@@ -1,0 +1,85 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:keyboard_stand",
+  "owner": "thing",
+  "state": {
+    "music": {"n":1,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
+  },
+  "links": {"player":{"n":1,"from":"soul","most":1,"audience":{"rule":"everyone"}}},
+  "points": {"player":{"role":"stand","at_mm":[0,0,450]}},
+  "geometry": {"bounds_mm":[1100,1000,450]},
+  "forms": {
+    "play": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"}],
+      "steps": [{"step":"walk_to","point":"player"}],
+      "effects": [
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"calm","event":"played_calm"}
+      ]
+    },
+    "play_happy": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"}],
+      "steps": [{"step":"walk_to","point":"player"}],
+      "effects": [
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"happy","event":"played_happy"}
+      ]
+    },
+    "play_sad": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"}],
+      "steps": [{"step":"walk_to","point":"player"}],
+      "effects": [
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"sad","event":"played_sad"}
+      ]
+    },
+    "stop": {
+      "who": {"link":"player"},
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","not":"silent"}],
+      "steps": [],
+      "effects": [
+        {"change":"set","field":"music","to":"silent","event":"stopped_playing"},
+        {"change":"unlink","link":"player","from":"actor","event":"stepped_away"}
+      ]
+    }
+  },
+  "motion": {"how":"two_hands"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:keyboard_stand",
+    "table": [
+      {"do":"sound","sound":"tune","mood":"calm","mode":"loop","field":"music","at":{"calm":700},"reach_mm":18000},
+      {"do":"sound","sound":"tune","mood":"happy","mode":"loop","field":"music","at":{"happy":700},"reach_mm":18000},
+      {"do":"sound","sound":"tune","mood":"sad","mode":"loop","field":"music","at":{"sad":700},"reach_mm":18000}
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"collide":false,"kind":"box","at":[-250,420,0],"size":[40,900,40],"roll":35523,"color":"#222222"},
+        {"collide":false,"kind":"box","at":[-250,420,0],"size":[40,900,40],"roll":-35523,"color":"#222222"},
+        {"collide":false,"kind":"box","at":[250,420,0],"size":[40,900,40],"roll":35523,"color":"#222222"},
+        {"collide":false,"kind":"box","at":[250,420,0],"size":[40,900,40],"roll":-35523,"color":"#222222"},
+        {"collide":false,"kind":"box","at":[0,820,0],"size":[1020,80,320],"color":"#1d1d1f"},
+        {"collide":false,"kind":"box","at":[0,865,60],"size":[900,12,150],"color":"#f2efe6"},
+        {"collide":false,"kind":"box","at":[0,875,30],"size":[860,12,80],"color":"#262626"}
+      ],
+      "tags": ["music","keyboard-stand"]
+    }
+  },
+  "text": {
+    "card": "A stage keyboard on an X stand: stand at it and play a tune, by mood.",
+    "instrument": "instrument",
+    "keyboard": "keyboard",
+    "keys": "keys",
+    "howto_play": "Play it (play, play_happy or play_sad), then stop."
+  },
+  "card": {"text":"card","category":"instrument","synonyms":["keyboard","keys"]},
+  "howtos": {"play":{"text":"howto_play","steps":[{"form":"play"},{"form":"stop"}]}}
+}

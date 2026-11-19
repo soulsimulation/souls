@@ -1,0 +1,82 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:practice_mat",
+  "owner": "thing",
+  "state": {
+    "deployed": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "side": { "role": "stand", "at_mm": [0, 0, 1000] },
+    "centre": { "role": "stand", "at_mm": [0, 0, 0] }
+  },
+  "slots": {
+    "on": { "admits": "body", "posture": "lie", "most": 1, "at_mm": [0, 20, 0], "stand": "side" }
+  },
+  "geometry": { "bounds_mm": [1600, 230, 1200] },
+  "forms": {
+    "unroll": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "deployed", "is": false, "says": "unroll_the_roll" },
+        { "need": "slot_free", "slot": "on", "says": "footprint_occupied" },
+        { "need": "hand", "empty": true, "says": "put_down_first" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "side" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [{ "change": "set", "field": "deployed", "to": true, "event": "unrolled" }]
+    },
+    "roll_up": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "deployed", "is": true, "says": "roll_up_the_mat" },
+        { "need": "slot_free", "slot": "on", "says": "footprint_occupied" },
+        { "need": "hand", "empty": true, "says": "put_down_first" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "side" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [{ "change": "set", "field": "deployed", "to": false, "event": "rolled_up" }]
+    },
+    "stretch": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "deployed", "is": true, "says": "roll_up_the_mat" },
+        { "need": "slot_free", "slot": "on", "says": "footprint_occupied" },
+        { "need": "hand", "empty": true, "says": "put_down_first" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "centre" },
+        { "step": "move", "move": "stretch", "at": "centre" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": []
+    }
+  },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:practice_mat",
+    "table": [
+      { "part": "fill", "field": "deployed", "do": "show", "at": { "true": 1, "false": 0 } },
+      { "part": "lid", "field": "deployed", "do": "show", "at": { "true": 0, "false": 1 } }
+    ],
+    "shape": {"round":2,"shapes":[{"kind":"box","at":[0,8,0],"size":[1600,16,1200],"tint":"cloth","role":"fill"},{"kind":"box","at":[0,19,-540],"size":[1450,4,35],"tint":"trim","role":"fill"},{"kind":"box","at":[0,19,540],"size":[1450,4,35],"tint":"trim","role":"fill"},{"kind":"cyl","at":[0,110,0],"r":100,"h":600,"segments":12,"pitch":90000,"tint":"cloth","role":"lid"},{"kind":"cyl","at":[0,110,-220],"r":104,"h":24,"segments":12,"pitch":90000,"tint":"trim","role":"lid"},{"kind":"cyl","at":[0,110,220],"r":104,"h":24,"segments":12,"pitch":90000,"tint":"trim","role":"lid"}],"palette":{"cloth":"#4d7f78","trim":"#d3be8f"},"tags":["exercise","mat","roll","object"]}
+  },
+  "text": {
+    "card": "An exercise mat: unroll it on clear ground, stretch on it, roll it up.",
+    "camp": "camp",
+    "mat": "mat",
+    "stretch": "stretch",
+    "unroll_the_roll": "Use unroll on the compact roll, or stretch and roll up on its deployed mat.",
+    "roll_up_the_mat": "The mat is rolled up; unroll it on clear ground first.",
+    "footprint_occupied": "The practice footprint is occupied; leave it clear before deploying or packing the mat.",
+    "put_down_first": "Put down held objects before deploying, packing or using the mat."
+  },
+  "card": { "text": "card", "category": "camp", "synonyms": ["mat", "stretch"] }
+}

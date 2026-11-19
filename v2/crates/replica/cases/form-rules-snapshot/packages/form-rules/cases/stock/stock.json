@@ -1,0 +1,439 @@
+{
+  "format": "souls-stock-cases/1",
+  "about": "Stock (SA-F12, #2851): a shelf, a wardrobe, a fridge and a market stall written as kinds with a stock section, and what taking from each does. Read by tools/entry/stock.test.mjs; the rules package does not load this folder.",
+  "kinds": {
+    "test:bookshelf": {
+      "format": "souls-entry/1",
+      "kind": "test:bookshelf",
+      "owner": "thing",
+      "state": {
+        "books": {
+          "n": 1,
+          "type": "int",
+          "unit": "count",
+          "default": 40,
+          "min": 0,
+          "max": 60,
+          "audience": {
+            "rule": "everyone"
+          }
+        }
+      },
+      "links": {},
+      "stock": {
+        "books": {
+          "kind": "test:book",
+          "count": "books",
+          "take": "take_book",
+          "carries": [
+            "title",
+            "first_page"
+          ]
+        }
+      },
+      "forms": {
+        "take_book": {
+          "who": "anyone",
+          "starts": "act",
+          "needs": [
+            {
+              "need": "state",
+              "field": "books",
+              "at_least": 1
+            },
+            {
+              "need": "hand",
+              "free": true
+            }
+          ],
+          "steps": [],
+          "effects": [
+            {
+              "change": "create",
+              "kind": "test:book",
+              "into": "actor_hand",
+              "event": "taken"
+            }
+          ]
+        }
+      },
+      "text": {}
+    },
+    "test:wardrobe": {
+      "format": "souls-entry/1",
+      "kind": "test:wardrobe",
+      "owner": "thing",
+      "state": {
+        "coats": {
+          "n": 1,
+          "type": "int",
+          "unit": "count",
+          "default": 6,
+          "min": 0,
+          "max": 6
+        }
+      },
+      "links": {
+        "opener": {
+          "n": 1,
+          "from": "soul",
+          "most": 1,
+          "audience": {
+            "rule": "everyone"
+          }
+        }
+      },
+      "stock": {
+        "coats": {
+          "kind": "test:coat",
+          "count": "coats",
+          "take": "take_coat"
+        }
+      },
+      "forms": {
+        "take_coat": {
+          "who": "anyone",
+          "starts": "act",
+          "needs": [
+            {
+              "need": "state",
+              "field": "coats",
+              "at_least": 1
+            },
+            {
+              "need": "hand",
+              "free": true
+            }
+          ],
+          "steps": [],
+          "effects": [
+            {
+              "change": "create",
+              "kind": "test:coat",
+              "into": "actor_hand",
+              "event": "taken"
+            }
+          ]
+        }
+      },
+      "text": {},
+      "closed": {
+        "audience": {
+          "rule": "linked",
+          "link": "opener"
+        },
+        "fields": [
+          "coats"
+        ]
+      }
+    },
+    "test:fridge": {
+      "format": "souls-entry/1",
+      "kind": "test:fridge",
+      "owner": "thing",
+      "state": {
+        "milk": {
+          "n": 1,
+          "type": "int",
+          "unit": "count",
+          "default": 4,
+          "min": 0,
+          "max": 4
+        }
+      },
+      "links": {
+        "opener": {
+          "n": 1,
+          "from": "soul",
+          "most": 1,
+          "audience": {
+            "rule": "everyone"
+          }
+        }
+      },
+      "stock": {
+        "milk": {
+          "kind": "test:milk",
+          "count": "milk",
+          "take": "take_milk",
+          "refill": {
+            "every_us": 3600000000
+          }
+        }
+      },
+      "forms": {
+        "take_milk": {
+          "who": "anyone",
+          "starts": "act",
+          "needs": [
+            {
+              "need": "state",
+              "field": "milk",
+              "at_least": 1
+            },
+            {
+              "need": "hand",
+              "free": true
+            }
+          ],
+          "steps": [],
+          "effects": [
+            {
+              "change": "create",
+              "kind": "test:milk",
+              "into": "actor_hand",
+              "event": "taken"
+            }
+          ]
+        }
+      },
+      "text": {},
+      "closed": {
+        "audience": {
+          "rule": "linked",
+          "link": "opener"
+        },
+        "fields": [
+          "milk"
+        ]
+      }
+    },
+    "test:market_stall": {
+      "format": "souls-entry/1",
+      "kind": "test:market_stall",
+      "owner": "thing",
+      "state": {
+        "apples": {
+          "n": 1,
+          "type": "int",
+          "unit": "count",
+          "default": 12,
+          "min": 0,
+          "max": 12,
+          "audience": {
+            "rule": "everyone"
+          }
+        }
+      },
+      "links": {},
+      "stock": {
+        "apples": {
+          "kind": "test:apple",
+          "count": "apples",
+          "take": "take_apple",
+          "refill": {
+            "every_us": 60000000
+          }
+        }
+      },
+      "forms": {
+        "take_apple": {
+          "who": "anyone",
+          "starts": "act",
+          "needs": [
+            {
+              "need": "state",
+              "field": "apples",
+              "at_least": 1
+            },
+            {
+              "need": "hand",
+              "free": true
+            }
+          ],
+          "steps": [],
+          "effects": [
+            {
+              "change": "create",
+              "kind": "test:apple",
+              "into": "actor_hand",
+              "event": "taken"
+            }
+          ]
+        }
+      },
+      "text": {}
+    }
+  },
+  "cases": [
+    {
+      "name": "A1_shelf_of_40_gives_a_titled_book",
+      "kind": "test:bookshelf",
+      "fields": {
+        "books": 40
+      },
+      "take": "books",
+      "receipt": "r1",
+      "expect": {
+        "ok": true,
+        "made": "r1.0",
+        "carries": [
+          "title",
+          "first_page"
+        ],
+        "changes": [
+          {
+            "change": "create",
+            "node": "r1.0",
+            "kind": "test:book",
+            "to": {
+              "hand": "hand"
+            }
+          },
+          {
+            "change": "set",
+            "field": "books",
+            "n": 1,
+            "to": 39,
+            "by": -1
+          }
+        ]
+      }
+    },
+    {
+      "name": "A1_a_default_shelf_is_forty",
+      "kind": "test:bookshelf",
+      "fields": {},
+      "take": "books",
+      "receipt": "r2",
+      "expect": {
+        "ok": true,
+        "changes": [
+          {
+            "change": "create",
+            "node": "r2.0",
+            "kind": "test:book",
+            "to": {
+              "hand": "hand"
+            }
+          },
+          {
+            "change": "set",
+            "field": "books",
+            "n": 1,
+            "to": 39,
+            "by": -1
+          }
+        ]
+      }
+    },
+    {
+      "name": "A2_an_empty_shelf_refuses_saying_so",
+      "kind": "test:bookshelf",
+      "fields": {
+        "books": 0
+      },
+      "take": "books",
+      "receipt": "r3",
+      "expect": {
+        "ok": false,
+        "code": "empty",
+        "reason": "test:bookshelf is empty: no test:book is left"
+      }
+    },
+    {
+      "name": "A3_a_shelf_lists_at_once",
+      "kind": "test:bookshelf",
+      "fields": {
+        "books": 39
+      },
+      "list": true,
+      "opened": false,
+      "expect": {
+        "listed": [
+          {
+            "stock": "books",
+            "kind": "test:book",
+            "count": 39,
+            "carries": [
+              "title",
+              "first_page"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "A3_a_fridge_lists_nothing_before_it_is_opened",
+      "kind": "test:fridge",
+      "fields": {
+        "milk": 4
+      },
+      "list": true,
+      "opened": false,
+      "expect": {
+        "listed": null
+      }
+    },
+    {
+      "name": "A3_a_fridge_lists_once_opened",
+      "kind": "test:fridge",
+      "fields": {
+        "milk": 4
+      },
+      "list": true,
+      "opened": true,
+      "expect": {
+        "listed": [
+          {
+            "stock": "milk",
+            "kind": "test:milk",
+            "count": 4,
+            "carries": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "A3_a_closed_wardrobe_refuses_a_take_until_opened",
+      "kind": "test:wardrobe",
+      "fields": {
+        "coats": 6
+      },
+      "take": "coats",
+      "opened": false,
+      "receipt": "r4",
+      "expect": {
+        "ok": false,
+        "code": "closed",
+        "reason": "test:wardrobe is closed; open it to take from it"
+      }
+    },
+    {
+      "name": "a_stall_refills_one_a_minute_up_to_its_cap",
+      "kind": "test:market_stall",
+      "refill": {
+        "stock": "apples",
+        "from": 3,
+        "us": 300000000
+      },
+      "expect": {
+        "count": 8
+      }
+    },
+    {
+      "name": "a_stall_never_refills_above_its_cap",
+      "kind": "test:market_stall",
+      "refill": {
+        "stock": "apples",
+        "from": 10,
+        "us": 3600000000
+      },
+      "expect": {
+        "count": 12
+      }
+    },
+    {
+      "name": "a_wardrobe_does_not_refill",
+      "kind": "test:wardrobe",
+      "refill": {
+        "stock": "coats",
+        "from": 2,
+        "us": 3600000000
+      },
+      "expect": {
+        "count": 2
+      }
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":265,"group":"over-time","words":"take a nap and wake up in an hour","obvious":2,"when":"for an hour","things":{"bed":"eden:bed"},"chain":[{"this":"me","form":"lie_down","args":{"spot":"bed"}},{"this":"bed","form":"sleep"}]}

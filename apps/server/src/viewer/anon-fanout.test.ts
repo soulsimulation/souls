@@ -124,6 +124,11 @@ test('A1: a fanout viewer and a hub viewer hold the same replica for 60 s throug
   const fan = w.viewer(true); fan.c.connect(); await until(() => fan.c.replica.ready, 'the fanout viewer has its snapshot');
   assert.deepEqual([w.hub.clients.size, fanoutSize(w.hub)], [1, 1], 'the URL hello went to the fanout');
   await live(w, hubSide.seen, fan.seen, [hubSide.c, fan.c], 400);
+  // #2521: the fanout's frames are its own shared compressed ones, and the product client decodes them (the oracle below)
+  const s0 = fan.seen.sockets[0] as unknown as WebSocket & { _socket: { bytesRead: number } };
+  assert.ok(s0.extensions.includes('permessage-deflate'), 'the fanout socket negotiated permessage-deflate');
+  const decoded = fan.seen.raw.reduce((n, x) => n + Buffer.byteLength(x), 0);
+  assert.ok(s0._socket.bytesRead < decoded / 2, `compressed on the wire: ${s0._socket.bytesRead} bytes read for ${decoded} decoded`);
   // resume: the socket drops; the Connection comes back with since and the hub's epoch in its URL hello
   const snapshots = count(fan.seen, 'snapshot'), batchesBefore = count(fan.seen, 'batch');
   fan.seen.sockets.at(-1)!.terminate();

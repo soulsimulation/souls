@@ -1,0 +1,378 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "SA-X28, Eden's floors and ground (#2918). A rug is rolled up and unrolled, each with a free hand and refused when it is already so (naming the form that undoes it); a picnic blanket is folded the same way, and spread with a free hand whether folded or spread (spreading a spread blanket smooths it out, so a picnic can start by spreading it). A sandpit's sandcastle is built with a free hand and knocked down. A stage takes up to forty Souls on its floor: a Soul steps up when it is not on it and the floor has room, and only a Soul on it steps down. A yoga mat takes one Soul at a time, with a free hand, and only that Soul finishes. Each case is one need unmet, or none.",
+  "cases": [
+    {
+      "name": "rug_roll_up_every_need_met",
+      "act": {"this":"r1","form":"roll_up"},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rug"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "rug_roll_up_already_done_names_unroll",
+      "act": {"this":"r1","form":"roll_up"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"r1":{"kind":"eden:rug","fields":{"rolled":true}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"rolled","found":true,"wanted":{"is":false}},
+        "fix": {"form":"unroll"}
+      }
+    },
+    {
+      "name": "rug_roll_up_both_hands_full",
+      "act": {"this":"r1","form":"roll_up"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "r1": {"kind":"eden:rug"},
+          "b1": {"hands":{"left":"x1","right":"x2"}},
+          "x1": {"kind":"eden:cup"},
+          "x2": {"kind":"eden:cup"}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":1,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "rug_unroll_every_need_met",
+      "act": {"this":"r1","form":"unroll"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"r1":{"kind":"eden:rug","fields":{"rolled":true}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "rug_unroll_not_yet_names_roll_up",
+      "act": {"this":"r1","form":"unroll"},
+      "state": {"actor":"b1","nodes":{"r1":{"kind":"eden:rug"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"rolled","found":false,"wanted":{"is":true}},
+        "fix": {"form":"roll_up"}
+      }
+    },
+    {
+      "name": "rug_unroll_both_hands_full",
+      "act": {"this":"r1","form":"unroll"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "r1": {"kind":"eden:rug","fields":{"rolled":true}},
+          "b1": {"hands":{"left":"x1","right":"x2"}},
+          "x1": {"kind":"eden:cup"},
+          "x2": {"kind":"eden:cup"}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":1,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "sandpit_build_sandcastle_every_need_met",
+      "act": {"this":"s1","form":"build_sandcastle"},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:sandpit"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "sandpit_build_sandcastle_already_done_names_knock_down",
+      "act": {"this":"s1","form":"build_sandcastle"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"s1":{"kind":"eden:sandpit","fields":{"castle":true}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"castle","found":true,"wanted":{"is":false}},
+        "fix": {"form":"knock_down"}
+      }
+    },
+    {
+      "name": "sandpit_build_sandcastle_both_hands_full",
+      "act": {"this":"s1","form":"build_sandcastle"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {"kind":"eden:sandpit"},
+          "b1": {"hands":{"left":"x1","right":"x2"}},
+          "x1": {"kind":"eden:cup"},
+          "x2": {"kind":"eden:cup"}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":1,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "sandpit_knock_down_every_need_met",
+      "act": {"this":"s1","form":"knock_down"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"s1":{"kind":"eden:sandpit","fields":{"castle":true}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "sandpit_knock_down_not_yet_names_build_sandcastle",
+      "act": {"this":"s1","form":"knock_down"},
+      "state": {"actor":"b1","nodes":{"s1":{"kind":"eden:sandpit"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"castle","found":false,"wanted":{"is":true}},
+        "fix": {"form":"build_sandcastle"}
+      }
+    },
+    {
+      "name": "picnic_blanket_fold_every_need_met",
+      "act": {"this":"p1","form":"fold"},
+      "state": {"actor":"b1","nodes":{"p1":{"kind":"eden:picnic_blanket"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "picnic_blanket_fold_already_folded_names_spread",
+      "act": {"this":"p1","form":"fold"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"p1":{"kind":"eden:picnic_blanket","fields":{"spread":false}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {"field":"spread","found":false,"wanted":{"is":true}},
+        "fix": {"form":"spread"}
+      }
+    },
+    {
+      "name": "picnic_blanket_fold_both_hands_full",
+      "act": {"this":"p1","form":"fold"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {"kind":"eden:picnic_blanket"},
+          "b1": {"hands":{"left":"x1","right":"x2"}},
+          "x1": {"kind":"eden:cup"},
+          "x2": {"kind":"eden:cup"}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":1,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "picnic_blanket_spread_every_need_met",
+      "act": {"this":"p1","form":"spread"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"p1":{"kind":"eden:picnic_blanket","fields":{"spread":false}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "picnic_blanket_spread_when_spread_smooths_it_out",
+      "act": {"this":"p1","form":"spread"},
+      "state": {"actor":"b1","nodes":{"p1":{"kind":"eden:picnic_blanket"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "picnic_blanket_spread_both_hands_full",
+      "act": {"this":"p1","form":"spread"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {"kind":"eden:picnic_blanket","fields":{"spread":false}},
+          "b1": {"hands":{"left":"x1","right":"x2"}},
+          "x1": {"kind":"eden:cup"},
+          "x2": {"kind":"eden:cup"}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":0,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "stage_step_up_every_need_met",
+      "act": {"this":"st1","form":"step_up"},
+      "state": {"actor":"b1","nodes":{"st1":{"kind":"eden:stage"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "stage_step_up_floor_full",
+      "act": {"this":"st1","form":"step_up"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "st1": {
+            "kind": "eden:stage",
+            "slots": {
+              "floor": [
+                "c1",
+                "c2",
+                "c3",
+                "c4",
+                "c5",
+                "c6",
+                "c7",
+                "c8",
+                "c9",
+                "c10",
+                "c11",
+                "c12",
+                "c13",
+                "c14",
+                "c15",
+                "c16",
+                "c17",
+                "c18",
+                "c19",
+                "c20",
+                "c21",
+                "c22",
+                "c23",
+                "c24",
+                "c25",
+                "c26",
+                "c27",
+                "c28",
+                "c29",
+                "c30",
+                "c31",
+                "c32",
+                "c33",
+                "c34",
+                "c35",
+                "c36",
+                "c37",
+                "c38",
+                "c39",
+                "c40"
+              ]
+            }
+          },
+          "b1": {"hands":{"left":null,"right":null}},
+          "c1": {"hands":{"left":null,"right":null}},
+          "c2": {"hands":{"left":null,"right":null}},
+          "c3": {"hands":{"left":null,"right":null}},
+          "c4": {"hands":{"left":null,"right":null}},
+          "c5": {"hands":{"left":null,"right":null}},
+          "c6": {"hands":{"left":null,"right":null}},
+          "c7": {"hands":{"left":null,"right":null}},
+          "c8": {"hands":{"left":null,"right":null}},
+          "c9": {"hands":{"left":null,"right":null}},
+          "c10": {"hands":{"left":null,"right":null}},
+          "c11": {"hands":{"left":null,"right":null}},
+          "c12": {"hands":{"left":null,"right":null}},
+          "c13": {"hands":{"left":null,"right":null}},
+          "c14": {"hands":{"left":null,"right":null}},
+          "c15": {"hands":{"left":null,"right":null}},
+          "c16": {"hands":{"left":null,"right":null}},
+          "c17": {"hands":{"left":null,"right":null}},
+          "c18": {"hands":{"left":null,"right":null}},
+          "c19": {"hands":{"left":null,"right":null}},
+          "c20": {"hands":{"left":null,"right":null}},
+          "c21": {"hands":{"left":null,"right":null}},
+          "c22": {"hands":{"left":null,"right":null}},
+          "c23": {"hands":{"left":null,"right":null}},
+          "c24": {"hands":{"left":null,"right":null}},
+          "c25": {"hands":{"left":null,"right":null}},
+          "c26": {"hands":{"left":null,"right":null}},
+          "c27": {"hands":{"left":null,"right":null}},
+          "c28": {"hands":{"left":null,"right":null}},
+          "c29": {"hands":{"left":null,"right":null}},
+          "c30": {"hands":{"left":null,"right":null}},
+          "c31": {"hands":{"left":null,"right":null}},
+          "c32": {"hands":{"left":null,"right":null}},
+          "c33": {"hands":{"left":null,"right":null}},
+          "c34": {"hands":{"left":null,"right":null}},
+          "c35": {"hands":{"left":null,"right":null}},
+          "c36": {"hands":{"left":null,"right":null}},
+          "c37": {"hands":{"left":null,"right":null}},
+          "c38": {"hands":{"left":null,"right":null}},
+          "c39": {"hands":{"left":null,"right":null}},
+          "c40": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":0,"detail":{"node":"st1","slot":"floor"},"fix":null}
+    },
+    {
+      "name": "stage_step_down_every_need_met",
+      "act": {"this":"st1","form":"step_down"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "st1": {"kind":"eden:stage","links":{"on_stage":["b1"]},"slots":{"floor":["b1"]}},
+          "b1": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "yoga_mat_yoga_every_need_met",
+      "act": {"this":"y1","form":"yoga"},
+      "state": {"actor":"b1","nodes":{"y1":{"kind":"eden:yoga_mat"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "yoga_mat_yoga_someone_else_on_it",
+      "act": {"this":"y1","form":"yoga"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "y1": {"kind":"eden:yoga_mat","links":{"yogi":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"already_linked","need":0,"detail":{"link":"yogi","count":1},"fix":null}
+    },
+    {
+      "name": "yoga_mat_yoga_both_hands_full",
+      "act": {"this":"y1","form":"yoga"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "y1": {"kind":"eden:yoga_mat"},
+          "b1": {"hands":{"left":"x1","right":"x2"}},
+          "x1": {"kind":"eden:cup"},
+          "x2": {"kind":"eden:cup"}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":1,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "yoga_mat_finish_every_need_met",
+      "act": {"this":"y1","form":"finish"},
+      "state": {
+        "actor": "b1",
+        "nodes": {"y1":{"kind":"eden:yoga_mat","links":{"yogi":["b1"]}},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"yes"}
+    }
+  ]
+}

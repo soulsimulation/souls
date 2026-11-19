@@ -1,0 +1,17 @@
+# The kinds the world-model fixtures use (Engine v2 T2, #2641, v2/docs/world-model.md), one kind per line, each read
+# by T3's kind reader and named namespace:name@hash (v2/docs/ids.md). Only what decides admission is written, in the
+# entry format's section numbers (coordinator's decision on #2641, 17 Nov): 1 the name; 2 the owner (`thing`,
+# `family` for a body, `place`); 6 its slots (slot number: what that slot admits); 11 what it admits as children.
+# An admit list names kinds by plain namespace:name, or a category: `thing` (an owner of `thing`) or `body` (an owner
+# of `family`). It never goes through section 10, T3's hashed references, so a new kind renames no container.
+{1: "souls:place", 2: "place", 11: ["souls:room", "souls:boat", "body", "souls:carry", "souls:group", "thing"]}
+{1: "souls:room", 2: "place", 11: ["souls:door", "body", "thing"]}
+{1: "souls:boat", 2: "thing", 11: ["souls:room", "body"]}
+{1: "souls:door", 2: "thing"}
+{1: "souls:body", 2: "family", 6: {1: ["thing"], 2: ["thing"]}}    # 1 left hand, 2 right; each admits a thing
+{1: "souls:carry", 2: "place", 11: ["souls:sofa", "souls:crate"]}  # a joint activity is a node (contract T1)
+{1: "souls:group", 2: "place"}
+{1: "souls:cup", 2: "thing"}
+{1: "souls:key", 2: "thing"}
+{1: "souls:crate", 2: "thing"}
+{1: "souls:sofa", 2: "thing"}

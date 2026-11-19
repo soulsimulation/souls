@@ -110,6 +110,9 @@ export function licenceEvidence(rows, sha256, bytes, reviewed = { derivatives: [
     }
     return { reason: 'reviewed derivative source records changed or missing from SOURCES.csv', licence: 'unknown' };
   }
+  // V17 (#2717): a model this repository's own builders drew (v2/tools/import-eden/bake), pinned by its bytes.
+  const model = reviewed.generated?.models?.find(r => r.sha256 === sha256 && r.bytes === bytes && r.licence === 'own-work');
+  if (model) return { licence: 'own-work', source: { generated: model.path, kind: model.kind, by: reviewed.generated.by } };
   const record = served.objects.find(r => r.sha256 === sha256 && r.bytes === bytes);
   if (record) return { licence: 'served-public', source: { servedPublic: record.path, rights: record.rights } };
   return { reason: 'no exact SHA-256/bytes licence record in SOURCES.csv or reviewed derivative allowlist', licence: 'unknown' };

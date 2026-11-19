@@ -1,0 +1,12 @@
+# The limits on an intent's form (Engine v2 I2, #2689), read at build time by `replica::intent_decode::LIMITS`.
+# One line each, `name value`; the build fails if a name is missing, unknown or written twice. The gateway's
+# WebSocket takes its largest message from frame_bytes, so a frame over it is refused from its length alone.
+
+# The most bytes an intent's frame may have (v2/docs/intents.md rule 11).
+frame_bytes 4096
+# How deep arrays and maps may nest, the envelope itself counting as 1.
+depth 8
+# The most ranked fallbacks an act may carry (rule 6).
+fallbacks 4
+# The most bytes any one text may have: a verb, a named resource, a parameter.
+text_bytes 64

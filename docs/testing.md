@@ -36,6 +36,27 @@ when you change `tools/body-authoring/robot/` or the humanoid renderer it fits.
 `--test-concurrency=1`. Prefer `node --test` on the files you touched while iterating; the full suite belongs to CI
 and the remote gate.
 
+### The Soul client file
+
+`tools/world-launcher/soul/eden.mjs` is served and copied as one file, so `inline.mjs` inlines the client's modules
+(the `MODULES` it lists: `soul/*.mjs` and `packages/form-rules/src/rules.ts`) into generated blocks of it. **A pull
+request does not carry the rebuilt file.** Edit the module (or eden.mjs's own code outside the blocks) and leave the
+blocks as they are, so two PRs that change form rules never collide on eden.mjs. Who builds it:
+
+- **CI**: every `qualify` job runs `node tools/world-launcher/soul/inline.mjs` before its checks, so PR, merge-group
+  and main runs test the client built from that head. A module that cannot be inlined fails the job, and the launcher
+  test `inline: inline.mjs builds eden.mjs from its modules` checks the same locally.
+- **Main**: `eden-sync.yml` runs after each push to main that touches a module. When the committed copy is stale it
+  opens one pull request carrying only the rebuilt file (branch `bot/eden-sync-<sha>`, labelled `merge:ready`), so
+  checkouts, tools and local worlds that read eden.mjs from git catch up within a queue cycle.
+- **Release**: `release-client.mjs stamp` rebuilds a stale copy into the stamp commit, so the client a world serves
+  (`/eden.mjs`, and `upgrade` on users' machines) always matches the rules the release runs.
+
+Locally, run `node tools/world-launcher/soul/inline.mjs` before running tests that load eden.mjs after a module
+change. Then leave the rebuilt blocks out of your commit: `git checkout tools/world-launcher/soul/eden.mjs` when you
+did not edit eden.mjs's own code, or `git add -p` it when you did. `inline.mjs --check` says whether a copy is
+current.
+
 ## Walk gate
 
 Walkability is a release invariant. `apps/server/src/god/walk-audit.ts` audits fixed fixture copies of several worlds,
@@ -144,43 +165,86 @@ therefore **windowed**:
   The heavy jobs are skipped and `ci-ok` fails with "Full CI deferred". A deferred `ci-ok` is a real failure, so
   skipped heavy jobs never count toward merging, and branch protection still requires a green `ci-ok`. Docs or
   tools-only PRs select no heavy jobs and are never deferred.
+- **The full battery runs daily at 06:23 UTC and before each release, not per change** (Gene, 18 Nov: startup mode,
+  merge no slower than lanes implement). No `pull_request`, merge-group or push run runs the `qualify` legs that
+  `ci-scope.mjs` marks `heavy: true` (`packages`, which includes the walk, `launcher`, the server shards and
+  `soul-actions`), even inside the window. They run in the daily scheduled run on main (see CI on main below), in a
+  manual run, and in the remote gate before every release. On a PR, in the queue and on main, `ci-ok` passes when every
+  job that ran passed: the light legs the paths pick (`types-web`, which includes the bundle check, `web`, `client-cli`,
+  `native`, `latency`, `docs-reference`, `soul-tools`), the smoke, `scope` and `repo`. A change whose paths pick only
+  heavy legs has nothing of its own to run and is never deferred. The step summary lists the legs left to the daily
+  run. The decision is `lightOnly` in `.github/scripts/ci-scope.mjs`.
 - **To request full CI**, add `ci:run` (or `merge:ready`) to a ready PR. `ci.yml` takes the `labeled` event, so that starts
   a fresh `pull_request` run with the window open. The merge queue reads required checks from that event: a green dispatch
   doesn't clear a deferred `ci-ok`. The run queues behind a CI run already going for the same PR and cancels nothing, and it
   does no heavy work if that run passes at the same head, or if the head's newest run already passed. Once a PR is in
-  the window, its later pushes run in full as usual. A PR with conflicts gets no `pull_request` run until they are fixed.
+  the window, its later pushes run its jobs as usual. A PR with conflicts gets no `pull_request` run until they are fixed.
 - **Any other label starts the same run** (#2018). The merge queue reads only the newest `ci` run at a head, so a run
   without `ci-ok` would hide the real one. Like a window label's run, it queues behind the PR's running CI, cancels
   nothing, and does no heavy work when the head's newest run passed, so its `ci-ok` repeats that result.
+- **A label on a green head costs about a minute.** When the head's newest `ci` run passed, a label run (a window
+  label's included) runs only `scope` and `ci-ok`: no `qualify` leg, no smoke and no `repo`, since the tree is the
+  one that passed. A push, a head whose newest run failed or is still going, a closed window and every merge-group
+  run do their jobs as usual. `scope` reads the earlier runs with `GH_TOKEN` over the REST API (`ci-scope.mjs green`),
+  not the `gh` CLI, which the light runners don't have. The `proof` and `changelog` workflows still re-run on every
+  label in about a minute, because their answer depends on labels (`no-changelog`, `approved:maintainer`, `tier:Tn`,
+  `proof:waived`); `security` doesn't run on labels.
 - **By hand**, `gh workflow run ci.yml --ref <branch> -f pr=<n>` runs a PR's path-scoped CI on its branch, on the branch's
-  own `ci.yml`. It tells you the result, but it doesn't count for the queue.
-- Pushes to main, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its full-scope runs,
-  which the merge train reads (see CI on main below). A merge-group run is path-scoped over everything in the group since `main`, and
-  `proof-ok` reports there without checking anything, because a PR passes it at its head to enter the queue.
+  own `ci.yml`. It runs the heavy legs, and reads only earlier requested runs as green at the head. It tells you the
+  result, but it doesn't count for the queue.
+- Pushes to main, the daily run, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its
+  daily full-scope runs, which the merge train reads (see CI on main below). A merge-group run is path-scoped over
+  everything in the group since `main`, without the heavy legs, and
+  `proof-ok` is skipped there (no runner; a skipped required check counts as passing), because a PR passes it at its
+  head to enter the queue.
+
+**Low-risk paths.** When every file a PR or a merge group changes sits under `tools/entry/`, `content/kinds/`,
+`content/asks/`, `content/moves/`, `packages/form-rules/`, `docs/`, `changes/`, or is a root `*.md` other than
+`AGENTS.md` and `CLAUDE.md`, CI skips the server shards, `latency`, the smoke, `packages` (the walk) and `types-web` (the
+bundle). It runs `repo`, `soul-tools` (the entry tests, the form-rules tests and the one launcher test that reads
+`content/kinds`) and, for `docs/site` reference pages, `docs-reference`. A change under `packages/form-rules/src/` also
+keeps `types-web` and `web`, because `apps/web` imports it. One file outside the list, or an empty or unreadable diff,
+and the usual path map decides; a changelog fragment beside any other file still selects every job. The list is
+`LOW_RISK` in `.github/scripts/ci-scope.mjs`. The push to main after a merge group selects the same light set.
 
 Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
 `merge:ready` once a head's `ci-ok` is green, and remove `ci:run` from PRs that leave the window. A PR labelled
 `merge:ready` straight from a deferred head still works: the labeled run replaces the deferred one, and the train reads
-the replaced failure as stale (#909). But the train's 15-minute head wait is shorter than a server run, so a PR that
+the replaced failure as stale (#909). But the train's 15-minute head wait can be shorter than a PR run, so a PR that
 is behind main can still leave with `needs:rebase`. The decision is `windowFor` and `windowed` in
 `.github/scripts/ci-scope.mjs`.
 
-**CI on main.** The merge queue fast-forwards `main` to the commit its merge-group run tested, so the push carries
-the same sha. When a successful merge-group `ci` run at that sha passed every `qualify` job, the push run does no heavy
-work: it runs `scope`, `repo` and the marker job `merge-group-covered`, and `ci-ok` passes on those. Any other push to
-main (a direct push, a revert, a merge group whose paths selected only some jobs) runs everything. The marker counts as
-full scope for the merge train's `fullScope`, and the release gate's CI evidence then reads the merge-group run's jobs.
-The decision is `queueCovered` in `.github/scripts/ci-main.mjs`.
+**CI on main.** A push to main runs the light set its paths pick, the same selection as its merge group. Push runs
+share one concurrency group, `ci-main`, and a newer push cancels an older one still running, so when merges land
+quickly only the newest main commit is tested. The full battery, every leg, runs once a day on main: the scheduled run
+at 06:23 UTC (`schedule` in `ci.yml`), in its own group, `ci-daily`, which nothing cancels. A manual run
+(`gh workflow run ci.yml --ref main`) is full scope too. Main's CI blocks nothing: the merge queue doesn't read it. A
+red daily run gets a same-day fix lane. Cancelled runs say nothing. The merge train's `mainCiState` (used only when the
+merge queue is off) reads the newest completed full run, daily or manual, and a red light push after it still counts.
+The release gate's CI evidence takes the fullest successful run at the exact candidate: a daily or manual run on main,
+then a push, then a merge group. A candidate with only a light run there leaves the heavy steps to the remote gate,
+which runs everything before a release. Until 18 Nov a push covered by a full merge-group run ran the marker job
+`merge-group-covered` instead; `ci.yml` no longer has it, and readers accept the marker only on those older runs
+(`.github/scripts/ci-main.mjs`).
 
 **Soul Action tests.** `tools/soul-actions/*.test.mjs` runs as the CI job `soul-actions`, about 76 s measured on a
 loaded laptop. It is picked by its own paths (`tools/soul-actions`, `apps/server`, `packages/world-compiler`,
-`packages/engine-*`) and by every full-scope run, including each push to main, and a failure blocks through `ci-ok`. It
-is not a gate step, so the gate's suite tree and cached baseline don't change.
+`packages/engine-*`) and by every full-scope run, but it is a `heavy: true` leg, so since 18 Nov it runs only in the
+daily run on main and in manual runs. It is not a gate step, so the remote gate doesn't run it, and the gate's suite
+tree and cached baseline don't change.
 
 **Soul runtime and trace tests.** `tools/soul-runtime/*.test.mjs` and `tools/soul-trace/*.test.mjs` run as the CI job
 `soul-tools`, about 17 s measured on a loaded laptop. It is picked by its own paths (`tools/soul-runtime`,
 `tools/soul-trace`, `tools/world-launcher/soul`, `apps/server`) and by every full-scope run, and a failure blocks through
 `ci-ok`. Like `soul-actions`, it is not a gate step.
+
+**Engine v2 (`v2/`).** The CI job `v2` builds and tests the Rust workspace under `v2/` with `v2/tools/ci.sh`, on the
+toolchain `v2/rust-toolchain.toml` pins, with a cargo cache keyed on that file and `v2/Cargo.lock`; it skips the pnpm
+install. It is picked by its own paths (`v2/`) and by every full-scope run. A change only under `v2/` runs that job
+alone, has release-gate scope `none` (no walk, bundle, conformance or remote gate) and is T1, its docs included. The
+strict tiers for the core (`v2/crates/sim`, `replica`, `skills` T3; `v2/web` T2) are written in
+`docs/process/PROOF-POLICY.yml` and switched on at the cut-over by X8 (#2839). The publication check and the secret
+scanner always apply. Later tasks add their steps to `v2/tools/ci.sh`, not new jobs.
 
 **Self-hosted runners.** The `qualify` legs that `ci-scope.mjs` marks `heavy: true` (the server shards and the legs
 whose hosted median is over about 8 minutes: `packages`, `launcher`, `soul-actions`) run on the runners named by the
@@ -192,6 +256,28 @@ instances online; a leg moves between pools by its flag, and `ci-scope.test.mjs`
 systemd service under one dedicated unprivileged user, with the label, and Playwright's Chromium system packages when
 the OS has them (not Ubuntu 20.04). It is idempotent, takes the registration token as an argument and names no host;
 its header shows the one-line invocation from a workstation. The steward sets and clears `CI_HEAVY_RUNNER`.
+
+**Wide runner (D5).** One more timed instance, `souls-wide-1` with the label `souls-wide`, runs on the timed-runner host.
+Its service is pinned (systemd `CPUAffinity=`) to the union of the CPUs of `souls-timed-3` to `souls-timed-6`: 12
+physical cores, so the world gets 6, the launcher 1 and the load drivers 5. It is for the gates only: V7 (5,000 viewers)
+and H1 at 5,000 or more. Dispatch `timed-run.yml` with `runner=souls-wide` and a core plan, for example
+`-f runner=souls-wide -f cores=world=6,launcher=1 -f command=viewers -f args='--viewers 5000,10000'`. It takes the split
+commands, which need a core plan there, and `settled`. Viewer arms above 2,000 are refused on every other runner.
+- **Soft mutex.** The wide instance shares its CPUs with four narrow ones, and the start gate keeps them apart. Each run
+  waits up to 5 minutes for its own CPUs to go quiet and then refuses. On `souls-wide` the gate also refuses while any
+  one of its CPUs is over half busy, so a wide job does not start on top of a narrow one.
+- **If they race.** A narrow job's gate sees only its own CPUs, and a wide run leaves some of them nearly idle (most of
+  the world's cores), so a narrow job can start during a wide run. Both then run on shared cores and neither timing
+  counts; repeat the wide run. For a gate run, keep narrow jobs off those four: remove their `souls-timed` label for the
+  run and add it back after (`gh api -X DELETE repos/soulsimulation/souls/actions/runners/<id>/labels/souls-timed`, then
+  `gh api -X POST repos/soulsimulation/souls/actions/runners/<id>/labels -f 'labels[]=souls-timed'`; the ids come from
+  `gh api repos/soulsimulation/souls/actions/runners`).
+- **Set up or change it** with `tools/ci/setup-runners.sh --count 1 --prefix souls-wide --label souls-wide --cpus-from
+  souls-timed-3,souls-timed-4,souls-timed-5,souls-timed-6`, run as root on the host. Run it with `--dry-run` first: that
+  prints the CPUs it read from each instance and every step, and changes nothing.
+- **Remove it.** On the host, in its install directory: `sudo ./svc.sh stop && sudo ./svc.sh uninstall`. Then delete its
+  `<unit>.d` drop-in under `/etc/systemd/system`, run `sudo systemctl daemon-reload` and delete the directory. Finally,
+  delete the runner on GitHub (`gh api -X DELETE repos/soulsimulation/souls/actions/runners/<id>`).
 
 ## Remote gate
 
