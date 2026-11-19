@@ -2,10 +2,11 @@
 //! `listening on <address>` once it serves, and refuses to start, with a line saying why, on what [`start::parse`]
 //! refuses.
 
-use directoryd::accounts::serve::{App, key_digest, run};
+use directoryd::accounts::serve::{App, key_digest, now, run};
 use directoryd::accounts::session::{Jwks, Verifier};
 use directoryd::accounts::start;
 use directoryd::accounts::store::Store;
+use directoryd::accounts::view::ViewKey;
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 
@@ -25,6 +26,29 @@ fn main() {
             std::process::exit(2);
         }
     };
+    let view_key = match &config.view_key {
+        None => None,
+        Some(path) => match std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| ViewKey::read(&t))
+        {
+            Some(k) => Some(k),
+            None => {
+                eprintln!("directoryd: refusing to start: --view-key is a file of 64 hex digits");
+                std::process::exit(2);
+            }
+        },
+    };
+    // A test person's Souls and worlds, for local and test worlds (`--test-own`, only with the test sign-in).
+    for (name, grant, follow) in &config.test_own {
+        let owned = store
+            .sign_in(start::TEST_ISSUER, name, now())
+            .and_then(|a| store.own(&a.account, grant, follow.as_deref()));
+        if let Err(e) = owned {
+            eprintln!("directoryd: refusing to start: {e}");
+            std::process::exit(2);
+        }
+    }
     let verifier = config
         .provider
         .as_ref()
@@ -54,6 +78,8 @@ fn main() {
         store,
         verifier,
         test_sign_in: config.test_sign_in,
+        view_key,
+        origin: Some(config.public_url.trim_end_matches('/').to_string()),
         mailbox_key,
         pairing,
         log: Mutex::new(Box::new(std::io::stderr())),

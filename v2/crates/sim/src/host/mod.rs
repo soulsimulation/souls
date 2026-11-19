@@ -5,6 +5,10 @@
 //! - **One phase a tick.** [`step`] steps every running skill once, in its body's id order, against the tree as it
 //!   stood at the tick's start: the tree is borrowed read-only for the whole phase, so nothing a skill does can change
 //!   what another reads in the same tick (T1).
+//! - **Side by side** (N17b, #3255). [`Runner::tick`] steps the skills that allow it on [`Runner::threads`] threads,
+//!   a chunk of runs at a time, and joins their stages in body order (`beside`); the controller's step, the inputs
+//!   handed on and the ladder's reads are split the same way (`crate::par`). The outcome is the same, bit for bit,
+//!   at any thread count, and a skill that panics ends its own run by name (`unit-panicked`).
 //! - **Everything staged.** Controller inputs, entries, timers set and cleared are held in [`Staged`] until every
 //!   skill has stepped. The caller applies them after: inputs through [`hand_on`] to the controller (B1 #2680),
 //!   entries to the log, timers to the due list (K9 #2672). A skill does not see its own emits either.
@@ -40,7 +44,10 @@
 //!
 //! Not here: entries to the log, timers (K9).
 
+mod beside;
 pub mod restart;
+
+pub use beside::{BESIDE_ORDERED, CHUNK, UNIT_PANICKED};
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -148,7 +155,8 @@ struct WorldHost<'a, G> {
     seed: u64,
     body: Id,
     driver: Driver,
-    minter: &'a mut Minter,
+    /// `None` for a skill stepped beside others ([`Skill::beside`]): it may neither draw nor set a timer.
+    minter: Option<&'a mut Minter>,
     staged: &'a mut Staged,
     /// Host calls, reads and questions included (they take `&self`).
     calls: Cell<u64>,
@@ -276,8 +284,11 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
 
     fn set_timer(&mut self, after: Micros, name: Name) -> Id {
         self.count();
+        let Some(minter) = self.minter.as_deref_mut() else {
+            panic!("{BESIDE_ORDERED}: a skill stepped beside others set a timer");
+        };
         // A scope's 2^64 counters cannot run out in a world's life; if they did, the timer is named by its body.
-        let id = self.minter.mint().unwrap_or(self.body);
+        let id = minter.mint().unwrap_or(self.body);
         self.staged.timers.push(Timer {
             body: self.body,
             id,
@@ -294,6 +305,9 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
 
     fn draw(&mut self) -> u64 {
         self.count();
+        if self.minter.is_none() {
+            panic!("{BESIDE_ORDERED}: a skill stepped beside others drew");
+        }
         self.staged.draws += 1;
         splitmix(self.seed ^ splitmix(self.staged.draws))
     }
@@ -371,7 +385,7 @@ pub fn step_in_units(
                     seed,
                     body: r.body,
                     driver: r.driver,
-                    minter: &mut *minter,
+                    minter: Some(&mut *minter),
                     staged: &mut own,
                     calls: Cell::new(0),
                 };
@@ -421,7 +435,7 @@ pub fn lend<T>(
         seed,
         body,
         driver,
-        minter,
+        minter: Some(minter),
         staged,
         calls: Cell::new(0),
     };
@@ -448,7 +462,16 @@ impl Staged {
 /// inputs go on (B1 #2680). An input whose driver does not hold the body's locomotion is refused by the controller and
 /// changes nothing; the refusals are returned with their bodies.
 pub fn hand_on(staged: &Staged, controller: &mut Controller) -> Vec<(Id, Refusal)> {
-    controller.set_velocities(&staged.controls)
+    hand_on_threads(staged, controller, 1)
+}
+
+/// [`hand_on`] on `threads` threads (N17b): the same refusals, in the same order.
+pub fn hand_on_threads(
+    staged: &Staged,
+    controller: &mut Controller,
+    threads: usize,
+) -> Vec<(Id, Refusal)> {
+    controller.set_velocities_on(&staged.controls, threads)
 }
 
 /// Hands a tick's staged crossings on: for each, the world's [`Links`] gives the track (or opens a shut door, and the
@@ -526,6 +549,11 @@ pub struct Runner {
     minter: Minter,
     /// Each skill's step is a unit in K11's wrapper: a panic ends that run, a third retires the skill (K18 #3160).
     pub units: Units,
+    /// Threads stepping the skills that may be stepped side by side ([`Skill::beside`], N17b #3255), the tick's own
+    /// included; 1 steps them all on it. Whatever the count, every tick's outcome is the same.
+    pub threads: usize,
+    /// How many such skills one thread takes at a time, in body order. The outcome does not depend on it either.
+    pub chunk: usize,
 }
 
 fn decode_int(v: &Value) -> Option<i64> {
@@ -579,7 +607,7 @@ struct Here<'a> {
     town: View<'a>,
     controller: &'a Controller,
     fields: &'a BTreeMap<Id, BTreeMap<u64, Value>>,
-    settled: BTreeSet<Id>,
+    settled: &'a BTreeSet<Id>,
     /// A body's kind, named once a tick, not at each read (#3213).
     kind: Name,
 }
@@ -691,6 +719,8 @@ impl Runner {
             seed: 1,
             minter: Minter::new(Scope([0x9b; 16])),
             units: Units::new(),
+            threads: 1,
+            chunk: CHUNK,
         }
     }
 
@@ -877,29 +907,28 @@ impl Runner {
     pub fn tick(&mut self, town: &mut Town) -> Result<(), Refusal> {
         self.reground(town);
         let at = self.now + self.tick;
-        let marks: Vec<Mark> = self
-            .controller
-            .bodies()
-            .map(|b| Mark {
-                who: b.id,
-                node: node_of(b),
-                at: b.pose.position,
-                waiting: waiting(self.fields.get(&b.id)),
-                crossing: self.controller.carrying(b.id),
-                staying: self.staying.contains(&b.id),
-                // An ask stands while its order lasts and the body is not held (walked out by the world).
-                spot: self
-                    .asks
-                    .get(&b.id)
-                    .filter(|_| {
-                        !self
-                            .fields
-                            .get(&b.id)
-                            .is_some_and(|f| f.contains_key(&F_HELD))
-                    })
-                    .copied(),
-            })
-            .collect();
+        // Read on the runner's threads (N17b): each mark reads one body alone.
+        let bodies: Vec<&Moved> = self.controller.bodies().collect();
+        let marks: Vec<Mark> = crate::par::map(&bodies, self.threads, CHUNK * 4, |b| Mark {
+            who: b.id,
+            node: node_of(b),
+            at: b.pose.position,
+            waiting: waiting(self.fields.get(&b.id)),
+            crossing: self.controller.carrying(b.id),
+            staying: self.staying.contains(&b.id),
+            // An ask stands while its order lasts and the body is not held (walked out by the world).
+            spot: self
+                .asks
+                .get(&b.id)
+                .filter(|_| {
+                    !self
+                        .fields
+                        .get(&b.id)
+                        .is_some_and(|f| f.contains_key(&F_HELD))
+                })
+                .copied(),
+        });
+        drop(bodies);
         // The world's own refusals: the tick goes on, and the first is returned at its end.
         let world = town.turns(&marks, at).err();
         let world = world.or(town.spots(&marks, at).err());
@@ -934,27 +963,22 @@ impl Runner {
             .filter(|b| self.settled(*b))
             .collect();
         let drivers: BTreeMap<Id, Driver> = self.runs.iter().map(|r| (r.body, r.driver)).collect();
-        let staged = {
-            let view = town.view();
-            let tree = view.tree;
-            let here = Here {
-                town: view,
+        // Each skill's step is a unit in K11's wrapper (K18 #3160): one that panics ends its own run by name.
+        let staged = beside::step(
+            town.split(self.threads),
+            beside::Reads {
                 controller: &self.controller,
                 fields: &self.fields,
-                settled,
-                kind: body_kind(),
-            };
-            step_in_units(
-                tree,
-                &here,
-                self.now,
-                self.seed,
-                &mut self.minter,
-                &mut self.runs,
-                &mut self.units,
-            )
-        };
-        let mut refused = hand_on(&staged, &mut self.controller);
+                settled: &settled,
+                now: self.now,
+                seed: self.seed,
+            },
+            &mut self.minter,
+            &mut self.runs,
+            self.chunk,
+            &mut self.units,
+        );
+        let mut refused = hand_on_threads(&staged, &mut self.controller, self.threads);
         refused.extend(carry(&staged, &mut self.controller, town, at));
         // The tick's end: each skill's own entries set its body's fields.
         for e in &staged.emits {
@@ -976,7 +1000,9 @@ impl Runner {
             }
             self.ended.insert(*who, (self.now, p.clone()));
         }
-        let stepped = self.controller.step(&town.surfaces, self.tick, at);
+        let stepped = self
+            .controller
+            .step_on(&town.surfaces, self.tick, at, self.threads);
         refused.extend(stepped.refused);
         // Each refused body's run ends by its first refusal's name; the others' ticks are done already.
         for (who, r) in &refused {
