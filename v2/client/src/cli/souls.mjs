@@ -31,6 +31,8 @@
 //                                             names which Soul asks, when the home has more than one
 //   souls.mjs stats                           per achieved intent: commands, bytes printed, first-send result (R10)
 //   souls.mjs stop                            ends the daemon
+//   souls.mjs shoot <place|soul|thing> [--eyes] [--page <url>] [--out f.png]   a picture drawn here from the public
+//                                             stream (G10, shoot/shoot.mjs); with no browser, words and why
 //   souls.mjs digest [--since <time>] [--refs]   the owner's update from the Soul's memory log (R14); no daemon
 //   souls.mjs consolidate [--force]           the owner's opt-in pass over the memory's journal (R14); no daemon
 //   souls.mjs memory <words...>               every memory line holding every word, `untrusted` when a world wrote it (R19)
@@ -53,10 +55,12 @@ import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSy
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_PKG, call } from '../daemon/client.mjs';
+import { DEFAULT_PKG, call, request } from '../daemon/client.mjs';
 import { findHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
+import { chooseCommandSoul, chooseSoul, HOME_COMMANDS, homeCommand } from '../home/commands.mjs';
 import { consolidateIn, digestOf, rememberIn, searchIn, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
+import { runShoot } from '../shoot/shoot.mjs';
 
 export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'converse', 'lie', 'pray', 'prayers', 'wait', 'history', 'stats', 'stop'];
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
@@ -98,6 +102,7 @@ async function pairing(home, url, { within = 15_000 } = {}) {
 
 /** The daemon request the arguments make, or a refusal by name. */
 export function requestOf(argv) {
+  if (HOME_COMMANDS.includes(argv[0])) return { home: argv[0], args: argv.slice(1) };
   const args = [...argv], opts = {};
   // history's --soul is its question; --as is the Soul asking.
   const asking = args.includes('history');
@@ -143,8 +148,7 @@ async function local({ local: op, soul: named, since, refs, force, ...asked }, h
   const kept = existsSync(join(home, 'souls')) ? readdirSync(join(home, 'souls')).filter((s) => existsSync(join(soulDirOf(home, s), 'memory'))) : [];
   // A newly paired Soul has no memory folder yet, and may still remember.
   const souls = op === 'remember' ? [...new Set([...kept, ...soulsWithTokens(home)])] : kept;
-  const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
-  if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a memory'}`), { code: 'which-soul' });
+  const soul = chooseSoul(home, named, souls);
   if (op === 'memory') return { ok: true, soul, ...searchIn(home, soul, asked.args) };
   if (op === 'remember') return { ok: true, soul, ...rememberIn(home, soul, asked.args) };
   if (op === 'digest') return { ok: true, soul, ...digestOf(soulDirOf(home, soul), { since, refs }) };
@@ -157,8 +161,7 @@ async function local({ local: op, soul: named, since, refs, force, ...asked }, h
  */
 async function schedule(home, named, { sub, args, until, missed }) {
   const souls = soulsWithTokens(home);
-  const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
-  if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a token'}`), { code: 'which-soul' });
+  const soul = chooseSoul(home, named, souls);
   const file = join(soulDirOf(home, soul), 'memory', 'schedule.md');
   if (sub === 'add') {
     const [when, ...does] = args;
@@ -177,17 +180,22 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
   const asked = requestOf(process.argv.slice(2)), { req, soul: named, refused, detail } = asked;
   try {
-    if (refused && process.argv[2] !== 'upgrade') throw Object.assign(new Error(detail), { code: refused });
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
-    if (process.argv[2] === 'upgrade') out(await (await import('../upgrade/upgrade.mjs')).main(process.argv.slice(3)));
+    if (process.argv[2] === 'shoot') { // G10: drawn here, in a browser, from the public stream; no daemon unless it must use words
+      const souls = soulsWithTokens(home), ask = souls.length === 1 ? (r) => call(home, souls[0], r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
+      out(await runShoot(process.argv.slice(3), { home, env: process.env, ask }));
+      process.exit(0);
+    }
+    if (refused && process.argv[2] !== 'upgrade') throw Object.assign(new Error(detail), { code: refused });
+    if (asked.home) out(await homeCommand(home, asked.home, asked.args, { onAsk: (a) => out({ ok: true, step: 'approve', ...a }) }));
+    else if (process.argv[2] === 'upgrade') out(await (await import('../upgrade/upgrade.mjs')).main(process.argv.slice(3)));
     else if (asked.local) out(await local(asked, home));
     else if (req.op === 'pair') { out(await pairing(home, req.url)); process.exit(0); }
     else {
-      const souls = soulsWithTokens(home);
-      const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
-      if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a token'}`), { code: 'which-soul' });
+      const { soul, resident } = await chooseCommandSoul(home, named);
       const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : 5000;
-      out(await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms }));
+      out(resident ? await request(runtimeOf(home, soul).socket, req, ms)
+        : await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms }));
     }
   } catch (e) {
     out({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) });
