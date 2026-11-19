@@ -12,6 +12,11 @@
 //   world second.
 // - gateway → page: `{31: item}`, R4's item as its bytes; `{32: name}` when the world refused the subscription;
 //   `{4: name}` the sign-in's outcome.
+//
+// The page signs in with a view token (V13b, #3407) it gets from the directory for its web session ([`exchange`]),
+// scoped to the account's Souls and worlds and lasting two minutes. Before it expires the page gets a fresh one and
+// sends it on the open socket (`{1: token}`, answered `{4: "view.renewed"}`), so the view carries on with no gap; a
+// token not renewed ends its socket (`{4: "view.expired"}`).
 import { decode, encode } from 'cborg';
 import { NearClock } from './near.ts';
 import type { SampleRec, Source, SourceEvents } from './source.ts';
@@ -67,6 +72,43 @@ export function readItem(bytes: Uint8Array): Item {
   return { t: 'entry', e: { at: num(e.get(2)), audience: num(aud.get(1)) === 2 ? key(aud.get(2) as IdValue) : null, samples } };
 }
 
+/**
+ * A signed-in web session as the page holds it (V13b, #3407): the provider's session token, asked for fresh at each
+ * exchange, or, on a local or test world, a named test person (the directory refuses that sign-in off loopback).
+ */
+export type Session = { bearer: () => Promise<string> } | { testName: string };
+/** What the directory answers an exchange: a view token, when it expires (seconds since 1970), what it may watch. */
+export type ViewGrant = { token: string; expires: number; owned: { grant: string; follow: string | null }[] };
+
+/**
+ * The session exchange (V13b): the directory's `POST /v1/account/view-token` turns a signed-in session into a
+ * short-lived gateway view token for the account's Souls and worlds. The token is held in memory alone: never put in an
+ * address, a log or storage, and the request is not cached and sends no referrer or cookie.
+ */
+export async function exchange(directory: string, session: Session, post: typeof fetch = globalThis.fetch): Promise<ViewGrant> {
+  const bearer = 'bearer' in session ? await session.bearer() : null;
+  const res = await post(`${directory.replace(/\/$/, '')}/v1/account/view-token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
+    body: 'testName' in session ? JSON.stringify({ name: session.testName }) : '',
+    cache: 'no-store',
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+  });
+  const body = (await res.json()) as Partial<ViewGrant> & { refused?: string };
+  if (!res.ok || typeof body.token !== 'string') throw new Error(`no view: the directory said ${body.refused ?? res.status}`);
+  return { token: body.token, expires: Number(body.expires), owned: body.owned ?? [] };
+}
+
+/** The body to follow: the one asked for if the account owns it, else its first Soul's. Null if it follows none. */
+export function chooseFollow(owned: ViewGrant['owned'], asked: string | null): string | null {
+  const bodies = owned.map((o) => o.follow).filter((f): f is string => !!f);
+  return asked && bodies.includes(asked) ? asked : bodies[0] ?? null;
+}
+
+/** A view token is renewed this long before it expires (ms). */
+export const RENEW_BEFORE_MS = 30_000;
+
 /** The page's frames to the gateway. */
 export const frames = {
   hello: () => encode(new Map<number, unknown>([[1, PROTOCOL], [2, new Uint8Array(0)]])),
@@ -84,6 +126,9 @@ export type SocketOptions = {
   level?: number;
   /** Bytes a world second. */
   budget?: number;
+  /** When `token` expires, seconds since 1970, and how to get a fresh one (V13b): renewed on the open socket. */
+  expires?: number;
+  renew?: (() => Promise<{ token: string; expires: number }>) | null;
   /** Wall time, ms (a test's own). */
   now?: () => number;
   WebSocket?: typeof WebSocket;
@@ -110,8 +155,40 @@ export class SocketSource implements Source {
   /** Entries received by audience (`public`, or the audience id's key): what reached the page. */
   readonly seen = new Map<string, number>();
 
+  /** The token in use, renewed in place; never shown. */
+  #token: string;
+  #expires: number;
+  #renewing: ReturnType<typeof setTimeout> | null = null;
+  /** Renewals made on the open socket. */
+  renewals = 0;
+
   constructor(o: SocketOptions) {
-    this.o = { level: 1, budget: 16_000, now: () => Date.now(), WebSocket: globalThis.WebSocket, ...o };
+    this.o = { level: 1, budget: 16_000, now: () => Date.now(), WebSocket: globalThis.WebSocket, expires: Infinity, renew: null, ...o };
+    this.#token = o.token;
+    this.#expires = this.o.expires;
+  }
+
+  /**
+   * Renews the view token before it expires (V13b): a fresh one from `renew`, sent on the open socket as a sign-in
+   * (`{1: token}`), so the subscription carries on with no gap. Without `renew`, or with no expiry, nothing to do.
+   */
+  private scheduleRenewal(on: SourceEvents): void {
+    const renew = this.o.renew;
+    if (!renew || !Number.isFinite(this.#expires) || this.stopped) return;
+    if (this.#renewing) clearTimeout(this.#renewing);
+    const wait = Math.max(1000, this.#expires * 1000 - this.o.now() - RENEW_BEFORE_MS);
+    this.#renewing = setTimeout(async () => {
+      try {
+        const g = await renew();
+        this.#token = g.token;
+        this.#expires = g.expires;
+        if (this.ws?.readyState === 1) this.ws.send(frames.signIn(g.token));
+        this.renewals++;
+      } catch (e) {
+        on.error(e instanceof Error ? e.message : 'the view could not be renewed');
+      }
+      this.scheduleRenewal(on);
+    }, Math.min(wait, 2 ** 31 - 1));
   }
 
   /** The world time now as the socket tells it: the newest entry's, moved on by the wall time since; null when down. */
@@ -127,6 +204,17 @@ export class SocketSource implements Source {
 
   start(on: SourceEvents): void {
     this.stopped = false;
+    // Back after a drop with a token that has lapsed: a fresh one first.
+    if (this.o.renew && this.o.now() >= this.#expires * 1000 - 1000) {
+      this.o.renew().then((g) => ((this.#token = g.token), (this.#expires = g.expires), this.open(on)),
+        (e) => (on.error(e instanceof Error ? e.message : 'no view'), (this.retry = setTimeout(() => this.start(on), RETRY_MS))));
+      return;
+    }
+    this.open(on);
+  }
+
+  private open(on: SourceEvents): void {
+    if (this.stopped) return;
     const ws = new this.o.WebSocket(this.o.url);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
@@ -135,13 +223,14 @@ export class SocketSource implements Source {
     ws.onmessage = (ev) => {
       const b = new Uint8Array(ev.data as ArrayBuffer);
       this.bytes += b.byteLength;
-      if (step === 0) return void ((step = 1), ws.send(frames.signIn(this.o.token)));
+      if (step === 0) return void ((step = 1), ws.send(frames.signIn(this.#token)));
       const m = decode(b, { useMaps: true }) as Map<number, unknown>;
       if (step === 1) {
         const outcome = m.get(4) as string | undefined;
         if (outcome === 'token.refused') return void on.error('the gateway refused the sign-in');
         step = 2;
         ws.send(frames.subscribe(this.o.follow, this.o.level, this.o.budget));
+        this.scheduleRenewal(on);
         return;
       }
       if (m.has(REFUSED)) return void ((this.refused = String(m.get(REFUSED))), on.error(`the world refused the view: ${this.refused}`));
@@ -168,6 +257,7 @@ export class SocketSource implements Source {
   stop(): void {
     this.stopped = true;
     if (this.retry) clearTimeout(this.retry);
+    if (this.#renewing) clearTimeout(this.#renewing);
     this.ws?.close();
     this.ws = null;
     this.up = false;
