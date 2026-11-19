@@ -5,8 +5,10 @@ a view of it. This page fixes how the sealed log becomes objects in a private bu
 browser plays is packed from them, and what that costs in object writes. Code: `v2/tools/archive` (packer, restore
 tool, write count) and `v2/crates/replica/src/history` (the bundle and day-index formats). Checks:
 `v2/tools/archive/tests/archive.rs`. Seeking, the event index and the coarse levels are V4's (#2713), below; checks
-`v2/tools/archive/tests/seek.rs`. Not here: ten-second shipping (O3), serving a restored world (O12), the scrub bar
-(V9), search by Soul (W6), removal (W7), the corpus check (V18).
+`v2/tools/archive/tests/seek.rs`. The page's history, scrub bar and links to a moment are V9's (#2719,
+`v2/web/src/history`); `cargo run -p archive -- pack` archives a stream-check run's log into a folder it serves. Not
+here: ten-second shipping (O3), serving a restored world (O12), search by Soul (W6), removal (W7), the corpus check
+(V18).
 
 ## The objects
 
