@@ -21,10 +21,14 @@
 //! how) and is answered: a receipt naming both entries when done, else a refusal naming how it ended
 //! (`claim-taken`, `resource-held`, `out-of-reach`, ...). One answer, at its end: I7's accept-then-resolve is not here.
 //!
-//! **A restart** replays the log: each record's entries are applied to the world as built, the receipts index and
-//! each actor's last sequence and kept answers are rebuilt from it, and new intent ids follow the last one minted.
-//! A repeat after a restart gets the answer it had; an intent that was open at the kill was never logged nor
-//! answered, and is taken again when the gateway sends it again.
+//! **A restart** starts from the newest checkpoint that verifies, when the world takes them (K5, K18c #3176): its
+//! tree, and its carry (each actor's last sequence and kept answers, the next intent id, every body's pose and seat,
+//! the tick); the log is opened at the checkpoint's durable place (K4b) and only the records after it are replayed.
+//! Without one it replays the whole log onto the world as built. Either way each record's entries are applied, the
+//! receipts index and the kept answers are rebuilt from it, and new intent ids follow the last one minted. A repeat
+//! after a restart gets the answer it had; an intent that was open at the kill was never logged nor answered, and is
+//! taken again when the gateway sends it again. A body the log last had in a seat is seated in it again, the seat held
+//! in the slots table (`crate::bodies`).
 //!
 //! **Free text** goes to K16's text store first and the log holds its reference only (`{21: id}`, T8 rule 6). Words
 //! come in an intent as T8's `{23: words}` (CBOR text is names only, so words are bytes). Each is kept in K16's store
@@ -43,9 +47,12 @@
 //! (T1: everything reads the state as of the tick's start, and what a tick writes is seen from the next):
 //!
 //! 0. the intents that arrived since the last tick are taken (the recorder's inputs, K12);
-//! 1. due timers: acts whose deadline passed end `act.timed-out` (K9's due list); a move's phase timers fire;
+//! 1. due timers: acts whose deadline passed end `act.timed-out` (K9's due list); the world node's light, day and
+//!    weather timers due before the next tick fire at their due times and write their entries (E6, #3369; a first
+//!    start writes [`Config::sky`] when the node holds no settings); a move's phase timers fire;
 //! 2. skills step through the host, each one unit in K11's wrapper (K13a, T9b/T9c; a panic ends that skill only);
-//! 3. the controller steps the bodies (B1), moves and seats included (B2, B3);
+//! 3. the controller steps the bodies (B1), moves and seats included (B2, B3); each utterance a step started is
+//!    written with its hearers (`sim::speech::heard`, B11, #3369);
 //! 4. committed acts: the checks that came back are committed (I3, I4), then the checked edits (G1b, `sim::edit`;
 //!    each counts as outstanding, so lockstep waits for it as for an act), and new moves start (I4b);
 //! 5. the tick's input record, then its part, go to the log (K4, K12): the part carries the answers ([`ANSWERED`]),
@@ -55,7 +62,8 @@
 //!    the answers;
 //! 8. the auditor checks a slice of the tree (K11).
 //!
-//! A checkpoint is taken by K5's rule (amount of log), between ticks. **Lockstep** ([`Config::lockstep`]) runs the
+//! A checkpoint is taken by K5's rule (amount of log), between ticks: at the start of a tick, once every record
+//! handed to the log is on the disk, so it never holds a change the log lacks. **Lockstep** ([`Config::lockstep`]) runs the
 //! same loop on a clock the caller moves ([`Event::RunTo`]) and waits for every check before a tick, so a run fed
 //! the same inputs at the same ticks writes the same log: how K12's replay is checked on the real loop.
 //!
@@ -66,8 +74,8 @@
 //! block. Intents enter through a [`Door`], which stamps them as they are read.
 //!
 //! Not here (K18's known limits): a route search and a move's checks still run on the clock thread (`sim::host`'s
-//! runner plans a walk's route when its spot is granted; B3 checks a seat at commit); a seated body is logged only
-//! while it stands, so a restart stands it where it last stood; one zone a process.
+//! runner plans a walk's route when its spot is granted; B3 checks a seat at commit); a walk or a sit in progress at
+//! a kill is not resumed (its intent is taken again when sent again); one zone a process.
 // worldd's real clock (`Real`): the one place the process reads time.
 #![allow(clippy::disallowed_methods)]
 
@@ -79,7 +87,8 @@ use crate::words;
 use replica::apply::Replica;
 use replica::edit::{self, Edit, Refused};
 use replica::effects::{
-    Actor, Body, Cause, Change, Effect, Envelope, Event as Named, Part, Refusal,
+    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event as Named, Part, Refusal, Rest,
+    TimerRec,
 };
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
@@ -88,21 +97,25 @@ use replica::pose::Pose;
 use replica::select::Answer as Answered;
 use replica::select::Spot;
 use replica::select::wire::SPOT;
+use replica::sky::{self, Sky};
 use replica::sync::{self, Records, Served, wire};
 use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use replica::views::Redactions;
 use replica::world_model::Audience;
 use sim::audit::Auditor;
-use sim::checkpoint::{Blobs, Checkpoints};
+use sim::checkpoint::{self, Blobs, Checkpoints};
 use sim::clock::{Clock as Pace, Heartbeat, Ticker};
 use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
 use sim::commit::spot::{self, Spot as Bound};
 use sim::commit::{Checks, Outcome, commit, mark_clock_thread};
+use sim::daylight::{self, Daylight, Write as Fire};
 use sim::edit::Planned;
 use sim::frozen::Publisher;
 use sim::log::{Durable, Log, Storage};
 use sim::recorder::{self, Input};
+use sim::speech;
 use sim::text::Store;
+use sim::timers::{DueList, Timer};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -114,6 +127,16 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 type R<T> = Result<T, Refusal>;
+
+fn recs_of(changes: Vec<Change>) -> Vec<ChangeRec> {
+    changes
+        .into_iter()
+        .map(|change| ChangeRec {
+            change,
+            rest: Rest::new(),
+        })
+        .collect()
+}
 
 /// Makes the world's bodies on the thread that steps them (a skill is not sent between threads), each standing where
 /// the log last had it (`Placed`, empty on a first start; [`Bodies::add_body_at`]).
@@ -195,6 +218,114 @@ pub struct Ran {
     /// Faults the auditor named so far, and units ended by a panic.
     pub faults: u64,
     pub panicked: u64,
+    /// The bodies in a seat: (body, the seat's thing), in body order.
+    pub seated: Vec<(Id, Id)>,
+}
+
+/// How a start found the world (K18c, #3176): from the newest checkpoint and the log after it, or the whole log.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Restart {
+    /// The log record the checkpoint holds up to, when one was restored.
+    pub checkpoint: Option<u64>,
+    /// Log records read back (the input records included) and the parts of them applied to the tree.
+    pub read: u64,
+    pub applied: u64,
+}
+
+/// One actor's kept answers in a carry: its bytes, its last sequence, and its kept (sequence, answer frame) pairs.
+type Kept = (Vec<u8>, u64, Vec<(u64, Vec<u8>)>);
+
+/// What a restart needs besides the tree, kept in a checkpoint's seed (K5 keeps the seed opaque; K18c, #3176):
+/// `{1: [[actor, last sequence, [[sequence, answer frame], ...]], ...], 2: next intent counter, 3: [body row, ...]
+/// (`crate::bodies::row`), 4: the tick}`. Without it a restart from a checkpoint would forget the answers kept for
+/// repeats and the bodies that had not moved since.
+#[derive(Debug, Default)]
+struct Carry {
+    sequences: Vec<Kept>,
+    next_intent: u64,
+    placed: Placed,
+    tick: i64,
+}
+
+impl Carry {
+    fn to_bytes(&self) -> Vec<u8> {
+        let sequences = self
+            .sequences
+            .iter()
+            .map(|(a, last, kept)| {
+                Value::Array(vec![
+                    Value::Bytes(a.clone()),
+                    Value::Uint(*last),
+                    Value::Array(
+                        kept.iter()
+                            .map(|(s, f)| {
+                                Value::Array(vec![Value::Uint(*s), Value::Bytes(f.clone())])
+                            })
+                            .collect(),
+                    ),
+                ])
+            })
+            .collect();
+        let mut m = BTreeMap::from([
+            (1, Value::Array(sequences)),
+            (2, Value::Uint(self.next_intent)),
+            (
+                3,
+                Value::Array(
+                    self.placed
+                        .iter()
+                        .map(|(id, (p, s))| bodies::row(*id, p, *s))
+                        .collect(),
+                ),
+            ),
+        ]);
+        if let Ok(t) = u64::try_from(self.tick) {
+            m.insert(4, Value::Uint(t));
+        }
+        encode(&Value::Map(m)).unwrap_or_default()
+    }
+
+    /// The carry a checkpoint's seed holds; an empty or unread seed carries nothing (a checkpoint from before K18c).
+    fn read(seed: &[u8]) -> Option<Carry> {
+        let Value::Map(m) = decode(seed).ok()?.value else {
+            return None;
+        };
+        let mut c = Carry {
+            tick: -1,
+            ..Carry::default()
+        };
+        if let Some(Value::Array(rows)) = m.get(&1) {
+            for r in rows {
+                let Value::Array(r) = r else { continue };
+                let [Value::Bytes(a), Value::Uint(last), Value::Array(kept)] = r.as_slice() else {
+                    continue;
+                };
+                let kept = kept
+                    .iter()
+                    .filter_map(|k| match k {
+                        Value::Array(p) => match p.as_slice() {
+                            [Value::Uint(s), Value::Bytes(f)] => Some((*s, f.clone())),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .collect();
+                c.sequences.push((a.clone(), *last, kept));
+            }
+        }
+        if let Some(Value::Uint(n)) = m.get(&2) {
+            c.next_intent = *n;
+        }
+        if let Some(Value::Array(rows)) = m.get(&3) {
+            for (id, pose, stance) in rows.iter().filter_map(bodies::read_row) {
+                c.placed.insert(id, (pose, stance));
+            }
+        }
+        if let Some(Value::Uint(t)) = m.get(&4) {
+            c.tick = i64::try_from(*t).unwrap_or(i64::MAX);
+        }
+        Some(c)
+    }
 }
 
 pub struct Config {
@@ -230,11 +361,27 @@ pub struct Config {
     /// The world's one creator and the kinds it pins, for edit intents (G1b, #3362); without them every edit is
     /// refused `edit.not-the-creator`.
     pub edits: Option<edit::World>,
+    /// The day, night and weather (E6) a start writes on the world node when it holds none; a world node that holds
+    /// its settings keeps them. `None`: a world without settings has no sky.
+    pub sky: Option<daylight::Config>,
+    /// The view subscriptions' tier (#3292), handed each tick's part once it is on the disk.
+    pub served: Option<crate::views::served::Feed>,
     /// K16's text store, where an intent's words are kept (V1b); a store in memory when none is given.
     pub text: Option<Arc<Store>>,
     /// Called once at start with the log's durable mark; what it gives is handed each part record as it is appended
     /// (its number and bytes): a view tier's `offer`, so a stream writer follows the world (V1b).
     pub follow: Option<Follow>,
+    /// Each log record once it is on the disk, input records included, in order (C1, #3365): `worldd serve`'s own
+    /// view tier and shipper read them here, off the clock thread.
+    pub synced: Option<Sender<Synced>>,
+}
+
+/// A record on the disk ([`Config::synced`]): its number in the log, its bytes, and whether it is the recorder's input
+/// record (K12) rather than a tick's part.
+pub struct Synced {
+    pub record: u64,
+    pub bytes: Vec<u8>,
+    pub input: bool,
 }
 
 /// See [`Config::follow`]: what each appended record (its number and bytes) is handed to.
@@ -261,6 +408,9 @@ impl Config {
             measures: true,
             health: None,
             edits: None,
+            synced: None,
+            sky: None,
+            served: None,
             text: None,
             follow: None,
         }
@@ -275,6 +425,10 @@ pub struct World {
     /// The view tier, when [`Config::views`]: subscribe to it.
     pub tier: Option<Arc<Tier>>,
     pub measures: Option<Arc<Measures>>,
+    /// How this start found the world (K18c).
+    pub restart: Restart,
+    /// The log's durable mark: a tier of the caller's own waits on it (C1).
+    pub durable: Durable,
     clock: Option<JoinHandle<()>>,
 }
 
@@ -442,10 +596,72 @@ struct Clock {
     checkpoints: Option<Checkpoints>,
     /// Log records written, the input records included.
     records: u64,
+    /// Log bytes handed since the last checkpoint's count, and the log's durable mark (K18c).
+    since: u64,
+    durable: Durable,
     tick: i64,
     measures: Option<Arc<Measures>>,
     /// K16's store, where words are kept (V1b).
     text: Arc<Store>,
+    /// The world node's day, night and weather (E6, #3369), when the world has them.
+    sky: Option<Heavens>,
+    /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
+    tick_us: Micros,
+}
+
+/// The world node's sky in the running tick (E6, #3369): its three timers on K9's due list, each fired at its due time
+/// by the tick that holds it, and each fire's entries written on the world node.
+struct Heavens {
+    daylight: Daylight,
+    /// The world node's timers: `souls:light`, `souls:day`, `souls:weather`.
+    due: DueList,
+    /// Each timer's id now, by name: a fire clears it and sets the next.
+    timers: BTreeMap<Name, Id>,
+    mint: Minter,
+    /// A first start writes the settings and the first light, date and weather at its first tick.
+    first: bool,
+}
+
+/// The scope the sky's timer ids are minted in.
+const SKY_TIMERS: Scope = Scope([0xe6; 16]);
+
+impl Heavens {
+    /// The sky of `replica`'s world node: its settings as the node holds them (a restart rebuilds the due list from
+    /// the timers the tree holds), else `new`'s, written at the first tick; `None` with neither.
+    fn of(replica: &Replica, new: Option<daylight::Config>) -> Option<Heavens> {
+        let tree = replica.tree();
+        let root = tree.node(tree.root())?;
+        let world = root.id();
+        let (cfg, first) = match daylight::Config::read(root.fields()) {
+            Some(c) => (c, false),
+            None => (new?, true),
+        };
+        let names = [sky::T_LIGHT, sky::T_DAY, sky::T_WEATHER];
+        let mut due = DueList::new();
+        let mut timers = BTreeMap::new();
+        let mut mint = Minter::new(SKY_TIMERS);
+        for (id, t) in tree.timers() {
+            if t.node == world && names.contains(&t.name.as_str()) {
+                let _ = due.set(Timer {
+                    node: world,
+                    id: *id,
+                    due: t.due,
+                    name: t.name.clone(),
+                });
+                timers.insert(t.name.clone(), *id);
+                if id.scope() == SKY_TIMERS {
+                    mint.past(id.counter());
+                }
+            }
+        }
+        Some(Heavens {
+            daylight: Daylight::new(cfg, world),
+            due,
+            timers,
+            mint,
+            first,
+        })
+    }
 }
 
 /// What an intent becomes: a form's act for the checkers, a move for the bodies, or an edit for the edit checker.
@@ -970,13 +1186,161 @@ impl Clock {
         Ok(())
     }
 
+    /// Writes the world's own entries (its utterances, its sky), each envelope's sequence set in turn, as one part
+    /// applied to the world and logged with the tick. A part the world refuses is not written, and is named.
+    fn write_own(&mut self, effects: Vec<Effect>, what: &str) {
+        let first = self.replica.version();
+        let effects: Vec<Value> = effects
+            .into_iter()
+            .zip(first..)
+            .map(|(mut e, sequence)| {
+                e.envelope.sequence = sequence;
+                e.to_value()
+            })
+            .collect();
+        let v = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(self.replica.header().hash().to_bytes())),
+            (2, Value::Array(effects)),
+        ]));
+        let part = encode(&v)
+            .map_err(|e| Refusal {
+                name: "encoding",
+                detail: e.to_string(),
+            })
+            .and_then(|b| Part::read(&b))
+            .and_then(|p| self.replica.apply(&p).map(|()| p));
+        match part {
+            Ok(p) => {
+                self.unsealed = true;
+                self.effects.extend(p.effects.iter().cloned());
+                self.parts.push(Arc::new(p));
+            }
+            Err(r) => eprintln!("worldd: {what} was not written: {r}"),
+        }
+    }
+
+    /// An envelope of the world's own, at `at` on node `node` (its sequence is set when written).
+    fn own(node: Id, at: Micros) -> Envelope {
+        Envelope {
+            sequence: 0,
+            at,
+            cause: Cause::World,
+            actor: Actor::World,
+            audience: Audience::Everyone,
+            node,
+        }
+    }
+
+    /// One fire's two entries on the world node at `at` (E6): its changes with its event, then its old timer cleared
+    /// and the next set; the next goes on the due list.
+    fn put_sky(&mut self, at: Micros, w: Fire) {
+        let Some(h) = self.sky.as_mut() else { return };
+        let Ok(id) = h.mint.mint() else {
+            eprintln!("worldd: the sky's timer ids are spent");
+            return;
+        };
+        let world = h.daylight.world;
+        let mut recs = Vec::new();
+        if let Some(old) = h.timers.insert(w.timer.clone(), id) {
+            recs.push(TimerRec::Clear { timer: old });
+        }
+        recs.push(TimerRec::Set {
+            timer: id,
+            due: w.next,
+            name: w.timer.clone(),
+        });
+        let _ = h.due.set(Timer {
+            node: world,
+            id,
+            due: w.next,
+            name: w.timer,
+        });
+        let changes = Effect {
+            envelope: Clock::own(world, at),
+            body: Body::Changes(recs_of(w.changes)),
+            events: w.event.map(|e| vec![e]),
+            rest: Rest::new(),
+        };
+        let timers = Effect {
+            envelope: Clock::own(world, at),
+            body: Body::Timers(recs),
+            events: None,
+            rest: Rest::new(),
+        };
+        self.write_own(vec![changes, timers], "the sky");
+    }
+
+    /// Step 1 for the world node's sky (E6, #3369): a first start's settings and first light, date and weather at
+    /// world time `now`; then each of its timers due before the next tick's start, fired at its due time against what
+    /// the node announces then, in K9's order. Nothing runs between changes, so a world that catches up 48 hours
+    /// writes what one stepped writes.
+    fn fire_sky(&mut self, now: Micros) {
+        let Some(h) = self.sky.as_mut() else { return };
+        if std::mem::take(&mut h.first) {
+            let world = h.daylight.world;
+            let sets = h
+                .daylight
+                .cfg
+                .fields()
+                .into_iter()
+                .map(|(field, to)| Change::Set {
+                    node: world,
+                    field,
+                    to,
+                    by: None,
+                })
+                .collect();
+            let started = h.daylight.start(now);
+            let settings = Effect {
+                envelope: Clock::own(world, now),
+                body: Body::Changes(recs_of(sets)),
+                events: None,
+                rest: Rest::new(),
+            };
+            self.write_own(vec![settings], "the sky's settings");
+            match started {
+                Ok(writes) => {
+                    for w in writes {
+                        self.put_sky(now, w);
+                    }
+                }
+                Err(r) => eprintln!("worldd: the sky did not start: {r}"),
+            }
+        }
+        let before = now + self.tick_us;
+        loop {
+            let Some(h) = self.sky.as_mut() else { return };
+            let Some(t) = h.due.fire(before) else { return };
+            let tree = self.replica.tree();
+            let announced = tree.node(tree.root()).and_then(|n| Sky::read(n.fields()));
+            let Some(announced) = announced else {
+                eprintln!(
+                    "worldd: the world node announces no sky; {} not fired",
+                    t.name.as_str()
+                );
+                continue;
+            };
+            match h.daylight.fire(&t.name, t.due, &announced) {
+                Ok(w) => self.put_sky(t.due, w),
+                Err(r) => eprintln!("worldd: the sky's {} did not fire: {r}", t.name.as_str()),
+            }
+        }
+    }
+
     /// Steps 1 to 3 for the bodies (I4b): their due timers, skills and controller, to world time `now`; each move that
-    /// ended is answered: a receipt naming its entries when done, else its reason by name.
+    /// ended is answered: a receipt naming its entries when done, else its reason by name. Each utterance a step
+    /// started is written with its hearers (B11, #3369): the speaker's entry, as `sim::speech::entry` makes it.
     fn step_bodies(&mut self, now: Micros) {
         let Some(b) = self.bodies.as_mut() else {
             return;
         };
-        for (id, how) in b.step(now) {
+        let ended = b.step(now);
+        let heard = std::mem::take(&mut b.heard);
+        for (speaker, said, at) in heard {
+            let e = speech::entry(Clock::own(speaker, at), speaker, &said);
+            self.write_own(vec![e], "an utterance");
+        }
+        for (id, how) in ended {
             self.settle(id, how, now);
         }
     }
@@ -1053,6 +1417,10 @@ impl Clock {
         let mark = || on.then(measures::steady_us);
         let mut at = [None; measures::NPHASES + 1];
         at[0] = mark();
+        // K5: a checkpoint once enough log has been written since the last, taken between ticks, here before the
+        // tick and once every record handed to the log is on the disk (K18c): it never holds a change the log lacks.
+        self.checkpoint();
+        at[1] = mark();
         self.tick = n;
         // 0. What arrived since the last tick, and what a script set for this one, is taken now.
         for (bytes, reply, stamps) in std::mem::take(&mut self.pending) {
@@ -1063,7 +1431,7 @@ impl Clock {
                 self.arrival(&bytes, reply, Stamps::default(), now);
             }
         }
-        at[1] = mark();
+        at[2] = mark();
         // 1. Due timers: acts whose deadline passed.
         while let Some(id) = self.deadlines.due(now) {
             if let Some(b) = self.bodies.as_mut() {
@@ -1074,10 +1442,12 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "act.timed-out"));
             }
         }
-        at[2] = mark();
+        // 1. The world node's sky: its timers due in this tick, each at its due time (E6, #3369).
+        self.fire_sky(now);
+        at[3] = mark();
         // 1-3. The bodies' own timers, skills through the host, the controller.
         self.step_bodies(now);
-        at[3] = mark();
+        at[4] = mark();
         // 4. Committed acts: the checks back since the last tick, then the moves taken.
         for (mut act, checks) in std::mem::take(&mut self.checked) {
             let Some(id) = Id::new(self.lineage, act.id) else {
@@ -1131,7 +1501,7 @@ impl Clock {
         // 4b. Checked edits (G1b): committed through `sim::edit`, or refused whole.
         self.edits(now);
         self.start_moves(now);
-        at[4] = mark();
+        at[5] = mark();
         // 5. The tick's input record, then its part: effects, answers, the bodies that moved, the tick, the state.
         let inputs = match std::mem::take(&mut self.inputs) {
             i if i.is_empty() => None,
@@ -1153,7 +1523,7 @@ impl Clock {
                         Value::Array(
                             moved
                                 .iter()
-                                .map(|(id, p)| Value::Array(vec![id.to_value(), p.to_value()]))
+                                .map(|(id, p, s)| bodies::row(*id, p, *s))
                                 .collect(),
                         ),
                     ),
@@ -1165,7 +1535,7 @@ impl Clock {
         if record.is_some() {
             self.unsealed = true;
         }
-        at[5] = mark();
+        at[6] = mark();
         // 6. The frozen copy, for the checkers and readers.
         if !self.parts.is_empty() {
             if self.roots.is_some() {
@@ -1200,38 +1570,14 @@ impl Clock {
             });
         }
         self.records += written;
-        at[6] = mark();
+        self.since += bytes as u64;
+        at[7] = mark();
         // 8. A slice of the auditor: faults named, nothing repaired, the clock never stopped.
         let slice = self.auditor.slice(self.replica.tree(), self.audit);
         for f in &slice.faults {
             eprintln!("worldd: audit: {f:?}");
         }
         self.faults += slice.faults.len() as u64;
-        at[7] = mark();
-        // K5: a checkpoint once enough log has been written since the last, taken between ticks.
-        if let Some(c) = self.checkpoints.as_mut() {
-            c.appended(bytes as u64);
-            if c.due() {
-                let version = Version {
-                    lineage: self.lineage,
-                    zone: self.zone,
-                    epoch: self.epoch,
-                    sequence: self.replica.version(),
-                };
-                // One seal for both: what R5b's seals hashed since the last checkpoint, then what changed after.
-                let taken = self.replica.seal().and_then(|mut sealed| {
-                    self.kept.keep(&sealed);
-                    self.unsealed = false;
-                    let mut nodes = std::mem::take(&mut self.fresh);
-                    nodes.append(&mut sealed.nodes);
-                    sealed.nodes = nodes;
-                    c.take_sealed(sealed, version, self.records, None, &[])
-                });
-                if let Err(e) = taken {
-                    eprintln!("worldd: a checkpoint was not taken: {e}");
-                }
-            }
-        }
         at[8] = mark();
         if let Some(m) = &self.measures {
             let mut phases = [0; measures::NPHASES];
@@ -1244,16 +1590,80 @@ impl Clock {
         }
     }
 
+    /// K5's checkpoint, when due and the log is on the disk up to every record handed to it (K18c, #3176): the
+    /// tree, where the log resumes (K4b) and what a restart needs besides the tree ([`Carry`], in the root's seed).
+    fn checkpoint(&mut self) {
+        let Some(c) = self.checkpoints.as_mut() else {
+            return;
+        };
+        c.appended(std::mem::take(&mut self.since));
+        let at = self.durable.at();
+        if !c.due() || at.record < self.records {
+            return;
+        }
+        let carry = Carry {
+            sequences: self
+                .sequences
+                .kept()
+                .map(|(a, last, kept)| (a.to_vec(), last, kept.cloned().collect()))
+                .collect(),
+            next_intent: self.next_intent,
+            placed: self.bodies.as_ref().map(Bodies::placed).unwrap_or_default(),
+            tick: self.tick,
+        };
+        let version = Version {
+            lineage: self.lineage,
+            zone: self.zone,
+            epoch: self.epoch,
+            sequence: self.replica.version(),
+        };
+        let minter = Minter::at(self.lineage, self.next_intent);
+        let Some(c) = self.checkpoints.as_mut() else {
+            return;
+        };
+        // One seal for both: what R5b's seals hashed since the last checkpoint, then what changed after.
+        let taken = self.replica.seal().and_then(|mut sealed| {
+            self.kept.keep(&sealed);
+            self.unsealed = false;
+            let mut nodes = std::mem::take(&mut self.fresh);
+            nodes.append(&mut sealed.nodes);
+            sealed.nodes = nodes;
+            c.take_sealed(
+                sealed,
+                version,
+                self.records,
+                Some((at, &minter)),
+                &carry.to_bytes(),
+            )
+        });
+        if let Err(e) = taken {
+            eprintln!("worldd: a checkpoint was not taken: {e}");
+        }
+    }
+
     fn ran(&self) -> Ran {
         let panicked = self
             .bodies
             .as_ref()
             .map_or(0, |b| b.runner.units.ended.len() as u64);
+        let mut seated: Vec<(Id, Id)> = self
+            .bodies
+            .as_ref()
+            .map(|b| {
+                b.slots
+                    .seated()
+                    .into_iter()
+                    .map(|(b, t, _)| (b, t))
+                    .collect()
+            })
+            .unwrap_or_default();
+        seated.sort();
         Ran {
             tick: self.tick,
             state: self.state(),
             faults: self.faults,
             panicked,
+            seated,
         }
     }
 }
@@ -1265,6 +1675,8 @@ fn answer_loop<S: Storage + 'static>(
     ticks: Receiver<Tick>,
     tier: Option<Arc<Tier>>,
     measures: Option<Arc<Measures>>,
+    synced: Option<Sender<Synced>>,
+    served: Option<crate::views::served::Feed>,
     mut follow: Option<Offer>,
 ) {
     for (k, t) in ticks.into_iter().enumerate() {
@@ -1273,12 +1685,18 @@ fn answer_loop<S: Storage + 'static>(
             m.queues[measures::LOG].enter(k, t.handed.unwrap_or_else(measures::steady_us));
         }
         let mut last = None;
+        let mut appended = Vec::new();
+        let mut durable_part = None;
         for (k, bytes) in [t.inputs, t.record].into_iter().enumerate() {
             let Some(bytes) = bytes else { continue };
             // Parts only (not the recorder's input records) go to the view tier and to what follows the world.
             let part = k == 1;
             let copy = (part && tier.is_some()).then(|| bytes.clone());
             let kept = (part && follow.is_some()).then(|| bytes.clone());
+            let sent = synced.as_ref().map(|_| bytes.clone());
+            if part && served.is_some() {
+                durable_part = Some(bytes.clone());
+            }
             match log.append(bytes) {
                 Ok(n) => {
                     last = Some(n);
@@ -1287,6 +1705,13 @@ fn answer_loop<S: Storage + 'static>(
                     }
                     if let (Some(f), Some(b)) = (follow.as_mut(), kept) {
                         f(n, b);
+                    }
+                    if let Some(b) = sent {
+                        appended.push(Synced {
+                            record: n,
+                            bytes: b,
+                            input: k == 0,
+                        });
                     }
                 }
                 Err(e) => {
@@ -1300,6 +1725,14 @@ fn answer_loop<S: Storage + 'static>(
         {
             eprintln!("worldd: the log failed, nothing more is answered: {e}");
             return;
+        }
+        if let Some(tx) = &synced {
+            for s in appended {
+                let _ = tx.send(s);
+            }
+        }
+        if let (Some(v), Some(r)) = (&served, durable_part) {
+            v.record(r);
         }
         let synced = measures.as_ref().map(|_| measures::steady_us());
         for (waiters, frame, mut stamps) in t.replies {
@@ -1330,14 +1763,9 @@ fn answer_loop<S: Storage + 'static>(
 
 /// What a restart reads back from the log besides the tree: each body's last pose and the last tick logged.
 fn read_back(part: &Part, placed: &mut Placed, last: &mut Option<i64>) {
-    if let Some(Value::Array(bodies)) = part.rest.get(&BODIES) {
-        for b in bodies {
-            if let Value::Array(p) = b
-                && let [id, pose] = p.as_slice()
-                && let (Ok(id), Ok(pose)) = (replica::effects::read_id(id), Pose::from_value(pose))
-            {
-                placed.insert(id, pose);
-            }
+    if let Some(Value::Array(rows)) = part.rest.get(&BODIES) {
+        for (id, pose, stance) in rows.iter().filter_map(bodies::read_row) {
+            placed.insert(id, (pose, stance));
         }
     }
     if let Some(Value::Uint(n)) = part.rest.get(&TICK) {
@@ -1353,21 +1781,64 @@ fn time(e: replica::time::TimeRefusal) -> Refusal {
 }
 
 /// Opens the log in `storage`, replays it onto `world` (the world as built, before any record), and starts the
-/// clock, answers and checker threads. The bodies are made standing where the log last had them, and the ticker
-/// resumes after the last tick logged.
+/// clock, answers and checker threads. The bodies are made where the log last had them, standing or seated, and the
+/// ticker resumes after the last tick logged.
+///
+/// With [`Config::checkpoints`], a restart starts from the newest checkpoint that verifies (K5): its tree and its
+/// carry ([`Carry`]: kept answers, the next intent id, the bodies, the tick), with the log opened at the checkpoint's
+/// durable place (K4b) and only the records after it replayed ([`World::restart`] says how many).
 pub fn start<S: Storage + 'static>(
     mut world: Replica,
     rules: Rules,
     storage: S,
     cfg: Config,
 ) -> R<World> {
-    let (log, found) = Log::open(storage, cfg.epoch)?;
+    let restored = match &cfg.checkpoints {
+        Some((dir, _)) if dir.exists() => checkpoint::restore(dir)?,
+        _ => None,
+    };
+    for (name, why) in restored.iter().flat_map(|r| &r.rejected) {
+        eprintln!("worldd: checkpoint {name} passed over: {why}");
+    }
+    let (log, found) = Log::open_at(
+        storage,
+        cfg.epoch,
+        restored.as_ref().and_then(|r| r.root.log),
+    )?;
     let mut sequences = Sequences::default();
     let mut receipts = Receipts::default();
     let mut next_intent = 1;
     let mut placed = Placed::new();
     let mut last = None;
-    for record in &found.records {
+    let mut restart = Restart::default();
+    let mut blobs = Blobs::default();
+    let records: &[Vec<u8>] = match restored {
+        Some(r) => {
+            let logged = found.first + found.records.len() as u64;
+            if logged < r.root.record {
+                // Not by K18c's rule (a checkpoint waits for the log's sync), but a log cut short by hand would.
+                eprintln!(
+                    "worldd: checkpoint at record {} is past the log's end ({logged}): its tree is kept",
+                    r.root.record
+                );
+            }
+            world = Replica::restored(world.header().clone(), r.tree, r.root.version.sequence);
+            if let Some(c) = Carry::read(&r.root.seed) {
+                for (actor, last_seq, kept) in c.sequences {
+                    sequences.restore(&actor, last_seq, kept);
+                }
+                next_intent = c.next_intent.max(1);
+                placed = c.placed;
+                last = (c.tick >= 0).then_some(c.tick);
+            }
+            restart.checkpoint = Some(r.root.record);
+            blobs = r.blobs;
+            found.after(r.root.record)
+        }
+        None => &found.records,
+    };
+    restart.read = records.len() as u64;
+    for record in records {
         // The recorder's input records are what the world was handed, not what it did (K12): passed by.
         if recorder::is_input(record) {
             continue;
@@ -1376,6 +1847,7 @@ pub fn start<S: Storage + 'static>(
         if !part.effects.is_empty() {
             world.apply(&part)?;
         }
+        restart.applied += 1;
         receipts.index(&part.effects);
         read_back(&part, &mut placed, &mut last);
         // Nodes an edit placed took their ids on the intents' counter (G1b): never give one out again.
@@ -1451,7 +1923,7 @@ pub fn start<S: Storage + 'static>(
         false => None,
     };
     let checkpoints = match &cfg.checkpoints {
-        Some((dir, every)) => Some(Checkpoints::open(dir, *every, Blobs::default())?),
+        Some((dir, every)) => Some(Checkpoints::open(dir, *every, blobs)?),
         None => None,
     };
     let publisher = Arc::new(Publisher::new(&world));
@@ -1482,14 +1954,29 @@ pub fn start<S: Storage + 'static>(
         None => Arc::new(crate::words::in_memory(cfg.lineage)?),
     };
     let follow = cfg.follow.take().map(|f| f(log.durable_mark()));
+    let durable = log.durable_mark();
+    let world_durable = log.durable_mark();
+    let synced = cfg.synced.take();
     let (answers, ticks) = channel();
     let answer_tier = tier.clone();
     let answer_measures = measures.clone();
+    let served = cfg.served.take();
     let answering = thread::Builder::new()
         .name("answers".into())
-        .spawn(move || answer_loop(log, ticks, answer_tier, answer_measures, follow))
+        .spawn(move || {
+            answer_loop(
+                log,
+                ticks,
+                answer_tier,
+                answer_measures,
+                synced,
+                served,
+                follow,
+            )
+        })
         .map_err(io)?;
-    let records = found.records.len() as u64;
+    let records = found.first + found.records.len() as u64;
+    let sky = Heavens::of(&world, cfg.sky.take());
     let clock_measures = measures.clone();
     // R5b's first seal hashes every node: taken here, before the clock runs, so no tick waits on it (a big world's
     // whole tree, sealed at its first sync request, held the clock past K7's watchdog). Later seals hash what changed.
@@ -1540,8 +2027,12 @@ pub fn start<S: Storage + 'static>(
         faults: 0,
         checkpoints,
         records,
+        since: 0,
+        durable,
         tick: last.unwrap_or(-1),
         measures: clock_measures,
+        sky,
+        tick_us,
         text,
     };
     let lockstep = cfg.lockstep;
@@ -1555,12 +2046,26 @@ pub fn start<S: Storage + 'static>(
             if let Some(make) = make {
                 match make(&placed) {
                     Ok(mut b) => {
-                        b.begin(ticker.due().unwrap_or(0));
+                        let at = ticker.due().unwrap_or(0);
+                        b.begin(at);
+                        // Those the log last had in a seat sit in it again, the seat held (K18c).
+                        for (body, why) in b.seat_placed(&placed, at) {
+                            eprintln!(
+                                "worldd: {} stands, not seated again: {why}",
+                                replica::world_model::show(body)
+                            );
+                        }
                         c.bodies = Some(b);
                     }
                     Err(e) => eprintln!("worldd: the bodies did not start, moves are refused: {e}"),
                 }
             }
+            // The state this start resumes from, bodies included: after a kill it equals the last logged tick's (C1).
+            eprintln!(
+                "worldd: started at tick {} state {}",
+                c.tick,
+                replica::encode::to_hex(&c.state())
+            );
             // Takes one event; false once the world is to stop.
             let take = |c: &mut Clock, e: Event| -> Option<Sender<Ran>> {
                 match e {
@@ -1677,6 +2182,8 @@ pub fn start<S: Storage + 'static>(
         beat,
         tier,
         measures,
+        restart,
+        durable: world_durable,
         clock: Some(clock),
     })
 }

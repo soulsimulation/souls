@@ -8,7 +8,8 @@
 //!    (`Part::read`) and applied to the writer's own copy of the view (R1's replica): a part the copy refuses is never
 //!    written, and the copy's state hash is what every tenth part carries.
 //! 3. **A part is cut by world time**, every [`stream::PERIOD_US`], when the first record of a later stretch arrives
-//!    (or on [`Writer::flush`]); it is numbered in the order written. A stretch with no records writes no part.
+//!    (or once its time has passed, rule 11, or on [`Writer::flush`]); it is numbered in the order written. A stretch
+//!    with no records writes no part.
 //! 4. **Temporary name, then rename.** Each file is written whole under `<name>.tmp` and renamed to its name, so a
 //!    writer killed mid-write leaves no broken file under a final name, and a cache never keeps half a part. The
 //!    pointer is written after its part, the same way.
@@ -43,6 +44,14 @@
 //!     of any other audience are never in it. A whisper's entry is not in a public view at all, so its reference is
 //!     not either. The file is written whole and renamed (rule 4) before the part, so a reader that finds a part finds
 //!     its words.
+//! 11. **A still world says so** (V5b, #3460). [`follow`] is handed the world's clock and tells the writer the world's
+//!     time now ([`Writer::idle`]) after each frame, and at least every 20 ms without one. Once a stretch's time has
+//!     passed, with [`SETTLE_US`] more for its last records to be synced, the open stretch is written, so a burst after a
+//!     still while is on the page within the usual lag rather than waiting for the next record. With nothing open, the
+//!     pointer says the world is still up to world-now less [`SETTLE_US`] (`quiet(until)`), every [`QUIET_EVERY_US`] of
+//!     world time; a page plays a still world to there, and no empty part is ever written (rule 3). A record that
+//!     reaches the writer later than [`SETTLE_US`] after its world time is still written, in its own stretch; a page
+//!     that has drawn past it has missed only its motion, never its state.
 //!
 //! Not here: serving (V2), history (V3), snapshot chunks for a reader that joins late, and drawing the words (W4).
 
@@ -74,6 +83,12 @@ use crate::views::{Delivery, Subscriber};
 use sim::text::Store;
 
 type R<T> = Result<T, Refusal>;
+
+/// How long past a stretch's world time the writer waits for its last records before writing it (rule 11): records
+/// reach the writer once K4 has synced them, a little after the world time they carry.
+pub const SETTLE_US: Micros = 250_000;
+/// How often, in world time, a still world's pointer moves its "quiet until" on (rule 11).
+pub const QUIET_EVERY_US: Micros = stream::PERIOD_US;
 
 fn fault(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
@@ -444,6 +459,32 @@ impl Writer {
         self.pointer()
     }
 
+    /// Told the world's time `now` (rule 11): writes the open stretch once its time and [`SETTLE_US`] have passed, and,
+    /// with nothing open, marks the pointer quiet up to `now - SETTLE_US` every [`QUIET_EVERY_US`].
+    pub fn idle(&mut self, now: Micros) -> R<()> {
+        if self.lead.is_some() {
+            // A carried subtree waits for its arrive, which belongs to the open stretch or a later one.
+            return Ok(());
+        }
+        let settled = now.saturating_sub(SETTLE_US);
+        if let Some(w) = self.window {
+            if (w + 1) * stream::PERIOD_US > settled {
+                return Ok(());
+            }
+            self.cut()?;
+        }
+        let due = match (self.quiet_until, self.last_to) {
+            (Some(q), _) => settled >= q.saturating_add(QUIET_EVERY_US),
+            (None, Some(to)) => settled > to,
+            (None, None) => true,
+        };
+        if due {
+            self.quiet(Some(settled))
+        } else {
+            Ok(())
+        }
+    }
+
     fn pointer(&self) -> R<()> {
         let p = Pointer {
             newest: self.written.parts.checked_sub(1),
@@ -587,8 +628,14 @@ fn with_kinds<'a>(h: &Header, root: &Name, used: impl Iterator<Item = &'a Name>)
 }
 
 /// Follows `sub`, writing each frame, on its own thread, until `stop` is set and the queue is empty; then writes the
-/// open stretch and gives the writer back. A snapshot delivery ends it with `stream-gap` (rule 6).
-pub fn follow(mut writer: Writer, sub: Subscriber, stop: Arc<AtomicBool>) -> JoinHandle<R<Writer>> {
+/// open stretch and gives the writer back. A snapshot delivery ends it with `stream-gap` (rule 6). `now` is the world's
+/// clock, read only to tell the writer the world's time (rule 11), never by the writer itself (rule 5).
+pub fn follow(
+    mut writer: Writer,
+    sub: Subscriber,
+    stop: Arc<AtomicBool>,
+    mut now: impl FnMut() -> Micros + Send + 'static,
+) -> JoinHandle<R<Writer>> {
     std::thread::spawn(move || {
         loop {
             match sub.recv_timeout(Duration::from_millis(20)) {
@@ -604,6 +651,7 @@ pub fn follow(mut writer: Writer, sub: Subscriber, stop: Arc<AtomicBool>) -> Joi
                 None if stop.load(Ordering::Relaxed) => break,
                 None => {}
             }
+            writer.idle(now())?;
         }
         writer.flush()?;
         Ok(writer)

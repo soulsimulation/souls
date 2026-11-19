@@ -29,14 +29,20 @@ bad build answered is in the log, which the old build reads on its start.
 ## Commands
 
 ```sh
-# The probe file holds one intent (T10's bytes): an act a healthy world answers with a receipt.
-deploy <world> <build hash> --probe <file> [--window-s 60] [--records 200]
-deploy rollback <world> <to hash> --from <hash> --probe <file>
+bash v2/tools/ops/world-deploy.sh <world>     # the installed worldd, staged and deployed; prints the undo
+bash v2/tools/ops/world-rollback.sh <world>   # back to the build that deploy left
 ```
+
+The wrappers call the `deploy` program as `deploy <world> <build hash> --probe <file> [--window-s 60] [--records
+200]` and `deploy rollback <world> <to hash> --from <hash> --probe <file>`. `world-deploy.sh` takes the build from the
+install (`/usr/local/lib/souls/worldd`, staged under its hash), the probe from `/etc/souls/probe.intent` (one intent,
+T10's bytes: an act a healthy world answers with a receipt), and the build it leaves from the running process, which
+it keeps in `$WORLDS_ROOT/deploys/<world>` for `world-rollback.sh`.
 
 `deploy` prints the timeline (ms from its start), then `Kept`, `RolledBack { fault }`, `NotDeployed { why }` or
 `Refused { why }`; it exits 0 only for `Kept`. `deploy rollback` takes a world back by hand, with the same schema check
-(it assumes the build being left wrote records). Put the build on the machine first
+(it assumes the build being left wrote records), and refuses `rollback.wrong-from`, changing nothing, unless the
+world is pinned to `--from`; `rollback-v2.yml` runs it ([release.md](../release.md)). Put the build on the machine first
 (`$WORLDS_ROOT/builds/<hash>/worldd`, `supervisor hash <file>` for its hash).
 
 ## The proof run
@@ -49,6 +55,9 @@ a build that reads only an older schema is refused. It prints the timelines, soc
 
 ## Known limits
 
+- The install (O17) places neither the `deploy` program (`/usr/local/lib/souls/deploy`, built from `v2/tools/ops`)
+  nor the probe (`/etc/souls/probe.intent`); until it does, put both there by hand, or `world-deploy.sh` stops and
+  says which is missing.
 - The served world here is `worldd gateway-link` (I4's world) started by a build script that maps `--dir` to it; the
   launcher's own `worldd --dir` still runs K7's clock. `deploy` against systemd has not been run on a Linux machine.
 - The canary watches ticks and acts through the probe; there is no auditor to watch yet.

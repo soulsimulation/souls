@@ -23,6 +23,7 @@ members = [
     "tools/scan-ids",
     "tools/stall-test",
     "tools/stream-check",
+    "tools/templates",
     "tools/testworld",
     "tools/wasm-load",
 ]

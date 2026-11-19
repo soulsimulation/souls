@@ -22,10 +22,23 @@
 //     {"op":"say","words":".."}           words out loud, T8's `{23: words}` in parameter 1 (V1b, #3361)
 //     {"op":"whisper","to":"<id>","words":".."}  words to one listener's body alone
 //     {"op":"lie","this":"<id>"}          lie down on a bed (worldd's bodies, as a sit)
+//   and C6's (#3390): once current on each socket it subscribes, over the gateway's view subscription (#3292), to its
+//   own body followed, and the world addresses to it each utterance that body hears, with the words it may read. Each
+//   is an event `{"kind":"heard","from":"<body id>","name":..,"words":..,"whisper":bool}`: it wakes a `wait`, is in
+//   the next `look`'s brief (`heard`, quoted as data), and reaches the reflexes as `souls:said` (`toMe` for a
+//   whisper), whose intents are sent once, as `act`'s are. Its own words are not heard back.
 //   and R10's (#2702): every answer carries `age`, and `gap` and `stale` while its copy is not known current, or
 //   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
 //   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
 //     {"op":"stats"}                      per achieved intent: commands, bytes printed, first-send result by cause
+//   and R13's (#2753), wake rules on R9's events within the owner's budget (`../wake/wake.mjs`), and the owner's
+//   messages from the mailbox, which reach `wait` as `mail` events whatever the budget:
+//     {"op":"wake","do":"add|remove|budget|list",...}   the wake rules; `wait` hands the queued wakes as `wakes`
+//     {"op":"act",...,"for":"<message id>"}           this act serves that message: its outcome closes it
+//     {"op":"event","event":{...}}                    an event as R9's matcher takes it, until frames carry them
+//   and R16's (#2817), from the world's public history (`history` in its config) and the Soul's memory, the copy as
+//   it is (naming only), so it ends with `at` and not `changed`:
+//     {"op":"history","at":"<place>"} | {"thing":"<id>"} | {"soul":"<id or name>"}, "since"/"until": world µs
 //   and R8's (#2703), checking with R2's form rules on the copy (`../check/`), kind entries from `<home>/kinds/`:
 //     {"op":"can","intent":{"verb":"..","this":"<id>","form":".."}}   yes, no with the reason, or unknown, and `current`
 //     {"op":"can","acts":["sit:<id>"]}  and  {"op":"act","acts":["sit:<id>","sit:<id>"]}   C10's (#3414): the thin
@@ -60,7 +73,7 @@ import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
-import { brief, changedBlock } from '../brief/brief.mjs';
+import { QUOTED_NOTE, brief, changedBlock } from '../brief/brief.mjs';
 import { changedBetween, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
@@ -69,6 +82,9 @@ import { ageOf } from './age.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
 import { Table } from '../reflex/reflex.mjs';
+import { Wakes } from '../wake/wake.mjs';
+import { history } from '../history/history.mjs';
+import { readLog, soulDirOf } from '../memory/memory.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -135,8 +151,16 @@ const state = { cursor: null, sequence: 0, unanswered: [], ...(existsSync(rt.sta
 const save = () => { writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\n', { mode: 0o600 }); renameSync(`${rt.state}.tmp`, rt.state); };
 const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
+const heardSince = []; // what this Soul heard since its last turn (a look or a wait), for the brief (C6)
+const HEARD_KEPT = 50, HEARING_BUDGET = 8000; // bytes a world second the view stream may use
 const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, build: null };
 const reflexes = new Table(soul); // R9: onEvent(event, now) per named event once frames carry them
+const wakes = new Wakes(soul); // R13: its budget's deliveries are kept on disk, so a restart never resets them
+if (state.wake) Object.assign(wakes, { budget: state.wake.budget, delivered: state.wake.delivered });
+const saveWakes = () => { state.wake = { budget: wakes.budget, delivered: wakes.delivered }; save(); };
+const mail = new Map(); // R13: the owner's open messages given to this daemon, by id
+const serving = new Map(); // sequence → the message its act serves
+const closes = []; // closes not yet sent, for the next sign-in
 const copy = new wire.Copy(); // its scope, by hash (R5b)
 // A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
 // Eden-sized scope (10,000 records, 64 a request) takes about 160 round trips, over 10 s at 65 ms each (#3424).
@@ -173,11 +197,31 @@ function send(bytes, sequence, ranked) {
   ws.send(bytes);
 }
 
-/** Signed in and current: intents go now. */
+/** Signed in and current: intents go now, and (once a socket) the subscription to what this Soul hears (C6). */
 function current() {
   signedIn = true;
   attempt = 0;
+  while (closes.length > 0 && signedIn) ws.send(closes.shift());
+  if (ws && !ws.hearing) { ws.hearing = true; ws.send(wire.wireSubscribe(scope, seat.grant.counter, BigInt(HEARING_BUDGET))); }
   while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
+}
+
+/** R13: a text frame, the mailbox's: a message for this Soul, noted once. */
+function onText(text) {
+  let m;
+  try { m = JSON.parse(text).mail; } catch { return; }
+  if (!m || typeof m.id !== 'string' || mail.has(m.id)) return;
+  mail.set(m.id, m);
+  log(`message ${m.id}`); // never its words
+  note({ kind: 'mail', id: m.id, text: String(m.text), at: m.at });
+}
+
+/** R13: the message `id` closed with its act's outcome, now or at the next sign-in. */
+function closeMail(id, state, outcome) {
+  const line = JSON.stringify({ close: { id, state, outcome } });
+  mail.delete(id);
+  log(`message ${id} closed ${state} (${outcome})`);
+  if (ws && signedIn) ws.send(line); else closes.push(line);
 }
 
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
@@ -238,6 +282,7 @@ function connect() {
   sock.onopen = () => { if (ended) sock.close(); else sock.send(wire.wireHello()); };
   sock.onmessage = (m) => {
     if (ended) { sock.close(); return; } // given up: it must not sign in and take the grant from its successor
+    if (typeof m.data === 'string') { onText(m.data); return; }
     const bytes = new Uint8Array(m.data);
     try {
       if (step === 'hello') {
@@ -259,6 +304,8 @@ function connect() {
         return;
       }
       if (kind === 'sync') { syncAnswer(sock, Number(a), b, bytes); return; }
+      if (kind === 'item') { onItem(bytes); return; }
+      if (kind === 'view-refused') { log(`hearing refused: ${a}`); note({ kind: 'hearing-refused', reason: a }); return; }
       // The frames applied at the cursor's version (#3346): a refusal does not move the version, so on a resume the
       // gateway replays those at the cursor after the ones counted here, and none twice.
       if (b !== '-') { state.seen = b === state.cursor ? (state.seen ?? 1) + 1 : 1; state.cursor = b; }
@@ -268,6 +315,10 @@ function connect() {
         if (k >= 0) { state.unanswered.splice(k, 1); counts.answered++; }
         trace.write({ k: 'answer', seq: s, cause: causeOf(Number(c), d, rankedOf.get(s)), achieved: achievedOf(Number(c), d) });
         if (Number(c) !== 3) rankedOf.delete(s); // an accepted move is resolved later
+        if (serving.has(s) && Number(c) !== 3) {
+          closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
+          serving.delete(s);
+        }
       }
       save();
       // C4: the answer's kind (1 receipt, 2 refused, 3 accepted, 4 resolved, 5 unread) and its reason, by name.
@@ -303,6 +354,28 @@ function connect() {
   }
   sock.onerror = () => { /* onclose follows */ };
 }
+
+// --- What this Soul hears (C6, #3390) ---------------------------------------------------------------------------
+/**
+ * One view item: an utterance this Soul's body heard, with its words when it may read them. Its own are left out
+ * (its say has its receipt). Each wakes a `wait`, joins the next brief, and goes to the reflexes as `souls:said`.
+ */
+function onItem(bytes) {
+  const line = wire.wireHeard(bytes);
+  if (!line) return;
+  const [, sequence, at, from, audience, words] = line.split(' ');
+  if (from === ME) return;
+  const e = { kind: 'heard', from, words: words === '-' ? null : Buffer.from(words, 'hex').toString('utf8'), whisper: audience !== '-', sequence: Number(sequence), at: Number(at) };
+  heardSince.push(e);
+  if (heardSince.length > HEARD_KEPT) heardSince.shift();
+  note(e);
+  for (const { intent } of reflexes.onEvent({ name: 'souls:said', fields: { 1: e.words }, actor: from, toMe: e.whisper, sequence: e.sequence }, Date.now())) {
+    sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor });
+  }
+}
+
+/** Heard utterances for an answer: the speaker's name from the copy beside its id. */
+const named = (rows, hs) => hs.map((e) => ({ ...e, ...(rows.get(e.from)?.name ? { name: rows.get(e.from).name } : {}) }));
 
 // --- Commands on the Unix socket --------------------------------------------------------------------------------
 /** The copy brought current through the gateway (a sync under way is waited for); false if it could not be. */
@@ -347,7 +420,8 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'read', 'stats', 'reflex', 'stop', 'describe', 'check', 'edit']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'stop', 'describe', 'check', 'edit']);
+const nothingYet = () => !events.some((e) => e.kind !== 'synced');
 
 // --- G7 (#2796): a creator's edits -------------------------------------------------------------------------------
 const EDIT_WITHIN = 10_000; // an edit's answer is awaited this long; past it, it stays unanswered in `status`
@@ -430,6 +504,8 @@ function sendIntent(ranked, { target, words, args, basis, expiry }) {
 }
 
 async function answer(req) {
+  // R13: a command from the model's turn shows that what a reader was handed was taken.
+  if (!['wait', 'status'].includes(req.op)) wakes.confirm();
   switch (req.op) {
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
@@ -441,18 +517,29 @@ async function answer(req) {
       };
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
-      const b = brief(rows, { me: ME, changes, ageMs: performance.now() - (confirmedAt ?? startedAt) });
+      const heard = named(rows, heardSince.splice(0));
+      const b = brief(rows, { me: ME, changes, heard, ageMs: performance.now() - (confirmedAt ?? startedAt) });
       delete b.changed; // the answer's own closes it
       return b;
     });
     case 'find': return closing({ ok: true }, (rows) => find(rows.values(), req.words, { limit: Math.min(Number(req.limit ?? 8), 50) }));
     case 'wait': {
-      const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000;
-      if (!events.some((e) => e.kind !== 'synced')) {
-        await new Promise((ok) => { const t = setTimeout(ok, ms); wakers.push(() => { clearTimeout(t); ok(); }); });
+      const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000, until = Date.now() + ms;
+      // R13: the queued wakes are handed as one delivery when the budget allows; over it, they wait for it to.
+      let handed = wakes.deliver(Date.now());
+      while (handed.length === 0 && nothingYet() && Date.now() < until) {
+        const free = wakes.nextFree(Date.now());
+        const left = Math.min(until, free ?? until) - Date.now();
+        await new Promise((ok) => { const t = setTimeout(ok, Math.max(left, 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
+        handed = wakes.deliver(Date.now());
       }
+      if (handed.length) saveWakes();
       const got = events.splice(0);
-      return closing({ ok: true, events: got, ...(got.some((e) => e.kind !== 'synced') ? {} : { timedOut: true }) });
+      const timedOut = handed.length === 0 && !got.some((e) => e.kind !== 'synced');
+      heardSince.length = 0; // shown here, so not again in the next brief
+      const said = got.some((e) => e.kind === 'heard') ? { note: QUOTED_NOTE } : {};
+      return closing({ ok: true, events: got, ...said, ...(handed.length ? { wakes: handed } : {}), ...(timedOut ? { timedOut: true } : {}) },
+        (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)) }));
     }
     case 'can': {
       const c = Array.isArray(req.acts) ? actsOf(req.acts)[0] ?? candidateOf(null) : candidateOf(req.intent);
@@ -461,6 +548,7 @@ async function answer(req) {
       return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
     }
     case 'act': {
+      if (req.for !== undefined && !mail.has(req.for)) return { ok: false, code: 'mail-not-found', detail: 'for names an open message this daemon was given' };
       const candidates = Array.isArray(req.acts) ? actsOf(req.acts) : (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf);
       if (candidates.length === 0 || candidates.length > ACT_MOST || candidates.some((c) => !c.verb || /\s/.test(c.verb))) {
         return { ok: false, code: 'act-ranked-list', detail: `one to ${ACT_MOST} verbs, best first` };
@@ -481,6 +569,7 @@ async function answer(req) {
       const target = Array.isArray(req.acts) ? keep.map((c) => c.this ?? '').join(' ') : req.target;
       const args = Object.entries(keep[0].args ?? {}).map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
       const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, basis, expiry: req.expiry });
+      if (req.for !== undefined) serving.set(sequence, req.for);
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
       return closing(out, null, age ? { age } : { now: true });
     }
@@ -524,12 +613,41 @@ async function answer(req) {
         : { ok: false, sequence, code: a.reason ?? 'edit.refused', ...(a.op !== undefined ? { op: a.op } : {}) };
       return closing(out);
     }
+    case 'history': return historyAnswer(req);
     case 'read': return { ok: true, events: events.splice(0) };
     case 'stats': return stats(trace.read(), { transcript: transcriptOf(home) });
     case 'reflex': return reflexes.op(req, Date.now());
+    case 'wake': { const out = wakes.op(req, Date.now()); if (req.do === 'budget') saveWakes(); return out; }
+    case 'event': {
+      const e = req.event;
+      if (!e || typeof e.name !== 'string') return { ok: false, code: 'event-not-an-event', detail: 'an event has a name' };
+      const fired = wakes.onEvent(e, Date.now());
+      if (fired) for (const w of wakers.splice(0)) w();
+      return { ok: true, fired };
+    }
     case 'stop': setImmediate(stop); return { ok: true };
     default: return { ok: false, code: 'unknown-op' };
   }
+}
+
+/**
+ * R16 (#2817): what happened at a place, to a thing or with a Soul. Named from the copy as it is and from memory; a
+ * name that is not an id is looked up there. History files come from the world's `history` base, as any viewer's.
+ */
+async function historyAnswer(req) {
+  if (!seat.history) return { ok: false, code: 'no-history', detail: `world ${seat.world} names no history in config.json` };
+  const by = req.at != null ? 'place' : req.thing != null ? 'thing' : req.soul != null ? 'soul' : null;
+  if (!by) return { ok: false, code: 'history-asks-one', detail: 'history --at <place> | --thing <id> | --soul <name>' };
+  const memory = readLog(soulDirOf(home, soul)), rows = rowsOf(copy), names = new Map();
+  for (const { value: v } of memory) if (v?.person?.id && v.person.name) names.set(v.person.id, String(v.person.name).slice(0, 40));
+  const asked = String(req.at ?? req.thing ?? req.soul), low = asked.toLowerCase();
+  const id = ID.test(asked) ? asked : low === 'me' ? ME
+    : [...rows.values()].find((r) => r.name.toLowerCase() === low)?.id ?? [...names].find(([, n]) => n.toLowerCase() === low)?.[0];
+  if (!id) return { ok: false, code: 'history-unknown', detail: `no ${by} named ${asked.slice(0, 60)} in the copy or memory` };
+  const num = (v) => (v == null ? undefined : Number(v));
+  const get = async (key) => { const r = await fetch(new URL(key, seat.history)); return r.ok ? new Uint8Array(await r.arrayBuffer()) : null; };
+  const a = await history({ by, id, since: num(req.since), until: num(req.until) }, { get, rows, names, memory, me: ME });
+  return { ...a, at: sequenceOf(copyVersion) };
 }
 
 const server = createServer((c) => {

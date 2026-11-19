@@ -1,8 +1,9 @@
 // The home on the owner's machine (Engine v2 R6, #2700), ported from tools/world-launcher/soul/home.mjs as far as
 // the resident daemon needs it. The layout is unchanged:
 //
-//   .souls/config.json        worlds by key: `{ worlds: { <key>: { url, gateway } } }`; `gateway` is a v2 world's
-//                             agents' socket (`ws://<host>/v2/ws`, I1)
+//   .souls/config.json        worlds by key: `{ worlds: { <key>: { url, gateway, history } } }`; `gateway` is a v2 world's
+//                             agents' socket (`ws://<host>/v2/ws`, I1), `history` where its public history is served
+//                             (V9's `h/<world>/<lineage>/`, for R16's `history`)
 //   .souls/credentials.json   mode 0600, the only file that holds a token: `{ souls: { <id>: { <key>: { token } } } }`
 //   .souls/souls/<id>/runtime/ the daemon's lock, its log, its state (cursor, sequences) and its socket
 //
@@ -101,10 +102,10 @@ export function readSeat(root, soul) {
   const worlds = readJson(file).souls?.[soul] ?? {};
   const key = Object.keys(worlds).find((k) => typeof worlds[k]?.token === 'string');
   if (!key) throw new Refused('no-token', `no token for ${soul}`);
-  const gateway = readJson(join(root, 'config.json')).worlds?.[key]?.gateway;
+  const { gateway, history } = readJson(join(root, 'config.json')).worlds?.[key] ?? {};
   if (typeof gateway !== 'string') throw new Refused('no-gateway', `world ${key} has no gateway`);
   const token = worlds[key].token;
   const m = /^(soul|creator)-([0-9a-f]{32})-(\d+)\.[0-9a-f]{64}$/.exec(token);
   if (!m) throw new Refused('token-not-a-soul-token', `the token for ${soul} is not a Soul's or a creator's v2 token`);
-  return { world: key, gateway, grant: { actor: m[1], scope: m[2], counter: BigInt(m[3]) }, token };
+  return { world: key, gateway, grant: { actor: m[1], scope: m[2], counter: BigInt(m[3]) }, token, ...(typeof history === 'string' ? { history } : {}) };
 }
