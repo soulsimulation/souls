@@ -2250,6 +2250,13 @@ pub fn start<S: Storage + 'static>(
             mark_clock_thread();
             let beat = thread_beat;
             let mut c = build();
+            // With joins (C3), a body the log placed is stood again only while its node is in the tree: a retired
+            // body's last row outlives it.
+            let mut placed = placed;
+            if c.life.is_some() {
+                let tree = c.replica.tree();
+                placed.retain(|id, _| tree.handle(*id).is_some());
+            }
             if let Some(make) = make {
                 match make(&placed) {
                     Ok(mut b) => {
