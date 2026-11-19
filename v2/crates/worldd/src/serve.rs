@@ -4,7 +4,9 @@
 //! **The world folder** (`seed` writes it; everything after is the world's own):
 //!
 //! - `world.json`: `{"format": "souls/world/1", "name", "souls": [[counter, x mm, z mm], ...], "souls_scope"}`. The
-//!   name is the world's instance name, `<lineage hex>-<zone scope hex>-<zone counter>` (`worldd@<name>`).
+//!   name is the world's instance name, `<lineage hex>-<zone scope hex>-<zone counter>` (`worldd@<name>`). With
+//!   `"creator": "<32 hex>-<n>"` (`seed --creator`, G7b #3477) the world takes that creator's edit intents (G1b),
+//!   checked against its own kinds; `world.kinds`, written at each start, is those kinds' text for the creator's client.
 //! - `facts.json`: the facts file N1's exporter wrote (`v2/tools/import-eden`, or X6's `v2/tools/import-world` for a
 //!   live world). The world as built is read from it at each start: its header and the walkers' town.
 //! - `entries/`: the Soul Actions entries (`souls-entry/1`), one file each, read into the checkers' rules by kind.
@@ -143,6 +145,8 @@ struct Built {
     root: Id,
     /// The world's rules (T2), for the engine's own acts (C2).
     rules: replica::tree::Rules,
+    /// The kind lines the rules were read from, one a line: the text a creator's client keeps (G7b, #3477).
+    kinds_text: String,
 }
 
 /// Loads a facts file (N1's or X6's) as the world as built.
@@ -150,13 +154,18 @@ fn build(facts: &str) -> R<Built> {
     let mut im = import_eden::load(facts)?;
     // R1's replica starts a zone's root as the header's `souls:place` kind (as stream-check's Eden): one here,
     // admitting what the loader's world admits, so the log replays onto an empty replica.
-    im.rules.kinds.extend(
-        parse_kinds(&format!(
-            "{{1: \"souls:place\", 2: \"place\", 11: [\"{}\"]}}",
-            import_eden::GROUND
-        ))
-        .map_err(|e| format!("the root's kind: {e:?}"))?,
+    let root_kind = format!(
+        "{{1: \"souls:place\", 2: \"place\", 11: [\"{}\"]}}",
+        import_eden::GROUND
     );
+    im.rules
+        .kinds
+        .extend(parse_kinds(&root_kind).map_err(|e| format!("the root's kind: {e:?}"))?);
+    let mut kinds_text = String::new();
+    for line in im.kind_lines.iter().chain([&root_kind]) {
+        kinds_text.push_str(line);
+        kinds_text.push('\n');
+    }
     let (root, ground) = match (im.nodes.get("world"), im.nodes.get("ground")) {
         (Some(r), Some(g)) => (*r, *g),
         _ => return Err("the facts have no world or no ground".into()),
@@ -184,7 +193,21 @@ fn build(facts: &str) -> R<Built> {
         ground,
         root,
         rules,
+        kinds_text,
     })
+}
+
+/// A world creator's principal as `world.json` and `seed --creator` write it, `<32 hex>-<counter>` (its grant is
+/// `creator-<32 hex>-<counter>`, G7b).
+fn creator_of(text: &str) -> R<Id> {
+    text.split_once('-')
+        .and_then(|(scope, n)| {
+            Id::new(
+                Scope(from_hex(scope).ok()?.try_into().ok()?),
+                n.parse().ok()?,
+            )
+        })
+        .ok_or_else(|| format!("a creator is <32 hex>-<counter>, not {text}"))
 }
 
 /// The world's instance name: `<lineage hex>-<zone scope hex>-<zone counter>`, the zone being the root.
@@ -263,7 +286,7 @@ pub fn seed(args: &[String]) -> i32 {
 fn seed_in(args: &[String]) -> R<String> {
     let (Some(facts), Some(dir)) = (arg(args, "--facts"), arg(args, "--dir")) else {
         return Err("usage: worldd seed --facts <facts.json> --dir <new folder> [--entries <dir>] [--souls <n>] \
-                    [--at <x m>,<z m>]"
+                    [--at <x m>,<z m>] [--creator <32 hex>-<n>]"
             .into());
     };
     let dir = PathBuf::from(dir);
@@ -325,8 +348,13 @@ fn seed_in(args: &[String]) -> R<String> {
     let n = log.append(built.part).map_err(refusal)?;
     log.wait_durable(n + 1).map_err(refusal)?;
     drop(log.close());
+    // The world's one creator (G7b), if named: `serve` takes its edits.
+    let creator = match arg(args, "--creator") {
+        Some(c) => format!(", \"creator\": \"{c}\"", c = creator_of(c).map(|_| c)?),
+        None => String::new(),
+    };
     let meta = format!(
-        "{{\"format\": \"souls/world/1\", \"name\": \"{name}\", \"souls_scope\": \"{}\", \"souls\": [{}]}}\n",
+        "{{\"format\": \"souls/world/1\", \"name\": \"{name}\", \"souls_scope\": \"{}\", \"souls\": [{}]{creator}}}\n",
         to_hex(&scope),
         rows.join(", ")
     );
@@ -682,6 +710,17 @@ fn serve(args: &[String]) -> R<()> {
     cfg.sky = Some(eden_sky(built.root.scope()));
     // The engine's own acts (C2): the world's rules; no activity kinds are loaded from a world folder yet.
     cfg.engine = Some((built.rules.clone(), Vec::new()));
+    // The world's creator (G7b, #3477), when `world.json` names one: its edit intents are checked against the world's
+    // own kinds and committed (G1b); without one every edit is refused `edit.not-the-creator`. The kinds text is
+    // written beside, for the creator's client to keep.
+    if let Some(c) = meta.get("creator").and_then(Json::str) {
+        cfg.edits = Some(replica::edit::World {
+            creator: creator_of(c)?,
+            kinds: built.rules.kinds.clone(),
+        });
+    }
+    let kinds_path = dir.join("world.kinds");
+    std::fs::write(&kinds_path, &built.kinds_text).map_err(io(&kinds_path))?;
     let (town, ground) = (built.town, built.ground);
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
         bodies(town, ground, &souls, placed)

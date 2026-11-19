@@ -95,6 +95,8 @@ pub struct Import {
     pub left_out: Vec<String>,
     /// Today's def ref to its form: point, path or area.
     pub forms: BTreeMap<String, String>,
+    /// Every kind line the rules were read from, in order: the world's kinds text a creator's client keeps (G7b).
+    pub kind_lines: Vec<String>,
     /// The header and the one part the tree was committed from, as bytes: a client's copy is built from them.
     pub log: (Vec<u8>, Vec<u8>),
     /// Every entry the import committed, in order: what a stream of the world starts from (V5, #2714).
@@ -287,7 +289,9 @@ pub fn load(text: &str) -> R<Import> {
         (WINDOW, format!("{{1: \"{WINDOW}\", 2: \"place\"}}")),
         (PLACE, format!("{{1: \"{PLACE}\", 2: \"place\"}}")),
     ];
+    let mut kind_lines = Vec::new();
     for (plain_name, line) in &structural {
+        kind_lines.push(line.clone());
         let (fname, k) = name_kind(line)?;
         rules.kinds.insert(fname.clone(), k);
         full.insert(plain_name, fname);
@@ -315,6 +319,7 @@ pub fn load(text: &str) -> R<Import> {
             s(k, "hash")?
         );
         let (fname, kind) = name_kind(&line)?;
+        kind_lines.push(line);
         rules.kinds.insert(fname.clone(), kind);
         kinds.insert(r.to_owned(), fname);
         forms.insert(r.to_owned(), s(k, "form")?.to_owned());
@@ -822,6 +827,7 @@ pub fn load(text: &str) -> R<Import> {
         notes: b.notes,
         left_out: b.left_out,
         forms,
+        kind_lines,
         log: (
             encode(&header.to_value()).map_err(|e| e.to_string())?,
             part_bytes,
