@@ -15,8 +15,10 @@
 //!    refused because the name exists is this claim's own earlier ship when the bytes are the same, else `part-exists`.
 //! 4. **Two marks.** On the provider's success the shipper moves `landed` (records off the machine) and the log's
 //!    off-machine gauge. The directory record's mark (`Directory::ship`, one more write) is moved only when a landed
-//!    record holds an act that cannot be undone; [`Mark::recorded`] is what such an act waits for (T11 rule 2). A
-//!    piece past the record's mark is still history for a restore of the claim in force; a takeover's `from` cuts it.
+//!    record holds an act that cannot be undone, and whenever the checkpoint pointer moves (O3b, #3458), to the last
+//!    record landed; [`Mark::recorded`] is what such an act waits for (T11 rule 2). A piece past the record's mark is
+//!    still history for a restore of the claim in force; a takeover's `from` cuts it. A takeover that landed nothing
+//!    at its own `from` cuts nothing ([`piece_at`]): a restore that died before its first upload loses no records.
 //! 5. **Checkpoints** (K5's files, one file each, so one object each) are shipped from the world's checkpoint folder:
 //!    the newest whose records are all landed, at most one each [`CHECKPOINT_GAP_US`], at
 //!    `ckpt/<lineage>/<zone>/<epoch>/<token>/<record>`, then a pointer `ckpt/<lineage>/<zone>/newest`, `{1: format,
@@ -568,9 +570,20 @@ impl<S: Store, C: Clock> Shipper<S, C> {
         self.checkpoint_shipped = Some(record);
         self.checkpoint_at = Some(now);
         self.starts = self.starts.split_off(&from);
-        let mut m = self.mark.lock();
-        m.uploads.checkpoints += 1;
-        m.uploads.pointers += 1;
+        {
+            let mut m = self.mark.lock();
+            m.uploads.checkpoints += 1;
+            m.uploads.pointers += 1;
+        }
+        // The directory's mark follows the pointer (O3b, #3458): to the last record landed, at or past the
+        // checkpoint, so a takeover's `from` is never before the pointer and a reader from record 0 still reads this
+        // claim's pieces up to it.
+        if self.first > 0 && self.mark.recorded() < self.first {
+            self.dir.ship(&mut self.claim, self.first - 1)?;
+            let mut m = self.mark.lock();
+            m.recorded = self.first;
+            m.uploads.marks += 1;
+        }
         Ok(())
     }
 }
@@ -647,20 +660,11 @@ pub fn fetch<S: Store>(store: &S, lineage: &[u8; 16], zone: Id) -> R<Fetched> {
         at = p.from;
     }
     let mut pieces = Vec::new();
-    while let Some(t) = record.in_force(at) {
-        let key = part_key(lineage, zone, t, at);
-        let Some(o) = store.get(&key)? else {
-            break;
-        };
-        let p = Piece::read(&o.bytes)?;
-        if p.first != at || p.records.is_empty() {
-            return refuse("piece-gap", format!("{key}: starts at {}", p.first));
-        }
+    while let Some((key, p, bytes)) = piece_at(store, &record, at)? {
         log.push(format!(
-            "piece {key}: records {} to {}, {} bytes",
+            "piece {key}: records {} to {}, {bytes} bytes",
             p.first,
             p.first + p.records.len() as u64 - 1,
-            o.bytes.len()
         ));
         at += p.records.len() as u64;
         pieces.push(p);
@@ -676,4 +680,58 @@ pub fn fetch<S: Store>(store: &S, lineage: &[u8; 16], zone: Id) -> R<Fetched> {
         pieces,
         log,
     })
+}
+
+/// The piece of history that starts at record `at` (its name, the piece, its size): the one of the claim in force
+/// there (rule 8), or, when that claim has no piece at `at` and none at its own first record either, the one of the
+/// claim before it (O3b, #3458). A takeover that died before its first upload landed nothing, so the records past
+/// the mark are still its predecessor's, and the next takeover reads them. A piece that does not start at `at`, or
+/// holds no records, is refused (`piece-gap`).
+pub fn piece_at<S: Store>(
+    store: &S,
+    rec: &WorldRecord,
+    at: u64,
+) -> R<Option<(String, Piece, usize)>> {
+    for t in rec.takeovers.iter().rev().filter(|t| t.from <= at) {
+        let key = part_key(&rec.lineage, rec.zone, t, at);
+        if let Some(o) = store.get(&key)? {
+            let p = Piece::read(&o.bytes)?;
+            if p.first != at || p.records.is_empty() {
+                return refuse("piece-gap", format!("{key}: starts at {}", p.first));
+            }
+            return Ok(Some((key, p, o.bytes.len())));
+        }
+        // No piece here: the claim's history ends here, unless it landed nothing at its own first record.
+        if t.from != at
+            && store
+                .get(&part_key(&rec.lineage, rec.zone, t, t.from))?
+                .is_some()
+        {
+            return Ok(None);
+        }
+    }
+    Ok(None)
+}
+
+/// A restart's claim (O3b, #3458, as the ops tool's restart, `ops world --restart`): a new epoch from the
+/// directory's mark plus one, which is where its shipping resumes, the records before it being off the machine under
+/// the mark. Refused `restart-gap` when the records this machine holds (`held`) do not reach it.
+pub fn take_over<S: Store>(
+    dir: &mut Directory<S>,
+    lineage: &[u8; 16],
+    zone: Id,
+    held: std::ops::Range<u64>,
+) -> R<Claim> {
+    let claim = dir.claim(lineage, zone)?;
+    let from = claim.takeover.from;
+    if from < held.start || from > held.end {
+        return refuse(
+            "restart-gap",
+            format!(
+                "the claim starts at {from}; this machine holds {} to {}",
+                held.start, held.end
+            ),
+        );
+    }
+    Ok(claim)
 }

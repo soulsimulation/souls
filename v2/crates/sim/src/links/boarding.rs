@@ -14,6 +14,9 @@
 //!   holds it at that time, is refused as `boarding-frame-away`: nobody is moved to a frame that is not there.
 //! - **A crossing is never cut in half.** The grant is given only while [`CROSSING`] of the dwell is left, the time a
 //!   granted body has to make it, so the frame never starts while a body is on the link.
+//! - **Sent to the frame's slot** (E7, #2756): a body an intent sends to the frame waits at the ground end until the
+//!   frame stops there or the intent expires, whichever is first ([`Boarding::queue`]). When the next stop is, is
+//!   the timetable every copy reads from the frame's formula (`replica::schedule::stops`); the agent picks the expiry.
 //! - **Leaving is always accepted** (E23's rule 8, "at a stop"): a rider that asks to leave waits at the deck end and
 //!   is granted the crossing at the next stop, which the loaded track promises within its stated time.
 
@@ -42,6 +45,25 @@ pub struct Boarding {
     pub slot: u64,
     pub ground: Id,
     pub width: i64,
+}
+
+/// A body sent to the frame's slot by an intent, waiting at the ground end until that intent's expiry; `distance` is
+/// how far from the end it stands (µm, N8's facts).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sent {
+    pub body: Id,
+    pub intent: Id,
+    pub expiry: Micros,
+    pub distance: i64,
+}
+
+/// How a wait at a boarding link ended, and when.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Waited {
+    /// Granted the crossing while the frame stood at the stop.
+    Granted(Sent, Micros),
+    /// The intent expired first: the body never boarded (`souls:order-expired`).
+    Expired(Sent, Micros),
 }
 
 impl Boarding {
@@ -75,6 +97,38 @@ impl Boarding {
         let mut f = facts.clone();
         f.room = [f.room[0] && open, f.room[1] && open];
         turns.write(self.frame, &self.link(), &f, at)
+    }
+
+    /// One tick of the bodies sent to the frame's slot, waiting at the ground end (E7, #2756): the walk waits at the
+    /// link as at a narrow door (N8), standing in a queue (T10). A body whose intent has expired by `at` leaves the
+    /// wait ([`Waited::Expired`], B7's `souls:order-expired`); the rest are added to `facts`' ground end and the link's
+    /// turns are written; a body granted the crossing leaves the wait ([`Waited::Granted`]) and boards on its next
+    /// tick ([`Boarding::board`]). A granted crossing is never cut in half. Nothing here holds a time or a condition:
+    /// the expiry is the intent's own, and the grant comes from the frame's stops.
+    pub fn queue(
+        &self,
+        turns: &mut Turns,
+        table: &Table,
+        sent: &mut Vec<Sent>,
+        facts: &Facts,
+        at: Micros,
+    ) -> R<Vec<Waited>> {
+        let mut out = Vec::new();
+        sent.retain(|s| {
+            let live = at < s.expiry;
+            if !live {
+                out.push(Waited::Expired(*s, at));
+            }
+            live
+        });
+        let mut f = facts.clone();
+        f.waiting[0].extend(sent.iter().map(|s| (s.distance, s.body)));
+        self.write(turns, table, &f, at)?;
+        let granted = turns.state(&self.link()).and_then(|s| s.granted);
+        if let Some(k) = sent.iter().position(|s| Some(s.body) == granted) {
+            out.push(Waited::Granted(sent.remove(k), at));
+        }
+        Ok(out)
     }
 
     /// `boarding-frame-away` unless the scene holds the frame standing where its track puts it at `at`, at this

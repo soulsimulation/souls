@@ -4,9 +4,11 @@
 //! `listening <addr:port>` once it accepts sockets. The tokens file holds `<grant> <sha-256 hex> [<account>]` lines,
 //! never a token. View subscriptions go to the world's view tier at `--views` (default: the world's socket path with
 //! `.views`). With `--receipts <dir>` (the world's `<worlds root>/worlds/<world>/receipts`), each answered intent
-//! is a line in `<dir>/<UTC day>.jsonl` (see `receipts.rs`). With `--mailbox <directory addr:port> --mailbox-key
-//! <file>`, the owner's messages reach their Souls' sockets (R13, `mailbox.rs`). With `--creator <32 hex>-<n> --directory
-//! <addr:port>`, a page signed in as that creator exchanges its session for a short token (W5, `creator.rs`).
+//! is a line in `<dir>/<UTC day>.jsonl` (see `receipts.rs`). With `--view-key <file>` (64 hex digits, the key the
+//! directory signs view tokens with, V13b) a page signs in with a view token for a view socket. With `--mailbox
+//! <directory addr:port> --mailbox-key <file>`, the owner's messages reach their Souls' sockets (R13, `mailbox.rs`).
+//! With `--creator <32 hex>-<n> --directory <addr:port>`, a page signed in as that creator exchanges its session for a
+//! short token (W5, `creator.rs`).
 //!
 //! On SIGTERM or SIGINT it stops accepting, closes every signed-in socket with 1012 and exits within [`DRAIN`]
 //! (O16, #2809; `v2/docs/runbook/gateway-upgrade.md`).
@@ -15,7 +17,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use gatewayd::receipts::Receipts;
-use gatewayd::token::Tokens;
+use gatewayd::token::{Tokens, ViewKey};
 use gatewayd::{Gateway, creator, mailbox, socket, stderr_log, world_link};
 use replica::encode::from_hex;
 use replica::ids::{Id, Scope};
@@ -54,7 +56,7 @@ async fn main() {
         arg("--build"),
     ) else {
         eprintln!(
-            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>] [--views <path>] [--mailbox <addr:port> --mailbox-key <file>] [--creator <32 hex>-<n> --directory <addr:port>]"
+            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>] [--views <path>] [--view-key <file>] [--mailbox <addr:port> --mailbox-key <file>] [--creator <32 hex>-<n> --directory <addr:port>]"
         );
         std::process::exit(2);
     };
@@ -67,6 +69,16 @@ async fn main() {
     };
     let receipts = arg("--receipts").map_or_else(Receipts::off, |d| Receipts::to_dir(d.into()));
     let gw = Gateway::with_receipts(tokens, build, stderr_log(), receipts);
+    if let Some(path) = arg("--view-key") {
+        let key = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| ViewKey::read(&t));
+        let Some(key) = key else {
+            eprintln!("gatewayd: --view-key is a file of 64 hex digits");
+            std::process::exit(2);
+        };
+        let _ = gw.view_key.set(key);
+    }
     if let (Some(addr), Some(key)) = (arg("--mailbox"), arg("--mailbox-key")) {
         let Ok(key) = std::fs::read_to_string(&key) else {
             eprintln!("gatewayd: the mailbox key could not be read");
