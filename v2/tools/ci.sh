@@ -38,6 +38,8 @@ step install-apart bash tools/ops/install.sh check
 step cost node --test tools/ops/cost/cost.test.mjs
 # The site owner's health page, usage table and history (O21, #3325); A2 runs the supervisor the tests above built.
 step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
+# The watcher (O15, #2808): one message per trouble and recovery, none for a deploy, a stop or a sleep; no look wakes a world.
+step ops-watch node --test tools/ops/watch/watch.test.mjs
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
 step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
 # The driver's loads (I10, #2693): the shared shapes imported, the stretch merged, every kind given a verb.
