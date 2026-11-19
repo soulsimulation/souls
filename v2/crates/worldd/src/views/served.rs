@@ -432,14 +432,16 @@ mod tests {
             .set_read_timeout(Some(Duration::from_millis(100)))
             .unwrap();
         let said = "the bread is still warm";
-        let whispered = "meet me by the lamp";
+        let whispered = "meet me by the door";
         for (seq, intent) in [
             (1, words(a, "local:say", None, said, 1)),
             (2, words(a, "local:whisper", Some(c), whispered, 2)),
         ] {
             let (reply, answer) = channel();
             assert!(world.door().arrive(intent, reply), "intent {seq} taken");
-            answer.recv_timeout(Duration::from_secs(5)).expect("an answer");
+            answer
+                .recv_timeout(Duration::from_secs(5))
+                .expect("an answer");
         }
         // Every utterance each subscription was sent: (its number, the speaker, the words).
         let mut heard: Vec<(u64, Id, Option<String>)> = Vec::new();
@@ -447,7 +449,8 @@ mod tests {
         let mut rounds_after = 0;
         for _ in 0..30 {
             while let Some(m) = read(&mut gateway) {
-                let (Some(Value::Uint(n)), Some(Value::Bytes(item))) = (m.get(&1), m.get(&2)) else {
+                let (Some(Value::Uint(n)), Some(Value::Bytes(item))) = (m.get(&1), m.get(&2))
+                else {
                     continue;
                 };
                 if let Some(h) = replica::speech::heard(item).unwrap() {
@@ -471,7 +474,11 @@ mod tests {
         };
         assert!(heard.iter().all(|h| h.1 == a), "all said by A: {heard:?}");
         assert_eq!(to(1), vec![Some(said)], "A hears its say, not its whisper");
-        assert_eq!(to(2), vec![Some(said)], "B hears the say, never the whisper");
+        assert_eq!(
+            to(2),
+            vec![Some(said)],
+            "B hears the say, never the whisper"
+        );
         assert_eq!(to(3), vec![Some(said), Some(whispered)], "C hears both");
         world.stop();
     }

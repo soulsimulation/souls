@@ -56,6 +56,8 @@ type R<T> = Result<T, Refusal>;
 
 /// A tick's entries of each body, each encoded once, whether `sampled` keeps it in any second, and its audience.
 type ByBody = BTreeMap<Id, Vec<(Arc<[u8]>, bool, Audience)>>;
+/// An utterance of a tick: its entry encoded once, its hearers, its audience and its words' reference.
+type Utterance = (Arc<[u8]>, BTreeSet<Id>, Audience, Id);
 
 /// The budget a client starts with, bytes a world second.
 pub const START_BUDGET: u64 = 8_000;
@@ -533,7 +535,7 @@ impl Hub {
         // The entries of bodies, each encoded once: (bytes, whether `sampled` keeps it whatever the second).
         let mut by_body: ByBody = BTreeMap::new();
         // The utterances: each entry's bytes, its hearers, its audience and its words' reference.
-        let mut said: Vec<(Arc<[u8]>, BTreeSet<Id>, Audience, Id)> = Vec::new();
+        let mut said: Vec<Utterance> = Vec::new();
         for e in &part.effects {
             self.places.apply(e);
             if let Some((body, keep)) = self.body_of(e) {
@@ -577,7 +579,10 @@ impl Hub {
                 if hears {
                     // Its words as this subscriber may read them (T8 rule 6): none when it may not, or none are kept.
                     let reader: Vec<Id> = s.audiences.iter().copied().collect();
-                    let text = self.words.as_ref().and_then(|t| t.read(*words, &reader).ok());
+                    let text = self
+                        .words
+                        .as_ref()
+                        .and_then(|t| t.read(*words, &reader).ok());
                     s.address_said(bytes, text)?;
                 }
             }
