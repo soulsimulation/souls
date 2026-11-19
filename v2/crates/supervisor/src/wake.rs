@@ -5,8 +5,8 @@
 //! - **At start** it reads the record and arms every alarm, overdue first: a world whose alarm came due while the
 //!   daemon or the machine was down is woken at once. A killed daemon or a reboot loses no alarm.
 //! - **Early by the wake and the queue:** a world is woken at its due time less the longest wake measured lately
-//!   (start to `awake`, at least [`WAKE_FLOOR_US`]) less [`START_US`] for each world due in the second before it, so
-//!   100 worlds due in one second are started in order and each is up before its due change. A woken world waits for
+//!   (start to `awake`, at least [`WAKE_FLOOR_US`]) less [`START_US`] for each other world due within a second either
+//!   side of it, so 100 worlds due in one second are started in order and each is up before its due change. A woken world waits for
 //!   its due time; it never commits early.
 //! - **By an intent:** `wake <world>` (the gateway holds an intent for it) starts the world now. Nothing else wakes
 //!   one: a viewer never reaches this socket.
@@ -30,28 +30,33 @@ use crate::alarm::Record;
 
 /// The shortest lead a world is woken with, µs: before any wake is measured, and the floor after.
 pub const WAKE_FLOOR_US: i64 = 500_000;
-/// The extra lead for each world due in the second before this one, µs.
+/// The extra lead for each other world due within a second either side of this one, µs.
 pub const START_US: i64 = 10_000;
 /// The longest the daemon blocks before it reads the wall clock again, µs.
 pub const RECHECK_US: i64 = 1_000_000;
 /// Wakes measured that the lead is the longest of.
 const MEASURED: usize = 16;
 
-/// Starts a world.
+/// Starts worlds: every world due at once in one call, so a crowd costs one start request, not one per world.
 pub trait Waker {
-    fn wake(&mut self, world: &str);
+    fn wake(&mut self, worlds: &[String]);
 }
 
-/// `systemctl start --no-block worldd@<world>.service`: a world already running is left as it is.
+/// `systemctl start --no-block worldd@<world>.service ...`, all in one call: a world already running is left as it
+/// is. One call per world measured about 20 ms each, so 100 due in one second were started over 2 s (O2's runs).
 pub struct Systemd;
 
 impl Waker for Systemd {
-    fn wake(&mut self, world: &str) {
+    fn wake(&mut self, worlds: &[String]) {
+        if worlds.is_empty() {
+            return;
+        }
         let r = Command::new("systemctl")
-            .args(["start", "--no-block", &format!("worldd@{world}.service")])
+            .args(["start", "--no-block"])
+            .args(worlds.iter().map(|w| format!("worldd@{w}.service")))
             .status();
         if !r.is_ok_and(|s| s.success()) {
-            eprintln!("alarms: wake {world}: systemctl failed");
+            eprintln!("alarms: wake {worlds:?}: systemctl failed");
         }
     }
 }
@@ -60,13 +65,15 @@ impl Waker for Systemd {
 pub struct Program(pub String);
 
 impl Waker for Program {
-    fn wake(&mut self, world: &str) {
-        let r = Command::new(&self.0)
-            .arg(world)
-            .stdin(Stdio::null())
-            .spawn();
-        if let Err(e) = r {
-            eprintln!("alarms: wake {world}: {e}");
+    fn wake(&mut self, worlds: &[String]) {
+        for world in worlds {
+            let r = Command::new(&self.0)
+                .arg(world)
+                .stdin(Stdio::null())
+                .spawn();
+            if let Err(e) = r {
+                eprintln!("alarms: wake {world}: {e}");
+            }
         }
     }
 }
@@ -150,7 +157,8 @@ impl<S: Store> Daemon<S> {
     }
 
     /// Each armed alarm's wake time, in the order of the due times (overdue first): its due time less the lead and
-    /// the queue, and no later than the wake time of any world due after it.
+    /// the queue (every other world due within a second either side, started with it), and no later than the wake
+    /// time of any world due after it.
     pub fn plan(&self) -> Vec<(i64, String)> {
         let mut due: Vec<(i64, &String)> = self
             .record
@@ -163,9 +171,10 @@ impl<S: Store> Daemon<S> {
         let lead = self.lead();
         let mut out: Vec<(i64, String)> = due
             .iter()
-            .enumerate()
-            .map(|(k, (d, w))| {
-                let queue = due[..k].iter().filter(|(e, _)| *e > d - 1_000_000).count() as i64;
+            .map(|(d, w)| {
+                let lo = due.partition_point(|(e, _)| *e < d - 1_000_000);
+                let hi = due.partition_point(|(e, _)| *e <= d + 1_000_000);
+                let queue = (hi - lo - 1) as i64;
                 (d - lead - queue * START_US, (*w).clone())
             })
             .collect();
@@ -178,15 +187,20 @@ impl<S: Store> Daemon<S> {
 
     /// Wakes every world whose wake time has come; returns when the next one is.
     pub fn fire(&mut self, now: i64, waker: &mut dyn Waker) -> Option<i64> {
-        let plan = self.plan();
-        for (at, world) in &plan {
-            if *at > now {
-                return Some(*at);
+        let mut due = Vec::new();
+        let mut next = None;
+        for (at, world) in self.plan() {
+            if at > now {
+                next = Some(at);
+                break;
             }
-            waker.wake(world);
-            self.fired.insert(world.clone(), now);
+            due.push(world);
         }
-        None
+        waker.wake(&due);
+        for world in due {
+            self.fired.insert(world, now);
+        }
+        next
     }
 
     /// Handles one message from the socket.
@@ -200,7 +214,7 @@ impl<S: Store> Daemon<S> {
                 let _ = answer.send(r.map_or_else(|e| format!("no {e}"), |()| "ok".into()));
             }
             Msg::Wake(world, answer) => {
-                waker.wake(&world);
+                waker.wake(std::slice::from_ref(&world));
                 self.fired.entry(world).or_insert(now);
                 let _ = answer.send("ok".into());
             }
@@ -239,8 +253,8 @@ mod tests {
     struct Woken(Vec<String>);
 
     impl Waker for Woken {
-        fn wake(&mut self, world: &str) {
-            self.0.push(world.to_owned());
+        fn wake(&mut self, worlds: &[String]) {
+            self.0.extend_from_slice(worlds);
         }
     }
 
@@ -277,10 +291,10 @@ mod tests {
                 .expect("set");
         }
         let plan = d.plan();
-        // The last of the crowd is woken its lead and 99 starts early, and none before it later than that.
-        let last = 10_495_000 - WAKE_FLOOR_US - 99 * START_US;
-        assert_eq!(plan[99], (last, "w099".to_owned()));
-        assert_eq!(plan[0], (last, "w000".to_owned()));
+        // Each of the crowd is woken its lead and 99 starts early: the first of it too.
+        let early = WAKE_FLOOR_US + 99 * START_US;
+        assert_eq!(plan[0], (10_000_000 - early, "w000".to_owned()));
+        assert_eq!(plan[99], (10_495_000 - early, "w099".to_owned()));
         assert!(plan.windows(2).all(|p| p[0].0 <= p[1].0 && p[0].1 < p[1].1));
     }
 

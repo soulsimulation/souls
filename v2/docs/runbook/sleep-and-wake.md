@@ -28,9 +28,10 @@ sleeping world, `<world> <due µs from the Unix epoch>` or `<world> none`.
 - **At start** it reads the record and arms every alarm, overdue first. A daemon killed, or a machine rebooted, loses
   no alarm: an alarm that came due while it was down is fired at once.
 - **Early:** a world is started at its due time less the longest wake measured lately (start to the world's
-  `awake`, at least 0.5 s) less 10 ms for each world due in the second before it, and never after a world due later
-  than it. 100 worlds due in one second are started in order, each up before its due change. A world woken early
-  waits; it never commits early.
+  `awake`, at least 0.5 s) less 10 ms for each other world due within a second either side of it, and never after a
+  world due later than it. Every world whose time has come is started in one `systemctl start` call (one call per
+  world took about 20 ms each, 2 s for 100). 100 worlds due in one second are started in order, each up before its
+  due change. A world woken early waits; it never commits early.
 - **By an intent:** the gateway, started with `--wake $WORLDS_ROOT/alarms.sock --world-name <world>`, holds an
   intent for a world that is away and asks the daemon, once, to wake it (`wake <world>`); the intent goes when the
   world is reachable. A sync request (a reader) asks no wake and is answered `world.restarting`. A viewer never

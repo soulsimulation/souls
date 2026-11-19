@@ -84,7 +84,7 @@ case "${1:-}" in
       arm $(( $(now_us) + 90000000 )) 10000
       if [ "$1" = kill ]; then
         sleep 20
-        systemctl kill -s KILL souls-alarms.service
+        systemctl kill --kill-whom=main -s KILL souls-alarms.service
         sleep 1
         echo "daemon killed; restarted: $(systemctl is-active souls-alarms.service)"
       fi
