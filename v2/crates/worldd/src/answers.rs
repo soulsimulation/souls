@@ -66,7 +66,8 @@
 //!
 //! A checkpoint is taken by K5's rule (amount of log), between ticks: at the start of a tick, once every record
 //! handed to the log is on the disk, so it never holds a change the log lacks. **Lockstep** ([`Config::lockstep`]) runs the
-//! same loop on a clock the caller moves ([`Event::RunTo`]) and waits for every check before a tick, so a run fed
+//! same loop on a clock the caller moves ([`Event::RunTo`]) and waits for every check, and for the checkers' copy
+//! to stand at the live version, before a tick, so a run fed
 //! the same inputs at the same ticks writes the same log: how K12's replay is checked on the real loop.
 //!
 //! **Measures** (O4, #2694, `crate::measures`): each act carries its stamps from the socket to its answer, each
@@ -218,6 +219,10 @@ impl Door {
             .is_ok()
     }
 }
+
+/// How long a lockstep tick waits for the checkers' copy to stand at the live version: only a bound on a publisher
+/// that refused a part; a loaded machine catches up well within it.
+const PUBLISHED_WAIT: Duration = Duration::from_secs(60);
 
 /// Where a lockstep run stands after [`Event::RunTo`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2196,6 +2201,11 @@ pub fn start<S: Storage + 'static>(
                                 }
                             }
                         }
+                        // And the checkers' copy caught up with the live tree: it is published on its own thread, and
+                        // an act checked on a copy behind it is rechecked a tick later, so the commit tick (and the
+                        // log) would depend on that thread's speed.
+                        let live = c.replica.version();
+                        c.publisher.wait_for(live, PUBLISHED_WAIT);
                         let Ok(due) = ticker.due() else { break };
                         *shared.lock().unwrap_or_else(|p| p.into_inner()) = due;
                         if let Err(e) = ticker.run_due(&mut *pace, &beat, &mut |n, s| c.tick(n, s))
