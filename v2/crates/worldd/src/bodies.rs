@@ -415,7 +415,10 @@ impl Bodies {
                 self.slots.place(t).is_some() || self.town.tree.handle(t).is_some()
             }),
             seated: Some(self.slots.held_by(body).is_some()),
-            free: t.map(|t| self.slots.holder(t).is_none()),
+            free: t.and_then(|t| {
+                self.slots.place(t)?;
+                Some(self.slots.free(&self.runner.controller, body, t).is_some())
+            }),
         }
     }
 
@@ -432,7 +435,11 @@ impl Bodies {
                     .iter()
                     .filter_map(|k| k.target().map(Slot::Named))
                     .collect();
-                let free = |t: Id| self.slots.place(t).is_some() && self.slots.holder(t).is_none();
+                let free = |t: Id| {
+                    self.slots
+                        .free(&self.runner.controller, a.body, t)
+                        .is_some()
+                };
                 match bind(&slots, free, 0, true) {
                     Bound::Slot { rank, .. } => Ok((rank, list[rank].clone())),
                     Bound::Ended(n) => Err(Refusal {
