@@ -77,6 +77,8 @@ pub fn form(intent: &Intent) -> Form {
         ("say", _) => Form::Say,
         ("whisper", Some(Target::Node(to))) => Form::Whisper(*to),
         ("describe", _) => Form::Describe,
+        // A Soul's join (C3, #3367) names its body as a describe does: at its birth, or again once it is here.
+        _ if intent.verb.as_str() == crate::answers::JOIN => Form::Describe,
         _ => Form::Other,
     }
 }
@@ -137,6 +139,21 @@ fn parameter(value: &Value, n: u64) -> Option<Id> {
         return None;
     };
     replica::effects::read_id(r.get(&REFERENCE)?).ok()
+}
+
+/// A body's name and description fields ([`NAME`], [`DESCRIPTION`]) as references, from a logged describe's or
+/// join's parameters 1 and 2 (C3, #3367: what a birth's node is created with).
+pub fn naming(value: &Value) -> BTreeMap<u64, Value> {
+    [(NAME, 1), (DESCRIPTION, 2)]
+        .into_iter()
+        .filter_map(|(field, n)| {
+            let r = parameter(value, n)?;
+            Some((
+                field,
+                Value::Map(BTreeMap::from([(REFERENCE, r.to_value())])),
+            ))
+        })
+        .collect()
 }
 
 /// The entry an intent of `form` writes, its words already kept (`value` is the intent as logged, `kept` its

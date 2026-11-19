@@ -42,6 +42,8 @@ impl FromAt {
 }
 
 impl sim::clock::Clock for FromAt {
+    // The test paces real time from AT, as worldd's own `Real` paces it from the Unix epoch.
+    #[allow(clippy::disallowed_methods)]
     fn now(&mut self) -> i64 {
         AT + self.0.elapsed().as_micros() as i64
     }

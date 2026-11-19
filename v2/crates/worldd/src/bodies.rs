@@ -37,6 +37,7 @@ use replica::pose::{Pose, Support, Vec3};
 use replica::time::Micros;
 use sim::controller::Stance;
 use sim::host::Runner;
+use sim::life::{Born, Life, Retired, Standing};
 use sim::mover::Body as Moved;
 use sim::moves::{Fired, Instance, Moves, Reach};
 use sim::slots::{PlaceAt, Request, Slots};
@@ -537,6 +538,34 @@ impl Bodies {
         };
         self.runner.end_order(body);
         self.live.remove(&body);
+    }
+
+    /// Births into this world's controller (K10, C3 #3367): the births `life` takes at world time `now`, each body
+    /// posed at a standing place of `standing` the town's ground holds.
+    pub fn births(
+        &mut self,
+        life: &mut Life,
+        now: Micros,
+        standing: &impl Standing,
+        family: &Family,
+    ) -> Vec<Born> {
+        life.tick(now, &mut self.runner, &self.town.surfaces, standing, family)
+    }
+
+    /// Retires `soul`'s body by K10's one path at world time `at` ([`Life::retire`]): its seat freed, its timers and
+    /// its run ended, the body out of the controller; and the intent it was moving for, if any, which then ends.
+    pub fn retire(&mut self, life: &mut Life, soul: Id, at: Micros) -> R<(Retired, Option<Id>)> {
+        let r = life.retire(
+            soul,
+            at,
+            &mut self.runner,
+            &mut self.slots,
+            &mut self.moves,
+            &mut self.due,
+        )?;
+        let open = self.live.remove(&r.body).map(|(intent, _)| intent);
+        self.logged.remove(&r.body);
+        Ok((r, open))
     }
 }
 
