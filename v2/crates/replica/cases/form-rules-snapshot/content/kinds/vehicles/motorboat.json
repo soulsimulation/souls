@@ -1,0 +1,94 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:motorboat",
+  "owner": "thing",
+  "state": {"running":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "points": {
+    "jetty": {"role":"stand","at_mm":[-1900,0,100],"yaw_mdeg":90000},
+    "key": {"role":"contact","at_mm":[350,800,650]}
+  },
+  "slots": {
+    "helm": {"admits":"body","posture":"sit","most":1,"at_mm":[350,680,100],"stand":"jetty"},
+    "front": {"admits":"body","posture":"sit","most":1,"at_mm":[-350,680,100],"stand":"jetty"},
+    "back_left": {"admits":"body","posture":"sit","most":1,"at_mm":[400,680,-1200],"stand":"jetty"},
+    "back_right": {"admits":"body","posture":"sit","most":1,"at_mm":[-400,680,-1200],"stand":"jetty"}
+  },
+  "geometry": {"bounds_mm":[1940,1220,5190]},
+  "forms": {
+    "start_motor": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"running","is":false},{"need":"within_reach","point":"key"}],
+      "steps": [{"step":"move","move":"press","at":"key"}],
+      "effects": [{"change":"set","field":"running","to":true,"event":"motor_started"}]
+    },
+    "stop_motor": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"running","is":true},{"need":"within_reach","point":"key"}],
+      "steps": [{"step":"move","move":"press","at":"key"}],
+      "effects": [{"change":"set","field":"running","to":false,"event":"motor_stopped"}]
+    },
+    "ride": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"slot_free","slot":"helm"}],
+      "steps": [{"step":"walk_to","point":"helm"},{"step":"sit","slot":"helm"}],
+      "effects": [{"change":"reparent","what":"actor","into":"helm","event":"took_the_helm"}]
+    },
+    "board": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {"type":"slot","select":{"of":"free_slots","in":"this","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [{"need":"slot_free","slot":{"arg":"seat"}}],
+      "steps": [{"step":"walk_to","point":{"arg":"seat"}},{"step":"sit","slot":{"arg":"seat"}}],
+      "effects": [{"change":"reparent","what":"actor","into":{"arg":"seat"},"event":"boarded"}]
+    },
+    "steer": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "toward": {"type":"thing","select":{"of":"things","in":"here","anchor":"me","order":"nearest","rank":1}}
+      },
+      "needs": [{"need":"state","field":"running","is":true}],
+      "steps": [{"step":"move","move":"steer","toward":{"arg":"toward"}}],
+      "effects": []
+    }
+  },
+  "vehicle": {"drive":"helm","steer":"steer","speed_mm_s":6000,"ground":"deep_water"},
+  "motion": {"how":"fixed"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:motorboat",
+    "table": [{"sound":"engine","field":"running","at":{"false":0,"true":450},"reach_mm":30000}],
+    "shape": {
+      "shapes": [
+        {"kind":"extrude","at":[0,-250,0],"polygon":[[-950,-2500],[950,-2500],[950,1200],[342,2305],[0,2500],[-342,2305],[-950,1200]],"h":600,"tint":"hull"},
+        {"kind":"extrude","at":[0,200,0],"polygon":[[-970,-2520],[970,-2520],[970,1220],[349,2325],[0,2520],[-349,2325],[-970,1220]],"h":80,"tint":"stripe"},
+        {"kind":"extrude","at":[0,350,0],"polygon":[[-800,-2350],[800,-2350],[800,1150],[288,2170],[0,2350],[-288,2170],[-800,1150]],"h":20,"tint":"deck"},
+        {"kind":"box","at":[-920,470,-400],"size":[80,250,4000],"round":0,"tint":"hull"},
+        {"kind":"box","at":[920,470,-400],"size":[80,250,4000],"round":0,"tint":"hull"},
+        {"kind":"box","at":[0,470,-2470],"size":[1900,250,80],"round":0,"tint":"hull"},
+        {"kind":"box","at":[0,750,800],"size":[1500,400,40],"round":0,"tint":"glass","pitch":-22918},
+        {"kind":"extrude","at":[0,355,100],"polygon":[[-720,-195],[720,-195],[720,195],[-720,195]],"h":290,"tint":"seat"},
+        {"kind":"extrude","at":[0,355,-1200],"polygon":[[-770,-195],[770,-195],[770,195],[-770,195]],"h":290,"tint":"seat"},
+        {"kind":"extrude","at":[0,530,-2550],"polygon":[[-145,-120],[145,-120],[145,120],[-145,120]],"h":440,"tint":"motor"},
+        {"kind":"box","at":[0,150,-2600],"size":[100,600,100],"round":0,"tint":"motor"}
+      ],
+      "palette": {"hull":"#f4f2ec","stripe":"#2f4a6b","deck":"#c79a63","glass":"#3b4b55","seat":"#e8e4dc","motor":"#3a3c3e"},
+      "tags": ["vehicle","water","boat"]
+    }
+  },
+  "text": {
+    "card": "A motorboat: start its engine at the helm and steer it across deep water.",
+    "getting_around": "transport",
+    "boat": "boat",
+    "speedboat": "speedboat",
+    "launch": "launch",
+    "howto_drive": "Take the helm, start the engine, then steer."
+  },
+  "card": {"text":"card","category":"getting_around","synonyms":["boat","speedboat","launch"]},
+  "howtos": {"drive":{"text":"howto_drive","steps":[{"form":"ride"},{"form":"start_motor"},{"form":"steer"}]}}
+}

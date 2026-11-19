@@ -43,10 +43,14 @@
 //!   first building's frame.
 //! - **Ends on the terrain.** An end on the open ground stands at the ground's height there (#3227,
 //!   `ground::scene::Terrain::ground`), as a body on it does (N11a), though N3's pieces of it are a plan at 0.
+//! - **Shores** (N11c, #3218). Where dry ground meets wading ground, a [`Kind::Wade`] (`souls:wade`); where wading
+//!   ground or dry ground meets swimming water, a [`Kind::Swim`] (`souls:swim`). No link of the tree (its id is
+//!   derived, [`shore_id`]): the routes find them along the edges the open ground's pieces share (`crate::routes`).
 //!
-//! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), rides (N12), a
+//! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), boarding a moving frame (N12, [`boarding`]), a
 //! locked door (the door's `locked` field is not read yet), the durable log (K4).
 
+pub mod boarding;
 pub mod turns;
 
 use crate::ground::scene::{DOORWAY, F_OPEN_DOOR_LINK, FLOOR, Terrain, Xform};
@@ -84,6 +88,18 @@ pub fn opened_event(kind: &str) -> &'static str {
     }
 }
 
+/// The id of the open ground `ground`'s shore link number `n` (N11c, #3218): derived, as a step's is
+/// (`ground::scene::step_id`), since a shore is no link of the tree.
+pub fn shore_id(ground: Id, n: u64) -> Id {
+    let mut input = b"souls:shore\0".to_vec();
+    input.extend_from_slice(&ground.scope().0);
+    input.extend_from_slice(&ground.counter().to_be_bytes());
+    let h = replica::ids::sha256(&input);
+    let mut scope = [0u8; 16];
+    scope.copy_from_slice(&h[..16]);
+    Id::new(replica::ids::Scope(scope), n).expect("a shore's number is below 2^53")
+}
+
 /// A link's kind: its T2 type, and the move that crosses it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -94,6 +110,13 @@ pub enum Kind {
     /// A low floor's open edge stepped down to the open ground, or a step between two of a floor's surfaces (N3's
     /// steps): no link of the tree, walked.
     Step,
+    /// A shore between dry ground and wading ground (N11c, #3218): no link of the tree ([`shore_id`]), waded.
+    Wade,
+    /// A shore between wading ground, or dry ground, and swimming water (N11c, #3218): no link of the tree, swum.
+    Swim,
+    /// Between the ground at a stop and a moving frame's deck, crossable only while the frame stands at that stop
+    /// ([`boarding`], N12): walked.
+    Boarding,
 }
 
 impl Kind {
@@ -110,16 +133,18 @@ impl Kind {
     /// The move that crosses it (contract T4).
     pub fn move_name(self) -> &'static str {
         match self {
-            Kind::Doorway | Kind::Ramp | Kind::Step => "souls:walk",
+            Kind::Doorway | Kind::Ramp | Kind::Step | Kind::Boarding => "souls:walk",
             Kind::Stairs => "souls:stairs",
             Kind::Ladder => "souls:climb",
+            Kind::Wade => "souls:wade",
+            Kind::Swim => "souls:swim",
         }
     }
 
     /// What its move needs of a body. Opening a shut door needs hands besides.
     pub fn needs(self) -> Abilities {
         Abilities {
-            legs: true,
+            legs: self != Kind::Swim,
             hands: self == Kind::Ladder,
         }
     }

@@ -14,12 +14,15 @@
 //! - **Ids:** a placed node has a temporary name in the batch; the engine mints its id at commit, and the receipt maps
 //!   each name to its id.
 //!
-//! A refusal names the failing operation by its place in the batch. Not here: overlap and support, the ground, the
-//! safety rule.
+//! A refusal names the failing operation by its place in the batch. Not here: overlap and support, the ground.
+//! The safety rule (G2, #2761) is judged in `sim::edit::safety`; its failures' names and texts are here ([`Unsafe`]),
+//! so a client reads the same names the world refuses by.
 //!
 //! - **Undo and redo** (G4, #2795) are batches like any other, committed by `sim::edit::undo`. Each names the batch it
 //!   reverses by its cause, `Cause::Effect(first)`, where `first` is the sequence of that batch's first effect, with a
 //!   creator acting ([`reverses`]).
+
+pub mod wire;
 
 use crate::apply::Replica;
 use crate::effects::{Actor, Cause, Effect};
@@ -27,7 +30,7 @@ use crate::encode::{Name, Value};
 use crate::ids::Id;
 use crate::pose::{Frame, Pose, Quat, Support, Vec3};
 use crate::read::Read;
-use crate::world_model::{Audience, Kind, plain, takes};
+use crate::world_model::{Audience, Kind, plain, show, takes};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The most operations a batch may carry.
@@ -342,5 +345,85 @@ pub fn reverses(e: &Effect) -> Option<u64> {
     match (e.envelope.actor, e.envelope.cause) {
         (Actor::Creator(_), Cause::Effect(first)) => Some(first),
         _ => None,
+    }
+}
+
+/// The safety rule's failures (G2, #2761): an edit, a thing set down, a lock or an undo that would bury a Soul's body,
+/// change what it is using, or leave it no way out is refused before it commits, by one of these names.
+pub const BURIES: &str = "edit.would-bury";
+pub const IN_USE: &str = "edit.in-use";
+pub const CUTS_OFF: &str = "edit.would-cut-off";
+
+/// How a body uses a thing an edit touches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Use {
+    /// Its pose is in one of the thing's slots (what it sits or lies in).
+    In,
+    /// Its support is the thing's surface (a counter, a table, a stair: a perch).
+    On,
+    /// The thing is a child of one of its body's slots (in its hand).
+    Holds,
+}
+
+/// One body the safety rule finds unsafe: which failure, the Soul, where its body is (the node its pose is in, and the
+/// point there, µm), and the thing it uses with how, when that is what the edit touches.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unsafe {
+    pub name: &'static str,
+    pub soul: Id,
+    pub node: Id,
+    pub at: Vec3,
+    pub thing: Option<(Id, Use)>,
+}
+
+/// Micrometres as metres to the centimetre.
+fn metres(v: i64) -> String {
+    let sign = if v < 0 { "-" } else { "" };
+    let a = v.unsigned_abs();
+    format!("{sign}{}.{:02}", a / 1_000_000, a % 1_000_000 / 10_000)
+}
+
+impl Unsafe {
+    /// The refusal's text: the Soul, the place and a fix.
+    pub fn text(&self) -> String {
+        let soul = show(self.soul);
+        let place = format!(
+            "node {} at ({}, {}) m",
+            show(self.node),
+            metres(self.at.x),
+            metres(self.at.z)
+        );
+        match (self.name, self.thing) {
+            (IN_USE, Some((t, how))) => {
+                let t = show(t);
+                let (how, place) = match how {
+                    // Its pose is in the thing's frame: the thing is the place.
+                    Use::In => ("is in", String::new()),
+                    Use::On => ("rests on", format!(", on {place}")),
+                    Use::Holds => ("holds", format!(", on {place}")),
+                };
+                format!(
+                    "Soul {soul} {how} {t}{place}; fix: leave {t} as it is until the Soul is done with it, or edit \
+                     something else"
+                )
+            }
+            (BURIES, _) => format!(
+                "would bury Soul {soul} where it stands, on {place}; fix: keep what the edit places or moves clear \
+                 of that spot by the body's radius, or make the edit once the Soul has moved"
+            ),
+            _ => format!(
+                "would leave Soul {soul} no way out, on {place}; fix: keep a way from there to the open ground \
+                 passable (a doorway, stair or gap a body can pass), or make the edit once the Soul has left"
+            ),
+        }
+    }
+
+    /// As a refusal of the whole batch.
+    pub fn refused(&self) -> Refused {
+        Refused {
+            op: None,
+            name: self.name,
+            detail: self.text(),
+        }
     }
 }

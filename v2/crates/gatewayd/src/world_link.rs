@@ -46,8 +46,10 @@ use crate::times;
 /// The answer to an intent sent while the world restarts.
 pub const RESTARTING: &str = "world.restarting";
 
-/// The longest frame read from the world.
-const FRAME_MOST: usize = 1 << 20;
+/// The longest frame read from the world. A sync answer carries whole records, and one record can be large: Eden's open
+/// ground holds every terrain tile's heights and classes, 5.4 MB, and a room's record lists each child's hash (36 bytes
+/// each). At 1 MiB neither could be sent, and the link was dropped at every try (#3424).
+pub const FRAME_MOST: usize = 16 << 20;
 
 /// How long the gateway waits between attempts to reach the world.
 const RETRY: Duration = Duration::from_millis(20);
@@ -350,15 +352,6 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
     }
 }
 
-/// A sync request's refusal by name, under the client's number `n`.
-pub fn sync_refused(n: Value, name: &str) -> Vec<u8> {
-    let name = Name::new(name).unwrap_or_else(|| unreachable!("a fixed name"));
-    encode(&Value::Map(
-        [(wire::ASK, n), (wire::REFUSED, Value::Text(name))].into(),
-    ))
-    .unwrap_or_default()
-}
-
 /// Answers each kept intent past its deadline ([`Link::overdue`]) by name, as the gateway's own answer, for as long
 /// as the gateway runs (C8, #3396).
 pub async fn deadlines(gw: Arc<Gateway>) {
@@ -369,6 +362,15 @@ pub async fn deadlines(gw: Arc<Gateway>) {
             gw.tell(&key, frame);
         }
     }
+}
+
+/// A sync request's refusal by name, under the client's number `n`.
+pub fn sync_refused(n: Value, name: &str) -> Vec<u8> {
+    let name = Name::new(name).unwrap_or_else(|| unreachable!("a fixed name"));
+    encode(&Value::Map(
+        [(wire::ASK, n), (wire::REFUSED, Value::Text(name))].into(),
+    ))
+    .unwrap_or_default()
 }
 
 /// A progress answer's actor (as bytes), sequence, cursor and µs left (C20): kind 3 with field 5.
