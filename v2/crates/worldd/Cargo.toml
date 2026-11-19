@@ -11,6 +11,9 @@ rustix = { version = "1", default-features = false, features = ["time", "std"] }
 sim = { path = "../sim" }
 # O3 (#2732): the object store and the directory's claim and mark, which the shipper writes through.
 directoryd = { path = "../directoryd" }
+# O3b (#3458): `serve` archives its history (V3's archiver) into the store it ships to, O9's folder store.
+archive = { path = "../../tools/archive" }
+supervisor = { path = "../supervisor" }
 # The built-in walk, run behind the host for a move intent (I4b, #3156).
 skills = { path = "../skills" }
 # E1's Eden measures (tests/index.rs) load Eden 2026's imported tree (N1, #2649); N2's test world, where a scripted

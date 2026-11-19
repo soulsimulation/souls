@@ -16,7 +16,6 @@ dependencies = [
  "miniz_oxide",
  "replica",
  "sim",
- "worldd",
 ]
 
 [[package]]
@@ -1479,6 +1478,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "worldd"
 version = "0.0.0"
 dependencies = [
+ "archive",
  "backup",
  "directoryd",
  "import-eden",
@@ -1486,6 +1486,7 @@ dependencies = [
  "rustix",
  "sim",
  "skills",
+ "supervisor",
  "testworld",
 ]
 

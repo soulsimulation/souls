@@ -8,7 +8,7 @@
 //!   with O3's shipping, at R2's price (in memory; `v2/docs/archive.md`).
 //! - `cargo run -p archive --release -- corpus <dir>`: writes entry one of V18's corpus.
 //! - `cargo run -p archive --release -- seek [hours]`: V4's seek table and index sizes (`seek_bench.rs`).
-//! - `ship`, `rebuild` and `ship-count`: O3's drill and count (#2732), in `drill.rs`.
+//! - O3's drill and count (`ship`, `rebuild`, `ship-count`, #2732) are `ops`'s: `v2/tools/ops/src/drill.rs`.
 //! - `cargo run -p archive --release -- pack <work dir> <out dir> [at µs ...]`: a stream-check run's log archived into
 //!   a folder the v2 page serves as history (V9), and each moment's state hash as `seek` gives it.
 //!
@@ -16,7 +16,6 @@
 //! (default `auto`), `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY` and `_PREFIX`: a local stand-in or a scratch bucket,
 //! never production's.
 
-mod drill;
 mod seek_bench;
 
 use std::cell::RefCell;
@@ -28,9 +27,8 @@ use std::sync::Arc;
 use archive::script::{self, SAID, TICK, World};
 use archive::{
     Archiver, R, Segment, Shared, Writes, fetch, rebuild_bundles, refuse, restore, state_hash,
-    stored_bundles, words_in_bundle, words_in_object,
+    store, stored_bundles, words_in_bundle, words_in_object,
 };
-use directoryd::directory::s3::S3;
 use directoryd::directory::store::{Memory, Store};
 use replica::encode::{encode, to_hex};
 use replica::ids::Id;
@@ -40,22 +38,6 @@ use sim::log::{FileStore, Log};
 const PRICE: f64 = 4.50;
 /// O3's designed shipping for a busy world: one write each ten seconds, a 30-day month.
 const O3_BUSY: u64 = 259_200;
-
-fn store() -> R<S3> {
-    let var = |k: &str| std::env::var(format!("ARCHIVE_STORE_{k}")).unwrap_or_default();
-    if var("ENDPOINT").is_empty() {
-        return refuse("store-settings", "ARCHIVE_STORE_ENDPOINT is not set");
-    }
-    let region = Some(var("REGION")).filter(|r| !r.is_empty());
-    S3::new(
-        &var("ENDPOINT"),
-        &var("BUCKET"),
-        region.as_deref().unwrap_or("auto"),
-        &var("ACCESS_KEY_ID"),
-        &var("SECRET_ACCESS_KEY"),
-        &var("PREFIX"),
-    )
-}
 
 const PREFIX: &str = "worlds/scripted/";
 
@@ -387,18 +369,6 @@ fn main() {
         "count" => count(),
         "corpus" => corpus(Path::new(&arg(2))),
         "seek" => seek_bench::run(arg(2).parse().unwrap_or(24)),
-        "ship" => store().and_then(|s| {
-            drill::ship(
-                s,
-                Path::new(&arg(2)),
-                Path::new(&arg(3)),
-                &arg(4),
-                arg(5).parse().unwrap_or(0),
-                arg(6).parse().unwrap_or(1),
-            )
-        }),
-        "rebuild" => store().and_then(|s| drill::rebuild(s, Path::new(&arg(2)), &arg(3))),
-        "ship-count" => drill::count(Path::new(&arg(2))),
         "pack" => pack(
             Path::new(&arg(2)),
             Path::new(&arg(3)),
@@ -409,9 +379,7 @@ fn main() {
         ),
         _ => refuse(
             "usage",
-            "record <dir> | restore <hash> | count | corpus <dir> | seek [hours] | ship <dir> <receipts> \
-             <even|uneven|still> <seconds> [seed] | rebuild <receipts> [kill] | ship-count <dir> \
-             | pack <work dir> <out dir> [at ...]",
+            "record <dir> | restore <hash> | count | corpus <dir> | seek [hours] | pack <work dir> <out dir> [at ...]",
         ),
     };
     if let Err(e) = out {

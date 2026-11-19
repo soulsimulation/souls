@@ -43,14 +43,20 @@ fn serve(dir: &Path, socket: &Path) -> Served {
     serve_with(dir, socket, &[])
 }
 
-/// `worldd serve` with no backup settings but `env`'s.
-fn serve_with(dir: &Path, socket: &Path, env: &[(&str, &str)]) -> Served {
+/// `worldd serve` with `more` arguments and no backup settings.
+fn serve_with(dir: &Path, socket: &Path, more: &[&std::ffi::OsStr]) -> Served {
+    serve_env(dir, socket, more, &[])
+}
+
+/// `worldd serve` with `more` arguments and no backup settings but `env`'s.
+fn serve_env(dir: &Path, socket: &Path, more: &[&std::ffi::OsStr], env: &[(&str, &str)]) -> Served {
     let mut c = worldd();
     c.args(["serve", "--dir"])
         .arg(dir)
         .arg("--socket")
         .arg(socket)
         .args(["--checkpoint-every", "2048"])
+        .args(more)
         .env_remove("SOULS_BACKUP_URL")
         .env_remove("SOULS_BACKUP_KEY_FILE")
         .stdout(Stdio::piped())
@@ -226,8 +232,25 @@ fn last_state(log: &Path) -> String {
         .expect("a tick with a state hash")
 }
 
-/// A seeded world folder `<d>/w` from N2's test world, one Soul at (-40, 30): the folder, the Soul, the zone's root
-/// and the ground.
+#[test]
+fn a1_a2_a5_seeded_world_serves_walks_and_restarts_after_sigkill() {
+    let d = scratch("c1");
+    let (dir, body, root, ground) = seeded(&d);
+
+    // A1: the first start replays the seeded log (the import's part), with the folder's entries.
+    let socket = d.join("s");
+    let w = serve(&dir, &socket);
+    let world = w.line("world ");
+    println!("{world}");
+    assert!(world.ends_with("1 entries, 1 souls"), "{world}");
+    println!("{}", w.line("restart: "));
+    let first = w.line("worldd: started at tick");
+    println!("A1: {first}");
+    // No store named (O3b A1): this test is C1's, unchanged.
+    serves_walks_and_restarts(w, &d, &dir, body, root, ground);
+}
+
+/// The seeded world: its folder, its Soul's body, its root and its ground.
 fn seeded(d: &Path) -> (PathBuf, Id, Id, Id) {
     let facts = d.join("facts.json");
     std::fs::write(
@@ -268,21 +291,9 @@ fn seeded(d: &Path) -> (PathBuf, Id, Id, Id) {
     (dir, body, root, ground)
 }
 
-#[test]
-fn a1_a2_a5_seeded_world_serves_walks_and_restarts_after_sigkill() {
-    let d = scratch("c1");
-    let (dir, body, root, ground) = seeded(&d);
-
-    // A1: the first start replays the seeded log (the import's part), with the folder's entries.
+fn serves_walks_and_restarts(w: Served, d: &Path, dir: &Path, body: Id, root: Id, ground: Id) {
     let socket = d.join("s");
-    let w = serve(&dir, &socket);
-    let world = w.line("world ");
-    println!("{world}");
-    assert!(world.ends_with("1 entries, 1 souls"), "{world}");
-    println!("{}", w.line("restart: "));
-    let first = w.line("worldd: started at tick");
-    println!("A1: {first}");
-
+    let dir = dir.to_path_buf();
     // A Soul walks 6 m east, then a walk in flight when the process is killed.
     let mut s = connect(&socket);
     walk(&mut s, body, root.scope(), ground, 1, -34, 30);
@@ -332,7 +343,157 @@ fn a1_a2_a5_seeded_world_serves_walks_and_restarts_after_sigkill() {
         "a walk after the restart"
     );
     w.kill();
-    let _ = std::fs::remove_dir_all(&d);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+/// The log's records on the disk, from record 0.
+fn logged(log: &Path) -> Vec<Vec<u8>> {
+    let (l, found) = Log::open(FileStore::open(log).expect("the log"), 1).expect("opens");
+    drop(l.close());
+    assert_eq!(found.first, 0);
+    found.records
+}
+
+/// The history in the store, read from record 0 as a full-history reader reads it: (record, bytes).
+fn history(bucket: &Path, root: Id) -> Vec<(u64, Vec<u8>)> {
+    use directoryd::directory::store::Store;
+    use replica::directory::WorldRecord;
+    let store = supervisor::folder::Folder::new(bucket.to_path_buf());
+    let key = WorldRecord::key(&root.scope().0, root);
+    let Some(o) = store.get(&key).expect("reads") else {
+        return Vec::new();
+    };
+    let rec = WorldRecord::read(&o.bytes).expect("the world's record");
+    let (mut at, mut out) = (0, Vec::new());
+    while let Some((_, p, _)) = worldd::shipping::piece_at(&store, &rec, at).expect("a piece") {
+        for r in p.records {
+            out.push((at, r));
+            at += 1;
+        }
+    }
+    out
+}
+
+/// Engine v2 O3b (#3458): with a store named, `worldd serve` claims its world and ships its log's records and
+/// checkpoints (A1). Killed with SIGKILL mid-shipping three times, each start claims again and ships from the
+/// directory's mark plus one: the history read from the store from record 0 then holds every record logged, once,
+/// in order (A2). The history's header and bundles are archived under `h/<world>/<lineage>/` (A3).
+// A real process on the real clock: the waits for shipping are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn o3b_a1_a2_a3_ships_history_exactly_once_across_three_kills() {
+    use std::ffi::OsStr;
+    let d = scratch("o3b");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    let bucket = d.join("bucket");
+    let more = [
+        OsStr::new("--store"),
+        bucket.as_os_str(),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    // Each run walks, then is killed with SIGKILL while records wait to be shipped (the seal age is about 9 s). The
+    // second walks again 11 s in, after a piece and the checkpoint pointer landed and moved the mark, so the third
+    // start resumes in the middle of the log.
+    let mut seq = 0;
+    let mut froms = Vec::new();
+    for (run, again) in [false, true, false].into_iter().enumerate() {
+        let w = serve_with(&dir, &socket, &more);
+        let shipping = w.line("shipping: ");
+        println!("run {run}: {shipping}");
+        let from: u64 = shipping
+            .strip_prefix(&format!("shipping: epoch {} from record ", run + 1))
+            .and_then(|r| r.split(' ').next()?.parse().ok())
+            .unwrap_or_else(|| panic!("{shipping}"));
+        froms.push(from);
+        w.line("listening");
+        let mut s = connect(&socket);
+        for k in 0..1 + usize::from(again) {
+            if k > 0 {
+                std::thread::sleep(Duration::from_millis(11_000));
+            }
+            seq += 1;
+            let x = if seq % 2 == 0 { -38 } else { -34 };
+            walk(&mut s, body, root.scope(), ground, seq, x, 30);
+            assert_eq!(answer(&mut s).0, 1, "the walk ends in a receipt");
+        }
+        std::thread::sleep(Duration::from_millis(1_500));
+        let landed = history(&bucket, root).len();
+        w.kill();
+        let on_disk = logged(&dir.join("log")).len();
+        println!("run {run}: SIGKILL, {landed} of {on_disk} records off the machine");
+        assert!(landed < on_disk, "killed mid-shipping");
+    }
+    assert!(
+        froms[2] > 0,
+        "the third start resumes past the mark: {froms:?}"
+    );
+    // A last start ships what the kills left: every record logged before it, once, in order.
+    let before = logged(&dir.join("log")).len();
+    let w = serve_with(&dir, &socket, &more);
+    println!("last run: {}", w.line("shipping: "));
+    w.line("listening");
+    // A3: walks either side of a minute of world time (the machine's clock) close a bundle, and the archiver writes
+    // its day's index.
+    let name = format!("{0}-{0}-{1}", to_hex(&root.scope().0), root.counter());
+    let hist = bucket.join(format!("h/{name}/{}", to_hex(&root.scope().0)));
+    let mut s = connect(&socket);
+    let mut moment = 0;
+    for k in 0..2 {
+        if k > 0 {
+            let now = answers::now();
+            let next = (now / 60_000_000 + 1) * 60_000_000;
+            std::thread::sleep(Duration::from_micros((next - now) as u64 + 1_500_000));
+        }
+        seq += 1;
+        let x = if seq % 2 == 0 { -38 } else { -34 };
+        walk(&mut s, body, root.scope(), ground, seq, x, 30);
+        assert_eq!(answer(&mut s).0, 1, "the walk ends in a receipt");
+        if k == 0 {
+            moment = answers::now();
+        }
+    }
+    let indexed = || {
+        std::fs::read_dir(hist.join("bundles"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|day| day.path().join("index").exists())
+    };
+    let end = Instant::now() + Duration::from_secs(30);
+    while (history(&bucket, root).len() < before || !indexed()) && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    w.kill();
+    let h = history(&bucket, root);
+    let log = logged(&dir.join("log"));
+    println!(
+        "A2: {} records read from record 0, {} logged before the last start, {} on the disk",
+        h.len(),
+        before,
+        log.len()
+    );
+    assert!(
+        h.len() >= before,
+        "every record logged before the last start"
+    );
+    for (n, (at, bytes)) in h.iter().enumerate() {
+        assert_eq!(*at, n as u64, "in order, each once");
+        assert_eq!(bytes, &log[n], "record {n} as logged");
+    }
+    // A3: the history's header and a day's bundle index, as the page reads them (`v2/tools/ops/o3b-history.mjs`).
+    assert!(hist.join("header").exists(), "the history's header");
+    assert!(indexed(), "a bundle and its day's index");
+    println!(
+        "A3: history {} world {name} lineage {} at {moment}",
+        hist.display(),
+        to_hex(&root.scope().0)
+    );
+    // `O3B_KEEP=1` keeps the store for the page's end-to-end run.
+    if std::env::var_os("O3B_KEEP").is_none() {
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }
 
 /// Every text-store reference the log at `log` holds (its parts' intents carry them in place of words).
@@ -429,9 +590,10 @@ fn o20b_a2_a3_served_world_ships_its_words_and_they_restore() {
     let pass = d.join("recovery.key");
     std::fs::write(&pass, "a recovery passphrase for the test\n").unwrap();
     let url = format!("folder:{}", bucket.display());
-    let w = serve_with(
+    let w = serve_env(
         &dir,
         &socket,
+        &[],
         &[
             ("SOULS_BACKUP_URL", &url),
             ("SOULS_BACKUP_KEY_FILE", pass.to_str().unwrap()),

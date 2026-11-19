@@ -266,11 +266,37 @@ pub struct Map {
     pub unread: Vec<(Id, String)>,
     /// Doorway ends (or, on the open ground, an end's part in one square) that lie on no piece (left out).
     pub meets_elsewhere: usize,
+    /// The map's own scratch, for its `&mut self` searches ([`Map::route`]).
+    scratch: Scratch,
+}
+
+/// What a search writes as it goes (N17b, #3255): its working state, and the lines it measured that the map had not
+/// cached yet. One per thread, so searches on several threads share one map read-only ([`Map::route_in`]); what a
+/// scratch found joins the map's caches by [`Map::keep`]. A cached value is the same however it was found (a piece's
+/// triangles' neighbours; the line between two portals, measured from the lower-numbered one), so which thread found
+/// it first changes no route.
+#[derive(Clone, Default)]
+pub struct Scratch {
     /// Per portal: (search stamp, cost so far, previous portal, how it was reached).
     seen: Vec<(u32, u32, u32, u32)>,
     /// Per portal: the stamp of the search that last took it from the queue.
     closed: Vec<u32>,
     stamp: u32,
+    /// Pieces whose triangles' neighbours this scratch found, not yet kept by the map.
+    adj: HashMap<u32, Vec<[u32; 3]>>,
+    /// Lines between portals of a piece this scratch measured, not yet kept: (piece, lower portal, higher portal).
+    dist: HashMap<(u32, u32, u32), u32>,
+}
+
+impl Scratch {
+    /// Sized for a map of `portals` portals (and the goal).
+    fn fit(&mut self, portals: usize) {
+        if self.seen.len() != portals + 1 {
+            self.seen = vec![(0, 0, NONE, NONE); portals + 1];
+            self.closed = vec![0; portals + 1];
+            self.stamp = 0;
+        }
+    }
 }
 
 fn sq(v: i64) -> i64 {
@@ -437,9 +463,7 @@ impl Map {
             owned: HashMap::new(),
             unread: Vec::new(),
             meets_elsewhere: 0,
-            seen: Vec::new(),
-            closed: Vec::new(),
-            stamp: 0,
+            scratch: Scratch::default(),
         };
         let mut ground_meets = Vec::new();
         // The open ground, square by square, and each piece's stretches along its square's edges.
@@ -543,8 +567,7 @@ impl Map {
         m.add_water(&open_ground, ground, gv);
         // The open ground's gates are kept as a building of the ground's own, replaced when a square cut again
         // changes their meets (G3b, #3449).
-        m.seen = vec![(0, 0, NONE, NONE); m.portals.len() + 1];
-        m.closed = vec![0; m.portals.len() + 1];
+        m.scratch.fit(m.portals.len());
         Ok(m)
     }
 
@@ -585,8 +608,7 @@ impl Map {
         self.unread.retain(|(id, _)| *id != b.thing);
         let base = self.add_floors(b, b.place, version);
         self.add_links(b, &base);
-        self.seen.resize(self.portals.len() + 1, (0, 0, NONE, NONE));
-        self.closed.resize(self.portals.len() + 1, 0);
+        self.scratch.fit(self.portals.len());
     }
 
     /// The dry pieces of the open ground's square `sq`.
@@ -785,8 +807,7 @@ impl Map {
                 rec.at.version = version;
             }
         }
-        self.seen.resize(self.portals.len() + 1, (0, 0, NONE, NONE));
-        self.closed.resize(self.portals.len() + 1, 0);
+        self.scratch.fit(self.portals.len());
         Ok(())
     }
 
@@ -1330,36 +1351,49 @@ impl Map {
         tri_idx(&self.pieces[q as usize].piece, t)
     }
 
-    fn adjacency(&mut self, q: u32) {
-        if self.pieces[q as usize].adj.is_some() {
-            return;
+    /// Piece `q`'s triangles' neighbours, built on first use: from the map's cache, else `s`'s.
+    fn adjacency<'m>(&'m self, s: &'m mut Scratch, q: u32) -> &'m [[u32; 3]] {
+        if let Some(a) = &self.pieces[q as usize].adj {
+            return a;
         }
-        let n = self.pieces[q as usize].piece.triangles.len() as u32;
-        let mut edges: HashMap<(u32, u32), (u32, usize)> = HashMap::with_capacity(n as usize * 3);
-        let mut adj = vec![[NONE; 3]; n as usize];
-        for t in 0..n {
-            let v = self.tri_idx(q, t);
-            for k in 0..3 {
-                let (a, b) = (v[k], v[(k + 1) % 3]);
-                if let Some((u, e)) = edges.remove(&(b, a)) {
-                    adj[t as usize][k] = u;
-                    adj[u as usize][e] = t;
-                } else {
-                    edges.insert((a, b), (t, k));
+        s.adj.entry(q).or_insert_with(|| {
+            let n = self.pieces[q as usize].piece.triangles.len() as u32;
+            let mut edges: HashMap<(u32, u32), (u32, usize)> =
+                HashMap::with_capacity(n as usize * 3);
+            let mut adj = vec![[NONE; 3]; n as usize];
+            for t in 0..n {
+                let v = self.tri_idx(q, t);
+                for k in 0..3 {
+                    let (a, b) = (v[k], v[(k + 1) % 3]);
+                    if let Some((u, e)) = edges.remove(&(b, a)) {
+                        adj[t as usize][k] = u;
+                        adj[u as usize][e] = t;
+                    } else {
+                        edges.insert((a, b), (t, k));
+                    }
                 }
             }
-        }
-        self.pieces[q as usize].adj = Some(adj);
+            adj
+        })
     }
 
     /// The line inside piece `q` from `s` to `t` (mm, its frame): a search over its triangles, then string pulling.
     /// An end off the piece (a doorway's meet may lie a few millimetres off it) is first moved to its nearest point.
     pub fn line(&mut self, q: u32, s: [i64; 2], t: [i64; 2]) -> Vec<[i64; 2]> {
+        let mut scratch = std::mem::take(&mut self.scratch);
+        let line = self.line_in(&mut scratch, q, s, t);
+        self.keep(&mut scratch);
+        self.scratch = scratch;
+        line
+    }
+
+    /// [`Map::line`] on a shared map, with `scratch`'s caches.
+    fn line_in(&self, scratch: &mut Scratch, q: u32, s: [i64; 2], t: [i64; 2]) -> Vec<[i64; 2]> {
         let ((ts, _, s), (tt, _, t)) = (self.gap(q, s), self.gap(q, t));
         if ts == tt {
             return vec![s, t];
         }
-        self.adjacency(q);
+        let adj = self.adjacency(scratch, q);
         let n = self.pieces[q as usize].piece.triangles.len();
         let mid = |m: &Map, k: u32| {
             let [a, b, c] = m.tri(q, k);
@@ -1370,7 +1404,6 @@ impl Map {
         let mut heap = BinaryHeap::new();
         g[ts as usize] = 0;
         heap.push(Reverse((len2(mid(self, ts), t), ts)));
-        let adj = self.pieces[q as usize].adj.take().expect("built");
         while let Some(Reverse((_, u))) = heap.pop() {
             if u == tt {
                 break;
@@ -1390,7 +1423,6 @@ impl Map {
             }
         }
         if prev[tt as usize] == NONE {
-            self.pieces[q as usize].adj = Some(adj);
             return vec![s, t];
         }
         let mut chain = vec![tt];
@@ -1409,30 +1441,47 @@ impl Map {
             portals.push((l, r));
         }
         portals.push((t, t));
-        self.pieces[q as usize].adj = Some(adj);
         funnel(&portals)
     }
 
-    /// The cached length of the line inside piece `q` between portals `p` and `r`, mm.
-    fn between(&mut self, q: u32, p: u32, r: u32) -> u32 {
+    /// The cached length of the line inside piece `q` between portals `p` and `r`, mm: measured from the
+    /// lower-numbered portal, so the same whichever way it is first asked (a line may differ a little by its
+    /// direction).
+    fn between(&self, s: &mut Scratch, q: u32, p: u32, r: u32) -> u32 {
         let key = (p.min(r), p.max(r));
         if let Some(&d) = self.pieces[q as usize].dist.get(&key) {
             return d;
         }
+        if let Some(&d) = s.dist.get(&(q, key.0, key.1)) {
+            return d;
+        }
         let (a, b) = (
-            self.portals[p as usize].mid(),
-            self.portals[r as usize].mid(),
+            self.portals[key.0 as usize].mid(),
+            self.portals[key.1 as usize].mid(),
         );
-        let line = self.line(q, a, b);
+        let line = self.line_in(s, q, a, b);
         let d = line.windows(2).map(|w| len2(w[0], w[1])).sum::<i64>() as u32;
-        self.pieces[q as usize].dist.insert(key, d);
+        s.dist.insert((q, key.0, key.1), d);
         d
     }
 
     /// The length of the line inside piece `q` from `a` to `b` (mm), uncached.
-    fn run(&mut self, q: u32, a: [i64; 2], b: [i64; 2]) -> u32 {
-        let line = self.line(q, a, b);
+    fn run(&self, s: &mut Scratch, q: u32, a: [i64; 2], b: [i64; 2]) -> u32 {
+        let line = self.line_in(s, q, a, b);
         line.windows(2).map(|w| len2(w[0], w[1])).sum::<i64>() as u32
+    }
+
+    /// What `scratch` found joins the map's caches; its working state stays with it.
+    pub fn keep(&mut self, scratch: &mut Scratch) {
+        for (q, adj) in scratch.adj.drain() {
+            let p = &mut self.pieces[q as usize];
+            if p.adj.is_none() {
+                p.adj = Some(adj);
+            }
+        }
+        for ((q, p, r), d) in scratch.dist.drain() {
+            self.pieces[q as usize].dist.insert((p, r), d);
+        }
     }
 
     /// For a link too narrow for this map's class: its door, if one stands in it, and both widths.
@@ -1486,9 +1535,16 @@ impl Map {
     /// A* over portals from `from` to `to` for a body with `has`: whether the goal was reached (the way back is left in
     /// `seen`), how many portals were taken from the queue, and the links it came to and could not use, each with
     /// why and how near its far end is to the goal.
-    fn search(&mut self, tree: &Tree, from: Spot, to: Spot, has: Mask) -> (bool, u32, Vec<Failed>) {
-        self.stamp = self.stamp.wrapping_add(1);
-        let stamp = self.stamp;
+    fn search(
+        &self,
+        sc: &mut Scratch,
+        tree: &Tree,
+        from: Spot,
+        to: Spot,
+        has: Mask,
+    ) -> (bool, u32, Vec<Failed>) {
+        sc.stamp = sc.stamp.wrapping_add(1);
+        let stamp = sc.stamp;
         let goal = self.portals.len() as u32;
         let goal_w = self.world(to.piece, to.at);
         let goal_xz = [to.at[0], to.at[2]];
@@ -1519,14 +1575,14 @@ impl Map {
             }
             let mid = self.portals[p as usize].mid();
             let g = if same {
-                self.run(from.piece, start_xz, mid)
+                self.run(sc, from.piece, start_xz, mid)
             } else {
                 len2(start_xz, mid) as u32
             };
             let h = h_of(self, p);
             relax(
-                &mut self.seen,
-                &self.closed,
+                &mut sc.seen,
+                &sc.closed,
                 &mut heap,
                 p,
                 g,
@@ -1539,16 +1595,16 @@ impl Map {
         let mut failed: Vec<Failed> = Vec::new();
         let mut found = false;
         while let Some(Reverse((f, _, u))) = heap.pop() {
-            let (_, g, ..) = self.seen[u as usize];
+            let (_, g, ..) = sc.seen[u as usize];
             if u == goal {
                 found = true;
                 break;
             }
-            if f > g.saturating_add(h_of(self, u)) || self.closed[u as usize] == stamp {
+            if f > g.saturating_add(h_of(self, u)) || sc.closed[u as usize] == stamp {
                 continue;
             }
             searched += 1;
-            self.closed[u as usize] = stamp;
+            sc.closed[u as usize] = stamp;
             let pieces = self.portals[u as usize].pieces;
             for q in pieces {
                 if q == NONE {
@@ -1556,34 +1612,25 @@ impl Map {
                 }
                 // From the start's own piece back to it, only after leaving it: its line inside the piece is the
                 // direct route, which [`Map::route`] weighs against this search.
-                if q == to.piece && !(same && self.seen[u as usize].3 == q) {
+                if q == to.piece && !(same && sc.seen[u as usize].3 == q) {
                     let mid = self.portals[u as usize].mid();
                     let d = if same {
-                        self.run(q, mid, goal_xz)
+                        self.run(sc, q, mid, goal_xz)
                     } else {
                         len2(mid, goal_xz) as u32
                     };
-                    relax(
-                        &mut self.seen,
-                        &self.closed,
-                        &mut heap,
-                        goal,
-                        g + d,
-                        0,
-                        u,
-                        q,
-                    );
+                    relax(&mut sc.seen, &sc.closed, &mut heap, goal, g + d, 0, u, q);
                 }
                 for k in 0..self.pieces[q as usize].portals.len() {
                     let r = self.pieces[q as usize].portals[k];
                     if r == u || self.shore_shut(r, has) {
                         continue;
                     }
-                    let d = self.between(q, u, r);
+                    let d = self.between(sc, q, u, r);
                     let h = h_of(self, r);
                     relax(
-                        &mut self.seen,
-                        &self.closed,
+                        &mut sc.seen,
+                        &sc.closed,
                         &mut heap,
                         r,
                         g.saturating_add(d),
@@ -1597,7 +1644,7 @@ impl Map {
             // Never straight back across the link just crossed: that lands on another portal of the end the body
             // went in by, a doorway used as a bridge between two squares' pieces of the open ground, which no walk
             // follows (#3187). Ground there is reached across the pieces.
-            if l != NONE && self.seen[u as usize].3 != LINK | l {
+            if l != NONE && sc.seen[u as usize].3 != LINK | l {
                 if let Some(why) = self.refuse(tree, l, has).filter(|_| !self.ashore(l, side)) {
                     let far = self.links[l as usize].ends[1 - side as usize]
                         .iter()
@@ -1612,8 +1659,8 @@ impl Map {
                     let r = self.links[l as usize].ends[1 - side as usize][k];
                     let h = h_of(self, r);
                     relax(
-                        &mut self.seen,
-                        &self.closed,
+                        &mut sc.seen,
+                        &sc.closed,
                         &mut heap,
                         r,
                         g.saturating_add(cost),
@@ -1628,11 +1675,11 @@ impl Map {
     }
 
     /// The portals from the start to the goal of the last search, each with how it was reached.
-    fn chain(&self) -> Vec<(u32, u32)> {
+    fn chain(&self, sc: &Scratch) -> Vec<(u32, u32)> {
         let mut chain = Vec::new();
         let mut at = self.portals.len() as u32;
         while at != NONE {
-            let (_, _, prev, via) = self.seen[at as usize];
+            let (_, _, prev, via) = sc.seen[at as usize];
             chain.push((at, via));
             at = prev;
         }
@@ -1648,10 +1695,27 @@ impl Map {
         to: Spot,
         has: Mask,
     ) -> Result<Route, Refusal> {
+        let mut scratch = std::mem::take(&mut self.scratch);
+        let r = self.route_in(&mut scratch, tree, from, to, has);
+        self.keep(&mut scratch);
+        self.scratch = scratch;
+        r
+    }
+
+    /// [`Map::route`] on a map shared by several threads, each with its own `sc` (N17b, #3255): the same route.
+    pub fn route_in(
+        &self,
+        sc: &mut Scratch,
+        tree: &Tree,
+        from: Spot,
+        to: Spot,
+        has: Mask,
+    ) -> Result<Route, Refusal> {
+        sc.fit(self.portals.len());
         let goal_xz = [to.at[0], to.at[2]];
         let start_xz = [from.at[0], from.at[2]];
         let direct = (from.piece == to.piece).then(|| {
-            let first_line = self.line(from.piece, start_xz, goal_xz);
+            let first_line = self.line_in(sc, from.piece, start_xz, goal_xz);
             Route {
                 size: self.size,
                 hops: vec![Hop::Patch {
@@ -1675,18 +1739,18 @@ impl Map {
             Some(d) if !shore => return Ok(d),
             d => d,
         };
-        let (found, searched, failed) = self.search(tree, from, to, has);
+        let (found, searched, failed) = self.search(sc, tree, from, to, has);
         if let Some(d) = direct
-            && (!found || u64::from(self.seen[self.portals.len()].1) >= d.length)
+            && (!found || u64::from(sc.seen[self.portals.len()].1) >= d.length)
         {
             return Ok(d);
         }
         if !found {
             // The link that failed: the first this body cannot use on the route a body with every ability takes;
             // when there is none, of the links it came to, the one whose far end is nearest the goal.
-            let (relaxed, ..) = self.search(tree, from, to, ALL);
+            let (relaxed, ..) = self.search(sc, tree, from, to, ALL);
             let first = if relaxed {
-                self.chain().iter().find_map(|&(_, via)| {
+                self.chain(sc).iter().find_map(|&(_, via)| {
                     (via != NONE && via & LINK != 0)
                         .then_some(via & !LINK)
                         .and_then(|l| self.refuse(tree, l, has).map(|w| (l, w)))
@@ -1710,7 +1774,7 @@ impl Map {
             });
         }
         let goal = self.portals.len() as u32;
-        let chain = self.chain();
+        let chain = self.chain(sc);
         let mut hops = vec![Hop::Patch {
             at: self.pieces[from.piece as usize].at,
             piece: from.piece,
@@ -1736,12 +1800,12 @@ impl Map {
             .filter(|(p, _)| *p != goal)
             .map(|(p, _)| self.portals[*p as usize].world)
             .collect();
-        let length = u64::from(self.seen[goal as usize].1);
+        let length = u64::from(sc.seen[goal as usize].1);
         let target = chain
             .first()
             .filter(|(p, _)| *p != goal)
             .map_or(goal_xz, |(p, _)| self.portals[*p as usize].mid());
-        let first_line = self.line(from.piece, start_xz, target);
+        let first_line = self.line_in(sc, from.piece, start_xz, target);
         Ok(Route {
             size: self.size,
             hops,
