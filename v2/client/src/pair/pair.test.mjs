@@ -7,7 +7,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createServer as netServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -151,6 +151,45 @@ test('A1, A2, A3: from an empty folder the owner approves once, the daemon acts,
   assert.ok(readFileSync(tokensFile, 'utf8').includes(`${said.grant} ${hash}`), 'the gateway holds its hash');
   const db = files.filter((f) => f.includes('pairing.sqlite')).map((f) => readFileSync(f, 'latin1')).join('');
   assert.ok(db.includes(hash), 'the store holds its hash');
+});
+
+test('a world placed by place-world.sh pairs by its 67-byte instance name, and its say reaches the world', async () => {
+  // Placed as on a machine (PLACE_ROOT stands in for /): the key the owner pairs with is the world's instance name.
+  const seeded = join(dir, 'seeded'), root = join(dir, 'placed');
+  mkdirSync(seeded);
+  mkdirSync(root);
+  writeFileSync(join(seeded, 'world.json'), JSON.stringify({ format: 'souls/world/1', name: `${'cd'.repeat(16)}-${'ef'.repeat(16)}-0`, souls: [] }));
+  const gwPort = await freePort();
+  const placed = await run('bash', [join(v2, 'tools/ops/place-world.sh'), seeded, '--port', String(gwPort)], null, { env: { PATH: process.env.PATH, PLACE_ROOT: root } });
+  assert.equal(placed.code, 0, placed.out);
+  const key = /^placed (\S+):/.exec(placed.out)[1];
+  assert.equal(key.length, 67);
+  assert.ok(lstatSync(join(root, 'var/lib/souls/views/w', key, 'views')).isSymbolicLink(), 'served at w/<instance name>/');
+
+  const home = join(dir, 'placed-home', '.souls');
+  const gateway = `ws://127.0.0.1:${gwPort}/v2/ws`;
+  let approving;
+  const { soul } = await pair({ home, directory, world: key, gateway, device: 'placed machine', label: 'test agent',
+    onAsk: ({ code }) => { approving = browser('/v1/pair/approve', { code, confirm: true, test_person: 'owner' }); } });
+  assert.equal((await approving).status, 200);
+
+  const { p: gw } = await run(bin('gatewayd'), ['--listen', `127.0.0.1:${gwPort}`, '--world', world, '--tokens', tokensFile, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
+  const rt = runtimeOf(home, soul);
+  try {
+    const said = await call(home, soul, { op: 'say', words: 'hello' }, { pkg: PKG });
+    assert.equal(said.ok, true, JSON.stringify(said));
+    // The gateway answers a frame it cannot read with no sequence: `intent.text-too-long` before this fix, the verb
+    // being `<instance name>:say`. Read, it goes to the world, which answers it by its sequence as the say it names
+    // (this stand-in world holds no body for a Soul paired just now, so its own answer is `intent.no-body`).
+    const answer = await waitFor(async () => (await request(rt.socket, { op: 'read' })).events
+      .find((e) => e.kind === 'answer' && (e.sequence === said.sequence || e.sequence === null)));
+    assert.deepEqual([answer.sequence, answer.reason], [said.sequence, 'intent.no-body'], `answered ${answer.answer} ${answer.reason}`);
+    assert.ok(Buffer.byteLength(said.verb) <= 64, `${said.verb} fits a verb's 64 bytes`);
+  } finally {
+    await request(rt.socket, { op: 'stop' }).catch(() => {});
+    gw.kill();
+    await waitFor(() => !existsSync(rt.lock));
+  }
 });
 
 test('a directory that is not https is refused, unless it is on this machine', async () => {

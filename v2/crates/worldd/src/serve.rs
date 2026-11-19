@@ -43,8 +43,9 @@
 //! <moved> stand points moved to clear ground`. A stand point a body cannot stand on is moved to the nearest clear ground
 //! within a form's reach (C15's rule), so a rise sets the body down where it can stand.
 //!
-//! **Off the machine** (O3b, #3458), when `--store <folder>` or `$WORLDD_STORE` names a store (O9's folder store; a
-//! fleet's real store is not wired here): the world is claimed under `--machine <name>` (`$WORLDD_MACHINE`, default
+//! **Off the machine** (O3b, #3458), when `--store <store>`, `$WORLDD_STORE` or the directory's `$DIRECTORY_STORE_URL`
+//! names a store (O3c, #3529: the offsite bucket, `s3:https://<host>/<bucket>[/<prefix>]` with its keys in `AWS_*`, or
+//! O9's folder store, `folder:<path>` or a path; `supervisor::bucket`): the world is claimed under `--machine <name>` (`$WORLDD_MACHINE`, default
 //! `local`), its build pinned on a first claim. Each record on the disk and each checkpoint is shipped by O3's
 //! shipper under that claim. A restart claims again ([`shipping::take_over`], as the ops tool's restart): the claim
 //! starts at the directory's mark plus one, and the shipper takes the log's records from there, so the history read
@@ -84,7 +85,7 @@ use sim::log::{FileStore, Log};
 use sim::recorder;
 use sim::slots::PlaceAt;
 use sim::walk::town::Town;
-use supervisor::folder::Folder;
+use supervisor::bucket::Under;
 use worldd::answers::{self, Config, Join};
 use worldd::bodies::{Bodies, Placed};
 use worldd::checkers::Rules;
@@ -479,13 +480,13 @@ fn bodies(
     Ok(b)
 }
 
-type Bucket = Shared<Folder>;
+type Bucket = Shared<supervisor::bucket::Bucket>;
 
 /// The archive's store on a restart (O3b): V3's shelf starts from record 0 again and writes its bundles and indexes
 /// as new. A create refused because the key exists is passed when the bytes are the same, and otherwise writes over
 /// them (a day's index, or a window closed at a graceful stop, made again from more records).
 #[derive(Clone)]
-struct Again(Bucket);
+struct Again(Under<Bucket>);
 
 impl Store for Again {
     fn get(&self, key: &str) -> Result<Option<Object>, Refusal> {
@@ -565,10 +566,10 @@ fn archiving(
     })
 }
 
-/// Claims the world in the store at `root` and starts its shipper and archiver, handed the log's records read at the
-/// start (numbered from `first`) from the claim's start on.
+/// Claims the world in the store `spec` names ([`supervisor::bucket::Bucket`]) and starts its shipper and archiver,
+/// handed the log's records read at the start (numbered from `first`) from the claim's start on.
 fn off_machine(
-    root: &Path,
+    spec: &str,
     machine: &str,
     built: &Built,
     name: &str,
@@ -576,9 +577,12 @@ fn off_machine(
     first: u64,
     records: &[Vec<u8>],
 ) -> R<Off> {
-    let store: Bucket = Shared(Arc::new(Folder::new(root.to_path_buf())));
+    let store: Bucket = Shared(Arc::new(
+        supervisor::bucket::Bucket::from_env(spec).map_err(refusal)?,
+    ));
+    println!("store: {}", store.0.what());
     let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
-    let mut d = Directory::new(store, machine);
+    let mut d = Directory::new(store.clone(), machine);
     let (lineage, zone) = (built.root.scope().0, built.header.zone);
     match d.world(&lineage, zone) {
         Err(e) if e.name == "record-missing" => {
@@ -619,10 +623,10 @@ fn off_machine(
         .cloned();
     let archive = match kind {
         Some(kind) => {
-            // A store of its own at the history's folder: the day's index names each bundle by its key, which the
-            // page reads relative to that folder.
-            let at = root.join("h").join(name).join(to_hex(&lineage));
-            let again = Again(Shared(Arc::new(Folder::new(at))));
+            // The history's keys as a store of their own: the day's index names each bundle by its key, which the
+            // page reads relative to the history's folder.
+            let prefix = format!("h/{name}/{}/", to_hex(&lineage));
+            let again = Again(Under { store, prefix });
             again
                 .put("header", built.header.stored(), When::Absent)
                 .map_err(refusal)?;
@@ -657,7 +661,7 @@ fn off_machine(
     Ok(off)
 }
 
-/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <folder>] [--machine
+/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] [--machine
 /// <name>]`: runs the world until killed. A checkpoint is taken each `--checkpoint-every` bytes of log (default 8 MiB).
 pub fn run(args: &[String]) -> i32 {
     match serve(args) {
@@ -671,7 +675,7 @@ pub fn run(args: &[String]) -> i32 {
 
 fn serve(args: &[String]) -> R<()> {
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
-        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <folder>] \
+        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] \
          [--machine <name>]",
     )?);
     let socket = arg(args, "--socket")
@@ -718,16 +722,18 @@ fn serve(args: &[String]) -> R<()> {
         Log::open(FileStore::open(&log_path).map_err(refusal)?, EPOCH).map_err(refusal)?;
     let store = log.close();
     let bucket = arg(args, "--store")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("WORLDD_STORE").map(PathBuf::from));
+        .cloned()
+        .or_else(|| std::env::var("WORLDD_STORE").ok())
+        .or_else(|| std::env::var(directoryd::directory::s3::URL_ENV).ok())
+        .filter(|s| !s.trim().is_empty());
     let mut off = match bucket {
-        Some(root) => {
+        Some(spec) => {
             let machine = arg(args, "--machine")
                 .cloned()
                 .or_else(|| std::env::var("WORLDD_MACHINE").ok())
                 .unwrap_or_else(|| "local".to_owned());
             Some(off_machine(
-                &root,
+                &spec,
                 &machine,
                 &built,
                 &name,
