@@ -9,7 +9,8 @@ use std::time::Duration;
 use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
-use axum::http::HeaderMap;
+use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
 use axum::routing::get;
 use replica::effects::Actor;
@@ -76,7 +77,8 @@ async fn upgrade(
         .iter()
         .find_map(|h| headers.get(*h).and_then(|v| v.to_str().ok()))
         .map(str::to_owned);
-    ws.read_buffer_size(READ_BUFFER)
+    let mut res = ws
+        .read_buffer_size(READ_BUFFER)
         .write_buffer_size(0)
         .max_write_buffer_size(SEND_MOST)
         .max_message_size(MESSAGE_MOST)
@@ -90,7 +92,11 @@ async fn upgrade(
                 client,
             )
             .await;
-        })
+        });
+    // The socket carries an owner's private view (V13, #2745): no cache keeps any response of it.
+    res.headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    res
 }
 
 fn control(name: &str) -> Vec<u8> {
@@ -101,6 +107,19 @@ fn control(name: &str) -> Vec<u8> {
 /// An answer the gateway gives itself to bytes it could not read: `{2: answer}`, with no version, not kept.
 fn own_answer(answer: Answer) -> Vec<u8> {
     encode(&Value::Map([(2, answer.to_value())].into())).unwrap_or_default()
+}
+
+/// A refusal the gateway gives itself, by name, as `{2: answer}`, not kept for a resume: C8's answer to an intent past
+/// its deadline while the world is away (`world_link::deadlines`).
+pub fn refused(actor: Actor, sequence: u64, reason: &str, now: Value) -> Vec<u8> {
+    own_answer(Answer::Refused {
+        actor,
+        sequence,
+        reason: Name::new(reason).unwrap_or_else(|| unreachable!("a fixed name")),
+        now,
+        changed: Vec::new(),
+        op: None,
+    })
 }
 
 /// A refusal the gateway gives itself, at the newest version the world sent. Once the world has sent one, it is a
@@ -332,11 +351,21 @@ fn take_intent(
             "intent-not-granted",
         );
     }
+    let left = intent.expiry.saturating_sub(unix_us());
     match gw
         .link
-        .submit(grant.key(), intent.sequence, bytes, received)
+        .submit(grant.key(), actor, intent.sequence, bytes, received, left)
     {
         Sent::Sent => None,
         Sent::Restarting => refuse(gw, grant, actor, intent.sequence, RESTARTING),
     }
+}
+
+/// The wall clock, µs from the Unix epoch: an intent's expiry is world time, which is real time (T5).
+// The gateway's one wall-clock read: how long an intent has left (C8, #3396). The gateway is not the engine.
+#[allow(clippy::disallowed_methods)]
+fn unix_us() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX))
 }

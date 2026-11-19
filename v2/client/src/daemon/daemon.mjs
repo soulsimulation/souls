@@ -53,6 +53,11 @@
 //       again at send time on a copy brought current; a current `no` drops it; none left is `stopped-locally`, with
 //       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
 //       intent's basis is the version the model was last shown, not the send-time version.
+//   and R15's (#2757), the Soul's own schedule (`../schedule/schedule.mjs`): the owner's `memory/schedule.md`, read
+//   again when it changes and checked each second (no long timer: Node turns one over 24.8 days into 1 ms). An entry's
+//   acts are checked (R8) and sent with no model turn; a wake goes through R13's budget. A change entry fires on R9's
+//   events (the `event` op, and what this Soul hears). Each occurrence is marked on disk with its sequence before
+//   it is sent. What was missed while the daemon was off is listed once, in the next answer, as `missed`.
 // - **Reconnects** with growing, randomised waits (from 100 ms to 5 s) and **resumes** from its cursor (R5 rule 1; the
 //   gateway replays what it kept after it, and after the frames it counted as applied at it: `seen`, #3346). A
 //   socket not signed in within 5 s is given up and another started. Every frame is built and read by replica's WASM
@@ -66,7 +71,7 @@
 //
 //   node v2/client/src/daemon/daemon.mjs --home <.souls> --soul <id> --pkg <replica wasm-bindgen pkg>
 
-import { appendFileSync, closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -84,6 +89,7 @@ import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { feederFor } from '../memory/feeder.mjs';
+import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -379,7 +385,9 @@ function onItem(bytes) {
   heardSince.push(e);
   if (heardSince.length > HEARD_KEPT) heardSince.shift();
   note(e);
-  fire({ name: SAID, fields: { 1: e.words }, actor: from, toMe: e.whisper, sequence: e.sequence });
+  const said = { name: SAID, fields: { 1: e.words }, actor: from, toMe: e.whisper, sequence: e.sequence };
+  scheduleEvent(said); // R15: a schedule entry waiting on it
+  fire(said);
   if (e.words) {
     // Memory keeps a line with its speaker's name: as the last answer's copy named it, else the speaker's id.
     heardWords.set('words', e.words).set('name', shown.get(from)?.name || from);
@@ -625,7 +633,8 @@ async function answer(req) {
       if (!e || typeof e.name !== 'string') return { ok: false, code: 'event-not-an-event', detail: 'an event has a name' };
       const fired = wakes.onEvent(e, Date.now());
       if (fired) for (const w of wakers.splice(0)) w();
-      return { ok: true, fired };
+      const scheduled = scheduleEvent(e);
+      return { ok: true, fired, ...(scheduled.length ? { scheduled } : {}) };
     }
     case 'stop': setImmediate(stop); return { ok: true };
     default: return { ok: false, code: 'unknown-op' };
@@ -666,6 +675,11 @@ const server = createServer((c) => {
           // R9: the reflexes that fired since the answer before, in this one's `changed`.
           const fired = reflexes.changed();
           if (fired.length) out.changed = { ...(out.changed ?? {}), reflexes: fired };
+          // R15: what the schedule missed while the daemon was off, once, in the next answer.
+          if (state.schedule.missed.length) {
+            out.missed = { note: MISSED_NOTE, entries: state.schedule.missed.splice(0) };
+            save();
+          }
           // Every answer carries its age (R10); each but stats's is traced with the bytes it prints.
           const said = JSON.stringify('age' in out ? out : { ...out, ...ageNow() }) + '\n';
           if (op !== 'stats') trace.write({ k: 'cmd', op, bytes: Buffer.byteLength(said) });
@@ -675,6 +689,91 @@ const server = createServer((c) => {
   });
   c.on('error', () => {});
 });
+
+// --- The Soul's own schedule (R15, #2757) ------------------------------------------------------------------------
+const SCHEDULE = join(soulDirOf(home, soul), 'memory', 'schedule.md');
+const BEAT_MS = 1000, BEAT_SAVED_MS = 10_000, GAP_MS = 15_000;
+const MISSED_NOTE = 'not sent: their moment passed while this daemon was off or asleep. Tell your owner; send what still matters yourself.';
+state.schedule = { marks: {}, beat: null, missed: [], dropped: 0, ...(state.schedule ?? {}) };
+let entries = [], stamp = null, beatSaved = 0;
+const inFlight = new Set();
+
+/** The file's entries, read again only when it changed; a line that does not parse is logged once and inert. */
+function scheduleNow() {
+  let s = null;
+  try { const st = statSync(SCHEDULE); s = `${st.mtimeMs} ${st.size}`; } catch { /* no file: no entries */ }
+  if (s === stamp) return entries;
+  stamp = s;
+  const read = readSchedule(SCHEDULE);
+  for (const b of read.bad) log(`schedule: line ${b.line} inert (${b.code})`);
+  entries = read.entries;
+  return entries;
+}
+
+/** One entry's moment: a wake joins R13's queue; acts are checked at send (R8) and sent once, marked first. */
+async function fireEntry(e, now, late) {
+  if (inFlight.has(e.key) || state.schedule.marks[e.key]) return;
+  inFlight.add(e.key);
+  try {
+    if (e.wake) {
+      state.schedule.marks[e.key] = { at: now, wake: true };
+      save();
+      wakes.merge([{ rule: e.id, why: e.wake, count: 1, at: now }]);
+      for (const w of wakers.splice(0)) w();
+      return;
+    }
+    const candidates = actsOf(e.acts);
+    let keep = candidates, dropped = [];
+    if (candidates.some((c) => c.form)) {
+      const current = isCurrent(await ageAfter(), CURRENT_MS);
+      ({ keep, dropped } = sift(candidates, current ? verdicts(candidates) : [], current));
+    }
+    if (state.schedule.marks[e.key]) return;
+    if (keep.length === 0) {
+      state.schedule.marks[e.key] = { at: now, stopped: dropped.map((d) => d.reason) };
+      save();
+      log(`schedule: ${e.id} stopped locally`);
+      return;
+    }
+    // Marked with its reserved sequence in the same write that takes it (sendIntent saves before it sends).
+    state.schedule.marks[e.key] = { at: now, sequence: state.sequence + 1, late };
+    const target = keep.map((c) => c.this ?? '').join(' ');
+    const args = Object.entries(keep[0].args ?? {}).map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
+    const { sequence } = sendIntent(keep.map((c) => c.verb), { target, args, basis: state.cursor });
+    trace.write({ k: 'scheduled', id: e.id, seq: sequence, late });
+    log(`schedule: ${e.id} sent as ${sequence} (${late} ms after its moment)`);
+  } catch (err) {
+    state.schedule.marks[e.key] ??= { at: now, failed: err.code ?? 'refused' };
+    save();
+    log(`schedule: ${e.id} not sent (${err.code ?? err.message})`);
+  } finally {
+    inFlight.delete(e.key);
+  }
+}
+
+/** Each second: the beat (a gap is the daemon off or the machine asleep), then the real times that have come. */
+function beat() {
+  const now = Date.now(), s = state.schedule;
+  const off = s.beat !== null && now - s.beat > GAP_MS ? [s.beat, now] : null;
+  if (off) log(`schedule: no beat for ${Math.round((now - s.beat) / 1000)} s`);
+  s.beat = now;
+  const { fire, missed } = due(scheduleNow(), s.marks, now, off);
+  for (const m of missed) {
+    s.marks[m.e.key] = { at: now, missed: true };
+    if (m.told) {
+      s.missed.push({ ...shownEntry(m.e), lateMs: m.late, ...(m.off ? { off: m.off.map((t) => new Date(t).toISOString()) } : {}) });
+    } else s.dropped++;
+  }
+  if (missed.length || now - beatSaved >= BEAT_SAVED_MS) { beatSaved = now; save(); }
+  for (const f of fire) fireEntry(f.e, now, f.late);
+}
+
+/** The change entries an event fires, sent at once. */
+function scheduleEvent(event) {
+  const now = Date.now(), hit = dueOnEvent(scheduleNow(), state.schedule.marks, event, soul, now);
+  for (const e of hit) fireEntry(e, now, 0);
+  return hit.map((e) => e.id);
+}
 
 function stop() {
   stopping = true;
@@ -694,5 +793,7 @@ server.on('error', (e) => {
   process.exit(5);
 });
 rmSync(rt.socket, { force: true });
+beat(); // before the first answer, so it lists what was missed while off
+setInterval(beat, BEAT_MS);
 atSocket(rt.socket, (path) => server.listen(path, () => log(`listening for ${soul}, pid ${process.pid}`)));
 connect();
