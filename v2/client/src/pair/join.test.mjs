@@ -70,9 +70,10 @@ async function testWorld() {
     points: { grip: { role: 'grip', at_mm: [0, 100, 0] } },
     forms: { take: { who: 'anyone', steps: [{ step: 'take', move: 'press', at: 'grip' }] } },
   }));
-  // Births stand 1 m east of the entry (K10's ring): the body is born 300 mm west of the box.
+  // The first birth stands 1 m east of the entry (K10's ring): 580 mm west of the box, clear of its solid and within
+  // a press's reach (600 mm).
   const [x, , z] = box.pose;
-  return { facts, entries, at: `${(x - 1300) / 1000},${z / 1000}`, find: 'box', verbs: ['testworld:take'] };
+  return { facts, entries, at: `${(x - 1580) / 1000},${z / 1000}`, find: 'box', verbs: ['testworld:take'] };
 }
 
 const receipts = (d) => readdirSync(d).flatMap((f) => readFileSync(join(d, f), 'utf8').trim().split('\n')).filter(Boolean).map((l) => JSON.parse(l));
