@@ -35,7 +35,15 @@ const BODY: &str =
 const TICK_US: i64 = 50_000;
 
 fn soul_id(n: u64) -> Id {
-    Id::new(Scope([1; 16]), n).unwrap()
+    // V13c: `--soul1 <scope hex>.<counter>` names soul 1 (an imported Soul), whose own body is then the one followed.
+    let named = arg("--soul1").filter(|_| n == 1).and_then(|k| {
+        let (s, c) = k.split_once('.')?;
+        Id::new(
+            Scope(replica::encode::from_hex(s).ok()?.try_into().ok()?),
+            c.parse().ok()?,
+        )
+    });
+    named.unwrap_or_else(|| Id::new(Scope([1; 16]), n).unwrap())
 }
 
 fn node(n: u64) -> Id {
@@ -185,7 +193,14 @@ async fn main() {
     tokio::spawn(axum::serve(listener, socket::router(gw.clone())).into_future());
 
     let hall = node(1);
-    let body = |i: u64| node(10 + i);
+    let own = arg("--soul1").is_some();
+    let body = |i: u64| {
+        if i == 0 && own {
+            soul_id(1)
+        } else {
+            node(10 + i)
+        }
+    };
     let mut w = W { seq: 0, at: 0 };
     let created: Vec<Effect> = (0..=bodies)
         .map(|i| {

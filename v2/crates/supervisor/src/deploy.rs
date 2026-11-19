@@ -3,10 +3,10 @@
 //!
 //! 1. **Rehearse** ([`rehearse`]): on a scratch copy of the world's folder, never the served one, the new build starts
 //!    as `worldd serve` from the log as it stood `window` records ago and is fed the intents those records took (the recorded inputs,
-//!    I4's [`ANSWERED`] rows). It passes when it starts, gives every fed intent a named end and gives the probe act a
-//!    receipt. Invariants, not hashes: two builds fed the same inputs need not write the same bytes.
+//!    I4's [`ANSWERED`] rows). It passes when it starts, gives every fed intent a named end and answers the probe
+//!    ([`Probe`]). Invariants, not hashes: two builds fed the same inputs need not write the same bytes.
 //! 2. **Canary** ([`watch`]): the world's pin is set to the new build (one conditional write, W8) and the world is
-//!    restarted. It must serve within `start_within` and give the probe act a receipt within `answer_within`, every
+//!    restarted. It must serve within `start_within` and answer the probe within `answer_within`, every
 //!    `every`, for `window`. The first miss is a fault, by name: `canary.not-serving`, `canary.unanswered`,
 //!    `canary.refused` (with the world's reason).
 //! 3. **Roll back** ([`roll_back`]): code rolls back, data never. If the new build wrote any record, the old build
@@ -31,6 +31,7 @@ use directoryd::directory::store::Store;
 use replica::encode::{Value, decode, encode, to_hex};
 use replica::ids::sha256;
 use replica::intents::Intent;
+use replica::sync::wire;
 use sim::log::{FileStore, Log, recover};
 
 use crate::{World, build_path, pin, set_pin};
@@ -88,18 +89,69 @@ pub fn now_us() -> i64 {
         .map_or(0, |d| d.as_micros() as i64)
 }
 
-/// A known-good act on the world, sent again with a new sequence each time: a healthy world gives it a receipt.
-/// Its sequences are real microseconds, so they only grow, across restarts and rehearsals alike.
-pub struct Probe {
-    pub intent: Intent,
+/// What the canary sends a world, again and again: a healthy world answers it within `answer_within`.
+///
+/// A release's probe is [`Probe::Ask`] (O18c, #3524): R5b's sync ask for the world's root hash, `{20: n, 21: []}`. It
+/// needs no actor and no body, so it never drives anyone's Soul: a Soul has one controller, its owner's agent. The
+/// world answers it on its clock thread, behind every tick record already handed to its answers thread, so a world
+/// that does not serve, whose clock is stuck or whose disk does not sync leaves it unanswered; it is never an intent,
+/// so it reaches no log and no recorder. [`Probe::Act`] is an act of a body the caller owns (a test world's), for runs
+/// that also want a commit: sent with a new sequence and expiry each time, real microseconds, so they only grow.
+pub enum Probe {
+    /// The sync ask's number, counted up.
+    Ask(u64),
+    Act(Box<Intent>),
 }
 
 impl Probe {
-    fn next(&mut self) -> Vec<u8> {
-        let t = now_us();
-        self.intent.sequence = self.intent.sequence.max(t as u64 - 1) + 1;
-        self.intent.expiry = t + 5_000_000;
-        encode(&self.intent.to_value()).unwrap_or_default()
+    /// The bytes to send, and the number its answer carries.
+    fn next(&mut self) -> (Vec<u8>, u64) {
+        match self {
+            Probe::Ask(n) => {
+                *n += 1;
+                let ask = [
+                    (wire::ASK, Value::Uint(*n)),
+                    (wire::IDS, Value::Array(Vec::new())),
+                ];
+                (encode(&Value::Map(ask.into())).unwrap_or_default(), *n)
+            }
+            Probe::Act(intent) => {
+                let t = now_us();
+                intent.sequence = intent.sequence.max(t as u64 - 1) + 1;
+                intent.expiry = t + 5_000_000;
+                (
+                    encode(&intent.to_value()).unwrap_or_default(),
+                    intent.sequence,
+                )
+            }
+        }
+    }
+
+    /// The end `frame` names when it answers the probe sent as `n`; `None` for any other frame.
+    fn answered(&self, frame: &[u8], n: u64) -> Option<End> {
+        match self {
+            Probe::Ask(_) => {
+                let Value::Map(m) = decode(frame).ok()?.value else {
+                    return None;
+                };
+                if m.get(&wire::ASK) != Some(&Value::Uint(n)) {
+                    return None;
+                }
+                // The world's version, and its root's hash as sealed now.
+                let root = match m.get(&wire::IDS) {
+                    Some(Value::Array(h)) => {
+                        matches!(h.as_slice(), [Value::Bytes(b)] if !b.is_empty())
+                    }
+                    _ => false,
+                };
+                Some(match m.get(&wire::REFUSED) {
+                    Some(Value::Text(r)) => End::Refused(r.as_str().to_owned()),
+                    _ if root && m.contains_key(&1) => End::Receipt,
+                    _ => End::Unnamed,
+                })
+            }
+            Probe::Act(_) => read_answer(frame).and_then(|(q, e)| (q == n).then_some(e)),
+        }
     }
 }
 
@@ -185,8 +237,7 @@ pub struct Canary {
 
 /// Sends the probe and waits for its answer; the fault by name when it is not a receipt in time.
 fn probe_once(s: &mut UnixStream, probe: &mut Probe, within: Duration) -> Result<(), String> {
-    let bytes = probe.next();
-    let seq = probe.intent.sequence;
+    let (bytes, seq) = probe.next();
     if !send(s, &bytes) {
         return Err("canary.not-serving: the socket closed".into());
     }
@@ -209,13 +260,11 @@ fn probe_once(s: &mut UnixStream, probe: &mut Probe, within: Duration) -> Result
                 ));
             }
         };
-        match read_answer(&frame) {
-            Some((q, End::Receipt)) if q == seq => return Ok(()),
-            Some((q, End::Refused(r))) if q == seq => return Err(format!("canary.refused: {r}")),
-            Some((q, End::Unnamed)) if q == seq => {
-                return Err("canary.refused: an unnamed answer".into());
-            }
-            _ => {}
+        match probe.answered(&frame, seq) {
+            Some(End::Receipt) => return Ok(()),
+            Some(End::Refused(r)) => return Err(format!("canary.refused: {r}")),
+            Some(End::Unnamed) => return Err("canary.refused: an unnamed answer".into()),
+            None => {}
         }
     }
 }
@@ -607,7 +656,7 @@ impl Deploy<'_> {
             ..self.canary
         };
         watch(&served_socket(self.root, &self.world), &back, probe, true)?;
-        note("serving again: the probe has its receipt".into());
+        note("serving again: the probe is answered".into());
         Ok(())
     }
 }

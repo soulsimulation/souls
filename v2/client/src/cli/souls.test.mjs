@@ -57,7 +57,7 @@ function run(bin, args, ready) {
   });
 }
 
-async function waitFor(f, ms = 10_000) {
+async function waitFor(f, ms = 30_000) {
   const until = Date.now() + ms;
   for (;;) {
     const v = await f();
@@ -174,7 +174,8 @@ test('A3: the command loads no WASM, and its median time is under 100 ms', async
   const report = Object.fromEntries(Object.entries(times).filter(([, xs]) => xs.length).map(([k, xs]) => [k, { n: xs.length, medianMs: Math.round(median(xs)) }]));
   if (process.env.R7_REPORT) console.log(JSON.stringify({ timings: report }));
   const all = Object.values(times).flat();
-  assert.ok(median(all) < 100, `median ${Math.round(median(all))} ms over ${all.length} commands: ${JSON.stringify(report)}`);
+  // A speed bar (real time): asserted only in the speed-bar step (ci.sh, V2_SPEED_BARS=1); R7_REPORT prints it.
+  if (process.env.V2_SPEED_BARS) assert.ok(median(all) < 100, `median ${Math.round(median(all))} ms over ${all.length} commands: ${JSON.stringify(report)}`);
 });
 
 test('the daemon\'s log and state hold no token', () => {

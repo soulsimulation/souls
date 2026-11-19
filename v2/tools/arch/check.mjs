@@ -54,7 +54,8 @@ export const ALLOWED = {
   // without unsafe, one clock for the world and its gateway across their local socket, so an act's stamps form one
   // chain (O4, #2694). skills: the world runs the built-in walk for a move intent; the test world in its tests (I4b,
   // #3156). archive, supervisor: `serve` archives its history (V3's archiver) into O9's folder store (O3b, #3458).
-  worldd: ['replica', 'sim', 'directoryd', 'import-eden', 'rustix', 'skills', 'testworld', 'archive', 'supervisor'],
+  // backup: O20's restore reads a served world's shipped stores back in its tests (O20b, #3523; dev only).
+  worldd: ['replica', 'sim', 'directoryd', 'import-eden', 'rustix', 'skills', 'testworld', 'archive', 'supervisor', 'backup'],
   // Agents' sockets (I1, #2683): WebSocket on tokio through axum, a constant-time compare, the OS random source.
   // worldd and sim: the world's view tier in the view subscription tests (#3292), and a real world behind the gateway
   // for a creator's edits end to end (G1b, #3362; dev only).
@@ -63,7 +64,8 @@ export const ALLOWED = {
   skills: ['replica'],
   // W8 (#2729): the object store's SigV4 signature (ring) and HTTP (ureq); sim's tick loop in a test (dev only).
   // W1 (#2704): RS256 checks and random ids (ring), the one-file account store (rusqlite), JWKS (serde_json, ureq).
-  directoryd: ['replica', 'ring', 'rusqlite', 'serde_json', 'ureq', 'sim'],
+  // W11 (#2749): a Soul's picture passes G6's check and hold point (assets).
+  directoryd: ['replica', 'ring', 'rusqlite', 'serde_json', 'ureq', 'sim', 'assets'],
   // O1 (#2730): the launcher reads a world's pin from its directory record.
   // O7 (#2804): the rehearsal reads a world's log and writes its scratch copy (K4's log).
   supervisor: ['replica', 'directoryd', 'sim'],

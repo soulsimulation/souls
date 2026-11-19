@@ -14,7 +14,7 @@
     }
   },
   "points": {
-    "front": { "role": "stand", "at_mm": [0, 0, 763], "yaw_mdeg": 180000 },
+    "front": { "role": "stand", "at_mm": [-750, 0, 700], "yaw_mdeg": 180000 },
     "top": { "role": "contact", "at_mm": [-100, 760, 50] }
   },
   "geometry": { "bounds_mm": [1300, 960, 625] },
