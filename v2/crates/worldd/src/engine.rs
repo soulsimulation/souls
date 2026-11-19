@@ -13,6 +13,9 @@
 //!   caused by the intent and acted by its Soul, are applied to the world with the tick's other entries
 //!   ([`Engine::out`]), so the intent's receipt names them. An act is answered at once: a receipt, or its refusal by
 //!   name. A carry in progress is sampled each tick between its carriers ([`Engine::tick`]).
+//! - **A restart keeps its activities** (E26, #3329): once the bodies are back, [`Engine::restore`] reads them from
+//!   their nodes and membership links, so a member speaks in one and leaves it as before. Open offers and carries in
+//!   progress are not restored.
 //!
 //! Not here: activity kinds read from a world's entries (a world is given them, [`crate::answers::Config`]); bodies
 //! as nodes of the tree (Eden's Souls are not yet, so a join, a lift or a take there is refused by T2); the view
@@ -140,7 +143,8 @@ impl Engine {
     /// still speak in one and leave it: each started one takes its members' role claims again through `c`.
     pub fn restore(&mut self, live: &Tree, c: &mut Controller) -> R<()> {
         let kinds = self.kinds.clone();
-        self.activities = Activities::restore(self.header.clone(), self.rules.clone(), kinds, live, c)?;
+        self.activities =
+            Activities::restore(self.header.clone(), self.rules.clone(), kinds, live, c)?;
         Ok(())
     }
 

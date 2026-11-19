@@ -47,7 +47,6 @@ const LINEAGE: Scope = Scope([0xe2; 16]);
 const PLACE: &str = "souls:place";
 const WALKER: &str = "test:walker";
 const OPENER: &str = "souls:opener";
-const MEMBER_ROLE: &str = "souls:member";
 
 fn name(s: &str) -> Name {
     Name::new(s).unwrap()
@@ -69,7 +68,10 @@ fn kinds() -> Vec<(&'static str, String)> {
     vec![
         (PLACE, pinned(PLACE, 1)),
         (WALKER, pinned(WALKER, 2)),
-        ("souls:conversation", conversation().name.as_str().to_owned()),
+        (
+            "souls:conversation",
+            conversation().name.as_str().to_owned(),
+        ),
     ]
 }
 
@@ -236,9 +238,11 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
         node: ground,
         slot: None,
     };
-    let mut b = Bodies::new(town.clone(), 50_000)?;
-    for n in 1..=3 {
-        let p = town.surfaces[&ground].place(soul(n), frame, at(n), Quat::IDENTITY)?;
+    let placed = (1..=3)
+        .map(|n| town.surfaces[&ground].place(soul(n), frame, at(n), Quat::IDENTITY))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut b = Bodies::new(town, 50_000)?;
+    for p in placed {
         b.add_body(humanoid(), p)?;
     }
     Ok(b)
@@ -249,7 +253,12 @@ struct Client(UnixStream, Id, u64);
 
 impl Client {
     /// One intent and its one answer: a receipt's entries, or a refusal's reason.
-    fn act(&mut self, verb: &str, target: Option<Id>, p: &[(u64, Value)]) -> Result<Vec<u64>, String> {
+    fn act(
+        &mut self,
+        verb: &str,
+        target: Option<Id>,
+        p: &[(u64, Value)],
+    ) -> Result<Vec<u64>, String> {
         self.2 += 1;
         let i = Intent {
             actor: Actor::Soul(self.1),
@@ -303,7 +312,10 @@ impl Client {
 
     /// A turn: a `say` into the conversation (private, E26a), or out loud (public).
     fn say(&mut self, into: Option<Id>, words: &str) -> Result<Vec<u64>, String> {
-        let w = Value::Map(BTreeMap::from([(23, Value::Bytes(words.as_bytes().to_vec()))]));
+        let w = Value::Map(BTreeMap::from([(
+            23,
+            Value::Bytes(words.as_bytes().to_vec()),
+        )]));
         self.act("test:say", into, &[(1, w)])
     }
 }
@@ -395,7 +407,12 @@ impl Run {
     fn said(&self) -> Vec<(Id, Said)> {
         let mut out = Vec::new();
         for e in self.entries() {
-            for ev in e.events.iter().flatten().filter(|ev| ev.name.as_str() == SAID) {
+            for ev in e
+                .events
+                .iter()
+                .flatten()
+                .filter(|ev| ev.name.as_str() == SAID)
+            {
                 out.push((
                     e.envelope.node,
                     Said::read(&ev.to_value(), e.envelope.audience).unwrap(),
@@ -457,10 +474,14 @@ fn as_souls(run: &Run, seq: &[u64], soul: Id) -> bool {
         .into_iter()
         .filter(|e| seq.contains(&e.envelope.sequence))
         .collect();
-    !es.is_empty() && es.len() == seq.len() && es.iter().all(|e| e.envelope.actor == Actor::Soul(soul))
+    !es.is_empty()
+        && es.len() == seq.len()
+        && es.iter().all(|e| e.envelope.actor == Actor::Soul(soul))
 }
 
 #[test]
+// A4 measures how long a member's read-back takes, in real time.
+#[allow(clippy::disallowed_methods)]
 fn a1_a3_a4_two_souls_open_talk_privately_and_leave() {
     let run = serve("a1");
     let (mut a, mut b, mut c) = (run.client(1, 0), run.client(2, 0), run.client(3, 0));
@@ -468,9 +489,15 @@ fn a1_a3_a4_two_souls_open_talk_privately_and_leave() {
     let o = offer(&mut a).expect("A1: offered");
     let conv = run.created(&o);
     steps.push(("offer", soul(1), o));
-    let acc = b.act("activity:accept", Some(conv), &[]).expect("A1: accepted");
+    let acc = b
+        .act("activity:accept", Some(conv), &[])
+        .expect("A1: accepted");
     steps.push(("accept", soul(2), acc));
-    assert_eq!(run.members(conv), Some([soul(1), soul(2)].into()), "A1: both are members");
+    assert_eq!(
+        run.members(conv),
+        Some([soul(1), soul(2)].into()),
+        "A1: both are members"
+    );
     let turns = [
         "shall we talk about the garden",
         "yes, the beans are up",
@@ -480,24 +507,42 @@ fn a1_a3_a4_two_souls_open_talk_privately_and_leave() {
         "nine it is",
     ];
     for (k, t) in turns.iter().enumerate() {
-        let (who, s) = if k % 2 == 0 { (&mut a, soul(1)) } else { (&mut b, soul(2)) };
+        let (who, s) = if k % 2 == 0 {
+            (&mut a, soul(1))
+        } else {
+            (&mut b, soul(2))
+        };
         let r = who.say(Some(conv), t).expect("A1: a member's turn");
         steps.push(("turn", s, r));
     }
     // A3: a non-member beside them speaking into it is refused, and nothing is said.
     let refused = c.say(Some(conv), "may I listen in");
-    assert_eq!(refused, Err("not-a-member".to_owned()), "A3: refused by name");
-    let l1 = a.act("activity:leave", Some(conv), &[]).expect("A1: the opener leaves");
+    assert_eq!(
+        refused,
+        Err("not-a-member".to_owned()),
+        "A3: refused by name"
+    );
+    let l1 = a
+        .act("activity:leave", Some(conv), &[])
+        .expect("A1: the opener leaves");
     steps.push(("leave", soul(1), l1));
-    let l2 = b.act("activity:leave", Some(conv), &[]).expect("A1: the member leaves");
+    let l2 = b
+        .act("activity:leave", Some(conv), &[])
+        .expect("A1: the member leaves");
     steps.push(("leave", soul(2), l2));
     for (what, s, seq) in &steps {
-        assert!(as_souls(&run, seq, *s), "A1: {what} {seq:?} is in the log as {s:?}'s");
+        assert!(
+            as_souls(&run, seq, *s),
+            "A1: {what} {seq:?} is in the log as {s:?}'s"
+        );
     }
     println!(
         "A1: {} steps (offer, accept, six turns, two leaves), each in the log as its Soul's: {:?}",
         steps.len(),
-        steps.iter().map(|(w, _, s)| (*w, s.clone())).collect::<Vec<_>>()
+        steps
+            .iter()
+            .map(|(w, _, s)| (*w, s.clone()))
+            .collect::<Vec<_>>()
     );
     assert_eq!(run.members(conv), None, "A1: ended with its last member");
 
@@ -506,7 +551,11 @@ fn a1_a3_a4_two_souls_open_talk_privately_and_leave() {
     assert_eq!(said.len(), 6, "A3: six turns, nothing for the refused one");
     for (_, s) in &said {
         assert_eq!(s.audience, Audience::Of(conv), "A3: the members' audience");
-        assert_eq!(s.hearers, [soul(1), soul(2)].into(), "A3: heard by the members");
+        assert_eq!(
+            s.hearers,
+            [soul(1), soul(2)].into(),
+            "A3: heard by the members"
+        );
     }
     // A4: a member reads every turn back; a public reader and a non-member are refused.
     let started = Instant::now();
@@ -516,17 +565,33 @@ fn a1_a3_a4_two_souls_open_talk_privately_and_leave() {
         .collect();
     let took = started.elapsed();
     assert_eq!(read, turns, "A4: the turns, in order");
-    assert!(took < Duration::from_secs(2), "A4: under 2 s, took {took:?}");
+    assert!(
+        took < Duration::from_secs(2),
+        "A4: under 2 s, took {took:?}"
+    );
     for (_, s) in &said {
-        assert_eq!(run.text.read(s.words, &[]).unwrap_err().name, "not-entitled", "A3: no public reader");
-        assert_eq!(run.text.read(s.words, &[soul(3)]).unwrap_err().name, "not-entitled", "A4: no non-member");
+        assert_eq!(
+            run.text.read(s.words, &[]).unwrap_err().name,
+            "not-entitled",
+            "A3: no public reader"
+        );
+        assert_eq!(
+            run.text.read(s.words, &[soul(3)]).unwrap_err().name,
+            "not-entitled",
+            "A4: no non-member"
+        );
     }
     // A3: no word of a turn is in the log.
     let log = run.store.0.lock().unwrap().bytes.clone();
     for t in turns.iter().chain(["may I listen in"].iter()) {
-        assert!(!log.windows(t.len()).any(|w| w == t.as_bytes()), "A3: {t:?} is not in the log");
+        assert!(
+            !log.windows(t.len()).any(|w| w == t.as_bytes()),
+            "A3: {t:?} is not in the log"
+        );
     }
-    println!("A4: a member read the six turns back in {took:?}; the public and a non-member were refused `not-entitled`");
+    println!(
+        "A4: a member read the six turns back in {took:?}; the public and a non-member were refused `not-entitled`"
+    );
     run.stop();
 }
 
@@ -536,20 +601,22 @@ fn a3_a_public_conversation_is_talk_at_its_reach() {
     let (mut a, mut b) = (run.client(1, 0), run.client(2, 0));
     let conv = run.created(&offer(&mut a).expect("offered"));
     b.act("activity:accept", Some(conv), &[]).expect("accepted");
-    a.say(None, "good morning, everyone").expect("a public turn");
+    a.say(None, "good morning, everyone")
+        .expect("a public turn");
     b.say(None, "morning").expect("a public turn");
     let said = run.said();
     assert_eq!(said.len(), 2);
     for (_, s) in &said {
         assert_eq!(s.audience, Audience::Everyone, "A3: public");
         assert_eq!(s.reach_mm, SAY_REACH_MM, "A3: at talk's reach");
-        assert_eq!(
-            run.text.read(s.words, &[soul(3)]).unwrap().is_empty(),
-            false,
+        assert!(
+            !run.text.read(s.words, &[soul(3)]).unwrap().is_empty(),
             "A3: anyone may read a public turn"
         );
     }
-    println!("A3: a public conversation's two turns are public, reach {SAY_REACH_MM} mm, read by a non-member");
+    println!(
+        "A3: a public conversation's two turns are public, reach {SAY_REACH_MM} mm, read by a non-member"
+    );
     run.stop();
 }
 
@@ -558,7 +625,9 @@ fn a2_a_decline_is_named_to_the_opener_and_nothing_is_said() {
     let run = serve("a2");
     let (mut a, mut b) = (run.client(1, 0), run.client(2, 0));
     let conv = run.created(&offer(&mut a).expect("offered"));
-    let d = b.act("activity:decline", Some(conv), &[]).expect("A2: the decline lands");
+    let d = b
+        .act("activity:decline", Some(conv), &[])
+        .expect("A2: the decline lands");
     // The decline's entry: `souls:offer-declined`, naming the offer and the opener, addressed to the opener alone.
     let declined: Vec<(Id, BTreeSet<Id>)> = run
         .entries()
@@ -571,12 +640,25 @@ fn a2_a_decline_is_named_to_the_opener_and_nothing_is_said() {
             (read_id(&ev.fields[&1]).unwrap(), to)
         })
         .collect();
-    assert_eq!(declined, vec![(conv, [soul(1)].into())], "A2: named to the opener alone");
-    assert_eq!(run.members(conv), None, "A2: the declined conversation ended");
+    assert_eq!(
+        declined,
+        vec![(conv, [soul(1)].into())],
+        "A2: named to the opener alone"
+    );
+    assert_eq!(
+        run.members(conv),
+        None,
+        "A2: the declined conversation ended"
+    );
     let into = a.say(Some(conv), "are you there");
-    assert!(into.is_err(), "A2: nothing is said into a declined conversation: {into:?}");
+    assert!(
+        into.is_err(),
+        "A2: nothing is said into a declined conversation: {into:?}"
+    );
     assert!(run.said().is_empty(), "A2: no utterance in the log");
-    println!("A2: the decline {d:?} is addressed to the opener; a turn into it was refused {into:?}");
+    println!(
+        "A2: the decline {d:?} is addressed to the opener; a turn into it was refused {into:?}"
+    );
     run.stop();
 }
 
@@ -595,7 +677,8 @@ fn a5_a_leave_is_accepted_and_a_restart_keeps_the_conversation() {
         "A5: after a restart the conversation and its members are there"
     );
     let (mut a, mut b) = (run.client(1, a.2), run.client(2, b.2));
-    b.say(Some(conv), "after the restart").expect("A5: a member speaks after the restart");
+    b.say(Some(conv), "after the restart")
+        .expect("A5: a member speaks after the restart");
     let l1 = a.act("activity:leave", Some(conv), &[]);
     let l2 = b.act("activity:leave", Some(conv), &[]);
     println!("A5: after a restart, leaves {l1:?} {l2:?}");
