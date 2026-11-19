@@ -11,8 +11,8 @@
 #                                               runs it on another machine through `$INSTALL_SSH <target> <command>`
 #
 # What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd,
-# directoryd, the origin and the page's files); data in /var/lib/souls; settings in /etc/souls, the secrets file
-# root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@, souls-directory and souls-origin.
+# directoryd, deploy, the origin and the page's files); data in /var/lib/souls; settings in /etc/souls, the secrets file
+# root-owned, and /etc/souls/probe, where `deploy` keeps each world's probe (made from its folder at its first deploy); the units souls.slice, worldd@ (with its drop-in), souls-gateway@, souls-directory and souls-origin.
 # Carried over from today's installer: idempotent, and it starts, enables and restarts nothing. It never reads or
 # writes today's units, users, data, proxy, DNS or firewall: it refuses, changing nothing, when anything it would
 # make is already there and not its own (install.state records what it made).
@@ -26,7 +26,7 @@ DATA=/var/lib/souls
 ETC=/etc/souls
 UNITS=/etc/systemd/system
 STATE=$ETC/install.state
-PROGRAMS=(supervisor worldd gatewayd directoryd)
+PROGRAMS=(supervisor worldd gatewayd directoryd deploy)
 UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service)
 DROPIN=$UNITS/worldd@.service.d
 # Everything it may make, and so everything it may remove: the user, three folders it owns whole, its units.
@@ -164,6 +164,7 @@ install_all() {
   else
     act "perms $ETC 750 root:$ACCOUNT" true
   fi
+  ensure_dir "$ETC/probe" 750 root root
   ensure_dir "$LIB" 755 root root "tree $LIB"
   for p in "${PROGRAMS[@]}"; do ensure_file "$from/bin/$p" "$LIB/$p" 755 root root; done
   ensure_tree "$from/origin" "$LIB/origin"

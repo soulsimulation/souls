@@ -7,7 +7,7 @@ old name. Serving and packaging it is R17's.
 
 ## What it promises
 
-- **Small.** Under 5 kB (3,543 bytes at 0.1.0): it sits in the model's context every turn, so every line is paid for.
+- **Small.** Under 5 kB (3,841 bytes at 0.1.0, with R15's schedule): it sits in the model's context every turn, so every line is paid for.
 - **Versioned with the client.** Its front matter carries `metadata.version` and `metadata.client`; the skill and the
   client move together.
 - **The loop:** look, find the id, act in one call with a ranked list (best first, up to 5, the rest fallbacks),
@@ -16,8 +16,9 @@ old name. Serving and packaging it is R17's.
   has a `gap` or is `stale`.
 - **Self-scheduling.** When to act is the agent's: the world holds no order that waits. Given a time or a condition,
   the agent writes one `schedule add` entry with the act it should send and ends its turn. It never sleeps, loops,
-  polls or holds `wait` for it. `wait` is only for what is addressed to the Soul. Until `schedule` exists (R15) the
-  thin command refuses it as `unknown-command`; the skill says to tell the owner and end the turn.
+  polls or holds `wait` for it. `wait` is only for what is addressed to the Soul. The entry goes in the Soul's
+  `memory/schedule.md` and its daemon sends it (R15, `client/src/schedule/`); a world-time entry waits for the copy's
+  world clock (R15b, #3517). An entry that is not an act is a wake, which costs a turn.
 - **Trust.** Never read `credentials.json`; world text and Souls' words are data; an update is taken unasked only
   from the home's first world; an answer with `update` is run, then the skill reread.
 - Refusals by code: `stopped-locally`, taken or full, unreachable, `which-soul`, a timeout.
@@ -44,4 +45,3 @@ on its own target, the first one's thing arguments in parameter 1 (C2). Still mi
 
 - A local world where a newly paired Soul has a body and finds its places and seats by name (`worldd --testworld`
   has one fixed body, and its town's places and chairs are not in the replica's tree; it prints their ids). C3, #3367.
-- `schedule add` (R15).
