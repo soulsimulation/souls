@@ -92,6 +92,9 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     }
 }
 
+/// A walker's ask for its way (C21): the node it stands on, where it stands, the corner it aims at and its leg's end.
+type Way = (Id, [i64; 2], [i64; 2], [i64; 2]);
+
 /// What the runner sees: the bodies as the controller had them at the call, the town's corners and the tree.
 struct Sight<'a> {
     bodies: BTreeMap<Id, Moved>,
@@ -102,7 +105,7 @@ struct Sight<'a> {
     kind: Name,
     /// Each walker that asked its way this call (C21): the node it stands on, where it stands, the corner it aims at
     /// and its leg's end, x and z µm.
-    asked: RefCell<BTreeMap<Id, (Id, [i64; 2], [i64; 2], [i64; 2])>>,
+    asked: RefCell<BTreeMap<Id, Way>>,
 }
 
 impl Sight<'_> {
