@@ -6,6 +6,8 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, RwLock};
 
 use replica::effects::Actor;
 use replica::encode::{Value, encode, from_hex, to_hex};
@@ -222,6 +224,58 @@ impl Tokens {
     }
 }
 
+/// What tells a tokens file's versions apart: its modification time, length and inode (a file written whole and
+/// renamed into place, as the directory writes it, is a new inode).
+type Stamp = (Option<std::time::SystemTime>, u64, u64);
+
+fn stamp(path: &Path) -> Option<Stamp> {
+    use std::os::unix::fs::MetadataExt;
+    let m = std::fs::metadata(path).ok()?;
+    Some((m.modified().ok(), m.len(), m.ino()))
+}
+
+fn read_file(path: &Path) -> Result<Tokens, String> {
+    std::fs::read_to_string(path)
+        .map_err(|e| e.to_string())
+        .and_then(|t| Tokens::read(&t))
+}
+
+/// The tokens file, read again whenever it changed (Engine v2 C3, #3367): a token the directory pairs while the
+/// gateway runs works at its first sign-in, with no restart. A file that no longer reads leaves the tokens as they
+/// were.
+pub struct Source {
+    path: PathBuf,
+    seen: Mutex<Option<Stamp>>,
+}
+
+impl Source {
+    /// Reads the file at `path`, remembering which version it read.
+    pub fn open(path: &Path) -> Result<(Source, Tokens), String> {
+        let seen = stamp(path);
+        let tokens = read_file(path)?;
+        let source = Source {
+            path: path.to_owned(),
+            seen: Mutex::new(seen),
+        };
+        Ok((source, tokens))
+    }
+
+    /// Reads the file again into `tokens` if it changed since it was last read; true when it did.
+    pub fn refresh(&self, tokens: &RwLock<Tokens>) -> bool {
+        let now = stamp(&self.path);
+        let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        if now.is_none() || *seen == now {
+            return false;
+        }
+        let Ok(read) = read_file(&self.path) else {
+            return false;
+        };
+        *tokens.write().unwrap_or_else(|e| e.into_inner()) = read;
+        *seen = now;
+        true
+    }
+}
+
 /// The key the directory signs view tokens with, shared with the gateways (V13b, #3407). Never formatted.
 pub struct ViewKey([u8; 32]);
 
@@ -304,6 +358,39 @@ impl fmt::Debug for ViewToken {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn token(counter: u64) -> (Grant, String) {
+        let id =
+            Id::new(Scope([0x3c; 16]), counter).unwrap_or_else(|| unreachable!("a small counter"));
+        let grant = Grant::Actor(Actor::Soul(id));
+        (grant, format!("{}.{}", grant.to_text(), "ab".repeat(32)))
+    }
+
+    /// C3 A3: a token added to the file while the gateway runs is taken at the next check, with no restart.
+    #[test]
+    fn a3_a_rewritten_tokens_file_is_read_again() {
+        let dir = std::env::temp_dir().join(format!("gatewayd-c3-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("tokens");
+        let (a, ta) = token(1);
+        let (b, tb) = token(2);
+        let line = |g: Grant, t: &str| Tokens::line(g, &sha256(t.as_bytes()));
+        std::fs::write(&path, line(a, &ta)).unwrap();
+        let (source, read) = Source::open(&path).unwrap();
+        let tokens = RwLock::new(read);
+        let check = |t: &str| tokens.read().unwrap().check(&Token::parse(t).unwrap());
+        assert_eq!(check(&ta), Some(a));
+        assert_eq!(check(&tb), None, "not paired yet");
+        assert!(!source.refresh(&tokens), "unchanged: not read again");
+        // The directory writes the file whole and renames it into place.
+        let next = dir.join("tokens.next");
+        std::fs::write(&next, line(a, &ta) + &line(b, &tb)).unwrap();
+        std::fs::rename(&next, &path).unwrap();
+        assert!(source.refresh(&tokens));
+        assert_eq!(check(&tb), Some(b), "the new token works at once");
+        assert_eq!(check(&ta), Some(a));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn hmac_sha256_matches_rfc_4231_case_2() {

@@ -29,15 +29,19 @@ step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked
 # The architecture's own rules (K14, #2648): a self-test on seeded violations, then the tree (v2/tools/arch/README.md).
 step arch node tools/arch/check.mjs
 step tests cargo test --workspace --locked
-# The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md).
+# The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md); the site's pages it serves (O23, #3324).
 # The test files by name: Node 24 on CI reads a bare folder as one file, not as the tests inside it.
-step origin-headers node --test tools/origin/origin.test.mjs
+step origin-headers node --test tools/origin/origin.test.mjs tools/origin/site.test.mjs
 # The install (O17, #2810): nothing it would write, and no unit, user or port it names, is today's system's.
 step install-apart bash tools/ops/install.sh check
 # What a world costs (O11, #2721): the scripted hour, the sum check, a stopped world, the not-metered rule, the page.
 step cost node --test tools/ops/cost/cost.test.mjs
+# The cut-over's count of what a rollback leaves in the new system (X7, #2836).
+step cutover-count node --test tools/ops/cutover/count.test.mjs
 # The site owner's health page, usage table and history (O21, #3325); A2 runs the supervisor the tests above built.
 step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
+# Imported Souls approved again per day (X15, #3322): counts only, no Soul or account id.
+step ops-reapproved node --test tools/ops/reapproved.test.mjs
 # The watcher (O15, #2808): one message per trouble and recovery, none for a deploy, a stop or a sleep; no look wakes a world.
 step ops-watch node --test tools/ops/watch/watch.test.mjs
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
@@ -147,7 +151,8 @@ step client-history node --test client/src/history/*.test.mjs
 # A home on today's client comes across (R18, #2821): the released 2.36.2 client against the new answers, from v2/ alone.
 step client-upgrade node --test client/test/compat/*.test.mjs client/src/upgrade/*.test.mjs
 # Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else;
-# pairing to a served world writes the history it advertises, which `history --at` reads (R16b, #3480).
+# then a paired Soul joins a served world, acts and leaves, through the gateway (C3, #3367).
+# Pairing to a served world writes the history it advertises, which `history --at` reads (R16b, #3480).
 step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p testworld --locked --quiet &&
   node --test client/src/pair/*.test.mjs'
 # The served client (R17, #2818): the served files against the release's manifest; the one line, upgrade, rollback.

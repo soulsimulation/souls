@@ -1,0 +1,13 @@
+# A conversation (Engine v2 E26, #3329): an activity Souls join to talk as a group they each chose. Read by
+# `replica::activity::ActivityKind::from_value` (B5's encoding, the one the running world takes). Two roles, since an
+# offer (E8) is a pair: the opener, who offers it, and the member, who accepts. Each claims one voice only, so a member
+# walks, sits and uses its hands while it talks. An offer nobody answers lapses after a minute; a leave takes at most
+# 0.4 s and is always accepted. Pinned as souls:conversation@1220 + sha256("souls/conversation/1").
+{
+  1: "souls:conversation@1220070284220bb6e0bbfc46dc1efce8ad751cf0af39f0958875c2e4b9e077135c51",
+  2: 1,
+  3: [{1: "souls:opener", 2: "souls:here", 3: [{1: 2, 2: 4}]},    # one voice
+      {1: "souls:member", 2: "souls:here", 3: [{1: 2, 2: 4}]}],
+  4: 60000000,                                                    # an unanswered offer lapses after 60 s
+  5: 400000                                                       # a leave takes at most 0.4 s
+}
