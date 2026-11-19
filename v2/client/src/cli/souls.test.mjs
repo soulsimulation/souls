@@ -15,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { requestOf } from './souls.mjs';
+import { objects, serve } from '../history/day.mjs';
+import { DAY } from '../history/history.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -35,7 +37,14 @@ const procs = [];
 const seat = (counter) => ({ grant: `soul-${WORLD_SCOPE}-${counter}`, token: `soul-${WORLD_SCOPE}-${counter}.${randomBytes(32).toString('hex')}` });
 const a = seat(2), b = seat(4); // the world's two bodies
 const times = { status: [], look: [], find: [], act: [], wait: [] };
-let rtA, rtB;
+let rtA, rtB, served;
+// R16: a world day of history in V4's files: the other Soul switches its lamp each minute, and this Soul arrives in
+// the room each hour.
+const ROOM = `${WORLD_SCOPE}-1`, A_ID = `${WORLD_SCOPE}-2`, B_ID = `${WORLD_SCOPE}-4`;
+const dayActs = [
+  ...Array.from({ length: 1440 }, (_, m) => ({ at: DAY + m * 60e6 + 5e6, kind: 'r2:switched', node: LAMP_B, actor: B_ID })),
+  ...Array.from({ length: 24 }, (_, h) => ({ at: DAY + h * 3600e6 + 7e6, kind: 'souls:arrived', node: ROOM, actor: A_ID })),
+].sort((x, y) => x.at - y.at);
 
 function run(bin, args, ready) {
   const p = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -75,7 +84,8 @@ before(async () => {
   await waitFor(() => { try { return statSync(world).isSocket(); } catch { return false; } });
   const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', world, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
   mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, 'config.json'), JSON.stringify({ worlds: { local: { url: 'http://127.0.0.1/', gateway: `ws://${addr}/v2/ws` } } }));
+  served = await serve(objects(dayActs));
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ worlds: { local: { url: 'http://127.0.0.1/', gateway: `ws://${addr}/v2/ws`, history: served.base } } }));
   writeFileSync(join(home, 'credentials.json'), JSON.stringify({ souls: { [A]: { local: { token: a.token } }, [B]: { local: { token: b.token } } } }), { mode: 0o600 });
   chmodSync(join(home, 'credentials.json'), 0o600);
   rtA = runtimeOf(home, A);
@@ -90,6 +100,7 @@ before(async () => {
 after(async () => {
   for (const rt of [rtA, rtB]) await request(rt.socket, { op: 'stop' }).catch(() => {});
   for (const p of procs) p.kill();
+  served?.stop();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -208,4 +219,28 @@ test('C4 A1: say and whisper send T8 words through the daemon; the world keeps t
   assert.equal(refused(['say']), 'words-empty-or-long');
   assert.equal(refused(['whisper', 'bob', 'hi']), 'whisper-names-a-body');
   assert.equal(refused(['lie']), 'lie-names-a-thing');
+});
+
+test('R16: history by thing, place and Soul through the daemon, each named from the copy, under 600 bytes', () => {
+  // history's --soul is its question, so the asking Soul is --as.
+  assert.deepEqual(requestOf(['history', '--soul', 'Kofi', '--as', A, '--since', '5']), { req: { op: 'history', soul: 'Kofi', since: '5' }, soul: A });
+  assert.deepEqual(requestOf(['history', '--at', ROOM]).req, { op: 'history', at: ROOM });
+  const ask = (args, status = 0) => {
+    const r = spawnSync(process.execPath, [CLI, 'history', ...args, '--as', A], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8' });
+    assert.equal(r.status, status, r.stdout + r.stderr);
+    assert.ok(Buffer.byteLength(r.stdout) < 600, `${r.stdout.length} bytes`);
+    return JSON.parse(r.stdout);
+  };
+  const lamp = ask(['--thing', LAMP_B_NAME]);
+  assert.equal(lamp.about, LAMP_B_NAME, 'a name is looked up in the copy');
+  assert.equal(lamp.found, 1440);
+  assert.deepEqual(lamp.span, { from: 'd1 00:00', to: 'd2 00:00' });
+  assert.equal(lamp.lines[0], 'd1 23:59 body 4 r2:switched');
+  assert.equal(lamp.more, 1435);
+  assert.equal(typeof lamp.at, 'number');
+  const room = ask(['--at', ROOM]);
+  assert.equal(room.found, 1440 + 24, 'the room and what the copy holds in it');
+  const me = ask(['--soul', 'me']);
+  assert.deepEqual([me.about, me.found, me.lines[0]], ['me', 24, 'd1 23:00 arrived room 1']);
+  assert.equal(ask(['--soul', 'nobody'], 1).code, 'history-unknown');
 });
