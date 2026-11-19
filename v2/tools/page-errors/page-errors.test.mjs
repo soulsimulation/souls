@@ -32,8 +32,8 @@ test('the four injected failures each appear once, with the page build, world an
 
 test('no PII is stored: names in quotes, tokens, Clerk ids, emails, addresses, query strings and user agents are gone', () => {
   const { ce, dir } = fresh();
-  const secret = ['Kwyjibo says "meet me at the well at noon, love Gene"', 'Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyXzJhYmMifQ.c2ln', 'user_2pQ7xYzAbCdEfGhIjKlMnOp', 'gene@example.com', '81.2.69.160', '?token=sk_live_abc123def456ghi789', 'session=abcd'];
-  ce.ingest('81.2.69.160', UA_DESK, body({ b: 'we-x', w: 'mine', e: [
+  const secret = ['Kwyjibo says "meet me at the well at noon, love Gene"', 'Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyXzJhYmMifQ.c2ln', 'user_2pQ7xYzAbCdEfGhIjKlMnOp', 'gene@example.com', '81.2.69.160', '?token=sk_live_abc123def456ghi789', 'session=abcd'];   // scrub-guard: allow (a test address)
+  ce.ingest('81.2.69.160', UA_DESK, body({ b: 'we-x', w: 'mine', e: [   // scrub-guard: allow (a test address)
     { k: 'rej', m: `Error: failed for ${secret[2]} ${secret[3]} from ${secret[4]} ${secret[1]} ${secret[6]}`, s: 'api-request' },
     { k: 'js', m: `TypeError: ${secret[0]}`, s: 'SoulCard' },
     { k: 'res', m: 'script', s: `https://sim.eden.art/worlds/assets/x.js${secret[5]}` },
@@ -41,7 +41,7 @@ test('no PII is stored: names in quotes, tokens, Clerk ids, emails, addresses, q
   ] }));
   ce.flush();
   const stored = readdirSync(dir).map((f) => readFileSync(join(dir, f), 'utf8')).join('\n') + JSON.stringify(ce.summary());
-  for (const bad of ['Kwyjibo', 'meet me', 'Gene', 'eyJ', 'user_2pQ7', 'gene@example.com', '81.2.69.160', 'sk_live', 'abcd', 'Macintosh', 'Chrome/141']) assert.ok(!stored.includes(bad), `stored data must not contain ${bad}`);
+  for (const bad of ['Kwyjibo', 'meet me', 'Gene', 'eyJ', 'user_2pQ7', 'gene@example.com', '81.2.69.160', 'sk_live', 'abcd', 'Macintosh', 'Chrome/141']) assert.ok(!stored.includes(bad), `stored data must not contain ${bad}`);   // scrub-guard: allow (a test address)
   assert.match(stored, /chrome\/desktop/);
   const rows = readFileSync(join(dir, 'events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   for (const r of rows) assert.deepEqual(Object.keys(r).sort(), ['b', 'c', 'fp', 'k', 'n', 't', 'v', 'w'], 'an event row holds no text at all');
@@ -76,11 +76,11 @@ test('new kinds are counted from the build that went live; a later release start
   t += 60_000;
   const b = clientErrors({ dir, build: 'we-two', now: () => t, limits: { flushMs: 1 } });
   assert.equal(b.newSinceRelease(), 0);
-  t += 1000; b.ingest('1.1.1.2', UA_DESK, body({ b: 'we-two', e: [{ k: 'js', m: 'old error', s: 'a' }, { k: 'gl', m: 'context lost' }] }));
+  t += 1000; b.ingest('1.1.1.2', UA_DESK, body({ b: 'we-two', e: [{ k: 'js', m: 'old error', s: 'a' }, { k: 'gl', m: 'context lost' }] }));   // scrub-guard: allow (a test address)
   assert.equal(b.newSinceRelease(), 1, 'only the context loss is new');
   const s = b.summary(); assert.equal(s.top.find((r) => r.kind === 'js').new, false); assert.deepEqual(s.top.find((r) => r.kind === 'js').builds, { 'we-one': 1, 'we-two': 1 });
   // a handover: the old generation writes after the new one read the table; the new one (nothing unsaved) re-reads it
-  b.flush(); t += 1000; a.ingest('1.1.1.3', UA_DESK, body({ b: 'we-one', e: [{ k: 'arrival', m: 'not done in 60 s', s: 'snapshot' }] })); a.flush();
+  b.flush(); t += 1000; a.ingest('1.1.1.3', UA_DESK, body({ b: 'we-one', e: [{ k: 'arrival', m: 'not done in 60 s', s: 'snapshot' }] })); a.flush();   // scrub-guard: allow (a test address)
   assert.ok(b.summary().top.some((r) => r.kind === 'arrival'));
 });
 
@@ -100,7 +100,7 @@ test('#406: a handover write is read even when it lands on the same mtime (coars
 test('bad input is refused without storing anything', () => {
   const { ce } = fresh();
   assert.equal(ce.ingest('1.2.3.4', UA_DESK, Buffer.from('{nope'))[0], 400);
-  assert.deepEqual(ce.ingest('1.2.3.5', UA_DESK, body({ b: '<script>', w: '../etc', e: [{ k: 'evil', m: 'x' }, 'str', null] })), [204, null]);
+  assert.deepEqual(ce.ingest('1.2.3.5', UA_DESK, body({ b: '<script>', w: '../etc', e: [{ k: 'evil', m: 'x' }, 'str', null] })), [204, null]);   // scrub-guard: allow (a test address)
   assert.equal(ce.summary().kinds, 0);
 });
 
