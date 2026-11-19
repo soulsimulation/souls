@@ -251,6 +251,7 @@ impl Activities {
     /// first to accept and a new one for each after, expiring after the kind's `proposal_lasts`. The pair waits its
     /// turn behind the asker's earlier pairs and starts when both bodies are free, perhaps now. Returns the pair's
     /// activity. `offer-missing`, `not-asked`, `offer-answered`, `offer-expired`, `offer-withdrawn`.
+    #[allow(clippy::too_many_arguments)]
     pub fn accept(
         &mut self,
         tree: &mut Tree,
