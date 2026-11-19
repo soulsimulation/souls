@@ -1,12 +1,27 @@
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { externalAgent, measure, TASK } from './eval.mjs';
+import { fileURLToPath } from 'node:url';
+import { externalAgent, folder, measure, TASK } from './eval.mjs';
+
+const scratch = fileURLToPath(new URL('../../../.local/g7b/adapter-tests/', import.meta.url));
+mkdirSync(scratch, { recursive: true });
+
+test('creator setup stays in the run scratch with only the skill, command and unpaired home', () => {
+  const dir = mkdtempSync(join(scratch, 'setup-'));
+  try {
+    const f = folder(dir);
+    assert.equal(f.at, join(dir, 'agent'));
+    assert.equal(f.home, join(f.at, '.souls'));
+    assert.deepEqual(readdirSync(f.at).sort(), ['.souls', 'creator.md', 'souls-god.mjs']);
+    assert.deepEqual(readdirSync(f.home), ['kinds']);
+    assert.equal(statSync(f.at).mode & 0o777, 0o700);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('external driver publishes private paths, waits for completion, and retains its transcript for grading', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'creator-driver-'));
+  const dir = mkdtempSync(join(scratch, 'driver-'));
   try {
     const pending = externalAgent(join(dir, 'agent'), dir, 1, { within: 1000, poll: 1 });
     const manifest = JSON.parse(readFileSync(join(dir, 'ready.json'), 'utf8'));
@@ -26,7 +41,7 @@ test('external driver publishes private paths, waits for completion, and retains
 });
 
 test('external driver stops at its bounded wait without claiming a completed trial', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'creator-driver-timeout-'));
+  const dir = mkdtempSync(join(scratch, 'driver-timeout-'));
   try {
     await assert.rejects(externalAgent(join(dir, 'agent'), dir, 2, { within: 5, poll: 1 }), /timed out/);
   } finally { rmSync(dir, { recursive: true, force: true }); }

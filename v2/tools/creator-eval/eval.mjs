@@ -6,7 +6,7 @@
 // person `creator` holds the world's creator grant, as the accounts import records a creator account. The creator's
 // home is paired for real (`pair.mjs --creator`): a request approved by another test person is refused by name first
 // (A1), then the creator account's approval registers the grant and hands the daemon its token. The agent works in an
-// empty folder outside any repository holding the skill, the command and that home. Per run it reports the pairing,
+// fresh private scratch folder holding the skill, the command and that home. Per run it reports the pairing,
 // the agent's turns, tokens, commands and refusals, what the run built in the world, and whether the token's secret
 // appears in the transcript, the command's output or the daemon's files.
 //
@@ -20,8 +20,7 @@
 
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -89,9 +88,10 @@ function pair(home, w, grant, person) {
   });
 }
 
-/** The agent's folder: the skill and the command, outside any repository; its home is paired below. */
-function folder() {
-  const at = mkdtempSync(join(tmpdir(), 'souls-creator-'));
+/** The agent's private folder, beside the retained run output under ignored scratch; its home is paired below. */
+export function folder(dir) {
+  const at = join(dir, 'agent');
+  mkdirSync(at, { recursive: true, mode: 0o700 });
   copyFileSync(SKILL, join(at, 'creator.md'));
   writeFileSync(join(at, 'souls-god.mjs'), `// The creator's command (Souls v2): runs v2/client/src/creator/souls-god.mjs.\nimport { spawnSync } from 'node:child_process';\nprocess.exitCode = spawnSync(process.execPath, [${JSON.stringify(GOD)}, ...process.argv.slice(2)], { stdio: 'inherit' }).status ?? 1;\n`);
   const home = join(at, '.souls');
@@ -178,7 +178,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     mkdirSync(dir, { recursive: true });
     const creator = `${randomBytes(16).toString('hex')}-1`, grant = `creator-${creator}`, id = `c_${creator}`;
     const w = await world(dir, facts, creator);
-    const f = folder();
+    const f = folder(dir);
     try {
       // A1: another account's approval is refused by name; the creator account's pairs the home.
       const refused = await pair(f.home, w, grant, 'someone-else');
