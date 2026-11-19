@@ -268,11 +268,23 @@ for (const e of m.entities.values()) {
   for (const l of b.links ?? []) add(`stairs:${l.kind}`);
 }
 
+// --- Sky (V19c, #3521) ---------------------------------------------------------------------------------------------
+// How today's page draws this world's sky: the date it is drawn on (`state.time.calendar`), its palette
+// (`state.sky.palette`), and today's morning mist (`atmosphere/weather.ts` `morningMist`: peaking at 06:30, gone 2.5 h
+// either side, at full strength), which today's page draws on every world but the desert palette's.
+const ws = m.state as { time?: { calendar?: unknown }; sky?: { palette?: unknown } };
+const palette = typeof ws.sky?.palette === 'string' ? ws.sky.palette : null;
+const sky = {
+  ...(typeof ws.time?.calendar === 'string' ? { calendar: ws.time.calendar } : {}),
+  ...(palette ? { palette } : {}),
+  ...(palette === 'mars-desert' ? {} : { mist: [390, 150, 100] }),
+};
+
 // --- Write ---------------------------------------------------------------------------------------------------------
 const file = {
   format: 'souls/import-eden/1',
   ...(live ? live.head : { template: { path: TEMPLATE, sha256: sha(text), batches: g.batches.length } }),
-  seed: live ? m.seed : SEED, entities: m.entities.size, bake, byRef,
+  seed: live ? m.seed : SEED, entities: m.entities.size, bake, byRef, sky,
   kinds: [...kinds.values()].sort((a, b) => (a.ref < b.ref ? -1 : 1)),
   things, doors: doorPairs,
   // The recipe is today's own format (metres, fractions): kept whole as text for N3, never read here as numbers.

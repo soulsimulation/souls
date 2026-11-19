@@ -32,3 +32,6 @@ tools/world-launcher/soul/released/2.32.0/skill.md.gz
 # Engine v2 F8 (#2823): the chess-move hatch test module, own work, 2,914 bytes, built from
 # v2/crates/sim/tests/hatch/chess-move/ by its build.sh and loaded by hash in the hatch test; approved by the coordinator 19 Nov.
 v2/crates/sim/tests/hatch/chess-move.wasm
+# The released 2.36.2 client and skill, gzipped, which R18's upgrade-compat test (#2821) upgrades from.
+v2/client/test/compat/released/2.36.2/eden.mjs.gz
+v2/client/test/compat/released/2.36.2/skill.md.gz

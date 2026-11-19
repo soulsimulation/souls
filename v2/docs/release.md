@@ -106,6 +106,4 @@ dies when served (`plant`), or one that never serves (`mute`).
 
 - The workflows have not been dispatched: a new workflow runs only once it is on main, and the `scratch` and
   `production` environments wait for the owner's checklist. Every step they run was run on a scratch machine.
-- The served client is moved to `/usr/local/lib/souls/client`; answering a world's `/eden.mjs`, `/skill.md` and
-  `/v1/config` from it is R18's (#2821).
 - `install.sh apply` with an older bundle writes its own page over a released one.
