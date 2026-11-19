@@ -18,3 +18,5 @@ rustix = { version = "1", default-features = false, features = ["time", "std"] }
 [dev-dependencies]
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+# The world's view tier, served on its local socket, for the view subscription tests (#3292).
+worldd = { path = "../worldd" }

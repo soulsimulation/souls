@@ -2,7 +2,8 @@
 //!
 //! `gatewayd --listen <addr:port> --world <local socket path> --tokens <file> --build <hex>` prints
 //! `listening <addr:port>` once it accepts sockets. The tokens file holds `<grant> <sha-256 hex> [<account>]` lines,
-//! never a token. With `--receipts <dir>` (the world's `<worlds root>/worlds/<world>/receipts`), each answered intent
+//! never a token. View subscriptions go to the world's view tier at `--views` (default: the world's socket path with
+//! `.views`). With `--receipts <dir>` (the world's `<worlds root>/worlds/<world>/receipts`), each answered intent
 //! is a line in `<dir>/<UTC day>.jsonl` (see `receipts.rs`).
 
 use std::path::PathBuf;
@@ -28,7 +29,7 @@ async fn main() {
         arg("--build"),
     ) else {
         eprintln!(
-            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>]"
+            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>] [--views <path>]"
         );
         std::process::exit(2);
     };
@@ -41,6 +42,11 @@ async fn main() {
     };
     let receipts = arg("--receipts").map_or_else(Receipts::off, |d| Receipts::to_dir(d.into()));
     let gw = Gateway::with_receipts(tokens, build, stderr_log(), receipts);
+    let views = arg("--views").map_or_else(
+        || PathBuf::from(&world).with_extension("views"),
+        PathBuf::from,
+    );
+    tokio::spawn(gatewayd::views::run(gw.clone(), views));
     tokio::spawn(world_link::run(gw.clone(), PathBuf::from(world)));
     let listener = match tokio::net::TcpListener::bind(&listen).await {
         Ok(l) => l,

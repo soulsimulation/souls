@@ -333,6 +333,8 @@ pub struct Config {
     pub measures: bool,
     /// Where `health.json` is written every two seconds, when measures are on.
     pub health: Option<PathBuf>,
+    /// The view subscriptions' tier (#3292), handed each tick's part once it is on the disk.
+    pub served: Option<crate::views::served::Feed>,
     /// K16's text store, where an intent's words are kept (V1b); a store in memory when none is given.
     pub text: Option<Arc<Store>>,
     /// Called once at start with the log's durable mark; what it gives is handed each part record as it is appended
@@ -363,6 +365,7 @@ impl Config {
             roots: None,
             measures: true,
             health: None,
+            served: None,
             text: None,
             follow: None,
         }
@@ -1334,6 +1337,7 @@ fn answer_loop<S: Storage + 'static>(
     ticks: Receiver<Tick>,
     tier: Option<Arc<Tier>>,
     measures: Option<Arc<Measures>>,
+    served: Option<crate::views::served::Feed>,
     mut follow: Option<Offer>,
 ) {
     for (k, t) in ticks.into_iter().enumerate() {
@@ -1342,12 +1346,16 @@ fn answer_loop<S: Storage + 'static>(
             m.queues[measures::LOG].enter(k, t.handed.unwrap_or_else(measures::steady_us));
         }
         let mut last = None;
+        let mut durable_part = None;
         for (k, bytes) in [t.inputs, t.record].into_iter().enumerate() {
             let Some(bytes) = bytes else { continue };
             // Parts only (not the recorder's input records) go to the view tier and to what follows the world.
             let part = k == 1;
             let copy = (part && tier.is_some()).then(|| bytes.clone());
             let kept = (part && follow.is_some()).then(|| bytes.clone());
+            if part && served.is_some() {
+                durable_part = Some(bytes.clone());
+            }
             match log.append(bytes) {
                 Ok(n) => {
                     last = Some(n);
@@ -1369,6 +1377,9 @@ fn answer_loop<S: Storage + 'static>(
         {
             eprintln!("worldd: the log failed, nothing more is answered: {e}");
             return;
+        }
+        if let (Some(v), Some(r)) = (&served, durable_part) {
+            v.record(r);
         }
         let synced = measures.as_ref().map(|_| measures::steady_us());
         for (waiters, frame, mut stamps) in t.replies {
@@ -1577,9 +1588,10 @@ pub fn start<S: Storage + 'static>(
     let (answers, ticks) = channel();
     let answer_tier = tier.clone();
     let answer_measures = measures.clone();
+    let served = cfg.served.take();
     let answering = thread::Builder::new()
         .name("answers".into())
-        .spawn(move || answer_loop(log, ticks, answer_tier, answer_measures, follow))
+        .spawn(move || answer_loop(log, ticks, answer_tier, answer_measures, served, follow))
         .map_err(io)?;
     let records = found.first + found.records.len() as u64;
     let clock_measures = measures.clone();

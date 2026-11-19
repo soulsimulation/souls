@@ -22,6 +22,7 @@ use crate::receipts::{Outcome, Who};
 use crate::resume::Cursor;
 use crate::times;
 use crate::token::{self, Grant, Token};
+use crate::views;
 use crate::world_link::{FRAME_MOST, RESTARTING, Sent, sync_refused};
 use replica::sync::wire;
 use std::collections::BTreeMap;
@@ -217,7 +218,8 @@ async fn serve(
         ok = ok && send(&mut socket, times::finish(frame)).await;
     }
 
-    // 4. Intents in, the stream out.
+    // 4. Intents in, the stream out; view items out once it subscribes, to this socket alone (`views.rs`).
+    let mut view: Option<(u64, tokio::sync::mpsc::Receiver<Vec<u8>>)> = None;
     while ok {
         tokio::select! {
             incoming = socket.recv() => {
@@ -227,6 +229,13 @@ async fn serve(
                     Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
                     _ => break,
                 };
+                if let Some(request) = views::request(&bytes) {
+                    if let Some((n, _)) = view.take() {
+                        gw.views.end(n);
+                    }
+                    view = Some(gw.views.subscribe(request, &views::audiences(grant)));
+                    continue;
+                }
                 if let Some(answer) = take_intent(&gw, actor, grant, bytes, received) {
                     gw.receipts.write(&who, Outcome::Refusal);
                     ok = send(&mut socket, answer).await;
@@ -237,7 +246,20 @@ async fn serve(
                 // Another socket signed in for this grant, or this one fell too far behind.
                 None => break,
             },
+            item = async {
+                match view.as_mut() {
+                    Some((_, items)) => items.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => match item {
+                Some(frame) => ok = send(&mut socket, frame).await,
+                // Its view queue was full: let go, as a slow stream is.
+                None => break,
+            },
         }
+    }
+    if let Some((n, _)) = view {
+        gw.views.end(n);
     }
     gw.detach(grant, attached.session);
 }
