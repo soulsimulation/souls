@@ -89,12 +89,8 @@ impl Units {
         world: &W,
         step: impl FnOnce(&W, &mut Vec<T>),
     ) -> Ran<T> {
-        if self.retired.contains(unit) {
-            // A body still running a retired unit is idle from here.
-            if self.running(body) == Some(unit) {
-                self.running.remove(&body);
-            }
-            return Ran::Refused("unit-retired");
+        if let Some(name) = self.refuse(unit, body) {
+            return Ran::Refused(name);
         }
         let mut stage = Vec::new();
         // The world is behind a shared reference and the stage is dropped on a panic, so nothing half-written can
@@ -108,27 +104,45 @@ impl Units {
                     .map(|s| (*s).to_string())
                     .or_else(|| payload.downcast_ref::<String>().cloned())
                     .unwrap_or_default();
-                let strikes = self.strikes.entry(unit.to_string()).or_insert(0);
-                *strikes += 1;
-                let strikes = *strikes;
-                let retired = strikes >= STRIKES;
-                if retired {
-                    self.retired.insert(unit.to_string());
-                }
-                if self.running(body) == Some(unit) {
-                    self.running.remove(&body);
-                }
-                let e = Ended {
-                    unit: unit.to_string(),
-                    body,
-                    reason: "unit-panicked",
-                    message,
-                    strikes,
-                    retired,
-                };
-                self.ended.push(e.clone());
-                Ran::Failed(e)
+                Ran::Failed(self.fail(unit, body, message))
             }
         }
+    }
+
+    /// [`Units::run`]'s refusal: `unit-retired` when `unit` is retired (a body still running it is idle from here),
+    /// else `None`.
+    pub fn refuse(&mut self, unit: &str, body: Id) -> Option<&'static str> {
+        if !self.retired.contains(unit) {
+            return None;
+        }
+        if self.running(body) == Some(unit) {
+            self.running.remove(&body);
+        }
+        Some("unit-retired")
+    }
+
+    /// [`Units::run`]'s count of a panic its caller caught itself (N17b #3255: a skill stepped on another thread,
+    /// counted in body order once the threads have joined): the unit ends by name, its body idle.
+    pub fn fail(&mut self, unit: &str, body: Id, message: String) -> Ended {
+        let strikes = self.strikes.entry(unit.to_string()).or_insert(0);
+        *strikes += 1;
+        let strikes = *strikes;
+        let retired = strikes >= STRIKES;
+        if retired {
+            self.retired.insert(unit.to_string());
+        }
+        if self.running(body) == Some(unit) {
+            self.running.remove(&body);
+        }
+        let e = Ended {
+            unit: unit.to_string(),
+            body,
+            reason: "unit-panicked",
+            message,
+            strikes,
+            retired,
+        };
+        self.ended.push(e.clone());
+        e
     }
 }
