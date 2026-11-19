@@ -58,6 +58,9 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    section through a pull request (`release/changelog-<version>`), as `publish.yml`. Each is skipped when already
    there, so a second dispatch adds no section, tag or entry; a tag at another commit is refused
    (`release.tag-elsewhere`).
+   The viewers' origin serves the entry in the feed (`/v1/feed`, today's shape) on its next read, and the page the
+   release moved carries the changelog with this release's section compiled in (`/changelog`, `/changelog.md`), both
+   from `v2/tools/origin/site.mjs` (O23).
 
 ## A rollback
 
@@ -104,5 +107,5 @@ dies when served (`plant`), or one that never serves (`mute`).
 - The workflows have not been dispatched: a new workflow runs only once it is on main, and the `scratch` and
   `production` environments wait for the owner's checklist. Every step they run was run on a scratch machine.
 - The served client is moved to `/usr/local/lib/souls/client`; answering a world's `/eden.mjs`, `/skill.md` and
-  `/v1/config` from it is R18's (#2821). Nothing reads `news.jsonl` yet.
+  `/v1/config` from it is R18's (#2821).
 - `install.sh apply` with an older bundle writes its own page over a released one.
