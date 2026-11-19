@@ -61,6 +61,21 @@ export function chooseSoul(home, named, eligible) {
   throw new Refused('which-soul', `name a Soul with --soul: ${rows.map((s) => `${s.name ?? s.id} (${s.id})`).join(', ') || 'none lives here'}`);
 }
 
+/** A command can use a token-backed Soul or an answering resident daemon whose token has been removed. */
+export async function chooseCommandSoul(home, named) {
+  const tokens = new Set(soulsWithTokens(home));
+  const eligible = await Promise.all(listSouls(home).map(async ({ id }) => {
+    if (tokens.has(id)) return id;
+    try {
+      const status = await request(runtimeOf(home, id).socket, { op: 'status' });
+      return status.ok && status.soul === id ? id : null;
+    } catch { return null; }
+  }));
+  const soul = chooseSoul(home, named, eligible.filter(Boolean));
+  // Direct reuse prevents a disappearing tokenless daemon from starting a replacement without credentials.
+  return { soul, resident: !tokens.has(soul) };
+}
+
 function setDefault(home, named) {
   if (!named) throw new Refused('usage', 'default <Soul id or name>');
   const soul = chooseSoul(home, named), config = configOf(home);

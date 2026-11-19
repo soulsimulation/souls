@@ -47,9 +47,9 @@ import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSy
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_PKG, call } from '../daemon/client.mjs';
+import { DEFAULT_PKG, call, request } from '../daemon/client.mjs';
 import { findHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
-import { chooseSoul, HOME_COMMANDS, homeCommand } from '../home/commands.mjs';
+import { chooseCommandSoul, chooseSoul, HOME_COMMANDS, homeCommand } from '../home/commands.mjs';
 import { consolidateIn, digestOf, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
 
@@ -173,10 +173,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     else if (asked.local) out(await local(asked, home));
     else if (req.op === 'pair') { out(await pairing(home, req.url)); process.exit(0); }
     else {
-      const souls = soulsWithTokens(home);
-      const soul = chooseSoul(home, named, souls);
+      const { soul, resident } = await chooseCommandSoul(home, named);
       const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : 5000;
-      out(await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms }));
+      out(resident ? await request(runtimeOf(home, soul).socket, req, ms)
+        : await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms }));
     }
   } catch (e) {
     out({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) });

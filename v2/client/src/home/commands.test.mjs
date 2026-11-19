@@ -107,6 +107,18 @@ test('A1 carried names after R18 aliases: old names/default select the current v
   assert.equal(chooseSoul(home), A); assert.equal(listSouls(home)[0].name, null);
 });
 
+test('command selection refuses a tokenless Soul with only a stale socket and a live pid in its lock', async (t) => {
+  const { home } = fixture(t, [A]), rt = runtimeOf(home, A);
+  rmSync(join(home, 'credentials.json'));
+  json(rt.lock, { pid: process.pid });
+  writeFileSync(rt.socket, 'not a listening daemon');
+  const refused = await cli(home, ['status', '--soul', A]);
+  assert.equal(refused.code, 1, refused.out + refused.err);
+  assert.equal(refused.value.code, 'no-such-soul');
+  assert.deepEqual(read(rt.lock), { pid: process.pid }, 'selection starts no replacement daemon');
+  assert.equal(existsSync(rt.log), false);
+});
+
 test('A2 carried export/import: real CLI moves exact memory, private token and cursor/sequence; source and transit disappear after verification', async (t) => {
   const { dir, home } = fixture(t);
   const before = durable(home, A), rt = runtimeOf(home, A), state = read(rt.state);
