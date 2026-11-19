@@ -92,12 +92,13 @@ impl Gaze {
 }
 
 /// One utterance for a voice to carry: the reference its words are kept under, how long it lasts (from its words,
-/// `replica::speech::length_of`), and whether it replaces the one under way or waits behind it.
+/// `replica::speech::length_of`), whether it replaces the one under way or waits behind it, and its reach (E13).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {
     pub words: Id,
     pub length: Micros,
     pub replace: bool,
+    pub reach: replica::speech::Reach,
 }
 
 /// A body's voice: the utterance under way, until when, and those waiting, in order.
@@ -722,6 +723,22 @@ impl Controller {
         if across {
             self.near.remove_body(body);
         }
+        Ok(())
+    }
+
+    /// The world's own rule when `body`'s node's ground was rebuilt (G3, #2760): it stands as `placed`, found again on
+    /// the new ground where it stood (`moved` when that is anywhere else: never a move), or, standing on none
+    /// (`None`), stands still until it is walked out.
+    pub fn regrounded(&mut self, body: Id, placed: Option<Moved>) -> R<()> {
+        let s = self.slot(body)?;
+        match placed {
+            Some(m) if m.pose.position != s.moved.pose.position => {
+                return refuse("moved", replica::world_model::show(body));
+            }
+            Some(m) => s.moved = m,
+            None => (s.input.velocity, s.moved.linear) = (Vec3::ZERO, Vec3::ZERO),
+        }
+        s.touched = true;
         Ok(())
     }
 

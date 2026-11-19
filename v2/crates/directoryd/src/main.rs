@@ -29,6 +29,10 @@ fn main() {
         .provider
         .as_ref()
         .map(|p| Verifier::new(&p.issuer, &p.parties, Box::new(Jwks { url: p.jwks_url() })));
+    let pairing = directoryd::pairing::Pairing::start(&config).unwrap_or_else(|e| {
+        eprintln!("directoryd: refusing to start: the pairing store: {e}");
+        std::process::exit(2)
+    });
     let listener = match TcpListener::bind(config.listen) {
         Ok(l) => l,
         Err(e) => {
@@ -42,7 +46,18 @@ fn main() {
         store,
         verifier,
         test_sign_in: config.test_sign_in,
+        pairing,
         log: Mutex::new(Box::new(std::io::stderr())),
+        worlds: match directoryd::worlds::list::from_env("directoryd") {
+            Some(Err(e)) => {
+                eprintln!(
+                    "directoryd: refusing to start: worlds: {}: {}",
+                    e.name, e.detail
+                );
+                std::process::exit(2);
+            }
+            w => w.and_then(Result::ok),
+        },
     };
     run(listener, Arc::new(app));
 }

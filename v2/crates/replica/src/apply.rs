@@ -11,12 +11,12 @@
 //! - **A batch** is parts, each a little-endian `u32` byte length and then the part's stored bytes. JavaScript passes
 //!   one in as bytes and gets a small answer back ([`Applied`]); the state stays inside WASM memory.
 
-use crate::effects::{Body, Change, Effect, Header, Part, Refusal, TransferRec};
+use crate::effects::{Body, Change, Effect, Flight, Header, Part, Refusal, TransferRec};
 use crate::encode::{Name, Value, encode};
 use crate::hash::{Chain, state_hash, step_hash};
 use crate::ids::Id;
-use crate::tree::Tree;
-use std::collections::{BTreeSet, HashMap};
+use crate::tree::{Sealed, Tree};
+use std::collections::{BTreeMap, BTreeSet};
 
 type R<T> = Result<T, Refusal>;
 
@@ -33,7 +33,7 @@ pub struct Replica {
     header: Header,
     version: u64,
     /// The version each node last changed at, removed nodes included. Lookup only: never walked.
-    pub(crate) changed_at: HashMap<Id, u64>,
+    pub(crate) changed_at: BTreeMap<Id, u64>,
     /// The same, ordered by version and then id, so that what changed since a version is a range.
     pub(crate) by_version: BTreeSet<(u64, Id)>,
 }
@@ -92,7 +92,7 @@ impl Replica {
             tree,
             header,
             version: 0,
-            changed_at: HashMap::new(),
+            changed_at: BTreeMap::new(),
             by_version: BTreeSet::new(),
         })
     }
@@ -103,6 +103,11 @@ impl Replica {
 
     pub fn tree(&self) -> &Tree {
         &self.tree
+    }
+
+    /// Seals the tree ([`Tree::seal`]): a world serving R5's sync answers from its last seal (R5b, #3164).
+    pub fn seal(&mut self) -> R<Sealed> {
+        self.tree.seal()
     }
 
     /// The version the copy stands at: the number of log entries applied.
@@ -129,22 +134,54 @@ impl Replica {
 
     /// Applies a part whole or not at all, then marks each node its entries changed with the version after that entry.
     pub fn apply(&mut self, part: &Part) -> R<()> {
-        self.apply_touched(part, &[]).map(drop)
+        self.apply_touched(part, &[], &[]).map(drop)
     }
 
     /// Applies a part of a view that declares the sequences it skipped ([`Tree::apply_gaps`]): a gap it did not
     /// declare is still `sequence-gap`. The version stands after the part's last entry.
     pub fn apply_gaps(&mut self, part: &Part, gaps: &[(u64, u64)]) -> R<()> {
-        self.apply_touched(part, gaps).map(drop)
+        self.apply_touched(part, gaps, &[]).map(drop)
+    }
+
+    /// [`Replica::apply_gaps`], with the subtrees the view carried in, each landed by the arrive of its sequence
+    /// ([`Tree::apply_view`]).
+    pub fn apply_view(
+        &mut self,
+        part: &Part,
+        gaps: &[(u64, u64)],
+        carried: &[(u64, Flight)],
+    ) -> R<()> {
+        self.apply_touched(part, gaps, carried).map(drop)
     }
 
     /// [`Replica::apply`], giving back the nodes the part changed, in id order.
-    fn apply_touched(&mut self, part: &Part, gaps: &[(u64, u64)]) -> R<Vec<Id>> {
-        let touched: Vec<Vec<Id>> = part.effects.iter().map(|e| self.touched(e)).collect();
-        if gaps.is_empty() {
+    fn apply_touched(
+        &mut self,
+        part: &Part,
+        gaps: &[(u64, u64)],
+        carried: &[(u64, Flight)],
+    ) -> R<Vec<Id>> {
+        let mut touched: Vec<Vec<Id>> = part.effects.iter().map(|e| self.touched(e)).collect();
+        // A carried subtree: what it takes out where it was, and what it lands, with the ends of its links.
+        for (seq, f) in carried {
+            let at = part
+                .effects
+                .iter()
+                .position(|e| e.envelope.sequence == *seq);
+            if let Some(t) = at.and_then(|i| touched.get_mut(i)) {
+                t.extend(self.subtree_and_ends(f.root));
+                t.extend(self.node_parent(f.root));
+                t.extend(f.nodes.keys());
+                t.extend(f.links.values().flat_map(|l| l.ends));
+                t.push(f.pose.frame.node);
+                t.sort();
+                t.dedup();
+            }
+        }
+        if gaps.is_empty() && carried.is_empty() {
             self.tree.apply(&self.header, part)?;
         } else {
-            self.tree.apply_gaps(&self.header, part, gaps)?;
+            self.tree.apply_view(&self.header, part, gaps, carried)?;
         }
         let mut all = Vec::new();
         for (e, ids) in part.effects.iter().zip(touched) {
@@ -181,7 +218,7 @@ impl Replica {
             }
             let (bytes, tail) = tail.split_at(len);
             rest = tail;
-            let touched = match Part::read(bytes).and_then(|p| self.apply_touched(&p, &[])) {
+            let touched = match Part::read(bytes).and_then(|p| self.apply_touched(&p, &[], &[])) {
                 Ok(t) => t,
                 Err(r) => {
                     refused = Some(r.name);
@@ -209,7 +246,7 @@ impl Replica {
     /// records, the node that writes it and the subtree that leaves; T5's and timers', the node that writes them.
     fn touched(&self, e: &Effect) -> Vec<Id> {
         let mut out = vec![e.envelope.node];
-        let mut new_links: HashMap<Id, [Id; 2]> = HashMap::new();
+        let mut new_links: BTreeMap<Id, [Id; 2]> = BTreeMap::new();
         match &e.body {
             Body::Changes(changes) => {
                 for c in changes {

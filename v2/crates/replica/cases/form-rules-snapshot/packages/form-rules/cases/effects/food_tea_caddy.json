@@ -1,0 +1,21 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Tea caddy (from #1878): a Soul blends two green and one mint into the well (each a transfer between two fields of the caddy: two sets summing to zero), is refused a blend that would fill the well past four, blends one more green (and no mint: a transfer of nothing), recovers the well's three green and one mint into the reserve, is refused a second recovery (the well is empty), restores the reserve into the well, is refused one more mint (the well holds four) and takes the caddy. Both leaves are conserved: green 5 + 3 + 0 = 8, mint 7 + 1 + 0 = 8.",
+  "cases": [
+    {
+      "name": "blend_recover_restore_take",
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "c1"]}, "c1": {"kind": "eden:tea_caddy"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "do": [
+        {"act": {"this": "c1", "form": "blend", "args": {"green": 2, "mint": 1}}, "receipt": "rt1", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "c1", "field": "green", "n": 1, "to": 6, "by": -2}, {"change": "set", "node": "c1", "field": "well_green", "n": 3, "to": 2, "by": 2}, {"change": "set", "node": "c1", "field": "mint", "n": 2, "to": 7, "by": -1}, {"change": "set", "node": "c1", "field": "well_mint", "n": 4, "to": 1, "by": 1}], "events": [{"event": "eden:green_added", "node": "c1", "changes": [0, 1]}, {"event": "eden:mint_added", "node": "c1", "changes": [2, 3]}], "timers": []}},
+        {"act": {"this": "c1", "form": "blend", "args": {"green": 1, "mint": 2}}, "receipt": "rt2", "expect": {"verdict": "no", "reason": "field_differs", "need": 2, "says": "well_full"}},
+        {"act": {"this": "c1", "form": "blend", "args": {"green": 1, "mint": 0}}, "receipt": "rt3", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "c1", "field": "green", "n": 1, "to": 5, "by": -1}, {"change": "set", "node": "c1", "field": "well_green", "n": 3, "to": 3, "by": 1}, {"change": "set", "node": "c1", "field": "mint", "n": 2, "to": 7, "by": 0}, {"change": "set", "node": "c1", "field": "well_mint", "n": 4, "to": 1, "by": 0}], "events": [{"event": "eden:green_added", "node": "c1", "changes": [0, 1]}, {"event": "eden:mint_added", "node": "c1", "changes": [2, 3]}], "timers": []}},
+        {"act": {"this": "c1", "form": "recover"}, "receipt": "rt4", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "c1", "field": "well_green", "n": 3, "to": 0, "by": -3}, {"change": "set", "node": "c1", "field": "reserve_green", "n": 5, "to": 3, "by": 3}, {"change": "set", "node": "c1", "field": "well_mint", "n": 4, "to": 0, "by": -1}, {"change": "set", "node": "c1", "field": "reserve_mint", "n": 6, "to": 1, "by": 1}], "events": [{"event": "eden:green_recovered", "node": "c1", "changes": [0, 1]}, {"event": "eden:mint_recovered", "node": "c1", "changes": [2, 3]}], "timers": []}},
+        {"act": {"this": "c1", "form": "recover"}, "receipt": "rt5", "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "says": "recover_needs"}},
+        {"act": {"this": "c1", "form": "restore"}, "receipt": "rt6", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "c1", "field": "reserve_green", "n": 5, "to": 0, "by": -3}, {"change": "set", "node": "c1", "field": "well_green", "n": 3, "to": 3, "by": 3}, {"change": "set", "node": "c1", "field": "reserve_mint", "n": 6, "to": 0, "by": -1}, {"change": "set", "node": "c1", "field": "well_mint", "n": 4, "to": 1, "by": 1}], "events": [{"event": "eden:green_restored", "node": "c1", "changes": [0, 1]}, {"event": "eden:mint_restored", "node": "c1", "changes": [2, 3]}], "timers": []}},
+        {"act": {"this": "c1", "form": "blend", "args": {"green": 0, "mint": 1}}, "receipt": "rt7", "expect": {"verdict": "no", "reason": "field_differs", "need": 2, "says": "well_full"}},
+        {"act": {"this": "c1", "form": "take"}, "receipt": "rt8", "expect": {"verdict": "yes", "changes": [{"change": "reparent", "node": "c1", "to": {"node": "b1", "hand": "left"}}], "events": [{"event": "eden:taken", "node": "c1", "changes": [0]}], "timers": []}}
+      ],
+      "after": {"c1": {"kind": "eden:tea_caddy", "fields": {"green": 5, "well_green": 3, "mint": 7, "well_mint": 1, "reserve_green": 0, "reserve_mint": 0}}, "b1": {"hands": {"left": "c1", "right": null}}}
+    }
+  ]
+}

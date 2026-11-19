@@ -1,0 +1,266 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:journal_entry, eden:field_journal and eden:field_writing_desk (from #1713). A field journal holds five entries; each is written once, signed by its writer (a link) with words by reference, and takes one ink charge from the nearest writing desk, moved onto the page, so the desk's ink and the journal's ink always sum to what the desk was given. Refused as the original refused: an entry already written ('This journal is full: its five earlier entries remain unchanged.'; earlier entries cannot be edited), the desk out of ink ('Appending needs one unused ink charge.'), something held ('Put down what you are holding before writing.'). Nothing refills the desk, so no fix is named.",
+  "cases": [
+    {
+      "name": "write_every_need_met",
+      "act": {
+        "this": "e1",
+        "form": "write",
+        "args": {
+          "words": "w1",
+          "desk": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "e1": {
+            "kind": "eden:journal_entry"
+          },
+          "d1": {
+            "kind": "eden:field_writing_desk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "write_an_entry_already_signed",
+      "act": {
+        "this": "e1",
+        "form": "write",
+        "args": {
+          "words": "w1",
+          "desk": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "e1": {
+            "kind": "eden:journal_entry",
+            "fields": {
+              "words": {
+                "text": "w0"
+              },
+              "ink": 1
+            },
+            "links": {
+              "writer": [
+                "b2"
+              ]
+            }
+          },
+          "d1": {
+            "kind": "eden:field_writing_desk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "already_linked",
+        "need": 0,
+        "detail": {
+          "link": "writer",
+          "count": 1
+        },
+        "fix": null,
+        "says": "written_fixed"
+      }
+    },
+    {
+      "name": "write_no_ink_left",
+      "act": {
+        "this": "e1",
+        "form": "write",
+        "args": {
+          "words": "w1",
+          "desk": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "e1": {
+            "kind": "eden:journal_entry"
+          },
+          "d1": {
+            "kind": "eden:field_writing_desk",
+            "fields": {
+              "ink": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "node": "d1",
+          "field": "ink",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null,
+        "says": "no_ink"
+      }
+    },
+    {
+      "name": "write_holding_something",
+      "act": {
+        "this": "e1",
+        "form": "write",
+        "args": {
+          "words": "w1",
+          "desk": "d1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "e1": {
+            "kind": "eden:journal_entry"
+          },
+          "d1": {
+            "kind": "eden:field_writing_desk"
+          },
+          "x1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 2,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "put_down"
+      }
+    },
+    {
+      "name": "field_journal_take_every_need_met",
+      "act": {
+        "this": "j1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "j1": {
+            "kind": "eden:field_journal"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "field_journal_take_both_hands_full",
+      "act": {
+        "this": "j1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "j1": {
+            "kind": "eden:field_journal"
+          },
+          "h1": {
+            "kind": "eden:field_journal"
+          },
+          "h2": {
+            "kind": "eden:field_journal"
+          },
+          "b1": {
+            "hands": {
+              "left": "h1",
+              "right": "h2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}

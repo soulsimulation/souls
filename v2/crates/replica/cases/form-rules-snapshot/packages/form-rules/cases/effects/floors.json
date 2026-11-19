@@ -1,0 +1,304 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "SA-X28, Eden's floors and ground (#2918), every form done in turn: a rug rolled up and unrolled, a sandcastle built and knocked down, a picnic blanket folded and spread, two Souls stepping up onto a stage and down, and a yoga mat taken one Soul at a time.",
+  "cases": [
+    {
+      "name": "rug_rolled_up_and_unrolled",
+      "about": "A rug is rolled up, cannot be rolled up twice, and is unrolled.",
+      "state": {
+        "actor": "b1",
+        "nodes": {"room":{"loose":["b1","r1"]},"r1":{"kind":"eden:rug"},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "do": [
+        {
+          "act": {"this":"r1","form":"roll_up"},
+          "receipt": "rug_rolled_up_and_unrolled-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"r1","field":"rolled","n":1,"to":1}],
+            "events": [{"event":"eden:rolled_up","node":"r1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"r1","form":"roll_up"},
+          "receipt": "rug_rolled_up_and_unrolled-1",
+          "expect": {"verdict":"no","reason":"field_differs","need":0}
+        },
+        {
+          "act": {"this":"r1","form":"unroll"},
+          "receipt": "rug_rolled_up_and_unrolled-2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"r1","field":"rolled","n":1,"to":0}],
+            "events": [{"event":"eden:unrolled","node":"r1","changes":[0]}],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b1","r1"]},
+        "r1": {"kind":"eden:rug","fields":{"rolled":0}},
+        "b1": {"hands":{"left":null,"right":null}}
+      }
+    },
+    {
+      "name": "sandpit_castle_built_and_knocked_down",
+      "about": "A sandcastle is built, a second Soul knocks it down, and there is then none to knock down.",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose":["b1","b2","s1"]},
+          "s1": {"kind":"eden:sandpit"},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this":"s1","form":"build_sandcastle"},
+          "receipt": "sandpit_castle_built_and_knocked_down-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"s1","field":"castle","n":1,"to":1}],
+            "events": [{"event":"eden:built_a_sandcastle","node":"s1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"s1","form":"knock_down"},
+          "actor": "b2",
+          "receipt": "sandpit_castle_built_and_knocked_down-1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"s1","field":"castle","n":1,"to":0}],
+            "events": [{"event":"eden:knocked_the_sandcastle_down","node":"s1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"s1","form":"knock_down"},
+          "receipt": "sandpit_castle_built_and_knocked_down-2",
+          "expect": {"verdict":"no","reason":"field_differs","need":0}
+        }
+      ],
+      "after": {
+        "room": {"loose":["b1","b2","s1"]},
+        "s1": {"kind":"eden:sandpit","fields":{"castle":0}},
+        "b1": {"hands":{"left":null,"right":null}},
+        "b2": {"hands":{"left":null,"right":null}}
+      }
+    },
+    {
+      "name": "picnic_blanket_folded_and_spread",
+      "about": "The blanket, spread where it was placed, is folded and cannot be folded twice; it is spread out again, and spreading it once more smooths it out.",
+      "state": {
+        "actor": "b1",
+        "nodes": {"room":{"loose":["b1","p1"]},"p1":{"kind":"eden:picnic_blanket"},"b1":{"hands":{"left":null,"right":null}}}
+      },
+      "do": [
+        {
+          "act": {"this":"p1","form":"fold"},
+          "receipt": "picnic_blanket_folded_and_spread-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"p1","field":"spread","n":1,"to":0}],
+            "events": [{"event":"eden:folded","node":"p1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"p1","form":"fold"},
+          "receipt": "picnic_blanket_folded_and_spread-1",
+          "expect": {"verdict":"no","reason":"field_differs","need":0}
+        },
+        {
+          "act": {"this":"p1","form":"spread"},
+          "receipt": "picnic_blanket_folded_and_spread-2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"p1","field":"spread","n":1,"to":1}],
+            "events": [{"event":"eden:spread_out","node":"p1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"p1","form":"spread"},
+          "receipt": "picnic_blanket_folded_and_spread-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"set","node":"p1","field":"spread","n":1,"to":1}],
+            "events": [{"event":"eden:spread_out","node":"p1","changes":[0]}],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b1","p1"]},
+        "p1": {"kind":"eden:picnic_blanket","fields":{"spread":1}},
+        "b1": {"hands":{"left":null,"right":null}}
+      }
+    },
+    {
+      "name": "stage_up_and_down",
+      "about": "Two Souls step up onto the stage; one cannot step up twice; each steps down, and a Soul not on it cannot.",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose":["b1","b2","st1"]},
+          "st1": {"kind":"eden:stage"},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this":"st1","form":"step_up"},
+          "receipt": "stage_up_and_down-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"reparent","node":"b1","to":{"node":"st1","slot":"floor"}},
+              {"change":"link","node":"st1","link":"on_stage","n":1,"end":"b1"}
+            ],
+            "events": [
+              {"event":"eden:stepped_up","node":"st1","changes":[0]},
+              {"event":"eden:took_the_stage","node":"st1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"st1","form":"step_up"},
+          "actor": "b2",
+          "receipt": "stage_up_and_down-1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"reparent","node":"b2","to":{"node":"st1","slot":"floor"}},
+              {"change":"link","node":"st1","link":"on_stage","n":1,"end":"b2"}
+            ],
+            "events": [
+              {"event":"eden:stepped_up","node":"st1","changes":[0]},
+              {"event":"eden:took_the_stage","node":"st1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"st1","form":"step_up"},
+          "receipt": "stage_up_and_down-2",
+          "expect": {"verdict":"no","reason":"already_linked"}
+        },
+        {
+          "act": {"this":"st1","form":"step_down"},
+          "receipt": "stage_up_and_down-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"unlink","node":"st1","link":"on_stage","n":1,"end":"b1"},
+              {"change":"reparent","node":"b1","to":{"node":"room"}}
+            ],
+            "events": [
+              {"event":"eden:left_the_stage","node":"st1","changes":[0]},
+              {"event":"eden:stepped_down","node":"st1","changes":[1]}
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"st1","form":"step_down"},
+          "receipt": "stage_up_and_down-4",
+          "expect": {"verdict":"no","reason":"not_linked"}
+        },
+        {
+          "act": {"this":"st1","form":"step_down"},
+          "actor": "b2",
+          "receipt": "stage_up_and_down-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {"change":"unlink","node":"st1","link":"on_stage","n":1,"end":"b2"},
+              {"change":"reparent","node":"b2","to":{"node":"room"}}
+            ],
+            "events": [
+              {"event":"eden:left_the_stage","node":"st1","changes":[0]},
+              {"event":"eden:stepped_down","node":"st1","changes":[1]}
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["st1","b1","b2"]},
+        "st1": {"kind":"eden:stage","slots":{"floor":[]},"links":{"on_stage":[]}},
+        "b1": {"hands":{"left":null,"right":null}},
+        "b2": {"hands":{"left":null,"right":null}}
+      }
+    },
+    {
+      "name": "yoga_mat_one_at_a_time",
+      "about": "One Soul does yoga on the mat; a second is refused until the first finishes, then takes its turn.",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose":["b1","b2","y1"]},
+          "y1": {"kind":"eden:yoga_mat"},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "do": [
+        {
+          "act": {"this":"y1","form":"yoga"},
+          "receipt": "yoga_mat_one_at_a_time-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"link","node":"y1","link":"yogi","n":1,"end":"b1"}],
+            "events": [{"event":"eden:began_yoga","node":"y1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"y1","form":"yoga"},
+          "actor": "b2",
+          "receipt": "yoga_mat_one_at_a_time-1",
+          "expect": {"verdict":"no","reason":"already_linked","need":0}
+        },
+        {
+          "act": {"this":"y1","form":"finish"},
+          "actor": "b2",
+          "receipt": "yoga_mat_one_at_a_time-2",
+          "expect": {"verdict":"no","reason":"not_linked"}
+        },
+        {
+          "act": {"this":"y1","form":"finish"},
+          "receipt": "yoga_mat_one_at_a_time-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"unlink","node":"y1","link":"yogi","n":1,"end":"b1"}],
+            "events": [{"event":"eden:finished_yoga","node":"y1","changes":[0]}],
+            "timers": []
+          }
+        },
+        {
+          "act": {"this":"y1","form":"yoga"},
+          "actor": "b2",
+          "receipt": "yoga_mat_one_at_a_time-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{"change":"link","node":"y1","link":"yogi","n":1,"end":"b2"}],
+            "events": [{"event":"eden:began_yoga","node":"y1","changes":[0]}],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {"loose":["b1","b2","y1"]},
+        "y1": {"kind":"eden:yoga_mat","links":{"yogi":["b2"]}},
+        "b1": {"hands":{"left":null,"right":null}},
+        "b2": {"hands":{"left":null,"right":null}}
+      }
+    }
+  ]
+}

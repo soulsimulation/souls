@@ -19,9 +19,23 @@
 //!   uses a link only when it has every bit the link needs. A ladder needs hands and climb. A shut door needs hands
 //!   besides, read from the door's field when the route is asked for (N4: open or shut is the door's, never the
 //!   link's).
+//! - **Water** (N11c, #3218). The open ground's water patches (N11b's wading ground and water, `OpenGround::cut_water`)
+//!   are pieces of the map too, mapped after everything dry so a dry body's pieces, portals and links keep their
+//!   numbers. Where two pieces of different grounds share a stretch of edge, a shore link joins them, its two ends that
+//!   stretch: dry ground to wading ground a [`Kind::Wade`] (needs [`WADE`]), wading ground or dry ground to water a
+//!   [`Kind::Swim`] (needs [`SWIM`]); wet pieces of one ground share plain portals. Crossing a shore costs the height
+//!   between its ends. A body never comes to a shore whose move it lacks, so its search is the one it had before the
+//!   water was mapped, and a route into water it may not use is refused by name (`link-needs-wade`,
+//!   `link-needs-swim`); but any body may cross a shore out of the water, so none is stranded in it. [`Map::spot`]
+//!   finds dry ground only; [`Map::spot_for`] the ground a body may stand on ([`may_stand`]). A start and goal on one
+//!   piece are the line inside it, unless a body that may wade or swim has a shorter way out across a shore and back.
 //! - **Versions.** A route carries the node, square and version of each patch it crosses, so a later reader can tell
 //!   a route cut on a patch since rebuilt (G3, #2760). The tree keeps no per-node version yet, so the map is given
 //!   one per node, as N3's cache is.
+//! - **Replacing a building** (#3276). After an edit inside a building, [`Map::replace`] takes off the pieces of its
+//!   floors and the portals of its links (on the open ground's pieces too) and puts on the building as read again;
+//!   nothing else is cut or read. Piece and portal numbers are never reused, so a map replaced in place numbers its
+//!   pieces differently from one built whole, and its routes are otherwise the same.
 //! - **No route.** A named refusal, `no-route`, naming the link that failed and why: the first link this body
 //!   cannot use on the route a body with every ability would take, or, when there is none either, of the links the
 //!   search came to and could not use, the one whose far end is nearest the goal.
@@ -31,13 +45,22 @@
 //!   clearance (twice the radius plus [`MARGIN`]) is `link-too-narrow` whatever else stops it, and a body refused
 //!   there is told the link, its door and both widths. A floater routes as a walker of its class.
 //!
-//! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), routes across water (N11). Ground cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
+//! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), a gait's speed as cost (a route is
+//! the shortest, not the quickest), walking a shore link (the walk skill crosses tree links and steps only). Ground
+//! cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
 
+// The repeat rule (K12, v2/clippy.toml): the distance and patch maps are lookups on the search's hot path, never
+// iterated, so their order reaches no route.
+#![allow(clippy::disallowed_types)]
+
+pub mod way;
+
+use crate::gaits::Ground;
 use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::sizes::too_narrow;
-use crate::ground::{MARGIN, OpenGround, Piece, SQUARE, Scene};
-use crate::links::{Building, End, F_OPEN, Kind, Link, Open, ground_doors};
+use crate::ground::{MARGIN, OpenGround, Piece, SQUARE};
+use crate::links::{Building, End, F_OPEN, Kind, Link, Open, floor_joins, ground_doors, shore_id};
 use replica::effects::Refusal;
 use replica::encode::Value;
 use replica::ids::Id;
@@ -70,8 +93,25 @@ pub fn needs(kind: Kind) -> Mask {
     match kind {
         Kind::Ladder => HANDS | CLIMB,
         Kind::Doorway | Kind::Stairs | Kind::Ramp | Kind::Step => 0,
+        Kind::Wade => WADE,
+        Kind::Swim => SWIM,
     }
 }
+
+/// Whether a body with abilities `has` may stand on `ground`: dry ground always, wading ground with wading, water with
+/// swimming.
+pub fn may_stand(ground: Ground, has: Mask) -> bool {
+    match ground {
+        Ground::Dry => true,
+        Ground::Wading => has & WADE != 0,
+        Ground::Water => has & SWIM != 0,
+    }
+}
+
+/// How far two edges may lie apart and still be one shore, mm (the grid's rounding).
+const SHORE_OFF: i64 = 2;
+/// The shortest stretch of edge two pieces share that is a portal or a shore, mm.
+const SHORE_MIN: i64 = 10;
 
 /// A patch by its node and, on the open ground, its square.
 type PatchKey = (Id, Option<(i32, i32)>);
@@ -99,6 +139,8 @@ struct PieceRec {
     at: PatchAt,
     frame: u32,
     piece: Piece,
+    /// The water a wet piece of the open ground is of (its index in the scene's waters).
+    water: Option<u32>,
     portals: Vec<u32>,
     /// Per triangle (counter-clockwise), the triangle across each edge `k` (vertex `k` to `k + 1`), or `NONE`.
     adj: Option<Vec<[u32; 3]>>,
@@ -135,6 +177,16 @@ struct LinkRec {
     ends: [Vec<u32>; 2],
     /// Crossing it, mm.
     cost: u32,
+    /// Replaced with its building ([`Map::replace`]): no portals, never read.
+    gone: bool,
+}
+
+/// What of the map a building put there: its floors, its links, and its ends that lie on no piece.
+#[derive(Default)]
+struct Owned {
+    floors: Vec<Id>,
+    links: Vec<u32>,
+    elsewhere: usize,
 }
 
 /// A link of the map as a reader sees it.
@@ -148,6 +200,8 @@ pub struct LinkInfo {
     pub blocked: Option<&'static str>,
     /// How many portals each end has.
     pub ends: [usize; 2],
+    /// The piece each end's first portal lies on.
+    pub pieces: [Option<u32>; 2],
 }
 
 /// Where a body stands: a piece of the map and a point on it (mm, the piece's frame).
@@ -202,6 +256,8 @@ pub struct Map {
     portals: Vec<Portal>,
     links: Vec<LinkRec>,
     by_patch: HashMap<PatchKey, Vec<u32>>,
+    /// Each building read, by its thing: what it put on the map.
+    owned: HashMap<Id, Owned>,
     /// Buildings whose links could not be read, with why.
     pub unread: Vec<(Id, String)>,
     /// Doorway ends (or, on the open ground, an end's part in one square) that lie on no piece (left out).
@@ -294,6 +350,7 @@ impl Map {
             portals: Vec::new(),
             links: Vec::new(),
             by_patch: HashMap::new(),
+            owned: HashMap::new(),
             unread: Vec::new(),
             meets_elsewhere: 0,
             seen: Vec::new(),
@@ -302,7 +359,8 @@ impl Map {
         };
         let mut ground_meets = Vec::new();
         // The open ground, square by square, and each piece's stretches along its square's edges.
-        let open = OpenGround::prepare(&Scene::of(tree, ground)?, radius)?;
+        let open_ground = OpenGround::of(tree, ground, radius)?;
+        let open = &open_ground;
         let gv = version(ground);
         // Edge stretches by line: (true for x = c, c) → (lo, hi, square, piece).
         let mut lines: BTreeMap<(bool, i64), Vec<Stretch>> = BTreeMap::new();
@@ -390,6 +448,7 @@ impl Map {
                 meets: &ground_meets,
                 on: &on,
                 doors: &gdoors,
+                terrain: open.terrain(),
             };
             let b = match Building::read_sized(tree, id, Some(open), radius) {
                 Ok(b) => b,
@@ -398,19 +457,8 @@ impl Map {
                     continue;
                 }
             };
-            m.frames.push(place);
-            let frame = (m.frames.len() - 1) as u32;
             known.extend(b.links.iter().map(|l| l.id));
-            let mut base: HashMap<Id, u32> = HashMap::new();
-            for (&floor, (_, patch)) in &b.floors {
-                base.insert(floor, m.pieces.len() as u32);
-                let at = PatchAt {
-                    node: floor,
-                    square: None,
-                    version: version(floor),
-                };
-                m.add_patch(at, frame, patch.pieces.clone());
-            }
+            let base = m.add_floors(&b, place, version);
             buildings.push((b, base));
         }
         // The open ground's own links (gates in walls and fences), then every link's ends as portals.
@@ -421,48 +469,149 @@ impl Map {
             meets: &ground_meets,
             on: &on,
             doors: &gdoors,
+            terrain: open.terrain(),
         };
         let gates = Building::of_ground(tree, open, &known)?;
+        let gates_at = gates.thing;
         buildings.push((gates, HashMap::new()));
-        for (b, base) in &buildings {
-            for l in &b.links {
-                let mut ends = [Vec::new(), Vec::new()];
-                // A blocked link's ends are portals too, so a search that comes to it can name it.
-                for (k, e) in l.ends.iter().enumerate() {
-                    if let Some(e) = e {
-                        ends[k] = m.end_portals(l, e, k as u8, base, b);
-                    }
-                }
-                let run: i64 = l
-                    .line
-                    .windows(2)
-                    .map(|w| len3([w[0].x, w[0].y, w[0].z], [w[1].x, w[1].y, w[1].z]))
-                    .sum::<i64>()
-                    / 1000;
-                // Walked through narrower than the body with its clearance: that is why, whatever else stops it. A
-                // ladder is climbed facing it, so its width is not the body's.
-                let narrow = l.kind != Kind::Ladder && too_narrow(l.width, radius);
-                let blocked = narrow.then_some("link-too-narrow").or(l.blocked).or(
-                    if ends.iter().any(Vec::is_empty) {
-                        Some("link-end-off-ground")
-                    } else {
-                        None
-                    },
-                );
-                m.links.push(LinkRec {
-                    id: l.id,
-                    kind: l.kind,
-                    door: l.door,
-                    blocked,
-                    width: l.width,
-                    ends,
-                    cost: run as u32,
-                });
-            }
+        // Steps from one thing's floor onto another's (#3227), and every floor's first piece and piece count.
+        for (i, l) in floor_joins(&buildings.iter().map(|(b, _)| b).collect::<Vec<_>>()) {
+            buildings[i].0.links.push(l);
         }
+        let all: HashMap<Id, (u32, u32)> = buildings
+            .iter()
+            .flat_map(|(_, base)| base.clone())
+            .collect();
+        for (b, _) in &buildings {
+            m.add_links(b, &all);
+        }
+        m.add_water(&open_ground, ground, gv);
+        // The open ground's gates are the ground's, replaced only with it.
+        m.owned.remove(&gates_at);
         m.seen = vec![(0, 0, NONE, NONE); m.portals.len() + 1];
         m.closed = vec![0; m.portals.len() + 1];
         Ok(m)
+    }
+
+    /// Replaces building `b`'s floors and links with those it was read with again after an edit (G3, #3276): the
+    /// pieces of its old floors and the portals of its old links leave the map (the open ground's pieces keep only
+    /// their other portals), and its floors and links as read now are put on, `version` giving each floor's version.
+    /// Nothing else is read or cut again. A building first read here is put on the same way.
+    pub fn replace(&mut self, b: &Building, version: &dyn Fn(Id) -> u64) {
+        if let Some(old) = self.owned.remove(&b.thing) {
+            for f in &old.floors {
+                for q in self.by_patch.remove(&(*f, None)).unwrap_or_default() {
+                    let rec = &mut self.pieces[q as usize];
+                    let portals = std::mem::take(&mut rec.portals);
+                    rec.piece = Piece {
+                        outline: Vec::new(),
+                        vertices: Vec::new(),
+                        triangles: Vec::new(),
+                        ground: Ground::Dry,
+                    };
+                    rec.adj = None;
+                    rec.dist = HashMap::new();
+                    for p in portals {
+                        self.drop_portal(p);
+                    }
+                }
+            }
+            for l in old.links {
+                let rec = &mut self.links[l as usize];
+                rec.gone = true;
+                rec.blocked = Some("link-gone");
+                let ends = std::mem::take(&mut rec.ends);
+                for p in ends.into_iter().flatten() {
+                    self.drop_portal(p);
+                }
+            }
+            self.meets_elsewhere -= old.elsewhere;
+        }
+        self.unread.retain(|(id, _)| *id != b.thing);
+        let base = self.add_floors(b, b.place, version);
+        self.add_links(b, &base);
+        self.seen.resize(self.portals.len() + 1, (0, 0, NONE, NONE));
+        self.closed.resize(self.portals.len() + 1, 0);
+    }
+
+    /// Takes portal `p` off the pieces it lies on; its index is never used again.
+    fn drop_portal(&mut self, p: u32) {
+        let pieces = std::mem::replace(&mut self.portals[p as usize].pieces, [NONE, NONE]);
+        self.portals[p as usize].link = NONE;
+        for q in pieces {
+            if q != NONE {
+                self.pieces[q as usize].portals.retain(|&r| r != p);
+            }
+        }
+    }
+
+    /// Puts building `b`'s floors on the map in its frame `place`: each floor's first piece and piece count.
+    fn add_floors(
+        &mut self,
+        b: &Building,
+        place: Xform,
+        version: &dyn Fn(Id) -> u64,
+    ) -> HashMap<Id, (u32, u32)> {
+        self.frames.push(place);
+        let frame = (self.frames.len() - 1) as u32;
+        let mut base: HashMap<Id, (u32, u32)> = HashMap::new();
+        for (&floor, (_, patch)) in &b.floors {
+            base.insert(floor, (self.pieces.len() as u32, patch.pieces.len() as u32));
+            let at = PatchAt {
+                node: floor,
+                square: None,
+                version: version(floor),
+            };
+            self.add_patch(at, frame, patch.pieces.clone());
+        }
+        let owned = self.owned.entry(b.thing).or_default();
+        owned.floors = b.floors.keys().copied().collect();
+        base
+    }
+
+    /// Puts building `b`'s links on the map, their ends as portals (`base`: each floor's first piece and piece count,
+    /// of every building a link of `b` may reach).
+    fn add_links(&mut self, b: &Building, base: &HashMap<Id, (u32, u32)>) {
+        let (first, elsewhere) = (self.links.len() as u32, self.meets_elsewhere);
+        let radius = self.size.radius_mm();
+        for l in &b.links {
+            let mut ends = [Vec::new(), Vec::new()];
+            // A blocked link's ends are portals too, so a search that comes to it can name it.
+            for (k, e) in l.ends.iter().enumerate() {
+                if let Some(e) = e {
+                    ends[k] = self.end_portals(l, e, k as u8, base);
+                }
+            }
+            let run: i64 = l
+                .line
+                .windows(2)
+                .map(|w| len3([w[0].x, w[0].y, w[0].z], [w[1].x, w[1].y, w[1].z]))
+                .sum::<i64>()
+                / 1000;
+            // Walked through narrower than the body with its clearance: that is why, whatever else stops it. A
+            // ladder is climbed facing it, so its width is not the body's.
+            let narrow = l.kind != Kind::Ladder && too_narrow(l.width, radius);
+            let blocked = narrow.then_some("link-too-narrow").or(l.blocked).or(
+                if ends.iter().any(Vec::is_empty) {
+                    Some("link-end-off-ground")
+                } else {
+                    None
+                },
+            );
+            self.links.push(LinkRec {
+                id: l.id,
+                kind: l.kind,
+                door: l.door,
+                blocked,
+                width: l.width,
+                ends,
+                cost: run as u32,
+                gone: false,
+            });
+        }
+        let owned = self.owned.entry(b.thing).or_default();
+        owned.links = (first..self.links.len() as u32).collect();
+        owned.elsewhere = self.meets_elsewhere - elsewhere;
     }
 
     fn add_patch(&mut self, at: PatchAt, frame: u32, pieces: Vec<Piece>) {
@@ -473,11 +622,143 @@ impl Map {
                 at,
                 frame,
                 piece: pc,
+                water: None,
                 portals: Vec::new(),
                 adj: None,
                 dist: HashMap::new(),
             });
         }
+    }
+
+    /// The open ground's water patches (N11c, #3218), mapped after every dry piece, portal and link so that a dry
+    /// body's keep their numbers: wet pieces of one ground that touch (across a square's edge, or where two waters
+    /// meet) share a portal, and pieces of two grounds a shore link whose two ends are the stretch of edge they share.
+    /// Dry ground and wading ground are joined by a [`Kind::Wade`]; wading ground, or dry ground, and swimming water
+    /// by a [`Kind::Swim`]. End 0 is on the drier piece.
+    fn add_water(&mut self, open: &OpenGround, ground: Id, version: u64) {
+        let first_wet = self.pieces.len() as u32;
+        for (i, j) in open.squares() {
+            let at = PatchAt {
+                node: ground,
+                square: Some((i, j)),
+                version,
+            };
+            for (w, pc) in open.cut_water(i, j) {
+                let q = self.pieces.len() as u32;
+                self.by_patch
+                    .entry((ground, Some((i, j))))
+                    .or_default()
+                    .push(q);
+                self.pieces.push(PieceRec {
+                    at,
+                    frame: 0,
+                    piece: pc,
+                    water: Some(w),
+                    portals: Vec::new(),
+                    adj: None,
+                    dist: HashMap::new(),
+                });
+            }
+        }
+        let edges = |pc: &Piece| -> Vec<([i64; 2], [i64; 2])> {
+            pc.outline
+                .iter()
+                .flat_map(|r| {
+                    (0..r.len()).map(move |k| {
+                        let (a, b) = (r[k], r[(k + 1) % r.len()]);
+                        (
+                            [i64::from(a[0]), i64::from(a[2])],
+                            [i64::from(b[0]), i64::from(b[2])],
+                        )
+                    })
+                })
+                .collect()
+        };
+        let wetness = |g: Ground| match g {
+            Ground::Dry => 0,
+            Ground::Wading => 1,
+            Ground::Water => 2,
+        };
+        let first_link = self.links.len();
+        for q in first_wet..self.pieces.len() as u32 {
+            let Some((i, j)) = self.pieces[q as usize].at.square else {
+                continue;
+            };
+            let mine = edges(&self.pieces[q as usize].piece);
+            let near: Vec<u32> = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .filter_map(|(di, dj)| self.by_patch.get(&(ground, Some((i + di, j + dj)))))
+                .flatten()
+                .copied()
+                // Each wet pair once; a dry piece from its wet side.
+                .filter(|&r| r < first_wet || r > q)
+                .collect();
+            for r in near {
+                let theirs = edges(&self.pieces[r as usize].piece);
+                let (gq, gr) = (
+                    self.pieces[q as usize].piece.ground,
+                    self.pieces[r as usize].piece.ground,
+                );
+                for &(a, b) in &mine {
+                    for &(c, d) in &theirs {
+                        let Some((s0, s1)) = shared(a, b, c, d) else {
+                            continue;
+                        };
+                        if gq == gr {
+                            self.add_portal([q, r], s0, s1, NONE, 0);
+                            continue;
+                        }
+                        let (lo, hi) = if wetness(gq) < wetness(gr) {
+                            (q, r)
+                        } else {
+                            (r, q)
+                        };
+                        let kind = if wetness(gq).max(wetness(gr)) == 1 {
+                            Kind::Wade
+                        } else {
+                            Kind::Swim
+                        };
+                        let li = self.links.len() as u32;
+                        let p0 = self.add_portal([lo, NONE], s0, s1, li, 0);
+                        let p1 = self.add_portal([hi, NONE], s0, s1, li, 1);
+                        let dy =
+                            self.portals[p0 as usize].world[1] - self.portals[p1 as usize].world[1];
+                        self.links.push(LinkRec {
+                            id: shore_id(ground, (self.links.len() - first_link) as u64),
+                            kind,
+                            door: None,
+                            blocked: None,
+                            ends: [vec![p0], vec![p1]],
+                            cost: dy.unsigned_abs() as u32,
+                            // A shore is as wide as its stretch of edge: never too narrow (B12).
+                            width: 0,
+                            gone: false,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// The water a piece of the open ground is of, if it is wet (its index in the scene's waters).
+    pub fn water_of(&self, piece: u32) -> Option<u32> {
+        self.pieces[piece as usize].water
+    }
+
+    /// Whether a body with `has` may not take portal `r` onward: the drier end of a shore whose move it lacks. A body
+    /// may always come out of the water, so it is never stranded in it; a body that may not go in never comes to the
+    /// shore, so a dry body's search is as it was before the water was mapped.
+    fn shore_shut(&self, r: u32, has: Mask) -> bool {
+        let p = &self.portals[r as usize];
+        p.link != NONE
+            && p.side == 0
+            && matches!(self.links[p.link as usize].kind, Kind::Wade | Kind::Swim)
+            && needs(self.links[p.link as usize].kind) & !has != 0
+    }
+
+    /// Whether crossing link `l` from its end `side` comes out of the water: a shore crossed from its wetter end.
+    fn ashore(&self, l: u32, side: u8) -> bool {
+        side == 1 && matches!(self.links[l as usize].kind, Kind::Wade | Kind::Swim)
     }
 
     /// The portals of link `l`'s end `e` (its side `k`): on the floor's piece it lies on (a stair's or a ladder's end,
@@ -488,8 +769,7 @@ impl Map {
         l: &Link,
         e: &End,
         k: u8,
-        base: &HashMap<Id, u32>,
-        b: &Building,
+        base: &HashMap<Id, (u32, u32)>,
     ) -> Vec<u32> {
         let li = self.links.len() as u32;
         let (a, b2, mid) = ([mm(e.a.x), mm(e.a.z)], [mm(e.b.x), mm(e.b.z)], e.middle());
@@ -502,16 +782,16 @@ impl Map {
                 .is_some_and(|v| i64::from(v[1]) == y)
         };
         // The piece among `qs` the segment's middle lies on, within the grid's rounding.
+        // The open ground is one level, its plan at 0, and an end on it stands on its terrain (#3227): any height.
         let on = |m: &Map, qs: &mut dyn Iterator<Item = u32>, mid: [i64; 2]| {
-            qs.filter(|&q| at_y(m, q))
+            qs.filter(|&q| m.pieces[q as usize].at.square.is_some() || at_y(m, q))
                 .map(|q| (m.off_piece(q, mid), q))
                 .min()
                 .filter(|&(d, _)| d <= MEET_OFF)
                 .map(|(_, q)| q)
         };
         let mut out = Vec::new();
-        if let Some(&first) = base.get(&e.floor) {
-            let n = b.floors[&e.floor].1.pieces.len() as u32;
+        if let Some(&(first, n)) = base.get(&e.floor) {
             let q = if matches!(l.kind, Kind::Doorway | Kind::Step) {
                 on(self, &mut (first..first + n), [mm(mid.x), mm(mid.z)])
             } else {
@@ -579,9 +859,10 @@ impl Map {
     /// Whether the point `p` (mm, the ground's frame) lies on a piece of the open ground's square `sq`, within the
     /// grid's rounding: where a doorway's segment there is a portal.
     pub fn on_square(&self, ground: Id, sq: (i32, i32), p: [i64; 2]) -> bool {
-        self.by_patch
-            .get(&(ground, Some(sq)))
-            .is_some_and(|qs| qs.iter().any(|&q| self.off_piece(q, p) <= MEET_OFF))
+        self.by_patch.get(&(ground, Some(sq))).is_some_and(|qs| {
+            qs.iter()
+                .any(|&q| self.dry(q) && self.off_piece(q, p) <= MEET_OFF)
+        })
     }
 
     /// How many pieces, portals and links the map holds.
@@ -637,14 +918,35 @@ impl Map {
     pub fn links(&self) -> Vec<LinkInfo> {
         self.links
             .iter()
+            .filter(|l| !l.gone)
             .map(|l| LinkInfo {
                 id: l.id,
                 kind: l.kind,
                 door: l.door.is_some(),
                 blocked: l.blocked,
                 ends: [l.ends[0].len(), l.ends[1].len()],
+                pieces: [0, 1].map(|k| {
+                    l.ends[k]
+                        .first()
+                        .map(|&p| self.portals[p as usize].pieces[0])
+                }),
             })
             .collect()
+    }
+
+    /// The pieces the ends of the `k`th link (in [`Map::links`]' order) lie on, both ends together.
+    pub fn link_pieces(&self, k: usize) -> Vec<u32> {
+        self.links[k]
+            .ends
+            .iter()
+            .flatten()
+            .map(|&p| self.portals[p as usize].pieces[0])
+            .collect()
+    }
+
+    /// Whether the map holds a floor's patch for `node`.
+    pub fn is_floor(&self, node: Id) -> bool {
+        self.by_patch.contains_key(&(node, None))
     }
 
     /// A piece of the map.
@@ -673,8 +975,17 @@ impl Map {
             .collect()
     }
 
-    /// The spot at `at` (µm, the node's frame) on the patch of `node` (a floor, or the open ground).
+    fn dry(&self, q: u32) -> bool {
+        self.pieces[q as usize].piece.ground == Ground::Dry
+    }
+
+    /// The spot at `at` (µm, the node's frame) on the patch of `node` (a floor, or the open ground's dry ground).
     pub fn spot(&self, node: Id, at: Vec3) -> Option<Spot> {
+        self.spot_for(node, at, 0)
+    }
+
+    /// As [`Map::spot`], on ground a body with `has` may stand on: wading ground with wading, water with swimming.
+    pub fn spot_for(&self, node: Id, at: Vec3, has: Mask) -> Option<Spot> {
         let p = [mm(at.x), mm(at.z)];
         let square = (
             p[0].div_euclid(SQUARE) as i32,
@@ -685,6 +996,7 @@ impl Map {
             .get(&(node, None))
             .or_else(|| self.by_patch.get(&(node, Some(square))))?;
         list.iter()
+            .filter(|&&q| may_stand(self.pieces[q as usize].piece.ground, has))
             .filter_map(|&q| {
                 let y = self.pieces[q as usize]
                     .piece
@@ -712,14 +1024,16 @@ impl Map {
             p[0].div_euclid(SQUARE) as i32,
             p[1].div_euclid(SQUARE) as i32,
         );
-        let list = self
-            .by_patch
-            .get(&(node, None))
-            .or_else(|| self.by_patch.get(&(node, Some(square))))?;
+        let (list, open) = match self.by_patch.get(&(node, None)) {
+            Some(l) => (l, false),
+            None => (self.by_patch.get(&(node, Some(square)))?, true),
+        };
         let y = mm(at.y);
+        // The open ground is one level, its plan at 0; a body on it stands at the terrain's height (N11a, #2735).
         list.iter()
+            .filter(|&&q| self.dry(q))
             .filter(|&&q| {
-                self.pieces[q as usize]
+                open || self.pieces[q as usize]
                     .piece
                     .vertices
                     .first()
@@ -751,8 +1065,7 @@ impl Map {
     }
 
     fn vert(&self, q: u32, k: u32) -> [i64; 2] {
-        let v = self.pieces[q as usize].piece.vertices[k as usize];
-        [i64::from(v[0]), i64::from(v[2])]
+        vert(&self.pieces[q as usize].piece, k)
     }
 
     /// The triangle of piece `q` holding `p` (edges included), counter-clockwise.
@@ -775,41 +1088,16 @@ impl Map {
     /// The triangle of piece `q` nearest `p`, the squared distance to it (0 inside), and its point nearest `p` (`p`
     /// itself inside).
     fn gap(&self, q: u32, p: [i64; 2]) -> (u32, i64, [i64; 2]) {
-        let pc = &self.pieces[q as usize].piece;
-        let seg = |a: [i64; 2], b: [i64; 2]| {
-            let (ex, ez) = (b[0] - a[0], b[1] - a[1]);
-            let l2 = (ex * ex + ez * ez).max(1);
-            let t = ((p[0] - a[0]) * ex + (p[1] - a[1]) * ez).clamp(0, l2);
-            let at = [a[0] + ex * t / l2, a[1] + ez * t / l2];
-            (sq(at[0] - p[0]) + sq(at[1] - p[1]), at)
-        };
-        (0..pc.triangles.len() as u32)
-            .map(|t| {
-                let [a, b, c] = self.tri(q, t);
-                if cross(a, b, p) >= 0 && cross(b, c, p) >= 0 && cross(c, a, p) >= 0 {
-                    (0, t, p)
-                } else {
-                    let (d, at) = seg(a, b).min(seg(b, c)).min(seg(c, a));
-                    (d, t, at)
-                }
-            })
-            .min()
-            .map_or((0, i64::MAX, p), |(d, t, at)| (t, d, at))
+        gap(&self.pieces[q as usize].piece, p)
     }
 
     /// Triangle `t` of piece `q`, its corners counter-clockwise.
     fn tri(&self, q: u32, t: u32) -> [[i64; 2]; 3] {
-        let [i, j, k] = self.tri_idx(q, t);
-        [self.vert(q, i), self.vert(q, j), self.vert(q, k)]
+        tri(&self.pieces[q as usize].piece, t)
     }
 
     fn tri_idx(&self, q: u32, t: u32) -> [u32; 3] {
-        let [i, j, k] = self.pieces[q as usize].piece.triangles[t as usize];
-        if cross(self.vert(q, i), self.vert(q, j), self.vert(q, k)) < 0 {
-            [i, k, j]
-        } else {
-            [i, j, k]
-        }
+        tri_idx(&self.pieces[q as usize].piece, t)
     }
 
     fn adjacency(&mut self, q: u32) {
@@ -911,6 +1199,12 @@ impl Map {
         d
     }
 
+    /// The length of the line inside piece `q` from `a` to `b` (mm), uncached.
+    fn run(&mut self, q: u32, a: [i64; 2], b: [i64; 2]) -> u32 {
+        let line = self.line(q, a, b);
+        line.windows(2).map(|w| len2(w[0], w[1])).sum::<i64>() as u32
+    }
+
     /// For a link too narrow for this map's class: its door, if one stands in it, and both widths.
     fn widths(&self, l: u32, why: &str) -> String {
         let link = &self.links[l as usize];
@@ -969,6 +1263,9 @@ impl Map {
         let goal_w = self.world(to.piece, to.at);
         let goal_xz = [to.at[0], to.at[2]];
         let start_xz = [from.at[0], from.at[2]];
+        // From a piece back to it (a shore left and come back to): the start's and the goal's legs are lines inside
+        // it, not straight, or the way round a pond would look as short as the way across.
+        let same = from.piece == to.piece;
         let mut heap: BinaryHeap<Reverse<(u32, u32, u32)>> = BinaryHeap::new();
         let relax = |seen: &mut Vec<(u32, u32, u32, u32)>,
                      closed: &[u32],
@@ -987,7 +1284,15 @@ impl Map {
         let h_of = |m: &Map, p: u32| (len3(m.portals[p as usize].world, goal_w)) as u32;
         for k in 0..self.pieces[from.piece as usize].portals.len() {
             let p = self.pieces[from.piece as usize].portals[k];
-            let g = len2(start_xz, self.portals[p as usize].mid()) as u32;
+            if self.shore_shut(p, has) {
+                continue;
+            }
+            let mid = self.portals[p as usize].mid();
+            let g = if same {
+                self.run(from.piece, start_xz, mid)
+            } else {
+                len2(start_xz, mid) as u32
+            };
             let h = h_of(self, p);
             relax(
                 &mut self.seen,
@@ -1019,8 +1324,15 @@ impl Map {
                 if q == NONE {
                     continue;
                 }
-                if q == to.piece {
-                    let d = len2(self.portals[u as usize].mid(), goal_xz) as u32;
+                // From the start's own piece back to it, only after leaving it: its line inside the piece is the
+                // direct route, which [`Map::route`] weighs against this search.
+                if q == to.piece && !(same && self.seen[u as usize].3 == q) {
+                    let mid = self.portals[u as usize].mid();
+                    let d = if same {
+                        self.run(q, mid, goal_xz)
+                    } else {
+                        len2(mid, goal_xz) as u32
+                    };
                     relax(
                         &mut self.seen,
                         &self.closed,
@@ -1034,7 +1346,7 @@ impl Map {
                 }
                 for k in 0..self.pieces[q as usize].portals.len() {
                     let r = self.pieces[q as usize].portals[k];
-                    if r == u {
+                    if r == u || self.shore_shut(r, has) {
                         continue;
                     }
                     let d = self.between(q, u, r);
@@ -1056,7 +1368,7 @@ impl Map {
             // went in by, a doorway used as a bridge between two squares' pieces of the open ground, which no walk
             // follows (#3187). Ground there is reached across the pieces.
             if l != NONE && self.seen[u as usize].3 != LINK | l {
-                if let Some(why) = self.refuse(tree, l, has) {
+                if let Some(why) = self.refuse(tree, l, has).filter(|_| !self.ashore(l, side)) {
                     let far = self.links[l as usize].ends[1 - side as usize]
                         .iter()
                         .map(|&r| len3(self.portals[r as usize].world, goal_w))
@@ -1108,9 +1420,9 @@ impl Map {
     ) -> Result<Route, Refusal> {
         let goal_xz = [to.at[0], to.at[2]];
         let start_xz = [from.at[0], from.at[2]];
-        if from.piece == to.piece {
+        let direct = (from.piece == to.piece).then(|| {
             let first_line = self.line(from.piece, start_xz, goal_xz);
-            return Ok(Route {
+            Route {
                 size: self.size,
                 hops: vec![Hop::Patch {
                     at: self.pieces[from.piece as usize].at,
@@ -1120,9 +1432,25 @@ impl Map {
                 first_line,
                 waypoints: Vec::new(),
                 searched: 0,
+            }
+        });
+        // On one piece, the line inside it, unless a shore this body may cross leaves it: across a pond may be shorter
+        // than round it.
+        let shore = has & (WADE | SWIM) != 0
+            && self.pieces[from.piece as usize].portals.iter().any(|&p| {
+                let l = self.portals[p as usize].link;
+                l != NONE && matches!(self.links[l as usize].kind, Kind::Wade | Kind::Swim)
             });
-        }
+        let direct = match direct {
+            Some(d) if !shore => return Ok(d),
+            d => d,
+        };
         let (found, searched, failed) = self.search(tree, from, to, has);
+        if let Some(d) = direct
+            && (!found || u64::from(self.seen[self.portals.len()].1) >= d.length)
+        {
+            return Ok(d);
+        }
         if !found {
             // The link that failed: the first this body cannot use on the route a body with every ability takes;
             // when there is none, of the links it came to, the one whose far end is nearest the goal.
@@ -1193,6 +1521,80 @@ impl Map {
             searched,
         })
     }
+}
+
+/// The stretch of edge `a`–`b` that edge `c`–`d` lies along, within [`SHORE_OFF`], if it is at least [`SHORE_MIN`]
+/// long (mm).
+fn shared(a: [i64; 2], b: [i64; 2], c: [i64; 2], d: [i64; 2]) -> Option<([i64; 2], [i64; 2])> {
+    let u = [b[0] - a[0], b[1] - a[1]];
+    let l2 = u[0] * u[0] + u[1] * u[1];
+    let l = l2.isqrt();
+    if l == 0 || cross(a, b, c).abs() > SHORE_OFF * l || cross(a, b, d).abs() > SHORE_OFF * l {
+        return None;
+    }
+    let t = |p: [i64; 2]| (p[0] - a[0]) * u[0] + (p[1] - a[1]) * u[1];
+    let (tc, td) = (t(c), t(d));
+    let (lo, hi) = (tc.min(td).max(0), tc.max(td).min(l2));
+    if (hi - lo) < SHORE_MIN * l {
+        return None;
+    }
+    let at = |t: i64| {
+        [
+            a[0] + (i128::from(u[0]) * i128::from(t) / i128::from(l2)) as i64,
+            a[1] + (i128::from(u[1]) * i128::from(t) / i128::from(l2)) as i64,
+        ]
+    };
+    Some((at(lo), at(hi)))
+}
+
+fn vert(pc: &Piece, k: u32) -> [i64; 2] {
+    let v = pc.vertices[k as usize];
+    [i64::from(v[0]), i64::from(v[2])]
+}
+
+/// Triangle `t` of `pc`, its corners' indices counter-clockwise.
+fn tri_idx(pc: &Piece, t: u32) -> [u32; 3] {
+    let [i, j, k] = pc.triangles[t as usize];
+    if cross(vert(pc, i), vert(pc, j), vert(pc, k)) < 0 {
+        [i, k, j]
+    } else {
+        [i, j, k]
+    }
+}
+
+fn tri(pc: &Piece, t: u32) -> [[i64; 2]; 3] {
+    let [i, j, k] = tri_idx(pc, t);
+    [vert(pc, i), vert(pc, j), vert(pc, k)]
+}
+
+/// The triangle of `pc` nearest `p`, the squared distance to it (0 inside), and its point nearest `p` (`p` itself
+/// inside).
+fn gap(pc: &Piece, p: [i64; 2]) -> (u32, i64, [i64; 2]) {
+    let seg = |a: [i64; 2], b: [i64; 2]| {
+        let (ex, ez) = (b[0] - a[0], b[1] - a[1]);
+        let l2 = (ex * ex + ez * ez).max(1);
+        let t = ((p[0] - a[0]) * ex + (p[1] - a[1]) * ez).clamp(0, l2);
+        let at = [a[0] + ex * t / l2, a[1] + ez * t / l2];
+        (sq(at[0] - p[0]) + sq(at[1] - p[1]), at)
+    };
+    (0..pc.triangles.len() as u32)
+        .map(|t| {
+            let [a, b, c] = tri(pc, t);
+            if cross(a, b, p) >= 0 && cross(b, c, p) >= 0 && cross(c, a, p) >= 0 {
+                (0, t, p)
+            } else {
+                let (d, at) = seg(a, b).min(seg(b, c)).min(seg(c, a));
+                (d, t, at)
+            }
+        })
+        .min()
+        .map_or((0, i64::MAX, p), |(d, t, at)| (t, d, at))
+}
+
+/// Whether `p` (mm, the ground's frame) lies on one of `pieces` (a square's), within the grid's rounding: as
+/// [`Map::on_square`], for a reader without the map (a building read again off the clock thread, G3).
+pub fn on_pieces(pieces: &[Piece], p: [i64; 2]) -> bool {
+    pieces.iter().any(|pc| gap(pc, p).1.isqrt() <= MEET_OFF)
 }
 
 /// String pulling through a channel of (left, right) portals, the first and last each a point.

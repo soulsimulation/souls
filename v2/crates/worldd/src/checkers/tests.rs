@@ -37,6 +37,7 @@ fn switch_on(id: u64, body: Id, toggles: &[Id]) -> Act {
             })
             .collect(),
         recheck: None,
+        spot: None,
     }
 }
 
