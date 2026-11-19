@@ -14,6 +14,12 @@
 //   souls.mjs can <act> [<arg id>...]         the daemon's local check (R8): yes, no with the reason, or unknown
 //   souls.mjs say "<words>"                   says the words out loud, to whoever is near
 //   souls.mjs whisper <body id> "<words>"     says them to that one body alone
+//   souls.mjs converse start <body id> "<text>" [--private]   offers that body a conversation; the opening line goes
+//                                             to it alone. Its accept or decline arrives in `wait` (E26)
+//   souls.mjs converse accept|decline|leave <conversation id>   joins, declines or leaves (a leave is always accepted)
+//   souls.mjs converse say <conversation id> "<text>" [--private]   a turn: out loud by default, members only with
+//                                             --private (remembered for that conversation)
+//   souls.mjs converse list                   the conversations in the copy
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
 //   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened (an answer, or words
 //                                             said to or near it: `heard`, also in the next look), or at the timeout
@@ -47,7 +53,7 @@ import { consolidateIn, digestOf, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
 import { runShoot } from '../shoot/shoot.mjs';
 
-export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'lie', 'wait', 'history', 'stats', 'stop'];
+export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'converse', 'lie', 'wait', 'history', 'stats', 'stop'];
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = ['digest', 'consolidate', 'schedule'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -110,6 +116,14 @@ export function requestOf(argv) {
   if (op === 'say') req.words = rest.join(' ');
   if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
   if (op === 'lie') req.this = rest[0];
+  if (op === 'converse') {
+    const words = rest.filter((w) => w !== '--private');
+    const [does = 'list', who, ...said] = words;
+    Object.assign(req, { do: does, ...(rest.includes('--private') ? { private: true } : {}) });
+    if (does === 'start') req.with = who;
+    else if (who !== undefined) req.conversation = who;
+    if (said.length) req.words = said.join(' ');
+  }
   if (op === 'wait' && rest[0] !== undefined) req.seconds = Number(rest[0]);
   if (op === 'history') {
     for (const [k, v] of [['at', opts.at], ['thing', opts.thing], ['soul', opts.of], ['since', opts.since], ['until', opts.until]]) if (v !== undefined) req[k] = v;
