@@ -9,6 +9,11 @@
 //! answered a repeat) is dropped, so each intent is answered once. Keeping intents across a restart of the gateway
 //! itself, and the world's repeats across its own restart, are I4's durable half.
 //!
+//! A sleeping world (O2, #2731): with a wake set ([`Link::set_wake`], the gateway's `--wake`), an intent that
+//! arrives while the world is away is held instead, and the gateway asks once for the world to be woken; the held
+//! intents go when it is reachable, as on any reconnect. Only an intent asks: a sync request is a read, and a reader
+//! (a viewer) wakes no world, so it is answered [`RESTARTING`] as before.
+//!
 //! A sync request (R5b, #3164; `replica::sync::wire`) goes to the world under the gateway's own number, with the
 //! asking actor; its answer goes back to that actor's socket under the client's number. One asked while the world is
 //! away, or not yet answered when the link drops, is answered at once with [`RESTARTING`]: the client asks again.
@@ -38,6 +43,9 @@ const FRAME_MOST: usize = 1 << 20;
 /// How long the gateway waits between attempts to reach the world.
 const RETRY: Duration = Duration::from_millis(20);
 
+/// Asks for the sleeping world to be woken; it must not block.
+pub type Wake = Arc<dyn Fn() + Send + Sync>;
+
 /// What became of an intent handed to the link.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Sent {
@@ -66,15 +74,25 @@ struct State {
     now: Option<Value>,
     /// Sync requests sent and not yet answered, by the gateway's number: the actor's bytes and the client's number.
     syncs: HashMap<u64, (Vec<u8>, Value)>,
+    /// How to wake a sleeping world, and whether it was asked since the world was last reachable.
+    wake: Option<Wake>,
+    asked: bool,
 }
 
 impl Link {
     /// Hands an intent to the world, keeping it until it is answered; `received` is when its socket read it.
     pub fn submit(&self, key: Vec<u8>, sequence: u64, bytes: Vec<u8>, received: u64) -> Sent {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(out) = s.out.clone() else {
-            return Sent::Restarting;
-        };
+        let out = s.out.clone();
+        if out.is_none() {
+            let Some(wake) = s.wake.clone() else {
+                return Sent::Restarting;
+            };
+            // The world may be asleep: hold the intent and ask, once, for the world to be woken.
+            if !std::mem::replace(&mut s.asked, true) {
+                wake();
+            }
+        }
         if s.index.contains_key(&(key.clone(), sequence)) {
             // Sent again while still unanswered: it is answered once.
             return Sent::Sent;
@@ -83,7 +101,9 @@ impl Link {
         s.next += 1;
         s.index.insert((key.clone(), sequence), n);
         // A send to a writer that has just ended is not lost: the intent stays kept and goes again on reconnect.
-        let _ = out.send(bytes.clone());
+        if let Some(out) = out {
+            let _ = out.send(bytes.clone());
+        }
         s.pending
             .insert(n, (key, sequence, bytes, received, times::stamp()));
         Sent::Sent
@@ -105,6 +125,11 @@ impl Link {
         s.syncs.insert(ours, (key, n));
         let _ = out.send(bytes);
         Sent::Sent
+    }
+
+    /// Sets how to wake a sleeping world: from now, an intent while the world is away is held and a wake asked.
+    pub fn set_wake(&self, wake: Wake) {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).wake = Some(wake);
     }
 
     /// Whether the world is reachable now.
@@ -170,6 +195,7 @@ impl Link {
             let _ = tx.send(bytes.clone());
         }
         s.out = Some(tx);
+        s.asked = false;
         rx
     }
 

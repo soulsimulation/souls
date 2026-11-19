@@ -1,0 +1,19 @@
+# The machine's alarm daemon (Engine v2 O2, #2731): wakes each sleeping worldd@<world> before its next due change,
+# or at once for an intent the gateway holds. Its alarms live in the directory, so a restart or a reboot loses none.
+# Runbook: v2/docs/runbook/sleep-and-wake.md.
+
+[Unit]
+Description=Souls alarm daemon
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Environment=WORLDS_ROOT=/var/lib/souls/worlds
+EnvironmentFile=-/etc/souls/directory.env
+ExecStart=/usr/local/lib/souls/supervisor alarms
+Restart=always
+RestartSec=100ms
+
+[Install]
+WantedBy=multi-user.target

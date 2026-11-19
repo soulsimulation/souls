@@ -26,6 +26,9 @@ ExecStart=/usr/local/lib/souls/supervisor launch %i
 ExecStartPost=-/usr/local/lib/souls/supervisor ready %i
 ExecStopPost=-/usr/local/lib/souls/supervisor exited %i
 Restart=always
+# A world that went to sleep (O2, #2731) exits 75 with its alarm in the directory: not restarted, not a failure.
+RestartPreventExitStatus=75
+SuccessExitStatus=75
 RestartSec=100ms
 RestartSteps=10
 RestartMaxDelaySec=29s

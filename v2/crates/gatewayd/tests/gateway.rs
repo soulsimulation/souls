@@ -520,3 +520,81 @@ async fn r4_scripted_run_for_the_usage_rollup() {
     assert_eq!(lines.len(), 7);
     println!("r4: {} lines under {}", lines.len(), root.display());
 }
+
+/// O2 (#2731) A4 and A5: the world is asleep (nothing listens on its socket). With a wake set, an intent is held, the
+/// wake is asked once, and the world, started by it a second later, answers the intent within 3 s. A reader's sync
+/// request asks no wake: it is answered `world.restarting` and the world stays asleep.
+#[tokio::test]
+// The test measures how long the answer took in real time (the wall-clock rule, K7).
+#[allow(clippy::disallowed_methods)]
+async fn o2_an_intent_wakes_a_sleeping_world_and_a_reader_does_not() {
+    use replica::sync::wire;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+    const WAKE: Duration = Duration::from_secs(1);
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(30));
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("gw-o2.sock");
+    let _ = std::fs::remove_file(&path);
+    let gw = Gateway::new(tokens, BUILD.to_vec(), Arc::new(|_: &str| {}));
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let (p, n, rt) = (
+        path.clone(),
+        wakes.clone(),
+        tokio::runtime::Handle::current(),
+    );
+    gw.link.set_wake(Arc::new(move || {
+        n.fetch_add(1, Ordering::SeqCst);
+        let p = p.clone();
+        rt.spawn(async move {
+            tokio::time::sleep(WAKE).await;
+            world(UnixListener::bind(&p).unwrap()).await;
+        });
+    }));
+    tokio::spawn(world_link::run(gw.clone(), path));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}{}", listener.local_addr().unwrap(), socket::PATH);
+    tokio::spawn(axum::serve(listener, socket::router(gw.clone())).into_future());
+    let (mut ws, o) = connect(&url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+
+    // A5: a reader's request wakes no world.
+    put(
+        &mut ws,
+        encode(&Value::Map([(wire::ASK, Value::Uint(1))].into())).unwrap(),
+    )
+    .await;
+    let answer = next(&mut ws).await.unwrap();
+    let Value::Map(m) = &answer else {
+        panic!("{answer:?}")
+    };
+    assert!(
+        matches!(m.get(&wire::REFUSED), Some(Value::Text(n)) if n.as_str() == world_link::RESTARTING)
+    );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(wakes.load(Ordering::SeqCst), 0, "a reader woke the world");
+    assert!(!gw.link.up());
+
+    // A4: an intent wakes it and is answered within 3 s; a second one asks no second wake.
+    let sent = Instant::now();
+    put(&mut ws, intent(soul(30), 1)).await;
+    put(&mut ws, intent(soul(30), 2)).await;
+    let first = next(&mut ws).await.unwrap();
+    let took = sent.elapsed();
+    let second = next(&mut ws).await.unwrap();
+    assert_eq!(
+        [frame_sequence(&first), frame_sequence(&second)],
+        [Some(1), Some(2)]
+    );
+    assert!(
+        frame_version(&first).is_some(),
+        "the world's receipt, not the gateway's refusal"
+    );
+    assert!(took < Duration::from_secs(3), "answered in {took:?}");
+    assert_eq!(wakes.load(Ordering::SeqCst), 1);
+    println!(
+        "o2: an intent to a sleeping world answered in {} ms (the world up {} ms after the wake)",
+        took.as_millis(),
+        WAKE.as_millis()
+    );
+}
