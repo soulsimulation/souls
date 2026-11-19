@@ -15,7 +15,8 @@
 //   souls.mjs say "<words>"                   says the words out loud, to whoever is near
 //   souls.mjs whisper <body id> "<words>"     says them to that one body alone
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
-//   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened, or at the timeout
+//   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened (an answer, or words
+//                                             said to or near it: `heard`, also in the next look), or at the timeout
 //   souls.mjs history --at <place> | --thing <id> | --soul <name> [--since <µs>] [--until <µs>]
 //                                             what happened, from the public history and this Soul's memory: a day by
 //                                             default, at most seven, five lines, the rest counted (R16); --as <id>

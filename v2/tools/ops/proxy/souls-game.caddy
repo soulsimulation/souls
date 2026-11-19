@@ -1,0 +1,15 @@
+# souls.game, the other older name (Engine v2 O19, #2830): everything goes to soul.game with the same path and query,
+# as sim-eden-art.caddy does for sim.eden.art (which keeps its sign-in bridge). GET and HEAD get 301; other methods get
+# 308, so an old client's POST stays a POST. Installed beside soul-game.caddy as /etc/caddy/sites/souls-game.caddy.
+# Inert until the name's DNS points at this host (not in this task).
+https://souls.game {
+	header X-Robots-Tag "noindex"
+
+	@read method GET HEAD
+	handle @read {
+		redir https://soul.game{uri} 301
+	}
+	handle {
+		redir https://soul.game{uri} 308
+	}
+}
