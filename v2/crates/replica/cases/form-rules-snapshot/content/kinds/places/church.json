@@ -1,0 +1,392 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:church",
+  "owner": "thing",
+  "state": {
+    "open_times": {
+      "n": 1,
+      "type": "schedule",
+      "most": 14,
+      "default": [
+        {
+          "repeat": "weekly",
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat",
+            "sun"
+          ],
+          "from_us": 28800000000,
+          "to_us": 72000000000
+        }
+      ],
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "services": {
+      "n": 2,
+      "type": "schedule",
+      "most": 14,
+      "default": [
+        {
+          "repeat": "weekly",
+          "days": [
+            "sun"
+          ],
+          "from_us": 36000000000,
+          "to_us": 39600000000
+        }
+      ],
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      10000,
+      13500,
+      22000
+    ]
+  },
+  "areas": {
+    "nave": {
+      "at_mm": [
+        0,
+        100,
+        1445
+      ],
+      "radius_mm": 4780
+    },
+    "vestry": {
+      "at_mm": [
+        0,
+        100,
+        -7445
+      ],
+      "radius_mm": 1335
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    },
+    "enter": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "nave"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:church",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            2500,
+            0
+          ],
+          "size": [
+            10000,
+            5000,
+            18000
+          ],
+          "tint": "wall"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            2525,
+            7500,
+            0
+          ],
+          "size": [
+            18300,
+            5000,
+            5150
+          ],
+          "yaw": 90000,
+          "tint": "roof"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            -2525,
+            7500,
+            0
+          ],
+          "size": [
+            18300,
+            5000,
+            5150
+          ],
+          "yaw": 270000,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1500,
+            10000
+          ],
+          "size": [
+            3200,
+            3000,
+            2000
+          ],
+          "tint": "wall"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            825,
+            3500,
+            10000
+          ],
+          "size": [
+            2200,
+            1000,
+            1750
+          ],
+          "yaw": 90000,
+          "tint": "roof"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            -825,
+            3500,
+            10000
+          ],
+          "size": [
+            2200,
+            1000,
+            1750
+          ],
+          "yaw": 270000,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1300,
+            11020
+          ],
+          "size": [
+            1800,
+            2400,
+            60
+          ],
+          "tint": "doorway"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            10600,
+            8000
+          ],
+          "size": [
+            1400,
+            1800,
+            1400
+          ],
+          "tint": "wall"
+        },
+        {
+          "kind": "cone",
+          "at": [
+            0,
+            12500,
+            8000
+          ],
+          "r": 1100,
+          "h": 2000,
+          "segments": 4,
+          "yaw": 45000,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            5015,
+            2600,
+            6000
+          ],
+          "size": [
+            50,
+            2800,
+            1000
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -5015,
+            2600,
+            6000
+          ],
+          "size": [
+            50,
+            2800,
+            1000
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            5015,
+            2600,
+            2000
+          ],
+          "size": [
+            50,
+            2800,
+            1000
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -5015,
+            2600,
+            2000
+          ],
+          "size": [
+            50,
+            2800,
+            1000
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            5015,
+            2600,
+            -2000
+          ],
+          "size": [
+            50,
+            2800,
+            1000
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -5015,
+            2600,
+            -2000
+          ],
+          "size": [
+            50,
+            2800,
+            1000
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            5015,
+            2600,
+            -6000
+          ],
+          "size": [
+            50,
+            2800,
+            1000
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -5015,
+            2600,
+            -6000
+          ],
+          "size": [
+            50,
+            2800,
+            1000
+          ],
+          "tint": "glass"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "wall": "#e9e4da",
+        "trim": "#8f877a",
+        "roof": "#4f5a60",
+        "doorway": "#2b2622",
+        "glass": "#9fb8c4"
+      },
+      "tags": [
+        "structure",
+        "building",
+        "church"
+      ]
+    }
+  },
+  "text": {
+    "card": "A stone church with pews and an altar, open daily; a service on Sundays at 10.",
+    "building": "building",
+    "chapel": "chapel",
+    "temple": "temple",
+    "place_of_worship": "place of worship",
+    "meeting_house": "meeting house"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "chapel",
+      "temple",
+      "place_of_worship",
+      "meeting_house"
+    ]
+  }
+}

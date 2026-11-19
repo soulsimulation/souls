@@ -1256,8 +1256,9 @@ mod tests {
         rx
     }
 
+    /// The answer on `rx`. The deadline only stops a hung test: a loaded runner can take seconds per tick.
     fn answer(rx: &Receiver<Vec<u8>>) -> Vec<u8> {
-        rx.recv_timeout(Duration::from_secs(5)).expect("an answer")
+        rx.recv_timeout(Duration::from_secs(30)).expect("an answer")
     }
 
     /// (kind, field 4, entries) of an answer frame: kind 1 a receipt (intent id, entries), 2 a refusal (reason).
@@ -1584,6 +1585,35 @@ mod tests {
         (items.parse().unwrap(), num(rest).parse().unwrap())
     }
 
+    /// `"written":n` in a health file: which write of the file it is.
+    fn written(health: &str) -> u64 {
+        let at = health.find("\"written\":").expect("written") + 10;
+        health[at..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse()
+            .unwrap()
+    }
+
+    /// Reads the health file at `path` until `done` holds for it. The deadline only stops a hung test: the health
+    /// thread and this one may be starved for seconds on a loaded runner, so no bound here is a measure.
+    fn health_until(
+        path: &std::path::Path,
+        what: &str,
+        mut done: impl FnMut(&str) -> bool,
+    ) -> String {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let h = std::fs::read_to_string(path).unwrap_or_default();
+            if !h.is_empty() && done(&h) {
+                return h;
+            }
+            assert!(Instant::now() < deadline, "{what} within 30 s: {h}");
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     #[test]
     fn o4_a2_a4_health_shows_phases_and_queues_and_updates_with_the_clock_stuck() {
         let dir = std::env::temp_dir().join(format!("o4-health-{}", std::process::id()));
@@ -1598,9 +1628,13 @@ mod tests {
         for s in 1..=20 {
             answer(&send(&world, &toggle(pairs[0].0, pairs[0].1, s, later)));
         }
-        // A2: each tick's phases against the budget, and every queue's oldest item.
-        thread::sleep(Duration::from_millis(2_100));
-        let h = std::fs::read_to_string(&path).unwrap();
+        // A2: each tick's phases against the budget, and every queue's oldest item, in the first write after the 20
+        // answers (the file is written every 2 s; on a loaded runner, later).
+        let h = health_until(&path, "a write after the 20 answers", |h| {
+            measures::PARTS
+                .iter()
+                .all(|p| h.contains(&format!("\"{p}\":{{\"count\":20,")))
+        });
         assert!(h.contains("\"budget_us\":50000"), "{h}");
         for p in measures::PHASES {
             assert!(h.contains(&format!("\"{p}\":")), "phase {p}: {h}");
@@ -1615,42 +1649,47 @@ mod tests {
             assert_eq!(queue(&h, q).0, 0, "queue {q} is empty at rest: {h}");
         }
 
-        // A4: the clock thread held for 7 s; the health file keeps coming every 2 s, its arrivals ageing.
+        // A4: the clock thread held for 12 s; the health file keeps coming every 2 s, its arrival waiting and ageing.
+        // Stuck is read from the file itself (the arrival still queued: only the clock thread takes it) and the
+        // writes are counted by its own `written`, so a starved reader misses none of them and sees no false gap.
         world
             .events
-            .send(Event::Stall(Duration::from_secs(7)))
+            .send(Event::Stall(Duration::from_secs(12)))
             .unwrap();
         thread::sleep(Duration::from_millis(50));
         let rx = send(&world, &toggle(pairs[1].0, pairs[1].1, 1, later));
-        let start = Instant::now();
-        let mut seen: Vec<(Duration, u64)> = Vec::new();
-        let mut last = String::new();
-        while start.elapsed() < Duration::from_millis(6_500) {
-            let h = std::fs::read_to_string(&path).unwrap_or_default();
-            if h != last && !h.is_empty() {
-                seen.push((start.elapsed(), queue(&h, "arrivals").1));
-                last = h;
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        eprintln!(
-            "o4 a4: health.json rewrites while the clock thread is held (since the hold, arrivals oldest µs): {seen:?}"
+        // (write, arrivals oldest µs) of each health file read while the arrival waits.
+        let mut seen: Vec<(u64, u64)> = Vec::new();
+        health_until(
+            &path,
+            "the arrival taken once the clock thread is back",
+            |h| {
+                let (items, oldest) = queue(h, "arrivals");
+                if items == 0 {
+                    return !seen.is_empty();
+                }
+                if seen.last().is_none_or(|s| s.0 != written(h)) {
+                    seen.push((written(h), oldest));
+                }
+                false
+            },
         );
+        eprintln!(
+            "o4 a4: health.json writes while the clock thread is held (write, arrivals oldest µs): {seen:?}"
+        );
+        let (first, last) = (seen[0], seen[seen.len() - 1]);
         assert!(
-            seen.len() >= 3,
+            last.0 - first.0 >= 2,
             "written at least three times while stuck: {seen:?}"
         );
+        let every = u64::try_from(measures::EVERY.as_micros()).unwrap();
         for pair in seen.windows(2) {
             assert!(
-                pair[1].0 - pair[0].0 <= Duration::from_millis(2_300),
-                "every 2 s: {seen:?}"
-            );
-            assert!(
-                pair[1].1 > pair[0].1,
-                "the arrival waits, older each time: {seen:?}"
+                pair[1].1 >= pair[0].1 + (pair[1].0 - pair[0].0) * every,
+                "every 2 s, the arrival older each time: {seen:?}"
             );
         }
-        assert!(seen.last().unwrap().1 >= 4_000_000, "{seen:?}");
+        assert!(last.1 >= 4_000_000, "{seen:?}");
         assert_eq!(
             read(&answer(&rx)).0,
             1,

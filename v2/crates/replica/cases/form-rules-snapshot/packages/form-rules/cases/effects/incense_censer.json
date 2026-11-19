@@ -1,0 +1,125 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The incense censer (from #1552): lit by hand, it stays lit (no timer: the original's burning state persisted until put out); put out, it is dark again; lit a second time.",
+ "cases": [
+  {
+   "name": "light_put_out_light_again",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "i1"
+      ]
+     },
+     "i1": {
+      "kind": "eden:incense_censer"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       330,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "touch": {
+      "reach_mm": 600
+     },
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "i1",
+      "form": "light"
+     },
+     "now_us": 0,
+     "receipt": "ri1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "i1",
+        "field": "lit",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:lit",
+        "node": "i1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "i1",
+      "form": "put_out"
+     },
+     "now_us": 600000000,
+     "receipt": "ri2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "i1",
+        "field": "lit",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:put_out",
+        "node": "i1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "i1",
+      "form": "light"
+     },
+     "now_us": 700000000,
+     "receipt": "ri3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "i1",
+        "field": "lit",
+        "n": 1,
+        "to": 1
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -7,6 +7,7 @@
 //! - [`token`]: what a token grants, its SHA-256 alone stored, compared in constant time, revocable.
 //! - [`world_link`]: one local socket to the world; intents not yet answered are kept and sent again on reconnect.
 //! - [`resume`]: a client resumes its stream from a cursor, or is told by name that it must start again.
+//! - [`gate`]: the gate a world's intents pass through while it moves to another machine (O9, #2828).
 //! - [`receipts`]: one line per answered intent in the world's receipts file, for the operator's usage roll-up.
 //! - [`views`]: a signed-in socket subscribes to R4's view items for its scope (#3292), on a second local socket to
 //!   the world; its frames are keys 30 to 32.
@@ -34,6 +35,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use replica::encode::Value;
 use tokio::sync::mpsc;
 
+pub mod gate;
 pub mod receipts;
 pub mod resume;
 pub mod socket;
@@ -41,6 +43,8 @@ pub mod times;
 pub mod token;
 pub mod views;
 pub mod world_link;
+
+pub use gate::{End, Entry, Gate};
 
 use receipts::{Outcome, Receipts, Who};
 use resume::{Cursor, Kept, Resume};

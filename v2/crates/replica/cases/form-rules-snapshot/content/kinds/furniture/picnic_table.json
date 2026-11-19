@@ -1,0 +1,57 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:picnic_table",
+  "owner": "thing",
+  "state": { "clean": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "points": {
+    "side": { "role": "stand", "at_mm": [1300, 0, 0], "yaw_mdeg": 270000 },
+    "top": { "role": "contact", "at_mm": [0, 765, 0] },
+    "by_seat_1": { "role": "stand", "at_mm": [-450, 0, 928] },
+    "by_seat_2": { "role": "stand", "at_mm": [450, 0, 928] },
+    "by_seat_3": { "role": "stand", "at_mm": [-450, 0, -928] },
+    "by_seat_4": { "role": "stand", "at_mm": [450, 0, -928] }
+  },
+  "slots": {
+    "seat_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-450, 465, 620], "stand": "by_seat_1" },
+    "seat_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [450, 465, 620], "stand": "by_seat_2" },
+    "seat_3": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-450, 465, -620], "stand": "by_seat_3" },
+    "seat_4": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [450, 465, -620], "stand": "by_seat_4" }
+  },
+  "geometry": { "bounds_mm": [1770, 770, 1500] },
+  "forms": {
+    "wipe": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [{ "step": "walk_to", "point": "side" }, { "step": "move", "move": "slide", "at": "top" }],
+      "effects": [{ "change": "set", "field": "clean", "to": true, "event": "wiped" }]
+    },
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    }
+  },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:picnic_table",
+    "shape": {"shapes":[{"kind":"extrude","at":[0,730,0],"polygon":[[-885,-360],[885,-360],[885,360],[-885,360]],"h":20,"tint":"wood"},{"kind":"extrude","at":[0,433,620],"polygon":[[-885,-125],[885,-125],[885,125],[-885,125]],"h":15,"tint":"wood"},{"kind":"extrude","at":[0,433,-620],"polygon":[[-885,-125],[885,-125],[885,125],[-885,125]],"h":15,"tint":"wood"},{"kind":"box","at":[-700,380,300],"size":[70,860,70],"round":0,"tint":"dark","pitch":31513},{"kind":"box","at":[-700,380,-300],"size":[70,860,70],"round":0,"tint":"dark","pitch":-31513},{"kind":"box","at":[-700,400,0],"size":[60,60,1500],"round":0,"tint":"dark"},{"kind":"box","at":[700,380,300],"size":[70,860,70],"round":0,"tint":"dark","pitch":31513},{"kind":"box","at":[700,380,-300],"size":[70,860,70],"round":0,"tint":"dark","pitch":-31513},{"kind":"box","at":[700,400,0],"size":[60,60,1500],"round":0,"tint":"dark"},{"kind":"cyl","at":[0,767,0],"r":140,"h":3,"segments":12,"tint":"spill","role":"fill"}],"palette":{"wood":"#a47a4c","dark":"#6e4a30","spill":"#6b4a2e"},"tags":["prop","street","table","seat","surface","park","furniture"],"round":15},
+    "table": [{ "part": "fill", "field": "clean", "do": "show", "at": { "true": 0, "false": 1 } }]
+  },
+  "text": {
+    "card": "A picnic table with two benches: four sit, food goes on top.",
+    "table": "table",
+    "picnic": "picnic",
+    "wipe": "wipe"
+  },
+  "card": { "text": "card", "category": "table", "synonyms": ["picnic"] }
+}
