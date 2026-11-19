@@ -177,12 +177,14 @@ mod tests {
             "s3:https://who:secret-x@host.example/b",
             "s3:https://host.example",
         ] {
-            let e = Bucket::parse(spec, keys).err().expect("refused");
+            let e = Bucket::parse(spec, keys)
+                .err()
+                .unwrap_or_else(|| panic!("refused"));
             assert!(!e.detail.contains("secret-x") && !e.detail.contains("host.example"));
         }
         let wrong =
             Bucket::parse(&s.url("souls"), |_| "someone-else".to_owned()).expect("settings");
-        let e = wrong.get("x").err().expect("refused");
+        let e = wrong.get("x").expect_err("refused");
         assert_eq!(e.name, "store-error");
         assert!(!e.detail.contains("someone-else"));
     }

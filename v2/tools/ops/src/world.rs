@@ -927,7 +927,7 @@ mod tests {
             at += p.records.len() as u64;
         }
         assert_eq!(at, shipped.records, "every record from 0");
-        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(root);
         Ok(())
     }
 }
