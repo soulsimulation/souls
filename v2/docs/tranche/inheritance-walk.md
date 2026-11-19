@@ -87,6 +87,13 @@ agenda checkpoint is [#1960, 19 Nov](https://github.com/soulsimulation/souls/iss
 | 15–16, 89, 91 | R18c #3596 | Saved internal former world id is sent, local alias retained; missing/contradictory metadata refuses without guessing |
 | 30–31, 39, 101 | B15 #2750 / PR #3568 (Gene approved core catalogue + larger class) | Served preset/body change with every fit/doorway check; ordinary upload limits preserved |
 | P1, P3–P4, 105, 114 | O24 #3326; O23b #3578 | Operator-only test-Soul approval; site-owner /ops loads real data rather than a shell/503 |
+| 34–35, 45, 47 | standing-slot #3598 | Existing seven standing-slot forms enter/leave via the lawful controller; exact slot/posture, restart and full-slot refusal |
+| 32, 47 | floor-target #3599 | Existing building targets resolve to authoritative room/floor before routing; representative upper-floor gateway completion |
+| 34, 45, 47 | standing-reach #3600 | Ordinary higher seats use admitted body's standing reach; smaller/too-high cases refuse without a global contact-reach increase |
+| 35, 43, 47 | named-args #3601 | Complete declared named-part/text/thing/slot inputs reach existing binder and resolver; missing/wrong/ambiguous inputs refuse |
+| 32, 34, 47 | office-roof #3602 | Locate and carry authoritative existing office access, then ground → original terrace fixture → ground; no fabricated roof links |
+| 35, 47 | boating-caller #3603 | Legal moored boat boards/rides/steers/disembarks via current carrier engine; offshore/high static cabins and wrong driver refuse |
+| 36 | generic E4 set-down #3604 | Real thin client takes/carries/sets down its own held object through E4; identity/support/freed hand/replay/restart and safe refusals |
 
 ### Observed sources, not preview results
 
@@ -107,9 +114,16 @@ agenda checkpoint is [#1960, 19 Nov](https://github.com/soulsimulation/souls/iss
   [the handback](https://github.com/soulsimulation/souls/issues/2835#issuecomment-7014357148): scripted rows 2, 4, 5
   and HTTP/stream metadata row 72 passed; failures and unchecked rows 32/45 are retained. None was rerun here.
   The two declared prior runs are not reset by this relocation or by filing follow-ups.
-- Row 36's old reachability/set-down finding remains open: C18 #3454 / PR #3507 is the recorded reachability
-  source, but the generic set-down gap still needs a bounded next-task proposal from the coordinator. A4 is not
-  claimed complete by this preparation. Rows 32 and 45 still need the retained focused rehearsal before real input.
+- The current-main C22 enumeration (203/333) is source evidence, not a parity pass. Its missing-input rows and
+  legitimate permission/support refusals are not automatically caller defects: retain absent arguments, wrong
+  permissions, offshore boats and high static cabins as their actual results. #3598–#3603 isolate independently
+  traced standing-slot, floor-target, standing-reach, named-argument, existing-office-access and carrier callers.
+  #3601's 29 `arg-missing` sweep rows are harness omissions; its dresser named-part caller needs declared input.
+- Row 36's generic E4 set-down caller is now filed as #3604, separate from C18 #3454 / PR #3507 and C28's
+  approach-to-take work. Rack-slot Put and two-person Carry set-down do not prove ordinary held-object set-down.
+  A4 remains unproved overall; rows 32/45 and every real-preview result still need their own observed evidence.
+- Loose lifetime policy is unchanged: the existing F10b reader preserves `ever`/absent as forever and explicit
+  microsecond timers. #3604 adds no expiry behavior and removes no timers; these tasks request no global expiry decision.
 
 ## Existing design dispositions
 
@@ -175,12 +189,12 @@ Task: the issue or PR carrying the row; issue closure alone does not establish a
 
 | Row | Walker | Walk it: do, then see | Task | Script |
 |---|---|---|---|---|
-| 32 | O | Walk through doors, up stairs to an upper floor and a roof terrace, to a far place | N3–N8; C27 #3509 (PR #3549); K18d #3595 | 32 |
+| 32 | O | Walk through doors, up stairs to an upper floor and a roof terrace, to a far place | N3–N8; C27 #3509 (PR #3549); K18d #3595; floor #3599, office access #3602 | 32 |
 | 33 | O | A crowded hour: nobody stuck, nothing teleports | N10, K11, E16, O5; B7b #3489 (draft #3592), B7c #3593 | |
-| 34 | O | Sit at the campfire, on a bench, lie on a bed, rise; a second Soul on a full seat is refused | B3, E3; C17 #3453, C19 #3457; thin sit #3573, queue #3593 | 34a, 34b |
-| 35 | O | Jog, run, wade, swim; board a rowing boat, ride, steer; a ride | N11, N12 #2737, E12 | 35 |
-| 36 | O | Pick up, carry, put down, hand over; two Souls carry a long load | B4, E4, E24, B9, B14 | 36 |
-| 36x | O | A thing set down is still there later, as today (today's soul.game clears no loose things; kind expiry policies vary) | (parity: no expiry) | 36b |
+| 34 | O | Sit at the campfire, on a bench, lie on a bed, rise; a second Soul on a full seat is refused | B3, E3; C17 #3453, C19 #3457; thin sit #3573, queue #3593; standing slot #3598, reach #3600 | 34a, 34b |
+| 35 | O | Jog, run, wade, swim; board a rowing boat, ride, steer; a ride | N11, N12 #2737, E12; standing slot #3598, named args #3601, boating #3603 | 35 |
+| 36 | O | Pick up, carry, put down, hand over; two Souls carry a long load | B4, E4, E24, B9, B14; generic E4 set-down #3604 | 36 |
+| 36x | O | A forever-policy thing set down remains later; an explicit timer retains its declared lifetime | existing F10b: ever/absent forever, explicit microsecond timers; #3604 preserves policy | 36b |
 | 37 | O | Build with joined parts: a rack bay from the yard, changing crews, take it down | X17 #3342 (B18 #3339, B19 #3340) | |
 | 38 | O, V | Gestures, gaze, a handshake, a dance, holding hands | E10, E11, B11, B5, B8 | |
 | 39 | O | A small body, a creature, a floater | B12 | |
@@ -189,9 +203,9 @@ Task: the issue or PR carrying the row; issue closure alone does not establish a
 | 42 | O | Water and the garden | SA | |
 | 43 | O | Drawers, lockers, the swap shelf, lost and found, the pantry | SA | |
 | 44 | O | Boards, notes, books, the guestbook, posters, paintings, chalk | SA | |
-| 45 | O | Play the piano (seated at it), a duet, the jukebox, records, checkers, frisbee, juggling | SA (on B8, F8) | 45 |
+| 45 | O | Play the piano (seated at it), a duet, the jukebox, records, checkers, frisbee, juggling | SA (on B8, F8); standing slot #3598, seat reach #3600 | 45 |
 | 46 | O | Tea, coffee, eating | SA | |
-| 47 | O | Eden's own things and activity spots | SA (C22 #3485 sweep) | |
+| 47 | O | Eden's own things and activity spots | SA (C22 #3485 enumeration only); callers #3598–#3603, set-down #3604 | |
 | 48 | O | What the Soul perceives near it; a closed container hides what it holds | R4, E22 | |
 | 49 | O | Leave a body with no agent for an hour: it idles, then a zombie walks out of town and sleeps | B16 (Gene, 17 Nov) | |
 
