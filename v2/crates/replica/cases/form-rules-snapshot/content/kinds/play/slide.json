@@ -1,0 +1,38 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:slide",
+  "owner": "thing",
+  "points": {
+    "ladder": { "role": "stand", "at_mm": [0, 0, -1500], "yaw_mdeg": 0 },
+    "deck": { "role": "contact", "at_mm": [0, 1600, -700] },
+    "bottom": { "role": "stand", "at_mm": [0, 0, 2000], "yaw_mdeg": 0 }
+  },
+  "geometry": { "bounds_mm": [800, 1779, 2685] },
+  "forms": {
+    "slide_down": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        { "step": "walk_to", "point": "ladder" },
+        { "step": "move", "move": "press", "at": "deck" },
+        { "step": "wait", "us": 4000000 },
+        { "step": "walk_to", "point": "bottom" }
+      ],
+      "effects": []
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:slide",
+    "shape": {"shapes":[{"kind":"cyl","at":[-350,800,-1000],"r":50,"h":1600,"segments":6,"tint":"frame"},{"kind":"cyl","at":[350,800,-1000],"r":50,"h":1600,"segments":6,"tint":"frame"},{"kind":"cyl","at":[-350,800,-400],"r":50,"h":1600,"segments":6,"tint":"frame"},{"kind":"cyl","at":[350,800,-400],"r":50,"h":1600,"segments":6,"tint":"frame"},{"kind":"box","at":[0,1600,-700],"size":[760,40,660],"round":0,"tint":"deck"},{"kind":"box","at":[0,300,-1120],"size":[600,40,60],"round":0,"tint":"frame"},{"kind":"box","at":[0,700,-1120],"size":[600,40,60],"round":0,"tint":"frame"},{"kind":"box","at":[0,1100,-1120],"size":[600,40,60],"round":0,"tint":"frame"},{"kind":"box","at":[0,1500,-1120],"size":[600,40,60],"round":0,"tint":"frame"},{"kind":"box","at":[0,900,500],"size":[600,50,2400],"round":0,"tint":"chute","pitch":35523},{"kind":"box","at":[320,1000,500],"size":[40,200,2400],"round":0,"tint":"chute","pitch":35523},{"kind":"box","at":[-320,1000,500],"size":[40,200,2400],"round":0,"tint":"chute","pitch":35523}],"palette":{"frame":"#7d8783","deck":"#a47a4c","chute":"#f1c84b"},"tags":["play","slide","playground"],"round":20}
+  },
+  "text": {
+    "card": "A playground slide: climb the ladder and slide down the chute.",
+    "playground": "playground",
+    "chute": "chute",
+    "play": "play"
+  },
+  "card": { "text": "card", "category": "playground", "synonyms": ["chute", "play"] }
+}

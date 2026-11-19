@@ -1,0 +1,54 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:rug",
+  "owner": "thing",
+  "state": {"rolled":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "points": {"end":{"role":"stand","at_mm":[-1150,0,0]}},
+  "geometry": {"bounds_mm":[2000,50,1400]},
+  "forms": {
+    "roll_up": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"rolled","is":false},{"need":"hand","free":true}],
+      "steps": [{"step":"walk_to","point":"end"},{"step":"wait","us":5000000}],
+      "effects": [{"change":"set","field":"rolled","to":true,"event":"rolled_up"}]
+    },
+    "unroll": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"rolled","is":true},{"need":"hand","free":true}],
+      "steps": [{"step":"walk_to","point":"end"},{"step":"wait","us":3000000}],
+      "effects": [{"change":"set","field":"rolled","to":false,"event":"unrolled"}]
+    }
+  },
+  "areas": {"top":{"allows":{"sit":"on","lie":"on"}}},
+  "motion": {"how":"two_hands"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:rug",
+    "table": [
+      {"part":"body","field":"rolled","do":"show","at":{"true":0,"false":1}},
+      {"part":"flip","field":"rolled","do":"show","at":{"true":1,"false":0}}
+    ],
+    "shape": {
+      "round": 15,
+      "shapes": [
+        {"kind":"box","at":[0,6,0],"size":[2000,12,1400],"round":0,"tint":"border","role":"body"},
+        {"kind":"box","at":[0,9,0],"size":[1800,12,1200],"round":0,"tint":"field","role":"body"},
+        {"kind":"box","at":[0,11,0],"size":[1200,12,600],"round":0,"tint":"border","role":"body"},
+        {"kind":"cyl","at":[-850,80,0],"r":80,"h":1400,"segments":12,"pitch":90000,"tint":"border","role":"flip"}
+      ],
+      "palette": {"border":"#b0573a","field":"#f2ead8"},
+      "tags": ["furniture","rug","floor","decor"]
+    }
+  },
+  "text": {
+    "card": "A woven floor rug: sit or lie on it, roll it up, carry it elsewhere.",
+    "floor": "floor",
+    "carpet": "carpet",
+    "mat": "mat",
+    "howto_roll": "Roll it up, then unroll it."
+  },
+  "card": {"text":"card","category":"floor","synonyms":["carpet","mat"]},
+  "howtos": {"roll":{"text":"howto_roll","steps":[{"form":"roll_up"},{"form":"unroll"}]}}
+}

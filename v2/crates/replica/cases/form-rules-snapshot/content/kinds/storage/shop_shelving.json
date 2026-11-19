@@ -1,0 +1,132 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:shop_shelving",
+  "owner": "thing",
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        725
+      ],
+      "yaw_mdeg": 180000
+    },
+    "shelves": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        900,
+        260
+      ]
+    }
+  },
+  "slots": {
+    "shelf_1": {
+      "admits": "thing",
+      "most": 8,
+      "at_mm": [
+        0,
+        120,
+        50
+      ],
+      "fits_mm": [
+        500,
+        400,
+        400
+      ]
+    },
+    "shelf_2": {
+      "admits": "thing",
+      "most": 8,
+      "at_mm": [
+        0,
+        520,
+        50
+      ],
+      "fits_mm": [
+        500,
+        400,
+        400
+      ]
+    },
+    "shelf_3": {
+      "admits": "thing",
+      "most": 8,
+      "at_mm": [
+        0,
+        920,
+        50
+      ],
+      "fits_mm": [
+        500,
+        400,
+        400
+      ]
+    },
+    "shelf_4": {
+      "admits": "thing",
+      "most": 8,
+      "at_mm": [
+        0,
+        1320,
+        50
+      ],
+      "fits_mm": [
+        500,
+        400,
+        400
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      2010,
+      1600,
+      550
+    ]
+  },
+  "forms": {
+    "browse": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "look",
+          "at": "shelves"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "two_souls"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:shop_shelving",
+    "shape": {"shapes":[{"kind":"box","at":[0,800,-240],"size":[2000,1600,60],"round":0,"tint":"frame"},{"kind":"box","at":[-980,800,0],"size":[50,1600,550],"round":0,"tint":"frame"},{"kind":"box","at":[980,800,0],"size":[50,1600,550],"round":0,"tint":"frame"},{"kind":"box","at":[0,100,0],"size":[1920,30,520],"round":0,"tint":"shelf"},{"kind":"box","at":[0,500,0],"size":[1920,30,520],"round":0,"tint":"shelf"},{"kind":"box","at":[0,900,0],"size":[1920,30,520],"round":0,"tint":"shelf"},{"kind":"box","at":[0,1300,0],"size":[1920,30,520],"round":0,"tint":"shelf"},{"kind":"box","at":[0,50,20],"size":[1900,40,440],"round":0,"tint":"frame"},{"kind":"box","at":[-675,260,50],"size":[360,280,300],"round":0,"tint":"g2"},{"kind":"box","at":[-225,220,50],"size":[360,200,300],"round":0,"tint":"g3"},{"kind":"box","at":[225,240,50],"size":[360,240,300],"round":0,"tint":"g0"},{"kind":"box","at":[675,260,50],"size":[360,280,300],"round":0,"tint":"g1"},{"kind":"box","at":[-675,620,50],"size":[360,200,300],"round":0,"tint":"g3"},{"kind":"box","at":[-225,640,50],"size":[360,240,300],"round":0,"tint":"g0"},{"kind":"box","at":[225,660,50],"size":[360,280,300],"round":0,"tint":"g1"},{"kind":"box","at":[675,620,50],"size":[360,200,300],"round":0,"tint":"g2"},{"kind":"box","at":[-675,1040,50],"size":[360,240,300],"round":0,"tint":"g0"},{"kind":"box","at":[-225,1060,50],"size":[360,280,300],"round":0,"tint":"g1"},{"kind":"box","at":[225,1020,50],"size":[360,200,300],"round":0,"tint":"g2"},{"kind":"box","at":[675,1040,50],"size":[360,240,300],"round":0,"tint":"g3"},{"kind":"box","at":[-675,1460,50],"size":[360,280,300],"round":0,"tint":"g1"},{"kind":"box","at":[-225,1420,50],"size":[360,200,300],"round":0,"tint":"g2"},{"kind":"box","at":[225,1440,50],"size":[360,240,300],"round":0,"tint":"g3"},{"kind":"box","at":[675,1460,50],"size":[360,280,300],"round":0,"tint":"g0"}],"palette":{"frame":"#d8d4cc","shelf":"#bfbab0","g0":"#c46a43","g1":"#3f6b5c","g2":"#d9a63a","g3":"#2f4a6b"},"tags":["furniture","storage","shop"]}
+  },
+  "text": {
+    "card": "Shop shelving with four shelves of goods: browse it, set things on it.",
+    "storage": "storage",
+    "shelves": "shelves",
+    "aisle": "aisle"
+  },
+  "card": {
+    "text": "card",
+    "category": "storage",
+    "synonyms": [
+      "shelves",
+      "aisle"
+    ]
+  }
+}

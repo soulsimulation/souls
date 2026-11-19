@@ -1,0 +1,457 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:melody_box",
+  "owner": "thing",
+  "state": {
+    "step_1": {
+      "n": 1,
+      "type": "enum",
+      "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
+      "default": "c4",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "step_2": {
+      "n": 2,
+      "type": "enum",
+      "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
+      "default": "e4",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "step_3": {
+      "n": 3,
+      "type": "enum",
+      "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
+      "default": "g4",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "step_4": {
+      "n": 4,
+      "type": "enum",
+      "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
+      "default": "c5",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "step_5": {
+      "n": 5,
+      "type": "enum",
+      "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
+      "default": "g4",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "step_6": {
+      "n": 6,
+      "type": "enum",
+      "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
+      "default": "e4",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "step_7": {
+      "n": 7,
+      "type": "enum",
+      "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
+      "default": "c4",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "step_8": {
+      "n": 8,
+      "type": "enum",
+      "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
+      "default": "rest",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tempo": {
+      "n": 9,
+      "type": "enum",
+      "values": ["bpm_60", "bpm_90", "bpm_120"],
+      "default": "bpm_90",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "playing": {
+      "n": 10,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "winds": {
+      "n": 11,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1000000,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [150, 60, 0]
+    },
+    "keys": {
+      "role": "contact",
+      "at_mm": [0, 140, 50]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 600]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [300, 260, 180]
+  },
+  "forms": {
+    "compose": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "step": {
+          "type": "field",
+          "of": ["step_1", "step_2", "step_3", "step_4", "step_5", "step_6", "step_7", "step_8"]
+        },
+        "note": {
+          "type": "value",
+          "of": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"]
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "playing",
+          "is": false,
+          "says": "stop_first"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "keys"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "step"
+          },
+          "to": {
+            "arg": "note"
+          },
+          "event": "composed"
+        }
+      ]
+    },
+    "set_tempo": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tempo": {
+          "type": "value",
+          "of": ["bpm_60", "bpm_90", "bpm_120"]
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "playing",
+          "is": false,
+          "says": "stop_first"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "keys"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "tempo",
+          "to": {
+            "arg": "tempo"
+          },
+          "event": "tempo_set"
+        }
+      ]
+    },
+    "wind": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "playing",
+          "is": false,
+          "says": "stop_first"
+        },
+        {
+          "need": "any",
+          "fields": ["step_1", "step_2", "step_3", "step_4", "step_5", "step_6", "step_7", "step_8"],
+          "not": "rest",
+          "says": "no_notes"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "keys"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": true,
+          "event": "wound"
+        },
+        {
+          "change": "set",
+          "field": "winds",
+          "by": 1,
+          "event": "wound"
+        }
+      ]
+    },
+    "stop": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "playing",
+          "is": true,
+          "says": "already_stopped"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "keys"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "playing",
+          "to": false,
+          "event": "stopped"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:melody_box",
+    "table": [
+      {
+        "part": "light",
+        "field": "playing",
+        "do": "glow",
+        "at": {
+          "true": 700,
+          "false": 0
+        }
+      },
+      {
+        "sound": "music",
+        "field": "playing",
+        "at": {
+          "true": 700,
+          "false": 0
+        },
+        "reach_mm": 8000
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"kind":"box","at":[0,60,0],"size":[300,120,180],"tint":"wood"},
+        {"kind":"cyl","at":[0,140,-20],"r":30,"h":220,"roll":90000,"segments":14,"tint":"brass","role":"light"},
+        {"kind":"box","at":[0,130,50],"size":[220,10,40],"tint":"steel"},
+        {"kind":"box","at":[-88,172,-20],"size":[12,8,12],"tint":"pin","when":"@step_1=c4"},
+        {"kind":"box","at":[-88,176,-20],"size":[12,16,12],"tint":"pin","when":"@step_1=d4"},
+        {"kind":"box","at":[-88,180,-20],"size":[12,24,12],"tint":"pin","when":"@step_1=e4"},
+        {"kind":"box","at":[-88,184,-20],"size":[12,32,12],"tint":"pin","when":"@step_1=f4"},
+        {"kind":"box","at":[-88,188,-20],"size":[12,40,12],"tint":"pin","when":"@step_1=g4"},
+        {"kind":"box","at":[-88,192,-20],"size":[12,48,12],"tint":"pin","when":"@step_1=a4"},
+        {"kind":"box","at":[-88,196,-20],"size":[12,56,12],"tint":"pin","when":"@step_1=b4"},
+        {"kind":"box","at":[-88,200,-20],"size":[12,64,12],"tint":"pin","when":"@step_1=c5"},
+        {"kind":"box","at":[-63,172,-20],"size":[12,8,12],"tint":"pin","when":"@step_2=c4"},
+        {"kind":"box","at":[-63,176,-20],"size":[12,16,12],"tint":"pin","when":"@step_2=d4"},
+        {"kind":"box","at":[-63,180,-20],"size":[12,24,12],"tint":"pin","when":"@step_2=e4"},
+        {"kind":"box","at":[-63,184,-20],"size":[12,32,12],"tint":"pin","when":"@step_2=f4"},
+        {"kind":"box","at":[-63,188,-20],"size":[12,40,12],"tint":"pin","when":"@step_2=g4"},
+        {"kind":"box","at":[-63,192,-20],"size":[12,48,12],"tint":"pin","when":"@step_2=a4"},
+        {"kind":"box","at":[-63,196,-20],"size":[12,56,12],"tint":"pin","when":"@step_2=b4"},
+        {"kind":"box","at":[-63,200,-20],"size":[12,64,12],"tint":"pin","when":"@step_2=c5"},
+        {"kind":"box","at":[-38,172,-20],"size":[12,8,12],"tint":"pin","when":"@step_3=c4"},
+        {"kind":"box","at":[-38,176,-20],"size":[12,16,12],"tint":"pin","when":"@step_3=d4"},
+        {"kind":"box","at":[-38,180,-20],"size":[12,24,12],"tint":"pin","when":"@step_3=e4"},
+        {"kind":"box","at":[-38,184,-20],"size":[12,32,12],"tint":"pin","when":"@step_3=f4"},
+        {"kind":"box","at":[-38,188,-20],"size":[12,40,12],"tint":"pin","when":"@step_3=g4"},
+        {"kind":"box","at":[-38,192,-20],"size":[12,48,12],"tint":"pin","when":"@step_3=a4"},
+        {"kind":"box","at":[-38,196,-20],"size":[12,56,12],"tint":"pin","when":"@step_3=b4"},
+        {"kind":"box","at":[-38,200,-20],"size":[12,64,12],"tint":"pin","when":"@step_3=c5"},
+        {"kind":"box","at":[-13,172,-20],"size":[12,8,12],"tint":"pin","when":"@step_4=c4"},
+        {"kind":"box","at":[-13,176,-20],"size":[12,16,12],"tint":"pin","when":"@step_4=d4"},
+        {"kind":"box","at":[-13,180,-20],"size":[12,24,12],"tint":"pin","when":"@step_4=e4"},
+        {"kind":"box","at":[-13,184,-20],"size":[12,32,12],"tint":"pin","when":"@step_4=f4"},
+        {"kind":"box","at":[-13,188,-20],"size":[12,40,12],"tint":"pin","when":"@step_4=g4"},
+        {"kind":"box","at":[-13,192,-20],"size":[12,48,12],"tint":"pin","when":"@step_4=a4"},
+        {"kind":"box","at":[-13,196,-20],"size":[12,56,12],"tint":"pin","when":"@step_4=b4"},
+        {"kind":"box","at":[-13,200,-20],"size":[12,64,12],"tint":"pin","when":"@step_4=c5"},
+        {"kind":"box","at":[12,172,-20],"size":[12,8,12],"tint":"pin","when":"@step_5=c4"},
+        {"kind":"box","at":[12,176,-20],"size":[12,16,12],"tint":"pin","when":"@step_5=d4"},
+        {"kind":"box","at":[12,180,-20],"size":[12,24,12],"tint":"pin","when":"@step_5=e4"},
+        {"kind":"box","at":[12,184,-20],"size":[12,32,12],"tint":"pin","when":"@step_5=f4"},
+        {"kind":"box","at":[12,188,-20],"size":[12,40,12],"tint":"pin","when":"@step_5=g4"},
+        {"kind":"box","at":[12,192,-20],"size":[12,48,12],"tint":"pin","when":"@step_5=a4"},
+        {"kind":"box","at":[12,196,-20],"size":[12,56,12],"tint":"pin","when":"@step_5=b4"},
+        {"kind":"box","at":[12,200,-20],"size":[12,64,12],"tint":"pin","when":"@step_5=c5"},
+        {"kind":"box","at":[37,172,-20],"size":[12,8,12],"tint":"pin","when":"@step_6=c4"},
+        {"kind":"box","at":[37,176,-20],"size":[12,16,12],"tint":"pin","when":"@step_6=d4"},
+        {"kind":"box","at":[37,180,-20],"size":[12,24,12],"tint":"pin","when":"@step_6=e4"},
+        {"kind":"box","at":[37,184,-20],"size":[12,32,12],"tint":"pin","when":"@step_6=f4"},
+        {"kind":"box","at":[37,188,-20],"size":[12,40,12],"tint":"pin","when":"@step_6=g4"},
+        {"kind":"box","at":[37,192,-20],"size":[12,48,12],"tint":"pin","when":"@step_6=a4"},
+        {"kind":"box","at":[37,196,-20],"size":[12,56,12],"tint":"pin","when":"@step_6=b4"},
+        {"kind":"box","at":[37,200,-20],"size":[12,64,12],"tint":"pin","when":"@step_6=c5"},
+        {"kind":"box","at":[62,172,-20],"size":[12,8,12],"tint":"pin","when":"@step_7=c4"},
+        {"kind":"box","at":[62,176,-20],"size":[12,16,12],"tint":"pin","when":"@step_7=d4"},
+        {"kind":"box","at":[62,180,-20],"size":[12,24,12],"tint":"pin","when":"@step_7=e4"},
+        {"kind":"box","at":[62,184,-20],"size":[12,32,12],"tint":"pin","when":"@step_7=f4"},
+        {"kind":"box","at":[62,188,-20],"size":[12,40,12],"tint":"pin","when":"@step_7=g4"},
+        {"kind":"box","at":[62,192,-20],"size":[12,48,12],"tint":"pin","when":"@step_7=a4"},
+        {"kind":"box","at":[62,196,-20],"size":[12,56,12],"tint":"pin","when":"@step_7=b4"},
+        {"kind":"box","at":[62,200,-20],"size":[12,64,12],"tint":"pin","when":"@step_7=c5"},
+        {"kind":"box","at":[87,172,-20],"size":[12,8,12],"tint":"pin","when":"@step_8=c4"},
+        {"kind":"box","at":[87,176,-20],"size":[12,16,12],"tint":"pin","when":"@step_8=d4"},
+        {"kind":"box","at":[87,180,-20],"size":[12,24,12],"tint":"pin","when":"@step_8=e4"},
+        {"kind":"box","at":[87,184,-20],"size":[12,32,12],"tint":"pin","when":"@step_8=f4"},
+        {"kind":"box","at":[87,188,-20],"size":[12,40,12],"tint":"pin","when":"@step_8=g4"},
+        {"kind":"box","at":[87,192,-20],"size":[12,48,12],"tint":"pin","when":"@step_8=a4"},
+        {"kind":"box","at":[87,196,-20],"size":[12,56,12],"tint":"pin","when":"@step_8=b4"},
+        {"kind":"box","at":[87,200,-20],"size":[12,64,12],"tint":"pin","when":"@step_8=c5"},
+        {"kind":"box","at":[0,210,-95],"size":[300,180,12],"tint":"wood"}
+      ],
+      "palette": {
+        "wood": "#7a4f2f",
+        "brass": "#c9a24a",
+        "steel": "#b8bcc2",
+        "pin": "#e8e2d0"
+      },
+      "tags": ["music", "music-box", "object"]
+    }
+  },
+  "text": {
+    "card": "A music box of eight steps: set each note or a rest and a tempo, then wind it.",
+    "music": "music",
+    "melody": "melody",
+    "tune": "tune",
+    "put_down_first": "Empty your hands before operating the melody box.",
+    "stop_first": "Stop the melody box before composing or winding again.",
+    "no_notes": "Compose at least one note before winding: every step is a rest.",
+    "already_stopped": "The melody box is already stopped.",
+    "howto_play": "With empty hands and the box stopped, set a step to a note from C4 to C5 or a rest, choose a tempo, and wind it to play."
+  },
+  "card": {
+    "text": "card",
+    "category": "music",
+    "synonyms": ["melody", "tune"]
+  },
+  "howtos": {
+    "play": {
+      "text": "howto_play",
+      "steps": [
+        {
+          "form": "compose"
+        },
+        {
+          "form": "set_tempo"
+        },
+        {
+          "form": "wind"
+        }
+      ]
+    }
+  }
+}
