@@ -1,0 +1,17 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:probe",
+  "owner": "thing",
+  "forms": {
+    "read": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "at": { "type": "thing" } },
+      "needs": [{ "need": "state", "of": { "arg": "at" }, "field": "survey", "at_least": 1 }],
+      "steps": [],
+      "effects": []
+    }
+  },
+  "text": { "card": "A test probe: reads a field of the thing it is pointed at, seen only by its creator." },
+  "card": { "text": "card" }
+}

@@ -1,0 +1,70 @@
+{
+ "format": "souls-entry/1",
+ "kind": "mars:rack_beam",
+ "owner": "thing",
+ "state": {
+  "hold_crew": {
+   "n": 1,
+   "type": "int",
+   "unit": "count",
+   "default": 2,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "links": {
+  "joint": {
+   "n": 1,
+   "from": "mars:rack_upright",
+   "most": 2,
+   "most_per": 56,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "end_l": {
+   "role": "joint",
+   "connector": "beam_end",
+   "mates": "beam_seat",
+   "at_mm": [0, 51, -1372],
+   "yaw_mdeg": 180000
+  },
+  "end_r": {
+   "role": "joint",
+   "connector": "beam_end",
+   "mates": "beam_seat",
+   "at_mm": [0, 51, 1372],
+   "yaw_mdeg": 0
+  },
+  "grip_mid": {
+   "role": "grip",
+   "at_mm": [0, 51, 0]
+  },
+  "grip_l": {
+   "role": "grip",
+   "at_mm": [0, 51, -1097]
+  },
+  "grip_r": {
+   "role": "grip",
+   "at_mm": [0, 51, 1097]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [51, 102, 2743]
+ },
+ "motion": {
+  "how": "two_hands"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "card"
+ },
+ "card": {
+  "text": "card"
+ }
+}

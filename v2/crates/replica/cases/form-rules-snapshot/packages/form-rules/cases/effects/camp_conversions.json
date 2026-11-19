@@ -1,0 +1,523 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The camp conversions done: a chair assembled once from the supplied set, a mat unrolled, stretched on and rolled up, a pillow patched, inflated to full and vented with no air returned to the kit.",
+ "cases": [
+  {
+   "name": "chair_assembled_once_from_the_supplied_set",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "k1"
+      ]
+     },
+     "k1": {
+      "kind": "eden:camp_chair_kit"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "k1",
+      "form": "assemble"
+     },
+     "receipt": "ra1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "timber",
+        "n": 1,
+        "to": 0
+       },
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "panels",
+        "n": 2,
+        "to": 0
+       },
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "covering",
+        "n": 3,
+        "to": 0
+       },
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "fasteners",
+        "n": 4,
+        "to": 0
+       },
+       {
+        "change": "create",
+        "node": "ra1.0",
+        "kind": "eden:camp_chair",
+        "to": {
+         "node": "k1",
+         "slot": "out"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:timber_used",
+        "node": "k1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:panels_used",
+        "node": "k1",
+        "changes": [
+         1
+        ]
+       },
+       {
+        "event": "eden:covering_used",
+        "node": "k1",
+        "changes": [
+         2
+        ]
+       },
+       {
+        "event": "eden:fasteners_used",
+        "node": "k1",
+        "changes": [
+         3
+        ]
+       },
+       {
+        "event": "eden:chair_assembled",
+        "node": "k1",
+        "changes": [
+         4
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "k1",
+      "form": "assemble"
+     },
+     "receipt": "ra2",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "k1": {
+     "kind": "eden:camp_chair_kit",
+     "fields": {
+      "timber": 0,
+      "panels": 0,
+      "covering": 0,
+      "fasteners": 0
+     },
+     "slots": {
+      "out": [
+       "ra1.0"
+      ]
+     }
+    },
+    "ra1.0": {
+     "kind": "eden:camp_chair"
+    }
+   }
+  },
+  {
+   "name": "mat_unrolled_stretched_on_and_rolled_up",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "m1"
+      ]
+     },
+     "m1": {
+      "kind": "eden:practice_mat"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "m1",
+      "form": "stretch"
+     },
+     "receipt": "rm1",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "m1",
+      "form": "unroll"
+     },
+     "receipt": "rm2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "m1",
+        "field": "deployed",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:unrolled",
+        "node": "m1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "m1",
+      "form": "stretch"
+     },
+     "receipt": "rm3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    },
+    {
+     "act": {
+      "this": "m1",
+      "form": "roll_up"
+     },
+     "receipt": "rm4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "m1",
+        "field": "deployed",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:rolled_up",
+        "node": "m1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "m1": {
+     "kind": "eden:practice_mat",
+     "fields": {
+      "deployed": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "pillow_patched_inflated_three_times_and_vented_without_refund",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "p1",
+       "k1"
+      ]
+     },
+     "p1": {
+      "kind": "eden:camp_pillow"
+     },
+     "k1": {
+      "kind": "eden:pillow_repair_kit"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "p1",
+      "form": "inflate",
+      "args": {
+       "kit": "k1"
+      }
+     },
+     "receipt": "rp1",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "patch",
+      "args": {
+       "kit": "k1"
+      }
+     },
+     "receipt": "rp2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "patches",
+        "n": 2,
+        "to": 0,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "patches",
+        "n": 2,
+        "to": 1,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:patched",
+        "node": "p1",
+        "changes": [
+         0,
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "inflate",
+      "args": {
+       "kit": "k1"
+      }
+     },
+     "receipt": "rp3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "air",
+        "n": 1,
+        "to": 2,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "air",
+        "n": 1,
+        "to": 1,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:inflated",
+        "node": "p1",
+        "changes": [
+         0,
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "inflate",
+      "args": {
+       "kit": "k1"
+      }
+     },
+     "receipt": "rp4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "air",
+        "n": 1,
+        "to": 1,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "air",
+        "n": 1,
+        "to": 2,
+        "by": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "inflate",
+      "args": {
+       "kit": "k1"
+      }
+     },
+     "receipt": "rp5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "air",
+        "n": 1,
+        "to": 0,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "air",
+        "n": 1,
+        "to": 3,
+        "by": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "inflate",
+      "args": {
+       "kit": "k1"
+      }
+     },
+     "receipt": "rp6",
+     "expect": {
+      "verdict": "no",
+      "reason": "not_enough",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "vent"
+     },
+     "receipt": "rp7",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "p1",
+        "field": "air",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:vented",
+        "node": "p1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "p1",
+      "form": "inflate",
+      "args": {
+       "kit": "k1"
+      }
+     },
+     "receipt": "rp8",
+     "expect": {
+      "verdict": "no",
+      "reason": "not_enough",
+      "need": 1
+     }
+    }
+   ],
+   "after": {
+    "p1": {
+     "kind": "eden:camp_pillow",
+     "fields": {
+      "patches": 1,
+      "air": 0
+     }
+    },
+    "k1": {
+     "kind": "eden:pillow_repair_kit",
+     "fields": {
+      "patches": 0,
+      "air": 0
+     }
+    }
+   }
+  }
+ ]
+}

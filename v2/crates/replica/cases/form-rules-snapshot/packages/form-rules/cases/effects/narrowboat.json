@@ -1,0 +1,339 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:narrowboat (core/narrowboat@1, 1 placed): a home afloat. Its hatch opens and closes within touch, as today; the berth and the galley seat are reached only with it open; the stern steers.",
+ "cases": [
+  {
+   "name": "narrowboat_open_lie_down_close_and_take_the_tiller",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "b2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:narrowboat",
+      "fields": {
+       "open": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1100,
+       -5800
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       600,
+       -2500
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "lie_down"
+     },
+     "actor": "b2",
+     "receipt": "rnarrowboat_o0",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "open"
+     },
+     "receipt": "rnarrowboat_o1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "open",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:opened",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "lie_down"
+     },
+     "actor": "b2",
+     "receipt": "rnarrowboat_o2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b2",
+        "to": {
+         "node": "t1",
+         "slot": "berth"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:lay_down",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "sit_inside"
+     },
+     "receipt": "rnarrowboat_o3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "t1",
+         "slot": "galley"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:sat_down",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "close"
+     },
+     "actor": "b2",
+     "receipt": "rnarrowboat_o4",
+     "expect": {
+      "verdict": "no",
+      "reason": "out_of_reach",
+      "need": 1
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "close"
+     },
+     "receipt": "rnarrowboat_o5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "open",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:closed",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:narrowboat",
+     "fields": {
+      "open": 0
+     },
+     "slots": {
+      "berth": [
+       "b2"
+      ],
+      "galley": [
+       "b1"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "narrowboat_take_the_tiller_and_steer",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "b2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:narrowboat",
+      "fields": {
+       "open": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "ride"
+     },
+     "receipt": "rnarrowboat_t0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "t1",
+         "slot": "stern"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:took_the_tiller",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "steer",
+      "args": {
+       "toward": "b2"
+      }
+     },
+     "receipt": "rnarrowboat_t1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "close"
+     },
+     "receipt": "rnarrowboat_t2",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:narrowboat",
+     "fields": {
+      "open": false
+     },
+     "slots": {
+      "stern": [
+       "b1"
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

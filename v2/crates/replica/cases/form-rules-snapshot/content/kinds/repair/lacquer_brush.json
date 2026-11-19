@@ -1,0 +1,22 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:lacquer_brush",
+  "owner": "thing",
+  "points": {
+    "grip": { "role": "grip", "at_mm": [-80, 25, 0] }
+  },
+  "geometry": { "bounds_mm": [300, 50, 50] },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:lacquer_brush",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[-35,25,0],"size":[220,25,25],"tint":"wood"},{"kind":"box","at":[90,25,0],"size":[40,28,28],"tint":"ferrule"},{"kind":"box","at":[125,25,0],"size":[40,30,22],"tint":"gold"}],"palette":{"wood":"#a47a4c","ferrule":"#858b8b","gold":"#e0ad3f"},"tags":["art","tool","item","brush"]}
+  },
+  "text": {
+    "card": "A lacquer brush, carried in one hand, for golden seams on cracked ceramic.",
+    "tool": "tool",
+    "restore": "restore",
+    "lacquer": "lacquer"
+  },
+  "card": { "text": "card", "category": "tool", "synonyms": ["restore", "lacquer"] }
+}

@@ -1,0 +1,71 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pantry",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 800] }
+  },
+  "slots": {
+    "place_1": { "admits": "thing", "most": 1, "at_mm": [-330, 1015, -10], "stand": "front", "fits_mm": [200, 280, 300], "row": "shelf", "place": 1, "end": "first" },
+    "place_2": { "admits": "thing", "most": 1, "at_mm": [-110, 1015, -10], "stand": "front", "fits_mm": [200, 280, 300], "row": "shelf", "place": 2 },
+    "place_3": { "admits": "thing", "most": 1, "at_mm": [110, 1015, -10], "stand": "front", "fits_mm": [200, 280, 300], "row": "shelf", "place": 3 },
+    "place_4": { "admits": "thing", "most": 1, "at_mm": [330, 1015, -10], "stand": "front", "fits_mm": [200, 280, 300], "row": "shelf", "place": 4, "end": "last" }
+  },
+  "geometry": { "bounds_mm": [1000, 1550, 400] },
+  "forms": {
+    "stock": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": { "type": "thing" },
+        "place": { "type": "slot", "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "held_by_actor", "thing": { "arg": "thing" } },
+        { "need": "slot_free", "slot": { "arg": "place" } }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "place" } },
+        { "step": "put", "slot": { "arg": "place" } }
+      ],
+      "effects": [{ "change": "reparent", "what": { "arg": "thing" }, "into": { "arg": "place" }, "event": "stocked" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:pantry",
+    "shape": {
+      "round": 10,
+      "shapes": [
+        { "kind": "box", "at": [-485, 775, 0], "size": [30, 1550, 400], "tint": "wood" },
+        { "kind": "box", "at": [485, 775, 0], "size": [30, 1550, 400], "tint": "wood" },
+        { "kind": "box", "at": [0, 775, -190], "size": [940, 1550, 20], "tint": "back" },
+        { "kind": "box", "at": [0, 1535, 0], "size": [1000, 30, 400], "tint": "wood" },
+        { "kind": "box", "at": [0, 60, 0], "size": [940, 30, 380], "tint": "wood" },
+        { "kind": "box", "at": [0, 520, 0], "size": [940, 30, 380], "tint": "wood" },
+        { "kind": "box", "at": [0, 1000, 0], "size": [940, 30, 380], "tint": "wood" },
+        { "kind": "box", "at": [0, 1040, 185], "size": [940, 50, 20], "tint": "wood" },
+        { "kind": "cyl", "at": [-300, 630, -40], "r": 55, "h": 190, "segments": 10, "tint": "jar" },
+        { "kind": "cyl", "at": [-300, 735, -40], "r": 58, "h": 20, "segments": 10, "tint": "lid" },
+        { "kind": "cyl", "at": [-140, 600, -40], "r": 50, "h": 130, "segments": 10, "tint": "jar2" },
+        { "kind": "cyl", "at": [-140, 675, -40], "r": 53, "h": 20, "segments": 10, "tint": "lid" },
+        { "kind": "box", "at": [220, 660, -40], "size": [300, 250, 220], "tint": "sack" }
+      ],
+      "palette": { "wood": "#9a7448", "back": "#7c5a38", "jar": "#c9a24a", "jar2": "#a8493a", "lid": "#3a3a3a", "sack": "#c8b48a" },
+      "tags": ["furniture", "storage", "shelf", "pantry", "kitchen"]
+    }
+  },
+  "text": {
+    "card": "A pantry: an open shelf of four places for small things, a mug, an apple, a bun.",
+    "kitchen": "kitchen",
+    "larder": "larder",
+    "food_shelf": "food shelf",
+    "howto_stock": "Hold a small thing and stock the pantry with it; anyone takes it out again by hand."
+  },
+  "card": { "text": "card", "category": "kitchen", "synonyms": ["larder", "food_shelf"] },
+  "howtos": {
+    "stock": { "text": "howto_stock", "steps": [{ "form": "stock" }] }
+  }
+}
