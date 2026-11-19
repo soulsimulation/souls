@@ -95,6 +95,16 @@ struct Seeded {
 
 /// `worldd seed` from the facts `text`, with `souls` Souls 2 m apart along x from (x m, z m).
 fn seed(d: &Path, text: &str, souls: u64, at: (i64, i64)) -> Seeded {
+    seed_entries(d, text, souls, at, None)
+}
+
+fn seed_entries(
+    d: &Path,
+    text: &str,
+    souls: u64,
+    at: (i64, i64),
+    entries: Option<&Path>,
+) -> Seeded {
     let facts = d.join("facts.json");
     std::fs::write(&facts, text).expect("facts");
     let im = import_eden::load(text).expect("loads");
@@ -111,7 +121,8 @@ fn seed(d: &Path, text: &str, souls: u64, at: (i64, i64)) -> Seeded {
         .map(|n| n.kind().clone())
         .expect("a thing with solids on the open ground");
     let dir = d.join("w");
-    let out = Command::new(env!("CARGO_BIN_EXE_worldd"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_worldd"));
+    command
         .args(["seed", "--facts"])
         .arg(&facts)
         .arg("--dir")
@@ -121,9 +132,11 @@ fn seed(d: &Path, text: &str, souls: u64, at: (i64, i64)) -> Seeded {
             &souls.to_string(),
             "--at",
             &format!("{},{}", at.0, at.1),
-        ])
-        .output()
-        .expect("seed runs");
+        ]);
+    if let Some(entries) = entries {
+        command.arg("--entries").arg(entries);
+    }
+    let out = command.output().expect("seed runs");
     assert!(
         out.status.success(),
         "seed: {}",
@@ -317,6 +330,8 @@ struct Got {
     kind: u64,
     reason: String,
     version: u64,
+    names: BTreeMap<u64, Id>,
+    entries: Vec<u64>,
 }
 
 fn read_answer(v: &Value) -> Got {
@@ -341,6 +356,23 @@ fn read_answer(v: &Value) -> Got {
             _ => String::new(),
         },
         version,
+        names: match a.get(&6) {
+            Some(Value::Map(names)) => names
+                .iter()
+                .map(|(n, id)| (*n, replica::effects::read_id(id).unwrap()))
+                .collect(),
+            _ => BTreeMap::new(),
+        },
+        entries: match a.get(&5) {
+            Some(Value::Array(rows)) => rows
+                .iter()
+                .filter_map(|v| match v {
+                    Value::Uint(n) => Some(*n),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        },
     }
 }
 
@@ -687,4 +719,123 @@ async fn g1e_a2_a3_eden_buildsafe_refuses_a_wall_on_a_soul_and_answers_fast() {
     );
     // A3's 200 ms bar is read from the printed numbers on a quiet machine (#3157): on a loaded laptop the path alone
     // (two ticks and the log's sync) passes it before any plan.
+}
+
+/// G1f A1: an actual creator edit registers the declared seat before its receipt, and removal is safe and complete.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the exported static Eden facts file"]
+async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
+    let text = std::fs::read_to_string(std::env::var("EDEN_FACTS").expect("EDEN_FACTS")).unwrap();
+    let im = import_eden::load(&text).unwrap();
+    let source = im
+        .tree
+        .node(im.tree.handle(im.nodes["e_0fc49dc9"]).unwrap())
+        .unwrap();
+    let kind = source.kind().clone();
+    let fields = source.fields().clone();
+    let (x, z) = clear_row(&text);
+    let d = scratch("g1f-seat");
+    let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let w = seed_entries(&d, &text, 1, (x, z), Some(&entries));
+    let (c, actor) = creator(0xcf);
+    static_creator(&w, c);
+    let socket = d.join("s");
+    let served = serve_with(&w, &socket, None);
+    served.line("listening ", 120);
+    let (url, tokens) = gateway(&socket, &[actor, Actor::Soul(w.souls[0])]).await;
+    let mut creator = sign_in(&url, &tokens[0]).await;
+    let mut soul = sign_in(&url, &tokens[1]).await;
+    let op = Op::Place {
+        name: 1,
+        kind,
+        parent: Ref::Node(w.ground),
+        at: Spot {
+            slot: None,
+            position: Vec3::new((x + 1) * M, 0, z * M - 509_000),
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: w.ground,
+                height: 0,
+            },
+        },
+        audience: Audience::Everyone,
+        fields,
+    };
+    let (placed, _) = send(&mut creator, edit_intent(&w, actor, 1, 0, op)).await;
+    assert_eq!(placed.kind, 1, "new chair commits: {placed:?}");
+    let chair = placed.names[&1];
+    let ask = |sequence, verb: &str, target: Option<Id>| {
+        encode(
+            &Intent {
+                actor: Actor::Soul(w.souls[0]),
+                verb: Name::new(verb).unwrap(),
+                target: target.map(Target::Node),
+                parameters: BTreeMap::new(),
+                sequence,
+                basis: basis(w.root.scope(), placed.version),
+                expiry: i64::MAX,
+                resources: Vec::new(),
+                fallbacks: Vec::new(),
+                replaces: None,
+                body: None,
+            }
+            .to_value(),
+        )
+        .unwrap()
+    };
+    let (sat, _) = send(&mut soul, ask(1, "eden:sit", Some(chair))).await;
+    println!(
+        "G1f placed receipt {:?}; sat receipt {:?}",
+        placed.entries, sat.entries
+    );
+    assert_eq!(sat.kind, 1, "new seat is usable immediately: {sat:?}");
+    let log = std::fs::read(w.dir.join("log")).unwrap();
+    let seated = sim::log::recover(&log)
+        .unwrap()
+        .records
+        .iter()
+        .filter_map(|r| {
+            let Value::Map(m) = decode(r).ok()?.value else {
+                return None;
+            };
+            let Value::Array(rows) = m.get(&answers::BODIES)? else {
+                return None;
+            };
+            rows.iter()
+                .filter_map(worldd::bodies::read_row)
+                .find(|(_, p, _)| {
+                    p.frame.node == chair && p.frame.slot == Some(1) && p.support == Support::Slot
+                })
+        })
+        .last();
+    assert!(
+        seated.is_some(),
+        "the actual body occupies the new seat's exact slot"
+    );
+    let remove = || Op::Remove {
+        node: Ref::Node(chair),
+    };
+    let (blocked, _) = send(
+        &mut creator,
+        edit_intent(&w, actor, 2, sat.version, remove()),
+    )
+    .await;
+    assert_eq!((blocked.kind, blocked.reason.as_str()), (2, "edit.in-use"));
+    let (rose, _) = send(&mut soul, ask(2, "eden:rise", None)).await;
+    assert_eq!(rose.kind, 1, "the Soul rises: {rose:?}");
+    let (removed, _) = send(
+        &mut creator,
+        edit_intent(&w, actor, 3, rose.version, remove()),
+    )
+    .await;
+    assert_eq!(
+        removed.kind, 1,
+        "unoccupied seat removal commits: {removed:?}"
+    );
+    let (gone, _) = send(&mut soul, ask(3, "eden:sit", Some(chair))).await;
+    assert_eq!(gone.kind, 2, "a retired seat cannot take a body: {gone:?}");
+    println!(
+        "G1f occupied removal: {}; rise receipt {:?}; removal receipt {:?}; retired seat: {}",
+        blocked.reason, rose.entries, removed.entries, gone.reason
+    );
 }

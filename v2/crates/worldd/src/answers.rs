@@ -752,7 +752,7 @@ struct Clock {
 }
 
 /// An edit planned off the clock, and the Souls' bodies its commit is judged against (G2's rule, G1c).
-type Checked = (Planned, Vec<Who>);
+type Checked = (Planned, Vec<Who>, crate::edit_places::Projection);
 
 /// The world node's sky in the running tick (E6, #3369): its three timers on K9's due list, each fired at its due time
 /// by the tick that holds it, and each fire's entries written on the world node.
@@ -1383,14 +1383,23 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
                 continue;
             }
-            let committed = checked.and_then(|(c, souls)| {
+            let committed = checked.and_then(|(c, souls, places)| {
+                if let Some(b) = &self.bodies {
+                    places.check(&b.slots)?;
+                }
                 let mut minter = Minter::at(self.lineage, self.next_intent);
                 let done = sim::edit::commit(&mut self.replica, &mut minter, &c, &souls, now);
                 self.next_intent = minter.next();
-                done
+                done.map(|c| (c, places))
             });
             match committed {
-                Ok(c) => {
+                Ok((c, places)) => {
+                    if let Some(b) = &mut self.bodies
+                        && let Err(e) = places.install(&mut b.slots, &c.names)
+                    {
+                        self.faults += 1;
+                        eprintln!("worldd: edit places {}", e.name);
+                    }
                     self.unsealed = true;
                     // The edit checker's town is built again from a copy with this edit (G1e).
                     if let Some(w) = &self.walkers {
@@ -2928,7 +2937,16 @@ pub fn start<S: Storage + 'static>(
         .edits
         .take()
         .zip(walkers.clone())
-        .map(|(w, m)| edit_checker(w, creator, Arc::clone(&publisher), m, events.clone()))
+        .map(|(w, m)| {
+            edit_checker(
+                w,
+                creator,
+                Arc::clone(&publisher),
+                m,
+                events.clone(),
+                rules.kinds.clone(),
+            )
+        })
         .transpose()?;
     let (acts, checked) = checkers::start(cfg.checkers, Arc::clone(&publisher), Arc::new(rules));
     let fwd = events.clone();
@@ -3232,6 +3250,7 @@ fn edit_checker(
     publisher: Arc<Publisher>,
     walkers: Arc<buildsafe::Moving>,
     events: Sender<Event>,
+    entries: replica::rules::json::Value,
 ) -> R<Sender<(Id, Edit)>> {
     let (tx, rx) = channel::<(Id, Edit)>();
     thread::Builder::new()
@@ -3271,9 +3290,10 @@ fn edit_checker(
                         Some(t) => sim::edit::plan_on(c, &copy, &Known::of(t)),
                         None => sim::edit::plan(c, &copy, ground),
                     })
-                    .map(|p| {
+                    .and_then(|p| {
+                        let places = crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
                         let tree = buildsafe::souls(&copy, &world.kinds);
-                        (p, buildsafe::judged(tree, &walkers.latest()))
+                        Ok((p, buildsafe::judged(tree, &walkers.latest()), places))
                     });
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
                     break;
