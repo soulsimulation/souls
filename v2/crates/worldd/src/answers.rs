@@ -772,10 +772,24 @@ fn thing_args(intent: &Intent) -> acts::Args {
             && let [Value::Bytes(k), v] = kv.as_slice()
             && let Ok(k) = String::from_utf8(k.clone())
         {
-            if let Value::Uint(n) = v {
-                args.slots.insert(k, *n);
-            } else if let Ok(id) = replica::effects::read_id(v) {
-                args.things.insert(k, id);
+            use skills::form_runner::Arg;
+            match v {
+                Value::Uint(n) => drop(args.slots.insert(k, *n)),
+                // A value by name, and words by their reference (`{21: id}`, K16): a set's arguments (C24).
+                Value::Text(n) => drop(args.values.insert(k, Arg::Name(n.as_str().to_owned()))),
+                Value::Map(m) if m.len() == 1 => {
+                    if let Some(Ok(id)) = m
+                        .get(&replica::audience::REFERENCE)
+                        .map(replica::effects::read_id)
+                    {
+                        args.values.insert(k, Arg::Text(id));
+                    }
+                }
+                _ => {
+                    if let Ok(id) = replica::effects::read_id(v) {
+                        args.things.insert(k, id);
+                    }
+                }
             }
         }
     }
