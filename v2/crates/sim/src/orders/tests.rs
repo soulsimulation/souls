@@ -352,6 +352,7 @@ impl World {
             &[Request {
                 body,
                 thing: w.chair,
+                slot: None,
                 mv: &sit,
                 stance: Stance::Sit,
             }],
