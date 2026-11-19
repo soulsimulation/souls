@@ -88,6 +88,7 @@ fn hall() -> Surface {
             outline: vec![corners.clone()],
             vertices: corners,
             triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: sim::gaits::Ground::Dry,
         }],
     )
 }
