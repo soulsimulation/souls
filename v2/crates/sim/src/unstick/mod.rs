@@ -492,35 +492,33 @@ impl Ladder {
         }
         // Who runs, taken once (each walker below changes only its own run, after it is read).
         let running = runner.running_bodies();
-        // Still bodies, as they stand now: no order (arrived, or ended by name), not staying, not walking out.
-        let still: Vec<(Id, Id, Vec3)> = runner
-            .controller
-            .bodies()
-            .filter(|b| {
-                !runner.staying.contains(&b.id)
-                    && !running.contains(&b.id)
-                    && !self.outs.contains(&b.id)
-            })
-            .map(|b| (b.id, node_of(b), b.pose.position))
-            .collect();
+        // Still bodies, as they stand now: no order (arrived, or ended by name), not staying, not walking out. Read
+        // the first time a walker asks (N17b): nothing below moves a body, starts a run or changes the walk-outs.
+        let mut still: Option<Vec<(Id, Id, Vec3)>> = None;
         let mut asked: BTreeSet<(Id, Id)> = BTreeSet::new();
         let ids: Vec<Id> = self.walkers.keys().copied().collect();
-        for who in ids {
-            let Some(body) = runner.controller.body(who).copied() else {
+        // Each walker's own reads, on the runner's threads (N17b): nothing below changes another walker's.
+        let reads = crate::par::map(&ids, runner.threads, 256, |&who| {
+            runner.controller.body(who).copied().map(|b| {
+                (
+                    b,
+                    runner.controller.carrying(who).is_some(),
+                    running.contains(&who),
+                    waiting(runner.fields.get(&who)),
+                )
+            })
+        });
+        for (who, read) in ids.into_iter().zip(reads) {
+            let Some((body, carried, runs, waits)) = read else {
                 continue;
             };
-            // A leg ends when the controller has carried the body across its link.
-            let carried = runner.controller.carrying(who).is_some();
+            // A leg ends when the controller has carried the body across its link (`carried`).
             let w = self.walkers.get_mut(&who).expect("a walker");
             if w.carried && !carried {
                 w.leg += 1;
             }
             w.carried = carried;
-            if !running.contains(&who)
-                || self.outs.contains(&who)
-                || runner.staying.contains(&who)
-                || carried
-            {
+            if !runs || self.outs.contains(&who) || runner.staying.contains(&who) || carried {
                 self.clocks.remove(&who);
                 continue;
             }
@@ -530,7 +528,6 @@ impl Ladder {
             };
             let (order, speed, wleg) = (w.order, w.speed, w.leg);
             let gap = len(body.pose.position, leg.to);
-            let waits = waiting(runner.fields.get(&who));
             let fresh = Clock {
                 leg: wleg,
                 best: gap,
@@ -598,7 +595,19 @@ impl Ladder {
                 c.rung = 2;
                 let (node, p) = (node_of(&body), body.pose.position);
                 let far = waits.and_then(|(l, _)| town.far_end(l, node, p));
-                for &(s, sn, sp) in &still {
+                let still = still.get_or_insert_with(|| {
+                    runner
+                        .controller
+                        .bodies()
+                        .filter(|b| {
+                            !runner.staying.contains(&b.id)
+                                && !running.contains(&b.id)
+                                && !self.outs.contains(&b.id)
+                        })
+                        .map(|b| (b.id, node_of(b), b.pose.position))
+                        .collect()
+                });
+                for &(s, sn, sp) in still.iter() {
                     let near = sn == node && len(sp, p) < NEAR;
                     let blocks = far.is_some_and(|(fnode, fp)| sn == fnode && len(sp, fp) < ROOM);
                     if (near || blocks) && asked.insert((who, s)) {
