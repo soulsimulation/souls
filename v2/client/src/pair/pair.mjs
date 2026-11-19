@@ -51,7 +51,7 @@ export async function pair({ home, directory, world, gateway, device, label, sou
   const secret = randomBytes(32).toString('hex');
   const asked = await post('/v1/pair/request', {
     secret_hash: createHash('sha256').update(secret).digest('hex'),
-    device, label, scope: 'soul', force, ...(soul ? { soul } : { new: true }),
+    device, label, scope: 'soul', force, world, ...(soul ? { soul } : { new: true }),
   });
   if (asked.refused) throw new Refused(asked.refused, 'the directory refused the request');
   onAsk?.({ link: asked.link, code: asked.code });
