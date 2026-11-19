@@ -39,6 +39,13 @@
 //! had it, and its Soul finds it again by its link. A token the directory pairs later is added to `tokens` and the
 //! gateway reads the file again: no restart.
 //!
+//! **Seats** (C17, #3453). A start registers the seats the world's entries declare on its things for the gateway's sit,
+//! lie and rise and a form's sit ([`places`]): every slot admitting a body that a thing's kind's entry declares is a
+//! seat (a sofa's three, a bed's two; C19, #3457), its point carried up the tree onto the floor a body stands on.
+//! It prints `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor;
+//! <moved> stand points moved to clear ground`. A stand point a body cannot stand on is moved to the nearest clear ground
+//! within a form's reach (C15's rule), so a rise sets the body down where it can stand.
+//!
 //! **Off the machine** (O3b, #3458), when `--store <store>`, `$WORLDD_STORE` or the directory's `$DIRECTORY_STORE_URL`
 //! names a store (O3c, #3529: the offsite bucket, `s3:https://<host>/<bucket>[/<prefix>]` with its keys in `AWS_*`, or
 //! O9's folder store, `folder:<path>` or a path; `supervisor::bucket`): the world is claimed under `--machine <name>` (`$WORLDD_MACHINE`, default
@@ -50,6 +57,12 @@
 //! bundles the page's history plays (`#w=<world name>&l=<lineage hex>&t=<µs>`, its files served under `s/`). The
 //! day's bundle index is written again each time a bundle closes. A restart archives again from record 0: what was
 //! stored is passed over when the same and written over when made from more records ([`Again`]).
+//!
+//! **Its creator** (G1e, #3532): with a store, the world's one creator is the one its record in the directory names
+//! (the list's row for its lineage and zone, then that name's record, `directoryd::worlds::list::creator_of`), read
+//! at the start and again every 30 s. Only that creator's edits are taken, each judged by G2's rule on the town before
+//! it commits (`answers`'s edit checker); every other actor's, and every edit while the record names none, is refused
+//! `edit.not-the-creator`. Without a store the world takes no edits.
 //!
 //! Not here: a G9 fork as a seed (a fork's checkpoint has no facts file for the walkers' town).
 
@@ -64,10 +77,13 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 
 use archive::{Archiver, Shared};
+use directoryd::accounts::principal_text;
 use directoryd::directory::Directory;
 use directoryd::directory::store::{Object, Store, When};
+use directoryd::worlds::list::creator_of;
 use replica::apply::Replica;
 use replica::bodies::{Class, Family, Resource};
+use replica::edit::World as Editing;
 use replica::effects::{Effect, Refusal};
 use replica::encode::{Name, Value, encode, from_hex, to_hex};
 use replica::ids::{Id, Scope, sha256};
@@ -79,10 +95,12 @@ use replica::world_model::{Audience, parse_kinds, plain};
 use sim::links::Doors;
 use sim::log::{FileStore, Log};
 use sim::recorder;
+use sim::slots::PlaceAt;
 use sim::walk::town::Town;
 use supervisor::bucket::Under;
 use worldd::answers::{self, Config, Join};
 use worldd::bodies::{Bodies, Placed};
+use worldd::buildsafe::Creator;
 use worldd::checkers::Rules;
 use worldd::shipping::{self, Item, Shipper, Wall};
 use worldd::view_out::{self, Writer};
@@ -125,6 +143,9 @@ fn eden_sky(lineage: Scope) -> sim::daylight::Config {
     seed.copy_from_slice(&lineage.0[..8]);
     sim::daylight::Config::today(cal, u64::from_le_bytes(seed))
 }
+
+/// How often the world's record is read again for its creator (G1e).
+const CREATOR_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Souls stand this far apart along x on a first start, mm.
 const APART_MM: i64 = 2_000;
@@ -264,6 +285,17 @@ fn humanoid() -> R<Family> {
             leg("souls:leg-right")?,
             hand("souls:hand-left", 1)?,
             hand("souls:hand-right", 2)?,
+            // The eyes and the voice B2's humanoid has (a look claims the gaze, a cheer the voice: C23).
+            Resource {
+                name: n("souls:eyes")?,
+                class: Class::Gaze,
+                slot: None,
+            },
+            Resource {
+                name: n("souls:voice")?,
+                class: Class::Voice,
+                slot: None,
+            },
         ],
     })
 }
@@ -308,6 +340,10 @@ fn seed_in(args: &[String]) -> R<String> {
     if let Some(e) = arg(args, "--entries") {
         let mut found = Vec::new();
         entries(Path::new(e), &mut found)?;
+        // Stand points a body can stand on: each moved clear of its own kind's solids, named here (C13, #3440).
+        for line in import_eden::clear_stand_points(&import_eden::load(&text)?, &mut found) {
+            println!("stand point: {line}");
+        }
         for (kind, v) in &found {
             let p = dir
                 .join("entries")
@@ -393,9 +429,59 @@ fn souls(meta: &Json) -> R<Vec<(Id, i64, i64)>> {
         .collect()
 }
 
+/// The seats the world's entries `kinds` declare on its things ([`import_eden::body_slots`]), each placed on the floor a
+/// body stands on: its point and facing there, and its stand point in the slot's frame. A stand point a body cannot
+/// stand on (under a table, against a wall) is moved to the nearest place within a form's reach of it where a body
+/// can (C15's rule, `skills::form_runner::REACH`), so a rise always sets the body down on clear ground. Returns the
+/// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
+/// floor above the thing) and the stand points moved.
+fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize, usize) {
+    let (found, all) = import_eden::body_slots(&town.tree, kinds);
+    let view = town.view();
+    let (mut out, mut moved) = (Vec::new(), 0);
+    for s in &found {
+        let Some((floor, point, facing)) = view.on_floor(s.thing, s.at) else {
+            continue;
+        };
+        let mut place = PlaceAt {
+            thing: s.thing,
+            place: replica::moves::Place {
+                slot: s.slot,
+                height: s.at.y.max(0),
+                stand: [s.stand.x - s.at.x, s.stand.z - s.at.z],
+            },
+            point,
+            facing,
+            floor,
+        };
+        // The stand point on the floor, at the floor's height under the seat.
+        let stand = place.stand().map(|p| Vec3::new(p.x, point.y - s.at.y, p.z));
+        let [w, x, y, z] = facing.parts();
+        let back = replica::pose::Quat::new(w, -x, -y, -z);
+        if let (Ok(stand), Ok(back)) = (stand, back)
+            && view.stand_near(floor, stand, 1, None).is_none()
+            && let Some(clear) = view.stand_near(floor, stand, skills::form_runner::REACH, None)
+            && let Ok(d) = back.rotate(Vec3::new(clear.x - point.x, 0, clear.z - point.z))
+        {
+            place.place.stand = [d.x, d.z];
+            moved += 1;
+        }
+        out.push(place);
+    }
+    let left = found.len() - out.len();
+    let mut things: Vec<Id> = out.iter().map(|p| p.thing).collect();
+    things.dedup();
+    (out, things.len(), all, left, moved)
+}
+
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
-/// where the log last had it.
-fn bodies(town: Town, ground: Id, placed: &Placed) -> Result<Bodies, Refusal> {
+/// where the log last had it. The world's seats are added ([`places`]).
+fn bodies(
+    town: Town,
+    ground: Id,
+    placed: &Placed,
+    places: Vec<PlaceAt>,
+) -> Result<Bodies, Refusal> {
     let family = humanoid().map_err(|e| Refusal {
         name: "family",
         detail: e,
@@ -412,6 +498,9 @@ fn bodies(town: Town, ground: Id, placed: &Placed) -> Result<Bodies, Refusal> {
         }
     }
     let mut b = Bodies::new(town, 50_000)?;
+    for s in places {
+        b.add_place(s)?;
+    }
     for a in at {
         b.add_body_at(family.clone(), a, placed)?;
     }
@@ -614,6 +703,33 @@ fn off_machine(
     Ok(off)
 }
 
+/// The world's one creator, read from its record in the directory `spec` names (G1e, #3532) at the start, and again
+/// each [`CREATOR_EVERY`] on a thread of its own: a change replaces it (there is never more than one), and a failed
+/// read keeps the last.
+fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
+    let store = supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?;
+    let (lineage, zone) = (built.root.scope().0, built.header.zone);
+    let read = move || creator_of(&store, &lineage, zone);
+    let creator = Arc::new(Creator::new(read().map_err(refusal)?));
+    let say = |c: Option<Id>| c.map_or_else(|| "none".to_owned(), principal_text);
+    println!("creator: {}", say(creator.get()));
+    let watched = Arc::clone(&creator);
+    std::thread::Builder::new()
+        .name("creator".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(CREATOR_EVERY);
+                match read() {
+                    Ok(c) if watched.set(c) => println!("creator: {}", say(c)),
+                    Ok(_) => {}
+                    Err(e) => eprintln!("worldd: the creator's record: {}", refusal(e)),
+                }
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(creator)
+}
+
 /// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] [--machine
 /// <name>]`: runs the world until killed. A checkpoint is taken each `--checkpoint-every` bytes of log (default 8 MiB).
 pub fn run(args: &[String]) -> i32 {
@@ -657,6 +773,14 @@ fn serve(args: &[String]) -> R<()> {
         kinds.len(),
         souls.len()
     );
+    let mut built = built;
+    let (places, things, all, left, moved) = places(&mut built.town, &kinds);
+    println!(
+        "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
+         moved to clear ground",
+        places.len(),
+        things
+    );
     let rules = Rules {
         kinds: Json::Obj(kinds),
         moves,
@@ -671,6 +795,10 @@ fn serve(args: &[String]) -> R<()> {
         .or_else(|| std::env::var("WORLDD_STORE").ok())
         .or_else(|| std::env::var(directoryd::directory::s3::URL_ENV).ok())
         .filter(|s| !s.trim().is_empty());
+    let creator = match &bucket {
+        Some(spec) => Some(creator(spec, &built)?),
+        None => None,
+    };
     let mut off = match bucket {
         Some(spec) => {
             let machine = arg(args, "--machine")
@@ -717,6 +845,15 @@ fn serve(args: &[String]) -> R<()> {
     cfg.sky = Some(eden_sky(built.root.scope()));
     // The engine's own acts (C2): the world's rules; no activity kinds are loaded from a world folder yet.
     cfg.engine = Some((built.rules.clone(), Vec::new()));
+    // G1e (#3532): with a directory, the world's one creator edits it, as its record names it now.
+    if let Some(c) = creator {
+        cfg.edits = Some(Editing {
+            // Not read: the checker takes the creator from `cfg.creator`.
+            creator: built.header.zone,
+            kinds: built.rules.kinds.clone(),
+        });
+        cfg.creator = Some(c);
+    }
     let (town, ground) = (built.town, built.ground);
     // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
     let int = |v: &Json| match v {
@@ -736,7 +873,7 @@ fn serve(args: &[String]) -> R<()> {
         per_tick: 8,
     });
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
-        bodies(town, ground, placed)
+        bodies(town, ground, placed, places.clone())
     }));
     let empty = Replica::start(built.header.stored()).map_err(refusal)?;
     let world = answers::start(empty.frozen(), rules, store, cfg).map_err(refusal)?;

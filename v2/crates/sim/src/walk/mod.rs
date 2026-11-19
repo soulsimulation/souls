@@ -18,8 +18,11 @@
 //!   commits ([`town::Town::rebuild`], [`town::Town::install`]); each plan records the ground it crossed with its
 //!   versions. The runner finds its bodies again on the new ground (`crate::host::Runner::reground`) and the ladder
 //!   plans the stale walks again (`crate::unstick`); the walk skill takes the new route as any other (`F_ROUTE`).
+//! - **A form's walk that stalls** (C21, #3484, [`stall`]): one that gains less than a quarter metre toward its goal
+//!   over 3 s ends `walk.blocked`, naming what blocks it.
 //! - **Integers.** Positions in µm, time in µs.
 
+pub mod stall;
 pub mod town;
 
 use crate::mover::Body;

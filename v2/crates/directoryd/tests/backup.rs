@@ -123,6 +123,7 @@ fn a2_directoryd_ships_its_stores_and_the_copies_read_back() {
     let ada = sign_in(&addr, "Ada");
     let account = ada["account"].as_str().unwrap().to_owned();
     // The copy taken after Ada's sign-in: the newest copy of the account store names her.
+    // Wait for pairing too before stopping the shipper: accounts can finish before that next store.
     let folder = Folder::new(bucket.clone());
     let key = Key::from_passphrase(b"a recovery passphrase for the test").unwrap();
     let restored = dir.join("restored.sqlite");
@@ -134,7 +135,7 @@ fn a2_directoryd_ships_its_stores_and_the_copies_read_back() {
             std::fs::write(&restored, &files[0].1).unwrap();
             let s = Accounts::open(&restored).expect("the copy opens");
             let a = s.sign_in(TEST_ISSUER, "Ada", 0).expect("signs in");
-            if a.account == account {
+            if a.account == account && folder.get("store/pairing").unwrap().is_some() {
                 break true;
             }
         }
