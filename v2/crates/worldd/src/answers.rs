@@ -2771,6 +2771,10 @@ pub fn start<S: Storage + 'static>(
         detail: "the zone".into(),
     })?;
     let records = found.first + found.records.len() as u64;
+    // Restored trees retain sealed hashes: their unchanged records will not be emitted by the next seal.
+    // Keep the validated blobs for sync before the checkpoint writer takes ownership of them.
+    let mut kept = Records::default();
+    kept.extend(blobs.records());
     let mut checkpoints = match &cfg.checkpoints {
         Some((dir, every)) => Some(Checkpoints::open(dir, *every, blobs)?),
         None => None,
@@ -2791,8 +2795,10 @@ pub fn start<S: Storage + 'static>(
                 sequence: world.version(),
             };
             let minter = Minter::at(cfg.lineage, next_intent);
-            c.take_at(
-                world.tree_for_seal(),
+            let sealed = world.seal()?;
+            kept.keep(&sealed);
+            c.take_sealed(
+                sealed,
                 version,
                 records,
                 Some((at, &minter)),
@@ -2921,10 +2927,9 @@ pub fn start<S: Storage + 'static>(
     let world_durable = log.durable_mark();
     let synced = cfg.synced.take();
     let served = cfg.served.take();
-    // The first seal hashes every node: taken here, before the clock runs, so no tick waits on it. Later seals hash
-    // what changed. The sync thread (C16) starts from a whole copy of the sealed world and the records the seal gave.
+    // Seal any remaining changes before the clock runs. The sync thread (C16) starts from the sealed world and
+    // one complete cache: restored records, the pre-clock checkpoint's records, and this seal's incremental records.
     let first = world.seal()?;
-    let mut kept = Records::default();
     kept.keep(&first);
     let syncs = syncs::start(world.frozen(), kept, (cfg.lineage, zone, cfg.epoch)).map_err(io)?;
     let fresh = if cfg.checkpoints.is_some() {
