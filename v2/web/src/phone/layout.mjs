@@ -40,26 +40,30 @@ const WORLDS = { worlds: [
   { name: 'harbour', label: 'Gene', template: 'eden', awake: true, picture: null },
   { name: 'a-world-with-a-rather-long-name-for-a-phone', label: 'a creator with a long label', template: 'blank', awake: false, picture: null, closed: true },
 ], templates: ['eden', 'blank'] };
-const ANSWERS = {
-  'GET /v1/worlds': WORLDS,
-  'GET /__sim/worlds.json': { worlds: [{ slug: 'eden', name: 'Eden', souls: 12 }] },
-  'POST /v1/account/souls': { souls: SOULS },
-  'POST /v1/account/souls/profile': {},
-  'POST /v1/account/souls/revoke': {},
-  'POST /v1/worlds/settings': { world: { name: 'harbour', label: 'Gene' } },
-  'POST /v1/pair/show': { code: 'WDJB-MJHT', device: 'a laptop called workbench-of-the-north', label: 'claude-code', soul: null, age: 42, connected: 'laptop-a', force: false },
-  'POST /v1/pair/approve': {},
-};
-export async function route(page) {
-  await page.route(/\/(v1|__sim)\//, (r) => {
-    const u = new URL(r.request().url());
-    const body = ANSWERS[`${r.request().method()} ${u.pathname}`];
-    return r.fulfill(body ? { status: 200, contentType: 'application/json', body: JSON.stringify(body) } : { status: 404, contentType: 'application/json', body: '{"refused":"no-fixture"}' });
+/** Routes the directory's answers on `page`, kept per page: a rename or a revoke shows on the next read. With `w`, the
+ *  world `harbour` opens on w's stream (its `world.json`, as a placed world's page reads it). */
+export async function route(page, w = null) {
+  const souls = structuredClone(SOULS), mine = (b) => souls.find((s) => s.soul === b.soul);
+  const answers = {
+    'GET /v1/worlds': () => WORLDS,
+    'GET /__sim/worlds.json': () => ({ worlds: [{ slug: 'eden', name: 'Eden', souls: 12 }] }),
+    'POST /v1/account/souls': () => ({ souls }),
+    'POST /v1/account/souls/profile': (b) => (Object.assign(mine(b), { name: b.name || null, description: b.description || null }), {}),
+    'POST /v1/account/souls/revoke': (b) => ((mine(b).device = null), {}),
+    'POST /v1/worlds/settings': () => ({ world: { name: 'harbour', label: 'Gene' } }),
+    'POST /v1/pair/show': () => ({ code: 'WDJB-MJHT', device: 'a laptop called workbench-of-the-north', label: 'claude-code', soul: null, age: 42, connected: 'laptop-a', force: false }),
+    'POST /v1/pair/approve': () => ({}),
+    ...(w ? { 'GET /w/harbour/views/world.json': () => ({ stream: `/s/${w.stream}` }) } : {}),
+  };
+  await page.route(/\/(v1|__sim|w)\//, (r) => {
+    const answer = answers[`${r.request().method()} ${new URL(r.request().url()).pathname}`];
+    if (!answer) return r.fulfill({ status: 404, contentType: 'application/json', body: '{"refused":"no-fixture"}' });
+    return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(answer(r.request().postDataJSON() ?? {})) });
   });
 }
 
 /** A small world playing on the page: worldd's stream folder, its first body's id, and a stop. */
-async function world() {
+export async function world() {
   const worldd = join(V2, 'target/debug/worldd');
   if (!existsSync(worldd)) throw new Error(`${worldd}: build it first (cargo build -p worldd)`);
   const work = mkdtempSync(join(tmpdir(), 'v2-w14-'));
@@ -73,7 +77,7 @@ async function world() {
   return { www: join(work, 'www'), stream: `${stream}/`, soul: bodies[0].replace(/-(\d+)$/, '.$1'), stop: () => (proc.kill(), rmSync(work, { recursive: true, force: true })) };
 }
 
-async function vite(www) {
+export async function vite(www) {
   const proc = spawn(join(WEB, 'node_modules/.bin/vite'), ['--port', String(o.port), '--strictPort', '--host', '127.0.0.1'], { cwd: WEB, env: { ...process.env, V2_STREAM_DIR: www }, stdio: ['ignore', 'pipe', 'inherit'] });
   await new Promise((ok, no) => {
     proc.once('exit', (c) => no(new Error(`vite exited ${c}`)));
@@ -167,7 +171,7 @@ async function main() {
       for (const pg of pages(`http://127.0.0.1:${o.port}`, w)) {
         const ctx = await browser.newContext(opts);
         const page = await ctx.newPage();
-        await route(page);
+        await route(page, w);
         await page.goto(pg.url, { waitUntil: 'domcontentloaded' });
         let bad;
         try {
