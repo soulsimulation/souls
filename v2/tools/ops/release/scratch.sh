@@ -74,9 +74,8 @@ up() {
   [ -f "$bundle/install.sh" ] && [ -f "$facts" ] && [ -d "$entries" ] || die "up <dir> <install bundle> <facts> <entries>"
   mkdir -p "$m"/{shim,units,lib,etc,seed,data/run,data/worlds/worlds}
   m=$(cd "$m" && pwd)
-  # The install's programs, where `install.sh apply` puts them (/usr/local/lib/souls), and its probe folder.
-  for b in supervisor worldd gatewayd directoryd deploy; do install -m 755 "$bundle/bin/$b" "$m/lib/$b"; done
-  install -d -m 750 "$m/etc/probe"
+  # The install's programs, where `install.sh apply` puts them (/usr/local/lib/souls).
+  for b in supervisor worldd gatewayd directoryd deploy gateway-upgrade; do install -m 755 "$bundle/bin/$b" "$m/lib/$b"; done
   cat > "$m/shim/systemctl" << 'EOF'
 #!/usr/bin/env bash
 # systemd's part on the scratch machine: restart [--no-block] <unit> and is-active [--quiet] <unit>.
