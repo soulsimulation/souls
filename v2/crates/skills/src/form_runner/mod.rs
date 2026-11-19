@@ -189,7 +189,10 @@ fn aim(
         return named(p);
     }
     let Some(a) = v.get("arg").and_then(Value::str) else {
-        return refuse("step-malformed", format!("{what}: a name or {{\"arg\": name}}"));
+        return refuse(
+            "step-malformed",
+            format!("{what}: a name or {{\"arg\": name}}"),
+        );
     };
     match args.get(a) {
         Some(Arg::Name(p)) => named(p),
@@ -399,8 +402,9 @@ fn set_field<'a>(e: &'a Value, args: &'a Args) -> Result<&'a str, Refusal> {
 }
 
 /// The value a `set` writes to field `field` (F14), as the entry format allows it: a whole number or a flag, a value
-/// of an `enum` field (a name, refused `value-unknown` when the field does not list it), and through an argument the
-/// same, a thing's id or words' reference (`{21: id}`, K16) for a `text` field. Refused `effect-malformed` otherwise.
+/// of an `enum` field (a name, refused `value-unknown` when the field does not list it), no words (`null`, `{}`) for a
+/// `text` field, and through an argument the same, a thing's id or words' reference (`{21: id}`, K16) for a `text`
+/// field. Refused `effect-malformed` otherwise.
 fn set_to(entry: &Value, field: &str, to: &Value, args: &Args) -> Result<encode::Value, Refusal> {
     let def = entry.get("state").and_then(|s| s.get(field));
     let ty = def.and_then(|d| d.get("type")).and_then(Value::str);
@@ -414,10 +418,7 @@ fn set_to(entry: &Value, field: &str, to: &Value, args: &Args) -> Result<encode:
         match (ty, listed, Name::new(v)) {
             (Some("enum"), true, Some(n)) => Ok(encode::Value::Text(n)),
             (Some("enum"), _, _) => refuse("value-unknown", format!("{field}: {v}")),
-            _ => refuse(
-                "effect-malformed",
-                format!("set.to: {field} takes no name"),
-            ),
+            _ => refuse("effect-malformed", format!("set.to: {field} takes no name")),
         }
     };
     let int = |n: i128| match (u64::try_from(n), i64::try_from(n)) {
@@ -429,6 +430,8 @@ fn set_to(entry: &Value, field: &str, to: &Value, args: &Args) -> Result<encode:
         Value::Bool(b) => Ok(encode::Value::Uint(u64::from(*b))),
         Value::Int(n) => int(*n),
         Value::Str(v) => named(v),
+        // A text field set to nothing holds no words: no reference, `{}`.
+        Value::Null if ty == Some("text") => Ok(encode::Value::Map(BTreeMap::new())),
         _ => match to.get("arg").and_then(Value::str) {
             Some(a) => match (args.get(a), ty) {
                 (Some(Arg::Name(v)), _) => named(v),

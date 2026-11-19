@@ -18,7 +18,7 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 
 use body_script::{TICK, ground, ground_id, humanoid, place};
-use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Rest};
+use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Refusal, Rest};
 use replica::encode::{Name, Value as Cbor};
 use replica::host::{Answer, Ask, Seen};
 use replica::ids::{Id, Minter, Scope};
@@ -35,7 +35,6 @@ use sim::host::Geometry;
 use sim::mover::Surface;
 use sim::moves::{Moves, Reach, library};
 use sim::timers::DueList;
-use replica::effects::Refusal;
 use skills::form_runner::{Arg, Args, Limits, check};
 
 /// How far from the body a thing is placed, µm: the body walks to it as the form asks.
@@ -111,7 +110,7 @@ struct Stage {
     /// Kinds refused at import, by name (F14).
     refused: BTreeMap<String, Refusal>,
     /// Words kept for text arguments, by reference number (a stand-in for K16).
-    words: Vec<String>,
+    words: BTreeMap<Id, String>,
 }
 
 fn obj(pairs: Vec<(&str, J)>) -> J {
@@ -168,7 +167,7 @@ impl Stage {
             placed: 0,
             runs: BTreeMap::new(),
             refused: BTreeMap::new(),
-            words: Vec::new(),
+            words: BTreeMap::new(),
         };
         s.look();
         s
@@ -231,8 +230,11 @@ impl Stage {
                 (Some("bool"), Cbor::Uint(u)) => J::Bool(*u != 0),
                 (_, Cbor::Uint(u)) => J::Int(i128::from(*u)),
                 (_, Cbor::Nint(n)) => J::Int(-1 - i128::from(*n)),
-                // An enum's value by name (F14); words by their reference stay unread here.
+                // An enum's value by name (F14), and words by their reference, as the case gave them.
                 (_, Cbor::Text(n)) => J::Str(n.as_str().to_owned()),
+                (Some("text"), r) => replica::audience::reference(r)
+                    .and_then(|id| self.words.get(&id))
+                    .map_or(J::Null, |w| J::Str(w.clone())),
                 _ => J::Null,
             };
             let fname = fname.clone();
@@ -508,7 +510,7 @@ impl Stage {
                     let Some(id) = Id::new(Scope([0xe4; 16]), n) else {
                         continue;
                     };
-                    self.words.push(words.clone());
+                    self.words.insert(id, words.clone());
                     Arg::Text(id)
                 }
                 (_, J::Int(n)) => match i64::try_from(*n) {
