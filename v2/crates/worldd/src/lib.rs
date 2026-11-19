@@ -8,3 +8,4 @@ pub mod checkers;
 pub mod measures;
 pub mod view_out;
 pub mod views;
+pub mod words;

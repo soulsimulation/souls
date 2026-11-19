@@ -31,7 +31,14 @@
 //!    in motion is refused as `stream-start-moving` (a fork has removed its bodies), and a link whose owning end is
 //!    not in the view is left out.
 //!
-//! Not here: serving (V2), history (V3), snapshot chunks for a reader that joins late, the words path (W4), and a
+//! 9. **Words beside the public parts** (V1b, #3361). A writer given K16's store ([`Writer::fork_with_text`]) of a public
+//!    view writes, before each part, its text file `<number>.text`: the words of the part's references (`{21: id}`) as
+//!    `[[reference, words], ...]` in reference order, the words as bytes, each read from the store as the public audience reads it
+//!    (`Store::read` with no ids), so a removed reference (the redaction list) and words of any other audience are
+//!    never in it. A whisper's entry is not in a public view at all, so its reference is not either. The file is
+//!    written whole and renamed (rule 4) before the part, so a reader that finds a part finds its words.
+//!
+//! Not here: serving (V2), history (V3), snapshot chunks for a reader that joins late, drawing the words (W4), and a
 //! subtree carried in on an arrival whose leave the view did not hold (T7 rule 4): its record holds the subtree as it
 //! was in flight but not where it lands, so no reader could land it, and the writer refuses it as `stream-carried`.
 //! A view of a zone's root that starts with the zone holds every leave, so it never writes one.
@@ -61,6 +68,7 @@ use replica::views::Key;
 use replica::world_model::{Audience, End};
 
 use crate::views::{Delivery, Subscriber};
+use sim::text::Store;
 
 type R<T> = Result<T, Refusal>;
 
@@ -109,6 +117,9 @@ pub struct Writer {
     expect: u64,
     last_to: Option<Micros>,
     written: Written,
+    /// K16's store, for the text file beside each part of a public view (rule 9).
+    text: Option<Arc<Store>>,
+    public: bool,
 }
 
 impl Writer {
@@ -138,6 +149,8 @@ impl Writer {
             expect: 0,
             last_to: None,
             written: Written::default(),
+            text: None,
+            public: key.audience == Audience::Everyone,
         };
         w.pointer()?;
         Ok(w)
@@ -151,6 +164,18 @@ impl Writer {
         key: &Key,
         anchor: (Micros, u64),
         state: &State,
+    ) -> R<Writer> {
+        Writer::fork_with_text(root, header, key, anchor, state, None)
+    }
+
+    /// As [`Writer::fork`], with K16's store from part 0 on (rule 9): a state's references get their words too.
+    pub fn fork_with_text(
+        root: &Path,
+        header: &Header,
+        key: &Key,
+        anchor: (Micros, u64),
+        state: &State,
+        text: Option<Arc<Store>>,
     ) -> R<Writer> {
         if key.node != state.root {
             return Err(fault(
@@ -181,6 +206,7 @@ impl Writer {
         }
         let header = with_kinds(header, &top.kind, viewed.iter().map(|(_, _, n)| &n.kind))?;
         let mut w = Writer::create(root, &header, key, anchor)?;
+        w.text = text;
 
         let at = state
             .time
@@ -411,6 +437,20 @@ impl Writer {
             _ => return Err(fault("stream-frame", "a record is a map")),
         };
         let entries = u64::try_from(records.len()).unwrap_or(u64::MAX);
+        let text = match (&self.text, self.public) {
+            (Some(store), true) => {
+                let refs = replica::audience::references(&Value::Array(records.clone()));
+                let words: Vec<Value> = refs
+                    .into_iter()
+                    .filter_map(|r| {
+                        let w = store.read(r, &[]).ok()?;
+                        Some(Value::Array(vec![r.to_value(), Value::Bytes(w)]))
+                    })
+                    .collect();
+                Some(words)
+            }
+            _ => None,
+        };
         let raw = encode(&Value::Map(
             [
                 (1, Value::Bytes(self.header.hash().to_bytes())),
@@ -440,6 +480,10 @@ impl Writer {
             gaps,
         };
         let bytes = sp.to_bytes()?;
+        if let Some(words) = text {
+            let b = encode(&Value::Array(words)).map_err(|e| fault("encoding", e.to_string()))?;
+            write_whole(&self.dir.join(format!("{number}.text")), &b)?;
+        }
         write_whole(&self.dir.join(number.to_string()), &bytes)?;
         self.written.parts += 1;
         self.written.entries += entries;
