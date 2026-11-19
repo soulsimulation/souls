@@ -18,6 +18,7 @@ import {worldConfig} from '../../config.ts';
 import {BODY_UPLOAD_POLICY,UploadRejected} from '../../moderation/validate.ts';
 import {randomInt,createHash} from 'node:crypto';
 import {siteRequestOk} from '../../travel/travel.ts';
+import {refuseWhenDiskLow} from '../../load/disk-headroom.ts';
 import {lookRequest,resolveLook,legacyPreset,LookError,HUMANOID_PARAMS,HUMANOID_REF,OUTFITS} from '../../../../web/src/humanoid/look.ts';
 
 export const BODY_PRESETS=[{id:'humanoid',name:'Humanoid',body:null},PIP_PRESET,...FLOATER_MODELS.map(m=>{
@@ -192,7 +193,7 @@ export function mountBodyRoutes(app:Hono,deps:EdgeDeps&{ledger:EdgeLedger;bodySi
     library.setPublic(ref,on);return {contract:'body-library/1',ref,public:on,status:d.status};});
   app.put('/v1/edge/body/library/:ref/public',publish(true));app.delete('/v1/edge/body/library/:ref/public',publish(false));
   app.post('/v1/edge/body/uploads',wrap(async c=>{
-    const s=deps.soul(c);if(!available)throw new EdgeError(503,'body.unavailable','This world engine cannot assign bodies');if(!deps.souls.limits.allow(`edge-body-upload:${s.soulId}`,2,60000).ok)throw new EdgeError(429,'rate-limited','At most two body uploads per minute');
+    const s=deps.soul(c);if(!available)throw new EdgeError(503,'body.unavailable','This world engine cannot assign bodies');refuseWhenDiskLow(c,(...a)=>new EdgeError(...a));/* #2538 */if(!deps.souls.limits.allow(`edge-body-upload:${s.soulId}`,2,60000).ok)throw new EdgeError(429,'rate-limited','At most two body uploads per minute');
     const form=await uploadForm(c);if(form.getAll('model').length!==1||form.getAll('manifest').length!==1)throw new EdgeError(400,'body.multipart','One model file and one manifest are required');
     const model=form.get('model'),raw=form.get('manifest');if(!model||typeof model==='string'||typeof raw!=='string'||raw.length>4096)throw new EdgeError(400,'body.multipart','One model file and one short JSON manifest are required');
     if(model.size>BODY_LIMITS.bytes)throw new EdgeError(413,'body.too-large','Body GLB exceeds 4 MiB');

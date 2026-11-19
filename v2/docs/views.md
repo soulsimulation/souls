@@ -33,8 +33,10 @@ views (R3), live subscriptions (R4), files and the CDN (V1, V2) and packing (V3)
    thread. It holds each entry whose audience is the key's and that touches the key's subtree: its node was the key's
    node or under it just before the entry, or a node it creates or brings in (a create, an arrive's subtree) is under
    it just after. When an arrival lands under the key and the view did not hold its leave, `full` and `sampled` first
-   write the subtree as it was in flight, `{0: {1: sequence, 2: [[id, node], ...], 3: [[id, link], ...]}}` (field 0,
-   which no entry has) in T6's state layout, so a view can draw what came in from elsewhere. It holds only the nodes of
+   write the subtree as it was in flight, `{0: {1: sequence, 2: [[id, node], ...], 3: [[id, link], ...], 4: pose}}`
+   (field 0, which no entry has) in T6's state layout, with where it lands: the flight's pose, whose frame is the new
+   parent and slot (revision 2; a revision 1 record has no field 4 and cannot be landed). A reader puts the subtree in
+   flight and the arrive after it lands it, so a view can draw what came in from elsewhere. It holds only the nodes of
    the key's audience, and links of that audience whose ends it may see (T2 rule 9); a view of another audience than
    the arrival's gets its own nodes this way too (a private note in a public box), and no record when there are none. One walk of the log feeds every key; any number of subscriptions with one key share one view. Every
    entry moves the view's position, seen or not. For one redaction list and version a stream only appends: a record
