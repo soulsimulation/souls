@@ -12,4 +12,14 @@ disallowed-methods = [
   { path = "std::time::Instant::elapsed", reason = "the wall-clock rule (K7, TRUNK T5): read time through sim::clock::Clock" },
   { path = "std::time::SystemTime::now", reason = "the wall-clock rule (K7, TRUNK T5): read time through sim::clock::Clock" },
   { path = "std::time::SystemTime::elapsed", reason = "the wall-clock rule (K7, TRUNK T5): read time through sim::clock::Clock" },
+  # The same build repeats itself (K12, #2675): the world draws from sim::random, keyed by seed, node, purpose and counter.
+  { path = "rand::thread_rng", reason = "the repeat rule (K12): draw from sim::random, keyed by seed, node, purpose and counter", allow-invalid = true },
+]
+
+# The repeat rule (K12, #2675): Rust seeds a HashMap's order at random in each process, so two runs of one build can
+# write different logs. `sim` keeps ordered maps (BTreeMap, BTreeSet). The rule is `sim`'s: a crate or module whose
+# maps are lookups and never reach state or the log in their order allows `clippy::disallowed_types` and says so.
+disallowed-types = [
+  { path = "std::collections::HashMap", reason = "the repeat rule (K12): its order changes per process; use BTreeMap" },
+  { path = "std::collections::HashSet", reason = "the repeat rule (K12): its order changes per process; use BTreeSet" },
 ]

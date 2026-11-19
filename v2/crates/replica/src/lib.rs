@@ -16,6 +16,7 @@ pub mod encode;
 pub mod facts;
 pub mod group;
 pub mod hash;
+pub mod hatch;
 pub mod history;
 pub mod host;
 pub mod ids;

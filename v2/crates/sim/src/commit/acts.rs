@@ -16,7 +16,7 @@ use replica::effects::{Cause, Effect};
 use replica::encode::Name;
 use replica::ids::Id;
 use replica::time::Micros;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 /// Answers kept per actor, to answer a repeat with.
 pub const KEPT: usize = 16;
@@ -41,7 +41,7 @@ struct Last {
 /// Each actor's last answered sequence and its last [`KEPT`] answers, by the actor's encoded bytes.
 #[derive(Default)]
 pub struct Sequences {
-    actors: HashMap<Vec<u8>, Last>,
+    actors: BTreeMap<Vec<u8>, Last>,
 }
 
 impl Sequences {
@@ -72,7 +72,7 @@ impl Sequences {
 /// The index from an intent to the entries it caused: its receipt.
 #[derive(Default)]
 pub struct Receipts {
-    by_intent: HashMap<Id, Vec<u64>>,
+    by_intent: BTreeMap<Id, Vec<u64>>,
 }
 
 impl Receipts {

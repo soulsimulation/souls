@@ -13,7 +13,7 @@
 //!
 //! The hub knows the bodies its records created; a world's bodies as built, before its first record, are not in it yet.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -90,7 +90,7 @@ fn audiences(v: &Value) -> R<BTreeSet<Id>> {
 fn run(rx: &Receiver<Cmd>) {
     let mut hub = Hub::new();
     // (connection, gateway's number) -> (hub's number, where its items go).
-    let mut subs: HashMap<(u64, u64), Held> = HashMap::new();
+    let mut subs: BTreeMap<(u64, u64), Held> = BTreeMap::new();
     while let Ok(cmd) = rx.recv() {
         match cmd {
             Cmd::Record(bytes) => {
@@ -291,7 +291,7 @@ mod tests {
         let mut cfg = Config::new(LINEAGE, 1);
         cfg.tick = Duration::from_millis(10);
         cfg.measures = false;
-        cfg.views = Some(feed.clone());
+        cfg.served = Some(feed.clone());
         let world =
             answers::start(w.replica, toggles::rules(), Mem::with(Vec::new()), cfg).unwrap();
 

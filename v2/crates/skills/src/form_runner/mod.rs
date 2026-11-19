@@ -34,13 +34,18 @@
 //!   its move like a `move` step, and its contact is the instant of B4's transfer of the thing into a free hand or into
 //!   a slot of the node ([`Effect::Take`], [`Effect::Put`]). The world works each out against the tree (`sim::forms`).
 //!
+//! - **The hatch** (F8, #2823). A form whose rule data cannot express carries one pure function, named by its module's
+//!   hash ([`bind_hatch`]); [`run_hatch`] runs it on its declared reads in `replica`'s one interpreter, so the world,
+//!   the daemon and a page give the same verdict at the same counted steps.
+//!
 //! Not here: who may (F6), stages of long forms (F11), a thing made or set down where there is no slot (E4).
 
 use std::collections::BTreeMap;
 
 use replica::effects::Refusal;
 use replica::encode::{self, Name};
-use replica::host::{Host, Progress, Skill};
+use replica::hatch::Loaded;
+use replica::host::{Answers, Hatch, Host, Progress, Skill};
 use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::rules::json::Value;
@@ -343,6 +348,169 @@ pub fn bind_effects_with(
         });
     }
     Ok(out)
+}
+
+/// Binds form `form`'s hatch (F8, #2823), if it has one, into T9's shape (`replica::host::Hatch`, which refuses by
+/// name): `{"module": "prov-<multihash hex>", "reads": [{"field": name} | {"arg": name}], "steps_most": n, "answers":
+/// "verdict" | {"field": name}, "why": key}`. A read of a field the kind does not declare is `field-unknown`.
+pub fn bind_hatch(entry: &Value, form: &str) -> Result<Option<Hatch>, Refusal> {
+    let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
+        return refuse("form-unknown", form);
+    };
+    let Some(h) = f.get("hatch") else {
+        return Ok(None);
+    };
+    let field = |name: &str| {
+        match entry
+            .get("state")
+            .and_then(|s| s.get(name))
+            .and_then(|d| d.get("n"))
+        {
+            Some(Value::Int(n)) => u64::try_from(*n).map_err(|_| ()),
+            _ => Err(()),
+        }
+        .map_err(|()| Refusal {
+            name: "field-unknown",
+            detail: name.to_owned(),
+        })
+    };
+    let module = h
+        .get("module")
+        .and_then(Value::str)
+        .and_then(|t| t.strip_prefix("prov-"))
+        .filter(|t| t.len() % 2 == 0)
+        .and_then(|t| {
+            (0..t.len() / 2)
+                .map(|i| u8::from_str_radix(&t[2 * i..2 * i + 2], 16).ok())
+                .collect::<Option<Vec<u8>>>()
+        })
+        .unwrap_or_default();
+    let mut reads = Vec::new();
+    for r in h.get("reads").and_then(Value::arr).unwrap_or(&[]) {
+        reads.push(
+            match (
+                r.get("field").and_then(Value::str),
+                r.get("arg").and_then(Value::str),
+            ) {
+                (Some(f), None) => encode::Value::Map(
+                    [
+                        (1, encode::Value::Uint(1)),
+                        (2, encode::Value::Uint(field(f)?)),
+                    ]
+                    .into(),
+                ),
+                (None, Some(a)) => encode::Value::Map(
+                    [
+                        (1, encode::Value::Uint(2)),
+                        (2, encode::Value::Text(a_name(a)?)),
+                    ]
+                    .into(),
+                ),
+                _ => return refuse("hatch-not-a-record", "a read is {field} or {arg}"),
+            },
+        );
+    }
+    let answers = match h.get("answers") {
+        Some(a) if a.str() == Some("verdict") => [(1, encode::Value::Uint(1))].into(),
+        Some(a) => match a.get("field").and_then(Value::str) {
+            Some(f) => [
+                (1, encode::Value::Uint(2)),
+                (2, encode::Value::Uint(field(f)?)),
+            ]
+            .into(),
+            None => return refuse("hatch-not-a-record", "answers is verdict or {field}"),
+        },
+        None => return refuse("hatch-not-a-record", "answers is verdict or {field}"),
+    };
+    let steps = match h.get("steps_most") {
+        Some(Value::Int(n)) => u64::try_from(*n).unwrap_or(0),
+        _ => 0,
+    };
+    let why = a_name(text(h.get("why"), "hatch.why")?)?;
+    Hatch::from_value(&encode::Value::Map(
+        [
+            (1, encode::Value::Bytes(module)),
+            (2, encode::Value::Array(reads)),
+            (3, encode::Value::Uint(steps)),
+            (4, encode::Value::Map(answers)),
+            (5, encode::Value::Text(why)),
+        ]
+        .into(),
+    ))
+    .map(Some)
+}
+
+/// A read's value as the hatch's words: a whole number is one word, a list or a record its parts' words in order.
+fn words(v: &encode::Value, into: &mut Vec<i64>) -> Result<(), Refusal> {
+    let not = || Refusal {
+        name: "hatch-read-not-a-number",
+        detail: "a hatch reads whole numbers, lists and records of them".into(),
+    };
+    match v {
+        encode::Value::Uint(n) => into.push(i64::try_from(*n).map_err(|_| not())?),
+        encode::Value::Nint(n) => into.push(-1 - i64::try_from(*n).map_err(|_| not())?),
+        encode::Value::Array(vs) => vs.iter().try_for_each(|v| words(v, into))?,
+        encode::Value::Map(m) => m.values().try_for_each(|v| words(v, into))?,
+        encode::Value::Bytes(_) | encode::Value::Text(_) => return Err(not()),
+    }
+    Ok(())
+}
+
+/// The words a hatch is given for the values of its declared reads, in order (`replica::hatch`'s calling convention):
+/// `hatch-reads-differ` when their number is not the declared one, `hatch-read-not-a-number` for text or bytes.
+pub fn hatch_words(hatch: &Hatch, reads: &[encode::Value]) -> Result<Vec<Vec<i64>>, Refusal> {
+    if reads.len() != hatch.reads.len() {
+        return refuse(
+            "hatch-reads-differ",
+            format!("{} declared, {} given", hatch.reads.len(), reads.len()),
+        );
+    }
+    reads
+        .iter()
+        .map(|v| {
+            let mut w = Vec::new();
+            words(v, &mut w).map(|()| w)
+        })
+        .collect()
+}
+
+/// A hatch's verdict and the steps it took. A no refuses the act with the hatch's `why` (`hatch-said-no`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Verdict {
+    pub yes: bool,
+    pub steps: u64,
+}
+
+/// Runs a form's hatch (F8) on the values of its declared reads, in order, through `module`, the hatch's module loaded
+/// by its hash: the verdict, or the hatch's own refusal (`hatch-over-budget`, `hatch-trapped`, ...). A fault is
+/// contained in the call. A hatch that answers a field's value is `hatch-answer-not-built`.
+pub fn run_hatch(
+    hatch: &Hatch,
+    module: &Loaded,
+    reads: &[encode::Value],
+) -> Result<Verdict, Refusal> {
+    if hatch.answers != Answers::Verdict {
+        return refuse("hatch-answer-not-built", "a hatch answers a verdict");
+    }
+    let ran = module.run(&hatch_words(hatch, reads)?, hatch.steps_most)?;
+    match ran.answer {
+        0 | 1 => Ok(Verdict {
+            yes: ran.answer == 1,
+            steps: ran.steps,
+        }),
+        n => refuse(
+            "hatch-answer-malformed",
+            format!("{n}; a verdict is 1 or 0"),
+        ),
+    }
+}
+
+/// The refusal a hatch's no gives the act: `hatch-said-no`, with its `why`.
+pub fn hatch_no(hatch: &Hatch) -> Refusal {
+    Refusal {
+        name: "hatch-said-no",
+        detail: hatch.why.as_str().to_owned(),
+    }
 }
 
 /// The deadlines of the steps that wait on the world, µs from the step's start. A pause's deadline is its own end.

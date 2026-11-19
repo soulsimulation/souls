@@ -49,6 +49,10 @@
 //! the shortest, not the quickest), walking a shore link (the walk skill crosses tree links and steps only). Ground
 //! cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
 
+// The repeat rule (K12, v2/clippy.toml): the distance and patch maps are lookups on the search's hot path, never
+// iterated, so their order reaches no route.
+#![allow(clippy::disallowed_types)]
+
 pub mod way;
 
 use crate::gaits::Ground;

@@ -27,6 +27,9 @@ use crate::mover::Surface;
 use crate::moves::{Moves, Reach, load};
 use crate::timers::DueList;
 
+/// F11's stages (#2774), on this bench.
+mod stages;
+
 const FAMILIES: &str = include_str!("../../../replica/fixtures/bodies/families.diag");
 const KINDS: &str = include_str!("../../../replica/fixtures/world-model/kinds.diag");
 const TICK: Micros = 50_000;
