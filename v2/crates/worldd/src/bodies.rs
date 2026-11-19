@@ -185,6 +185,11 @@ pub struct Bodies {
     /// How long a tick waits for each of the planner's batches: `None` as long as it takes (lockstep, the default),
     /// else a bound (a free-running clock never stops for the planner; a late batch is read at a later tick).
     pub wait: Option<Duration>,
+    /// A replay's record of the planner (K18b): at these body times, take only this many batches (each other body
+    /// tick takes every batch out, waiting as long as it takes). Read from the recorder's `Planned` inputs.
+    pub schedule: BTreeMap<Micros, u64>,
+    /// Where a free-running clock took fewer batches than were out, for the recorder: body time and batches taken.
+    late: Vec<(Micros, u64)>,
     /// The planner's answers for the next tick.
     planned: Planned,
     /// The reach distances last found, by body and seat.
@@ -258,6 +263,8 @@ impl Bodies {
         Ok(Bodies {
             planner,
             wait: None,
+            schedule: BTreeMap::new(),
+            late: Vec::new(),
             planned: Planned::default(),
             reached: BTreeMap::new(),
             waiting: Vec::new(),
@@ -410,9 +417,30 @@ impl Bodies {
         self.planner.searched
     }
 
-    /// The planner's answers to everything sent, taken for the next tick ([`Bodies::wait`]).
+    /// Body times and batch counts where a free-running clock took fewer of the planner's batches than were out, since
+    /// the last call: the recorder's `Planned` inputs (K18b).
+    pub fn late(&mut self) -> Vec<(Micros, u64)> {
+        std::mem::take(&mut self.late)
+    }
+
+    /// The planner's answers taken for the next tick: those [`Bodies::schedule`] names for this body tick, else every
+    /// batch out, waiting at most [`Bodies::wait`] for each; a shortfall is kept for the recorder.
     fn take(&mut self) {
-        let p = self.planner.take(self.wait);
+        let at = self.runner.now;
+        let p = match self.schedule.remove(&at) {
+            Some(n) => self
+                .planner
+                .take_n(usize::try_from(n).unwrap_or(usize::MAX)),
+            None => {
+                let out = self.planner.pending();
+                let p = self.planner.take(self.wait);
+                let left = self.planner.pending();
+                if left > 0 {
+                    self.late.push((at, (out - left) as u64));
+                }
+                p
+            }
+        };
         self.reached.extend(p.reach.iter().map(|(k, v)| (*k, *v)));
         self.planned.merge(p);
     }

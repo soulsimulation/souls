@@ -342,6 +342,10 @@ pub struct Config {
     /// Each log record once it is on the disk, input records included, in order (C1, #3365): `worldd serve`'s own
     /// view tier and shipper read them here, off the clock thread.
     pub synced: Option<Sender<Synced>>,
+    /// How long a free-running tick waits for each of the bodies' planner batches (K18b); `None` is a tenth of a tick.
+    pub planner_wait: Option<Duration>,
+    /// A replay's planner batches (K18b): the recorder's `Planned` inputs, body time µs and batches taken there.
+    pub planned: BTreeMap<u64, u64>,
 }
 
 /// A record on the disk ([`Config::synced`]): its number in the log, its bytes, and whether it is the recorder's input
@@ -370,6 +374,8 @@ impl Config {
             measures: true,
             health: None,
             synced: None,
+            planner_wait: None,
+            planned: BTreeMap::new(),
         }
     }
 }
@@ -862,7 +868,15 @@ impl Clock {
         let Some(b) = self.bodies.as_mut() else {
             return;
         };
-        for (id, how) in b.step(now) {
+        let ended = b.step(now);
+        // Where the planner's answers came back late (K18b), for the recorder: a replay takes them at the same tick.
+        for (at, taken) in b.late() {
+            self.inputs.push(Input::Planned {
+                at: u64::try_from(at).unwrap_or(0),
+                taken,
+            });
+        }
+        for (id, how) in ended {
             self.settle(id, how, now);
         }
     }
@@ -1364,6 +1378,11 @@ pub fn start<S: Storage + 'static>(
     let mut cfg = cfg;
     let make = cfg.bodies.take();
     let tick = cfg.tick;
+    let planner_wait = cfg.planner_wait;
+    let planned_at: BTreeMap<Micros, u64> = std::mem::take(&mut cfg.planned)
+        .into_iter()
+        .map(|(at, n)| (i64::try_from(at).unwrap_or(i64::MAX), n))
+        .collect();
     let tick_us = i64::try_from(cfg.tick.as_micros()).unwrap_or(50_000).max(1);
     if 1_000_000 % tick_us != 0 {
         return Err(Refusal {
@@ -1483,10 +1502,12 @@ pub fn start<S: Storage + 'static>(
                     Ok(mut b) => {
                         let at = ticker.due().unwrap_or(0);
                         b.begin(at);
-                        // A free-running clock waits at most a tenth of a tick for each planner batch (K18b).
+                        // A free-running clock waits at most a tenth of a tick for each planner batch (K18b); a
+                        // replay takes the batches where the recorder says the live run took them.
                         if !lockstep {
-                            b.wait = Some(tick / 10);
+                            b.wait = Some(planner_wait.unwrap_or(tick / 10));
                         }
+                        b.schedule = planned_at;
                         // Those the log last had in a seat sit in it again, the seat held (K18c).
                         for (body, why) in b.seat_placed(&placed, at) {
                             eprintln!(

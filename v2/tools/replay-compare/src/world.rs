@@ -96,7 +96,7 @@ impl World {
         for input in inputs {
             let sequence = self.tree.next() + effects.len() as u64;
             let (cause, actor, node, change) = match input {
-                Input::Time { .. } => continue,
+                Input::Time { .. } | Input::Planned { .. } => continue,
                 Input::Birth { by, kind } => {
                     let node = ee(FIRST_BORN + self.born);
                     self.born += 1;

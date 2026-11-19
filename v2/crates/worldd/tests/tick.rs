@@ -107,6 +107,15 @@ impl Skill for Panics {
 /// The walkers stand west of the square, the chair 4 m east of the first; with `panic`, a fourth body runs a skill
 /// that panics.
 fn bodies(placed: &Placed, panic: bool) -> Result<Bodies, replica::effects::Refusal> {
+    bodies_ticked(placed, panic, 50_000)
+}
+
+/// [`bodies`], stepped in ticks of `tick` µs.
+fn bodies_ticked(
+    placed: &Placed,
+    panic: bool,
+    tick: i64,
+) -> Result<Bodies, replica::effects::Refusal> {
     let (town, ground) = town();
     let frame = Frame {
         node: ground,
@@ -128,7 +137,7 @@ fn bodies(placed: &Placed, panic: bool) -> Result<Bodies, replica::effects::Refu
         Vec3::new(-42_000_000, 0, 22_000_000),
         Quat::IDENTITY,
     )?;
-    let mut b = Bodies::new(town, 50_000)?;
+    let mut b = Bodies::new(town, tick)?;
     for p in placements {
         b.add_body_at(humanoid(), p, placed)?;
     }
@@ -622,4 +631,149 @@ fn k18b_a2_a_route_search_on_the_clock_thread_fails() {
         .unwrap();
     sim::commit::mark_clock_thread();
     let _ = t.line(&body, Vec3::new(88_000_000, 0, -5_000_000));
+}
+
+/// A free-running clock from one tick (`.1` µs): real time since it started, so a world's first tick is tick 1, next to
+/// lockstep's first.
+struct FromZero(std::time::Instant, i64);
+
+impl sim::clock::Clock for FromZero {
+    #[allow(clippy::disallowed_methods)] // a test's real clock
+    fn now(&mut self) -> i64 {
+        self.1 + self.0.elapsed().as_micros() as i64
+    }
+
+    fn sleep_until(&mut self, t: i64) {
+        let wait = t - self.now();
+        if wait > 0 {
+            std::thread::sleep(Duration::from_micros(wait as u64));
+        }
+    }
+}
+
+/// The recorder's `Planned` inputs: where the live run took fewer planner batches than were out.
+fn planned(log: &[u8]) -> BTreeMap<u64, u64> {
+    let records = recover(log).unwrap().records;
+    let mut out = BTreeMap::new();
+    for (_, inputs) in recorder::inputs(&records).unwrap() {
+        for i in inputs {
+            if let recorder::Input::Planned { at, taken } = i {
+                out.insert(at, taken);
+            }
+        }
+    }
+    out
+}
+
+/// The tick the log's last part holds.
+fn last_tick(log: &[u8]) -> i64 {
+    recover(log)
+        .unwrap()
+        .records
+        .iter()
+        .filter(|r| !recorder::is_input(r))
+        .filter_map(|r| match Part::read(r).unwrap().rest.get(&answers::TICK) {
+            Some(Value::Uint(n)) => Some(*n as i64),
+            _ => None,
+        })
+        .next_back()
+        .expect("a part with a tick")
+}
+
+/// K18b (#3175): a free-running world reads the planner's batches when they are back, at most its bound after each
+/// tick (here none at all, so batches come back late); the flight recorder keeps where it took fewer than were out,
+/// and the recording replayed in lockstep lands each batch at the same tick: the same effects and the same state.
+#[test]
+fn k18b_a_free_running_world_with_its_planner_replays_in_lockstep() {
+    let p = pairs();
+    let (_, ground) = town();
+    let tick_us = 10_000;
+    let config = |planned: BTreeMap<u64, u64>| {
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.tick = Duration::from_micros(tick_us as u64);
+        cfg.planner_wait = Some(Duration::ZERO);
+        cfg.planned = planned;
+        cfg.bodies = Some(Box::new(move |p: &Placed| bodies_ticked(p, false, tick_us)));
+        cfg
+    };
+    // The live run: whether a batch comes back late depends on the machine, so it runs again (up to five times) until
+    // one does.
+    let live = || {
+        let store = Mem::with(Vec::new());
+        let mut cfg = config(BTreeMap::new());
+        #[allow(clippy::disallowed_methods)] // a test's real clock
+        let zero = std::time::Instant::now();
+        cfg.clock = Some(Box::new(FromZero(zero, tick_us)));
+        let w = answers::start(lamp_world().replica, toggles::rules(), store.clone(), cfg).unwrap();
+        let to_chair = at(&w, 20, intent(p[0].0, 1, "eden:walk", Some(chair()), None));
+        let stroll = at(
+            &w,
+            21,
+            intent(
+                p[2].0,
+                1,
+                "eden:walk",
+                Some(ground),
+                Some(Vec3::new(-44_000_000, 0, 38_000_000)),
+            ),
+        );
+        let walked = answer(&to_chair);
+        let strolled = answer(&stroll);
+        let (reply, sit) = channel();
+        w.door()
+            .arrive(intent(p[0].0, 2, "eden:sit", Some(chair()), None), reply);
+        let sat = answer(&sit);
+        std::thread::sleep(Duration::from_millis(300));
+        w.stop();
+        println!("K18b free-running: walk {walked:?}, stroll {strolled:?}, sit {sat:?}");
+        walked.expect("the walk lands");
+        strolled.expect("the stroll lands");
+        sat.expect("the sit lands");
+        bytes(&store)
+    };
+    let (log, schedule) = (0..5)
+        .map(|_| {
+            let log = live();
+            let schedule = planned(&log);
+            (log, schedule)
+        })
+        .find(|(_, s)| !s.is_empty())
+        .expect("some batches came back late in one of five runs");
+    let (end, state) = (last_tick(&log), last_state(&log));
+    println!(
+        "K18b free-running: {} body ticks took batches late, last tick {end}",
+        schedule.len()
+    );
+
+    // The recording in lockstep: the intents at their ticks, the planner's batches where the live run took them.
+    let again = Mem::with(Vec::new());
+    let mut cfg = config(schedule);
+    cfg.lockstep = true;
+    let r = answers::start(lamp_world().replica, toggles::rules(), again.clone(), cfg).unwrap();
+    let answers: Vec<_> = script(&log)
+        .into_iter()
+        .map(|(t, b)| at(&r, t, b))
+        .collect();
+    let replayed = run_to(&r, end);
+    for a in &answers {
+        answer(a).expect("the same answers");
+    }
+    r.stop();
+    let (h1, h2) = (
+        recorder::effect_hash(&recover(&log).unwrap().records),
+        recorder::effect_hash(&recover(&bytes(&again)).unwrap().records),
+    );
+    println!(
+        "K18b free-running: effect hash {} replayed {}; state {} replayed {}",
+        hex(&h1),
+        hex(&h2),
+        hex(&state),
+        hex(&replayed.state)
+    );
+    assert_eq!(
+        replayed.state.to_vec(),
+        state,
+        "the replay ends in the same state"
+    );
+    assert_eq!(h1, h2, "and writes the same effects");
 }

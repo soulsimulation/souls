@@ -19,9 +19,10 @@
 //! - **Waits.** [`Thread::take`] waits for the answers to everything sent. In lockstep as long as it takes, so what a
 //!   tick reads never depends on the threads' timing and a run fed the same inputs at the same ticks repeats (K12's
 //!   replay). A free-running clock never stops for the planner: it waits at most a bound for each batch, and a batch
-//!   late is merged into a later take (its walkers stand, its grants and sits wait). There the answers' tick depends
-//!   on the planner's time, as an intent's tick depends on when it arrives; the log records what was done. The
-//!   planner works while the clock commits, records and waits for its next tick.
+//!   late is merged into a later take (its walkers stand, its grants and sits wait). Where it took fewer batches than
+//!   were out, the flight recorder keeps the body tick and the count (K12's input `Planned`), and a replay in
+//!   lockstep takes exactly those there ([`Thread::take_n`]), so it lands each batch at the tick the live run did and
+//!   ends in the same state. The planner works while the clock commits, records and waits for its next tick.
 
 use crate::host::{Planned, Wants};
 use crate::walk::World;
@@ -135,6 +136,36 @@ impl Thread {
         }
     }
 
+    /// Batches sent and not yet taken.
+    pub fn pending(&self) -> usize {
+        self.out
+    }
+
+    /// The answers to the first `n` batches not yet taken (or every one, if fewer), later over earlier, waiting as long
+    /// as it takes: a replay taking the batches a free-running clock took ([`crate::recorder::Input::Planned`]).
+    pub fn take_n(&mut self, n: usize) -> Planned {
+        let mut all = Planned::default();
+        for _ in 0..n.min(self.out) {
+            let Ok(p) = self.answers.recv() else {
+                self.out = 0;
+                break;
+            };
+            self.out -= 1;
+            self.merge(&mut all, p);
+        }
+        all
+    }
+
+    fn merge(&mut self, all: &mut Planned, p: Option<Planned>) {
+        match p {
+            Some(p) => {
+                self.searched += p.searched;
+                all.merge(p);
+            }
+            None => self.panicked += 1,
+        }
+    }
+
     /// The answers to every batch sent and not yet taken, later answers over earlier: waiting as long as it takes
     /// (`None`), or up to `wait` for each; a batch not back in time is taken by a later call.
     pub fn take(&mut self, wait: Option<Duration>) -> Planned {
@@ -156,13 +187,7 @@ impl Thread {
                 }
             };
             self.out -= 1;
-            match p {
-                Some(p) => {
-                    self.searched += p.searched;
-                    all.merge(p);
-                }
-                None => self.panicked += 1,
-            }
+            self.merge(&mut all, p);
         }
         all
     }
