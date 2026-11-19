@@ -1,10 +1,11 @@
-//! A committed move reaches the body (Engine v2 I4b, #3156): walk, sit and rise from the gateway.
+//! A committed move reaches the body (Engine v2 I4b, #3156): walk, sit, lie and rise from the gateway.
 //!
-//! [`crate::answers`] takes a move intent (a form's verb named `walk`, `sit` or `rise`, as `eden:sit`; T10 rule 4
+//! [`crate::answers`] takes a move intent (a form's verb named `walk`, `sit`, `lie` or `rise`, as `eden:sit`; T10 rule 4
 //! keeps `souls:` verbs for the engine's own) like any act: an id, a deadline and a place in the next tick. At that
 //! tick it is committed here, and the body is driven only through what already moves bodies (`v2/docs/bodies.md`): a
 //! walk is N7's walk skill run behind the host (`sim::host::Runner`, T9b/T9c), sent to a point (N9); a sit is B3's
-//! reserved seat and B2's sit move (`sim::slots`, `sim::moves`); a rise is B3's rise. Each steps the one controller
+//! reserved seat and B2's sit move (`sim::slots`, `sim::moves`); a lie is the same with B2's lie move and the stance
+//! lie (C4, #3368); a rise is B3's rise. Each steps the one controller
 //! (B1). Nothing here sets a pose or a position.
 //!
 //! - **Checked at commit.** A move's checks are its own: the controller's claims (T9 rule 4), the reach (B2), the seat
@@ -48,6 +49,7 @@ type R<T> = Result<T, Refusal>;
 
 const SIT: &str = include_str!("../../replica/fixtures/moves/sit.diag");
 const RISE: &str = include_str!("../../replica/fixtures/moves/rise.diag");
+const LIE: &str = include_str!("../../replica/fixtures/moves/lie.diag");
 
 /// A walk's speed, µm a second.
 pub const WALK: i64 = 1_400_000;
@@ -62,6 +64,10 @@ pub enum Ask {
     },
     /// Sit on the seat of `thing`.
     Sit {
+        thing: Id,
+    },
+    /// Lie down in the slot of `thing`.
+    Lie {
         thing: Id,
     },
     Rise,
@@ -108,6 +114,7 @@ pub fn read(intent: &Intent, body: Id) -> Option<Result<Asked, &'static str>> {
             Ok(Ask::Walk { node, point })
         }),
         "sit" => node.ok_or("move.no-target").map(|thing| Ask::Sit { thing }),
+        "lie" => node.ok_or("move.no-target").map(|thing| Ask::Lie { thing }),
         "rise" => Ok(Ask::Rise),
         _ => return None,
     };
@@ -157,6 +164,7 @@ pub struct Bodies {
     due: DueList,
     mint: Minter,
     sit: Move,
+    lie: Move,
     rise: Move,
     /// The move each body is doing for an intent.
     live: BTreeMap<Id, (Id, Live)>,
@@ -190,6 +198,7 @@ impl Bodies {
             due: DueList::new(),
             mint: Minter::new(Scope([0xb4; 16])),
             sit: load(SIT)?,
+            lie: load(LIE)?,
             rise: load(RISE)?,
             live: BTreeMap::new(),
             ended: Vec::new(),
@@ -322,7 +331,11 @@ impl Bodies {
                 }
                 Ask::Sit { thing } => {
                     self.replace(a.body);
-                    sits.push((id, a.body, thing));
+                    sits.push((id, a.body, thing, Stance::Sit));
+                }
+                Ask::Lie { thing } => {
+                    self.replace(a.body);
+                    sits.push((id, a.body, thing, Stance::Lie));
                 }
                 Ask::Rise => {
                     self.replace(a.body);
@@ -348,11 +361,15 @@ impl Bodies {
             let geo = self.geo(&bodies, &things);
             let requests: Vec<Request> = sits
                 .iter()
-                .map(|&(_, body, thing)| Request {
+                .map(|&(_, body, thing, stance)| Request {
                     body,
                     thing,
-                    mv: &self.sit,
-                    stance: Stance::Sit,
+                    mv: if stance == Stance::Lie {
+                        &self.lie
+                    } else {
+                        &self.sit
+                    },
+                    stance,
                 })
                 .collect();
             let done = self.slots.commit(
@@ -364,7 +381,7 @@ impl Bodies {
                 &requests,
                 now,
             );
-            // Taken in B3's stable order, and each matched back to its intent by its body.
+            // Sits and lies, taken in B3's stable order, and each matched back to its intent by its body.
             for (body, r) in done {
                 if let Some(&(id, ..)) = sits.iter().find(|s| s.1 == body) {
                     out.push((id, self.started(id, body, r)));
