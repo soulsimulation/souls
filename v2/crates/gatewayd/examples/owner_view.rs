@@ -140,7 +140,9 @@ impl W {
 
 fn arg(name: &str) -> Option<String> {
     let a: Vec<String> = std::env::args().collect();
-    a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned())
+    a.iter()
+        .position(|x| x == name)
+        .and_then(|i| a.get(i + 1).cloned())
 }
 
 /// Where body `i` (0 the owner's) walks at world second `s`: on a circle of up to 3 m, half a metre on each turn.
@@ -205,7 +207,7 @@ async fn main() {
         tokio::time::sleep_until((start + Duration::from_micros(w.at as u64)).into()).await;
         let s = w.at / 1_000_000;
         let mut e: Vec<Effect> = (0..=bodies)
-            .filter(|i| (tick as u64 + i) % 20 == 0)
+            .filter(|i| (tick as u64 + i).is_multiple_of(20))
             .map(|i| {
                 let (x, z) = spot(i, s);
                 w.walk(body(i), hall, x, z)
