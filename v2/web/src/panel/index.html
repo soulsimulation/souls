@@ -21,6 +21,17 @@
       ol { margin: 0; padding-left: 18px; }
       li.ok { color: #2f6b3a; }
       li.refused { color: #a33; }
+      /* Phones and touch screens (W14), as today's pages (apps/web world-chrome.css): every control at least 44 px; at
+         phone width the map sits above the tools instead of beside them. */
+      @media (max-width: 700px), (pointer: coarse) {
+        button, select, input { min-height: 44px; min-width: 44px; box-sizing: border-box; }
+      }
+      @media (max-width: 700px) {
+        html, body { height: auto; }
+        body { grid-template-columns: 1fr; }
+        #map { height: 55vh; }
+        aside { border-left: 0; border-top: 1px solid #d8d2c4; }
+      }
     </style>
   </head>
   <body>
