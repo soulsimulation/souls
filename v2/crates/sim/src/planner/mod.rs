@@ -104,6 +104,12 @@ impl Planner {
     /// each walker's line and each reach question.
     pub fn answer(&mut self, w: &Wants) -> Planned {
         let mut out = Planned::default();
+        if let Some(map) = &w.form_map {
+            if **map != self.town.versions {
+                return out;
+            }
+            out.map = Some(std::sync::Arc::clone(map));
+        }
         if let Some(marks) = &w.marks
             && let Err(r) = self.town.spots(marks, w.at)
         {

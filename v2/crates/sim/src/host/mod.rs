@@ -669,6 +669,7 @@ pub struct Wants {
     pub lines: Vec<(Moved, Vec3)>,
     /// Reach questions (B2, B3), retaining exact slot and pending move identity.
     pub reach: Vec<ReachQuestion>,
+    /// Immutable map identity shared by every route, line, reach and form question in this batch.
     pub form_map: Option<std::sync::Arc<crate::ground::Versions>>,
     pub forms: Vec<crate::planner::FormQuestion>,
 }
@@ -682,6 +683,8 @@ type Asked = RefCell<Vec<(Moved, Vec3)>>;
 /// The planner's answers to a tick's [`Wants`], used by the next tick ([`Runner::tick_planned`]).
 #[derive(Clone, Debug, Default)]
 pub struct Planned {
+    /// The originating batch map, shared with its authoritative caller.
+    pub map: Option<std::sync::Arc<crate::ground::Versions>>,
     /// Each walk given an answer: its order, then its place and legs, or a refusal's name.
     pub places: BTreeMap<Id, (Id, Placed)>,
     /// Each walker's line (#3167's, found by the planning call `View::search`) toward the leg's end it asked for, or
@@ -695,8 +698,23 @@ pub struct Planned {
 }
 
 impl Planned {
-    /// Takes `later`'s answers over these.
+    /// Discards answers from an obsolete map before they can enter a current cache. Searches remain counted.
+    pub fn keep_map(&mut self, current: &std::sync::Arc<crate::ground::Versions>) {
+        if self.map.as_ref().is_none_or(|map| !std::sync::Arc::ptr_eq(map, current)) {
+            self.places.clear();
+            self.lines.clear();
+            self.reach.clear();
+            self.forms.clear();
+            self.map = None;
+        }
+    }
+
+    /// Takes `later`'s answers over these. A different map cannot retain answers from its predecessor.
     pub fn merge(&mut self, later: Planned) {
+        if let Some(map) = &later.map {
+            self.keep_map(map);
+            self.map = Some(std::sync::Arc::clone(map));
+        }
         self.places.extend(later.places);
         self.lines.extend(later.lines);
         self.reach.extend(later.reach);
