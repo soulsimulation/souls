@@ -16,8 +16,11 @@
 //!   and is counted in a release build.
 //! - **Contained.** A panic in one batch's answers is caught: that batch is answered with nothing (the walks stand
 //!   and ask again), and the planner goes on.
-//! - **Waits.** [`Thread::take`] waits for the answers to everything sent, as long as it takes: what a tick reads
-//!   never depends on the threads' timing, so a run fed the same inputs repeats, lockstep or free-running. The
+//! - **Waits.** [`Thread::take`] waits for the answers to everything sent. In lockstep as long as it takes, so what a
+//!   tick reads never depends on the threads' timing and a run fed the same inputs at the same ticks repeats (K12's
+//!   replay). A free-running clock never stops for the planner: it waits at most a bound for each batch, and a batch
+//!   late is merged into a later take (its walkers stand, its grants and sits wait). There the answers' tick depends
+//!   on the planner's time, as an intent's tick depends on when it arrives; the log records what was done. The
 //!   planner works while the clock commits, records and waits for its next tick.
 
 use crate::host::{Planned, Wants};
@@ -25,8 +28,9 @@ use crate::walk::World;
 use crate::walk::town::Town;
 use replica::pose::Vec3;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 /// The straight distance, µm, from `a` to `b`: a reach check (B2), the planner's.
 pub fn reach(a: Vec3, b: Vec3) -> i64 {
@@ -131,13 +135,25 @@ impl Thread {
         }
     }
 
-    /// The answers to every batch sent and not yet taken, later answers over earlier, waiting as long as it takes.
-    pub fn take(&mut self) -> Planned {
+    /// The answers to every batch sent and not yet taken, later answers over earlier: waiting as long as it takes
+    /// (`None`), or up to `wait` for each; a batch not back in time is taken by a later call.
+    pub fn take(&mut self, wait: Option<Duration>) -> Planned {
         let mut all = Planned::default();
         while self.out > 0 {
-            let Ok(p) = self.answers.recv() else {
-                self.out = 0;
-                break;
+            let p = match wait {
+                None => self
+                    .answers
+                    .recv()
+                    .map_err(|_| RecvTimeoutError::Disconnected),
+                Some(d) => self.answers.recv_timeout(d),
+            };
+            let p = match p {
+                Ok(p) => p,
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => {
+                    self.out = 0;
+                    break;
+                }
             };
             self.out -= 1;
             match p {

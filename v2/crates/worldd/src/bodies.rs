@@ -29,6 +29,7 @@
 //! Not here: I7's accept-then-resolve (one answer, at the move's end), plans (I9).
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use replica::bodies::Family;
 use replica::effects::{Actor, Refusal, fixture_bytes};
@@ -181,6 +182,9 @@ pub struct Bodies {
     logged: BTreeMap<Id, Pose>,
     /// The planner thread: route searches and reach distances, off the clock (K18b, #3175).
     planner: Thread,
+    /// How long a tick waits for each of the planner's batches: `None` as long as it takes (lockstep, the default),
+    /// else a bound (a free-running clock never stops for the planner; a late batch is read at a later tick).
+    pub wait: Option<Duration>,
     /// The planner's answers for the next tick.
     planned: Planned,
     /// The reach distances last found, by body and seat.
@@ -253,6 +257,7 @@ impl Bodies {
         })?;
         Ok(Bodies {
             planner,
+            wait: None,
             planned: Planned::default(),
             reached: BTreeMap::new(),
             waiting: Vec::new(),
@@ -405,10 +410,9 @@ impl Bodies {
         self.planner.searched
     }
 
-    /// The planner's answers to everything sent, taken for the next tick: waited for as long as it takes, so what a
-    /// tick reads never depends on the threads' timing.
+    /// The planner's answers to everything sent, taken for the next tick ([`Bodies::wait`]).
     fn take(&mut self) {
-        let p = self.planner.take();
+        let p = self.planner.take(self.wait);
         self.reached.extend(p.reach.iter().map(|(k, v)| (*k, *v)));
         self.planned.merge(p);
     }

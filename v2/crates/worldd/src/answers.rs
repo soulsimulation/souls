@@ -67,9 +67,10 @@
 //!
 //! **Off the clock** (K18b, #3175). The clock runs no rule check, no route search and no reach check: the checkers
 //! run the rules (I3), and the bodies' planner thread (`sim::planner`) writes the spot tables, plans a walk's legs,
-//! finds each walker's line and measures each reach, from the bodies as a tick left them, for the next tick. Each
-//! tick waits for the planner's answers to the last one, as a lockstep tick waits for every check, so a run's results
-//! never depend on the threads' timing; the planner works while the clock commits, records and waits for the next tick.
+//! finds each walker's line and measures each reach, from the bodies as a tick left them, for the next tick. A
+//! lockstep tick waits for the planner's answers to the last one as it waits for every check, so a run fed the same
+//! inputs repeats; a free-running one waits at most a tenth of a tick for each batch and reads a late one at a later
+//! tick, so the clock never stops for the planner.
 //!
 //! Not here (K18's known limits): a walk or a sit in progress at a kill is not resumed (its intent is taken again
 //! when sent again); one zone a process.
@@ -1362,6 +1363,7 @@ pub fn start<S: Storage + 'static>(
     }
     let mut cfg = cfg;
     let make = cfg.bodies.take();
+    let tick = cfg.tick;
     let tick_us = i64::try_from(cfg.tick.as_micros()).unwrap_or(50_000).max(1);
     if 1_000_000 % tick_us != 0 {
         return Err(Refusal {
@@ -1481,6 +1483,10 @@ pub fn start<S: Storage + 'static>(
                     Ok(mut b) => {
                         let at = ticker.due().unwrap_or(0);
                         b.begin(at);
+                        // A free-running clock waits at most a tenth of a tick for each planner batch (K18b).
+                        if !lockstep {
+                            b.wait = Some(tick / 10);
+                        }
                         // Those the log last had in a seat sit in it again, the seat held (K18c).
                         for (body, why) in b.seat_placed(&placed, at) {
                             eprintln!(

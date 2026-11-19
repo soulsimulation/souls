@@ -78,7 +78,7 @@ fn planned(n: u64, ticks: usize) -> Run {
             p.send(wants);
             #[allow(clippy::disallowed_methods)]
             times.push(t0.elapsed().as_micros() as u64);
-            answers = p.take();
+            answers = p.take(None);
         }
         Run {
             now: r.now,
