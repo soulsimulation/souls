@@ -28,11 +28,31 @@
 //!   stable moment: at once during a walk or a pause, and during a move at its next phase boundary (its contact or its
 //!   end, within the step's deadline). A run left before its effect's instant has no effect.
 //!
-//! Not here: amounts, making and removing (F4), who may (F6), stages of long forms (F11).
+//! - **Amounts, take and put, make and remove** (F4, #2769). [`bind_effects_with`] binds a form's effects with its
+//!   thing arguments: a `transfer` of an amount between two things ([`Effect::Transfer`]), a thing made into a hand or
+//!   a slot ([`Effect::Make`]) and a thing removed ([`Effect::Remove`]). A `take` or `put` step is a hand step: it runs
+//!   its move like a `move` step, and its contact is the instant of B4's transfer of the thing into a free hand or into
+//!   a slot of the node ([`Effect::Take`], [`Effect::Put`]). The world works each out against the tree (`sim::forms`).
+//!
+//! - **Arguments, names and declared points** (F14, #3384). [`bind_with`] and [`bind_effects_args`] bind a form with
+//!   its act's arguments ([`Args`]): a step may aim at a name argument (a point, slot or area of the kind) or at a
+//!   thing argument, whose place is read when the step starts; a `set` may write an `enum` value by name, and through
+//!   an argument a value, a thing's id or words' reference (`{21: id}`, K16), to a field named or chosen by a field
+//!   argument. A step's point is a point, a slot (its stand point, else its place) or a placed area; [`check`] refuses
+//!   a form that names any other at import (`point-unknown`).
+//!
+//! - **The hatch** (F8, #2823). A form whose rule data cannot express carries one pure function, named by its module's
+//!   hash ([`bind_hatch`]); [`run_hatch`] runs it on its declared reads in `replica`'s one interpreter, so the world,
+//!   the daemon and a page give the same verdict at the same counted steps.
+//!
+//! Not here: who may (F6), stages of long forms (F11), a thing made or set down where there is no slot (E4).
+
+use std::collections::BTreeMap;
 
 use replica::effects::Refusal;
 use replica::encode::{self, Name};
-use replica::host::{Host, Progress, Skill};
+use replica::hatch::Loaded;
+use replica::host::{Answers, Hatch, Host, Progress, Skill};
 use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::rules::json::Value;
@@ -41,19 +61,49 @@ use replica::time::Micros;
 use crate::route::{Leg, Route};
 
 /// One step of a form, bound. The closed list is SA-F1's (`walk_to`, `sit`, `rise`, `move`, `take`, `put`,
-/// `use_held`, `wait`, `settle`); the kinds F1 builds are these three, the rest are refused by name at bind.
+/// `use_held`, `wait`, `settle`); the kinds F1 builds are these, and F4's `take` and `put` are bound as a `move`
+/// (their transfer is an effect, [`Effect::Take`] and [`Effect::Put`]), or as a [`Step::Hand`] when they name no
+/// move. The rest are refused by name at bind.
+///
+/// Where a step aims (F14, #3384): a name the kind declares (a point, a slot's stand point or its place, or a placed
+/// area), the same through a name argument (`{"arg": ...}` of type `part`, `slot` or `field`), or a thing argument
+/// (`on`), whose place the runner reads when the step starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Step {
-    /// Walk to a point of the node, µm in the node's frame.
-    WalkTo { point: Name, at: Vec3 },
-    /// A move by name toward a point of the node.
-    Move { name: Name, at: Name },
+    /// Walk to a point of the node (or of thing `on`), µm in its frame.
+    WalkTo {
+        point: Name,
+        at: Vec3,
+        on: Option<Id>,
+    },
+    /// A move by name toward a point of the node (or of thing `on`); with no point, the move's own contact.
+    Move {
+        name: Name,
+        at: Option<Name>,
+        on: Option<Id>,
+    },
+    /// A `take` or `put` that names no move: a hand step whose contact is its start.
+    Hand,
     /// A pause of a fixed length, µs.
     Wait(Micros),
 }
 
+/// An argument of a Soul's act, as the world hands it to the forms (F14, #3384): a name from the kind's own lists (a
+/// `part`, `slot`, `field` or `value` argument), a thing by its id (`thing`), words kept by their reference (`text`:
+/// T8, K16's store holds the words and the intent carries `{21: id}`), or a whole number (`count`, `duration`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Arg {
+    Name(String),
+    Node(Id),
+    Text(Id),
+    Int(i64),
+}
+
+/// A form's arguments by name.
+pub type Args = BTreeMap<String, Arg>;
+
 /// The step kinds of SA-F1's closed list that later tasks build. A form that has one is refused `step-not-built`.
-pub const NOT_BUILT: [&str; 6] = ["sit", "rise", "take", "put", "use_held", "settle"];
+pub const NOT_BUILT: [&str; 4] = ["sit", "rise", "use_held", "settle"];
 
 fn name(t: &str) -> Name {
     Name::new(t).unwrap_or_else(|| unreachable!("a fixed name"))
@@ -80,12 +130,25 @@ fn a_name(t: &str) -> Result<Name, Refusal> {
     })
 }
 
-/// A point of the kind, `points.<name>.at_mm`, as µm.
+/// A place the kind declares by name, as µm in its frame (F14): a point (`points.<name>.at_mm`); a slot, at its stand
+/// point when it names one, else at its own `at_mm`; or a placed area (`areas.<name>.at_mm`). Points, slots and areas
+/// share one namespace. Anything else is `point-unknown`.
 fn point(entry: &Value, p: &str) -> Result<Vec3, Refusal> {
-    let mm = entry
-        .get("points")
-        .and_then(|ps| ps.get(p))
-        .and_then(|pt| pt.get("at_mm"))
+    let at = |section: &str, name: &str| {
+        entry
+            .get(section)
+            .and_then(|s| s.get(name))
+            .and_then(|x| x.get("at_mm"))
+    };
+    let slot = entry.get("slots").and_then(|s| s.get(p));
+    let stand = slot
+        .and_then(|s| s.get("stand"))
+        .and_then(Value::str)
+        .and_then(|s| at("points", s));
+    let mm = at("points", p)
+        .or(stand)
+        .or_else(|| at("slots", p))
+        .or_else(|| at("areas", p))
         .and_then(Value::arr)
         .ok_or_else(|| Refusal {
             name: "point-unknown",
@@ -116,9 +179,85 @@ fn move_name(t: &str) -> Result<Name, Refusal> {
     }
 }
 
-/// Binds form `form` of the kind `entry` (a `souls-entry/1` entry) into its steps, all or none: `form-unknown`,
-/// `form-has-no-steps`, `step-not-built` (with the step's kind), `step-unknown`, `step-malformed`, `point-unknown`.
+/// Where a step aims (F14): a declared name, or `{"arg": a}` bound from `args`: a name argument as the declared name
+/// it names, a thing argument as the thing itself (`on`; its own origin, read when the step starts). Refused
+/// `arg-missing` for an argument not given, `point-unknown` for a name the kind does not declare, `step-malformed`
+/// for any other value. Returns the name, its place in µm and the thing.
+fn aim(
+    entry: &Value,
+    v: &Value,
+    args: &Args,
+    what: &str,
+) -> Result<(Name, Vec3, Option<Id>), Refusal> {
+    let named = |p: &str| Ok((a_name(p)?, point(entry, p)?, None));
+    if let Some(p) = v.str() {
+        return named(p);
+    }
+    let Some(a) = v.get("arg").and_then(Value::str) else {
+        return refuse(
+            "step-malformed",
+            format!("{what}: a name or {{\"arg\": name}}"),
+        );
+    };
+    match args.get(a) {
+        Some(Arg::Name(p)) => named(p),
+        Some(Arg::Node(id)) => Ok((a_name(a)?, Vec3::ZERO, Some(*id))),
+        Some(_) => refuse(
+            "step-malformed",
+            format!("{what}: argument {a} is not a place"),
+        ),
+        None => refuse("arg-missing", a),
+    }
+}
+
+/// The import check (F14, #3384): every place a form of `entry` names in its steps (its stages' too) is one the kind
+/// declares ([`point`]: a point, a slot or a placed area), whether written as a name or as a name argument whose
+/// choices (`of`) the form lists. Run when a kind is imported, so a form that names an undeclared point is refused
+/// there, by name, rather than when a Soul does it: `point-unknown` with `<form>: <name>`. A thing argument is the
+/// world's to place and is not checked here.
+pub fn check(entry: &Value) -> Result<(), Refusal> {
+    for (form, f) in entry.get("forms").and_then(Value::obj).unwrap_or(&[]) {
+        let stages = f.get("stages").and_then(Value::arr).unwrap_or(&[]);
+        let steps = std::iter::once(f)
+            .chain(stages)
+            .flat_map(|x| x.get("steps").and_then(Value::arr).unwrap_or(&[]));
+        for s in steps {
+            for v in [s.get("point"), s.get("at")].into_iter().flatten() {
+                let choices: Vec<&str> = match v.str() {
+                    Some(p) => vec![p],
+                    None => v
+                        .get("arg")
+                        .and_then(Value::str)
+                        .and_then(|a| f.get("takes").and_then(|t| t.get(a)))
+                        .and_then(|t| t.get("of"))
+                        .and_then(Value::arr)
+                        .unwrap_or(&[])
+                        .iter()
+                        .filter_map(Value::str)
+                        .collect(),
+                };
+                for p in choices {
+                    point(entry, p).map_err(|r| Refusal {
+                        name: r.name,
+                        detail: format!("{form}: {}", r.detail),
+                    })?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Binds form `form` of the kind `entry` (a `souls-entry/1` entry) into its steps with no arguments ([`bind_with`]).
 pub fn bind(entry: &Value, form: &str) -> Result<Vec<Step>, Refusal> {
+    bind_with(entry, form, &Args::new())
+}
+
+/// Binds form `form` of the kind `entry` into its steps, all or none, with its act's arguments `args` (F14): a step's
+/// point (`walk_to.point`, a move's `at`) is a declared name or an argument ([`Step`]); a move with no `at` aims at the
+/// node with the move's own contact. Refused: `form-unknown`, `form-has-no-steps`, `step-not-built` (with the step's
+/// kind), `step-unknown`, `step-malformed`, `point-unknown`, `arg-missing`.
+pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Refusal> {
     let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
         return refuse("form-unknown", form);
     };
@@ -132,18 +271,27 @@ pub fn bind(entry: &Value, form: &str) -> Result<Vec<Step>, Refusal> {
             let kind = text(s.get("step"), "step")?;
             match kind {
                 "walk_to" => {
-                    let p = text(s.get("point"), "walk_to.point")?;
-                    Ok(Step::WalkTo {
-                        point: a_name(p)?,
-                        at: point(entry, p)?,
-                    })
+                    let Some(p) = s.get("point") else {
+                        return refuse("step-malformed", "walk_to.point: a name");
+                    };
+                    let (point, at, on) = aim(entry, p, args, "walk_to.point")?;
+                    Ok(Step::WalkTo { point, at, on })
                 }
-                "move" => {
-                    let at = text(s.get("at"), "move.at")?;
-                    point(entry, at)?;
+                "take" | "put" if s.get("move").is_none() && s.get("at").is_none() => {
+                    Ok(Step::Hand)
+                }
+                "move" | "take" | "put" => {
+                    let (at, on) = match s.get("at") {
+                        Some(v) => {
+                            let (at, _, on) = aim(entry, v, args, "move.at")?;
+                            (on.is_none().then_some(at), on)
+                        }
+                        None => (None, None),
+                    };
                     Ok(Step::Move {
                         name: move_name(text(s.get("move"), "move.move")?)?,
-                        at: a_name(at)?,
+                        at,
+                        on,
                     })
                 }
                 "wait" => match s.get("us") {
@@ -162,53 +310,415 @@ pub fn bind(entry: &Value, form: &str) -> Result<Vec<Step>, Refusal> {
         .collect()
 }
 
-/// One effect of a form, bound: field `field` (its number in the kind's `state`) of the node the form is done at is set
-/// to `to`.
+/// One effect of a form, bound. The world works each out at the effect's instant, against the tree (`sim::forms`).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Effect {
-    pub field: u64,
-    pub to: encode::Value,
+pub enum Effect {
+    /// Field `field` (its number in the kind's `state`) of the node the form is done at is set to `to`.
+    Set { field: u64, to: encode::Value },
+    /// An amount of field `field` moved from `from` to `into` (F4): the least of what is asked, what the source has
+    /// above its least and the room the target has left, written as the source's and the target's sets in one part.
+    Transfer {
+        field: u64,
+        from: Of,
+        into: Of,
+        amount: Amount,
+    },
+    /// A thing of kind `kind` made into `into`, refused when that is not free (F4).
+    Make { kind: Name, into: Place },
+    /// Thing `what` removed: one the node contains or the body holds (F4).
+    Remove { what: Of },
+    /// A `take` step's transfer (B4's, at its contact): `what` into a free hand of the body.
+    Take { what: Of },
+    /// A `put` step's transfer (B4's, at its contact): `what`, held by the body, into slot `slot` of the node.
+    Put { what: Of, slot: u64 },
 }
 
-/// Binds form `form`'s effects into generic sets, one field each, all or none: `effect-not-built` for a change other
-/// than `set ... to` (amounts, making and removing are F4's), `field-unknown`, `effect-malformed` for a value that is
-/// not a whole number or a flag (a flag is 0 or 1).
+/// A thing an effect names: the node the form is done at, or a thing argument, bound to its id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Of {
+    This,
+    Node(Id),
+}
+
+/// Where a made thing appears: a free hand of the body, or a slot of the node (its number, in the kind's order).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    Hand,
+    Slot(u64),
+}
+
+/// How much a transfer asks: a whole number of the field's unit, above zero, or all the room the target has left.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Amount {
+    Units(i64),
+    Room,
+}
+
+/// Binds form `form`'s effects with no thing arguments ([`bind_effects_with`]).
 pub fn bind_effects(entry: &Value, form: &str) -> Result<Vec<Effect>, Refusal> {
+    bind_effects_args(entry, form, &Args::new())
+}
+
+/// The number of field `field` in the kind's `state`.
+fn field_n(entry: &Value, field: &str) -> Result<u64, Refusal> {
+    let n = match entry
+        .get("state")
+        .and_then(|s| s.get(field))
+        .and_then(|d| d.get("n"))
+    {
+        Some(Value::Int(n)) => u64::try_from(*n).ok(),
+        _ => None,
+    };
+    n.ok_or_else(|| Refusal {
+        name: "field-unknown",
+        detail: field.to_owned(),
+    })
+}
+
+/// A thing an effect names: `"this"` (or nothing), or `{"arg": name}` bound from `args` (`arg-missing` when not).
+fn of(v: Option<&Value>, args: &Args) -> Result<Of, Refusal> {
+    let Some(v) = v.filter(|v| v.str() != Some("this")) else {
+        return Ok(Of::This);
+    };
+    match v.get("arg").and_then(Value::str) {
+        Some(a) => match args.get(a) {
+            Some(Arg::Node(id)) => Ok(Of::Node(*id)),
+            Some(_) => refuse("effect-malformed", format!("argument {a} is not a thing")),
+            None => refuse("arg-missing", a),
+        },
+        None => refuse("effect-malformed", "a thing is \"this\" or {\"arg\": name}"),
+    }
+}
+
+/// A `set`'s field (F14): its name, or a field argument's choice (`{"arg": ...}`, F14).
+fn set_field<'a>(e: &'a Value, args: &'a Args) -> Result<&'a str, Refusal> {
+    let f = e.get("field");
+    if let Some(name) = f.and_then(Value::str) {
+        return Ok(name);
+    }
+    match f.and_then(|f| f.get("arg")).and_then(Value::str) {
+        Some(a) => match args.get(a) {
+            Some(Arg::Name(n)) => Ok(n),
+            Some(_) => refuse("effect-malformed", format!("argument {a} is not a field")),
+            None => refuse("arg-missing", a),
+        },
+        None => refuse("effect-malformed", "set.field: a name or {\"arg\": name}"),
+    }
+}
+
+/// The value a `set` writes to field `field` (F14), as the entry format allows it: a whole number or a flag, a value
+/// of an `enum` field (a name, refused `value-unknown` when the field does not list it), no words (`null`, `{}`) for a
+/// `text` field, and through an argument the same, a thing's id or words' reference (`{21: id}`, K16) for a `text`
+/// field. Refused `effect-malformed` otherwise.
+fn set_to(entry: &Value, field: &str, to: &Value, args: &Args) -> Result<encode::Value, Refusal> {
+    let def = entry.get("state").and_then(|s| s.get(field));
+    let ty = def.and_then(|d| d.get("type")).and_then(Value::str);
+    let named = |v: &str| {
+        let listed = def
+            .and_then(|d| d.get("values"))
+            .and_then(Value::arr)
+            .unwrap_or(&[])
+            .iter()
+            .any(|x| x.str() == Some(v));
+        match (ty, listed, Name::new(v)) {
+            (Some("enum"), true, Some(n)) => Ok(encode::Value::Text(n)),
+            (Some("enum"), _, _) => refuse("value-unknown", format!("{field}: {v}")),
+            _ => refuse("effect-malformed", format!("set.to: {field} takes no name")),
+        }
+    };
+    let int = |n: i128| match (u64::try_from(n), i64::try_from(n)) {
+        (Ok(u), _) => Ok(encode::Value::Uint(u)),
+        (_, Ok(i)) => Ok(encode::Value::Nint(i.unsigned_abs() - 1)),
+        _ => refuse("effect-malformed", "set.to: out of range"),
+    };
+    match to {
+        Value::Bool(b) => Ok(encode::Value::Uint(u64::from(*b))),
+        Value::Int(n) => int(*n),
+        Value::Str(v) => named(v),
+        // A text field set to nothing holds no words: no reference, `{}`.
+        Value::Null if ty == Some("text") => Ok(encode::Value::Map(BTreeMap::new())),
+        _ => match to.get("arg").and_then(Value::str) {
+            Some(a) => match (args.get(a), ty) {
+                (Some(Arg::Name(v)), _) => named(v),
+                (Some(Arg::Int(n)), Some("int" | "duration")) => int(i128::from(*n)),
+                (Some(Arg::Text(id)), Some("text")) => Ok(encode::Value::Map(BTreeMap::from([(
+                    replica::audience::REFERENCE,
+                    id.to_value(),
+                )]))),
+                (Some(Arg::Node(id)), _) => Ok(id.to_value()),
+                (Some(_), _) => refuse(
+                    "effect-malformed",
+                    format!("set.to: argument {a} does not fit {field}"),
+                ),
+                (None, _) => refuse("arg-missing", a),
+            },
+            None => refuse(
+                "effect-malformed",
+                "set.to: a whole number, a flag, a name or {\"arg\": name}",
+            ),
+        },
+    }
+}
+
+/// A slot of the kind by name: its number, 1, 2, ... in the entry's order (as `replica::kinds::entry` numbers it).
+fn slot_n(entry: &Value, slot: &str) -> Result<u64, Refusal> {
+    let slots = entry.get("slots").and_then(Value::obj).unwrap_or(&[]);
+    (1u64..)
+        .zip(slots)
+        .find(|(_, (k, _))| k == slot)
+        .map(|(n, _)| n)
+        .ok_or_else(|| Refusal {
+            name: "slot-unknown",
+            detail: slot.to_owned(),
+        })
+}
+
+/// Binds form `form`'s effects with its thing arguments alone (name to id, F4); see [`bind_effects_args`].
+pub fn bind_effects_with(
+    entry: &Value,
+    form: &str,
+    things: &BTreeMap<String, Id>,
+) -> Result<Vec<Effect>, Refusal> {
+    let args = things
+        .iter()
+        .map(|(k, id)| (k.clone(), Arg::Node(*id)))
+        .collect();
+    bind_effects_args(entry, form, &args)
+}
+
+/// Binds form `form`'s effects, all or none, with its act's arguments `args`: first each `take` or `put` step's
+/// transfer, in step order, then the form's `effects`: `set ... to` on the node (a field by name or through a field
+/// argument; the value as [`set_to`] reads it, F14), `transfer`, `create` into the actor's hand or a slot (`into`:
+/// `"actor_hand"` or a slot's name) and `remove`. Refused: `effect-not-built` for any other change (a `create` `here`
+/// is E4's), `field-unknown`, `slot-unknown`, `arg-missing`, `value-unknown`, `effect-malformed` for a value the field
+/// cannot take, or an amount that is not a whole number above zero or `"room"`.
+pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<Effect>, Refusal> {
     let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
         return refuse("form-unknown", form);
     };
-    let effects = f.get("effects").and_then(Value::arr).unwrap_or(&[]);
-    effects
-        .iter()
-        .map(|e| {
-            let change = text(e.get("change"), "effect.change")?;
-            let Some(to) = e.get("to").filter(|_| change == "set") else {
-                return refuse("effect-not-built", change);
-            };
-            let field = text(e.get("field"), "effect.field")?;
-            let n = match entry
-                .get("state")
-                .and_then(|s| s.get(field))
-                .and_then(|d| d.get("n"))
-            {
-                Some(Value::Int(n)) => u64::try_from(*n).ok(),
-                _ => None,
-            };
-            let Some(field) = n else {
-                return refuse("field-unknown", field);
-            };
-            let to = match to {
-                Value::Bool(b) => encode::Value::Uint(u64::from(*b)),
-                Value::Int(n) => match (u64::try_from(*n), i64::try_from(*n)) {
-                    (Ok(u), _) => encode::Value::Uint(u),
-                    (_, Ok(i)) => encode::Value::Nint(i.unsigned_abs() - 1),
-                    _ => return refuse("effect-malformed", "set.to: out of range"),
+    let mut out = Vec::new();
+    for s in f.get("steps").and_then(Value::arr).unwrap_or(&[]) {
+        match s.get("step").and_then(Value::str) {
+            Some("take") => out.push(Effect::Take {
+                what: of(s.get("what"), args)?,
+            }),
+            Some("put") => out.push(Effect::Put {
+                what: of(s.get("what"), args)?,
+                slot: slot_n(entry, text(s.get("slot"), "put.slot")?)?,
+            }),
+            _ => {}
+        }
+    }
+    for e in f.get("effects").and_then(Value::arr).unwrap_or(&[]) {
+        let change = text(e.get("change"), "effect.change")?;
+        out.push(match (change, e.get("to")) {
+            ("set", Some(to)) => {
+                let name = set_field(e, args)?;
+                Effect::Set {
+                    field: field_n(entry, name)?,
+                    to: set_to(entry, name, to, args)?,
+                }
+            }
+            // Between two fields of one thing is not built here.
+            ("transfer", _) if e.get("into_field").is_some() => {
+                return refuse("effect-not-built", "transfer into_field");
+            }
+            ("transfer", _) => Effect::Transfer {
+                field: field_n(entry, text(e.get("field"), "transfer.field")?)?,
+                from: of(e.get("from"), args)?,
+                into: of(e.get("into"), args)?,
+                amount: match e.get("amount") {
+                    Some(Value::Int(n)) if *n > 0 => match i64::try_from(*n) {
+                        Ok(n) => Amount::Units(n),
+                        Err(_) => return refuse("effect-malformed", "transfer.amount: too large"),
+                    },
+                    Some(v) if v.str() == Some("room") => Amount::Room,
+                    _ => {
+                        return refuse(
+                            "effect-malformed",
+                            "transfer.amount: a whole number above zero or \"room\"",
+                        );
+                    }
                 },
-                _ => return refuse("effect-malformed", "set.to: a whole number or a flag"),
-            };
-            Ok(Effect { field, to })
+            },
+            ("create", _) => Effect::Make {
+                kind: a_name(text(e.get("kind"), "create.kind")?)?,
+                into: match text(e.get("into"), "create.into")? {
+                    "actor_hand" => Place::Hand,
+                    "here" => return refuse("effect-not-built", "create here"),
+                    slot => Place::Slot(slot_n(entry, slot)?),
+                },
+            },
+            ("remove", _) => Effect::Remove {
+                what: of(e.get("what"), args)?,
+            },
+            (other, _) => return refuse("effect-not-built", other),
+        });
+    }
+    Ok(out)
+}
+
+/// Binds form `form`'s hatch (F8, #2823), if it has one, into T9's shape (`replica::host::Hatch`, which refuses by
+/// name): `{"module": "prov-<multihash hex>", "reads": [{"field": name} | {"arg": name}], "steps_most": n, "answers":
+/// "verdict" | {"field": name}, "why": key}`. A read of a field the kind does not declare is `field-unknown`.
+pub fn bind_hatch(entry: &Value, form: &str) -> Result<Option<Hatch>, Refusal> {
+    let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
+        return refuse("form-unknown", form);
+    };
+    let Some(h) = f.get("hatch") else {
+        return Ok(None);
+    };
+    let field = |name: &str| {
+        match entry
+            .get("state")
+            .and_then(|s| s.get(name))
+            .and_then(|d| d.get("n"))
+        {
+            Some(Value::Int(n)) => u64::try_from(*n).map_err(|_| ()),
+            _ => Err(()),
+        }
+        .map_err(|()| Refusal {
+            name: "field-unknown",
+            detail: name.to_owned(),
+        })
+    };
+    let module = h
+        .get("module")
+        .and_then(Value::str)
+        .and_then(|t| t.strip_prefix("prov-"))
+        .filter(|t| t.len() % 2 == 0)
+        .and_then(|t| {
+            (0..t.len() / 2)
+                .map(|i| u8::from_str_radix(&t[2 * i..2 * i + 2], 16).ok())
+                .collect::<Option<Vec<u8>>>()
+        })
+        .unwrap_or_default();
+    let mut reads = Vec::new();
+    for r in h.get("reads").and_then(Value::arr).unwrap_or(&[]) {
+        reads.push(
+            match (
+                r.get("field").and_then(Value::str),
+                r.get("arg").and_then(Value::str),
+            ) {
+                (Some(f), None) => encode::Value::Map(
+                    [
+                        (1, encode::Value::Uint(1)),
+                        (2, encode::Value::Uint(field(f)?)),
+                    ]
+                    .into(),
+                ),
+                (None, Some(a)) => encode::Value::Map(
+                    [
+                        (1, encode::Value::Uint(2)),
+                        (2, encode::Value::Text(a_name(a)?)),
+                    ]
+                    .into(),
+                ),
+                _ => return refuse("hatch-not-a-record", "a read is {field} or {arg}"),
+            },
+        );
+    }
+    let answers = match h.get("answers") {
+        Some(a) if a.str() == Some("verdict") => [(1, encode::Value::Uint(1))].into(),
+        Some(a) => match a.get("field").and_then(Value::str) {
+            Some(f) => [
+                (1, encode::Value::Uint(2)),
+                (2, encode::Value::Uint(field(f)?)),
+            ]
+            .into(),
+            None => return refuse("hatch-not-a-record", "answers is verdict or {field}"),
+        },
+        None => return refuse("hatch-not-a-record", "answers is verdict or {field}"),
+    };
+    let steps = match h.get("steps_most") {
+        Some(Value::Int(n)) => u64::try_from(*n).unwrap_or(0),
+        _ => 0,
+    };
+    let why = a_name(text(h.get("why"), "hatch.why")?)?;
+    Hatch::from_value(&encode::Value::Map(
+        [
+            (1, encode::Value::Bytes(module)),
+            (2, encode::Value::Array(reads)),
+            (3, encode::Value::Uint(steps)),
+            (4, encode::Value::Map(answers)),
+            (5, encode::Value::Text(why)),
+        ]
+        .into(),
+    ))
+    .map(Some)
+}
+
+/// A read's value as the hatch's words: a whole number is one word, a list or a record its parts' words in order.
+fn words(v: &encode::Value, into: &mut Vec<i64>) -> Result<(), Refusal> {
+    let not = || Refusal {
+        name: "hatch-read-not-a-number",
+        detail: "a hatch reads whole numbers, lists and records of them".into(),
+    };
+    match v {
+        encode::Value::Uint(n) => into.push(i64::try_from(*n).map_err(|_| not())?),
+        encode::Value::Nint(n) => into.push(-1 - i64::try_from(*n).map_err(|_| not())?),
+        encode::Value::Array(vs) => vs.iter().try_for_each(|v| words(v, into))?,
+        encode::Value::Map(m) => m.values().try_for_each(|v| words(v, into))?,
+        encode::Value::Bytes(_) | encode::Value::Text(_) => return Err(not()),
+    }
+    Ok(())
+}
+
+/// The words a hatch is given for the values of its declared reads, in order (`replica::hatch`'s calling convention):
+/// `hatch-reads-differ` when their number is not the declared one, `hatch-read-not-a-number` for text or bytes.
+pub fn hatch_words(hatch: &Hatch, reads: &[encode::Value]) -> Result<Vec<Vec<i64>>, Refusal> {
+    if reads.len() != hatch.reads.len() {
+        return refuse(
+            "hatch-reads-differ",
+            format!("{} declared, {} given", hatch.reads.len(), reads.len()),
+        );
+    }
+    reads
+        .iter()
+        .map(|v| {
+            let mut w = Vec::new();
+            words(v, &mut w).map(|()| w)
         })
         .collect()
+}
+
+/// A hatch's verdict and the steps it took. A no refuses the act with the hatch's `why` (`hatch-said-no`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Verdict {
+    pub yes: bool,
+    pub steps: u64,
+}
+
+/// Runs a form's hatch (F8) on the values of its declared reads, in order, through `module`, the hatch's module loaded
+/// by its hash: the verdict, or the hatch's own refusal (`hatch-over-budget`, `hatch-trapped`, ...). A fault is
+/// contained in the call. A hatch that answers a field's value is `hatch-answer-not-built`.
+pub fn run_hatch(
+    hatch: &Hatch,
+    module: &Loaded,
+    reads: &[encode::Value],
+) -> Result<Verdict, Refusal> {
+    if hatch.answers != Answers::Verdict {
+        return refuse("hatch-answer-not-built", "a hatch answers a verdict");
+    }
+    let ran = module.run(&hatch_words(hatch, reads)?, hatch.steps_most)?;
+    match ran.answer {
+        0 | 1 => Ok(Verdict {
+            yes: ran.answer == 1,
+            steps: ran.steps,
+        }),
+        n => refuse(
+            "hatch-answer-malformed",
+            format!("{n}; a verdict is 1 or 0"),
+        ),
+    }
+}
+
+/// The refusal a hatch's no gives the act: `hatch-said-no`, with its `why`.
+pub fn hatch_no(hatch: &Hatch) -> Refusal {
+    Refusal {
+        name: "hatch-said-no",
+        detail: hatch.why.as_str().to_owned(),
+    }
 }
 
 /// The deadlines of the steps that wait on the world, µs from the step's start. A pause's deadline is its own end.
@@ -253,8 +763,13 @@ pub enum Woke {
 pub enum Next {
     /// Run this walk skill on the body until it ends, then wake the runner with [`Woke::Walked`].
     Walk(Box<dyn Skill>),
-    /// Start move `name` toward point `at` of `node` (B2), then wake the runner with [`Woke::Moved`].
-    Move { name: Name, node: Id, at: Name },
+    /// Start move `name` toward point `at` of `node` (B2; with no point, the move's own contact), then wake the runner
+    /// with [`Woke::Moved`].
+    Move {
+        name: Name,
+        node: Id,
+        at: Option<Name>,
+    },
     /// Nothing until the next wake.
     Sleep,
     /// The run is over, with its name. Whatever the run started and has not ended (a walk, a move, a timer) the world
@@ -272,7 +787,7 @@ pub struct Runner {
     /// The runner's timer: the step's deadline, or a pause's end.
     timer: Option<Id>,
     ended: bool,
-    /// The hand step: the first `move` step, whose contact is the effect's instant.
+    /// The hand step: the first `move` (or [`Step::Hand`]) step, whose contact is the effect's instant.
     hand: Option<usize>,
     /// The effect's instant came and the world has not taken it; `effected` once it came.
     effect: bool,
@@ -283,7 +798,9 @@ pub struct Runner {
 
 impl Runner {
     pub fn new(steps: Vec<Step>, node: Id, limits: Limits) -> Runner {
-        let hand = steps.iter().position(|s| matches!(s, Step::Move { .. }));
+        let hand = steps
+            .iter()
+            .position(|s| matches!(s, Step::Move { .. } | Step::Hand));
         Runner {
             steps,
             node,
@@ -344,8 +861,9 @@ impl Runner {
             return self.end(host, name("done"));
         };
         match step {
-            Step::WalkTo { at, .. } => {
-                let Some(node) = host.read(self.node) else {
+            Step::WalkTo { at, on, .. } => {
+                // A thing argument's place is read now, at the step's start (F14).
+                let Some(node) = host.read(on.unwrap_or(self.node)) else {
                     return self.end(host, name("node-gone"));
                 };
                 let to = Vec3::new(
@@ -361,14 +879,20 @@ impl Runner {
                     self.limits.tick,
                 )))
             }
-            Step::Move { name: mv, at } => {
+            Step::Move { name: mv, at, on } => {
                 self.timer =
                     Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
                 Next::Move {
                     name: mv,
-                    node: self.node,
+                    node: on.unwrap_or(self.node),
                     at,
                 }
+            }
+            Step::Hand => {
+                if self.hand == Some(self.at) {
+                    self.effect_now();
+                }
+                self.advance(host)
             }
             Step::Wait(us) => {
                 self.timer = Some(host.set_timer(us, name("souls:form-wait")));

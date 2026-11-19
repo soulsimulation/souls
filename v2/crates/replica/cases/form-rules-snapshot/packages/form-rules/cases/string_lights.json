@@ -1,0 +1,320 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "The festoon (core/string-lights@1, 8 placed): switch-on and switch-off, anyone, within touch, as today; the switch is on the left post.",
+ "cases": [
+  {
+   "name": "string_lights_switch_on_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:string_lights",
+      "fields": {
+       "on": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       -4000,
+       1200,
+       270
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "string_lights_switch_on_when_already_on_names_switch_off",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:string_lights",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       -4000,
+       1200,
+       270
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "switch_off"
+    }
+   }
+  },
+  {
+   "name": "string_lights_switch_on_out_of_reach_names_the_walk",
+   "act": {
+    "this": "l1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:string_lights",
+      "fields": {
+       "on": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       -4000,
+       1200,
+       3070
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  },
+  {
+   "name": "string_lights_switch_off_every_need_met",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:string_lights",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       -4000,
+       1200,
+       270
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "string_lights_switch_off_when_already_off_names_switch_on",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:string_lights",
+      "fields": {
+       "on": false
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       -4000,
+       1200,
+       270
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "switch_on"
+    }
+   }
+  },
+  {
+   "name": "string_lights_switch_off_out_of_reach_names_the_walk",
+   "act": {
+    "this": "l1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "l1": {
+      "kind": "eden:string_lights",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       -4000,
+       1200,
+       3070
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "switch",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "switch"
+    }
+   }
+  }
+ ]
+}

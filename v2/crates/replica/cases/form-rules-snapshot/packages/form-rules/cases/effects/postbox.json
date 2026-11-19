@@ -1,0 +1,202 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:postbox (SA-X34, #2924): post a held letter through its slot; unlock it and collect the post one letter at a time; lock it again.",
+  "cases": [
+    {
+      "name": "postbox_post_then_collect",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": "l1",
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:postbox"
+          },
+          "l1": {
+            "kind": "eden:letter"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "post",
+            "args": {
+              "letter": "l1"
+            }
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "remove",
+                "node": "l1"
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "letters",
+                "n": 2,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:posted",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:letter_in",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "collect"
+          },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 2
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "unlock"
+          },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "locked",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:unlocked",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "collect"
+          },
+          "receipt": "rc4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "create",
+                "node": "rc4.0",
+                "kind": "eden:letter",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                },
+                "stock": "post",
+                "carries": [
+                  "words"
+                ]
+              },
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "letters",
+                "n": 2,
+                "to": 0,
+                "by": -1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:collected",
+                "node": "t1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "lock"
+          },
+          "receipt": "rc5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "locked",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:locked",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:postbox",
+          "fields": {
+            "letters": 0,
+            "locked": 1
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "rc4.0",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}

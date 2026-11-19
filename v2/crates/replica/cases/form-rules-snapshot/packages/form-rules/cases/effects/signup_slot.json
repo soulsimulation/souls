@@ -1,0 +1,154 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "A sign-up slot (from entry 25, #493): Ana signs; Ben cannot sign the same slot or cross Ana off; Ana crosses herself off. Another Soul's attempt to take the name back is refused by its need (the actor is not at an end of the link), with the original's words by key.",
+ "cases": [
+  {
+   "name": "signed_then_crossed_off_by_the_signer",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "b2",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:signup_slot",
+      "links": {
+       "signed": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "sign"
+     },
+     "receipt": "r1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "t1",
+        "link": "signed",
+        "n": 1,
+        "end": "b1"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:signed_up",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "sign"
+     },
+     "actor": "b2",
+     "receipt": "r2",
+     "expect": {
+      "verdict": "no",
+      "reason": "already_linked",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "cross_off"
+     },
+     "actor": "b2",
+     "receipt": "r3",
+     "expect": {
+      "verdict": "no",
+      "reason": "not_linked",
+      "need": 0,
+      "detail": {
+       "link": "signed",
+       "count": 1
+      },
+      "says": "not_your_name"
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "cross_off"
+     },
+     "receipt": "r4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "unlink",
+        "node": "t1",
+        "link": "signed",
+        "n": 1,
+        "end": "b1"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:crossed_off",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:signup_slot",
+     "links": {
+      "signed": []
+     }
+    }
+   }
+  }
+ ]
+}

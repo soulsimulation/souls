@@ -1,0 +1,74 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:hedge",
+  "owner": "thing",
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        900
+      ],
+      "yaw_mdeg": 180000
+    },
+    "behind": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        -900
+      ],
+      "yaw_mdeg": 0
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      3000,
+      1200,
+      800
+    ]
+  },
+  "forms": {
+    "hide_behind": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "behind"
+        },
+        {
+          "step": "settle",
+          "posture": "sit"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:hedge",
+    "shape": {"round":20,"shapes":[{"kind":"box","at":[0,600,0],"size":[3000,1200,800],"round":300,"tint":"leaf"},{"kind":"sphere","at":[-900,1150,100],"r":300,"segments":7,"tint":"leaf2","scale":[1000,500,1000]},{"kind":"sphere","at":[700,1150,-100],"r":300,"segments":7,"tint":"leaf2","scale":[1000,500,1000]}],"palette":{"leaf":"#3f6b35","leaf2":"#4a7a3e"},"tags":["plant","hedge","garden","path"]}
+  },
+  "text": {
+    "card": "A clipped hedge as high as your chest: hide behind it.",
+    "plant": "plant",
+    "bush": "bush",
+    "shrubs": "shrubs"
+  },
+  "card": {
+    "text": "card",
+    "category": "plant",
+    "synonyms": [
+      "bush",
+      "shrubs"
+    ]
+  }
+}

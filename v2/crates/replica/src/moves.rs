@@ -16,13 +16,18 @@
 //! 6: [{1: phase, 2: µs}, ...], 7: effector, 8: reach µm, 9: contact point}`, a want `{1: 1 every | 2 one | 3 named,
 //! 2: class number or resource name}`, an effector `{1: 1}` the body, `{1: 2}` the resource the move holds, or
 //! `{1: 3, 2: point}` a named point of the thing held in it. Fixtures: `v2/crates/replica/fixtures/moves/`.
+//!
+//! - **Moves come from content** (F13, #3383). A `souls-move/1` entry (`content/moves/<name>.json`, SA-D4) is read by
+//!   [`Move::from_entry`], and a world's moves are a [`Library`]: each move by its hash (`souls/move/1` over its
+//!   encoded value, `v2/docs/ids.md` rule 16), which is its revision, and each name's current revision.
 
 use std::collections::BTreeMap;
 
 use crate::bodies::{Class, SkillShape, Want};
 use crate::effects::Refusal;
-use crate::encode::{Name, Value};
-use crate::ids::Id;
+use crate::encode::{Name, Value, encode};
+use crate::ids::{Hash, Id, Purpose};
+use crate::rules::json::{Value as J, parse};
 use crate::time::Micros;
 
 type R<T> = Result<T, Refusal>;
@@ -209,6 +214,237 @@ impl Move {
     /// The whole move's length, µs.
     pub fn length(&self) -> Micros {
         self.phases.iter().map(|p| p.length).sum()
+    }
+
+    /// The move as data: what [`Move::from_value`] reads.
+    pub fn to_value(&self) -> Value {
+        let map = |pairs: [(u64, Value); 2]| Value::Map(BTreeMap::from(pairs));
+        let classes =
+            |cs: &[Class]| Value::Array(cs.iter().map(|c| Value::Uint(number(c))).collect());
+        let want = |w: &Want| match w {
+            Want::All(c) => map([(1, Value::Uint(1)), (2, Value::Uint(number(c)))]),
+            Want::One(c) => map([(1, Value::Uint(2)), (2, Value::Uint(number(c)))]),
+            Want::Named(r) => map([(1, Value::Uint(3)), (2, Value::Text(r.clone()))]),
+        };
+        let effector = match &self.effector {
+            Effector::Body => Value::Map(BTreeMap::from([(1, Value::Uint(1))])),
+            Effector::Held => Value::Map(BTreeMap::from([(1, Value::Uint(2))])),
+            Effector::HeldPoint(p) => map([(1, Value::Uint(3)), (2, Value::Text(p.clone()))]),
+        };
+        let phases = self
+            .phases
+            .iter()
+            .map(|p| map([(1, Value::Text(p.name.clone())), (2, int(p.length))]))
+            .collect();
+        Value::Map(BTreeMap::from([
+            (1, Value::Text(self.name.clone())),
+            (2, Value::Uint(self.revision)),
+            (3, Value::Array(self.claims.iter().map(want).collect())),
+            (4, classes(&self.blocks)),
+            (5, classes(&self.cancelled_by)),
+            (6, Value::Array(phases)),
+            (7, effector),
+            (8, int(self.reach)),
+            (9, Value::Text(self.contact.clone())),
+        ]))
+    }
+
+    /// The move's revision: the hash of its meaning, `souls/move/1` over its encoded value (`v2/docs/ids.md`
+    /// rule 16). A retuned phase is a new revision, and the old one keeps its hash.
+    pub fn hash(&self) -> R<Hash> {
+        let bytes = encode(&self.to_value()).map_err(|e| Refusal {
+            name: "not-a-move",
+            detail: e.to_string(),
+        })?;
+        Ok(Hash::of(Purpose::Move, &bytes))
+    }
+
+    /// Reads a `souls-move/1` entry (SA-D4, `content/moves`, `docs/soul-actions/entry-format.md`), as R2's JSON, and
+    /// checks it as [`Move::from_value`] does. Its name is in the `souls` namespace, as a form's bare move name is.
+    /// Each class it claims is one resource of that class; `claim_taken` in `cancels_on` makes a claim on any class it
+    /// claims cancel it (reach at contact is always asked, `sim::moves`). Its phases keep the entry's order, start-up
+    /// first and recovery last, each named for its key without `_us`. The effector `hand` is the hand the move holds;
+    /// `held_point`, a point of the thing held in it, reaches from that hand through a held tool's tip, which the
+    /// geometry names (B4, `sim::moves::Reach::tip`). An entry names no contact point, since a form's `move` step
+    /// names it (`at`), so `souls:contact` stands in. An entry's revision number is 1: its hash tells revisions apart.
+    pub fn from_entry(e: &J) -> R<Move> {
+        if e.get("format").and_then(J::str) != Some("souls-move/1") {
+            return refuse("not-a-move", "format: souls-move/1");
+        }
+        let Some(bare) = e.get("move").and_then(J::str) else {
+            return refuse("not-a-move", "move: a name");
+        };
+        let claimed = entry_classes(e, "claims")?;
+        let cancels = match e.get("cancels_on") {
+            None => Vec::new(),
+            Some(J::Arr(a)) => a.iter().filter_map(J::str).collect(),
+            Some(_) => return refuse("not-a-move", "cancels_on: a list"),
+        };
+        let effector = match e.get("effector").and_then(J::str) {
+            Some("hand" | "held_point") => Effector::Held,
+            _ => return refuse("not-a-move", "effector: hand or held_point"),
+        };
+        let Some(ps) = e.get("phases").and_then(J::obj) else {
+            return refuse("not-a-move", "phases: a table of µs");
+        };
+        let (first, last) = (
+            ps.first().map(|p| p.0.as_str()),
+            ps.last().map(|p| p.0.as_str()),
+        );
+        if first != Some("start_up_us") || last != Some("recovery_us") {
+            return refuse(
+                "not-a-move",
+                format!("{bare}: phases start with start_up_us and end with recovery_us"),
+            );
+        }
+        let phases = ps
+            .iter()
+            .map(|(k, v)| {
+                let phase = k.strip_suffix("_us").unwrap_or(k).replace('_', "-");
+                Ok(Phase {
+                    name: entry_name(&format!("souls:{phase}"))?,
+                    length: whole(Some(v), k)?,
+                })
+            })
+            .collect::<R<Vec<Phase>>>()?;
+        let mv = Move {
+            name: entry_name(&format!("souls:{bare}"))?,
+            revision: 1,
+            claims: claimed.iter().cloned().map(Want::One).collect(),
+            blocks: entry_classes(e, "blocks")?,
+            cancelled_by: match cancels.contains(&"claim_taken") {
+                true => claimed,
+                false => Vec::new(),
+            },
+            phases,
+            effector,
+            reach: whole(e.get("reach_mm"), "reach_mm")?.saturating_mul(1000),
+            contact: entry_name("souls:contact")?,
+        };
+        Move::from_value(&mv.to_value())
+    }
+}
+
+fn number(c: &Class) -> u64 {
+    match c {
+        Class::Locomotion => 1,
+        Class::Manipulator => 2,
+        Class::Gaze => 3,
+        Class::Voice => 4,
+    }
+}
+
+/// A resource class by its entry name: SA-D4's `claims` and `blocks` are classes, never anatomy.
+fn class_named(n: &str) -> R<Class> {
+    match n {
+        "locomotion" => Ok(Class::Locomotion),
+        "manipulator" => Ok(Class::Manipulator),
+        "gaze" => Ok(Class::Gaze),
+        "voice" => Ok(Class::Voice),
+        _ => refuse("class-unknown", n),
+    }
+}
+
+fn entry_name(t: &str) -> R<Name> {
+    Name::new(t).ok_or_else(|| Refusal {
+        name: "not-a-move",
+        detail: format!("{t}: not a name"),
+    })
+}
+
+fn entry_classes(e: &J, key: &str) -> R<Vec<Class>> {
+    let Some(a) = e.get(key).and_then(J::arr) else {
+        return refuse("not-a-move", format!("{key}: a list of classes"));
+    };
+    a.iter()
+        .map(|c| match c.str() {
+            Some(n) => class_named(n),
+            None => refuse("not-a-move", format!("{key}: a list of classes")),
+        })
+        .collect()
+}
+
+/// A whole number above zero in an entry, as µs or mm.
+fn whole(v: Option<&J>, what: &str) -> R<i64> {
+    match v {
+        Some(J::Int(n)) if *n > 0 => {
+            i64::try_from(*n).or_else(|_| refuse("not-a-move", format!("{what}: too large")))
+        }
+        _ => refuse("not-a-move", format!("{what}: a whole number above zero")),
+    }
+}
+
+/// The moves a world has loaded, by hash (`v2/docs/ids.md` rule 16). Revisions of one name sit side by side, so a
+/// record or a header that names an older one by its hash still finds it; a name's current revision is the one loaded
+/// last. No code names a move: what a world can do comes from the entries it loads.
+#[derive(Clone, Debug, Default)]
+pub struct Library {
+    by_hash: BTreeMap<Hash, Move>,
+    current: BTreeMap<Name, Hash>,
+}
+
+impl Library {
+    pub fn new() -> Library {
+        Library::default()
+    }
+
+    /// Adds `mv` as its name's current revision; returns its hash.
+    pub fn insert(&mut self, mv: Move) -> R<Hash> {
+        let h = mv.hash()?;
+        self.current.insert(mv.name.clone(), h);
+        self.by_hash.insert(h, mv);
+        Ok(h)
+    }
+
+    /// Loads `souls-move/1` entries from their texts, each with a label (its file name). A bad one is refused by name
+    /// and the rest load. Returns each refusal with its label.
+    pub fn load(&mut self, sources: &[(&str, &str)]) -> Vec<(String, Refusal)> {
+        let mut refused = Vec::new();
+        for (label, text) in sources {
+            let read = parse(text)
+                .map_err(|e| Refusal {
+                    name: "not-a-move",
+                    detail: e,
+                })
+                .and_then(|e| Move::from_entry(&e))
+                .and_then(|mv| self.insert(mv));
+            if let Err(r) = read {
+                refused.push(((*label).to_owned(), r));
+            }
+        }
+        refused
+    }
+
+    /// The current revision of the move of this full name (`souls:press`).
+    pub fn get(&self, name: &Name) -> Option<&Move> {
+        self.by_hash.get(self.current.get(name)?)
+    }
+
+    /// The current revision's hash of the move of this full name.
+    pub fn revision(&self, name: &Name) -> Option<Hash> {
+        self.current.get(name).copied()
+    }
+
+    /// The move of this revision, if loaded.
+    pub fn by_hash(&self, hash: &Hash) -> Option<&Move> {
+        self.by_hash.get(hash)
+    }
+
+    /// Every name's current revision, by name: what a form's `move` step can name.
+    pub fn current(&self) -> Vec<Move> {
+        self.current
+            .values()
+            .filter_map(|h| self.by_hash.get(h).cloned())
+            .collect()
+    }
+
+    /// How many names it has.
+    pub fn len(&self) -> usize {
+        self.current.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.current.is_empty()
     }
 }
 
@@ -430,5 +666,100 @@ mod tests {
         };
         m.insert(10, Value::Uint(0));
         assert_eq!(name(Value::Map(m)), "not-a-move");
+    }
+
+    /// Every `content/moves` entry, by file, as `(file name, text)`.
+    fn entries() -> Vec<(String, String)> {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../content/moves");
+        let mut files: Vec<_> = std::fs::read_dir(dir)
+            .expect("content/moves")
+            .map(|e| e.expect("an entry").path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
+        files.sort();
+        files
+            .iter()
+            .map(|f| {
+                let label = f
+                    .file_name()
+                    .expect("a name")
+                    .to_string_lossy()
+                    .into_owned();
+                (label, std::fs::read_to_string(f).expect("a file"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_content_move_loads_by_its_hash() {
+        let texts = entries();
+        let sources: Vec<(&str, &str)> = texts
+            .iter()
+            .map(|(l, t)| (l.as_str(), t.as_str()))
+            .collect();
+        let mut lib = Library::new();
+        assert_eq!(lib.load(&sources), Vec::new(), "every entry reads");
+        assert_eq!(lib.len(), texts.len());
+        for (label, _) in &texts {
+            let full =
+                Name::new(&format!("souls:{}", label.trim_end_matches(".json"))).expect("a name");
+            let mv = lib.get(&full).unwrap_or_else(|| panic!("{label} loaded"));
+            let h = lib.revision(&full).expect("a revision");
+            assert_eq!(mv.hash().expect("hashes"), h);
+            assert_eq!(lib.by_hash(&h), Some(mv));
+            assert_eq!(Move::from_value(&mv.to_value()).as_ref(), Ok(mv));
+            assert_eq!(
+                mv.phases.first().map(|p| p.name.as_str()),
+                Some("souls:start-up")
+            );
+            assert_eq!(
+                mv.phases.last().map(|p| p.name.as_str()),
+                Some("souls:recovery")
+            );
+        }
+        assert_eq!(lib.current().len(), texts.len());
+    }
+
+    #[test]
+    fn a_retuned_entry_is_a_new_revision_and_the_old_one_stays() {
+        let entry = |start: u64| {
+            format!(
+                r#"{{"format": "souls-move/1", "move": "m", "claims": ["manipulator"], "blocks": ["manipulator"],
+                "cancels_on": ["claim_taken"], "effector": "hand", "reach_mm": 600,
+                "phases": {{"start_up_us": {start}, "recovery_us": 300000}}}}"#
+            )
+        };
+        let (a, b) = (entry(250_000), entry(260_000));
+        let mut lib = Library::new();
+        assert!(lib.load(&[("m.json", &a)]).is_empty());
+        let full = Name::new("souls:m").expect("a name");
+        let old = lib.revision(&full).expect("loaded");
+        let mv = lib.get(&full).expect("loaded").clone();
+        assert_eq!(
+            (mv.reach, mv.cancelled_by.clone()),
+            (600_000, vec![Class::Manipulator])
+        );
+        assert_eq!(mv.claims, vec![Want::One(Class::Manipulator)]);
+        assert!(lib.load(&[("m.json", &b)]).is_empty());
+        let new = lib.revision(&full).expect("loaded");
+        assert_ne!(old, new);
+        assert_eq!(lib.len(), 1);
+        assert_eq!(lib.by_hash(&old).map(|m| m.phases[0].length), Some(250_000));
+        assert_eq!(lib.get(&full).map(|m| m.phases[0].length), Some(260_000));
+        let refused = lib.load(&[
+            ("bad.json", &a.replace("600", "701")),
+            ("odd.json", &a.replace("\"recovery_us\"", "\"slide_us\"")),
+            ("hand.json", &a.replace("manipulator\"]", "hand\"]")),
+        ]);
+        let names: Vec<_> = refused.iter().map(|(l, r)| (l.as_str(), r.name)).collect();
+        assert_eq!(
+            names,
+            vec![
+                ("bad.json", "move-reach-out-of-range"),
+                ("odd.json", "not-a-move"),
+                ("hand.json", "class-unknown")
+            ]
+        );
+        assert_eq!(lib.revision(&full), Some(new));
     }
 }

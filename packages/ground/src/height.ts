@@ -77,15 +77,31 @@ export function heightAt(g: Ground, x: number, z: number): number {
   if (flats) h = padsFlatsWin(h, x, z, flats, onOldFlat(forms, x, z));
   // HILL: channels that hold over pads (a graded footpath through a packed hillside) fold once more, last: over the pads'
   // banks, never over a building's own flat or door landing (so no standing thing's ground moves)
-  let onFlat: boolean | undefined;
+  // A level terrace holds its ground the same way, its interior wholly, its edge band by its mask (#3291: a graded
+  // footpath's edge cut the alpine restaurant terrace 1.85 m down under its string lights)
+  let onFlat: boolean | undefined, hold: number | undefined;
   for (const l of forms) {
     if (l.kind !== 'channel' || !l.overPads) continue;
     const b = landformBounds(l); if (!inBounds(b, x, z)) continue;
     onFlat ??= forms.some((p) => p.kind === 'pad' && inBounds(influenceBounds(p), x, z) && padFlatDist(x, z, p) === 0);
     if (onFlat) break;
-    h = channelApply(l, h, x, z);
+    hold ??= terraceHold(forms, x, z);
+    if (hold >= 1) break;
+    const c = channelApply(l, h, x, z);
+    h = c + (h - c) * hold;
   }
   return h;
+}
+
+/** How much a level terrace holds (x, z): its area mask, the strongest where terraces overlap; 0 off every one. */
+function terraceHold(forms: Landform[], x: number, z: number): number {
+  let m = 0;
+  for (const l of forms) {
+    if (l.kind !== 'terrace' || l.level === undefined || !inBounds(landformBounds(l), x, z)) continue;
+    const a = areaMask(x, z, l.area, l.edge);
+    if (a > m) m = a;
+  }
+  return m;
 }
 
 /** Base, noise, natural forms and carves: the part of the fold a smooth brush samples around a point. */

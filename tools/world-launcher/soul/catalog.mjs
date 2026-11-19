@@ -17,8 +17,9 @@ export const OWN_WORDS_NOTE = "A Soul's now and about are its own words about it
 
 /** The catalog with its lookups. Build once per catalog version. */
 export function indexCatalog(cat) {
-  // SA-C1: a card is one line of what a kind is for, a category and synonyms (`cat.cards`, by the kind a row names); each row keeps its own
-  for (const row of [...cat.places, ...cat.things]) { const c = cat.cards?.[row.kind]; if (c) CARDS.set(row, c); }
+  // SA-C1: a card is one line of what a kind is for, a category and synonyms (`cat.cards`, by the kind a row names), or the
+  // card of the entry a row's kind names (`cat.entries`, SA-C3) when `cards` has none; each row keeps its own
+  for (const row of [...cat.places, ...cat.things]) { const c = cat.cards?.[row.kind] ?? entryCard(cat.entries?.[row.kind]); if (c) CARDS.set(row, c); }
   const places = new Map(cat.places.map((p) => [p.id, p])), byRef = new Map(cat.places.filter((p) => p.ref).map((p) => [p.ref, p]));
   const kids = new Map(), actsAt = new Map(), thingsAt = new Map(), things = new Map(cat.things.map((t) => [t.id, t])), acts = new Map(cat.acts.map((a) => [a.id, a]));
   const push = (m, k, v) => { const a = m.get(k); if (a) a.push(v); else m.set(k, [v]); };
@@ -53,6 +54,16 @@ export function handActs(ix, t, states) {
 }
 
 const WORDS = new WeakMap(), CARDS = new WeakMap();
+/** SA-C3: an entry's card as a catalog card `{purpose, category?, synonyms?}`. The entry names each by a key of its text
+ *  table (docs/soul-actions/entry-format.md); a key with no text is taken as the words themselves. Null without a card. */
+export function entryCard(entry) {
+  const c = entry?.card; if (!c || typeof c !== "object") return null;
+  const t = (k) => (typeof entry.text?.[k] === "string" ? entry.text[k] : typeof k === "string" ? k : null);
+  const purpose = t(c.text); if (!purpose) return null;
+  return { purpose, ...(c.category ? { category: t(c.category) } : {}), ...(Array.isArray(c.synonyms) && c.synonyms.length ? { synonyms: c.synonyms.map(t).filter(Boolean) } : {}) };
+}
+/** A thing's or place's card, as `find` reads it, by its id; null when its kind has none. */
+export const cardOf = (ix, id) => { const row = ix.things.get(id) ?? ix.place(id); const c = row && CARDS.get(row); return c ? { ...c, ...(purposeOf(row) ? { purpose: purposeOf(row) } : {}) } : null; };
 /** SA-C1: a row's purpose line (80 characters at most), from its kind's card `{purpose, category?, synonyms?}`, or null. */
 export const CARD_PURPOSE_MAX = 80;
 const purposeOf = (row) => { const p = CARDS.get(row)?.purpose; return typeof p === "string" && p ? p.slice(0, CARD_PURPOSE_MAX) : null; };

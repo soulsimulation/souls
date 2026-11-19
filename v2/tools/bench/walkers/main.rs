@@ -35,6 +35,11 @@
 //!   (crossing, walking out, waiting for a link, or walking), and the faults and refused routes are listed by link and
 //!   by piece.
 //!
+//! - **Joins** (K10, #2673; `--joins <count>,<seconds>`, the `joins` bench): `count` Souls ask a birth, evenly over
+//!   `seconds` from 10 s in, by one entry at the meetup place. [`sim::life::Life`] takes at most [`BIRTHS`] a tick on
+//!   the clock thread, inside the `orders` phase; the rest carry to the next tick. Each born body walks as a walker
+//!   from its birth tick. Posted: every join born or not, the longest wait, and the clock time per birth.
+//!
 //! Out: a summary line per measure on stdout; with `out-dir`, `ticks.csv` (one row per tick, µs by phase) and
 //! `run.trace` (V14's throwaway `birdseye/0` trace, for `v2/tools/birdseye/view.html`). Generated, never committed.
 
@@ -56,9 +61,11 @@ use replica::world_model::{plain, show};
 use sim::clock::{Clock, Heartbeat, Ticker};
 use sim::ground::scene::{Xform, xform_to};
 use sim::host::{Runner, waiting};
+use sim::life::{Birth, Life, Ring};
 use sim::links::Doors;
 use sim::mover::Body;
 use sim::routes::HANDS;
+use sim::speech::Hearing;
 use sim::unstick::{Ladder, Unstick};
 use sim::walk::town::{Spent, Town};
 use sim::walk::{World, node_of};
@@ -80,6 +87,10 @@ const REACH: i64 = 320_000_000;
 const NEARER: i64 = 1_000_000;
 /// The bar: no walker under a live order without progress this long, µs.
 const BAR: Micros = 30_000_000;
+/// Births a tick, at most (K10's budget: a birth's clock time times this stays far under a tick).
+const BIRTHS: usize = 32;
+/// Joins start this far into the run, µs.
+const JOINS_FROM: Micros = 10_000_000;
 
 /// SplitMix64.
 struct Seed(u64);
@@ -325,7 +336,18 @@ fn pct(v: &mut [i64], q: usize) -> i64 {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let fast = args.iter().any(|a| a == "--fast");
-    let args: Vec<&String> = args.iter().filter(|a| *a != "--fast").collect();
+    let jx = args.iter().position(|a| a == "--joins");
+    let (joins, join_s): (usize, i64) = jx.map_or((0, 1), |i| {
+        let v = args.get(i + 1).expect("--joins <count>,<seconds>");
+        let (c, t) = v.split_once(',').expect("--joins <count>,<seconds>");
+        (c.parse().expect("a count"), t.parse().expect("seconds"))
+    });
+    let args: Vec<&String> = args
+        .iter()
+        .enumerate()
+        .filter(|&(i, a)| a != "--fast" && jx.is_none_or(|j| i != j && i != j + 1))
+        .map(|(_, a)| a)
+        .collect();
     let usage = "usage: walkers <facts.json> <labels.json> <uniform|event> <seed> [walkers] [seconds] [out-dir] [--fast]";
     let (facts, labels, arm) = (
         args.get(1).expect(usage),
@@ -469,7 +491,10 @@ fn main() {
     let mut seed = Seed(seed_n ^ if arm == "event" { 0xE7E7 } else { 0x0F0F });
     let mut runner = Runner::new(TICK);
     let mut ladder = Ladder::new();
-    let mut plans: Vec<Plan> = vec![Plan::default(); n];
+    // Walkers placed now, then the joins as they are born: `ids[k]` is walker `k`'s body.
+    let total = n + joins;
+    let mut ids: Vec<Id> = (0..n).map(|k| walker_id(k as u64)).collect();
+    let mut plans: Vec<Plan> = vec![Plan::default(); total];
     let mut orders = 0u64;
     let draw = |seed: &mut Seed| -> usize {
         if arm == "event" && seed.below(10) < 6 {
@@ -644,6 +669,25 @@ fn main() {
         (f, c)
     });
 
+    // Births (K10): one entry, a ring of spots round the meetup place.
+    let entry = Id::new(Scope([0xe1; 16]), 1).expect("an id");
+    let ring = Ring {
+        entries: BTreeMap::from([(entry, (places[meet].node, places[meet].at))]),
+        radius: 2_000_000,
+        gap: 1_000_000,
+        rings: 4,
+    };
+    let mut life = Life::new(Scope([0x1b; 16]), BIRTHS);
+    let family = humanoid();
+    let (mut asked, mut join_refused, mut longest_wait) = (0usize, 0u64, 0 as Micros);
+    let mut birth_ns: Vec<i64> = Vec::new();
+    let mut birth_tick_us: Vec<i64> = Vec::new();
+    // The clock kept through the wave (#2615's bar): ticks run over ticks owed by real time, from the first join
+    // asked to 20 s of world time after the last born.
+    let mut wave0: Option<(Instant, usize)> = None;
+    let mut wave1: Option<(Instant, usize)> = None;
+    let mut last_born: Micros = 0;
+
     // The clock.
     let mut real = Real {
         wall0: std::time::SystemTime::now()
@@ -691,6 +735,8 @@ fn main() {
     let mut fault_at: BTreeMap<String, u64> = BTreeMap::new();
     let mut faulted: std::collections::BTreeSet<Id> = std::collections::BTreeSet::new();
     let mut ended_names: BTreeMap<String, u64> = BTreeMap::new();
+    // #3231: the tick's hearing (`Hearing::update`, after the ladder's step), timed apart from the tick, ns.
+    let (mut hearing, mut hear_ns) = (Hearing::new(), Vec::with_capacity(ticks as usize));
     while ticker.next_tick() < ticks {
         let mut body = |tick: i64, start: Micros| {
             // The clock catches up after an overrun: never past the run's last tick.
@@ -707,11 +753,51 @@ fn main() {
                 .collect();
             let s0 = w.spent.get();
             let a0 = Instant::now();
+            // Joins asked by this tick's end, then this tick's births (K10).
+            if joins > 0 && wave0.is_none() && at >= JOINS_FROM {
+                wave0 = Some((a0, tick_us.len()));
+            }
+            if wave1.is_none() && joins > 0 && ids.len() == total && at >= last_born + 20_000_000 {
+                wave1 = Some((a0, tick_us.len()));
+            }
+            while asked < joins
+                && JOINS_FROM + join_s * 1_000_000 * asked as i64 / joins as i64 <= at
+            {
+                let when = JOINS_FROM + join_s * 1_000_000 * asked as i64 / joins as i64;
+                let soul = Id::new(Scope([0x50; 16]), asked as u64 + 1).expect("an id");
+                if life
+                    .ask(Birth {
+                        soul,
+                        entry,
+                        asked: when,
+                    })
+                    .is_err()
+                {
+                    join_refused += 1;
+                }
+                asked += 1;
+            }
+            if life.waiting() > 0 {
+                let b0 = Instant::now();
+                let born = life.tick(at, &mut runner, &w.surfaces, &ring, &family);
+                let b_ns = b0.elapsed().as_nanos() as i64;
+                if !born.is_empty() {
+                    birth_ns.push(b_ns / born.len() as i64);
+                    birth_tick_us.push(b_ns / 1000);
+                }
+                for b in born {
+                    longest_wait = longest_wait.max(b.waited);
+                    let k = ids.len();
+                    ids.push(b.body);
+                    last_born = at;
+                    plans[k].due = Some(at);
+                }
+            }
             // Orders due this tick: the next walk of each walker that waited, and the crowd moments.
             if at >= next_moment {
                 moments += 1;
                 next_moment = at + seed.within(45_000_000, 120_000_000);
-                for k in 0..n {
+                for k in 0..ids.len() {
                     if seed.below(10) < 3 {
                         plans[k].due = Some(at + seed.within(0, 2_000_000));
                         plans[k].meet = true;
@@ -719,12 +805,12 @@ fn main() {
                     }
                 }
             }
-            for k in 0..n {
+            for k in 0..ids.len() {
                 let Some(due) = plans[k].due else { continue };
                 if due > at {
                     continue;
                 }
-                let who = walker_id(k as u64);
+                let who = ids[k];
                 let Some(b) = runner.controller.body(who).copied() else {
                     continue;
                 };
@@ -813,6 +899,9 @@ fn main() {
             ];
             tick_us.push(total / 1000);
             phase_us.push(ph.map(|v| v / 1000));
+            let h0 = Instant::now();
+            hearing.update(runner.controller.near(), ids.iter().copied());
+            hear_ns.push(h0.elapsed().as_nanos() as i64);
             corner_parts.push([
                 (s2.clears - s0.clears) as i64,
                 ((s2.clear_ns - s0.clear_ns) / 1000) as i64,
@@ -861,8 +950,8 @@ fn main() {
             }
             log_seen = ladder.log.len();
             let mut walking = 0;
-            for k in 0..n {
-                let who = walker_id(k as u64);
+            for k in 0..ids.len() {
+                let who = ids[k];
                 let p = &mut plans[k];
                 if !p.live {
                     continue;
@@ -1026,6 +1115,12 @@ fn main() {
     for l in &by_phase {
         println!("walkers: phase {l}");
     }
+    let h = &mut hear_ns;
+    let (hm, h99) = (pct(h, 50), pct(h, 99));
+    println!(
+        "walkers: hearing median {hm} ns, p99 {h99} ns, max {} ns",
+        h.last().unwrap_or(&0)
+    );
     println!(
         "walkers: clock: ticks {}, overruns {}, longest {} us, most lag {} us",
         s.ticks, s.overruns, s.max_tick_us, s.max_lag_us
@@ -1036,6 +1131,18 @@ fn main() {
         r90 / 1000,
         rmax / 1000
     );
+    // Every walker's end: its node and position, in id order. Equal digests, equal walks (a speed-up changes none).
+    let mut end = Vec::new();
+    for b in runner.controller.bodies() {
+        for id in [b.id, node_of(b)] {
+            end.extend(id.scope().0);
+            end.extend(id.counter().to_le_bytes());
+        }
+        for v in [b.pose.position.x, b.pose.position.y, b.pose.position.z] {
+            end.extend(v.to_le_bytes());
+        }
+    }
+    println!("walkers: end digest {}", Hash::of(Purpose::Fixture, &end));
     println!(
         "walkers: longest without progress under a live order {} ms (walker {}); orders past 30 s by state {over:?}; rungs {rungs:?}",
         worst.0 / 1000,
@@ -1079,6 +1186,34 @@ fn main() {
     );
     if arm == "event" {
         println!("walkers: crowd moments {moments}, reactions {reacted}");
+    }
+    if joins > 0 {
+        let born = ids.len() - n;
+        let (bm, bmax) = (
+            pct(&mut birth_ns, 50),
+            birth_ns.last().copied().unwrap_or(0),
+        );
+        let (tm, tmax) = (
+            pct(&mut birth_tick_us, 50),
+            birth_tick_us.last().copied().unwrap_or(0),
+        );
+        let kept = match (wave0, wave1) {
+            (Some((i0, t0)), Some((i1, t1))) => {
+                let owed = (i1 - i0).as_micros() as f64 / TICK as f64;
+                format!(
+                    "{:.3} ({} ticks run, {owed:.0} owed)",
+                    (t1 - t0) as f64 / owed,
+                    t1 - t0
+                )
+            }
+            _ => "not measured (the run ended inside the wave)".to_owned(),
+        };
+        println!("walkers: clock kept through the wave {kept}");
+        println!(
+            "walkers: joins {joins} over {join_s} s: asked {asked}, born {born}, refused {join_refused}, still waiting {}; longest wait {} ms; clock time a birth median {bm} ns, max {bmax} ns; births a tick at most {BIRTHS}, their time a tick median {tm} us, max {tmax} us",
+            life.waiting(),
+            longest_wait / 1000,
+        );
     }
     let bar = |ok: bool| if ok { "pass" } else { "miss" };
     println!(
