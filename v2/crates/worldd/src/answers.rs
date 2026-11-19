@@ -39,6 +39,15 @@
 //! [`crate::words`]): none of their bytes reach the log (`a5_` test). A `say`, a `whisper` or a `describe` writes its
 //! entry at once and is answered with a receipt after its tick's sync.
 //!
+//! **Joins and leaves** (C3, #3367; K10's one path, `sim::life`), when [`Config::join`] is given: a Soul's first
+//! intent asks its body's birth and waits for it. At the start of a coming tick (K10's budget a tick) the body is born
+//! by its entry: a `souls:body` node on the ground at a standing place, linked `souls:body-of` to its Soul, and the
+//! controller's. A first intent of verb [`JOIN`] carries the body's name and description as words (parameters 1 and
+//! 2, kept as a describe's) and the node is created with their references ([`words::NAME`], [`words::DESCRIPTION`]);
+//! the join is answered with the birth's entry. Any other first intent is taken once the body is born. [`LEAVE`]
+//! retires the body by K10's path: its seat freed, its timers and run ended, its link ended and its node removed.
+//! After a restart a Soul's body is found again by its `souls:body-of` link.
+//!
 //! **Sync by hash** (R5b, #3164): a frame with key 20 is R5's sync request (`replica::sync::wire`), not an intent.
 //! The [`Door`] hands it to the sync thread (`crate::syncs`, C16 #3450), never to the clock thread: it answers from
 //! its own sealed copy of the zone, which takes each tick's parts from the answers thread once they are on the disk,
@@ -96,15 +105,17 @@ use crate::syncs::{self, ToSync};
 use crate::views::Tier;
 use crate::words;
 use replica::apply::Replica;
+use replica::bodies::Family;
 use replica::edit::{self, Edit, Refused};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event as Named, Part, Refusal, Rest,
-    TimerRec,
+    TimerRec, TransferRec,
 };
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
 use replica::intents::{Answer, INTENT_MOST, Intent, Kind, Target};
 use replica::pose::Pose;
+use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::select::Answer as Answered;
 use replica::select::Spot;
 use replica::select::wire::SPOT;
@@ -123,6 +134,7 @@ use sim::daylight::{self, Daylight, Write as Fire};
 use sim::edit::Planned;
 use sim::edit::safety::Who;
 use sim::frozen::Publisher;
+use sim::life::{Birth, Life, Ring};
 use sim::log::{Durable, Log, Storage};
 use sim::recorder::{self, Input};
 use sim::speech;
@@ -399,6 +411,41 @@ pub struct Config {
     /// The world's rules and its activity kinds, for the engine's own acts (C2: activities, offers, carrying);
     /// without them those acts are refused `engine-acts-off`.
     pub engine: Option<(replica::tree::Rules, Vec<replica::activity::ActivityKind>)>,
+    /// Joins and leaves (C3, #3367): a Soul's first intent births its body here; none, the Souls' bodies are the
+    /// ones [`Config::bodies`] makes.
+    pub join: Option<Join>,
+}
+
+/// Where and how Souls' bodies are born (C3, #3367).
+pub struct Join {
+    /// The node bodies stand on (the open ground) and the entry's point there, µm: births ring round it.
+    pub entry: (Id, Vec3),
+    /// The body's family (its resources: legs, hands).
+    pub family: Family,
+    /// The body node's kind, by its full name as the world's header pins it.
+    pub kind: Name,
+    /// Births taken a tick, at most (K10's budget).
+    pub per_tick: usize,
+}
+
+/// A Soul's join (C3): its first intent, whose words name its body.
+pub const JOIN: &str = "life:join";
+/// A Soul's leave (C3): its body retired.
+pub const LEAVE: &str = "life:leave";
+/// The link from a body to its Soul (K10).
+const BODY_OF: &str = "souls:body-of";
+
+/// The births and the intents waiting for them (C3).
+struct Lives {
+    life: Life,
+    ring: Ring,
+    entry: Id,
+    family: Family,
+    kind: Name,
+    /// The ids of a leave's set-downs (their transfers).
+    mint: Minter,
+    /// Intents of Souls whose body is not born yet, by Soul, in the order they came.
+    unborn: Vec<(Id, Vec<u8>, Reply, Stamps)>,
 }
 
 /// A record on the disk ([`Config::synced`]): its number in the log, its bytes, and whether it is the recorder's input
@@ -439,6 +486,7 @@ impl Config {
             text: None,
             follow: None,
             engine: None,
+            join: None,
         }
     }
 }
@@ -557,6 +605,10 @@ struct Open {
     sequence: u64,
     body: Id,
     expiry: Micros,
+    /// Its deadline at its arrival, world time.
+    due: Micros,
+    /// A form's act: its run's deadline, from the run's start (C20).
+    run_due: Option<Micros>,
     intent: Value,
     waiters: Vec<Reply>,
     stamps: Stamps,
@@ -575,6 +627,8 @@ struct Tick {
     handed: Option<u64>,
     /// The tick's parts, handed to the sync thread once its records are on the disk (C16).
     parts: Vec<Arc<Part>>,
+    /// Answers sent as they are, with no block: a form act's progress (C20).
+    bare: Vec<(Vec<Reply>, Vec<u8>)>,
 }
 
 struct Clock {
@@ -601,6 +655,9 @@ struct Clock {
     fresh: Vec<(Hash, Vec<u8>)>,
     checked: Vec<(Act, Checks)>,
     replies: Vec<Out>,
+    /// Progress answers (C20), by act: sent after the tick's sync with its answers, as they are, never kept or logged;
+    /// one whose act ends in the same tick is dropped, as its answer says more.
+    progress: Vec<(Id, Vec<Reply>, Vec<u8>)>,
     rows: Vec<Value>,
     effects: Vec<Effect>,
     parts: Vec<Arc<Part>>,
@@ -619,7 +676,7 @@ struct Clock {
     /// Soul Actions (C2, #3366): the forms in progress, and the form acts taken since the last tick, committed at
     /// the next through the form runner when the world has bodies.
     forms: Acts,
-    forming: Vec<(Id, Act, sim::forms::Intent, BTreeMap<String, Id>)>,
+    forming: Vec<(Id, Act, sim::forms::Intent, acts::Args)>,
     /// The engine's own acts (C2): joint activities, offers, carrying; and those taken since the last tick.
     engine: Option<Engine>,
     engine_acts: Vec<engine::Act>,
@@ -649,6 +706,8 @@ struct Clock {
     sky: Option<Heavens>,
     /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
     tick_us: Micros,
+    /// Joins and leaves (C3), when the world births its Souls' bodies.
+    life: Option<Lives>,
     /// Loose things' ends (F10b, #3476), and the ends of owner's links the tick's acts ended.
     loose: Ends,
     unlinked: Vec<Id>,
@@ -720,24 +779,40 @@ enum Taken {
     Engine(engine::Act),
 }
 
-/// A form's thing arguments (F4) from an intent's parameter 1: `[[name as bytes, id], ...]`.
-fn thing_args(intent: &Intent) -> BTreeMap<String, Id> {
+/// A form's arguments from an intent's parameter 1: `[[name as bytes, id or slot number], ...]`, a thing by its id
+/// (F4) and a slot of the node by its number, 1, 2, ... in its entry's order (C12).
+fn thing_args(intent: &Intent) -> acts::Args {
+    let mut args = acts::Args::default();
     let Some(Value::Array(pairs)) = intent.parameters.get(&1) else {
-        return BTreeMap::new();
+        return args;
     };
-    pairs
-        .iter()
-        .filter_map(|p| match p {
-            Value::Array(kv) => match kv.as_slice() {
-                [Value::Bytes(k), v] => Some((
-                    String::from_utf8(k.clone()).ok()?,
-                    replica::effects::read_id(v).ok()?,
-                )),
-                _ => None,
-            },
-            _ => None,
-        })
-        .collect()
+    for p in pairs {
+        if let Value::Array(kv) = p
+            && let [Value::Bytes(k), v] = kv.as_slice()
+            && let Ok(k) = String::from_utf8(k.clone())
+        {
+            use skills::form_runner::Arg;
+            match v {
+                Value::Uint(n) => drop(args.slots.insert(k, *n)),
+                // A value by name, and words by their reference (`{21: id}`, K16): a set's arguments (C24).
+                Value::Text(n) => drop(args.values.insert(k, Arg::Name(n.as_str().to_owned()))),
+                Value::Map(m) if m.len() == 1 => {
+                    if let Some(Ok(id)) = m
+                        .get(&replica::audience::REFERENCE)
+                        .map(replica::effects::read_id)
+                    {
+                        args.values.insert(k, Arg::Text(id));
+                    }
+                }
+                _ => {
+                    if let Ok(id) = replica::effects::read_id(v) {
+                        args.things.insert(k, id);
+                    }
+                }
+            }
+        }
+    }
+    args
 }
 
 /// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name.
@@ -748,6 +823,36 @@ pub const MOVE_STARTED: &str = "souls:move-started";
 pub const MOVE_ENDED: &str = "souls:move-ended";
 /// How an act still going at its deadline ends (C8), and the move it drove with it.
 pub const TIMED_OUT: &str = "act.timed-out";
+
+/// The event of the entry a form's act writes when its run starts (C20, #3469): field 1 the body, 5 the act's
+/// deadline, world time µs (its start plus its steps' span, `sim::forms::span`). Its cause is the intent, so the
+/// act's receipt names it.
+pub const ACT_DEADLINE: &str = "souls:act-deadline";
+
+/// The answer's field of a progress answer that holds how long the act has left, µs ([`progress`]).
+pub const LEFT: u64 = 5;
+
+/// A progress answer (C20, #3469): `{1: version, 2: {1: actor, 2: sequence, 3: 3, 4: intent id, 5: µs left}}`, T10's
+/// accepted (`replica::intents::Answer::Accepted`) with how long the act has left until its deadline. It is not the
+/// act's answer: that follows, by the deadline, and a repeat is never given this one. Sent, with no block, when a
+/// form's act is still running at the deadline it got on arrival and its run is due later.
+pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: Micros) -> Vec<u8> {
+    let mut answer = match (Answer::Accepted {
+        actor,
+        sequence,
+        intent,
+    })
+    .to_value()
+    {
+        Value::Map(m) => m,
+        _ => BTreeMap::new(),
+    };
+    answer.insert(LEFT, Value::Uint(u64::try_from(left).unwrap_or(0)));
+    encode(&Value::Map(
+        [(1, version.clone()), (2, Value::Map(answer))].into(),
+    ))
+    .unwrap_or_default()
+}
 
 fn name(s: &str) -> Name {
     Name::new(s).unwrap_or_else(|| Name::new("act.refused").expect("a name"))
@@ -781,8 +886,7 @@ fn body_of(intent: &Intent) -> Result<Id, &'static str> {
 
 /// The act the checkers take for an intent: its verb's form on its target, then each fallback's, in rank order.
 /// A walk, a sit or a rise goes to the bodies instead ([`crate::bodies`], I4b); orders are B7's.
-fn act_of(intent: &Intent, id: u64, cause: Cause) -> Result<Act, &'static str> {
-    let body = body_of(intent)?;
+fn act_of(intent: &Intent, body: Id, id: u64, cause: Cause) -> Result<Act, &'static str> {
     let candidate =
         |verb: &Name, target: &Option<Target>| match (verb.as_str().split_once(':'), target) {
             (Some((ns, form)), Some(Target::Node(this))) if ns != "souls" => Ok(Candidate {
@@ -808,7 +912,12 @@ fn act_of(intent: &Intent, id: u64, cause: Cause) -> Result<Act, &'static str> {
 
 /// A walk or a sit aimed at a described spot (selector 2 of I5's list, E2 #2709): `None` for any other intent, else
 /// the act a checker resolves the spot for on its copy, or the spot's refusal by name.
-fn spot_of(intent: &Intent, id: u64, cause: Cause) -> Option<Result<Act, &'static str>> {
+fn spot_of(
+    intent: &Intent,
+    body: Result<Id, &'static str>,
+    id: u64,
+    cause: Cause,
+) -> Option<Result<Act, &'static str>> {
     let target @ Target::Selector(SPOT, _) = intent.target.as_ref()? else {
         return None;
     };
@@ -822,7 +931,7 @@ fn spot_of(intent: &Intent, id: u64, cause: Cause) -> Option<Result<Act, &'stati
             id,
             cause,
             actor: intent.actor,
-            body: body_of(intent)?,
+            body: body?,
             candidates: Vec::new(),
             recheck: None,
             spot: Some(Box::new(SpotAct {
@@ -938,6 +1047,7 @@ impl Clock {
         };
         self.in_flight.remove(&(o.key.clone(), o.sequence));
         self.deadlines.close(o.body, id);
+        self.progress.retain(|p| p.0 != id);
         if let Some(m) = &self.measures {
             if o.stamps.0[2].is_none() {
                 m.ended_unchecked(id.counter());
@@ -996,6 +1106,24 @@ impl Clock {
             }
             Seen::Fresh => {}
         }
+        // A Soul with no body here waits for its birth (C3); a leave has nothing to retire.
+        if let Some(soul) = self.unborn(&intent) {
+            if intent.verb.as_str() == LEAVE {
+                let a = self.refusal(actor, sequence, "soul-not-embodied");
+                return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+            }
+            if let Some(l) = self.life.as_mut() {
+                let entry = l.entry;
+                // Refused `soul-embodied` only when a birth is already waiting: this intent waits with it.
+                let _ = l.life.ask(Birth {
+                    soul,
+                    entry,
+                    asked: now,
+                });
+                l.unborn.push((soul, bytes.to_vec(), reply, stamps));
+            }
+            return;
+        }
         if let Some(f) = self.arrivals.as_mut() {
             // One write per line, unbuffered, so a killed world leaves every line it took.
             let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
@@ -1018,7 +1146,7 @@ impl Clock {
         if has_words(&value) {
             // The words go to the store and the intent is logged with their references (V1b); refused, it is logged
             // without its intent.
-            let r = match body_of(&intent) {
+            let r = match self.body_of(&intent) {
                 Ok(b) => words::keep(value, &self.text, words::audience(form, b), b, &mut kept)
                     .map_err(|r| r.name),
                 Err(e) => Err(e),
@@ -1039,9 +1167,22 @@ impl Clock {
             let a = self.refusal(actor, sequence, "intent.ids-exhausted");
             return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
         };
+        // A leave retires the Soul's body (C3).
+        if let (Actor::Soul(soul), true) =
+            (actor, intent.verb.as_str() == LEAVE && self.life.is_some())
+        {
+            return self.leave(
+                soul,
+                id,
+                (key, sequence, value),
+                &intent,
+                (reply, stamps),
+                now,
+            );
+        }
         // A say, a whisper or a describe writes its entry now and is answered after its tick's sync (V1b).
         if form != words::Form::Other {
-            let entry = match body_of(&intent) {
+            let entry = match self.body_of(&intent) {
                 Ok(b) if self.replica.node(b).is_some() => {
                     let env = words::envelope(self.replica.version(), now, id, actor, b);
                     words::entry(form, &value, &kept, b, members, env)
@@ -1073,11 +1214,19 @@ impl Clock {
         }
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
-            Some(_) => body_of(&intent).ok().and_then(|b| bodies::read(&intent, b)),
+            Some(_) => self
+                .body_of(&intent)
+                .ok()
+                .and_then(|b| bodies::read(&intent, b)),
             None => None,
         };
         let spotted = match self.bodies {
-            Some(_) => spot_of(&intent, self.next_intent, Cause::Intent(id)),
+            Some(_) => spot_of(
+                &intent,
+                self.body_of(&intent),
+                self.next_intent,
+                Cause::Intent(id),
+            ),
             None => None,
         };
         let verb = engine::Verb::of(intent.verb.as_str());
@@ -1085,10 +1234,13 @@ impl Clock {
             (Some(a), _, _, _) => a.map(Taken::Form),
             (None, Some(m), _, _) => m.map(Taken::Move),
             // The engine's own acts (C2): activities, offers and carrying, by verb.
-            (None, None, Some(v), _) => body_of(&intent).map(|body| {
+            (None, None, Some(v), _) => self.body_of(&intent).map(|body| {
                 Taken::Engine(engine::Act {
                     id,
-                    soul: body,
+                    soul: match actor {
+                        Actor::Soul(s) => s,
+                        _ => body,
+                    },
                     body,
                     verb: v,
                     target: match &intent.target {
@@ -1106,9 +1258,9 @@ impl Clock {
                     (_, None) => Err("intent.not-an-edit"),
                 }
             }
-            (None, None, None, _) => {
-                act_of(&intent, self.next_intent, Cause::Intent(id)).map(Taken::Form)
-            }
+            (None, None, None, _) => self.body_of(&intent).and_then(|body| {
+                act_of(&intent, body, self.next_intent, Cause::Intent(id)).map(Taken::Form)
+            }),
         };
         let taken = match taken {
             Ok(t) => t,
@@ -1135,11 +1287,8 @@ impl Clock {
             verb: intent.verb.clone(),
             words: None,
         });
-        self.deadlines.open(
-            body,
-            id,
-            intent.expiry.min(now.saturating_add(self.deadline)),
-        );
+        let due = intent.expiry.min(now.saturating_add(self.deadline));
+        self.deadlines.open(body, id, due);
         self.in_flight.insert((key.clone(), sequence), id);
         self.open.insert(
             id,
@@ -1149,6 +1298,8 @@ impl Clock {
                 sequence,
                 body,
                 expiry: intent.expiry,
+                due,
+                run_due: None,
                 intent: value,
                 waiters: vec![reply],
                 stamps,
@@ -1219,12 +1370,353 @@ impl Clock {
         }
     }
 
+    /// The body an intent drives: with joins (C3), a Soul's born body, else as [`body_of`] says.
+    fn body_of(&self, intent: &Intent) -> Result<Id, &'static str> {
+        match (intent.actor, &self.life) {
+            (Actor::Soul(s), Some(l)) => l.life.body_of(s).ok_or("intent.no-body"),
+            _ => body_of(intent),
+        }
+    }
+
+    /// The Soul of `intent` when it has no body here yet (C3). A body the log has for it (its `souls:body-of` link,
+    /// after a restart) is taken back first.
+    fn unborn(&mut self, intent: &Intent) -> Option<Id> {
+        let Actor::Soul(soul) = intent.actor else {
+            return None;
+        };
+        let l = self.life.as_mut()?;
+        if l.life.body_of(soul).is_some() {
+            return None;
+        }
+        let tree = self.replica.tree();
+        let found = tree
+            .links_at(soul)
+            .iter()
+            .filter(|e| tree.ty(e).as_str() == BODY_OF)
+            .find_map(|e| {
+                let (_, [body, _], _, _) = tree.link(e.link)?;
+                tree.handle(body)?;
+                Some((body, e.link))
+            });
+        match found {
+            Some((body, link)) => {
+                l.life.adopt(soul, body, link);
+                None
+            }
+            None => Some(soul),
+        }
+    }
+
+    /// This tick's births (C3, K10): each body born, its node and link written, a join among its Soul's waiting
+    /// intents answered with that entry, and its other intents taken now.
+    fn births(&mut self, now: Micros) {
+        let (Some(l), Some(b)) = (self.life.as_mut(), self.bodies.as_mut()) else {
+            return;
+        };
+        if l.life.waiting() == 0 {
+            return;
+        }
+        let mut born = b.births(&mut l.life, now, &l.ring, &l.family);
+        let mut taken = Vec::new();
+        for x in &mut born {
+            // The world's body kind, as its header pins it (K10 writes the plain name).
+            for c in &mut x.changes {
+                if let Change::Create { kind, .. } = c {
+                    *kind = l.kind.clone();
+                }
+            }
+            let (mine, rest) = std::mem::take(&mut l.unborn)
+                .into_iter()
+                .partition(|h| h.0 == x.soul);
+            l.unborn = rest;
+            taken.push((x.clone(), mine));
+        }
+        for (x, mine) in taken {
+            let mut later: Vec<(Vec<u8>, Reply, Stamps)> = Vec::new();
+            let mut join = None;
+            for (_, bytes, reply, stamps) in mine {
+                let is_join =
+                    join.is_none() && Intent::read(&bytes).is_ok_and(|i| i.verb.as_str() == JOIN);
+                if is_join {
+                    join = Some((bytes, reply, stamps));
+                } else {
+                    later.push((bytes, reply, stamps));
+                }
+            }
+            self.born(x, join, now);
+            for (bytes, reply, stamps) in later {
+                self.arrival(&bytes, reply, stamps, now);
+            }
+        }
+    }
+
+    /// Writes one birth: the body's node (named by `join`'s words when it is one) and its link to its Soul. A join is
+    /// answered with that entry; one sent again, or stale, is answered as any repeat.
+    fn born(&mut self, x: sim::life::Born, join: Option<(Vec<u8>, Reply, Stamps)>, now: Micros) {
+        let mut changes = x.changes;
+        let mut cause = (Cause::World, Actor::World);
+        let mut answer = None;
+        if let Some((bytes, reply, stamps)) = join {
+            let read = Intent::read(&bytes).ok().zip(actor_key(&bytes));
+            match read.map(|(i, k)| {
+                let fresh = matches!(self.sequences.seen(&k, i.sequence), Seen::Fresh);
+                (i, k, fresh)
+            }) {
+                Some((intent, key, true)) if !expired(intent.expiry, now) => {
+                    let mut kept = Vec::new();
+                    let value = words::keep(
+                        intent.to_value(),
+                        &self.text,
+                        Audience::Everyone,
+                        x.body,
+                        &mut kept,
+                    );
+                    if let (Ok(value), Some(id)) = (value, Id::new(self.lineage, self.next_intent))
+                    {
+                        self.next_intent += 1;
+                        if let Some(Change::Create { fields, .. }) = changes.first_mut() {
+                            fields.extend(words::naming(&value));
+                        }
+                        cause = (Cause::Intent(id), intent.actor);
+                        self.inputs.push(Input::Intent {
+                            id,
+                            soul: x.body,
+                            verb: intent.verb.clone(),
+                            words: None,
+                        });
+                        answer = Some((id, intent, key, value, reply, stamps));
+                    } else {
+                        // Words refused: the body is born unnamed, and the join is taken as any intent.
+                        self.arrival(&bytes, reply, stamps, now);
+                    }
+                }
+                _ => self.arrival(&bytes, reply, stamps, now),
+            }
+        }
+        let node = match changes.first() {
+            Some(Change::Create { pose, .. }) => pose.frame.node,
+            _ => self.replica.header().zone,
+        };
+        let effect = Effect {
+            envelope: Envelope {
+                sequence: self.replica.version(),
+                at: now,
+                cause: cause.0,
+                actor: cause.1,
+                audience: Audience::Everyone,
+                node,
+            },
+            body: Body::Changes(
+                changes
+                    .into_iter()
+                    .map(|change| ChangeRec {
+                        change,
+                        rest: Rest::new(),
+                    })
+                    .collect(),
+            ),
+            events: None,
+            rest: Rest::new(),
+        };
+        let written = self.write(effect);
+        if let Err(r) = &written {
+            eprintln!("worldd: a birth was not written: {r}");
+        }
+        if let Some((id, intent, key, value, reply, stamps)) = answer {
+            let a = match written {
+                Ok(()) => Answer::Receipt {
+                    actor: intent.actor,
+                    sequence: intent.sequence,
+                    intent: id,
+                    entries: self.receipts.entries(id).to_vec(),
+                    names: BTreeMap::new(),
+                },
+                Err(r) => self.refusal(intent.actor, intent.sequence, r.name),
+            };
+            self.answered(
+                key,
+                intent.sequence,
+                Some(id),
+                Some(value),
+                &a,
+                (vec![reply], stamps),
+            );
+        }
+    }
+
+    /// A leave (C3): `soul`'s body retired by K10's path, its link ended and its node removed in one entry, the move
+    /// it was making ended `retired`; answered with that entry, or refused by name.
+    fn leave(
+        &mut self,
+        soul: Id,
+        id: Id,
+        (key, sequence, value): (Vec<u8>, u64, Value),
+        intent: &Intent,
+        (reply, stamps): (Reply, Stamps),
+        now: Micros,
+    ) {
+        let actor = intent.actor;
+        // The entry is the body's own (T6 rule 6: it writes its own node and link).
+        let mut node = self.replica.header().zone;
+        let mut held = Vec::new();
+        if let Some(body) = self.life.as_ref().and_then(|l| l.life.body_of(soul)) {
+            node = body;
+            held = self.held(body);
+            // A form's run on the body is left first, while the body is still the controller's.
+            self.forms
+                .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+        }
+        let retired = match (self.life.as_mut(), self.bodies.as_mut()) {
+            (Some(l), Some(b)) => b.retire(&mut l.life, soul, now),
+            _ => Err(Refusal {
+                name: "soul-not-embodied",
+                detail: String::new(),
+            }),
+        };
+        let (r, open) = match retired {
+            Ok(x) => x,
+            Err(r) => {
+                let a = self.refusal(actor, sequence, r.name);
+                return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
+            }
+        };
+        self.next_intent += 1;
+        self.inputs.push(Input::Intent {
+            id,
+            soul: r.body,
+            verb: intent.verb.clone(),
+            words: None,
+        });
+        // What it held is set down where it stood (a leave of its hand and an arrive on the ground, in the same part),
+        // before the node goes: a leave never takes a thing out of the world with the body.
+        let header = self.replica.header().clone();
+        let mut effects = Vec::new();
+        for (thing, pose) in held {
+            let Some(transfer) = self.life.as_mut().and_then(|l| l.mint.mint().ok()) else {
+                continue;
+            };
+            let entry = |node, body| Effect {
+                envelope: words::envelope(0, now, id, actor, node),
+                body,
+                events: None,
+                rest: Rest::new(),
+            };
+            let on = pose.frame.node;
+            effects.push(entry(
+                thing,
+                Body::Transfer(TransferRec::Leave {
+                    transfer,
+                    node: thing,
+                    lineage: header.lineage,
+                    zone: header.zone,
+                    pose,
+                }),
+            ));
+            effects.push(entry(
+                on,
+                Body::Transfer(TransferRec::Arrive {
+                    transfer,
+                    carried: Vec::new(),
+                }),
+            ));
+        }
+        effects.push(Effect {
+            envelope: words::envelope(0, now, id, actor, node),
+            body: Body::Changes(
+                r.changes
+                    .into_iter()
+                    .map(|change| ChangeRec {
+                        change,
+                        rest: Rest::new(),
+                    })
+                    .collect(),
+            ),
+            events: None,
+            rest: Rest::new(),
+        });
+        let a = match self.write_all(effects) {
+            Ok(()) => Answer::Receipt {
+                actor,
+                sequence,
+                intent: id,
+                entries: self.receipts.entries(id).to_vec(),
+                names: BTreeMap::new(),
+            },
+            Err(e) => self.refusal(actor, sequence, e.name),
+        };
+        if let Some(i) = open
+            && let Some(o) = self.open.get(&i)
+        {
+            let (actor, sequence) = (o.actor, o.sequence);
+            self.end(i, |c| c.refusal(actor, sequence, "retired"));
+        }
+        self.answered(
+            key,
+            sequence,
+            Some(id),
+            Some(value),
+            &a,
+            (vec![reply], stamps),
+        );
+    }
+
+    /// What `body` holds (its node's children) and, for each, its pose set down on the node the body stands on,
+    /// where it stands (C3: a leave never takes a thing out of the world with the body).
+    fn held(&self, body: Id) -> Vec<(Id, Pose)> {
+        let tree = self.replica.tree();
+        let Some(h) = tree.handle(body) else {
+            return Vec::new();
+        };
+        let Some(n) = tree.node(h) else {
+            return Vec::new();
+        };
+        let (Some(parent), Some(birth)) = (n.parent(), n.place()) else {
+            return Vec::new();
+        };
+        let at = match self.bodies.as_ref().and_then(|b| b.pose(body)) {
+            Some((on, p)) if on == parent => p,
+            _ => birth.position,
+        };
+        tree.children(h)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|&c| {
+                let c = tree.node(c)?;
+                let pose = Pose {
+                    frame: Frame {
+                        node: parent,
+                        slot: None,
+                    },
+                    position: Vec3::new(at.x, 0, at.z),
+                    orientation: Quat::IDENTITY,
+                    support: Support::Surface {
+                        surface: parent,
+                        height: 0,
+                    },
+                };
+                Some((c.id(), pose))
+            })
+            .collect()
+    }
+
     /// Writes the entry of open move `id`: event `event` with `{1: body, 2: how (once it ended; its name's bytes, since
     /// an event's text is a namespaced name), 3: [x, y, z] µm,
     /// 4: the node of its frame}`, where the body stands or sits. A move started also names the candidate of its ranked
     /// list it took (C14): `5: its rank` (0 the intent's own) and `6: its target`. Its cause is the intent, so the
     /// receipt finds it.
     fn note(&mut self, id: Id, event: &str, how: Option<&str>, at: Micros) {
+        self.note_with(id, event, how, None, at);
+    }
+
+    /// [`Clock::note`], with field 5 the act's deadline, world time µs, when given (C20).
+    fn note_with(
+        &mut self,
+        id: Id,
+        event: &str,
+        how: Option<&str>,
+        due: Option<Micros>,
+        at: Micros,
+    ) {
         let Some(o) = self.open.get(&id) else { return };
         let mut fields = BTreeMap::from([(1, o.body.to_value())]);
         if let Some((rank, target)) = self.bodies.as_mut().and_then(|b| b.took(id)) {
@@ -1235,6 +1727,9 @@ impl Clock {
         }
         if let Some(h) = how {
             fields.insert(2, Value::Bytes(h.as_bytes().to_vec()));
+        }
+        if let Some(d) = due.and_then(|d| u64::try_from(d).ok()) {
+            fields.insert(5, Value::Uint(d));
         }
         if let Some((node, p)) = self.bodies.as_ref().and_then(|b| b.pose(o.body)) {
             let i = |n: i64| {
@@ -1269,10 +1764,24 @@ impl Clock {
     /// Applies one entry the world writes itself (a move's, or words', V1b), indexed for receipts and logged with the
     /// tick.
     fn write(&mut self, effect: Effect) -> R<()> {
-        let changes = matches!(&effect.body, Body::Changes(c) if !c.is_empty());
+        self.write_all(vec![effect])
+    }
+
+    /// Applies entries the world writes itself as one part, whole or not at all, each numbered in turn from the
+    /// replica's version.
+    fn write_all(&mut self, mut effects: Vec<Effect>) -> R<()> {
+        let changes = effects
+            .iter()
+            .any(|e| !matches!(&e.body, Body::Changes(c) if c.is_empty()));
+        for (k, e) in effects.iter_mut().enumerate() {
+            e.envelope.sequence = self.replica.version() + k as u64;
+        }
         let v = Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.replica.header().hash().to_bytes())),
-            (2, Value::Array(vec![effect.to_value()])),
+            (
+                2,
+                Value::Array(effects.iter().map(Effect::to_value).collect()),
+            ),
         ]));
         let p = encode(&v)
             .map_err(|e| Refusal {
@@ -1503,7 +2012,8 @@ impl Clock {
                 now,
             );
             match r {
-                Ok(sim::forms::Asked::Applied(_)) => self.form_ended(id, "done".into(), now),
+                Ok(sim::forms::Asked::Applied(_)) => self.form_ended(id, "done".into(), None, now),
+                Ok(sim::forms::Asked::Started(run)) => self.form_started(id, run, now),
                 Ok(_) => {}
                 Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
             }
@@ -1569,16 +2079,58 @@ impl Clock {
                 });
             }
         }
-        for (id, how) in self.forms.ended() {
-            self.form_ended(id, how, now);
+        for (id, how, why) in self.forms.ended() {
+            self.form_ended(id, how, why, now);
         }
     }
 
-    /// A form's run ended: an entry naming how, then its intent's answer, a receipt when `done`.
-    fn form_ended(&mut self, id: Id, how: String, now: Micros) {
+    /// A form's run started (C20, #3469): its act's deadline becomes the run's own, its start plus its steps' span
+    /// (`sim::forms::span`: its walk, its moves and its pauses), written as an [`ACT_DEADLINE`] entry its receipt
+    /// names. The due list keeps the sooner of that and the deadline set at its arrival: an act still running at its
+    /// arrival deadline with a later run deadline is answered in progress then ([`Clock::still_running`]).
+    fn form_started(&mut self, id: Id, run: sim::forms::RunId, now: Micros) {
+        let Some(due) = self.forms.forms.due(run) else {
+            return;
+        };
+        let Some(o) = self.open.get_mut(&id) else {
+            return;
+        };
+        o.run_due = Some(due);
+        let (body, first) = (o.body, o.due.min(due));
+        self.deadlines.close(body, id);
+        self.deadlines.open(body, id, first);
+        self.note_with(id, ACT_DEADLINE, None, Some(due), now);
+    }
+
+    /// A deadline of act `id` passed at `now` (C20): when it is a form's act whose run's deadline is later, its
+    /// deadline moves there and it is answered in progress ([`progress`]), so the gateway waits for it rather than
+    /// answering `act.timed-out` itself. Whether it did.
+    fn still_running(&mut self, id: Id, now: Micros) -> bool {
+        let Some(o) = self.open.get(&id) else {
+            return false;
+        };
+        let Some(due) = o.run_due.filter(|d| *d > now) else {
+            return false;
+        };
+        let frame = progress(
+            &self.version(),
+            o.actor,
+            o.sequence,
+            id,
+            due.saturating_sub(now),
+        );
+        self.progress.push((id, o.waiters.clone(), frame));
+        self.deadlines.open(o.body, id, due);
+        true
+    }
+
+    /// A form's run ended: an entry naming how (and for a walk that stalled, what blocked it: C21), then its intent's
+    /// answer, a receipt when `done`.
+    fn form_ended(&mut self, id: Id, how: String, why: Option<String>, now: Micros) {
         let Some(o) = self.open.get(&id) else { return };
         let (actor, sequence) = (o.actor, o.sequence);
-        self.note(id, FORM_ENDED, Some(&how), now);
+        let noted = why.map_or_else(|| how.clone(), |w| format!("{how}: {w}"));
+        self.note(id, FORM_ENDED, Some(&noted), now);
         if how == "done" {
             self.end(id, |c| Answer::Receipt {
                 actor,
@@ -1684,7 +2236,9 @@ impl Clock {
         self.checkpoint();
         at[1] = mark();
         self.tick = n;
-        // 0. What arrived since the last tick, and what a script set for this one, is taken now.
+        // 0. This tick's births (C3) and the intents that waited for them; then what arrived since the last tick, and
+        // what a script set for this one, is taken now.
+        self.births(now);
         for (bytes, reply, stamps) in std::mem::take(&mut self.pending) {
             self.arrival(&bytes, reply, stamps, now);
         }
@@ -1697,6 +2251,10 @@ impl Clock {
         // 1. Due timers: acts whose deadline passed. A walk going for one stops in this tick and its end is written
         // by the deadline's name; a sit, a lie or a rise runs to its end, and the act ends with it.
         while let Some(id) = self.deadlines.due(now) {
+            // A form's act whose run is due later is answered in progress, and kept to the run's deadline (C20).
+            if self.still_running(id, now) {
+                continue;
+            }
             let Some(o) = self.open.get(&id) else {
                 continue;
             };
@@ -1849,13 +2407,18 @@ impl Clock {
         let bytes = inputs.as_ref().map_or(0, Vec::len) + record.as_ref().map_or(0, Vec::len);
         let written = u64::from(inputs.is_some()) + u64::from(record.is_some());
         let handed = mark();
-        if written > 0 || !replies.is_empty() || !parts.is_empty() {
+        let progress: Vec<_> = std::mem::take(&mut self.progress)
+            .into_iter()
+            .map(|(_, to, frame)| (to, frame))
+            .collect();
+        if written > 0 || !replies.is_empty() || !progress.is_empty() || !parts.is_empty() {
             let _ = self.answers.send(Tick {
                 inputs,
                 record,
                 replies,
                 started: at[0],
                 handed,
+                bare: progress,
                 parts,
             });
         }
@@ -2043,6 +2606,11 @@ fn answer_loop<S: Storage + 'static>(
                 }
                 None => frame,
             };
+            for w in waiters {
+                let _ = w.send(frame.clone());
+            }
+        }
+        for (waiters, frame) in t.bare {
             for w in waiters {
                 let _ = w.send(frame.clone());
             }
@@ -2243,6 +2811,23 @@ pub fn start<S: Storage + 'static>(
         Scope(s)
     };
     let (forms_scope, engine_scope) = (scope("forms"), scope("engine"));
+    let life = cfg.join.take().map(|j| {
+        let entry = j.entry.0;
+        Lives {
+            life: Life::new(scope("life"), j.per_tick),
+            ring: Ring {
+                entries: BTreeMap::from([(entry, j.entry)]),
+                radius: 1_000_000,
+                gap: 1_000_000,
+                rings: 8,
+            },
+            entry,
+            family: j.family,
+            kind: j.kind,
+            mint: Minter::new(scope("leave")),
+            unborn: Vec::new(),
+        }
+    });
     let engine_parts = cfg.engine.take();
     let (events, rx) = channel();
     let walkers = cfg
@@ -2335,6 +2920,7 @@ pub fn start<S: Storage + 'static>(
         fresh,
         checked: Vec::new(),
         replies: Vec::new(),
+        progress: Vec::new(),
         rows: Vec::new(),
         effects: Vec::new(),
         parts: Vec::new(),
@@ -2366,6 +2952,7 @@ pub fn start<S: Storage + 'static>(
         sky,
         tick_us,
         text,
+        life,
         loose,
         unlinked: Vec::new(),
     };
@@ -2378,6 +2965,13 @@ pub fn start<S: Storage + 'static>(
             mark_clock_thread();
             let beat = thread_beat;
             let mut c = build();
+            // With joins (C3), a body the log placed is stood again only while its node is in the tree: a retired
+            // body's last row outlives it.
+            let mut placed = placed;
+            if c.life.is_some() {
+                let tree = c.replica.tree();
+                placed.retain(|id, _| tree.handle(*id).is_some());
+            }
             if let Some(make) = make {
                 match make(&placed) {
                     Ok(mut b) => {
@@ -2391,6 +2985,12 @@ pub fn start<S: Storage + 'static>(
                             );
                         }
                         c.bodies = Some(b);
+                        // The activities the log holds, so their members speak in them and leave them again (E26).
+                        if let (Some(e), Some(b)) = (c.engine.as_mut(), c.bodies.as_mut())
+                            && let Err(r) = e.restore(c.replica.tree(), &mut b.runner.controller)
+                        {
+                            eprintln!("worldd: the activities were not restored: {r}");
+                        }
                     }
                     Err(e) => eprintln!("worldd: the bodies did not start, moves are refused: {e}"),
                 }
