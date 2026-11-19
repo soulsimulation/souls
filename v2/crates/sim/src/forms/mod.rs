@@ -80,6 +80,11 @@
 //!   by its start plus that ([`Forms::due`]), so the act it carries out is given the time its walk and its own
 //!   duration take, from when it starts.
 //!
+//! - **Rise and settle** (C25, #3496). A `rise` stands a seated body up by B3's [`Slots::rise`] and the library's rise
+//!   move (its end wakes the run), a settled one at once, and is done at once for a body standing. A `settle` claims
+//!   the body's legs in a sitting or lying stance where it stands, with no slot; the claim outlives the run, and a
+//!   rise or any later claim on the legs (a walk) ends it.
+//!
 //! Not here: accepting the intent (I4),
 //! queueing for a reserved thing (B7), things for several users, a thing made or set down where there is no slot (E4).
 
@@ -429,6 +434,21 @@ pub struct Forms {
     /// The crossings the walks asked for this tick (C17): the caller carries them (`crate::host::carry`) and clears
     /// the list.
     pub crossings: Vec<(Id, Driver, Id, i64)>,
+    /// Bodies in a ground posture a `settle` took (C25), with the driver that holds it: a rise ends it, and so does
+    /// any later claim on the body's legs (a walk), which stands it up.
+    settled: BTreeMap<Id, Driver>,
+}
+
+/// The claim that holds a settled body's legs and its ground posture (C25, #3496): any later claim on its legs ends
+/// it, and the body stands.
+fn settled_shape() -> replica::bodies::SkillShape {
+    use replica::bodies::{Class, SkillShape, Want};
+    SkillShape {
+        name: name("souls:settled"),
+        claims: vec![Want::All(Class::Locomotion)],
+        blocks: vec![],
+        cancelled_by: vec![Class::Locomotion],
+    }
 }
 
 fn name(t: &str) -> Name {
@@ -1121,6 +1141,61 @@ impl Forms {
                     Err(how) => self.wake(w, run, Woke::Moved(how), now),
                 }
             }
+            // A ground posture where the body stands (C25, SA-G3): its legs held in that stance until a rise or a walk.
+            Next::Settle { lie } => {
+                let stance = if lie {
+                    crate::controller::Stance::Lie
+                } else {
+                    crate::controller::Stance::Sit
+                };
+                if let Some(d) = self.settled.remove(&body) {
+                    let _ = w.controller.release(body, d);
+                }
+                let held = w.controller.claim(body, &settled_shape()).and_then(|d| {
+                    w.controller
+                        .set(body, d, crate::controller::Part::Stance(stance))
+                        .map(|()| d)
+                });
+                match held {
+                    Ok(d) => {
+                        self.settled.insert(body, d);
+                        self.wake(w, run, Woke::Moved(name("done")), now);
+                    }
+                    Err(r) => self.wake(w, run, Woke::Moved(name(r.name)), now),
+                }
+            }
+            // Out of a seat by B3's rise (its end wakes the run, [`Forms::fire`]); up from a ground posture, or a body
+            // standing, at once (C25).
+            Next::Rise => {
+                if let Some(d) = self.settled.remove(&body) {
+                    let _ = w.controller.release(body, d);
+                    return self.wake(w, run, Woke::Moved(name("done")), now);
+                }
+                let seated = w.places.as_ref().and_then(|p| p.slots.held_by(body));
+                let Some(thing) = seated else {
+                    return self.wake(w, run, Woke::Moved(name("done")), now);
+                };
+                let (Some(found), Some(places)) = (
+                    w.library.iter().find(|m| m.name.as_str() == "souls:rise"),
+                    w.places.as_mut(),
+                ) else {
+                    return self.wake(w, run, Woke::Moved(name("move-unknown")), now);
+                };
+                let geo = seat_reach(w.reach, w.controller, places.slots, body, thing);
+                match places.slots.rise(
+                    w.controller,
+                    w.due,
+                    w.mint,
+                    w.moves,
+                    &geo,
+                    body,
+                    found,
+                    now,
+                ) {
+                    Ok(n) => fr.mv = Some(n),
+                    Err(r) => self.wake(w, run, Woke::Moved(name(r.name)), now),
+                }
+            }
             Next::Move { name: mv, node, at } => {
                 let Some(found) = w.library.iter().find(|m| m.name == mv) else {
                     return self.wake(w, run, Woke::Moved(name("move-unknown")), now);
@@ -1356,9 +1431,11 @@ pub fn span(steps: &[Step], limits: &Limits) -> Micros {
         .iter()
         .map(|s| match s {
             Step::WalkTo { .. } => limits.walk,
-            Step::Move { .. } | Step::Sit { .. } => limits.step_move,
+            Step::Move { .. } | Step::Sit { .. } | Step::Rise | Step::Settle { .. } => {
+                limits.step_move
+            }
             Step::Wait(us) => *us,
-            Step::Hand => 0,
+            Step::Hand | Step::UseHeld => 0,
         })
         .fold(wakes, i64::saturating_add)
 }
