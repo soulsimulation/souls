@@ -121,7 +121,7 @@ use sim::commit::spot::{self, Spot as Bound};
 use sim::commit::{Checks, Outcome, commit, mark_clock_thread};
 use sim::daylight::{self, Daylight, Write as Fire};
 use sim::edit::Planned;
-use sim::edit::safety::Who;
+use sim::edit::safety::{Known, Who};
 use sim::frozen::Publisher;
 use sim::log::{Durable, Log, Storage};
 use sim::recorder::{self, Input};
@@ -231,6 +231,8 @@ impl Door {
 /// How long a lockstep tick waits for the checkers' copy to stand at the live version: only a bound on a publisher
 /// that refused a part; a loaded machine catches up well within it.
 const PUBLISHED_WAIT: Duration = Duration::from_secs(60);
+/// How long the edit checker waits for an edit before it builds its town again, when an edit has committed since.
+const EDIT_IDLE: Duration = Duration::from_millis(100);
 
 /// Where a lockstep run stands after [`Event::RunTo`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -383,6 +385,9 @@ pub struct Config {
     /// The world's one creator and the kinds it pins, for edit intents (G1b, #3362); without them every edit is
     /// refused `edit.not-the-creator`.
     pub edits: Option<edit::World>,
+    /// The world's one creator as its directory record names it (G1e, #3532), read again on a change: in place of
+    /// `edits`'s creator, and while it names none every edit is refused `edit.not-the-creator`.
+    pub creator: Option<Arc<buildsafe::Creator>>,
     /// The day, night and weather (E6) a start writes on the world node when it holds none; a world node that holds
     /// its settings keeps them. `None`: a world without settings has no sky.
     pub sky: Option<daylight::Config>,
@@ -433,6 +438,7 @@ impl Config {
             measures: true,
             health: None,
             edits: None,
+            creator: None,
             synced: None,
             sky: None,
             served: None,
@@ -1203,6 +1209,10 @@ impl Clock {
             match committed {
                 Ok(c) => {
                     self.unsealed = true;
+                    // The edit checker's town is built again from a copy with this edit (G1e).
+                    if let Some(w) = &self.walkers {
+                        w.committed(self.replica.version());
+                    }
                     self.receipts.index(&c.part.effects);
                     self.effects.extend(c.part.effects.iter().cloned());
                     self.parts.push(c.part);
@@ -2249,11 +2259,12 @@ pub fn start<S: Storage + 'static>(
         .edits
         .is_some()
         .then(|| Arc::new(buildsafe::Moving::default()));
+    let creator = cfg.creator.take();
     let edits = cfg
         .edits
         .take()
         .zip(walkers.clone())
-        .map(|(w, m)| edit_checker(w, Arc::clone(&publisher), m, events.clone()))
+        .map(|(w, m)| edit_checker(w, creator, Arc::clone(&publisher), m, events.clone()))
         .transpose()?;
     let (acts, checked) = checkers::start(cfg.checkers, Arc::clone(&publisher), Arc::new(rules));
     let fwd = events.clone();
@@ -2522,15 +2533,18 @@ pub fn start<S: Storage + 'static>(
     })
 }
 
-/// The edit checker's thread (G1b): each edit is checked (`replica::edit::check`) and planned (`sim::edit::plan`, G2's
-/// safety guard) on the newest frozen copy that stands at the version it was planned against, or after a second
-/// whatever it stands at, never on the live tree. G2 is given that copy's open ground and its Souls' bodies
-/// ([`crate::buildsafe`], G1c), with the bodies the controller holds as the clock last handed them off, walkers and
-/// the next corner of each walker's line among them (G1d): the plan is cut on the ground, and the commit judges the
+/// The edit checker's thread (G1b): each edit is checked (`replica::edit::check`) and planned (`sim::edit::plan_on`,
+/// G2's safety guard on the town, G2b) on the newest frozen copy that stands at the version it was planned against
+/// (and after the last edit committed), or after a second whatever it stands at, never on the live tree. G2 is given
+/// that copy's open ground and its Souls' bodies ([`crate::buildsafe`], G1c), with the bodies the controller holds as
+/// the clock last handed them off, walkers and the next corner of each walker's line among them (G1d): the plan cuts
+/// only what the edit can affect on the checker's own town ([`buildsafe::TownCopy`], G1e), and the commit judges the
 /// bodies (lookups only), so an edit that would bury a Soul, cut it off or change what it uses is refused by name,
-/// naming the Soul.
+/// naming the Soul. While no edit waits, the town is built (again) ahead of the next. With `creator` (G1e), the
+/// creator is the one it names now.
 fn edit_checker(
-    world: edit::World,
+    mut world: edit::World,
+    creator: Option<Arc<buildsafe::Creator>>,
     publisher: Arc<Publisher>,
     walkers: Arc<buildsafe::Moving>,
     events: Sender<Event>,
@@ -2539,11 +2553,38 @@ fn edit_checker(
     thread::Builder::new()
         .name("edit-check".into())
         .spawn(move || {
-            for (id, e) in rx {
-                let copy = publisher.wait_for(e.planned, Duration::from_secs(1));
+            let mut town = buildsafe::TownCopy::new(world.kinds.clone());
+            loop {
+                let (id, e) = match rx.recv_timeout(EDIT_IDLE) {
+                    Ok(next) => next,
+                    Err(RecvTimeoutError::Timeout) => {
+                        let edited = walkers.edited();
+                        let copy = publisher.wait_for(edited, Duration::from_secs(1));
+                        town.on(&copy, buildsafe::open_ground(&copy), edited);
+                        continue;
+                    }
+                    Err(RecvTimeoutError::Disconnected) => break,
+                };
+                let edited = walkers.edited();
+                let copy = publisher.wait_for(e.planned.max(edited), Duration::from_secs(1));
                 let ground = buildsafe::open_ground(&copy);
-                let checked = edit::check(e, &copy, &world)
-                    .and_then(|c| sim::edit::plan(c, &copy, ground))
+                let who = creator.as_ref().map_or(Some(world.creator), |c| c.get());
+                let checked = match who {
+                    Some(c) => {
+                        world.creator = c;
+                        edit::check(e, &copy, &world)
+                    }
+                    None => Err(Refused {
+                        op: None,
+                        name: "edit.not-the-creator",
+                        detail: "the world's record names no creator".into(),
+                    }),
+                };
+                let checked = checked
+                    .and_then(|c| match town.on(&copy, ground, edited) {
+                        Some(t) => sim::edit::plan_on(c, &copy, &Known::of(t)),
+                        None => sim::edit::plan(c, &copy, ground),
+                    })
                     .map(|p| {
                         let tree = buildsafe::souls(&copy, &world.kinds);
                         (p, buildsafe::judged(tree, &walkers.latest()))
