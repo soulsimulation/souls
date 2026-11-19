@@ -79,6 +79,7 @@
 // worldd's real clock (`Real`): the one place the process reads time.
 #![allow(clippy::disallowed_methods)]
 
+use crate::acts::{self, Acts};
 use crate::bodies::{self, Ask, Asked, Bodies, Placed};
 use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
 use crate::measures::{self, Measures, Stamps};
@@ -583,6 +584,10 @@ struct Clock {
     edits: Option<Sender<(Id, Edit)>>,
     /// Edits checked since the last tick, committed (or refused) at the next.
     edited: Vec<(Id, Result<Planned, Refused>)>,
+    /// Soul Actions (C2, #3366): the forms in progress, and the form acts taken since the last tick, committed at
+    /// the next through the form runner when the world has bodies.
+    forms: Acts,
+    forming: Vec<(Id, Act, sim::forms::Intent)>,
     /// Intents arrived since the last tick, taken at the start of the next; and those a script set for a tick.
     pending: Vec<(Vec<u8>, Reply, Stamps)>,
     scheduled: BTreeMap<i64, Vec<(Vec<u8>, Reply)>>,
@@ -670,6 +675,9 @@ enum Taken {
     Move(Asked),
     Edit(Edit),
 }
+
+/// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name.
+pub const FORM_ENDED: &str = "souls:act-ended";
 
 /// The event of the entry a move writes when it starts, and when it ends (field 2: how, by name).
 pub const MOVE_STARTED: &str = "souls:move-started";
@@ -1079,7 +1087,7 @@ impl Clock {
             },
         );
         match taken {
-            Taken::Form(act) => {
+            Taken::Form(act) if self.bodies.is_none() => {
                 self.outstanding += 1;
                 if let Some(m) = &self.measures {
                     m.to_check(id.counter(), stamps.0[1]);
@@ -1087,6 +1095,11 @@ impl Clock {
                 let _ = self.acts.send(act);
             }
             Taken::Move(m) => self.moving.push((id, m)),
+            // With bodies, a form's act goes to the form runner at the next tick (C2), not to the checkers.
+            Taken::Form(act) => {
+                let i = acts::intent(id, intent.expiry, actor, bytes);
+                self.forming.push((id, act, i));
+            }
             Taken::Edit(e) => {
                 if let Some(tx) = &self.edits
                     && tx.send((id, e)).is_ok()
@@ -1354,6 +1367,85 @@ impl Clock {
         for (id, how) in ended {
             self.settle(id, how, now);
         }
+        let tick = u64::try_from(self.tick).unwrap_or(0);
+        self.forms
+            .tick(self.replica.tree(), self.bodies.as_mut(), tick, now);
+    }
+
+    /// Hands the form acts taken since the last tick to the form runner (C2): each starts its run, joins the one
+    /// going for its intent, gets its first receipt again, or is refused by name.
+    fn start_forms(&mut self, now: Micros) {
+        let tick = u64::try_from(self.tick).unwrap_or(0);
+        for (id, act, intent) in std::mem::take(&mut self.forming) {
+            let Some(o) = self.open.get(&id) else {
+                continue;
+            };
+            let (actor, sequence) = (o.actor, o.sequence);
+            if expired(o.expiry, now) {
+                self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
+                continue;
+            }
+            let candidates: Vec<(Id, String)> =
+                act.candidates.iter().map(|c| (c.this, c.form.clone())).collect();
+            let r = self.forms.start(
+                self.replica.tree(),
+                self.bodies.as_mut(),
+                act.body,
+                &candidates,
+                intent,
+                tick,
+                now,
+            );
+            match r {
+                Ok(sim::forms::Asked::Applied(_)) => self.form_ended(id, "done".into(), now),
+                Ok(_) => {}
+                Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
+            }
+        }
+    }
+
+    /// Numbers and applies what the forms wrote (F2's log hook: each entry handed back as logged), then answers the
+    /// intents whose runs ended.
+    fn write_forms(&mut self, now: Micros) {
+        let mut effects = self.forms.out();
+        if !effects.is_empty() {
+            for (k, e) in effects.iter_mut().enumerate() {
+                e.envelope.sequence = self.replica.version() + k as u64;
+            }
+            match sim::commit::write(&mut self.replica, &effects) {
+                Ok(part) => {
+                    self.unsealed = true;
+                    for e in &part.effects {
+                        self.forms.forms.logged(e);
+                    }
+                    self.receipts.index(&part.effects);
+                    self.effects.extend(part.effects.iter().cloned());
+                    self.parts.push(part);
+                }
+                Err(r) => eprintln!("worldd: a form's entries were not written: {r}"),
+            }
+        }
+        for (id, how) in self.forms.ended() {
+            self.form_ended(id, how, now);
+        }
+    }
+
+    /// A form's run ended: an entry naming how, then its intent's answer, a receipt when `done`.
+    fn form_ended(&mut self, id: Id, how: String, now: Micros) {
+        let Some(o) = self.open.get(&id) else { return };
+        let (actor, sequence) = (o.actor, o.sequence);
+        self.note(id, FORM_ENDED, Some(&how), now);
+        if how == "done" {
+            self.end(id, |c| Answer::Receipt {
+                actor,
+                sequence,
+                intent: id,
+                entries: c.receipts.entries(id).to_vec(),
+                names: BTreeMap::new(),
+            });
+        } else {
+            self.end(id, |c| c.refusal(actor, sequence, &how));
+        }
     }
 
     /// Step 4 for moves (I4b): those taken since the last tick start, each refused by name or begun.
@@ -1448,6 +1540,12 @@ impl Clock {
             if let Some(b) = self.bodies.as_mut() {
                 b.cancel(id);
             }
+            // A form's run whose act timed out is left: it ends at its next stable moment (F3).
+            if let Some(o) = self.open.get(&id) {
+                let body = o.body;
+                self.forms
+                    .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+            }
             if let Some(o) = self.open.get(&id) {
                 let (actor, sequence) = (o.actor, o.sequence);
                 self.end(id, |c| c.refusal(actor, sequence, "act.timed-out"));
@@ -1511,7 +1609,9 @@ impl Clock {
         }
         // 4b. Checked edits (G1b): committed through `sim::edit`, or refused whole.
         self.edits(now);
+        self.start_forms(now);
         self.start_moves(now);
+        self.write_forms(now);
         at[5] = mark();
         // 5. The tick's input record, then its part: effects, answers, the bodies that moved, the tick, the state.
         let inputs = match std::mem::take(&mut self.inputs) {
@@ -1938,6 +2038,7 @@ pub fn start<S: Storage + 'static>(
         None => None,
     };
     let publisher = Arc::new(Publisher::new(&world));
+    let (kinds, library) = (rules.kinds.clone(), acts::library()?);
     let (events, rx) = channel();
     let edits = cfg
         .edits
@@ -2029,6 +2130,8 @@ pub fn start<S: Storage + 'static>(
         moving: Vec::new(),
         edits,
         edited: Vec::new(),
+        forms: Acts::new(kinds, library),
+        forming: Vec::new(),
         pending: Vec::new(),
         scheduled: BTreeMap::new(),
         inputs: Vec::new(),

@@ -3,6 +3,7 @@
 //! machine (O3, #2732). The binary is `main.rs`.
 #![forbid(unsafe_code)]
 
+pub mod acts;
 pub mod answers;
 pub mod bodies;
 pub mod checkers;

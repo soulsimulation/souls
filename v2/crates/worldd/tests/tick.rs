@@ -42,9 +42,19 @@ fn humanoid() -> Family {
         class: Class::Locomotion,
         slot: None,
     };
+    let hand = |n: &str, slot: u64| Resource {
+        name: name(n),
+        class: Class::Manipulator,
+        slot: Some(slot),
+    };
     Family {
         name: name("souls:humanoid"),
-        resources: vec![r("souls:leg-left"), r("souls:leg-right")],
+        resources: vec![
+            r("souls:leg-left"),
+            r("souls:leg-right"),
+            hand("souls:hand-left", 1),
+            hand("souls:hand-right", 2),
+        ],
     }
 }
 
@@ -112,9 +122,11 @@ fn bodies(placed: &Placed, panic: bool) -> Result<Bodies, replica::effects::Refu
         node: ground,
         slot: None,
     };
+    // The switcher stands beside its lamp (the toggles world's second, 200 mm along x): its switch_on is the form
+    // runner's (C2, #3366), whose press reaches from where the controller has the body.
     let starts = [
         Vec3::new(-40_000_000, 0, 30_000_000),
-        Vec3::new(-40_000_000, 0, 26_000_000),
+        Vec3::new(200_000, 0, 300_000),
         Vec3::new(-40_000_000, 0, 34_000_000),
     ];
     let mut placements = Vec::new();
@@ -436,7 +448,8 @@ fn k18c_a1_a2_restart_from_the_newest_checkpoint_seated_stays_seated() {
         r.tick + 1,
         intent(switcher, 2, "r2:switch_off", Some(lamp), None),
     );
-    run_to(&m, r.tick + 5);
+    // The press takes 550 ms (C2: a form is carried out by the runner, its move included).
+    run_to(&m, r.tick + 20);
     answer(&off).expect("the switch_off lands");
     m.stop();
     let log = bytes(&store);
