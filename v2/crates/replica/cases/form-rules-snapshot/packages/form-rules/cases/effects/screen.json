@@ -1,0 +1,107 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:screen (SA-X34, #2924): a classroom screen: switch it on to show its picture, off again.",
+  "cases": [
+    {
+      "name": "screen_off_and_on",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:screen"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "switch_off"
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "on",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:switched_off",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "switch_off"
+          },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "switch_on"
+          },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "on",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:switched_on",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:screen",
+          "fields": {
+            "on": 1
+          }
+        }
+      }
+    }
+  ]
+}

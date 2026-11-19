@@ -1,0 +1,35 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:situp_bench",
+  "owner": "thing",
+  "points": { "side": { "role": "stand", "at_mm": [450, 0, 0], "yaw_mdeg": 270000 } },
+  "geometry": { "bounds_mm": [400, 460, 1300] },
+  "forms": {
+    "sit_ups": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        { "step": "walk_to", "point": "side" },
+        { "step": "settle", "posture": "lie" },
+        { "step": "wait", "us": 30000000 }
+      ],
+      "effects": []
+    }
+  },
+  "areas": { "pad": { "allows": { "lie": "on", "sit": "edge" } } },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:situp_bench",
+    "shape": {"shapes":[{"kind":"box","at":[0,420,0],"size":[320,80,1250],"color":"#2f3b46","collide":false},{"kind":"box","at":[0,190,0],"size":[80,380,1000],"color":"#5d646b","collide":false}],"tags":["eden","gym","sport","exercise-mat"]}
+  },
+  "text": {
+    "card": "An outdoor gym bench, low and padded: lie on it and do sit-ups.",
+    "gym": "gym",
+    "exercise_bench": "exercise bench",
+    "exercise": "exercise",
+    "workout": "workout"
+  },
+  "card": { "text": "card", "category": "gym", "synonyms": ["exercise_bench", "exercise", "workout"] }
+}

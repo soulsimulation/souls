@@ -1,0 +1,166 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "The pantry of #1076, through the rules step after step; each act re-applied with its receipt changes nothing.",
+  "cases": [
+    {
+      "name": "stock_the_pantry_with_a_mug_and_a_spoon_then_take_the_mug_out",
+      "about": "A Soul holding a mug and a spoon stocks the pantry with both, the mug in the first place and the spoon in the second, then takes the mug out again by its own take: it comes back to a free hand and its place is empty; the spoon stays on the shelf.",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "room": {
+            "loose": [
+              "p1",
+              "b1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:pantry"
+          },
+          "c1": {
+            "kind": "eden:cup"
+          },
+          "s1": {
+            "kind": "eden:spoon"
+          },
+          "b1": {
+            "hands": {
+              "left": "s1",
+              "right": "c1"
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "stock",
+            "args": {
+              "thing": "c1",
+              "place": "place_1"
+            }
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "c1",
+                "to": {
+                  "node": "p1",
+                  "slot": "place_1"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:stocked",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "stock",
+            "args": {
+              "thing": "s1",
+              "place": "place_2"
+            }
+          },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "s1",
+                "to": {
+                  "node": "p1",
+                  "slot": "place_2"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:stocked",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "take"
+          },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "c1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "p1",
+            "b1"
+          ]
+        },
+        "p1": {
+          "kind": "eden:pantry",
+          "slots": {
+            "place_1": [],
+            "place_2": [
+              "s1"
+            ]
+          }
+        },
+        "c1": {
+          "kind": "eden:cup"
+        },
+        "s1": {
+          "kind": "eden:spoon"
+        },
+        "b1": {
+          "hands": {
+            "left": "c1",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}

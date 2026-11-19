@@ -147,6 +147,9 @@ pub struct KindDef {
     pub body: Option<body::Decl>,
     pub slots: BTreeMap<u64, Slot>,
     pub links: BTreeMap<u64, LinkType>,
+    /// Section 11's bound: how many children of each admitted kind (plain `namespace:name`) it holds at most. A kind
+    /// read from a list of names alone (a fixture's, no bound) has none here.
+    pub most: BTreeMap<String, u64>,
 }
 
 impl KindDef {
@@ -241,6 +244,7 @@ impl Kinds {
                             body,
                             slots,
                             links,
+                            most,
                         } = d;
                         let def = KindDef {
                             name,
@@ -252,6 +256,7 @@ impl Kinds {
                             body,
                             slots,
                             links,
+                            most,
                         };
                         self.by_hash.insert(k.hash, def);
                     }
@@ -295,6 +300,15 @@ impl Kinds {
     /// Every kind refused so far, with why.
     pub fn refused(&self) -> &[KindError] {
         &self.refused
+    }
+
+    /// Each loaded kind's section 11 bounds, by full name: how many children of each admitted kind it holds at most.
+    pub fn most(&self) -> BTreeMap<String, BTreeMap<String, u64>> {
+        self.by_hash
+            .values()
+            .filter(|k| !k.most.is_empty())
+            .map(|k| (k.name.as_str().to_owned(), k.most.clone()))
+            .collect()
     }
 
     /// What each loaded kind admits, by full name, as a commit's [`crate::tree::Rules`] reads it.
@@ -408,6 +422,7 @@ struct Sections {
     body: Option<body::Decl>,
     slots: BTreeMap<u64, Slot>,
     links: BTreeMap<u64, LinkType>,
+    most: BTreeMap<String, u64>,
 }
 
 /// Reads and checks the sections this module knows.
@@ -655,21 +670,38 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
             );
         }
     }
-    let children = match s.get(&SECTION_CHILDREN) {
-        None => BTreeSet::new(),
-        Some(v) => texts(Some(v))
-            .ok_or_else(|| {
-                bad(
-                    "kind-children",
-                    SECTION_CHILDREN,
-                    None,
-                    "a list of kinds or categories".into(),
-                )
-            })?
-            .iter()
-            .map(|t| t.as_str().to_owned())
-            .collect(),
-    };
+    // Section 11: each child as `{1: kind, 2: most}` (an entry's, B19), or a kind's name alone (a fixture's, no bound).
+    let mut children = BTreeSet::new();
+    let mut most = BTreeMap::new();
+    if let Some(v) = s.get(&SECTION_CHILDREN) {
+        let why = || {
+            bad(
+                "kind-children",
+                SECTION_CHILDREN,
+                None,
+                "a list of kinds or categories, each a name or {1: kind, 2: most}".into(),
+            )
+        };
+        let Value::Array(list) = v else {
+            return Err(why());
+        };
+        for c in list {
+            match c {
+                Value::Map(m) => {
+                    let name = text(m.get(&1)).ok_or_else(why)?;
+                    let bound = match m.get(&2) {
+                        Some(Value::Uint(n)) if *n > 0 => *n,
+                        _ => return Err(why()),
+                    };
+                    most.insert(name.as_str().to_owned(), bound);
+                    children.insert(name.as_str().to_owned());
+                }
+                other => {
+                    children.insert(text(Some(other)).ok_or_else(why)?.as_str().to_owned());
+                }
+            }
+        }
+    }
 
     // How a thing moves (section 18, `{1: how}`): held in one or two hands, or not held (B4, #2739).
     let hands = match s.get(&crate::world_model::SECTION_MOTION) {
@@ -709,6 +741,7 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         },
         slots: named_slots,
         links,
+        most,
     })
 }
 

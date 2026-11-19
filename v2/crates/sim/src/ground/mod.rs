@@ -59,6 +59,11 @@
 //!   of the touched nodes is cut off the clock thread from the tree as the part leaves it, and installed on the tick
 //!   the part commits (`crate::walk::town::Town::install`): no tick sees new geometry over old ground. A route
 //!   records the versions it was planned on, and the walk is planned again on a mismatch (`crate::unstick`).
+//! - **Seated parts** (N19, #3341). A part seated in a bay is fixed geometry: its boxes are cut like any other's. A
+//!   thing riding a slot its parent gives no point for (`F_SLOTS`: a body's hands, a crew's carry) is carried, and is
+//!   not cut. A part moved to a new parent with its boxes (a transfer, not a creator's edit) touches its old ground and
+//!   its new, so the commit that seats or takes it asks for G3's rebuild (`crate::activity::seating::Seating::write`).
+//!   A body standing where a part would be seated is found by [`scene::stands_in`].
 //!
 //! A [`Turn`] moves the node's geometry into a turned and shifted frame before it is put on the grid; the door table
 //! (36 yaws, 25 offsets) uses it to show the cut does not depend on where the grid falls.
@@ -73,7 +78,7 @@ use i_overlay::core::overlay_rule::OverlayRule;
 use i_overlay::i_float::int::point::IntPoint;
 use i_overlay::i_shape::int::shape::{IntShape, IntShapes};
 use i_triangle::int::triangulatable::IntTriangulatable;
-use replica::effects::{Body, Change, Part};
+use replica::effects::{Body, Change, Part, Refusal, TransferRec};
 use replica::ids::Id;
 use replica::kinds::sizes::Size;
 use replica::pose::{Quat, Vec3};
@@ -947,6 +952,11 @@ impl OpenGround {
     }
 }
 
+/// How a commit that is not a creator's edit asks for G3's rebuild (N19, #3341): called with the tree as it stood
+/// before `part` and the part, once the part is committed, it rebuilds the ground the part touches and installs it
+/// before the next tick (`crate::walk::town::Town::rebuild` and `Town::install`, through what holds the town).
+pub type Rebuild = Box<dyn FnMut(Tree, &Part) -> Result<(), Refusal>>;
+
 /// Each node's ground version (G3, #2760): 0 until a committed part first touches it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Versions(BTreeMap<Id, u64>);
@@ -1022,8 +1032,22 @@ fn grounds_of(tree: &Tree, id: Id, out: &mut BTreeSet<Id>) {
 pub fn touched(before: &Tree, after: &Tree, part: &Part) -> BTreeSet<Id> {
     let mut ids = Vec::new();
     for e in &part.effects {
-        let Body::Changes(changes) = &e.body else {
-            continue;
+        let changes = match &e.body {
+            Body::Changes(changes) => changes,
+            // A thing with boxes moved to a new parent (a part seated or taken out, N19 #3341): its old ground and
+            // its new. A body or a crew's node has none, so a body's hop through a doorway touches nothing.
+            Body::Transfer(TransferRec::Leave { node, .. }) => {
+                let solid = |h| {
+                    before
+                        .node(h)
+                        .is_some_and(|n| n.fields().contains_key(&scene::F_SOLIDS))
+                };
+                if before.handle(*node).is_some_and(solid) {
+                    ids.push(*node);
+                }
+                continue;
+            }
+            _ => continue,
         };
         for c in changes {
             match &c.change {
