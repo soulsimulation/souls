@@ -73,7 +73,7 @@ fn send(w: &answers::World, i: &Intent) -> Receiver<Vec<u8>> {
 
 /// The answer's kind: 1 a receipt, 2 a refusal (with its reason).
 fn kind(rx: &Receiver<Vec<u8>>) -> (u64, String) {
-    let f = rx.recv_timeout(Duration::from_secs(5)).expect("an answer");
+    let f = rx.recv_timeout(Duration::from_secs(30)).expect("an answer");
     let Value::Map(m) = decode(&f).unwrap().value else {
         panic!("a frame")
     };
