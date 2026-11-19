@@ -86,6 +86,84 @@ pub fn limits() -> Limits {
     }
 }
 
+/// A gateway walk's route deadline and C21 progress watch. The route is read once N9 grants its actual spot;
+/// unrelated ticks do no route search. Waiting for a link or being carried is not a stalled walking tick.
+pub(crate) struct Walk {
+    body: Id,
+    order: Id,
+    started: Micros,
+    planned: bool,
+    watch: Watch,
+}
+
+fn walk_span(length_mm: u64, links: usize) -> Micros {
+    let speed = i128::from(crate::bodies::WALK);
+    let travel = (i128::from(length_mm) * 1_000_000_000 + speed - 1) / speed;
+    let travel = i64::try_from(travel).unwrap_or(i64::MAX);
+    // Half the free walking time for bends and yielding, at least 5 s, plus 5 s per crossing/door.
+    travel
+        .saturating_add((travel / 2).max(5_000_000))
+        .saturating_add(
+            i64::try_from(links)
+                .unwrap_or(i64::MAX)
+                .saturating_mul(5_000_000),
+        )
+        .min(WALK_MOST)
+}
+
+impl Walk {
+    pub(crate) fn new(body: Id, order: Id, started: Micros) -> Self {
+        Self {
+            body,
+            order,
+            started,
+            planned: false,
+            watch: Watch::new(),
+        }
+    }
+
+    /// A newly planned deadline, and whether the walk stalled. Neither changes the mover's path or authority.
+    pub(crate) fn step(&mut self, b: &mut Bodies, now: Micros) -> (Option<Micros>, bool) {
+        let Some(me) = b.runner.controller.body(self.body).copied() else {
+            return (None, false);
+        };
+        if !b.runner.running(self.body) {
+            return (None, false);
+        }
+        let mut due = None;
+        if !self.planned
+            && let Some(metrics) = b.runner.route_metrics(self.body, self.order)
+        {
+            due = Some(
+                self.started
+                    .saturating_add(walk_span(metrics.length_mm, metrics.links)),
+            );
+            self.planned = true;
+        }
+        let fields = b.runner.fields.get(&self.body);
+        let waiting = sim::host::waiting(fields).is_some()
+            || fields.is_some_and(|f| f.contains_key(&replica::host::F_HELD));
+        let aim = b
+            .town
+            .next_corner(self.body)
+            .filter(|(node, _)| *node == sim::walk::node_of(&me));
+        if waiting || b.runner.controller.carrying(self.body).is_some() || aim.is_none() {
+            self.watch.keep(&BTreeSet::new());
+            return (due, false);
+        }
+        let (node, aim) = aim.unwrap();
+        let to = b
+            .runner
+            .asks
+            .get(&self.body)
+            .filter(|(t, _)| t.node == node)
+            .and_then(|_| b.runner.granted.get(&self.body))
+            .map_or(aim, |p| [p.x, p.z]);
+        let here = [me.pose.position.x, me.pose.position.z];
+        (due, self.watch.seen(self.body, here, aim, to, now))
+    }
+}
+
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
         name,
@@ -748,5 +826,19 @@ pub fn intent(id: Id, expiry: Micros, actor: Actor, bytes: &[u8]) -> Intent {
         expiry,
         actor,
         digest: replica::ids::sha256(bytes),
+    }
+}
+
+#[cfg(test)]
+mod gateway_walk_tests {
+    use super::*;
+
+    #[test]
+    fn a_gateway_walks_route_time_includes_margin_links_and_the_same_ceiling() {
+        assert_eq!(walk_span(14_000, 0), 15_000_000);
+        assert_eq!(walk_span(14_000, 2), 25_000_000);
+        assert!(walk_span(20_000, 0) > 14_000_000);
+        assert!(walk_span(70_000, 0) >= 75_000_000);
+        assert_eq!(walk_span(u64::MAX, usize::MAX), WALK_MOST);
     }
 }
