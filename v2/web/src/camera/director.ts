@@ -201,7 +201,7 @@ export class CameraDirector {
   /** The find box: a Soul's name, then Enter, flies there. */
   private findBox(): HTMLInputElement {
     const el = document.createElement('input');
-    Object.assign(el, { type: 'search', placeholder: 'find a Soul', enterKeyHint: 'go', autocomplete: 'off', spellcheck: false });
+    Object.assign(el, { id: 'find', type: 'search', placeholder: 'find a Soul', enterKeyHint: 'go', autocomplete: 'off', spellcheck: false });
     el.setAttribute('aria-label', 'Find a Soul by name');
     el.style.cssText = 'position:fixed;left:12px;bottom:12px;width:min(240px,calc(100vw - 24px));box-sizing:border-box;padding:8px 10px;'
       + 'background:rgba(16,20,26,0.85);color:#e8e6e1;border:1px solid #3a4250;border-radius:4px;font:14px system-ui,sans-serif';

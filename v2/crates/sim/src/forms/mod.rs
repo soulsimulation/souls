@@ -69,7 +69,23 @@
 //!   form's other effects at their instant, all or none: a run that fails before it, or whose other effect is
 //!   refused, links nothing.
 //!
-//! Not here: a walk across a link (the walk's crossings are not carried here yet), accepting the intent (I4),
+//! - **Places and links** (C17, #3453). A `sit` (or `lie`) step takes the world's seat by B3's [`Slots`] and B2's sit
+//!   or lie move, the gateway's own path: [`World::places`] lends the places table and the floors, a seat's timers fire
+//!   through [`Slots::fire`] so its contact hands the body into the slot, and the move's end wakes the run. A walk's
+//!   crossings are kept for the caller to carry ([`Forms::crossings`], `crate::host::carry`), so a form walks
+//!   indoors across doors and stairs.
+//!
+//! - **A run's deadline** (C20, #3469). A run's longest time is its steps' own ([`span`]): each walk's, move's or
+//!   sit's deadline as the runner sets it, each pause's length, and room for the tick that wakes each. A run is due
+//!   by its start plus that ([`Forms::due`]), so the act it carries out is given the time its walk and its own
+//!   duration take, from when it starts.
+//!
+//! - **Rise and settle** (C25, #3496). A `rise` stands a seated body up by B3's [`Slots::rise`] and the library's rise
+//!   move (its end wakes the run), a settled one at once, and is done at once for a body standing. A `settle` claims
+//!   the body's legs in a sitting or lying stance where it stands, with no slot; the claim outlives the run, and a
+//!   rise or any later claim on the legs (a walk) ends it.
+//!
+//! Not here: accepting the intent (I4),
 //! queueing for a reserved thing (B7), things for several users, a thing made or set down where there is no slot (E4).
 
 pub mod amounts;
@@ -85,6 +101,7 @@ use replica::encode::{Name, Value};
 use replica::host::Progress;
 use replica::ids::{Id, Minter};
 use replica::moves::Move;
+use replica::pose::Vec3;
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::who_may::{self, Answer, Who};
@@ -93,8 +110,9 @@ use skills::form_runner::{self, Limits, Next, Runner, Step, Woke};
 
 use crate::controller::{Controller, Driver};
 use crate::host::{Geometry, Run, Staged, hand_on, lend, step};
+use crate::mover::Surface;
 use crate::moves::{Fired, Instance, Moves, Reach};
-use crate::slots::hands;
+use crate::slots::{PlaceAt, Request, Slots, hands};
 use crate::timers::{DueList, Timer};
 
 /// What a form's run reaches in the world: the tree as of the tick's start, the geometry's answers, the controller,
@@ -109,6 +127,71 @@ pub struct World<'a, G, R> {
     pub moves: &'a mut Moves,
     pub library: &'a [Move],
     pub seed: u64,
+    /// The world's places and floors, for a `sit` step (C17); `None` where the world has none.
+    pub places: Option<Places<'a>>,
+}
+
+/// The places a form's sit takes (B3's table, the gateway's own) and the floors a body is set back on.
+pub struct Places<'a> {
+    pub slots: &'a mut Slots,
+    pub floors: &'a BTreeMap<Id, Surface>,
+}
+
+/// A seat's reach for one body, as the gateway's sit measures it (`worldd`'s bodies): a seat is taken from its stand
+/// point and left there (B3), so its contacts are at the stand point ([`PlaceAt::stand`]), measured across x and z
+/// from where the body stands (its seat's stand point while it is in one); any other target as `inner`.
+struct SeatReach<'b, R> {
+    inner: &'b R,
+    body: Id,
+    from: Vec3,
+    place: Option<(Id, Vec3)>,
+}
+
+impl<R: Reach> Reach for SeatReach<'_, R> {
+    fn distance(
+        &self,
+        body: Id,
+        effector: &replica::moves::Effector,
+        limb: Option<&Name>,
+        target: Id,
+        point: &Name,
+    ) -> Option<i64> {
+        let Some((_, to)) = self.place.filter(|p| p.0 == target && body == self.body) else {
+            return self.inner.distance(body, effector, limb, target, point);
+        };
+        if !matches!(point.as_str(), "souls:slot" | "souls:stand") {
+            return self.inner.distance(body, effector, limb, target, point);
+        }
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        i64::try_from((d(self.from.x, to.x) + d(self.from.z, to.z)).isqrt()).ok()
+    }
+
+    fn tip(&self, body: Id, limb: &Name) -> Option<Name> {
+        self.inner.tip(body, limb)
+    }
+}
+
+/// [`SeatReach`] for `body` and the seat `place` of `slots`, over `inner`.
+fn seat_reach<'b, R: Reach>(
+    inner: &'b R,
+    c: &Controller,
+    slots: &Slots,
+    body: Id,
+    place: Option<&PlaceAt>,
+) -> SeatReach<'b, R> {
+    let at = |p: &PlaceAt| p.stand().ok();
+    let from = c.body(body).map_or(Vec3::ZERO, |b| {
+        match (b.pose.support, slots.held_place(body)) {
+            (replica::pose::Support::Slot, Some(p)) => at(p).unwrap_or(b.pose.position),
+            _ => b.pose.position,
+        }
+    });
+    SeatReach {
+        inner,
+        body,
+        from,
+        place: place.and_then(|p| Some((p.thing, at(p)?))),
+    }
 }
 
 /// A run's number, unique in [`Forms`].
@@ -210,6 +293,8 @@ struct FormRun {
     mv: Option<Instance>,
     /// The thing it reserves and the link's id, while the link stands.
     held: Option<(Id, Id)>,
+    /// When the run is due to have ended, world time: its start plus its steps' [`span`] (C20).
+    due: Micros,
     /// A long form's stages, and the one in progress (F11).
     long: Option<Long>,
 }
@@ -343,6 +428,24 @@ pub struct Forms {
     limits: amounts::Limits,
     /// The zone's header, for B4's transfer.
     header: Option<Header>,
+    /// The crossings the walks asked for this tick (C17): the caller carries them (`crate::host::carry`) and clears
+    /// the list.
+    pub crossings: Vec<(Id, Driver, Id, i64)>,
+    /// Bodies in a ground posture a `settle` took (C25), with the driver that holds it: a rise ends it, and so does
+    /// any later claim on the body's legs (a walk), which stands it up.
+    settled: BTreeMap<Id, Driver>,
+}
+
+/// The claim that holds a settled body's legs and its ground posture (C25, #3496): any later claim on its legs ends
+/// it, and the body stands.
+fn settled_shape() -> replica::bodies::SkillShape {
+    use replica::bodies::{Class, SkillShape, Want};
+    SkillShape {
+        name: name("souls:settled"),
+        claims: vec![Want::All(Class::Locomotion)],
+        blocks: vec![],
+        cancelled_by: vec![Class::Locomotion],
+    }
 }
 
 fn name(t: &str) -> Name {
@@ -366,6 +469,12 @@ impl Forms {
     /// Walks in progress, stepped each tick by [`Forms::tick`].
     pub fn walking(&self) -> usize {
         self.walks.len()
+    }
+
+    /// When run `run` is due to have ended, world time (C20): its start plus its steps' [`span`]. `None` once it
+    /// ended.
+    pub fn due(&self, run: RunId) -> Option<Micros> {
+        self.runs.get(&run).map(|r| r.due)
     }
 
     /// The keys of a log, read back after a restart at `now`: every entry, in order, as [`Forms::logged`] reads it. No
@@ -469,6 +578,28 @@ impl Forms {
         Ok(())
     }
 
+    /// The world ends the walk of `body`'s run as `how` (C21, #3484: a walk that stalled, `walk.blocked`): the walk
+    /// stops and its driver is released now, and the run ends by the runner's own rule for a walk's ending, in this
+    /// tick. Whether the body's run had a walk in progress.
+    pub fn stall<G: Geometry, R: Reach>(
+        &mut self,
+        w: &mut World<'_, G, R>,
+        body: Id,
+        how: &str,
+        now: Micros,
+    ) -> bool {
+        let Some(&run) = self.by_body.get(&body) else {
+            return false;
+        };
+        let Some(d) = self.runs.get_mut(&run).and_then(|fr| fr.walk.take()) else {
+            return false;
+        };
+        self.walks.retain(|r| r.body != body);
+        let _ = w.controller.release(body, d);
+        self.wake(w, run, Woke::Walked(Progress::Failed(name(how))), now);
+        true
+    }
+
     /// Node `node` was removed (its removal is logged, with every link that ends in it): a run on it as a body ends
     /// `body-gone`, and a run that reserves it ends `thing-gone`. The removal took the reservation with it, so the
     /// ending entry has no unlink.
@@ -509,7 +640,7 @@ impl Forms {
         let fields = BTreeMap::from([
             (1, Value::Uint(o.run)),
             (2, o.body.to_value()),
-            (3, Value::Text(how)),
+            (3, Value::Bytes(how.as_str().as_bytes().to_vec())),
         ]);
         self.out.push(entry(o, at, changes, name(ENDED), fields));
     }
@@ -543,8 +674,9 @@ impl Forms {
     }
 
     /// Hands an accepted form, bound into `steps` and `effects`, to a runner on `body` done at `node` for `intent`, and
-    /// wakes it. A resend of an intent whose effects are all in the log gets the first receipt, and one whose run is in
-    /// progress joins it. Refused: `intent-expired` past the intent's expiry, `intent-key-reused` for an intent id
+    /// wakes it; the points it walks to are turned by the node's orientation in the tree ([`form_runner::turn`]). A
+    /// resend of an intent whose effects are all in the log gets the first receipt, and one whose run is in progress
+    /// joins it. Refused: `intent-expired` past the intent's expiry, `intent-key-reused` for an intent id
     /// seen with other contents, `form-running` while the body has another run in progress.
     #[allow(clippy::too_many_arguments)]
     pub fn start<G: Geometry, R: Reach>(
@@ -687,6 +819,13 @@ impl Forms {
                 detail: replica::world_model::show(body),
             });
         }
+        // A turned thing's points are walked to turned with it (C13, #3440).
+        let mut steps = steps;
+        if node != body
+            && let Some(p) = w.tree.handle(node).and_then(|h| w.tree.node(h)?.place())
+        {
+            form_runner::turn(&mut steps, p.orientation)?;
+        }
         let reserves = node != body && !self.shared.contains(&node);
         if reserves && let Some(holder) = self.holder(node) {
             return Err(Refusal {
@@ -734,6 +873,7 @@ impl Forms {
         if link.is_some() {
             self.reserved.insert(node, run);
         }
+        let due = now.saturating_add(span(&steps, &limits));
         self.runs.insert(
             run,
             FormRun {
@@ -746,6 +886,7 @@ impl Forms {
                 mv: None,
                 held: link.map(|l| (node, l)),
                 long,
+                due,
             },
         );
         self.by_body.insert(body, run);
@@ -875,6 +1016,7 @@ impl Forms {
                 hands: &hands,
                 node: fr.node,
                 reserved: &reserved,
+                now: at,
             };
             let entries = match cx.entries(mint, e) {
                 Ok(x) => x,
@@ -985,6 +1127,103 @@ impl Forms {
                 }
                 Err(r) => self.wake(w, run, Woke::Walked(Progress::Failed(name(r.name))), now),
             },
+            Next::Sit { node, slot, lie } => {
+                let mv = name(if lie { "souls:lie" } else { "souls:sit" });
+                let (Some(found), Some(places)) =
+                    (w.library.iter().find(|m| m.name == mv), w.places.as_mut())
+                else {
+                    return self.wake(w, run, Woke::Moved(name("place-unknown")), now);
+                };
+                let place = places.slots.place_in(node, slot);
+                if place.is_none() {
+                    return self.wake(w, run, Woke::Moved(name("place-unknown")), now);
+                }
+                let geo = seat_reach(w.reach, w.controller, places.slots, body, place);
+                let request = Request {
+                    body,
+                    thing: node,
+                    slot: Some(slot),
+                    mv: found,
+                    stance: if lie {
+                        crate::controller::Stance::Lie
+                    } else {
+                        crate::controller::Stance::Sit
+                    },
+                };
+                let taken = places
+                    .slots
+                    .commit(w.controller, w.due, w.mint, w.moves, &geo, &[request], now)
+                    .pop()
+                    .map_or_else(
+                        || Err(name("place-unknown")),
+                        |(_, r)| r.map_err(|e| name(e.name)),
+                    );
+                match taken {
+                    Ok(n) => fr.mv = Some(n),
+                    Err(how) => self.wake(w, run, Woke::Moved(how), now),
+                }
+            }
+            // A ground posture where the body stands (C25, SA-G3): its legs held in that stance until a rise or a walk.
+            Next::Settle { lie } => {
+                let stance = if lie {
+                    crate::controller::Stance::Lie
+                } else {
+                    crate::controller::Stance::Sit
+                };
+                if let Some(d) = self.settled.remove(&body) {
+                    let _ = w.controller.release(body, d);
+                }
+                let held = w.controller.claim(body, &settled_shape()).and_then(|d| {
+                    w.controller
+                        .set(body, d, crate::controller::Part::Stance(stance))
+                        .map(|()| d)
+                });
+                match held {
+                    Ok(d) => {
+                        self.settled.insert(body, d);
+                        self.wake(w, run, Woke::Moved(name("done")), now);
+                    }
+                    Err(r) => self.wake(w, run, Woke::Moved(name(r.name)), now),
+                }
+            }
+            // Out of a seat by B3's rise (its end wakes the run, [`Forms::fire`]); up from a ground posture, or a body
+            // standing, at once (C25).
+            Next::Rise => {
+                if let Some(d) = self.settled.remove(&body) {
+                    let _ = w.controller.release(body, d);
+                    return self.wake(w, run, Woke::Moved(name("done")), now);
+                }
+                let seated = w.places.as_ref().and_then(|p| p.slots.held_by(body));
+                let Some(_) = seated else {
+                    return self.wake(w, run, Woke::Moved(name("done")), now);
+                };
+                let (Some(found), Some(places)) = (
+                    w.library.iter().find(|m| m.name.as_str() == "souls:rise"),
+                    w.places.as_mut(),
+                ) else {
+                    return self.wake(w, run, Woke::Moved(name("move-unknown")), now);
+                };
+                let geo = seat_reach(
+                    w.reach,
+                    w.controller,
+                    places.slots,
+                    body,
+                    places.slots.held_place(body),
+                );
+                match places.slots.rise(
+                    w.controller,
+                    w.due,
+                    w.mint,
+                    w.moves,
+                    &geo,
+                    body,
+                    found,
+                    now,
+                ) {
+                    Ok(n) => fr.mv = Some(n),
+                    Err(r) => self.wake(w, run, Woke::Moved(name(r.name)), now),
+                }
+            }
             Next::Move { name: mv, node, at } => {
                 let Some(found) = w.library.iter().find(|m| m.name == mv) else {
                     return self.wake(w, run, Woke::Moved(name("move-unknown")), now);
@@ -1144,6 +1383,7 @@ impl Forms {
         }
         let staged = step(w.tree, w.geometry, now, w.seed, w.mint, &mut self.walks);
         let _ = hand_on(&staged, w.controller);
+        self.crossings.extend(staged.crossings.iter().copied());
         let _ = w.due.apply(&staged);
         for (body, p) in staged.ended {
             let Some(&run) = self.by_body.get(&body) else {
@@ -1161,7 +1401,23 @@ impl Forms {
     /// Runs a timer the due list handed back, at its due time: a move's phase timer (B2's [`Moves::fire`]; a move's
     /// end wakes its run) or a run's own timer. Returns whether it was either; any other timer is the caller's.
     pub fn fire<G: Geometry, R: Reach>(&mut self, w: &mut World<'_, G, R>, t: &Timer) -> bool {
-        if let Some(f) = w.moves.fire(w.controller, w.due, w.mint, w.reach, t) {
+        // A seat's move fires through the places (C17): its contact hands the body into the slot, a rise's out.
+        let fired = match w.places.as_mut() {
+            Some(s) if s.slots.held_by(t.node).is_some() => {
+                let geo = seat_reach(
+                    w.reach,
+                    w.controller,
+                    s.slots,
+                    t.node,
+                    s.slots.held_place(t.node),
+                );
+                s.slots
+                    .fire(w.controller, w.due, w.mint, w.moves, &geo, s.floors, t)
+                    .map(|(f, _)| f)
+            }
+            _ => w.moves.fire(w.controller, w.due, w.mint, w.reach, t),
+        };
+        if let Some(f) = fired {
             match f {
                 Fired::Done(rec) | Fired::Cancelled(rec) => {
                     if let Some(&run) = self.by_body.get(&rec.body)
@@ -1193,6 +1449,28 @@ impl Forms {
         self.wake(w, run, Woke::Timer(t.id), t.due);
         true
     }
+}
+
+/// The longest a run of `steps` takes under `limits`, µs (C20, #3469): each step's own deadline as the runner sets it
+/// (a walk's [`Limits::walk`], a move's or a sit's [`Limits::step_move`]), each pause's length, and two ticks for each
+/// step and the run's end, for the wakes that end them. A run the runner leaves running ends by its own name before
+/// then (`deadline-passed`, or its walk's or move's ending).
+pub fn span(steps: &[Step], limits: &Limits) -> Micros {
+    let wakes = i64::try_from(steps.len())
+        .unwrap_or(i64::MAX)
+        .saturating_add(1)
+        .saturating_mul(limits.tick.saturating_mul(2));
+    steps
+        .iter()
+        .map(|s| match s {
+            Step::WalkTo { .. } => limits.walk,
+            Step::Move { .. } | Step::Sit { .. } | Step::Rise | Step::Settle { .. } => {
+                limits.step_move
+            }
+            Step::Wait(us) => *us,
+            Step::Hand | Step::UseHeld => 0,
+        })
+        .fold(wakes, i64::saturating_add)
 }
 
 /// The type of a body's link to its Soul (contract T2).
