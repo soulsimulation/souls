@@ -50,75 +50,15 @@ fn soul_intent(
     .unwrap()
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs the exported static Eden facts file"]
-async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exact_slot() {
-    let text = std::fs::read_to_string(std::env::var("EDEN_FACTS").expect("EDEN_FACTS")).unwrap();
-    let im = import_eden::load(&text).unwrap();
-    let source = |id| im.tree.node(im.tree.handle(id).unwrap()).unwrap();
-    let building = im
-        .nodes
-        .values()
-        .copied()
-        .map(source)
-        .find(|node| {
-            im.rules.kinds[node.kind().as_str()]
-                .children
-                .contains(import_eden::FLOOR)
-                && node.fields().contains_key(&import_eden::F_SOLIDS)
-        })
-        .expect("an existing pinned floor-admitting building kind");
-    let chair_source = source(im.nodes["e_0fc49dc9"]);
-    let door_source = im
-        .nodes
-        .values()
-        .copied()
-        .map(source)
-        .find(|node| {
-            node.fields()
-                .contains_key(&sim::ground::scene::F_OPEN_DOOR_LINK)
-                && im.rules.kinds[node.kind().as_str()].owner == "thing"
-        })
-        .expect("an existing physical door leaf");
-    let pinned = |plain: &str| {
-        Name::new(
-            im.rules
-                .kinds
-                .keys()
-                .find(|k| replica::world_model::plain(k) == plain)
-                .unwrap(),
-        )
-        .unwrap()
-    };
-    let (x, z) = clear_row(&text);
-    let d = scratch("k18d-room");
-    let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
-    let w = seed_entries(&d, &text, 2, (x, z), Some(&entries));
-    let (c, actor) = creator(0xd8);
-    static_creator(&w, c);
-    let socket = d.join("s");
-    let served = serve_with(&w, &socket, None);
-    served.line("listening ", 120);
-    let (url, tokens) = gateway(
-        &socket,
-        &[actor, Actor::Soul(w.souls[0]), Actor::Soul(w.souls[1])],
-    )
-    .await;
-    let mut maker = sign_in(&url, &tokens[0]).await;
-    let mut soul = sign_in(&url, &tokens[1]).await;
-    let mut other = sign_in(&url, &tokens[2]).await;
-    let closed = row(&[0, 0, 100, 2000, 0, 0, 2500, 1, 0]);
-    let open = vec![
-        row(&[0, -1300, 100, 700, 0, 0, 2500, 1, 0]),
-        row(&[0, 1300, 100, 700, 0, 0, 2500, 1, 0]),
-    ];
-    let solids = vec![
-        closed.clone(),
-        row(&[4000, 0, 100, 2000, 0, 0, 2500, 1, 0]),
-        row(&[2000, -2000, 2000, 100, 0, 0, 2500, 1, 0]),
-        row(&[2000, 2000, 2000, 100, 0, 0, 2500, 1, 0]),
-    ];
-    let place = |name, kind, parent, position, support, fields| Op::Place {
+fn place(
+    name: u64,
+    kind: Name,
+    parent: Ref,
+    position: Vec3,
+    support: Support,
+    fields: BTreeMap<u64, Value>,
+) -> Op {
+    Op::Place {
         name,
         kind,
         parent,
@@ -130,11 +70,31 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
         },
         audience: Audience::Everyone,
         fields,
+    }
+}
+
+fn room_batch(w: &Seeded, im: &import_eden::Import, building: &Name, x: i64, z: i64) -> Vec<Op> {
+    let pinned = |plain: &str| {
+        Name::new(
+            im.rules
+                .kinds
+                .keys()
+                .find(|kind| replica::world_model::plain(kind) == plain)
+                .unwrap(),
+        )
+        .unwrap()
     };
-    let batch = vec![
+    let closed = row(&[0, 0, 100, 2000, 0, 0, 2500, 1, 0]);
+    let solids = vec![
+        closed.clone(),
+        row(&[4000, 0, 100, 2000, 0, 0, 2500, 1, 0]),
+        row(&[2000, -2000, 2000, 100, 0, 0, 2500, 1, 0]),
+        row(&[2000, 2000, 2000, 100, 0, 0, 2500, 1, 0]),
+    ];
+    vec![
         place(
             1,
-            building.kind().clone(),
+            building.clone(),
             Ref::Node(w.ground),
             Vec3::new((x + 8) * M, 0, (z + 4) * M),
             Support::Surface {
@@ -149,17 +109,16 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
             Ref::New(1),
             Vec3::ZERO,
             Support::None,
-            BTreeMap::from([
-                (import_eden::F_LEVEL, int(0)),
-                (
-                    import_eden::F_SURFACES,
-                    Value::Array(vec![Value::Array(vec![
-                        int(0),
-                        polygon(-4000, 4000, -2000, 2000),
-                    ])]),
-                ),
-            ]),
+            BTreeMap::from([(import_eden::F_LEVEL, int(0))]),
         ),
+        Op::Set {
+            node: Ref::New(2),
+            field: import_eden::F_SURFACES,
+            to: Value::Array(vec![Value::Array(vec![
+                int(0),
+                polygon(-4000, 4000, -2000, 2000),
+            ])]),
+        },
         place(
             3,
             pinned(import_eden::ROOM),
@@ -184,20 +143,21 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
                 (import_eden::F_OUTLINE, polygon(-1900, 1900, -1900, 1900)),
             ]),
         ),
+    ]
+}
+
+fn furnishing_batch(
+    door_source: &replica::tree::NodeRef<'_>,
+    chair_source: &replica::tree::NodeRef<'_>,
+    host: Id,
+    foyer: Id,
+    inner: Id,
+) -> Vec<Op> {
+    let closed = row(&[0, 0, 100, 2000, 0, 0, 2500, 1, 0]);
+    let open = vec![
+        row(&[0, -1300, 100, 700, 0, 0, 2500, 1, 0]),
+        row(&[0, 1300, 100, 700, 0, 0, 2500, 1, 0]),
     ];
-    let (made, _) = send(&mut maker, edit_batch_intent(&w, actor, 1, 0, batch)).await;
-    assert_eq!(
-        made.kind, 1,
-        "creator's supported building/floor/two rooms commit: {made:?}"
-    );
-    assert!(!made.entries.is_empty());
-    durable(&w, actor, 1, &made);
-    let (host, floor, foyer, inner) = (
-        made.names[&1],
-        made.names[&2],
-        made.names[&3],
-        made.names[&4],
-    );
     let mut door_fields = door_source.fields().clone();
     door_fields.remove(&sim::ground::scene::F_OPEN_DOOR_LINK);
     door_fields.remove(&replica::edit::DOOR_GEOMETRY);
@@ -242,11 +202,81 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
         closed: vec![closed],
         open,
     };
-    let (opened, _) = send(
-        &mut maker,
-        edit_batch_intent(&w, actor, 2, made.version, vec![leaf, chair, passage]),
+    vec![leaf, chair, passage]
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the exported static Eden facts file"]
+async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exact_slot() {
+    let text = std::fs::read_to_string(std::env::var("EDEN_FACTS").expect("EDEN_FACTS")).unwrap();
+    let im = import_eden::load(&text).unwrap();
+    let source = |id| im.tree.node(im.tree.handle(id).unwrap()).unwrap();
+    let building = im
+        .nodes
+        .values()
+        .copied()
+        .map(source)
+        .find(|node| {
+            im.rules.kinds[node.kind().as_str()]
+                .children
+                .contains(import_eden::FLOOR)
+                && node.fields().contains_key(&import_eden::F_SOLIDS)
+        })
+        .expect("an existing pinned floor-admitting building kind");
+    let chair_source = source(im.nodes["e_0fc49dc9"]);
+    let door_source = im
+        .nodes
+        .values()
+        .copied()
+        .map(source)
+        .find(|node| {
+            node.fields()
+                .contains_key(&sim::ground::scene::F_OPEN_DOOR_LINK)
+                && im.rules.kinds[node.kind().as_str()].owner == "thing"
+        })
+        .expect("an existing physical door leaf");
+    let (x, z) = clear_row(&text);
+    let d = scratch("k18d-room");
+    let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let w = seed_entries(&d, &text, 2, (x, z), Some(&entries));
+    let (c, actor) = creator(0xd8);
+    static_creator(&w, c);
+    let socket = d.join("s");
+    let served = serve_with(&w, &socket, None);
+    served.line("listening ", 120);
+    let (url, tokens) = gateway(
+        &socket,
+        &[actor, Actor::Soul(w.souls[0]), Actor::Soul(w.souls[1])],
     )
     .await;
+    let mut maker = sign_in(&url, &tokens[0]).await;
+    let mut soul = sign_in(&url, &tokens[1]).await;
+    let mut other = sign_in(&url, &tokens[2]).await;
+    let batch = room_batch(&w, &im, building.kind(), x, z);
+    let bytes = edit_batch_intent(&w, actor, 1, 0, batch);
+    replica::intent_decode::decode(&bytes).expect("the actual floor/room batch passes gateway I2");
+    let (made, _) = send(&mut maker, bytes).await;
+    assert_eq!(
+        made.kind, 1,
+        "creator's supported building/floor/two rooms commit: {made:?}"
+    );
+    assert!(!made.entries.is_empty());
+    durable(&w, actor, 1, &made);
+    let (host, floor, foyer, inner) = (
+        made.names[&1],
+        made.names[&2],
+        made.names[&3],
+        made.names[&4],
+    );
+    let bytes = edit_batch_intent(
+        &w,
+        actor,
+        2,
+        made.version,
+        furnishing_batch(&door_source, &chair_source, host, foyer, inner),
+    );
+    replica::intent_decode::decode(&bytes).expect("the actual door/chair batch passes gateway I2");
+    let (opened, _) = send(&mut maker, bytes).await;
     assert_eq!(
         opened.kind, 1,
         "new leaf/chair/owned doorway commit: {opened:?}"
@@ -447,6 +477,72 @@ fn durable(w: &Seeded, actor: Actor, sequence: u64, got: &Got) {
         assert_eq!(
             effect.envelope.cause,
             replica::effects::Cause::Intent(intent)
+        );
+    }
+}
+
+#[test]
+#[ignore = "needs the exported static Eden facts file"]
+fn k18d_actual_creator_payload_classes_pass_gateway_i2_without_world_startup() {
+    let text = std::fs::read_to_string(std::env::var("EDEN_FACTS").expect("EDEN_FACTS")).unwrap();
+    let im = import_eden::load(&text).unwrap();
+    let source = |id| im.tree.node(im.tree.handle(id).unwrap()).unwrap();
+    let building = im
+        .nodes
+        .values()
+        .copied()
+        .map(source)
+        .find(|node| {
+            im.rules.kinds[node.kind().as_str()]
+                .children
+                .contains(import_eden::FLOOR)
+                && node.fields().contains_key(&import_eden::F_SOLIDS)
+        })
+        .unwrap();
+    let door = im
+        .nodes
+        .values()
+        .copied()
+        .map(source)
+        .find(|node| {
+            node.fields()
+                .contains_key(&sim::ground::scene::F_OPEN_DOOR_LINK)
+                && im.rules.kinds[node.kind().as_str()].owner == "thing"
+        })
+        .unwrap();
+    let chair = source(im.nodes["e_0fc49dc9"]);
+    let root = im.nodes["world"];
+    let w = Seeded {
+        dir: PathBuf::new(),
+        souls: Vec::new(),
+        root,
+        zone: import_eden::header(root, &im.rules).unwrap().zone,
+        ground: im.nodes["ground"],
+        wall: building.kind().clone(),
+    };
+    let future = |n| Id::new(root.scope(), n).unwrap();
+    let (_, actor) = creator(0xd8);
+    let room = edit_batch_intent(&w, actor, 1, 0, room_batch(&w, &im, building.kind(), 0, 0));
+    let furnishings = edit_batch_intent(
+        &w,
+        actor,
+        2,
+        1,
+        furnishing_batch(
+            &door,
+            &chair,
+            future(1_000_001),
+            future(1_000_002),
+            future(1_000_003),
+        ),
+    );
+    for (label, bytes) in [("floor/room", room), ("door/chair", furnishings)] {
+        let decoded = replica::intent_decode::decode(&bytes)
+            .unwrap_or_else(|r| panic!("{label}: {}: {}", r.name, r.detail));
+        assert_eq!(decoded.actor, actor);
+        println!(
+            "K18d canonical {label}: {} bytes accepted by unchanged gateway I2",
+            bytes.len()
         );
     }
 }

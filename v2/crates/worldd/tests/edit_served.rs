@@ -826,15 +826,19 @@ struct Got {
 
 fn read_answer(v: &Value) -> Got {
     let Value::Map(f) = v else { panic!("a frame") };
+    let Some(Value::Map(a)) = f.get(&2) else {
+        panic!("an answer")
+    };
     let version = match f.get(&1) {
         Some(Value::Array(a)) => match a.get(3) {
             Some(Value::Uint(s)) => *s,
             _ => panic!("a version"),
         },
-        _ => panic!("a version"),
-    };
-    let Some(Value::Map(a)) = f.get(&2) else {
-        panic!("an answer")
+        _ => panic!(
+            "versionless answer: kind {:?}, reason {:?}",
+            a.get(&3),
+            a.get(&4)
+        ),
     };
     Got {
         kind: match a.get(&3) {
