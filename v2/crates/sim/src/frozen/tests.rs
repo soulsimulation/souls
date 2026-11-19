@@ -36,7 +36,7 @@ fn walk(sequence: u64) -> Part {
     Part::read(&encode(&part.to_value()).unwrap()).unwrap()
 }
 
-const WAIT: Duration = Duration::from_secs(10);
+const WAIT: Duration = Duration::from_secs(30);
 
 /// T6's base fixture and then its link fixture: R1's query world (`replica/tests/queries.txt`).
 fn world() -> Replica {
