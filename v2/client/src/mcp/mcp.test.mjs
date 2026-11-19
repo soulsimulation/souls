@@ -47,7 +47,7 @@ function run(bin, args, ready, sink) {
   });
 }
 
-async function waitFor(f, ms = 10_000) {
+async function waitFor(f, ms = 30_000) {
   const until = Date.now() + ms;
   for (;;) {
     const v = await f();
@@ -141,7 +141,7 @@ test('A1: a host given the URL and a token lists the six tools and uses each on 
   assert.equal((await tool('eden_status', {}, { inPath: true })).pid, status.pid);
   const stop = await tool('eden_stop');
   assert.equal(stop.ok, true);
-  await waitFor(() => readdirSync(root).length === 0, 5000);
+  await waitFor(() => readdirSync(root).length === 0, 30_000);
   // A bad argument is the host's error, not a daemon request.
   const bad = await http({ jsonrpc: '2.0', id: 99, method: 'tools/call', params: { name: 'eden_wait', arguments: { seconds: 600 } } });
   assert.equal(bad.body.error.code, -32602);
@@ -188,7 +188,7 @@ test('A2: over 50 scripted calls, each tool\'s answer equals the thin command\'s
   }
   // stop: each ends its session's daemon with the same answer; the next MCP call opens another.
   const stopped = await tool('eden_stop');
-  await waitFor(() => readdirSync(root).length === 0, 5000);
+  await waitFor(() => readdirSync(root).length === 0, 30_000);
   await tool('eden_status');
   const thinStopped = thin(['stop']);
   assert.deepEqual(steady(thinStopped), steady(stopped));

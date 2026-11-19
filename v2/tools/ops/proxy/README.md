@@ -11,6 +11,9 @@ each rule does is in the header of [`soul-game.caddy`](soul-game.caddy).
 | `souls-routes.service`, `.timer` | `/etc/systemd/system/` | runs `routes.mjs` each minute as `simworlds` |
 | `standin.mjs` | not installed | the local stand-in that proves all of this (below) |
 
+The site's own pages (`/changelog`, `/changelog.md`, `/v1/feed`, `/ops`) go to the viewers' origin, which serves them
+from the page's files and the release's `news.jsonl` (`v2/tools/origin/site.mjs`, O23).
+
 `sim.eden.art` keeps today's `tools/world-launcher/deploy/caddy/sim-eden-art.caddy` (it redirects and keeps the
 sign-in bridge); `cdn-trust.snippet` stays in the global options.
 
@@ -22,8 +25,8 @@ Needs `caddy` on the path, a built `v2/web` (`npx vite build` in `v2/web`) and a
 BRAIN_MODE=fake node v2/tools/ops/proxy/standin.mjs --web v2/web/dist --today-web apps/web/dist
 ```
 
-It runs `front-check.mjs` with everything up (every point), then with today's launcher stopped (the poster), then once
-with the two systems' worlds swapped, which must fail. Exit 0 when all three come out as they should.
+It runs `front-check.mjs` with everything up (every point), then with today's launcher stopped (the poster and the site's
+pages), then once with the two systems' worlds swapped, which must fail. Exit 0 when all three come out as they should.
 
 ## Switch (the release owner, on the production host, as root)
 

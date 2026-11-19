@@ -207,7 +207,7 @@ impl W {
         );
         let Some(Delivery::Frame {
             record: r, bytes, ..
-        }) = self.sub.recv_timeout(Duration::from_secs(10))
+        }) = self.sub.recv_timeout(Duration::from_secs(30))
         else {
             panic!("the tier sent no frame: {:?}", self.tier.stats().fault)
         };

@@ -202,6 +202,7 @@ impl Hall {
             let req = Request {
                 body,
                 thing,
+                slot: None,
                 mv: sit,
                 stance: Stance::Sit,
             };

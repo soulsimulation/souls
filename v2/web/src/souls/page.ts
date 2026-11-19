@@ -8,6 +8,7 @@ import type { PartRec } from '../source/source.ts';
 import type { WorldView } from '../draw/world.ts';
 import { SoulsCopy, label, wrap, type Status } from './souls.ts';
 import { SPEECH_W, measurer, paint, place, type Candidate, type Ctx, type Placed } from './layer.ts';
+import { mountCard } from './mine.ts';
 
 const UM = 1e-6, HEAD = 2.1, FAR = 150;
 
@@ -16,6 +17,7 @@ export type PageSouls = { copy: SoulsCopy; apply(p: PartRec): void; draw(t: numb
 /** The Soul page's panel: one element, its fields set as text. */
 function panel(onClose: () => void) {
   const el = document.createElement('aside');
+  el.id = 'soul-page';
   el.style.cssText = 'position:fixed;right:12px;top:12px;width:min(320px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;'
     + 'padding:12px 14px;background:rgba(16,20,26,0.9);color:#e8e6e1;font:13px/1.45 system-ui,sans-serif;border-radius:6px;display:none;box-sizing:border-box';
   const close = document.createElement('button');
@@ -48,6 +50,9 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
   const width = measurer(ctx);
   const lines = (s: string) => wrap(s, SPEECH_W, width);
   const ui = panel(() => out.open(null));
+  // W11: a world's page carries the line that brings a new Soul (`mine.ts`).
+  const worldName = params.get('world');
+  if (worldName) mountCard(worldName);
   let open: string | null = params.get('soul');
   let shown = '';
   const v = new THREE.Vector3(), m = new THREE.Vector3();
