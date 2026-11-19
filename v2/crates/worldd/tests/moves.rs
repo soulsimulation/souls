@@ -2,7 +2,8 @@
 //! and rise intents to the world's end of the gateway's socket (I1's framing), and reads each answer back. The body
 //! walks to a chair's stand point, sits in its slot and stands again, driven only by the walk skill behind the host
 //! and B3's seats, through the one controller. Each receipt names the log's entries its intent caused; a walk while
-//! seated is refused by name, and a walk replaced by another ends `claim-taken`.
+//! seated is refused by name, and a walk replaced by another ends `claim-taken`. C4 (#3368): a lie on a bed goes the
+//! same way, with B2's lie move, and gets the same receipts.
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -109,6 +110,32 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
         thing: thing(),
         place,
         point: seat_at(),
+        facing: Quat::IDENTITY,
+        floor: ground,
+    })?;
+    Ok(b)
+}
+
+fn bed() -> Id {
+    Id::new(Scope([7; 16]), 9_003).unwrap()
+}
+
+/// A bed 4 m north of the chair: its slot 450 mm above the floor, its stand point 300 mm in front of it (in the lie
+/// move's 600 mm reach).
+const BED: &str = "{1: 1, 2: 450, 3: [0, 300]}";
+
+fn bed_at() -> Vec3 {
+    Vec3::new(-36_000_000, 450_000, 34_000_000)
+}
+
+fn bodies_and_bed() -> Result<Bodies, replica::effects::Refusal> {
+    let mut b = bodies()?;
+    let (_, ground) = town();
+    let place = Place::from_value(&decode(&fixture_bytes(BED)?).unwrap().value)?;
+    b.add_place(PlaceAt {
+        thing: bed(),
+        place,
+        point: bed_at(),
         facing: Quat::IDENTITY,
         floor: ground,
     })?;
@@ -417,5 +444,89 @@ fn a_described_spot_is_resolved_by_a_checker_bound_at_commit_or_refused_by_name(
         near(end.4, want.local, 60_000),
         "the body walked to the bound spot: {:?}",
         end.4
+    );
+}
+
+/// C4 A2: a lie on a bed goes through the bodies as a sit does: walk to its stand point, lie in its slot (a receipt
+/// naming the log's entries, the move started and ended `done`), a walk refused while lying, and a rise.
+#[test]
+fn c4_a2_a_lie_on_a_bed_gets_receipts_like_a_sit() {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.bodies = Some(Box::new(bodies_and_bed));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    let path = std::env::temp_dir().join(format!("c4-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    let (ready, accepted) = channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        ready.send(()).unwrap();
+        answers::serve(door, stream);
+    });
+    let stream = UnixStream::connect(&path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    accepted.recv().unwrap();
+    let mut c = Client(stream);
+
+    c.send(1, "eden:walk", Some(bed()));
+    let walk = c.answer().expect("the walk is done");
+    c.send(2, "eden:lie", Some(bed()));
+    let lie = c.answer().expect("the lie is done");
+    c.send(3, "eden:walk", Some(thing()));
+    assert_eq!(
+        c.answer(),
+        Err("resource-held".into()),
+        "no walk while lying"
+    );
+    c.send(4, "eden:rise", None);
+    let rise = c.answer().expect("the rise is done");
+    c.send(5, "eden:lie", None);
+    assert_eq!(
+        c.answer(),
+        Err("move.no-target".into()),
+        "a lie names its bed"
+    );
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+
+    let log = logged(&store.0.lock().unwrap().bytes);
+    for (what, (id, entries)) in [("walk", &walk), ("lie", &lie), ("rise", &rise)] {
+        let l = &log[id];
+        let seqs: Vec<u64> = l.iter().map(|e| e.0).collect();
+        assert_eq!(
+            &seqs, entries,
+            "{what}: the receipt names the log's entries"
+        );
+        assert_eq!(l[0].1, MOVE_STARTED);
+        assert_eq!(
+            (l[1].1.as_str(), l[1].2.as_deref()),
+            (MOVE_ENDED, Some("done"))
+        );
+    }
+    let l = log[&lie.0].last().cloned().unwrap();
+    println!(
+        "lie: receipt entries {:?}, ends on {} at {:?} µm",
+        lie.1,
+        replica::world_model::show(l.3),
+        l.4
+    );
+    assert_eq!(l.3, bed(), "lying: in the bed's slot");
+    let stand = Vec3::new(bed_at().x, 0, bed_at().z + 300_000);
+    let r = log[&rise.0].last().cloned().unwrap();
+    assert!(
+        near(r.4, stand, 1_000),
+        "standing on the bed's stand point: {:?}",
+        r.4
     );
 }

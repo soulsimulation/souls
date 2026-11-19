@@ -18,6 +18,10 @@
 //     {"op":"find","words":"..."}         one search over the copy (`../find/find.mjs`)
 //     {"op":"act","verbs":["a","b"]}      a ranked list: the first is the act, the rest its fallbacks, each on `target`
 //     {"op":"wait","seconds":30}          returns when something addressed to this Soul happened, or at the timeout
+//   and C4's (#3368), each sent once as `act` is, its answer arriving as an event (`answer` 1 is a receipt):
+//     {"op":"say","words":".."}           words out loud, T8's `{23: words}` in parameter 1 (V1b, #3361)
+//     {"op":"whisper","to":"<id>","words":".."}  words to one listener's body alone
+//     {"op":"lie","this":"<id>"}          lie down on a bed (worldd's bodies, as a sit)
 //   and R10's (#2702): every answer carries `age`, and `gap` and `stale` while its copy is not known current, or
 //   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
 //   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
@@ -247,7 +251,8 @@ function connect() {
         if (Number(c) !== 3) rankedOf.delete(s); // an accepted move is resolved later
       }
       save();
-      note({ kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b });
+      // C4: the answer's kind (1 receipt, 2 refused, 3 accepted, 4 resolved, 5 unread) and its reason, by name.
+      note({ kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b, answer: Number(c), ...(d !== '-' ? { reason: d } : {}) });
     } catch (e) {
       log(`frame refused: ${String(e.message ?? e).slice(0, 200)}`);
       if (syncing) { note({ kind: 'sync-refused', reason: String(e.message ?? e).slice(0, 200) }); sock.close(); }
@@ -319,7 +324,35 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'read', 'stats', 'reflex', 'stop']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'read', 'stats', 'reflex', 'stop']);
+
+// C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
+// the world's key when it is a plain name.
+const NS = /^[A-Za-z0-9_.\-/@]+$/.test(seat.world) && seat.world !== 'souls' ? seat.world : 'world';
+const WORDS_MOST = 1000; // characters a say or a whisper carries
+const ID = /^[0-9a-f]{32}-\d+$/;
+
+/** The intent a say, a whisper or a lie makes: its verb, target and words, or a refusal by name. */
+function formOf(req) {
+  if (req.op === 'lie') {
+    return ID.test(String(req.this ?? '')) ? { verb: `${NS}:lie`, target: req.this } : { code: 'lie-names-a-thing', detail: 'lie <id of a bed or a thing to lie on>' };
+  }
+  const words = String(req.words ?? '');
+  if (!words.trim() || [...words].length > WORDS_MOST) return { code: 'words-empty-or-long', detail: `1 to ${WORDS_MOST} characters` };
+  if (req.op === 'say') return { verb: `${NS}:say`, words };
+  return ID.test(String(req.to ?? '')) ? { verb: `${NS}:whisper`, target: req.to, words } : { code: 'whisper-names-a-body', detail: 'whisper <body id> "<words>"' };
+}
+
+/** Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in). */
+function sendIntent(ranked, { target, words, basis, expiry }) {
+  state.sequence++;
+  const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
+    basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words);
+  save();
+  const sequence = state.sequence, sent = signedIn;
+  if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
+  return { sequence, sent };
+}
 
 async function answer(req) {
   switch (req.op) {
@@ -369,15 +402,16 @@ async function answer(req) {
         trace.write({ k: 'send', seq: `local-${++stopped}`, ranked: candidates.length, cause: 'stopped-locally' });
         return closing({ ok: false, code: 'stopped-locally', sent: false, dropped, basis: sequenceOf(basis) }, null, { age });
       }
-      const ranked = keep.map((c) => c.verb);
-      state.sequence++;
-      const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
-        basis ? unhex(basis) : new Uint8Array(), BigInt(req.expiry ?? Number.MAX_SAFE_INTEGER), String(req.target ?? ''));
-      save();
-      const sequence = state.sequence, sent = signedIn;
-      if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
+      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target: req.target, basis, expiry: req.expiry });
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
       return closing(out, null, age ? { age } : { now: true });
+    }
+    case 'say': case 'whisper': case 'lie': {
+      const f = formOf(req);
+      if (f.code) return { ok: false, code: f.code, detail: f.detail };
+      const basis = shownVersion ?? state.cursor;
+      const { sequence, sent } = sendIntent([f.verb], { target: f.target, words: f.words, basis });
+      return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis) }, null, { now: true });
     }
     case 'read': return { ok: true, events: events.splice(0) };
     case 'stats': return stats(trace.read(), { transcript: transcriptOf(home) });
