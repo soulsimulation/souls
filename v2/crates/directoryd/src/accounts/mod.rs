@@ -7,8 +7,10 @@
 //!   each account to a random principal id. Only principal ids appear in effects (T8, `v2/docs/audience.md` rule 5).
 //! - [`start`]: what the program refuses to start with, among them the sign-in for local and test worlds on a public
 //!   address.
-//! - [`serve`]: the two sign-in requests over HTTP.
+//! - [`serve`]: the two sign-in requests over HTTP, and the mailbox's.
+//! - [`mailbox`]: the owner's messages to a Soul (R13, #2753), in the same file, never in a world's log.
 
+pub mod mailbox;
 pub mod serve;
 pub mod session;
 pub mod start;

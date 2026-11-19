@@ -142,10 +142,14 @@ step client-stats node --test client/src/stats/*.test.mjs
 step client-check node --test client/src/check/*.test.mjs
 # A Soul's memory (R14, #2754): a 30-day home opened unchanged, an hour of named events, digest, consolidate, aliases.
 step client-memory node --test client/src/memory/*.test.mjs
+# Asking what happened (R16, #2817): a recorded Eden of 100 acting Souls in V4's files, by place, thing and Soul.
+step client-history node --test client/src/history/*.test.mjs
 # Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else.
 step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/src/pair/*.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs
+# Wake rules and the owner's messages (R13, #2753): the budget, merging with no reader, the mailbox through the gateway.
+step client-wake bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/wake/*.test.mjs'
 # The MCP endpoint on v2 (R21, #3334): six tools, each answer the thin command's; 401, 405, 413; the card and page.
 step client-mcp bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/mcp/*.test.mjs'
 # A creator's terrain (G5, #2762): a landform's patches by today's packages/ground (zod is its one dependency; this job
