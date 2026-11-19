@@ -8,6 +8,9 @@
 //!   [`Guard::judge`] gives the verdict for bodies as they stand: on the copy's bodies when the change is checked, and
 //!   again on the tick it commits, against the bodies as they are then, so a Soul that walked in after the check
 //!   still refuses it. Judging is lookups only (a spot on each map per body); no ground is cut on the tick.
+//! - **Only what a change can affect** (G2b, #3488). In a zone with a town, [`guard_on`] takes the map before the
+//!   change from the town and cuts again only the squares and floors G3b's rebuild cuts again; [`guard`] cuts the
+//!   whole world on both sides and is the reference its verdicts are compared with.
 //! - **Bury** (`edit.would-bury`): a standing body on ground before the change and on none after it. The would-be
 //!   ground is cut with every box grown by the body's radius and margin (N3), so a new or moved solid whose grown
 //!   footprint holds the body, a floor shrunk or moved from under it, or its node removed, all bury it.
@@ -39,8 +42,11 @@
 #[cfg(test)]
 mod tests;
 
+use crate::ground::Versions;
 use crate::ground::scene::xform_to;
+use crate::links::Link;
 use crate::routes::{ALL, Map, Mask, Spot};
+use crate::walk::town::{Basis, Fresh, Town};
 use replica::edit::{BURIES, CUTS_OFF, IN_USE, Unsafe, Use};
 use replica::effects::{Actor, Body, Change, Header, Part, TransferRec};
 use replica::ids::Id;
@@ -97,45 +103,41 @@ fn area2(map: &Map, q: u32) -> i128 {
 }
 
 impl Side {
-    fn of(tree: &Tree, ground: Id) -> Result<Side, String> {
-        let map = Map::build(tree, ground, &|_| 0)?;
-        let open: Vec<i128> = (0..map.counts().0 as u32)
-            .map(|q| {
-                if map.patch_of(q).square.is_some() {
-                    area2(&map, q)
-                } else {
-                    0
-                }
-            })
+    fn of(map: Map) -> Side {
+        let n = map.counts().0;
+        // Each piece of the open ground with its area.
+        let open: Vec<(usize, i128)> = (0..n)
+            .filter(|&q| map.patch_of(q as u32).square.is_some())
+            .map(|q| (q, area2(&map, q as u32)))
+            .filter(|&(_, a)| a > 0)
             .collect();
         let (mut parts, mut main) = (Vec::new(), Vec::new());
+        let mut sum = vec![0i128; n];
         for has in 0..=ALL {
             let p = map.parts(has);
-            let mut sum: BTreeMap<u32, i128> = BTreeMap::new();
-            for (q, &a) in open.iter().enumerate() {
-                if a > 0 {
-                    *sum.entry(p[q]).or_default() += a;
-                }
+            sum.fill(0);
+            for &(q, a) in &open {
+                sum[p[q] as usize] += a;
             }
             main.push(
-                sum.into_iter()
-                    .max_by_key(|&(r, a)| (a, Reverse(r)))
-                    .map(|(r, _)| r),
+                (0..n as u32)
+                    .filter(|&r| sum[r as usize] > 0)
+                    .max_by_key(|&r| (sum[r as usize], Reverse(r))),
             );
             parts.push(p);
         }
         let links = map
             .links()
             .iter()
-            .enumerate()
-            .map(|(k, l)| (l.id, (l.blocked, map.link_pieces(k))))
+            .zip(map.link_pieces())
+            .map(|(l, pieces)| (l.id, (l.blocked, pieces)))
             .collect();
-        Ok(Side {
+        Side {
             map,
             parts,
             main,
             links,
-        })
+        }
     }
 
     /// Whether a body on `spot` with abilities `has` is in the part with the most open ground.
@@ -199,73 +201,154 @@ fn subtree(tree: &Tree, id: Id, out: &mut BTreeSet<Id>) {
 }
 
 /// Off the clock thread: the guard for the would-be change `part` on `before` (the frozen copy's tree; `header` is the
-/// zone's, `ground` its open ground, none in a zone without one). Refused with why when the part does not apply to
-/// the copy.
+/// zone's, `ground` its open ground, none in a zone without one), with the route maps of the whole world cut on both
+/// sides of it. For a zone with a town, [`guard_on`] cuts only what the change can affect, with the same verdicts.
+/// Refused with why when the part does not apply to the copy.
 pub fn guard(
     before: &Tree,
     header: &Header,
     ground: Option<Id>,
     part: &Part,
 ) -> Result<Guard, String> {
+    // It cuts the ground on both sides of the change: never on the clock thread (G3b, #3449).
+    crate::commit::off_clock();
     let mut after = before.frozen();
     after
         .apply(header, part)
         .map_err(|e| format!("{}: {}", e.name, e.detail))?;
-    let (mut removed, mut touched, mut by) = (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
-    for e in &part.effects {
-        if let Actor::Soul(s) = e.envelope.actor {
-            by.insert(s);
-        }
-        let changes = match &e.body {
-            Body::Changes(c) => c,
-            // A crossing to a new parent (a thing set down, picked up or carried through a door) moves its subtree.
-            Body::Transfer(TransferRec::Leave { node, .. }) => {
-                subtree(before, *node, &mut touched);
-                continue;
-            }
-            _ => continue,
-        };
-        for c in changes {
-            match &c.change {
-                Change::Remove { node } => subtree(before, *node, &mut removed),
-                Change::Reparent { node, .. } => subtree(before, *node, &mut touched),
-                Change::Set { node, .. } => {
-                    touched.insert(*node);
-                }
-                _ => {}
-            }
-        }
-    }
-    touched.extend(removed.iter().copied());
-    let mut held: BTreeMap<Id, Vec<Id>> = BTreeMap::new();
-    for &t in &touched {
-        if let Some(n) = before.handle(t).and_then(|h| before.node(h))
-            && let (Some(p), Some(_)) = (n.parent(), n.slot())
-        {
-            held.entry(p).or_default().push(t);
-        }
-    }
     let sides = match ground {
         Some(g) => {
-            let b = Side::of(before, g)?;
-            Some(Sides {
-                places: places(before, header.zone, g, &b.map),
-                before: b,
-                after: Side::of(&after, g)?,
-            })
+            let b = Map::build(before, g, &|_| 0)?;
+            let a = Map::build(&after, g, &|_| 0)?;
+            Some(Sides::of(before, header.zone, g, b, a))
         }
         None => None,
     };
-    Ok(Guard {
-        sides,
-        removed,
-        touched,
-        held,
-        by,
-    })
+    Ok(Guard::of(before, part, sides))
+}
+
+/// What [`guard_on`] reads of the town besides the copy's tree (G2b, #3488), as the town stood at the copy's version:
+/// its open ground, route map, basis and versions, and each link as its building was read.
+pub struct Known<'a> {
+    pub ground: Id,
+    pub map: &'a Map,
+    pub basis: Basis,
+    pub versions: &'a Versions,
+    links: BTreeMap<Id, &'a Link>,
+}
+
+impl<'a> Known<'a> {
+    /// What `town` gives the guard; its tree is the copy's.
+    pub fn of(town: &'a Town) -> Known<'a> {
+        let mut links = BTreeMap::new();
+        for l in town.buildings.iter().flat_map(|b| &b.links) {
+            links.entry(l.id).or_insert(l);
+        }
+        Known {
+            ground: town.ground,
+            map: &town.map,
+            basis: town.basis(),
+            versions: &town.versions,
+            links,
+        }
+    }
+}
+
+/// Off the clock thread: [`guard`] for a zone with a town (G2b, #3488), cutting only what the change can affect. G3b's
+/// rebuild cuts again the open ground's squares the part touches and reads again the buildings whose floors it
+/// touches (`Town::rebuild_on`). The map before the change is the town's own; the map after it is that map with those
+/// squares and buildings put on. Every body whose way out crosses them is found by joining each map's parts again,
+/// which cuts no ground. The whole world is built after the change only when the rebuild builds it whole
+/// (`Rebuilt::whole`, `Rebuilt::why`).
+pub fn guard_on(
+    before: &Tree,
+    header: &Header,
+    part: &Part,
+    known: &Known,
+) -> Result<Guard, String> {
+    crate::commit::off_clock();
+    let g = known.ground;
+    let mut after = before.frozen();
+    let r = Town::rebuild_on(&mut after, header, g, known.versions, &known.basis, part)?;
+    let v = |n: Id| r.versions.of(n);
+    let link_of = |id: Id| known.links.get(&id).map(|l| (*l).clone());
+    let (mut map, bs) = match &r.fresh {
+        Fresh::Whole(a) => (a.0.clone(), &[][..]),
+        Fresh::Squares(squares, _, bs) => {
+            let mut m = known.map.clone();
+            let cut = squares.iter().map(|(sq, p, _)| (*sq, p.clone())).collect();
+            m.replace_squares(g, v(g), cut, &link_of)?;
+            (m, &bs[..])
+        }
+        Fresh::Buildings(bs) => (known.map.clone(), &bs[..]),
+    };
+    for (b, _) in bs {
+        map.replace(b, &v);
+    }
+    let sides = Sides::of(before, header.zone, g, known.map.clone(), map);
+    Ok(Guard::of(before, part, Some(sides)))
+}
+
+impl Sides {
+    /// Both sides from the route maps before (`b`) and after (`a`) the change.
+    fn of(before: &Tree, zone: Id, ground: Id, b: Map, a: Map) -> Sides {
+        let b = Side::of(b);
+        Sides {
+            places: places(before, zone, ground, &b.map),
+            before: b,
+            after: Side::of(a),
+        }
+    }
 }
 
 impl Guard {
+    /// What the change `part` on `before` removes, moves, sets and holds, and who makes it; `sides` its ground.
+    fn of(before: &Tree, part: &Part, sides: Option<Sides>) -> Guard {
+        let (mut removed, mut touched, mut by) =
+            (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
+        for e in &part.effects {
+            if let Actor::Soul(s) = e.envelope.actor {
+                by.insert(s);
+            }
+            let changes = match &e.body {
+                Body::Changes(c) => c,
+                // A crossing to a new parent (a thing set down, picked up or carried through a door) moves its
+                // subtree.
+                Body::Transfer(TransferRec::Leave { node, .. }) => {
+                    subtree(before, *node, &mut touched);
+                    continue;
+                }
+                _ => continue,
+            };
+            for c in changes {
+                match &c.change {
+                    Change::Remove { node } => subtree(before, *node, &mut removed),
+                    Change::Reparent { node, .. } => subtree(before, *node, &mut touched),
+                    Change::Set { node, .. } => {
+                        touched.insert(*node);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        touched.extend(removed.iter().copied());
+        let mut held: BTreeMap<Id, Vec<Id>> = BTreeMap::new();
+        for &t in &touched {
+            if let Some(n) = before.handle(t).and_then(|h| before.node(h))
+                && let (Some(p), Some(_)) = (n.parent(), n.slot())
+            {
+                held.entry(p).or_default().push(t);
+            }
+        }
+        Guard {
+            sides,
+            removed,
+            touched,
+            held,
+            by,
+        }
+    }
+
     /// The verdict for `bodies` as they stand now: each body the change would leave unsafe, in the order given (see
     /// the module's notes). Empty: the change is safe for them.
     pub fn judge(&self, bodies: &[Who]) -> Vec<Unsafe> {
@@ -341,6 +424,19 @@ impl Guard {
         }
         None
     }
+}
+
+/// [`check`] for a zone with a town, by [`guard_on`] (G2b, #3488).
+pub fn check_on(
+    before: &Tree,
+    header: &Header,
+    part: &Part,
+    bodies: &[Who],
+    known: &Known,
+) -> Result<(Guard, Vec<Unsafe>), String> {
+    let g = guard_on(before, header, part, known)?;
+    let v = g.judge(bodies);
+    Ok((g, v))
 }
 
 /// The rule in one call, for a change judged once: the guard, and its verdict for `bodies` as they stand on the copy.

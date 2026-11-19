@@ -180,6 +180,13 @@ impl DueList {
         gone
     }
 
+    /// Cancels every timer of `node` alone (a body, which the tree does not hold yet: K10 #2673), in key order.
+    pub fn cancel_node(&mut self, node: Id) -> Vec<Timer> {
+        let ids = self.by_node.get(&node).cloned().unwrap_or_default();
+        let keys: Vec<Key> = ids.into_iter().map(|id| (self.by_id[&id], id)).collect();
+        keys.into_iter().filter_map(|k| self.take(k)).collect()
+    }
+
     /// Applies a tick's staged timers from the host (K13a): each set, then each clear, every one for the body that
     /// asked. Returns the refusals with their bodies; a refused one changes nothing.
     pub fn apply(&mut self, staged: &Staged) -> Vec<(Id, Refusal)> {
