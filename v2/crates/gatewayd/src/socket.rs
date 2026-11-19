@@ -21,7 +21,9 @@ use crate::Gateway;
 use crate::receipts::{Outcome, Who};
 use crate::times;
 use crate::token::{self, Grant, Token};
-use crate::world_link::{RESTARTING, Sent};
+use crate::world_link::{RESTARTING, Sent, sync_refused};
+use replica::sync::wire;
+use std::collections::BTreeMap;
 
 /// Where agents connect.
 pub const PATH: &str = "/v2/ws";
@@ -208,6 +210,20 @@ fn take_intent(
     bytes: Vec<u8>,
     received: u64,
 ) -> Option<Vec<u8>> {
+    // A sync request (R5b, `replica::sync::wire`), not an intent: to the world, for this grant's actor.
+    if let Ok(d) = decode(&bytes)
+        && let Value::Map(mut m) = d.value
+        && let Some(n) = m.remove(&wire::ASK)
+    {
+        let ask: BTreeMap<u64, Value> = m
+            .into_iter()
+            .filter(|(k, _)| *k == wire::IDS || *k == wire::RECORDS)
+            .collect();
+        return match gw.link.ask(grant.key(), n.clone(), ask) {
+            Sent::Sent => None,
+            Sent::Restarting => Some(sync_refused(n, RESTARTING)),
+        };
+    }
     let intent = match decode_intent(&bytes) {
         Ok(i) => i,
         Err(r) => {
