@@ -294,6 +294,7 @@ fn route(req: &Request, app: &App) -> (u16, Value, String) {
         // The page's preflight for a request from its own origin (CORS): headers alone.
         ("OPTIONS", _) => return (204, Value::Null, "preflight".into()),
         ("GET" | "POST", "/v1/worlds") => return crate::worlds::list::http::route(req, app),
+        ("POST", "/v1/worlds/settings") => return crate::worlds::list::http::settings(req, app),
         ("POST", "/v1/account/session") => who(req, app, false),
         ("POST", "/v1/account/test-sign-in") if app.test_sign_in => who(req, app, true),
         ("POST", "/v1/account/view-token" | "/v1/account/sign-out") => {
@@ -395,6 +396,7 @@ fn respond_as(
         204 => "No Content",
         400 => "Bad Request",
         401 => "Unauthorized",
+        403 => "Forbidden",
         409 => "Conflict",
         429 => "Too Many Requests",
         404 => "Not Found",
