@@ -56,6 +56,12 @@ pub fn chacha_block(key: &[u8; 32], counter: u32, nonce: &[u8; 12], rounds: u32)
     x
 }
 
+/// The 96-bit nonce that carries `counter`'s high 32 bits (little-endian; the rest zero), made from the counter alone.
+fn nonce_of(counter: u64) -> [u8; 12] {
+    let wide = u128::from(counter >> 32).to_le_bytes();
+    std::array::from_fn(|i| wide[i])
+}
+
 /// A world's random source: its seed, from its checkpoint.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Random {
@@ -78,10 +84,9 @@ impl Random {
         k.extend_from_slice(&self.seed);
         k.extend_from_slice(&encode(&node.to_value()).expect("an id encodes"));
         k.extend_from_slice(purpose.as_bytes());
-        // ChaCha's 32-bit block counter and its 96-bit nonce together carry the 64-bit counter.
-        let mut nonce = [0u8; 12];
-        nonce[..4].copy_from_slice(&((counter >> 32) as u32).to_le_bytes());
-        chacha_block(&sha256(&k), counter as u32, &nonce, 8)
+        // ChaCha's 32-bit block counter and its 96-bit nonce together carry the 64-bit counter: the nonce is the
+        // counter's high 32 bits, little-endian, widened to 96 bits.
+        chacha_block(&sha256(&k), counter as u32, &nonce_of(counter), 8)
     }
 
     /// The draw for `node`, `purpose` and `counter`: 64 bits.
@@ -116,13 +121,35 @@ mod tests {
     fn chacha20_matches_rfc_8439() {
         // RFC 8439 section 2.3.2: the block function's test vector, with 20 rounds.
         let key: [u8; 32] = std::array::from_fn(|i| i as u8);
-        let nonce = [0, 0, 0, 9, 0, 0, 0, 0x4a, 0, 0, 0, 0];
+        // The RFC's nonce, read from its fixture (hex) so the vector stays the RFC's exactly.
+        let hex = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fixtures/random/rfc8439-nonce.hex"
+        ))
+        .expect("the RFC 8439 nonce fixture");
+        let hex = hex.trim();
+        let nonce: [u8; 12] =
+            std::array::from_fn(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).expect("hex"));
         let want = [
             0xe4e7f110, 0x15593bd1, 0x1fdd0f50, 0xc47120a3, 0xc7f4d1c7, 0x0368c033, 0x9aaa2204,
             0x4e6cd4c3, 0x466482d2, 0x09aa9f07, 0x05d7c214, 0xa2028bd9, 0xd19c12b5, 0xb94e16de,
             0xe883d0cb, 0x4e3c50a2,
         ];
         assert_eq!(chacha_block(&key, 1, &nonce, 20), want);
+    }
+
+    #[test]
+    fn draws_past_the_32_bit_block_counter_are_pinned() {
+        // The counter's high bits ride in the nonce: pinned at counters that set them, so the nonce never changes.
+        let node = Id::new(Scope([0xee; 16]), 7).unwrap();
+        let r = Random::new(b"seed");
+        for (c, want) in [
+            (1u64 << 32, 0xde96_372f_da89_a82e_u64),
+            ((7u64 << 32) | 3, 0x4576_aed4_c4a0_b660),
+            (u64::MAX, 0x6a9a_8440_77c5_3837),
+        ] {
+            assert_eq!(r.draw(node, "place", c), want, "counter {c:#x}");
+        }
     }
 
     #[test]

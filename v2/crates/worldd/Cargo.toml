@@ -15,5 +15,6 @@ skills = { path = "../skills" }
 import-eden = { path = "../../tools/import-eden" }
 
 [dev-dependencies]
-# N2's test world, where a scripted client walks, sits and rises (I4b, #3156).
+# E1's Eden measures (tests/index.rs) load Eden 2026's imported tree (N1, #2649); N2's test world, where a scripted
+# client walks, sits and rises (I4b, #3156).
 testworld = { path = "../../tools/testworld" }
