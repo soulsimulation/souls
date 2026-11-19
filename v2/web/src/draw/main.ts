@@ -3,7 +3,7 @@
 // world the picture is, and the clock's state.
 import * as THREE from 'three';
 import { FreeCamera } from '../camera/camera.ts';
-import { PlaybackClock } from '../clock/clock.ts';
+import { PlaybackClock, caughtUp } from '../clock/clock.ts';
 import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
@@ -114,7 +114,7 @@ renderer.setAnimationLoop((now) => {
   sun.target.position.set(Math.round(at.x / texel) * texel, at.y, Math.round(at.z / texel) * texel);
   sun.position.copy(sun.target.position).add(SUN);
   const worldNow = pointer ? pointer.anchorWorld + (Date.now() - pointer.anchorWallMs) * 1000 : null;
-  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : clock.step(dt, worldNow, newestTo);
+  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : clock.step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
   let drawn = 0;
   if (t !== null) {

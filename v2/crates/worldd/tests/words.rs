@@ -140,7 +140,7 @@ fn run(name: &str) -> Run {
         .unwrap();
         let sub = tier.subscribe(vec![key], 1 << 16);
         let w = Writer::fork_with_text(&root, &header, &key, (0, 0), &start, Some(st)).unwrap();
-        *wr.lock().unwrap() = Some(follow(w, sub, s));
+        *wr.lock().unwrap() = Some(follow(w, sub, s, answers::now));
         Box::new(move |n, b| tier.offer(n, b))
     }));
     let log = Mem::default();
