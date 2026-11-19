@@ -358,6 +358,65 @@ fn committed_town(
     .unwrap()
 }
 
+/// The fixture's original leaf is building-local; its new creator parent is the owning room.
+fn g1f_leaf_in_room(tree: &replica::tree::Tree, leaf: Id, room: Id) -> Spot {
+    let leaf = tree.node(tree.handle(leaf).unwrap()).unwrap();
+    let building = leaf.parent().unwrap();
+    let pose = leaf.place().unwrap();
+    assert_eq!(leaf.slot(), None);
+    assert_eq!(
+        pose.support,
+        Support::Surface {
+            surface: building,
+            height: 0
+        }
+    );
+    let room_to_building = sim::ground::scene::xform_to(
+        tree,
+        tree.handle(room).unwrap(),
+        tree.handle(building).unwrap(),
+    )
+    .unwrap();
+    // This authored room has no turn relative to its building; preserve the original leaf orientation exactly.
+    assert_eq!(room_to_building.rot, Quat::IDENTITY);
+    let position = sim::links::back(&room_to_building, pose.position).unwrap();
+    assert_eq!(room_to_building.point(position).unwrap(), pose.position);
+    assert_eq!(
+        room_to_building.rot.then(pose.orientation).unwrap(),
+        pose.orientation
+    );
+    Spot {
+        slot: None,
+        position,
+        orientation: pose.orientation,
+        support: Support::Surface {
+            surface: room,
+            height: 0,
+        },
+    }
+}
+
+#[test]
+fn g1f_leaf_frame_roundtrip_matches_the_original_authored_aperture() {
+    let im = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
+    let leaf = im.nodes["door-building-to-b"];
+    let room = im.nodes["building/corridor"];
+    let local = g1f_leaf_in_room(&im.tree, leaf, room);
+    assert_eq!(local.position, Vec3::new(-100_000, 0, -550_000));
+    assert_eq!(local.orientation, Quat::IDENTITY);
+    assert_eq!(
+        local.support,
+        Support::Surface {
+            surface: room,
+            height: 0
+        }
+    );
+    assert_eq!(local.slot, None);
+    println!(
+        "G1f canonical frame round-trip PASS: room-local [-100,0,-550] mm -> authored building-local [1000,3000,-550] mm; yaw 0; frame room/none; support Surface(room,0)"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn g1f_a2_doorway_commits_owned_metadata_and_removal_guards_the_last_way_out() {
     use replica::edit::{Edit, World};
@@ -480,17 +539,13 @@ async fn g1f_a2_doorway_commits_owned_metadata_and_removal_guards_the_last_way_o
     let mut fields = leaf.fields().clone();
     fields.remove(&F_OPEN_DOOR_LINK);
     let pose = leaf.place().unwrap();
+    let leaf_at = g1f_leaf_in_room(&im.tree, original, from);
     let ops = vec![
         Op::Place {
             name: 1,
             kind: leaf.kind().clone(),
             parent: Ref::Node(from),
-            at: Spot {
-                slot: None,
-                position: pose.position,
-                orientation: pose.orientation,
-                support: pose.support,
-            },
+            at: leaf_at,
             audience: Audience::Everyone,
             fields,
         },
@@ -521,6 +576,24 @@ async fn g1f_a2_doorway_commits_owned_metadata_and_removal_guards_the_last_way_o
     assert_eq!(open.tree().link(link).unwrap().1, [from, to]);
     let new_leaf = open.tree().node(open.tree().handle(door).unwrap()).unwrap();
     assert_eq!(new_leaf.fields()[&F_OPEN_DOOR_LINK], link.to_value());
+    assert_eq!(new_leaf.parent(), Some(from));
+    assert_eq!(new_leaf.slot(), None);
+    assert_eq!(new_leaf.place().unwrap().support, leaf_at.support);
+    let committed_pose = sim::ground::scene::xform_to(
+        open.tree(),
+        open.tree().handle(door).unwrap(),
+        open.tree().handle(wall).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        committed_pose.point(Vec3::ZERO).unwrap(),
+        pose.position,
+        "the committed leaf occupies the exact original authored wall aperture"
+    );
+    assert_eq!(committed_pose.rot, pose.orientation);
+    println!(
+        "G1f committed physical leaf matches building-local [1000,3000,-550] mm, yaw 0; room-local [-100,0,-550] mm, frame room/none, support Surface(room,0)"
+    );
     let mut town = committed_town(&open, rules.clone(), w.ground);
     let legs = town
         .view()
