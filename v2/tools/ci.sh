@@ -144,6 +144,8 @@ step client-check node --test client/src/check/*.test.mjs
 step client-memory node --test client/src/memory/*.test.mjs
 # Asking what happened (R16, #2817): a recorded Eden of 100 acting Souls in V4's files, by place, thing and Soul.
 step client-history node --test client/src/history/*.test.mjs
+# A home on today's client comes across (R18, #2821): the released 2.36.2 client against the new answers, from v2/ alone.
+step client-upgrade node --test client/test/compat/*.test.mjs client/src/upgrade/*.test.mjs
 # Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else.
 step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/src/pair/*.test.mjs'
 # The served client (R17, #2818): the served files against the release's manifest; the one line, upgrade, rollback.
