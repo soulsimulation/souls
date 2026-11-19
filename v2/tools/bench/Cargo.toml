@@ -89,6 +89,11 @@ path = "measures/main.rs"
 name = "timed"
 path = "src/timed.rs"
 
+# I8, #2692: limits charged in checking time, per actor; `step0` measures what a check costs.
+[[bin]]
+name = "limits"
+path = "limits/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 # The `timers` bench runs the due list's scenario on a generated world (K9, #2672).

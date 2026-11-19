@@ -31,6 +31,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
+pub mod budget;
 pub mod places;
 #[cfg(test)]
 mod tests;

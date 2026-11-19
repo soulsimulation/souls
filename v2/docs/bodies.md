@@ -34,7 +34,10 @@ not here. The controller (B1) is summarised under [The controller](#the-controll
    on one body names it and changes no body.
    The activity is a node with one owner (T1), so it survives a restart.
 6. **Reach is measured from an effector, which may be a held tool.** A held thing is a child of the hand's slot
-   ([world-model.md](world-model.md) rule 2), so it moves with the hand and lengthens it (B12).
+   ([world-model.md](world-model.md) rule 2), so it moves with the hand and lengthens it (B12): a move that reaches
+   with the hand reaches from the named tip of a tool held in it. Take and put are moves whose contact instant is one
+   transfer, a leave and an arrive in one part; a thing's kind says whether it takes one hand or two (section 18,
+   `motion`); a body with no hands is refused `take-needs-hands` (B4, `sim::slots`).
 
 ## The host and the wall
 
