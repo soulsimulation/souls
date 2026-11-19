@@ -1254,6 +1254,8 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
                 r("souls:leg-right", Class::Locomotion, None),
                 r("souls:hand-left", Class::Manipulator, Some(1)),
                 r("souls:hand-right", Class::Manipulator, Some(2)),
+                r("souls:eyes", Class::Gaze, None),
+                r("souls:voice", Class::Voice, None),
             ],
         }
     };
@@ -1408,4 +1410,109 @@ fn c22_a3_every_form_of_every_eden_entry_runs_once_from_its_stand_point() {
         }
     }
     assert!(out.contains_key("done"));
+}
+
+/// C23 (#3494): form `form` of the entry in file `file` (under `entries`) given `edit`, or added by it.
+fn edit_form(
+    entries: &Path,
+    file: &str,
+    form: &str,
+    edit: impl FnOnce(&mut Vec<(String, replica::rules::json::Value)>),
+) {
+    use replica::rules::json::{Value as J, parse};
+    let path = entries.join(file);
+    let mut e = parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let J::Obj(o) = &mut e else {
+        panic!("{file}: an entry")
+    };
+    let Some((_, J::Obj(forms))) = o.iter_mut().find(|(k, _)| k == "forms") else {
+        panic!("{file}: forms")
+    };
+    match forms.iter_mut().find(|(k, _)| k == form) {
+        Some((_, J::Obj(f))) => edit(f),
+        _ => {
+            let mut f = Vec::new();
+            edit(&mut f);
+            forms.push((form.to_owned(), J::Obj(f)));
+        }
+    }
+    std::fs::write(&path, e.to_json()).unwrap();
+}
+
+/// C23 (#3494) A2: a move with no `at`, and a move `toward` or `at` a thing argument, each end `done` on a seeded Eden
+/// by a Soul born beside Eden's gym yoga mat (today's e_ea2c84ac), the receipt printed:
+///
+/// - the yoga mat's own `yoga` (a walk to `middle`, then a `stretch`, no `at`), with its `link` effect left out of the
+///   served entries (effects are C24's);
+/// - the park swings' (e_7dacb4f7, 19 m away) `push`, a press `toward` its `who` argument, here the yoga mat, with its
+///   walk to the argument left out (a walk to a thing argument is C25's): the press reaches the mat, not the swings;
+/// - the same swings given the humanoid's own `touch` (a touch `at` its `target` argument), at the yoga mat, its walk
+///   to the argument left out too.
+///
+/// Without the argument the push is refused `arg-missing`; toward the swings themselves it ends `out-of-reach`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c23_a2_moves_with_no_at_and_toward_or_at_an_argument_end_done() {
+    use replica::rules::json::{Value as J, parse};
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let entries = std::env::temp_dir().join(format!("eden-c23-kinds-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&entries);
+    copy_dir(Path::new(&format!("{root}/content/kinds")), &entries);
+    edit_form(&entries, "floors/yoga_mat.json", "yoga", |f| {
+        f.retain(|(k, _)| k != "effects")
+    });
+    let no_walk = |f: &mut Vec<(String, J)>| {
+        let Some((_, J::Arr(steps))) = f.iter_mut().find(|(k, _)| k == "steps") else {
+            panic!("steps")
+        };
+        steps.retain(|s| s.get("step").and_then(J::str) != Some("walk_to"));
+    };
+    edit_form(&entries, "play/swings.json", "push", no_walk);
+    let body =
+        parse(&std::fs::read_to_string(entries.join("body/humanoid.json")).unwrap()).unwrap();
+    let Some(J::Obj(touch)) = body.get("forms").and_then(|f| f.get("touch")).cloned() else {
+        panic!("the humanoid's touch")
+    };
+    edit_form(&entries, "play/swings.json", "touch", |f| {
+        *f = touch;
+        no_walk(f);
+    });
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (mat, swings) = (im.nodes["e_ea2c84ac"], im.nodes["e_7dacb4f7"]);
+    let (served, mut soul, dir, _) = serve_entries(
+        &facts,
+        entries.to_str().unwrap(),
+        "1.0,88.0",
+        "c23a2",
+        im.nodes["world"].scope(),
+    );
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(120)))
+        .unwrap();
+    let mut each = |verb: &str, at: Id, a: BTreeMap<u64, Value>| {
+        let done = soul.act(verb, Some(at), a);
+        println!("{verb}: {done:?}");
+        for (at, names, _) in receipt_entries(&dir, done.as_deref().unwrap_or(&[])) {
+            println!("  {at} µs: {names:?}");
+        }
+        done
+    };
+    let yoga = each("eden:yoga", mat, BTreeMap::new());
+    let missing = each("eden:push", swings, BTreeMap::new());
+    let push = each("eden:push", swings, args(&[("who", mat.to_value())]));
+    let far = each("eden:push", swings, args(&[("who", swings.to_value())]));
+    let touch = each("eden:touch", swings, args(&[("target", mat.to_value())]));
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&entries);
+    yoga.expect("a stretch, no at: done");
+    assert_eq!(missing, Err("arg-missing".to_owned()));
+    push.expect("a press toward the argument: done");
+    assert_eq!(
+        far,
+        Err("out-of-reach".to_owned()),
+        "toward the swings, 19 m off"
+    );
+    touch.expect("a touch at the argument: done");
 }

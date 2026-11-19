@@ -220,6 +220,17 @@ fn humanoid() -> R<Family> {
             leg("souls:leg-right")?,
             hand("souls:hand-left", 1)?,
             hand("souls:hand-right", 2)?,
+            // The eyes and the voice B2's humanoid has (a look claims the gaze, a cheer the voice: C23).
+            Resource {
+                name: n("souls:eyes")?,
+                class: Class::Gaze,
+                slot: None,
+            },
+            Resource {
+                name: n("souls:voice")?,
+                class: Class::Voice,
+                slot: None,
+            },
         ],
     })
 }

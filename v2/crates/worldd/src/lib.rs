@@ -8,6 +8,7 @@ pub mod bodies;
 pub mod checkers;
 pub mod engine;
 pub mod measures;
+pub mod moves;
 pub mod testbodies;
 pub mod view_out;
 pub mod views;
