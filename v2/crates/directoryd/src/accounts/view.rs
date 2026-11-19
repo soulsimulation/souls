@@ -1,7 +1,7 @@
 //! The session exchange (Engine v2 V13b, #3407): a signed-in web session exchanges for a short-lived gateway view
 //! token, scoped to the account's Souls and worlds, so the page opens its owner's view from the session alone.
 //!
-//! A view token is `view.<expires>.<grant>,<grant>….<HMAC-SHA256 hex>`: the grants are gatewayd's (`soul-…` or
+//! A view token is `view.<expires>.<grant>/<grant>….<HMAC-SHA256 hex>`: the grants are gatewayd's (`soul-…` or
 //! `creator-…`, `gatewayd::token::Grant`), `expires` is in seconds since 1970, and the MAC is over everything before
 //! its dot, with a key the directory and the gateways share (`--view-key`, a file of 64 hex digits). The gateway checks
 //! it without a call (`gatewayd::token::View`). It lets its holder watch, never act, and lives [`VIEW_TTL_S`]: a
@@ -9,6 +9,7 @@
 //! once; it is never logged, stored or put in an address.
 
 use replica::encode::{from_hex, to_hex};
+use replica::ids::Id;
 use ring::hmac;
 
 /// How long a view token holds (seconds). The page renews it before then.
@@ -30,7 +31,7 @@ impl ViewKey {
 
     /// A view token for `grants`, holding until `expires`.
     pub fn mint(&self, grants: &[String], expires: u64) -> String {
-        let body = format!("view.{expires}.{}", grants.join(","));
+        let body = format!("view.{expires}.{}", grants.join("/"));
         let mac = hmac::sign(&self.0, body.as_bytes());
         format!("{body}.{}", to_hex(mac.as_ref()))
     }
@@ -51,6 +52,18 @@ pub fn is_grant(text: &str) -> bool {
         && counter.bytes().all(|b| b.is_ascii_digit())
 }
 
+/// A grant's text for a Soul (`kind` `soul`) or a creator (`creator`, named by its principal id), as gatewayd writes it.
+pub fn grant_text(kind: &str, id: Id) -> String {
+    format!("{kind}-{}-{}", to_hex(&id.scope().0), id.counter())
+}
+
+/// The body the page follows for a grant (V13c): a Soul's own, since a Soul drives the body with its own id; none for
+/// a creator's. The body is written as the page's key, `<scope hex>.<counter>`.
+pub fn follow_of(grant: &str) -> Option<String> {
+    let (scope, counter) = grant.strip_prefix("soul-")?.split_once('-')?;
+    is_grant(grant).then(|| format!("{scope}.{counter}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,5 +77,12 @@ mod tests {
         assert_eq!(body, format!("view.1000.{g}"));
         assert_eq!(mac.len(), 64);
         assert!(is_grant(&g) && !is_grant("soul-ab-3") && !is_grant("world-x-1"));
+        assert_eq!(follow_of(&g), Some(format!("{}.3", "ab".repeat(16))));
+        assert_eq!(follow_of(&g.replacen("soul", "creator", 1)), None);
+        // V13c: a token of several grants is still a name (the sign-in frame's text): a ',' was refused by the decoder.
+        let two = k.mint(&[g.clone(), g.replacen("soul", "creator", 1)], 1000);
+        let name = |b: u8| b.is_ascii_alphanumeric() || b"_-.:/@".contains(&b);
+        assert!(two.bytes().all(name), "{two}");
+        assert!(replica::encode::Name::new(&two).is_some());
     }
 }
