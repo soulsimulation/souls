@@ -39,6 +39,13 @@
 //! had it, and its Soul finds it again by its link. A token the directory pairs later is added to `tokens` and the
 //! gateway reads the file again: no restart.
 //!
+//! **Seats** (C17, #3453). A start registers the seats the world's entries declare on its things for the gateway's sit,
+//! lie and rise and a form's sit ([`places`]): every slot admitting a body that a thing's kind's entry declares is a
+//! seat (a sofa's three, a bed's two; C19, #3457), its point carried up the tree onto the floor a body stands on.
+//! It prints `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor;
+//! <moved> stand points moved to clear ground`. A stand point a body cannot stand on is moved to the nearest clear ground
+//! within a form's reach (C15's rule), so a rise sets the body down where it can stand.
+//!
 //! **Off the machine** (O3b, #3458), when `--store <store>`, `$WORLDD_STORE` or the directory's `$DIRECTORY_STORE_URL`
 //! names a store (O3c, #3529: the offsite bucket, `s3:https://<host>/<bucket>[/<prefix>]` with its keys in `AWS_*`, or
 //! O9's folder store, `folder:<path>` or a path; `supervisor::bucket`): the world is claimed under `--machine <name>` (`$WORLDD_MACHINE`, default
@@ -79,6 +86,7 @@ use replica::world_model::{Audience, parse_kinds, plain};
 use sim::links::Doors;
 use sim::log::{FileStore, Log};
 use sim::recorder;
+use sim::slots::PlaceAt;
 use sim::walk::town::Town;
 use supervisor::bucket::Under;
 use worldd::answers::{self, Config, Join};
@@ -264,6 +272,17 @@ fn humanoid() -> R<Family> {
             leg("souls:leg-right")?,
             hand("souls:hand-left", 1)?,
             hand("souls:hand-right", 2)?,
+            // The eyes and the voice B2's humanoid has (a look claims the gaze, a cheer the voice: C23).
+            Resource {
+                name: n("souls:eyes")?,
+                class: Class::Gaze,
+                slot: None,
+            },
+            Resource {
+                name: n("souls:voice")?,
+                class: Class::Voice,
+                slot: None,
+            },
         ],
     })
 }
@@ -308,6 +327,10 @@ fn seed_in(args: &[String]) -> R<String> {
     if let Some(e) = arg(args, "--entries") {
         let mut found = Vec::new();
         entries(Path::new(e), &mut found)?;
+        // Stand points a body can stand on: each moved clear of its own kind's solids, named here (C13, #3440).
+        for line in import_eden::clear_stand_points(&import_eden::load(&text)?, &mut found) {
+            println!("stand point: {line}");
+        }
         for (kind, v) in &found {
             let p = dir
                 .join("entries")
@@ -393,9 +416,59 @@ fn souls(meta: &Json) -> R<Vec<(Id, i64, i64)>> {
         .collect()
 }
 
+/// The seats the world's entries `kinds` declare on its things ([`import_eden::body_slots`]), each placed on the floor a
+/// body stands on: its point and facing there, and its stand point in the slot's frame. A stand point a body cannot
+/// stand on (under a table, against a wall) is moved to the nearest place within a form's reach of it where a body
+/// can (C15's rule, `skills::form_runner::REACH`), so a rise always sets the body down on clear ground. Returns the
+/// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
+/// floor above the thing) and the stand points moved.
+fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize, usize) {
+    let (found, all) = import_eden::body_slots(&town.tree, kinds);
+    let view = town.view();
+    let (mut out, mut moved) = (Vec::new(), 0);
+    for s in &found {
+        let Some((floor, point, facing)) = view.on_floor(s.thing, s.at) else {
+            continue;
+        };
+        let mut place = PlaceAt {
+            thing: s.thing,
+            place: replica::moves::Place {
+                slot: s.slot,
+                height: s.at.y.max(0),
+                stand: [s.stand.x - s.at.x, s.stand.z - s.at.z],
+            },
+            point,
+            facing,
+            floor,
+        };
+        // The stand point on the floor, at the floor's height under the seat.
+        let stand = place.stand().map(|p| Vec3::new(p.x, point.y - s.at.y, p.z));
+        let [w, x, y, z] = facing.parts();
+        let back = replica::pose::Quat::new(w, -x, -y, -z);
+        if let (Ok(stand), Ok(back)) = (stand, back)
+            && view.stand_near(floor, stand, 1, None).is_none()
+            && let Some(clear) = view.stand_near(floor, stand, skills::form_runner::REACH, None)
+            && let Ok(d) = back.rotate(Vec3::new(clear.x - point.x, 0, clear.z - point.z))
+        {
+            place.place.stand = [d.x, d.z];
+            moved += 1;
+        }
+        out.push(place);
+    }
+    let left = found.len() - out.len();
+    let mut things: Vec<Id> = out.iter().map(|p| p.thing).collect();
+    things.dedup();
+    (out, things.len(), all, left, moved)
+}
+
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
-/// where the log last had it.
-fn bodies(town: Town, ground: Id, placed: &Placed) -> Result<Bodies, Refusal> {
+/// where the log last had it. The world's seats are added ([`places`]).
+fn bodies(
+    town: Town,
+    ground: Id,
+    placed: &Placed,
+    places: Vec<PlaceAt>,
+) -> Result<Bodies, Refusal> {
     let family = humanoid().map_err(|e| Refusal {
         name: "family",
         detail: e,
@@ -412,6 +485,9 @@ fn bodies(town: Town, ground: Id, placed: &Placed) -> Result<Bodies, Refusal> {
         }
     }
     let mut b = Bodies::new(town, 50_000)?;
+    for s in places {
+        b.add_place(s)?;
+    }
     for a in at {
         b.add_body_at(family.clone(), a, placed)?;
     }
@@ -657,6 +733,14 @@ fn serve(args: &[String]) -> R<()> {
         kinds.len(),
         souls.len()
     );
+    let mut built = built;
+    let (places, things, all, left, moved) = places(&mut built.town, &kinds);
+    println!(
+        "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
+         moved to clear ground",
+        places.len(),
+        things
+    );
     let rules = Rules {
         kinds: Json::Obj(kinds),
         moves,
@@ -736,7 +820,7 @@ fn serve(args: &[String]) -> R<()> {
         per_tick: 8,
     });
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
-        bodies(town, ground, placed)
+        bodies(town, ground, placed, places.clone())
     }));
     let empty = Replica::start(built.header.stored()).map_err(refusal)?;
     let world = answers::start(empty.frozen(), rules, store, cfg).map_err(refusal)?;

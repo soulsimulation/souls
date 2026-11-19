@@ -10,7 +10,11 @@
 //!
 //! - **Checked at commit.** A move's checks are its own: the controller's claims (T9 rule 4), the reach (B2), the seat
 //!   free and in reach (B3), a route (N7). They are made on the clock thread when the move starts, as B3 reserves a
-//!   seat: one tick's sits are taken together, in B3's stable order. A move refused there ends by that name.
+//!   seat: one tick's sits are taken one by one, in B3's stable order. A move refused there ends by that name.
+//! - **A thing with several seats** (C19, #3457). A sit names a thing; the world picks its free slot whose stand point
+//!   is nearest the body (`Slots::free`, ties by slot), so three Souls share a sofa, each in its own slot, and a fourth
+//!   is refused `place-taken`. A walk to a thing with no point goes to that slot's stand point. A restart hands each
+//!   seated body back into the slot its logged pose names.
 //! - **Ends by name.** A walk ends when its skill does: done, or failed by name. A sit or a rise ends when its move
 //!   does: `done`, or cancelled by name (`claim-taken`, `out-of-reach`). A new move on a body whose walk is still
 //!   going ends that walk `claim-taken`.
@@ -78,10 +82,27 @@ pub struct Asked {
     pub fallbacks: Vec<Ask>,
 }
 
+/// Whether `v` is a form's arguments: a list of `[name, value]` pairs, a name as bytes.
+fn form_args(v: Option<&Value>) -> bool {
+    match v {
+        Some(Value::Array(a)) => a.first().is_some_and(
+            |p| matches!(p, Value::Array(kv) if matches!(kv.first(), Some(Value::Bytes(_)))),
+        ),
+        _ => false,
+    }
+}
+
 /// Reads a move intent (`replica::move_check::read`, the client's own reading): `None` when its verb is not a move,
 /// else the ask and its fallbacks or the reason it is not one. A walk's point is parameter 1, `[x, y, z]` µm in its
 /// target's frame.
 pub fn read(intent: &Intent, body: Id) -> Option<Result<Asked, &'static str>> {
+    // A sit naming a form's arguments (`[[name, value], ...]`, its seat) is the entry's own form, run by the form
+    // runner with its walk (C17, #3453); a bare sit is the move.
+    if matches!(intent.verb.as_str().split_once(':'), Some((ns, "sit")) if ns != "souls")
+        && form_args(intent.parameters.get(&1))
+    {
+        return None;
+    }
     Some(move_check::read(intent)?.map(|mut asks| {
         let ask = asks.remove(0);
         Asked {
@@ -99,7 +120,10 @@ enum Live {
     Place(Instance),
 }
 
-/// Each body's point (its feet, or its seat's point while it is in one) and each seat's seat and stand point, µm.
+/// Each body's point (its feet, or its seat's stand point while it is in one) and each seat's seat and stand point,
+/// µm. A seat is taken from its stand point and left there (B3): its contacts (`souls:slot` for a sit or a lie,
+/// `souls:stand` for a rise) are reached at the stand point, across x and z, so the seat's own offset from it (the
+/// kind's model geometry, SEATDEF) is never counted against the body's reach (C17, #3453).
 struct Geo(BTreeMap<Id, Vec3>, BTreeMap<Id, [Vec3; 2]>);
 
 impl Reach for Geo {
@@ -112,14 +136,13 @@ impl Reach for Geo {
         point: &Name,
     ) -> Option<i64> {
         let a = self.0.get(&body)?;
-        let [place, stand] = self.1.get(&target)?;
+        let [_, stand] = self.1.get(&target)?;
         let b = match point.as_str() {
-            "souls:slot" => place,
-            "souls:stand" => stand,
+            "souls:slot" | "souls:stand" => stand,
             _ => return None,
         };
         let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
-        i64::try_from((d(a.x, b.x) + d(a.y, b.y) + d(a.z, b.z)).isqrt()).ok()
+        i64::try_from((d(a.x, b.x) + d(a.z, b.z)).isqrt()).ok()
     }
 }
 
@@ -250,7 +273,8 @@ impl Bodies {
     }
 
     /// Restart, after the seats are added (K18c, #3176): each body the log last had in a seat's slot is handed back
-    /// into it from where it was added, at body time `at`, and its seat is held again. A seat gone or taken leaves it
+    /// into that slot (its pose's frame names the thing and the slot, C19) from where it was added, at body time `at`,
+    /// and its seat is held again. A seat gone or taken leaves it
     /// standing, named in the result.
     pub fn seat_placed(&mut self, placed: &Placed, at: Micros) -> Vec<(Id, Refusal)> {
         let mut out = Vec::new();
@@ -258,11 +282,10 @@ impl Bodies {
             if pose.support != Support::Slot || self.runner.controller.body(body).is_none() {
                 continue;
             }
-            let thing = pose.frame.node;
             let r = self.slots.restore(
                 &mut self.runner.controller,
                 body,
-                thing,
+                (pose.frame.node, pose.frame.slot),
                 stance.unwrap_or(Stance::Sit),
                 at,
             );
@@ -329,14 +352,15 @@ impl Bodies {
         self.runner.now = now;
     }
 
-    fn geo(&self, bodies: &[Id], places: &[Id]) -> Geo {
+    /// The geometry for `bodies` and `places`, each place of a different thing (one body's seat, C19).
+    fn geo(&self, bodies: &[Id], places: &[&PlaceAt]) -> Geo {
         let c = &self.runner.controller;
         let points = bodies
             .iter()
             .filter_map(|&b| {
                 let p = c.body(b)?.pose;
-                let at = match (p.support, self.slots.held_by(b)) {
-                    (Support::Slot, Some(t)) => self.slots.place(t)?.point,
+                let at = match (p.support, self.slots.held_place(b)) {
+                    (Support::Slot, Some(s)) => s.stand().ok()?,
                     _ => p.position,
                 };
                 Some((b, at))
@@ -344,10 +368,7 @@ impl Bodies {
             .collect();
         let places = places
             .iter()
-            .filter_map(|&t| {
-                let s = self.slots.place(t)?;
-                Some((t, [s.point, s.stand().ok()?]))
-            })
+            .filter_map(|s| Some((s.thing, [s.point, s.stand().ok()?])))
             .collect();
         Geo(points, places)
     }
@@ -364,11 +385,17 @@ impl Bodies {
     /// Where a walk to `node` goes: `point` in its frame; with none, the stand point of `node`'s seat; else a free
     /// standing spot in `node` (C14): its middle by E2's shared library (`replica::select`, a client's answer at the
     /// same version), for N9's table to grant the nearest free legal standing spot to, the same every run.
-    fn goal(&self, node: Id, point: Option<Vec3>) -> R<Target> {
+    fn goal(&self, body: Id, node: Id, point: Option<Vec3>) -> R<Target> {
         if let Some(p) = point {
             return Ok(Target::new(node, p));
         }
-        if let Some(s) = self.slots.place(node) {
+        // The stand point of the free slot the world picks for `body` (C19), else of the thing's seat.
+        let place = self
+            .slots
+            .free(&self.runner.controller, body, node)
+            .and_then(|slot| self.slots.place_in(node, slot))
+            .or_else(|| self.slots.place(node));
+        if let Some(s) = place {
             return s.stand().map(|p| Target::new(s.floor, p));
         }
         let r = select::resolve(&self.town.tree, &Spot::Middle(node), None, &|_, _| false)?;
@@ -386,7 +413,10 @@ impl Bodies {
                 self.slots.place(t).is_some() || self.town.tree.handle(t).is_some()
             }),
             seated: Some(self.slots.held_by(body).is_some()),
-            free: t.map(|t| self.slots.holder(t).is_none()),
+            free: t.and_then(|t| {
+                self.slots.place(t)?;
+                Some(self.slots.free(&self.runner.controller, body, t).is_some())
+            }),
         }
     }
 
@@ -403,7 +433,11 @@ impl Bodies {
                     .iter()
                     .filter_map(|k| k.target().map(Slot::Named))
                     .collect();
-                let free = |t: Id| self.slots.place(t).is_some() && self.slots.holder(t).is_none();
+                let free = |t: Id| {
+                    self.slots
+                        .free(&self.runner.controller, a.body, t)
+                        .is_some()
+                };
                 match bind(&slots, free, 0, true) {
                     Bound::Slot { rank, .. } => Ok((rank, list[rank].clone())),
                     Bound::Ended(n) => Err(Refusal {
@@ -417,7 +451,7 @@ impl Bodies {
                 let mut last = None;
                 for (rank, k) in list.iter().enumerate() {
                     if let Ask::Walk { node, point } = k {
-                        match self.goal(*node, *point) {
+                        match self.goal(a.body, *node, *point) {
                             Ok(_) => return Ok((rank, (*k).clone())),
                             Err(r) => last = Some(r),
                         }
@@ -460,7 +494,7 @@ impl Bodies {
             self.took.insert(id, (rank, ask.target()));
             match ask {
                 Ask::Walk { node, point } => {
-                    let goal = self.goal(node, point);
+                    let goal = self.goal(a.body, node, point);
                     self.replace(a.body);
                     let walk = Box::new(Route::sent(WALK, self.runner.tick));
                     let r = goal.and_then(|g| self.runner.send(a.body, walk, g, id));
@@ -479,8 +513,8 @@ impl Bodies {
                 }
                 Ask::Rise => {
                     self.replace(a.body);
-                    let thing = self.slots.held_by(a.body);
-                    let geo = self.geo(&[a.body], &thing.into_iter().collect::<Vec<_>>());
+                    let held: Vec<&PlaceAt> = self.slots.held_place(a.body).into_iter().collect();
+                    let geo = self.geo(&[a.body], &held);
                     let r = self.slots.rise(
                         &mut self.runner.controller,
                         &mut self.due,
@@ -495,38 +529,41 @@ impl Bodies {
                 }
             }
         }
-        if !sits.is_empty() {
-            let bodies: Vec<Id> = sits.iter().map(|s| s.1).collect();
-            let things: Vec<Id> = sits.iter().map(|s| s.2).collect();
-            let geo = self.geo(&bodies, &things);
-            let requests: Vec<Request> = sits
-                .iter()
-                .map(|&(_, body, thing, stance)| Request {
-                    body,
-                    thing,
-                    mv: if stance == Stance::Lie {
-                        &self.lie
-                    } else {
-                        &self.sit
-                    },
-                    stance,
-                })
+        // Taken one by one in B3's stable order (body, then thing), each into the free slot the world picks for it
+        // (C19), its reach measured to that slot's stand point.
+        sits.sort_by_key(|s| (s.1, s.2));
+        for (id, body, thing, stance) in sits {
+            let slot = self.slots.free(&self.runner.controller, body, thing);
+            let place: Vec<&PlaceAt> = slot
+                .and_then(|s| self.slots.place_in(thing, s))
+                .into_iter()
                 .collect();
-            let done = self.slots.commit(
-                &mut self.runner.controller,
-                &mut self.due,
-                &mut self.mint,
-                &mut self.moves,
-                &geo,
-                &requests,
-                now,
-            );
-            // Sits and lies, taken in B3's stable order, and each matched back to its intent by its body.
-            for (body, r) in done {
-                if let Some(&(id, ..)) = sits.iter().find(|s| s.1 == body) {
-                    out.push((id, self.started(id, body, r)));
-                }
-            }
+            let geo = self.geo(&[body], &place);
+            let request = Request {
+                body,
+                thing,
+                slot,
+                mv: if stance == Stance::Lie {
+                    &self.lie
+                } else {
+                    &self.sit
+                },
+                stance,
+            };
+            let r = self
+                .slots
+                .commit(
+                    &mut self.runner.controller,
+                    &mut self.due,
+                    &mut self.mint,
+                    &mut self.moves,
+                    &geo,
+                    &[request],
+                    now,
+                )
+                .pop()
+                .map_or_else(|| Err(refusal("place-unknown", thing)), |(_, r)| r);
+            out.push((id, self.started(id, body, r)));
         }
         out
     }
@@ -546,10 +583,8 @@ impl Bodies {
             // host and the controller.
             let at = self.runner.now;
             while let Some(t) = self.due.fire(at + 1) {
-                let geo = self.geo(
-                    &[t.node],
-                    &self.slots.held_by(t.node).into_iter().collect::<Vec<_>>(),
-                );
+                let held: Vec<&PlaceAt> = self.slots.held_place(t.node).into_iter().collect();
+                let geo = self.geo(&[t.node], &held);
                 let fired = self.slots.fire(
                     &mut self.runner.controller,
                     &mut self.due,
