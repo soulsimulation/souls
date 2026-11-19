@@ -1,0 +1,219 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:fridge",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "pies": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 1,
+      "min": 0,
+      "max": 3
+    }
+  },
+  "points": {
+    "handle": {
+      "role": "grip",
+      "at_mm": [
+        270,
+        1000,
+        360
+      ]
+    },
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        900
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      670,
+      1685,
+      693
+    ]
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        },
+        {
+          "need": "within_reach",
+          "point": "handle"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "handle"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "opened"
+        },
+        {
+          "change": "link",
+          "link": "opener",
+          "from": "actor",
+          "event": "looked_inside"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        },
+        {
+          "need": "within_reach",
+          "point": "handle"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "handle"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "closed"
+        },
+        {
+          "change": "unlink",
+          "link": "opener",
+          "from": "actor",
+          "event": "stopped_looking"
+        }
+      ]
+    },
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "pies",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "create",
+          "kind": "eden:pie",
+          "into": "actor_hand",
+          "event": "took_a_pie"
+        }
+      ]
+    }
+  },
+  "links": {
+    "opener": {
+      "n": 1,
+      "from": "soul",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "closed": {
+    "audience": {
+      "rule": "linked",
+      "link": "opener"
+    },
+    "fields": [
+      "pies"
+    ]
+  },
+  "stock": {
+    "pies": {
+      "kind": "eden:pie",
+      "count": "pies",
+      "take": "take"
+    }
+  },
+  "motion": {
+    "how": "two_souls"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:fridge",
+    "table": [
+      {
+        "part": "door",
+        "field": "open",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "true": -100000,
+          "false": 0
+        }
+      }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"extrude","at":[0,15,0],"polygon":[[-335,-315],[335,-315],[335,315],[-335,315]],"h":1670,"tint":"body"},{"kind":"cyl","at":[-280,20,-260],"r":30,"h":40,"segments":5,"tint":"gap"},{"kind":"cyl","at":[280,20,-260],"r":30,"h":40,"segments":5,"tint":"gap"},{"kind":"cyl","at":[-280,20,260],"r":30,"h":40,"segments":5,"tint":"gap"},{"kind":"cyl","at":[280,20,260],"r":30,"h":40,"segments":5,"tint":"gap"},{"kind":"box","at":[0,850,340],"size":[660,1640,30],"tint":"body","role":"door","pivot":[-330,850,340]},{"kind":"cyl","at":[270,1000,370],"r":18,"h":400,"segments":5,"tint":"chrome","role":"door","pivot":[-330,850,340]}],"palette":{"body":"#e9e2cf","gap":"#9b968a","chrome":"#c9ced3"},"tags":["kitchen","fridge","object"]}
+  },
+  "text": {
+    "card": "A rounded retro fridge: open it to see inside and take a pie, then close it.",
+    "refrigerator": "refrigerator",
+    "icebox": "icebox",
+    "cooler": "cooler",
+    "kitchen": "kitchen"
+  },
+  "card": {
+    "text": "card",
+    "category": "kitchen",
+    "synonyms": [
+      "refrigerator",
+      "icebox",
+      "cooler"
+    ]
+  }
+}

@@ -2,14 +2,17 @@
 #![forbid(unsafe_code)]
 
 pub mod activity;
+pub mod audit;
 pub mod checkpoint;
 pub mod clock;
 pub mod commit;
 pub mod controller;
+pub mod daylight;
 pub mod edit;
 pub mod forms;
 pub mod frozen;
 pub mod gaits;
+pub mod gesture;
 pub mod ground;
 pub mod host;
 pub mod index;
@@ -17,12 +20,17 @@ pub mod links;
 pub mod log;
 pub mod mover;
 pub mod moves;
+pub mod refresh;
 pub mod routes;
 pub mod slots;
 pub mod speech;
 pub mod spots;
 pub mod structure;
+pub mod text;
+pub mod timed;
 pub mod timers;
+pub mod tracks;
+pub mod unit;
 pub mod unstick;
 pub mod walk;
 

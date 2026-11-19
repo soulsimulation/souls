@@ -1,0 +1,23 @@
+{
+  "format": "souls-entry/1",
+  "kind": "f5:kettle",
+  "owner": "thing",
+  "state": {
+    "heat": {
+      "n": 1, "type": "timed", "unit": "mC", "default": { "value": 20000, "per_s": 0, "set_us": 0 },
+      "min": 20000, "max": 100000, "levels": [{ "at_least": 100000, "form": "whistle" }],
+      "audience": { "rule": "everyone" }
+    },
+    "whistled": { "n": 2, "type": "int", "unit": "flag", "min": 0, "max": 1, "default": 0, "audience": { "rule": "everyone" } }
+  },
+  "geometry": { "bounds_mm": [310, 300, 240] },
+  "forms": {
+    "whistle": {
+      "who": "world",
+      "starts": "crossing",
+      "needs": [],
+      "steps": [{ "step": "wait", "us": 2000000 }],
+      "effects": [{ "change": "set", "field": "whistled", "to": 1 }]
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:shore",
+  "owner": "place",
+  "geometry": {"bounds_mm":[20000,300,20000]},
+  "looks": {"model":"look:shore"},
+  "text": {
+    "card": "The beach or stony edge of a lake or pond, down to the water.",
+    "ground": "ground",
+    "beach": "beach",
+    "waterside": "waterside"
+  },
+  "card": {"text":"card","category":"ground","synonyms":["beach","waterside"]}
+}

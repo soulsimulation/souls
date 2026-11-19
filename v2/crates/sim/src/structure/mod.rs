@@ -21,16 +21,21 @@
 //! - **Refusals:** `support.holders` (a part held by some, fewer than its crew, and not joined to stand) and
 //!   `support.none` (the part, and what it would hang by). The verdict is computed each time, never stored.
 //!
-//! Not here: load numbers, decks and stairs, moving parts (B19), a part's own pose (a part in a bay's slot stands).
+//! - **A part moved by a transfer** (B19, `crate::activity::seating`): a leave and arrive inside the zone is read as
+//!   the change of parent it makes, so a part handed into a bay's slot, out of it to a carry, and a crew's node moved
+//!   to a part (a hold) or off it are checked like any other change.
+//!
+//! Not here: load numbers, decks and stairs, a part's own pose (a part in a bay's slot stands).
 
 #[cfg(test)]
 mod tests;
 
 use replica::activity::{F_STATE, MEMBER};
-use replica::effects::{Body, Change, Effect, Refusal};
+use replica::effects::{Body, Change, Effect, Refusal, TransferRec};
 use replica::encode::Value;
 use replica::ids::{Id, KindSource};
 use replica::kinds::Kinds;
+use replica::pose::Frame;
 use replica::tree::Tree;
 use replica::world_model::{plain, show};
 use std::collections::{BTreeMap, BTreeSet};
@@ -165,19 +170,22 @@ impl Structure {
                 }
             }
         }
-        // A bay: a kind whose slots admit a standing kind.
-        let standing: BTreeSet<&str> = s
-            .roles
-            .iter()
-            .filter(|(_, r)| matches!(r, Role::Standing { .. }))
-            .map(|(n, _)| plain(n))
-            .collect();
-        for k in &defs {
-            if !k
-                .slots
+        // A bay: a kind whose slots admit a standing kind and a bearing one (a stand that holds frames is not a bay).
+        let of = |standing: bool| -> BTreeSet<&str> {
+            s.roles
+                .iter()
+                .filter(|(_, r)| matches!(r, Role::Standing { .. }) == standing)
+                .map(|(n, _)| plain(n))
+                .collect()
+        };
+        let (standing, bearing) = (of(true), of(false));
+        let admits = |k: &&replica::kinds::KindDef, set: &BTreeSet<&str>| {
+            k.slots
                 .values()
-                .any(|sl| sl.admits.iter().any(|a| standing.contains(a.as_str())))
-            {
+                .any(|sl| sl.admits.iter().any(|a| set.contains(a.as_str())))
+        };
+        for k in &defs {
+            if !admits(k, &standing) || !admits(k, &bearing) {
                 continue;
             }
             let spots = k
@@ -235,26 +243,54 @@ impl Structure {
         if self.bays.is_empty() {
             return Ok(());
         }
-        let changes: Vec<&Change> = effects
-            .iter()
-            .filter_map(|e| match &e.body {
-                Body::Changes(cs) => Some(cs.iter().map(|c| &c.change)),
-                _ => None,
-            })
-            .flatten()
-            .collect();
+        // Where each node created or moved by the part ends up, and its kind. A transfer's leave inside the zone (B19:
+        // a part handed to a slot or to a carry) is read as the change of parent it makes, from where the node is
+        // when it leaves.
         let mut made: BTreeMap<Id, (Id, String)> = BTreeMap::new();
+        let mut changes: Vec<Change> = Vec::new();
+        for e in effects {
+            match &e.body {
+                Body::Changes(cs) => {
+                    for c in cs {
+                        if let Change::Create {
+                            node, kind, pose, ..
+                        } = &c.change
+                        {
+                            made.insert(*node, (pose.frame.node, kind.as_str().to_owned()));
+                        }
+                        changes.push(c.change.clone());
+                    }
+                }
+                Body::Transfer(TransferRec::Leave { node, pose, .. }) => {
+                    let (Some(from), Some(kind)) = (
+                        Self::parent_of(tree, *node, &made),
+                        self.kind_of(tree, *node, &made),
+                    ) else {
+                        continue;
+                    };
+                    let slot = tree
+                        .handle(*node)
+                        .and_then(|h| tree.node(h))
+                        .and_then(|n| n.slot());
+                    made.insert(*node, (pose.frame.node, kind));
+                    changes.push(Change::Reparent {
+                        node: *node,
+                        from: Frame { node: from, slot },
+                        pose: *pose,
+                    });
+                }
+                _ => {}
+            }
+        }
         let mut bays = BTreeSet::new();
         let mut touched = BTreeSet::new();
         for c in &changes {
             let named: Vec<Id> = match c {
-                Change::Create {
-                    node, kind, pose, ..
-                } => {
-                    made.insert(*node, (pose.frame.node, kind.as_str().to_owned()));
+                Change::Create { node, .. }
+                | Change::Remove { node }
+                | Change::Set { node, .. } => {
                     vec![*node]
                 }
-                Change::Remove { node } | Change::Set { node, .. } => vec![*node],
                 Change::Reparent { node, from, pose } => vec![*node, from.node, pose.frame.node],
                 Change::Link { ends, .. } => ends.to_vec(),
                 Change::Unlink { link } => {
@@ -302,20 +338,31 @@ impl Structure {
             let Some(h) = tree.handle(p) else { continue };
             for a in tree.children(h).unwrap_or(&[]).to_vec() {
                 let Some(n) = tree.node(a) else { continue };
-                let Some(state) = uint(n.fields().get(&F_STATE)) else {
-                    continue;
-                };
-                let members = tree
-                    .links_of(a)
-                    .unwrap_or(&[])
-                    .iter()
-                    .filter(|e| tree.ty(e).as_str() == MEMBER)
-                    .map(|e| e.link)
-                    .collect();
-                b.acts.insert(n.id(), (p, state == STARTED, members));
+                if let Some((started, members)) = Self::act(tree, n.id()) {
+                    b.acts.insert(n.id(), (p, started, members));
+                }
             }
         }
         b
+    }
+
+    /// Whether `node` is an activity as the tree holds it: started, and its membership links.
+    fn act(tree: &Tree, node: Id) -> Option<(bool, BTreeSet<Id>)> {
+        let n = tree.handle(node).and_then(|h| tree.node(h))?;
+        let state = uint(n.fields().get(&F_STATE))?;
+        let members = tree
+            .links_of(tree.handle(node)?)
+            .unwrap_or(&[])
+            .iter()
+            .filter(|e| tree.ty(e).as_str() == MEMBER)
+            .map(|e| e.link)
+            .collect();
+        Some((state == STARTED, members))
+    }
+
+    /// Whether links of type `ty` (a full link type name) are joints: the rule reads them.
+    pub fn joint(&self, ty: &str) -> bool {
+        self.joints.contains(ty)
     }
 
     /// The joints at part `p` whose other end is a part of the bay.
@@ -376,6 +423,14 @@ impl Structure {
                             self.read_links(tree, b, *node);
                         }
                     }
+                } else if b.acts.get(node).is_some_and(|a| a.0 == from.node) {
+                    // An activity that held a part leaves it (B19: a hold becomes a carry again).
+                    b.acts.remove(node);
+                } else if b.parts.contains_key(&pose.frame.node)
+                    && let Some(a) = Self::act(tree, *node)
+                {
+                    // An activity comes to a part (B19: a carry becomes a hold), with its members.
+                    b.acts.insert(*node, (pose.frame.node, a.0, a.1));
                 }
             }
             Change::Set {

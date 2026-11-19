@@ -22,8 +22,8 @@
 //!   restart no claim is held by a move that did not come back, and a member can leave at once.
 //!
 //! Not here: contact rules (B6), the beat (B8), activities that keep members while empty, the gateway path (I7), a new
-//! revision when roles or places change, walking a member to its role's place, standing consent (a rule in the Soul's
-//! own client, E8 and R9).
+//! revision when roles or places change, walking a member to its role's place. Offers, accepted, declined or lapsed,
+//! are [`offer`] (E8); standing consent is a rule in the Soul's own client (R9), never here.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -44,6 +44,10 @@ use crate::moves::{Instance, Moves, Reach};
 use crate::structure::Structure;
 use crate::timers::{DueList, Timer};
 
+pub mod carry;
+pub mod offer;
+pub mod seating;
+
 type R<T> = Result<T, Refusal>;
 
 fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
@@ -62,6 +66,28 @@ fn minted(mint: &mut Minter) -> R<Id> {
         name: "id-counter-exhausted",
         detail: e.to_string(),
     })
+}
+
+/// The change that makes activity node `id` of `kind` under `place`, holding `node`.
+fn create(id: Id, kind: &Name, place: Id, audience: Audience, node: &Node) -> Change {
+    Change::Create {
+        node: id,
+        kind: kind.clone(),
+        pose: Pose {
+            frame: Frame {
+                node: place,
+                slot: None,
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: place,
+                height: 0,
+            },
+        },
+        audience,
+        fields: node.fields(),
+    }
 }
 
 /// The due list's name for the timer that lets a leaving body go.
@@ -108,6 +134,8 @@ pub struct Activities {
     holding: BTreeMap<Id, Id>,
     /// Leaves in progress, by their timer's id.
     leaving: BTreeMap<Id, Leaving>,
+    /// Offers still open or with pairs waiting (E8), and their bookkeeping.
+    offers: offer::Offers,
 }
 
 impl Activities {
@@ -123,6 +151,7 @@ impl Activities {
             live: BTreeMap::new(),
             holding: BTreeMap::new(),
             leaving: BTreeMap::new(),
+            offers: offer::Offers::default(),
         }
     }
 
@@ -154,7 +183,6 @@ impl Activities {
                 .is_some_and(|n| moves.record(*n).is_some())
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn write(
         &mut self,
         tree: &mut Tree,
@@ -164,13 +192,29 @@ impl Activities {
         event: &'static str,
         changes: Vec<Change>,
     ) -> R<()> {
+        let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
+        self.emit(tree, node, audience, by, event, BTreeMap::new(), changes)
+    }
+
+    /// Writes one effect at `node`: `by` is (when, who acted, why), with one event of `fields` naming every change.
+    #[allow(clippy::too_many_arguments)]
+    fn emit(
+        &mut self,
+        tree: &mut Tree,
+        node: Id,
+        audience: Audience,
+        by: (Micros, Actor, Cause),
+        event: &'static str,
+        fields: BTreeMap<u64, Value>,
+        changes: Vec<Change>,
+    ) -> R<()> {
         let n = changes.len() as u64;
         let effect = Effect {
             envelope: Envelope {
                 sequence: self.next,
-                at: ask.at,
-                cause: Cause::Intent(ask.intent),
-                actor: Actor::Soul(ask.soul),
+                at: by.0,
+                cause: by.2,
+                actor: by.1,
                 audience,
                 node,
             },
@@ -185,7 +229,7 @@ impl Activities {
             ),
             events: Some(vec![Event {
                 name: name(event),
-                fields: BTreeMap::new(),
+                fields,
                 changes: (0..n).collect(),
                 rest: Rest::new(),
             }]),
@@ -235,24 +279,7 @@ impl Activities {
             members: Vec::new(),
         };
         let id = minted(mint)?;
-        let create = Change::Create {
-            node: id,
-            kind: kind.clone(),
-            pose: Pose {
-                frame: Frame {
-                    node: place,
-                    slot: None,
-                },
-                position: Vec3::ZERO,
-                orientation: Quat::IDENTITY,
-                support: Support::Surface {
-                    surface: place,
-                    height: 0,
-                },
-            },
-            audience,
-            fields: node.fields(),
-        };
+        let create = create(id, kind, place, audience, &node);
         self.write(
             tree,
             place,
@@ -521,6 +548,8 @@ impl Activities {
             let _ = c.release(body, d);
         }
         let Some((n, record)) = instance.and_then(|n| moves.record(n).map(|r| (n, r))) else {
+            // Let go now: a pair accepted from its offer and waiting for this body starts (E8).
+            self.advance(tree, c, due, body, ask.at);
             return Ok(ask.at);
         };
         let bound = ask.at.saturating_add(within);

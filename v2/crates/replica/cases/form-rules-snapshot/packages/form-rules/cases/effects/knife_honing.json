@@ -1,0 +1,175 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The honing stone and camp knife (from #1886): three honings bring one knife from dull to fully maintained and spend the stone; a fourth, on another knife, is refused.",
+ "cases": [
+  {
+   "name": "hone_dull_to_fully_maintained_then_spent",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1",
+       "k1",
+       "k2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:honing_stone"
+     },
+     "k1": {
+      "kind": "eden:camp_knife"
+     },
+     "k2": {
+      "kind": "eden:camp_knife"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "hone_knife",
+      "args": {
+       "knife": "k1"
+      }
+     },
+     "receipt": "rh1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "honings",
+        "n": 1,
+        "to": 2,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "honings",
+        "n": 1,
+        "to": 1,
+        "by": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:knife_honed",
+        "node": "t1",
+        "changes": [
+         0,
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "hone_knife",
+      "args": {
+       "knife": "k1"
+      }
+     },
+     "receipt": "rh2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "honings",
+        "n": 1,
+        "to": 1,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "honings",
+        "n": 1,
+        "to": 2,
+        "by": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "hone_knife",
+      "args": {
+       "knife": "k1"
+      }
+     },
+     "receipt": "rh3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "honings",
+        "n": 1,
+        "to": 0,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "honings",
+        "n": 1,
+        "to": 3,
+        "by": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "hone_knife",
+      "args": {
+       "knife": "k2"
+      }
+     },
+     "receipt": "rh4",
+     "expect": {
+      "verdict": "no",
+      "reason": "not_enough",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:honing_stone",
+     "fields": {
+      "honings": 0
+     }
+    },
+    "k1": {
+     "kind": "eden:camp_knife",
+     "fields": {
+      "honings": 3
+     }
+    },
+    "k2": {
+     "kind": "eden:camp_knife"
+    }
+   }
+  }
+ ]
+}
