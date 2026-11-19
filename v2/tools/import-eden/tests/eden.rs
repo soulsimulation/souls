@@ -298,6 +298,13 @@ fn eden_2026_loads_with_the_bakes_counts_and_its_poses_compose_to_the_world() {
     println!("{tiles} terrain tiles read back byte for byte");
     assert_eq!(tiles, 256);
 
+    // C27 (#3509): a stall in the market pavilion stands in its room, the podium on the commons deck's floor, and a
+    // roof terrace's table on its hotel's roof floor; a stall on the open ground stays there.
+    assert_eq!(parent_key(&im, "e_baf7b2e1"), "e_26f30b38/pavilion");
+    assert_eq!(kind_of(&im, &parent_key(&im, "e_01496dba")), FLOOR);
+    assert_eq!(parent_key(&im, "e_090ced77"), "e_ad082d88/floor-3");
+    assert_eq!(parent_key(&im, "e_0ed9ffad"), "ground");
+
     // C9 (#3397): one full pass of K11's auditor over the seeded tree finds no slot holding two things.
     let mut a = Auditor::new();
     let mut faults = Vec::new();

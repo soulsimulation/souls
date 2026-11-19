@@ -236,6 +236,36 @@ fn a_malformed_or_unknown_step_is_refused_by_name_and_so_is_an_unknown_point() {
     );
 }
 
+/// C27 (#3509): a `walk_to` naming a placed area (entry format section 16) walks to that area's `at_mm`; an area
+/// with no place (`part`) is still `point-unknown`.
+#[test]
+fn c27_a_walk_to_naming_a_placed_area_walks_to_its_at_mm() {
+    let entry = parse(
+        r#"{"areas":{"shade":{"at_mm":[0,0,2500],"radius_mm":3000,"allows":{"stand":"on"}},
+            "lid":{"part":"lid","forbids":["sit"]}},
+            "forms":{"rest":{"steps":[{"step":"walk_to","point":"shade"}]},
+                     "lean":{"steps":[{"step":"walk_to","point":"lid"}]}}}"#,
+    )
+    .expect("JSON");
+    match &bind(&entry, "rest").expect("binds")[..] {
+        [
+            Step::WalkTo {
+                point,
+                at,
+                on: None,
+            },
+        ] => {
+            assert_eq!(point.as_str(), "shade");
+            assert_eq!(*at, Vec3::new(0, 0, 2_500_000));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        bind(&entry, "lean").expect_err("refused").name,
+        "point-unknown"
+    );
+}
+
 /// C17 (#3453): a `sit` step binds to its slot (by name or by argument), lying where the slot's posture is `lie` or
 /// the step is a `lie`; the form's `reparent` of the actor into that slot is the sit's own hand-off, not an effect;
 /// and the runner asks the world to take the seat, waking at its contact (the effect's instant) and ending done.

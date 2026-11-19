@@ -6,7 +6,9 @@
 //! - world -> open ground -> each thing placed at the world root. A thing's children are its plain children and those
 //!   in its slots (slot number = the slot's place in its bake, from 1). A room slot is not a slot: it is a room node.
 //! - a thing with rooms, floors or stairs -> one floor node per level -> its rooms. A thing placed in a room slot is a
-//!   child of that room. A window is a node under the room it opens from, with its width, height and sill.
+//!   child of that room. A window is a node under the room it opens from, with its width, height and sill. A thing
+//!   standing on a building's own floor (at the root, or in a slot of the building on that floor: a roof terrace) is
+//!   a child of that floor, or of its room there (C27, `on_floor`).
 //! - a doorway (a door, gate or arch opening) is a link between the room it opens from and the room it leads to, or
 //!   the open ground; one with no rooms (a wall's gate) joins its thing to the open ground. The door thing standing in
 //!   it keeps the link's id and its open state. A stair, ramp or ladder is a link between two floor nodes. Links carry
@@ -239,6 +241,77 @@ impl Build {
     }
 }
 
+/// Pose `p` (`[x, y, z, yaw mdeg]`, mm) given in the frame `frame` is in, carried into `frame`'s own.
+fn into(frame: [i64; 4], p: [i64; 4]) -> R<[i64; 4]> {
+    let e = |e| format!("{e:?}");
+    let d = Vec3::new(p[0] - frame[0], p[1] - frame[1], p[2] - frame[2]);
+    let back = Quat::from_yaw_mdeg((-frame[3]).rem_euclid(360_000)).map_err(e)?;
+    let q = back
+        .rotate(Vec3::new(d.x * 1000, d.y * 1000, d.z * 1000))
+        .map_err(e)?;
+    let mm = |v: i64| (v + v.signum() * 500) / 1000;
+    Ok([
+        mm(q.x),
+        mm(q.y),
+        mm(q.z),
+        (p[3] - frame[3]).rem_euclid(360_000),
+    ])
+}
+
+/// Whether `[x, z]` lies inside the polygon `poly` (`[[x, z] …]` mm), by crossings.
+fn inside(q: [i64; 2], poly: &Json) -> bool {
+    let pts: Vec<[i64; 2]> = poly
+        .arr()
+        .iter()
+        .filter_map(|p| match p.arr() {
+            [x, z] => Some([x.int()?, z.int()?]),
+            _ => None,
+        })
+        .collect();
+    let mut odd = false;
+    for k in 0..pts.len() {
+        let (a, c) = (pts[k], pts[(k + pts.len() - 1) % pts.len()]);
+        if (a[1] > q[1]) != (c[1] > q[1]) {
+            // x of the edge at q's z, compared without dividing: (q.x - a.x)·(c.z - a.z) < (c.x - a.x)·(q.z - a.z).
+            let (l, r) = (
+                i128::from(q[0] - a[0]) * i128::from(c[1] - a[1]),
+                i128::from(c[0] - a[0]) * i128::from(q[1] - a[1]),
+            );
+            if (c[1] > a[1] && l < r) || (c[1] < a[1] && l > r) {
+                odd = !odd;
+            }
+        }
+    }
+    odd
+}
+
+/// The floor of thing `host` that a thing at `local` (its pose in `host`'s frame) stands on, as `floor-<n>` or the
+/// room there that holds it, with the thing's pose in that node's frame (C27, #3509). Only a floor of the thing's own:
+/// one with a room on its level, or raised more than a step (`BODY_SPAN.0`, the walk's step) above the thing's
+/// origin. A lower floor with no room (a lawn, a path) is ground cover, walked as the open ground. The thing stands
+/// within a step of it.
+fn on_floor(host: &Json, local: [i64; 4]) -> R<Option<(String, [i64; 4])>> {
+    let rooms = need(host, "rooms").map(Json::arr).unwrap_or(&[]);
+    for fl in need(host, "floors").map(Json::arr).unwrap_or(&[]) {
+        let (lv, y) = (int(fl, "level")?, int(fl, "y")?);
+        let roomed = rooms.iter().any(|r| int(r, "floor").ok() == Some(lv));
+        if (local[1] - y).abs() > BODY_SPAN.0
+            || !(roomed || y > BODY_SPAN.0)
+            || !inside([local[0], local[2]], need(fl, "polygon")?)
+        {
+            continue;
+        }
+        for r in rooms.iter().filter(|r| int(r, "floor").ok() == Some(lv)) {
+            let q = into(pose4(need(r, "pose")?)?, local)?;
+            if inside([q[0], q[2]], need(r, "polygon")?) {
+                return Ok(Some((s(r, "id")?.to_owned(), q)));
+            }
+        }
+        return Ok(Some((format!("floor-{lv}"), local)));
+    }
+    Ok(None)
+}
+
 fn pose4(j: &Json) -> R<[i64; 4]> {
     let a = j.arr();
     if a.len() != 4 {
@@ -290,7 +363,8 @@ pub fn load(text: &str) -> R<Import> {
         ),
         (
             FLOOR,
-            format!("{{1: \"{FLOOR}\", 2: \"place\", 11: [\"{ROOM}\"]}}"),
+            // A thing on a floor outside its rooms (a deck's, a roof terrace's) is the floor's (C27).
+            format!("{{1: \"{FLOOR}\", 2: \"place\", 11: [\"thing\", \"{ROOM}\"]}}"),
         ),
         (
             ROOM,
@@ -705,6 +779,65 @@ pub fn load(text: &str) -> R<Import> {
         }
         if let Some(rows) = stair_fields.remove(&sp.id) {
             sp.fields.insert(F_STAIRS, Value::Array(rows));
+        }
+    }
+
+    // --- On another thing's floor (C27, #3509): a thing at the root standing on a building's own floor (a pavilion's,
+    // a deck's), or in a building's slot that lies on one of its floors (a roof terrace), stands on that floor, in
+    // the room there that holds it: the open ground is cut out under such a floor, and a roof is no ground. Moved
+    // after every node has its id, so no id changes. A decor thing stays where it is: scenery may reach far past the
+    // building its origin is in (a cableway from its valley station).
+    let decor: BTreeSet<&str> = need(&f, "kinds")?
+        .arr()
+        .iter()
+        .filter(|k| k.get("layer").and_then(Json::str) == Some("decor"))
+        .filter_map(|k| k.get("ref").and_then(Json::str))
+        .collect();
+    let hosts: Vec<&Json> = things
+        .iter()
+        .filter(|t| t.get("parent").and_then(Json::str).is_none() && t.get("floors").is_some())
+        .collect();
+    let mut at: HashMap<Id, usize> = HashMap::new();
+    for (k, sp) in b.specs.iter().enumerate() {
+        at.insert(sp.id, k);
+    }
+    for t in things {
+        if t.get("floors").is_some() || t.get("rooms").is_some() || decor.contains(s(t, "ref")?) {
+            continue;
+        }
+        let found = match (t.get("parent").and_then(Json::str), t.get("slot")) {
+            (None, _) => {
+                let w = pose4(need(t, "pose")?)?;
+                let mut found = None;
+                for h in &hosts {
+                    let local = into(pose4(need(h, "pose")?)?, w)?;
+                    if let Some(f) = on_floor(h, local)? {
+                        found = Some((s(h, "id")?, f));
+                        break;
+                    }
+                }
+                found
+            }
+            (Some(p), Some(sl)) if sl.get("n").is_some() => {
+                match hosts
+                    .iter()
+                    .find(|h| h.get("id").and_then(Json::str) == Some(p))
+                {
+                    Some(h) => on_floor(h, pose4(need(t, "pose")?)?)?.map(|f| (p, f)),
+                    None => None,
+                }
+            }
+            _ => None,
+        };
+        if let Some((host, (key, pose))) = found {
+            let (Some(&node), Some(&parent)) = (
+                b.nodes.get(s(t, "id")?),
+                b.nodes.get(&format!("{host}/{key}")),
+            ) else {
+                continue;
+            };
+            let sp = &mut b.specs[at[&node]];
+            (sp.parent, sp.slot, sp.pose) = (parent, None, pose);
         }
     }
 
