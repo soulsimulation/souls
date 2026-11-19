@@ -52,10 +52,10 @@ pub struct Profile {
     pub description: Option<String>,
 }
 
-/// A world's name as a request names it: 1 to 40 of `a-z`, `0-9` and `-` (G9's names; a reserved one may still be
-/// an old world's).
+/// A world's name as a request names it: 1 to 80 of `a-z`, `0-9` and `-` (G9's names, up to 40, or a placed
+/// world's instance name, `<32 hex>-<32 hex>-<n>`; a reserved one may still be an old world's).
 pub fn is_world(text: &str) -> bool {
-    (1..=40).contains(&text.len())
+    (1..=80).contains(&text.len())
         && text
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
