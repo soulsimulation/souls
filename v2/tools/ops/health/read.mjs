@@ -8,7 +8,8 @@
 //   their budget and each queue's oldest item;
 // - this machine's cached copy of the world's directory record, `cache/<world>` (W8, #2729): where it runs and when a
 //   sleeping world must wake.
-// The watcher's last look (O15) and the cost (O11) have no source yet: they are `null` and read "not metered".
+// - the off-machine watcher's last look, `watcher.json` (O15, #2808), written by v2/tools/ops/watch/look.mjs.
+// The cost (O11) has no source yet: it is `null` and reads "not metered"; so does the watcher's column until a first look.
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -92,7 +93,7 @@ export function worldRow(root, world, now) {
       over_budget: h.over_budget ?? null,
       health_age_s: Number.isFinite(h.at_unix_ms) ? Math.max(0, Math.round((now - h.at_unix_ms) / 1000)) : null,
     } : null,
-    watcher: null,
+    watcher: json(join(root, 'watcher.json'))?.at_unix_ms ?? null,
     cost: null,
   };
 }

@@ -4,6 +4,7 @@
 //! K4's log on a disk in memory.
 
 use super::*;
+use crate::edit::plan;
 use crate::log::{Log, Mem};
 use replica::edit::{Edit, Op, Ref, Spot, check, reverses};
 use replica::effects::{FIXTURE_HEADER, Header, fixture_bytes};
@@ -120,7 +121,9 @@ impl W {
             planned: self.live.version(),
             ops,
         };
-        let checked = check(edit, &self.live.frozen(), &self.world).expect("checked");
+        let copy = self.live.frozen();
+        let checked = check(edit, &copy, &self.world).expect("checked");
+        let planned = plan(checked, &copy, None).expect("planned");
         self.at += 1_000;
         let step = step.map(|s| Step {
             build: "house".to_owned(),
@@ -128,7 +131,14 @@ impl W {
         });
         let c = self
             .history
-            .edit(&mut self.live, &mut self.minter, &checked, self.at, step)
+            .edit(
+                &mut self.live,
+                &mut self.minter,
+                &planned,
+                &[],
+                self.at,
+                step,
+            )
             .expect("committed");
         self.append(&c.part);
         c

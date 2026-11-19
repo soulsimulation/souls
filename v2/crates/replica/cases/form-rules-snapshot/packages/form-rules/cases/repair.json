@@ -1,0 +1,97 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Repair and mending (SA-X12, #2907), from the merged rules of #1074 (the bench and its hammer), #1575 (tent canvas and the sewing awl) and #1641 (the ceramic bowl and the lacquer brush), all one faculty in mending.ts. A thing is repaired only while it is broken ('<the thing> is not broken.'), only with its tool in a hand ('<the thing> needs a hammer in your hand, and there is no hammer within reach here.'; the original fetched the nearest tool on the way, which is this refusal's fix, a take of that kind), and a bench only with nobody on it ('Someone is sitting on the bench; it can't be repaired under them.'). Where to stand ('There is no room to stand and work at the bench.') is the world's answer, not a need. The bench's sit form is the seating bench's, unchanged.",
+  "cases": [
+    {
+      "name": "bench_sit_every_need_met",
+      "act": { "this": "rb1", "form": "sit", "args": { "seat": "left" } },
+      "state": { "actor": "b1", "nodes": { "rb1": { "kind": "eden:repairable_bench" }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "bench_sit_seat_taken",
+      "act": { "this": "rb1", "form": "sit", "args": { "seat": "left" } },
+      "state": { "actor": "b1", "nodes": { "rb1": { "kind": "eden:repairable_bench", "slots": { "left": ["b2"] } }, "b1": { "hands": { "left": null, "right": null } }, "b2": {} } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0 }
+    },
+    {
+      "name": "bench_repair_every_need_met",
+      "act": { "this": "rb1", "form": "repair" },
+      "state": { "actor": "b1", "nodes": { "rb1": { "kind": "eden:repairable_bench", "fields": { "condition": "cracked" } }, "h1": { "kind": "eden:hammer" }, "b1": { "hands": { "left": null, "right": "h1" } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "bench_repair_not_broken",
+      "act": { "this": "rb1", "form": "repair" },
+      "state": { "actor": "b1", "nodes": { "rb1": { "kind": "eden:repairable_bench" }, "h1": { "kind": "eden:hammer" }, "b1": { "hands": { "left": null, "right": "h1" } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "condition", "found": "whole", "wanted": { "is": "cracked" } }, "fix": null }
+    },
+    {
+      "name": "bench_repair_no_hammer_in_hand",
+      "act": { "this": "rb1", "form": "repair" },
+      "state": { "actor": "b1", "nodes": { "rb1": { "kind": "eden:repairable_bench", "fields": { "condition": "cracked" } }, "a1": { "kind": "eden:sewing_awl" }, "b1": { "hands": { "left": "a1", "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_holding_kind", "need": 1, "detail": { "kind": "eden:hammer" }, "fix": { "step": "take", "kind": "eden:hammer" } }
+    },
+    {
+      "name": "bench_repair_someone_on_the_left_seat",
+      "act": { "this": "rb1", "form": "repair" },
+      "state": { "actor": "b1", "nodes": { "rb1": { "kind": "eden:repairable_bench", "fields": { "condition": "cracked" }, "slots": { "left": ["b2"] } }, "h1": { "kind": "eden:hammer" }, "b1": { "hands": { "left": null, "right": "h1" } }, "b2": {} } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 2, "detail": { "node": "rb1", "slot": "left" } }
+    },
+    {
+      "name": "bench_repair_someone_on_the_right_seat",
+      "act": { "this": "rb1", "form": "repair" },
+      "state": { "actor": "b1", "nodes": { "rb1": { "kind": "eden:repairable_bench", "fields": { "condition": "cracked" }, "slots": { "right": ["b2"] } }, "h1": { "kind": "eden:hammer" }, "b1": { "hands": { "left": null, "right": "h1" } }, "b2": {} } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 3, "detail": { "node": "rb1", "slot": "right" } }
+    },
+    {
+      "name": "tent_mend_every_need_met",
+      "act": { "this": "t1", "form": "mend" },
+      "state": { "actor": "b1", "nodes": { "t1": { "kind": "eden:mendable_tent", "fields": { "condition": "torn" } }, "a1": { "kind": "eden:sewing_awl" }, "b1": { "hands": { "left": "a1", "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "tent_mend_not_torn",
+      "act": { "this": "t1", "form": "mend" },
+      "state": { "actor": "b1", "nodes": { "t1": { "kind": "eden:mendable_tent" }, "a1": { "kind": "eden:sewing_awl" }, "b1": { "hands": { "left": "a1", "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "condition", "found": "whole", "wanted": { "is": "torn" } }, "fix": null }
+    },
+    {
+      "name": "tent_mend_no_awl_in_hand",
+      "act": { "this": "t1", "form": "mend" },
+      "state": { "actor": "b1", "nodes": { "t1": { "kind": "eden:mendable_tent", "fields": { "condition": "torn" } }, "h1": { "kind": "eden:hammer" }, "b1": { "hands": { "left": null, "right": "h1" } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_holding_kind", "need": 1, "detail": { "kind": "eden:sewing_awl" }, "fix": { "step": "take", "kind": "eden:sewing_awl" } }
+    },
+    {
+      "name": "bowl_restore_every_need_met",
+      "act": { "this": "g1", "form": "restore" },
+      "state": { "actor": "b1", "nodes": { "g1": { "kind": "eden:gold_seam_station" }, "l1": { "kind": "eden:lacquer_brush" }, "b1": { "hands": { "left": null, "right": "l1" } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "bowl_restore_already_restored",
+      "act": { "this": "g1", "form": "restore" },
+      "state": { "actor": "b1", "nodes": { "g1": { "kind": "eden:gold_seam_station", "fields": { "condition": "restored" } }, "l1": { "kind": "eden:lacquer_brush" }, "b1": { "hands": { "left": null, "right": "l1" } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "condition", "found": "restored", "wanted": { "is": "cracked" } }, "fix": null }
+    },
+    {
+      "name": "bowl_restore_empty_hands",
+      "act": { "this": "g1", "form": "restore" },
+      "state": { "actor": "b1", "nodes": { "g1": { "kind": "eden:gold_seam_station" }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_holding_kind", "need": 1, "detail": { "kind": "eden:lacquer_brush" }, "fix": { "step": "take", "kind": "eden:lacquer_brush" } }
+    }
+  ]
+}

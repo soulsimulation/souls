@@ -1,0 +1,1249 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:sand_garden (from #1678). Four cells of sand (back left, back right, front left, front right, in the garden's own frame with its stand at the front), each smooth, brushed along or brushed across. Anyone with a free hand brushes a chosen cell a chosen way (one form, `brush`: its `cell` argument is one of the four cell fields and its `pattern` one of along and across, each from the form's own list), ten seconds of work, or smooths all four. Refused, as the original refused: a cell that already has that furrow direction ('That cell already has this furrow direction.'), whose fix is the other direction, and no free hand ('Put down what you are holding before brushing the sand.'). and smoothing sand that is already smooth ('The sand is already smooth.', by `says`: a need that at least one of the four cells is not smooth). Brushing a cell smooth is not a choice of `brush` (bad input): smoothing is its own form.",
+  "cases": [
+    {
+      "name": "brush_back_left_along_every_need_met",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "back_left",
+          "pattern": "along"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "brush_back_left_along_already_so",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "back_left",
+          "pattern": "along"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden",
+            "fields": {
+              "back_left": "along"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "back_left",
+          "found": "along",
+          "wanted": {
+            "not": "along"
+          }
+        },
+        "fix": {
+          "form": "brush",
+          "args": {
+            "cell": "back_left",
+            "pattern": "across"
+          }
+        }
+      }
+    },
+    {
+      "name": "brush_back_left_along_hands_full",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "back_left",
+          "pattern": "along"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "brush_back_left_across_every_need_met",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "back_left",
+          "pattern": "across"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "brush_back_left_across_already_so",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "back_left",
+          "pattern": "across"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden",
+            "fields": {
+              "back_left": "across"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "back_left",
+          "found": "across",
+          "wanted": {
+            "not": "across"
+          }
+        },
+        "fix": {
+          "form": "brush",
+          "args": {
+            "cell": "back_left",
+            "pattern": "along"
+          }
+        }
+      }
+    },
+    {
+      "name": "brush_back_left_across_hands_full",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "back_left",
+          "pattern": "across"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "brush_back_right_along_every_need_met",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "back_right",
+          "pattern": "along"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "brush_back_right_along_already_so",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "back_right",
+          "pattern": "along"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden",
+            "fields": {
+              "back_right": "along"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "back_right",
+          "found": "along",
+          "wanted": {
+            "not": "along"
+          }
+        },
+        "fix": {
+          "form": "brush",
+          "args": {
+            "cell": "back_right",
+            "pattern": "across"
+          }
+        }
+      }
+    },
+    {
+      "name": "brush_back_right_along_hands_full",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "back_right",
+          "pattern": "along"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "brush_back_right_across_every_need_met",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "back_right",
+          "pattern": "across"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "brush_back_right_across_already_so",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "back_right",
+          "pattern": "across"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden",
+            "fields": {
+              "back_right": "across"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "back_right",
+          "found": "across",
+          "wanted": {
+            "not": "across"
+          }
+        },
+        "fix": {
+          "form": "brush",
+          "args": {
+            "cell": "back_right",
+            "pattern": "along"
+          }
+        }
+      }
+    },
+    {
+      "name": "brush_back_right_across_hands_full",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "back_right",
+          "pattern": "across"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "brush_front_left_along_every_need_met",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "front_left",
+          "pattern": "along"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "brush_front_left_along_already_so",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "front_left",
+          "pattern": "along"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden",
+            "fields": {
+              "front_left": "along"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "front_left",
+          "found": "along",
+          "wanted": {
+            "not": "along"
+          }
+        },
+        "fix": {
+          "form": "brush",
+          "args": {
+            "cell": "front_left",
+            "pattern": "across"
+          }
+        }
+      }
+    },
+    {
+      "name": "brush_front_left_along_hands_full",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "front_left",
+          "pattern": "along"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "brush_front_left_across_every_need_met",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "front_left",
+          "pattern": "across"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "brush_front_left_across_already_so",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "front_left",
+          "pattern": "across"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden",
+            "fields": {
+              "front_left": "across"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "front_left",
+          "found": "across",
+          "wanted": {
+            "not": "across"
+          }
+        },
+        "fix": {
+          "form": "brush",
+          "args": {
+            "cell": "front_left",
+            "pattern": "along"
+          }
+        }
+      }
+    },
+    {
+      "name": "brush_front_left_across_hands_full",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "front_left",
+          "pattern": "across"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "brush_front_right_along_every_need_met",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "front_right",
+          "pattern": "along"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "brush_front_right_along_already_so",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "front_right",
+          "pattern": "along"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden",
+            "fields": {
+              "front_right": "along"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "front_right",
+          "found": "along",
+          "wanted": {
+            "not": "along"
+          }
+        },
+        "fix": {
+          "form": "brush",
+          "args": {
+            "cell": "front_right",
+            "pattern": "across"
+          }
+        }
+      }
+    },
+    {
+      "name": "brush_front_right_along_hands_full",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "front_right",
+          "pattern": "along"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "brush_front_right_across_every_need_met",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "front_right",
+          "pattern": "across"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "brush_front_right_across_already_so",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "front_right",
+          "pattern": "across"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden",
+            "fields": {
+              "front_right": "across"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "front_right",
+          "found": "across",
+          "wanted": {
+            "not": "across"
+          }
+        },
+        "fix": {
+          "form": "brush",
+          "args": {
+            "cell": "front_right",
+            "pattern": "along"
+          }
+        }
+      }
+    },
+    {
+      "name": "brush_front_right_across_hands_full",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "front_right",
+          "pattern": "across"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "smooth_every_need_met",
+      "act": {
+        "this": "sg1",
+        "form": "smooth"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden",
+            "fields": {
+              "back_left": "along",
+              "front_right": "across"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "smooth_hands_full",
+      "act": {
+        "this": "sg1",
+        "form": "smooth"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden",
+            "fields": {
+              "back_left": "along"
+            }
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "smooth_already_smooth",
+      "act": {
+        "this": "sg1",
+        "form": "smooth"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "fields": [
+            "back_left",
+            "back_right",
+            "front_left",
+            "front_right"
+          ],
+          "found": [
+            "smooth",
+            "smooth",
+            "smooth",
+            "smooth"
+          ],
+          "wanted": {
+            "not": "smooth"
+          }
+        },
+        "fix": null,
+        "says": "already_smooth"
+      }
+    },
+    {
+      "name": "smooth_one_cell_brushed",
+      "act": {
+        "this": "sg1",
+        "form": "smooth"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden",
+            "fields": {
+              "front_right": "across"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "brush_a_value_the_form_does_not_list",
+      "act": {
+        "this": "sg1",
+        "form": "brush",
+        "args": {
+          "cell": "back_left",
+          "pattern": "smooth"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sg1": {
+            "kind": "eden:sand_garden",
+            "fields": {
+              "back_left": "along"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "bad_input",
+        "need": -1,
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "pattern",
+          "value": "smooth"
+        },
+        "fix": null
+      }
+    }
+  ]
+}
