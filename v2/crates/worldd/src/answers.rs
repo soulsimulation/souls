@@ -48,6 +48,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use crate::bodies::{self, Ask, Asked, Bodies};
+use crate::buildsafe;
 use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
 use crate::measures::{self, Measures, Stamps};
 use crate::words;
@@ -69,6 +70,7 @@ use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
 use sim::commit::spot::{self, Spot as Bound};
 use sim::commit::{Checks, Outcome, commit, mark_clock_thread};
 use sim::edit::Planned;
+use sim::edit::safety::Who;
 use sim::frozen::Publisher;
 use sim::log::{Durable, Log, Storage};
 use sim::text::Store;
@@ -105,8 +107,9 @@ pub enum Event {
         key: u64,
     },
     Checked(Box<(Act, Checks)>),
-    /// An edit checked off the clock thread on a frozen copy (G1b): to commit at the next tick, or its refusal.
-    Edited(Box<(Id, Result<Planned, Refused>)>),
+    /// An edit checked off the clock thread on a frozen copy (G1b): to commit at the next tick with the Souls' bodies
+    /// read from that copy (G1c), or its refusal.
+    Edited(Box<(Id, Result<Checked, Refused>)>),
     /// Holds the clock thread for this long: the stuck-thread run (O4 A4).
     Stall(Duration),
     Stop,
@@ -281,10 +284,13 @@ struct Clock {
     /// Where edits go to be checked off the clock thread, when the world takes edits (G1b).
     edits: Option<Sender<(Id, Edit)>>,
     /// Edits checked since the last tick, committed (or refused) at the next.
-    edited: Vec<(Id, Result<Planned, Refused>)>,
+    edited: Vec<(Id, Result<Checked, Refused>)>,
     /// K16's store, where words are kept (V1b).
     text: Arc<Store>,
 }
+
+/// An edit planned off the clock, and the Souls' bodies its commit is judged against (G2's rule, G1c).
+type Checked = (Planned, Vec<Who>);
 
 /// What an intent becomes: a form's act for the checkers, a move for the bodies, or an edit for the edit checker.
 enum Taken {
@@ -722,9 +728,9 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
                 continue;
             }
-            let committed = checked.and_then(|c| {
+            let committed = checked.and_then(|(c, souls)| {
                 let mut minter = Minter::at(self.lineage, self.next_intent);
-                let done = sim::edit::commit(&mut self.replica, &mut minter, &c, &[], now);
+                let done = sim::edit::commit(&mut self.replica, &mut minter, &c, &souls, now);
                 self.next_intent = minter.next();
                 done
             });
@@ -1215,8 +1221,9 @@ pub fn start<S: Storage + 'static>(
 
 /// The edit checker's thread (G1b): each edit is checked (`replica::edit::check`) and planned (`sim::edit::plan`, G2's
 /// safety guard) on the newest frozen copy that stands at the version it was planned against, or after a second
-/// whatever it stands at, never on the live tree. The toggles world has no open ground (`None`); its commit is judged
-/// against no Soul's body yet (G1b leaves the bodies' list to a later task).
+/// whatever it stands at, never on the live tree. G2 is given that copy's open ground and its Souls' bodies
+/// ([`crate::buildsafe`], G1c): the plan is cut on the ground, and the commit judges the bodies (lookups only), so an
+/// edit that would bury a Soul, cut it off or change what it uses is refused by name, naming the Soul.
 fn edit_checker(
     world: edit::World,
     publisher: Arc<Publisher>,
@@ -1228,8 +1235,10 @@ fn edit_checker(
         .spawn(move || {
             for (id, e) in rx {
                 let copy = publisher.wait_for(e.planned, Duration::from_secs(1));
-                let checked =
-                    edit::check(e, &copy, &world).and_then(|c| sim::edit::plan(c, &copy, None));
+                let ground = buildsafe::open_ground(&copy);
+                let checked = edit::check(e, &copy, &world)
+                    .and_then(|c| sim::edit::plan(c, &copy, ground))
+                    .map(|p| (p, buildsafe::souls(&copy, &world.kinds)));
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
                     break;
                 }

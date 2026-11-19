@@ -5,6 +5,7 @@
 
 pub mod answers;
 pub mod bodies;
+pub mod buildsafe;
 pub mod checkers;
 pub mod measures;
 pub mod shipping;
