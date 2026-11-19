@@ -52,6 +52,8 @@ pub enum Kind {
     Order,
     /// A cancel of an earlier intent of the same actor, named by `replaces`.
     Cancel,
+    /// A creator's edit: a batch of place, move, set and remove operations under one cause (rule 15).
+    Edit,
 }
 
 /// A target (rule 3): a node, or a selector from a closed list (E2 fills it) that the engine binds at commit and
@@ -272,8 +274,8 @@ impl Intent {
     /// (`intent-too-large`); then the record (`intent-not-a-record`, unknown fields included, `not-canonical`), the
     /// verb (`order-unknown` for an engine verb outside the closed list), the fallbacks (`fallbacks-too-many`,
     /// `fallback-not-an-act`, `fallbacks-not-on-an-act`), each kind's shape (`order-without-target`,
-    /// `cancel-without-replaces`, `cancel-not-bare`) and the driven body (`creator-without-body`,
-    /// `body-not-a-creators`).
+    /// `cancel-without-replaces`, `cancel-not-bare`, `edit-not-bare`, `edit-not-a-batch`) and the driven body
+    /// (`creator-without-body`, `body-not-a-creators`; an edit drives none).
     pub fn read(bytes: &[u8]) -> R<Intent> {
         let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         if size > INTENT_MOST {
@@ -350,8 +352,20 @@ impl Intent {
                 return refuse("cancel-not-bare", "a cancel carries only what it ends");
             }
         }
+        if kind == Kind::Edit {
+            // An edit drives no body, and the world decides who may send one (`edit.not-the-creator`).
+            if intent.target.is_some()
+                || !intent.resources.is_empty()
+                || intent.replaces.is_some()
+                || intent.body.is_some()
+            {
+                return refuse("edit-not-bare", "an edit carries only its batch");
+            }
+            crate::edit::wire::read(&intent.parameters)
+                .or_else(|why| refuse("edit-not-a-batch", why))?;
+        }
         match (intent.actor, intent.body) {
-            (Actor::Creator(_), None) => {
+            (Actor::Creator(_), None) if kind != Kind::Edit => {
                 return refuse(
                     "creator-without-body",
                     "a creator names the world's body it drives",
@@ -368,14 +382,16 @@ impl Intent {
         Ok(intent)
     }
 
-    /// The intent's kind, by its verb (rule 4): an engine verb (`souls:`) is a move, a cancel or one of the closed
-    /// orders, or `order-unknown`; any other verb is an act.
+    /// The intent's kind, by its verb (rule 4): an engine verb (`souls:`) is a move, a cancel, an edit (rule 15) or
+    /// one of the closed orders, or `order-unknown`; any other verb is an act.
     pub fn kind(&self) -> R<Kind> {
         let v = self.verb.as_str();
         if v == MOVE {
             Ok(Kind::Move)
         } else if v == CANCEL {
             Ok(Kind::Cancel)
+        } else if v == crate::edit::wire::VERB {
+            Ok(Kind::Edit)
         } else if ORDERS.contains(&v) {
             Ok(Kind::Order)
         } else if v.starts_with("souls:") {
@@ -429,21 +445,25 @@ pub const ANSWER_TIMES: u64 = 3;
 /// actor and a sequence are read get the unread answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Answer {
-    /// `{1: actor, 2: sequence, 3: 1, 4: intent id, 5: [log sequence, ...]}`.
+    /// `{1: actor, 2: sequence, 3: 1, 4: intent id, 5: [log sequence, ...], 6: {name: id}}`: 6, an edit's map from
+    /// each placed node's temporary name to the id the engine minted (rule 15), left out when empty.
     Receipt {
         actor: Actor,
         sequence: u64,
         intent: Id,
         entries: Vec<u64>,
+        names: BTreeMap<u64, Id>,
     },
-    /// `{1: actor, 2: sequence, 3: 2, 4: reason, 5: version now, 6: [node, ...] changed since the basis}`, 6 left out
-    /// when empty.
+    /// `{1: actor, 2: sequence, 3: 2, 4: reason, 5: version now, 6: [node, ...] changed since the basis, 7: the
+    /// failing operation}`: 6 left out when empty; 7, an edit's operation by its place in the batch (rule 15), left
+    /// out when none.
     Refused {
         actor: Actor,
         sequence: u64,
         reason: Name,
         now: Value,
         changed: Vec<Id>,
+        op: Option<u64>,
     },
     /// `{1: actor, 2: sequence, 3: 3, 4: intent id}`: a move accepted, to be resolved.
     Accepted {
@@ -472,6 +492,7 @@ impl Answer {
                 sequence,
                 intent,
                 entries,
+                names,
             } => {
                 let mut m = head(a, sequence, 1);
                 m.push((4, intent.to_value()));
@@ -479,6 +500,12 @@ impl Answer {
                     5,
                     Value::Array(entries.iter().map(|e| Value::Uint(*e)).collect()),
                 ));
+                if !names.is_empty() {
+                    m.push((
+                        6,
+                        Value::Map(names.iter().map(|(n, id)| (*n, id.to_value())).collect()),
+                    ));
+                }
                 map(m)
             }
             Answer::Refused {
@@ -487,6 +514,7 @@ impl Answer {
                 reason,
                 now,
                 changed,
+                op,
             } => {
                 let mut m = head(a, sequence, 2);
                 m.push((4, Value::Text(reason.clone())));
@@ -497,6 +525,7 @@ impl Answer {
                         Value::Array(changed.iter().map(|i| i.to_value()).collect()),
                     ));
                 }
+                m.extend(op.map(|o| (7, Value::Uint(o))));
                 map(m)
             }
             Answer::Accepted {
@@ -680,7 +709,7 @@ impl Checker {
 // --- The fixtures -------------------------------------------------------------------------------------------------
 
 /// The golden intents, as diagnostic notation (rule 14).
-pub const FIXTURES: [(&str, &str); 8] = [
+pub const FIXTURES: [(&str, &str); 9] = [
     ("act", include_str!("../fixtures/intents/act.diag")),
     ("move", include_str!("../fixtures/intents/move.diag")),
     (
@@ -692,6 +721,7 @@ pub const FIXTURES: [(&str, &str); 8] = [
     ("queue", include_str!("../fixtures/intents/queue.diag")),
     ("cancel", include_str!("../fixtures/intents/cancel.diag")),
     ("replace", include_str!("../fixtures/intents/replace.diag")),
+    ("edit", include_str!("../fixtures/intents/edit.diag")),
 ];
 
 /// The intents goldens, one per line, `name kind hex`, as `fixtures/intents/goldens.txt` holds them: the native test
