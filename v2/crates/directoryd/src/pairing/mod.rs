@@ -13,10 +13,15 @@
 //!   only approves what an agent asked for, and only for a Soul the owner holds.
 //! - Requests never expire (#2258); the card shows a request's age instead.
 //! - Polls closer than the interval are answered `slow_down`, and the interval grows by 5 s (RFC 8628 §3.5).
+//! - The account page (W9, #2827) lists an account's Souls, each with the device that holds it, and revokes one: its
+//!   token's hash leaves the store and the gateway's tokens file, so the gateway refuses its next intent
+//!   (`token.refused`), and the Soul is unconnected. A revoke takes the Soul to no other device.
+//! - My Souls (W11, #2749): each Soul's world, name, description and picture, and its retirement: see [`souls`].
 //! - Wrong short codes are counted per account: [`GUESSES_MOST`] in [`GUESS_WINDOW`] seconds, then every code is
 //!   refused `code-guesses` until the window passes.
 
 pub mod route;
+pub mod souls;
 #[cfg(test)]
 mod tests;
 
@@ -180,6 +185,7 @@ impl Pairing {
              CREATE TABLE IF NOT EXISTS paired_souls_v1(grant_text TEXT PRIMARY KEY, account TEXT NOT NULL,
                device TEXT, token_hash TEXT);",
         )?;
+        db.execute_batch(souls::SCHEMA)?;
         Ok(Pairing {
             public_url: public_url.trim_end_matches('/').to_string(),
             db: Mutex::new(db),
@@ -372,6 +378,9 @@ impl Pairing {
         let grant = match soul {
             Some(g) => match self.soul_of(&g).map_err(|e| (e, None))? {
                 None => return refuse("unknown-soul", None),
+                Some(_) if self.retired(&g).map_err(|e| (e, None))? => {
+                    return refuse("soul-retired", None);
+                }
                 Some((owner, _)) if owner != account => return refuse("not-yours", None),
                 Some((_, Some(device))) if !force => return refuse("soul-connected", Some(device)),
                 Some(_) => g,
@@ -397,6 +406,7 @@ impl Pairing {
         if changed == 0 {
             return Err(("unknown-code", None));
         }
+        self.note_world(&code, &grant).map_err(|e| (e, None))?;
         Ok(grant)
     }
 
@@ -503,6 +513,40 @@ impl Pairing {
         let tmp = file.with_extension("tmp");
         std::fs::write(&tmp, text)?;
         std::fs::rename(tmp, file)
+    }
+
+    /// The Souls `account` holds, each with the device it is connected to (`None`: unconnected), in grant order.
+    pub fn souls(&self, account: &str) -> Result<Vec<(String, Option<String>)>, &'static str> {
+        let db = self.db.lock().expect("the store");
+        let mut q = db
+            .prepare(
+                "SELECT grant_text, CASE WHEN token_hash IS NULL THEN NULL ELSE device END FROM paired_souls_v1
+                 WHERE account = ?1 AND grant_text LIKE 'soul-%' ORDER BY 1",
+            )
+            .map_err(|_| "store")?;
+        let rows = q
+            .query_map(params![account], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(|_| "store")?;
+        rows.collect::<Result<_, _>>().map_err(|_| "store")
+    }
+
+    /// `account` revokes its Soul `grant`: the token's hash leaves the store and the gateway's tokens file, and the
+    /// Soul is unconnected. Revoking an unconnected Soul changes nothing and is not refused.
+    pub fn revoke(&self, account: &str, grant: &str) -> Result<(), &'static str> {
+        match self.soul_of(grant)? {
+            None => return Err("unknown-soul"),
+            Some((owner, _)) if owner != account || !is_soul_grant(grant) => {
+                return Err("not-yours");
+            }
+            Some(_) => {}
+        }
+        let db = self.db.lock().expect("the store");
+        db.execute(
+            "UPDATE paired_souls_v1 SET device = NULL, token_hash = NULL WHERE grant_text = ?1 AND account = ?2",
+            params![grant, account],
+        )
+        .map_err(|_| "store")?;
+        self.write_tokens(&db).map_err(|_| "tokens-file")
     }
 
     /// Every hash the store holds for a Soul's token, for a test to read.

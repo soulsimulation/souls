@@ -39,7 +39,7 @@ use replica::ids::{Scope, Version};
 use replica::pose::{HandOff, Owner, Vec3};
 use sim::checkpoint::{Blobs, Checkpoints, replay};
 use sim::log::{FileStore, Log};
-use supervisor::folder::Folder;
+use supervisor::bucket::Bucket as Store_;
 use supervisor::moving::{self, Sealed};
 use worldd::shipping::{self, Item, Mark, Piece, Shipper, Uploads, Wall};
 
@@ -53,7 +53,8 @@ const GAP_US: u64 = 20_000_000;
 /// A build hash for the directory record (the scripted world's build is not pinned anywhere).
 const BUILD: [u8; 34] = [0x12; 34];
 
-pub type Bucket = Shared<Folder>;
+/// The store the world ships to and restores from (O3c, #3529): the offsite bucket, or a folder standing in for it.
+pub type Bucket = Shared<Store_>;
 
 fn io<T>(r: std::io::Result<T>) -> R<T> {
     r.or_else(|e| refuse("io", e.to_string()))
@@ -608,7 +609,9 @@ fn stdin_lines() -> Receiver<String> {
     rx
 }
 
-/// `ops world <source|target> <dir> <bucket> <t0 µs> <machine> [--restart | --restore]`.
+/// `ops world <source|target> <dir> <bucket> <t0 µs> <machine> [--restart | --restore]`. The bucket is a store as
+/// `worldd serve --store` names one ([`supervisor::bucket`]): `s3:https://<host>/<bucket>[/<prefix>]` with its keys
+/// in `AWS_*`, or a folder.
 pub fn run(args: &[String]) -> R<()> {
     let [role, dir, bucket, t0, machine, rest @ ..] = args else {
         return refuse(
@@ -623,7 +626,7 @@ pub fn run(args: &[String]) -> R<()> {
     let machine = Name::new(machine).ok_or_else(|| err("usage", "a machine name"))?;
     let restart = rest.iter().any(|a| a == "--restart");
     let restore = rest.iter().any(|a| a == "--restore");
-    let store = Shared(Arc::new(Folder::new(PathBuf::from(bucket))));
+    let store = Shared(Arc::new(Store_::from_spec(bucket)?));
     let scratch = dir.with_extension("scratch");
     let rx = stdin_lines();
     let mut wr;
@@ -749,6 +752,8 @@ fn restore_world(store: Bucket, machine: Name, dir: &Path, t0: u64, scratch: &Pa
     let mut wr = Writer::new(store.clone(), machine, dir, t0, ids_world());
     let (lineage, zone) = (wr.lineage, wr.zone);
     let f = shipping::fetch(&store, &lineage, zone)?;
+    // O20 (#2812): the world's stores outside its log (its words, uploads and removal list), from the same bucket.
+    backup::restore_world(&store, &to_hex(&lineage), dir)?;
     let fetched = unix_us();
     let mut bytes = f.checkpoint.as_ref().map_or(0, |c| c.1.len() as u64);
     for p in &f.pieces {
@@ -844,8 +849,31 @@ mod tests {
     #[test]
     fn a_world_restores_from_the_bucket_alone() -> R<()> {
         let root = std::env::temp_dir().join(format!("ops-o12-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let store = Shared(Arc::new(Folder::new(root.join("bucket"))));
+        let spec = format!("folder:{}", root.join("bucket").display());
+        restores_from(&root, &spec, |_| String::new())
+    }
+
+    /// O3c (#3529) A2: the same restore with the store an S3 bucket, a local stand-in, named in the offsite form.
+    #[test]
+    fn o3c_a2_a_world_restores_from_an_s3_bucket_alone() -> R<()> {
+        use directoryd::directory::stand_in::{KEY_ID, StandIn};
+        let root = std::env::temp_dir().join(format!("ops-o3c-test-{}", std::process::id()));
+        let s = StandIn::start(100).or_else(|e| refuse("io", e.to_string()))?;
+        restores_from(&root, &format!("{}/o12", s.url("souls")), |k| match k {
+            "AWS_ACCESS_KEY_ID" => KEY_ID.to_owned(),
+            "AWS_SECRET_ACCESS_KEY" => "stand-in-secret".to_owned(),
+            _ => String::new(),
+        })?;
+        assert!(
+            s.paths().iter().any(|p| p.starts_with("souls/o12/ckpt/")),
+            "the checkpoint went to the bucket"
+        );
+        Ok(())
+    }
+
+    fn restores_from(root: &Path, spec: &str, var: impl Fn(&str) -> String) -> R<()> {
+        let _ = std::fs::remove_dir_all(root);
+        let store = Shared(Arc::new(Store_::parse(spec, var)?));
         let t0 = unix_us();
         let mut a = source_world(store.clone(), name("machine-a"), &root.join("a"), t0)?;
         // Enough ticks for K5's checkpoint (each 256 KiB of log), so a pointer is shipped (O3b A4).
@@ -901,7 +929,7 @@ mod tests {
             at += p.records.len() as u64;
         }
         assert_eq!(at, shipped.records, "every record from 0");
-        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(root);
         Ok(())
     }
 }

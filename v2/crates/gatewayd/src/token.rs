@@ -221,3 +221,117 @@ impl Tokens {
         format!("{} {}\n", grant.to_text(), to_hex(hash))
     }
 }
+
+/// The key the directory signs view tokens with, shared with the gateways (V13b, #3407). Never formatted.
+pub struct ViewKey([u8; 32]);
+
+impl ViewKey {
+    pub fn new(bytes: [u8; 32]) -> ViewKey {
+        ViewKey(bytes)
+    }
+
+    /// Reads a key file: 64 hex digits.
+    pub fn read(text: &str) -> Option<ViewKey> {
+        Some(ViewKey(from_hex(text.trim()).ok()?.try_into().ok()?))
+    }
+
+    /// HMAC-SHA256 (RFC 2104) of `message` under this key.
+    pub fn mac(&self, message: &[u8]) -> [u8; 32] {
+        let pad = |b: u8| -> Vec<u8> {
+            let mut k = [b; 64];
+            for (k, x) in k.iter_mut().zip(self.0) {
+                *k ^= x;
+            }
+            k.to_vec()
+        };
+        let mut inner = pad(0x36);
+        inner.extend_from_slice(message);
+        let mut outer = pad(0x5c);
+        outer.extend_from_slice(&sha256(&inner));
+        sha256(&outer)
+    }
+}
+
+/// A view token as presented (V13b): `view.<expires>.<grant>,<grant>….<HMAC hex>`, minted by the directory from a
+/// signed-in web session (`directoryd::accounts::view`). It lets its holder subscribe to views for its grants, never
+/// send an intent, until it expires. Its text is private to this module and never formatted.
+pub struct ViewToken {
+    text: String,
+}
+
+/// What a checked view token grants: the Souls and worlds whose views it may watch, and until when (seconds since
+/// 1970).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct View {
+    pub grants: Vec<Grant>,
+    pub expires: u64,
+}
+
+impl ViewToken {
+    /// Reads a presented view token's shape; `None` if it is not one.
+    pub fn parse(text: &str) -> Option<ViewToken> {
+        let text = text.trim();
+        text.starts_with("view.").then(|| ViewToken {
+            text: text.to_owned(),
+        })
+    }
+
+    /// What it grants at `now` (seconds since 1970), or `None`: a wrong MAC, an expired token or a grant that is not
+    /// one. The MAC is compared in constant time.
+    pub fn check(&self, key: &ViewKey, now: u64) -> Option<View> {
+        let (body, mac) = self.text.rsplit_once('.')?;
+        let mac: [u8; 32] = from_hex(mac).ok()?.try_into().ok()?;
+        if !bool::from(key.mac(body.as_bytes()).ct_eq(&mac)) {
+            return None;
+        }
+        let mut parts = body.splitn(3, '.');
+        let (_, expires, grants) = (parts.next()?, parts.next()?, parts.next()?);
+        let expires: u64 = expires.parse().ok()?;
+        let grants = grants
+            .split(',')
+            .map(Grant::parse)
+            .collect::<Option<Vec<_>>>()?;
+        (now < expires && !grants.is_empty()).then_some(View { grants, expires })
+    }
+}
+
+impl fmt::Debug for ViewToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ViewToken(secret withheld)")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hmac_sha256_matches_rfc_4231_case_2() {
+        // RFC 4231 test case 2 ("Jefe"); a key shorter than the block is padded with zeros, as here.
+        let mut k = [0u8; 32];
+        k[..4].copy_from_slice(b"Jefe");
+        assert_eq!(
+            to_hex(&ViewKey::new(k).mac(b"what do ya want for nothing?")),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+    }
+
+    #[test]
+    fn a_view_token_holds_until_it_expires_and_only_under_its_key() {
+        let key = ViewKey::new([7; 32]);
+        let g = Grant::Actor(Actor::Soul(Id::new(Scope([0xab; 16]), 3).unwrap()));
+        let body = format!("view.1000.{}", g.to_text());
+        let text = format!("{body}.{}", to_hex(&key.mac(body.as_bytes())));
+        let t = ViewToken::parse(&text).unwrap();
+        let view = View {
+            grants: vec![g],
+            expires: 1000,
+        };
+        assert_eq!(t.check(&key, 999), Some(view));
+        assert_eq!(t.check(&key, 1000), None, "expired");
+        assert_eq!(t.check(&ViewKey::new([8; 32]), 999), None, "another key");
+        let forged = text.replace("view.1000.", "view.9000.");
+        assert_eq!(ViewToken::parse(&forged).unwrap().check(&key, 999), None);
+        assert!(!format!("{t:?}").contains(&text[text.len() - 64..]));
+    }
+}

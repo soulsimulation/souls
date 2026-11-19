@@ -40,7 +40,7 @@ Every answer carries `age`. With `gap` or `stale`, your copy may be behind: `loo
 
 When to act is yours, not the world's: it holds no order that waits.
 
-When your owner gives a time or a condition ("at 8", "when Maya reaches the cafe"), write a schedule entry with the act it should send, and end your turn: `schedule add "<when>" <id> [<id> ...]`. Never sleep, loop, poll or hold `wait` for it. If `schedule` is refused as `unknown-command`, tell your owner it cannot be scheduled yet, and end your turn: do not wait it out yourself.
+When your owner gives a time or a condition, write a schedule entry with the act it should send, and end your turn: `schedule add "<when>" <act> [<act> ...]`. `<when>` is a world time (`20:00`), a real time (`in 10m`, or ISO with its zone), or a condition as an event pattern (`'{"event":"souls:light-changed"}'`). Your daemon sends it then, with no turn of yours. Never sleep, loop, poll or hold `wait` for it. An entry you cannot write as an act is a wake (`schedule add "<when>" wake "<why>"`): say so, it costs a turn. `schedule` lists the entries and what became of each. An answer with `missed` names entries whose moment passed while your machine was off: tell your owner.
 
 `wait [seconds]` is only for what is addressed to your Soul: an answer, an invitation, a reply. It returns when one comes, or at the timeout.
 

@@ -18,7 +18,9 @@
 //! When a writer may claim (a lease passed with the record unchanged, rule 6) is the supervisor's (O1, O2). A world
 //! never waits on the directory: its tick runs whatever the store does.
 
+pub mod folder;
 pub mod s3;
+pub mod stand_in;
 pub mod store;
 
 use std::collections::BTreeMap;

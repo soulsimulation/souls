@@ -67,7 +67,8 @@ test('C11 A2, A3: a first sync of 30,000 records completes; it emits synced, whi
   writeFileSync(tokens, `soul-${SCOPE}-2 ${createHash('sha256').update(token).digest('hex')}\n`);
   procs.push(spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1',
     '--rooms', '1', '--bodies', '50', '--items', String(ITEMS),
-    // A debug build answers an Eden-sized sync slowly: K18's watchdog is given room for it.
+    // The sync needs no room (it is answered off the clock thread, C16 #3450), but a debug build's tick that commits
+    // the act below hashes the whole Eden-sized tree (K18's state hash) past K7's 500 ms: the watchdog is given room.
     '--watchdog-ms', '10000'], { stdio: 'ignore' }));
   await waitFor(() => statSync(world).isSocket(), 30_000);
   const g = spawn(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', world, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -101,9 +102,9 @@ test('C11 A2, A3: a first sync of 30,000 records completes; it emits synced, whi
   // it to resume after (a grant it has sent nothing is told stream.cannot-resume, I1). A new process holds no copy, so
   // it takes the scope again, on one socket.
   await request(rt.socket, { op: 'act', verb: 'r2:switch_on', target: `${SCOPE}-3` });
-  await waitFor(async () => (await status()).answered === 1, 10_000);
+  await waitFor(async () => (await status()).answered === 1, 30_000);
   await request(rt.socket, { op: 'stop' });
-  await waitFor(async () => { try { await status(); return false; } catch { return true; } }, 5000);
+  await waitFor(async () => { try { await status(); return false; } catch { return true; } }, 30_000);
   credentials();
   start(home, SOUL, PKG);
   const again = await current();

@@ -14,6 +14,7 @@
 //! - `checkpoints/`: K5's, taken by K18c's rule; a start resumes from the newest that verifies.
 //! - `tokens`: the gateway's tokens file, `<grant> <sha-256 hex>` per Soul, never a token. `souls.tokens` (mode 0600)
 //!   holds the Souls' tokens themselves, for a local client; it is never copied off the machine.
+//! - `log.text/`: K16's text store, every word said in the world (O20b, #3523).
 //! - `views/`: V1's stream of the zone's root (full, everyone), written by a view tier of the process's own, and
 //!   `views/world.json`, `{"stream": "views/<its folder>/", "history": "history/"}`, both relative to the world's
 //!   folder, which the page reads for `?world=` and pairing for the Soul's `history` (R16b, #3480). With a store
@@ -30,8 +31,9 @@
 //! thread. The Souls in `world.json` stand on the open ground at their places on a first start, where the log last had
 //! them after it.
 //!
-//! **Off the machine** (O3b, #3458), when `--store <folder>` or `$WORLDD_STORE` names a store (O9's folder store; a
-//! fleet's real store is not wired here): the world is claimed under `--machine <name>` (`$WORLDD_MACHINE`, default
+//! **Off the machine** (O3b, #3458), when `--store <store>`, `$WORLDD_STORE` or the directory's `$DIRECTORY_STORE_URL`
+//! names a store (O3c, #3529: the offsite bucket, `s3:https://<host>/<bucket>[/<prefix>]` with its keys in `AWS_*`, or
+//! O9's folder store, `folder:<path>` or a path; `supervisor::bucket`): the world is claimed under `--machine <name>` (`$WORLDD_MACHINE`, default
 //! `local`), its build pinned on a first claim. Each record on the disk and each checkpoint is shipped by O3's
 //! shipper under that claim. A restart claims again ([`shipping::take_over`], as the ops tool's restart): the claim
 //! starts at the directory's mark plus one, and the shipper takes the log's records from there, so the history read
@@ -71,7 +73,7 @@ use sim::links::Doors;
 use sim::log::{FileStore, Log};
 use sim::recorder;
 use sim::walk::town::Town;
-use supervisor::folder::Folder;
+use supervisor::bucket::Under;
 use worldd::answers::{self, Config};
 use worldd::bodies::{Bodies, Placed};
 use worldd::checkers::Rules;
@@ -381,7 +383,7 @@ fn bodies(
     Ok(b)
 }
 
-type Bucket = Shared<Folder>;
+type Bucket = Shared<supervisor::bucket::Bucket>;
 
 /// How often a running world's open event index is written, at most (R16b): a question sees acts this old.
 const VIEWS_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
@@ -390,7 +392,7 @@ const VIEWS_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 /// as new. A create refused because the key exists is passed when the bytes are the same, and otherwise writes over
 /// them (a day's index, or a window closed at a graceful stop, made again from more records).
 #[derive(Clone)]
-struct Again(Bucket);
+struct Again(Under<Bucket>);
 
 impl Store for Again {
     fn get(&self, key: &str) -> Result<Option<Object>, Refusal> {
@@ -482,10 +484,10 @@ fn archiving(
     })
 }
 
-/// Claims the world in the store at `root` and starts its shipper and archiver, handed the log's records read at the
-/// start (numbered from `first`) from the claim's start on.
+/// Claims the world in the store `spec` names ([`supervisor::bucket::Bucket`]) and starts its shipper and archiver,
+/// handed the log's records read at the start (numbered from `first`) from the claim's start on.
 fn off_machine(
-    root: &Path,
+    spec: &str,
     machine: &str,
     built: &Built,
     name: &str,
@@ -493,9 +495,12 @@ fn off_machine(
     first: u64,
     records: &[Vec<u8>],
 ) -> R<Off> {
-    let store: Bucket = Shared(Arc::new(Folder::new(root.to_path_buf())));
+    let store: Bucket = Shared(Arc::new(
+        supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?,
+    ));
+    println!("store: {}", store.0.what());
     let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
-    let mut d = Directory::new(store, machine);
+    let mut d = Directory::new(store.clone(), machine);
     let (lineage, zone) = (built.root.scope().0, built.header.zone);
     match d.world(&lineage, zone) {
         Err(e) if e.name == "record-missing" => {
@@ -536,10 +541,10 @@ fn off_machine(
         .cloned();
     let archive = match kind {
         Some(kind) => {
-            // A store of its own at the history's folder: the day's index names each bundle by its key, which the
-            // page reads relative to that folder.
-            let at = root.join("h").join(name).join(to_hex(&lineage));
-            let again = Again(Shared(Arc::new(Folder::new(at))));
+            // The history's keys as a store of their own: the day's index names each bundle by its key, which the
+            // page reads relative to the history's folder.
+            let prefix = format!("h/{name}/{}/", to_hex(&lineage));
+            let again = Again(Under { store, prefix });
             again
                 .put("header", built.header.stored(), When::Absent)
                 .map_err(refusal)?;
@@ -574,7 +579,7 @@ fn off_machine(
     Ok(off)
 }
 
-/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <folder>] [--machine
+/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] [--machine
 /// <name>]`: runs the world until killed. A checkpoint is taken each `--checkpoint-every` bytes of log (default 8 MiB).
 pub fn run(args: &[String]) -> i32 {
     match serve(args) {
@@ -588,7 +593,7 @@ pub fn run(args: &[String]) -> i32 {
 
 fn serve(args: &[String]) -> R<()> {
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
-        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <folder>] \
+        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] \
          [--machine <name>]",
     )?);
     let socket = arg(args, "--socket")
@@ -627,16 +632,18 @@ fn serve(args: &[String]) -> R<()> {
         Log::open(FileStore::open(&log_path).map_err(refusal)?, EPOCH).map_err(refusal)?;
     let store = log.close();
     let bucket = arg(args, "--store")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("WORLDD_STORE").map(PathBuf::from));
+        .cloned()
+        .or_else(|| std::env::var("WORLDD_STORE").ok())
+        .or_else(|| std::env::var(directoryd::directory::s3::URL_ENV).ok())
+        .filter(|s| !s.trim().is_empty());
     let mut off = match bucket {
-        Some(root) => {
+        Some(spec) => {
             let machine = arg(args, "--machine")
                 .cloned()
                 .or_else(|| std::env::var("WORLDD_MACHINE").ok())
                 .unwrap_or_else(|| "local".to_owned());
             Some(off_machine(
-                &root,
+                &spec,
                 &machine,
                 &built,
                 &name,
@@ -654,6 +661,22 @@ fn serve(args: &[String]) -> R<()> {
     })?;
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
     cfg.health = Some(dir.join("health.json"));
+    // K16's text store on the disk, `<dir>/log.text` beside the log as `gateway-link` keeps it (O20b, #3523): a
+    // world's words outlive a restart, and O20's shipper has them to ship.
+    let text = sim::text::Store::open_dir(
+        &dir.join("log.text"),
+        replica::ids::Minter::new(worldd::words::scope(built.root.scope())),
+    )
+    .map_err(|e| format!("the text store: {}", refusal(e)))?;
+    cfg.text = Some(Arc::new(text));
+    // O20's shipper for the world's own stores (its words, uploads and removal list), keyed by its lineage as O12's
+    // restore reads them back (O20b, #3523); with no bucket set it says so once and ships nothing.
+    let lineage = to_hex(&built.root.scope().0);
+    let stores = directoryd::backup::owned_by("worldd", &[&lineage]).map_err(refusal)?;
+    let strip = format!("worlds/{lineage}/");
+    let backup = directoryd::backup::run("worldd", dir.clone(), stores, Default::default(), &strip)
+        .map_err(|e| format!("refusing to start: {}", refusal(e)))?;
+    println!("{backup}");
     cfg.synced = Some(tx);
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.root.scope()));
