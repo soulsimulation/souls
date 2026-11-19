@@ -82,12 +82,12 @@ fn toggle(body: Id, thing: Id, sequence: u64, expiry_us: i64) -> Intent {
 fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
     let worldd = dir.join("bin/worldd");
     let serve = format!(
-        "cd \"$2\" && exec '{}' gateway-link --socket w.sock --lineage {} --epoch 1 --log world.log --bodies {BODIES}",
+        "cd \"$2\" && exec '{}' gateway-link --socket gateway.sock --lineage {} --epoch 1 --log log --bodies {BODIES}",
         worldd.display(),
         to_hex(&LINEAGE)
     );
     let text = format!(
-        "#!/bin/sh\n# O7 build: {name}\n{}\nexec '{}' \"$@\"\n",
+        "#!/bin/sh\n# O7 build: {name}\n[ \"$1\" = serve ] && shift\n{}\nexec '{}' \"$@\"\n",
         body.replace("SERVE", &serve),
         worldd.display()
     );
@@ -475,7 +475,7 @@ async fn main() {
                 .display()
                 .to_string();
             println!(
-                "\nRehearsal (A5): scratch copy `{scratch}/world.log`; {} records copied; {} recorded intents fed, {} named ends ({} receipts, refused {:?}); served log `root/worlds/<world>/world.log`: its first {} bytes (SHA-256 {}…) the same after: {}.",
+                "\nRehearsal (A5): scratch copy `{scratch}/log`; {} records copied; {} recorded intents fed, {} named ends ({} receipts, refused {:?}); served log `root/worlds/<world>/log`: its first {} bytes (SHA-256 {}…) the same after: {}.",
                 r.copied,
                 r.fed,
                 r.ended,

@@ -30,6 +30,7 @@ pub mod query;
 pub mod read;
 pub mod refusals;
 pub mod rules;
+pub mod schedule;
 pub mod select;
 pub mod selector;
 pub mod sky;

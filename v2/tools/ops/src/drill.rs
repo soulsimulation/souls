@@ -39,6 +39,21 @@ const STAKES_EVERY: u64 = 400;
 /// A build hash for the directory record (the scripted world's build is not pinned anywhere).
 const BUILD: [u8; 34] = [0x12; 34];
 
+/// The archive's prefix in the store (as `archive record`'s).
+const PREFIX: &str = "worlds/scripted/";
+
+/// A world whose committed parts queue up for the log (as `archive record`'s).
+fn logged(rooms: usize, things: usize) -> (World, Rc<RefCell<Vec<Vec<u8>>>>) {
+    let queue: Rc<RefCell<Vec<Vec<u8>>>> = Rc::default();
+    let q = queue.clone();
+    let w = script::world(
+        rooms,
+        things,
+        Some(Box::new(move |b: &[u8]| q.borrow_mut().push(b.to_vec()))),
+    );
+    (w, queue)
+}
+
 fn io<T>(r: std::io::Result<T>) -> R<T> {
     r.or_else(|e| refuse("io", e.to_string()))
 }
@@ -199,7 +214,7 @@ pub fn ship<S: Store + Send + Sync + 'static>(
     let mut load = Load::new(shape, seed)?;
     io(std::fs::create_dir_all(dir))?;
     let mut out = std::io::BufWriter::new(io(std::fs::File::create(receipts))?);
-    let (mut w, queue) = super::logged(100, 90);
+    let (mut w, queue) = logged(100, 90);
     let (lineage, zone) = (w.header.lineage.0, w.header.zone);
     let mut directory = Directory::new(store.clone(), machine());
     directory.set_build(&lineage, zone, &BUILD)?;
@@ -439,11 +454,11 @@ impl Clock for Ticks {
 pub fn count(dir: &Path) -> R<()> {
     let _ = std::fs::remove_dir_all(dir);
     let store = Shared(Arc::new(Memory::default()));
-    let (mut w, queue): (World, Rc<RefCell<Vec<Vec<u8>>>>) = super::logged(100, 90);
+    let (mut w, queue): (World, Rc<RefCell<Vec<Vec<u8>>>>) = logged(100, 90);
     let (lineage, zone) = (w.header.lineage.0, w.header.zone);
     let root = w.tree.node(w.tree.root()).expect("the root");
     let (rid, kind) = (root.id(), root.kind().clone());
-    let mut archiver = Archiver::open(store.clone(), super::PREFIX, &w.header, rid, kind)?;
+    let mut archiver = Archiver::open(store.clone(), PREFIX, &w.header, rid, kind)?;
     let mut directory = Directory::new(store.clone(), machine());
     directory.set_build(&lineage, zone, &BUILD)?;
     let claim = directory.claim(&lineage, zone)?;

@@ -156,6 +156,82 @@ fn a4_a_still_world_uploads_nothing() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The records from 0 as a full-history reader reads them, each with its number.
+fn from_zero(store: &Memory) -> Vec<(u64, Vec<u8>)> {
+    let key = WorldRecord::key(&LINEAGE, zone());
+    let rec = WorldRecord::read(&store.get(&key).expect("reads").expect("a record").bytes)
+        .expect("a record");
+    let (mut at, mut out) = (0, Vec::new());
+    while let Some((_, p, _)) = piece_at(store, &rec, at).expect("a piece") {
+        for r in p.records {
+            out.push((at, r));
+            at += 1;
+        }
+    }
+    out
+}
+
+/// O3b (#3458) A4: the directory's mark moves with the checkpoint pointer, and a restore that died before its first
+/// upload leaves a claim the next restore reads past: no record past the mark is lost, and the history read from
+/// record 0 holds every record once, in order.
+#[test]
+fn o3b_a4_mark_follows_the_pointer_and_an_empty_claim_loses_nothing() {
+    let dir = std::env::temp_dir().join(format!("o3b-a4-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a folder");
+    let store = Memory::default();
+    let clock = Fake::default();
+    let mut a = shipper(&store, clock.clone()).checkpoints(&dir, 0);
+    for n in 0..30u64 {
+        a.push(item(n, false)).expect("pushes");
+        if n % 10 == 9 {
+            clock.advance(LOSS_BAR_US);
+            a.poll().expect("polls");
+        }
+        if n == 14 {
+            std::fs::write(dir.join(format!("ckpt-{:020}", 15)), b"checkpoint 15").expect("writes");
+        }
+    }
+    // The pointer moved once (checkpoint 15, after the piece at 10 landed): the mark is the last record landed then.
+    let f = fetch(&store, &LINEAGE, zone()).expect("fetches");
+    assert_eq!(f.record.mark, Some(19), "the mark follows the pointer");
+    assert_eq!(a.mark().recorded(), 20);
+    // A restore claims and dies before its first upload: a claim from 20 with no piece.
+    let mut b = Directory::new(&store, Name::new("machine-b").expect("a name"));
+    assert_eq!(b.claim(&LINEAGE, zone()).expect("claims").takeover.from, 20);
+    // The next restore still reads the lost writer's pieces past the mark.
+    let f = fetch(&store, &LINEAGE, zone()).expect("fetches");
+    let got: Vec<u64> = f.pieces.iter().map(|p| p.first).collect();
+    assert_eq!(got, vec![10, 20], "the pieces past the mark are read");
+    let mut c = Directory::new(&store, Name::new("machine-c").expect("a name"));
+    let claim = c.claim(&LINEAGE, zone()).expect("claims");
+    assert_eq!(claim.takeover.from, 20);
+    let mut s =
+        Shipper::open(c, claim, LINEAGE, zone(), b"header", 20, clock.clone()).expect("opens");
+    for p in &f.pieces {
+        for (i, r) in p.records.iter().enumerate() {
+            let record = p.first + i as u64;
+            s.push(Item {
+                record,
+                bytes: r.clone(),
+                acts: 2,
+                stakes: false,
+            })
+            .expect("pushes");
+        }
+    }
+    s.flush().expect("flushes");
+    let all = from_zero(&store);
+    assert_eq!(all.len(), 30, "every record from 0");
+    for (n, (at, r)) in all.iter().enumerate() {
+        assert_eq!(
+            (*at, r.as_slice()),
+            (n as u64, &item(n as u64, false).bytes[..])
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A piece is read back only when its checksum holds.
 #[test]
 fn a_piece_checks_its_bytes() {

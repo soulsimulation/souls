@@ -32,6 +32,7 @@ use replica::ids::{Id, Minter, Scope};
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::time::Micros;
 use replica::world_model::{Audience, show};
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
 const M: i64 = 1_000_000;
@@ -115,9 +116,14 @@ fn flat(_: i64, _: i64) -> i64 {
     0
 }
 
+thread_local! {
+    /// The hill raised: [`HILL`], or one of #3473's.
+    static SHAPE: Cell<([f64; 2], f64, f64)> = const { Cell::new(HILL) };
+}
+
 /// The hill's height at a sample: a raised cosine.
 fn hill(i: i64, j: i64) -> i64 {
-    let ([cx, cz], r, h) = HILL;
+    let ([cx, cz], r, h) = SHAPE.get();
     let d = ((i as f64 - cx).powi(2) + (j as f64 - cz).powi(2)).sqrt() / r;
     if d >= 1.0 {
         0
@@ -307,7 +313,7 @@ impl Edits {
 }
 
 fn square() -> Vec<[i64; 2]> {
-    let ([cx, cz], r, _) = HILL;
+    let ([cx, cz], r, _) = SHAPE.get();
     let (cx, cz, r) = (cx as i64, cz as i64, r as i64);
     vec![
         [cx - r, cz - r],
@@ -319,7 +325,12 @@ fn square() -> Vec<[i64; 2]> {
 
 /// The hill's batch: its node, the tiles, and the box lifted by the ground's change under it (a sample, so exact).
 fn hill_ops(e: &Edits, box_id: Id, lift: bool) -> Vec<Op> {
-    let params = br#"{"kind":"bump","c":[24,24],"r":8,"h":6,"peak":1}"#.to_vec();
+    let ([cx, cz], r, h) = SHAPE.get();
+    let params = format!(
+        r#"{{"kind":"bump","c":[{cx},{cz}],"r":{r},"h":{},"peak":1}}"#,
+        h / 1000.0
+    )
+    .into_bytes();
     let mut ops = vec![
         e.landform("eden:landform", &square(), vec![(28, Value::Bytes(params))]),
         e.tiles(&hill),
@@ -608,10 +619,36 @@ fn a1_a_hill_across_a_route_re_routes_its_walkers_within_2_s() {
             "A1: round the hill, never on its flanks: {:?}",
             a.bad
         );
-        // Arrival is not A1's bar: a walker going round may stop on a steep cell's corner and end by name
-        // (`goal-unreachable`), a walking defect of N11a's uncut steep cells reported apart from this task.
-        println!("  where each walker ended: {:?}", a.ended);
-        assert!(a.arrived >= 1, "A1: walkers arrive round the hill");
+        assert_eq!(
+            a.arrived,
+            LINES.len(),
+            "A1: every walker arrives round the hill (#3473): {:?}",
+            a.ended
+        );
+    }
+}
+
+/// #3473: hills of other sizes across the same lines, each with a way round its steep cells: every walker arrives
+/// round it, none stopped on a steep cell's corner (`goal-unreachable`).
+#[test]
+fn a_walker_round_steep_cells_arrives_whatever_the_hill() {
+    // (radius m, height mm): A1's hill and those that stopped a walker on a cell's corner.
+    for (r, h) in [
+        (8.0, 6_000.0),
+        (9.0, 6_000.0),
+        (8.0, 5_000.0),
+        (10.0, 7_000.0),
+    ] {
+        SHAPE.set(([24.0, 24.0], r, h));
+        let a = arm(|e, b| hill_ops(e, b, true), steep);
+        report(&format!("hill {r} m by {} m", h / 1000.0), &a);
+        assert!(a.bad.is_empty(), "never on the hill's flanks: {:?}", a.bad);
+        assert_eq!(
+            a.arrived,
+            LINES.len(),
+            "every walker arrives round a {r} m by {h} mm hill: {:?}",
+            a.ended
+        );
     }
 }
 
