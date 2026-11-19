@@ -52,6 +52,7 @@ import { stats, transcriptOf } from '../stats/stats.mjs';
 import { ageOf } from './age.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
+import { Table } from '../reflex/reflex.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -119,6 +120,7 @@ const save = () => { writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\
 const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
 const counts = { sent: 0, answered: 0, connects: 0, resumed: 0, cannotResume: 0, drops: 0, build: null };
+const reflexes = new Table(soul); // R9: onEvent(event, now) per named event once frames carry them
 const copy = new wire.Copy(); // its scope, by hash (R5b)
 const SYNC_WITHIN = 10_000, SYNCS_KEPT = 8;
 const syncs = []; // the last syncs: kind, time and R5's counts
@@ -312,7 +314,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'read', 'stats', 'stop']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'read', 'stats', 'reflex', 'stop']);
 
 async function answer(req) {
   switch (req.op) {
@@ -374,6 +376,7 @@ async function answer(req) {
     }
     case 'read': return { ok: true, events: events.splice(0) };
     case 'stats': return stats(trace.read(), { transcript: transcriptOf(home) });
+    case 'reflex': return reflexes.op(req, Date.now());
     case 'stop': setImmediate(stop); return { ok: true };
     default: return { ok: false, code: 'unknown-op' };
   }
@@ -390,6 +393,9 @@ const server = createServer((c) => {
       Promise.resolve().then(() => { const req = JSON.parse(line); op = OPS.has(req.op) ? req.op : 'unknown'; return answer(req); })
         .catch((e) => ({ ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }))
         .then((out) => {
+          // R9: the reflexes that fired since the answer before, in this one's `changed`.
+          const fired = reflexes.changed();
+          if (fired.length) out.changed = { ...(out.changed ?? {}), reflexes: fired };
           // Every answer carries its age (R10); each but stats's is traced with the bytes it prints.
           const said = JSON.stringify('age' in out ? out : { ...out, ...ageNow() }) + '\n';
           if (op !== 'stats') trace.write({ k: 'cmd', op, bytes: Buffer.byteLength(said) });
