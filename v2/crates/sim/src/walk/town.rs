@@ -255,15 +255,15 @@ impl Rebuilt {
     }
 }
 
+/// A square of the open ground cut again: where it is, its dry pieces and, per piece and triangle, whether it lies
+/// on the terrain.
+type Square = ((i32, i32), Vec<Piece>, Vec<Vec<bool>>);
+
 enum Fresh {
     Whole(Box<Assembled>),
     /// The open ground's squares cut again (G3b, #3449): each with its dry pieces and, per piece and triangle,
     /// whether it lies on the terrain; and the basis as they leave it.
-    Squares(
-        Vec<((i32, i32), Vec<Piece>, Vec<Vec<bool>>)>,
-        Basis,
-        Vec<(Building, BTreeMap<Id, Surface>)>,
-    ),
+    Squares(Vec<Square>, Basis, Vec<(Building, BTreeMap<Id, Surface>)>),
     /// Each touched building read again, with its floors' surfaces.
     Buildings(Vec<(Building, BTreeMap<Id, Surface>)>),
 }
@@ -367,24 +367,24 @@ impl Town {
     ) -> Result<Rebuilt, String> {
         crate::commit::off_clock();
         // What the part changes is read in the tree before it is applied to it in place: no second copy (G3b).
-        let ids = changed(&base, part);
+        let ids = changed(base, part);
         let mut touched = BTreeSet::new();
-        grounds(&base, &ids, &mut touched);
-        let kids = basis.index.children(&base, &ids);
+        grounds(base, &ids, &mut touched);
+        let kids = basis.index.children(base, &ids);
         let parent = |t: &Tree, n: Id| t.handle(n).and_then(|h| t.node(h)).and_then(|n| n.parent());
         let parents: BTreeMap<Id, Id> = touched
             .iter()
-            .filter_map(|&f| Some((f, parent(&base, f)?)))
+            .filter_map(|&f| Some((f, parent(base, f)?)))
             .collect();
         base.apply(header, part)
             .map_err(|e| format!("{}: {}", e.name, e.detail))?;
-        grounds(&base, &ids, &mut touched);
+        grounds(base, &ids, &mut touched);
         let mut versions = versions.clone();
         versions.bump(&touched);
         let mut why = None;
         let fresh = if touched.contains(&ground) {
             let r = if touched.len() == 1 {
-                Town::recut(&kids, &base, &ids, basis)
+                Town::recut(&kids, base, &ids, basis)
             } else {
                 Err("the open ground and a building")
             };
@@ -392,13 +392,13 @@ impl Town {
                 Ok(f) => f,
                 Err(w) => {
                     why = Some(w);
-                    Fresh::Whole(Box::new(Town::assemble(&base, ground, &versions)?))
+                    Fresh::Whole(Box::new(Town::assemble(base, ground, &versions)?))
                 }
             }
         } else {
-            match Town::reread(&parents, &base, ground, &touched, basis) {
+            match Town::reread(&parents, base, ground, &touched, basis) {
                 Some(bs) => Fresh::Buildings(bs),
-                None => Fresh::Whole(Box::new(Town::assemble(&base, ground, &versions)?)),
+                None => Fresh::Whole(Box::new(Town::assemble(base, ground, &versions)?)),
             }
         };
         Ok(Rebuilt {

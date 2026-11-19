@@ -53,10 +53,14 @@ pub struct Index {
     widest: i64,
 }
 
+/// A square cut again: where it is, its dry pieces, its doorways' meets and, per piece and triangle, whether it
+/// lies on the terrain.
+pub type Square = ((i32, i32), Vec<Piece>, Vec<Meet>, Vec<Vec<bool>>);
+
 /// The squares a change cuts again: each with its dry pieces, the doorways' meets on them and, per piece and
 /// triangle, whether it lies on the terrain; and the index as the change leaves it.
 pub struct Recut {
-    pub squares: Vec<((i32, i32), Vec<Piece>, Vec<Meet>, Vec<Vec<bool>>)>,
+    pub squares: Vec<Square>,
     pub index: Index,
 }
 
