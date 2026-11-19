@@ -9,6 +9,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "archive"
+version = "0.0.0"
+dependencies = [
+ "directoryd",
+ "miniz_oxide",
+ "replica",
+ "sim",
+ "worldd",
+]
+
+[[package]]
 name = "assets"
 version = "0.0.0"
 dependencies = [
@@ -220,6 +231,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "driver"
+version = "0.0.0"
+dependencies = [
+ "futures-util",
+ "gatewayd",
+ "libc",
+ "replica",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "errno"
 version = "0.3.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -227,6 +250,15 @@ checksum = "e35d6e78f4cebb90e51d543db8fe41528851d6deeef6ef21ebd4bfdc1e784776"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "facts"
+version = "0.0.0"
+dependencies = [
+ "archive",
+ "replica",
+ "worldd",
 ]
 
 [[package]]
@@ -492,9 +524,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "import-accounts"
+version = "0.0.0"
+dependencies = [
+ "directoryd",
+ "replica",
+ "ring",
+ "rusqlite",
+ "serde_json",
+]
+
+[[package]]
 name = "import-eden"
 version = "0.0.0"
 dependencies = [
+ "replica",
+]
+
+[[package]]
+name = "import-world"
+version = "0.0.0"
+dependencies = [
+ "import-eden",
  "replica",
 ]
 
@@ -503,6 +554,17 @@ name = "itoa"
 version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
+
+[[package]]
+name = "keys"
+version = "0.0.0"
+dependencies = [
+ "gatewayd",
+ "replica",
+ "sim",
+ "tungstenite",
+ "worldd",
+]
 
 [[package]]
 name = "libc"
@@ -589,6 +651,22 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+
+[[package]]
+name = "ops"
+version = "0.0.0"
+dependencies = [
+ "archive",
+ "directoryd",
+ "futures-util",
+ "gatewayd",
+ "replica",
+ "sim",
+ "supervisor",
+ "tokio",
+ "tokio-tungstenite",
+ "worldd",
+]
 
 [[package]]
 name = "percent-encoding"
@@ -895,6 +973,7 @@ version = "0.0.0"
 dependencies = [
  "directoryd",
  "replica",
+ "sim",
 ]
 
 [[package]]
@@ -1271,9 +1350,13 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "worldd"
 version = "0.0.0"
 dependencies = [
+ "directoryd",
+ "import-eden",
  "replica",
  "rustix",
  "sim",
+ "skills",
+ "testworld",
 ]
 
 [[package]]

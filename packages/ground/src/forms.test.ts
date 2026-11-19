@@ -111,3 +111,14 @@ test('HILL: a channel with overPads holds its levels over a pad bank, never over
   assert.equal(heightAt(across, 0, 0), 0, 'the pad flat stays at its level');
   assert.equal(heightAt(across, 20, 0), 3, 'off the flat the way holds');
 });
+
+test('HILL: a channel with overPads leaves a level terrace interior at its level (#3291)', () => {
+  const terrace = { id: 't', kind: 'terrace', area: [[-6, -4], [6, -4], [6, 4], [-6, 4]], level: 5, edge: 1 } as Landform;
+  // a graded way along the terrace's north side, its edge reaching 2.5 m into the terrace (the alpine switchback)
+  const way = { id: 'r', kind: 'channel', path: [[-40, 6], [40, 6]], levels: [2, 2], w: 1.8, edge: 3, mode: 'set', overPads: true } as Landform;
+  const g = g0([terrace, way]);
+  for (let x = -5; x <= 5; x++) for (let z = -3; z <= 3; z++) assert.equal(heightAt(g, x, z), 5, `terrace interior (${x}, ${z})`);
+  assert.equal(heightAt(g, 0, 6), 2, 'off the terrace the way holds its level');
+  const lone = g0([way]);
+  assert.equal(heightAt(g, 0, 9.5), heightAt(lone, 0, 9.5), 'away from the terrace nothing changes');
+});

@@ -11,9 +11,13 @@
 //! a wrong commit). If every candidate's reads changed, the act goes back for one re-check on a newer copy
 //! ([`Outcome::Recheck`]); stale again after that, it is refused (`stale`).
 //!
-//! An act's life around the commit (repeats, receipts, deadlines, expiry) is [`acts`] (I4, #2687).
+//! An act's life around the commit (repeats, receipts, deadlines, expiry) is [`acts`] (I4, #2687). A slot's ranked
+//! fallbacks, named slots and selectors a checker resolved, are bound in rank order by [`bind`] (I5, #2690); a
+//! described spot by [`spot`] (E2, #2709).
 
 pub mod acts;
+pub mod bind;
+pub mod spot;
 
 use crate::structure::Structure;
 use replica::apply::Replica;

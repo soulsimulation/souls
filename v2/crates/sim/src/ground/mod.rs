@@ -39,11 +39,31 @@
 //!   corner or its middle over water (ground cover: a pier, a shore) keeps 0, the cover's height as before. Cutting
 //!   through every 1 m sample instead made Eden's open ground 24 times the triangles and slowed N15's thousand
 //!   walkers past real time; heights on the vertices made the routes' one level many.
+//! - **Things on the terrain.** What stands on the open ground is measured from the ground under it, not from the
+//!   plan's 0 (#3227; `scene::Terrain::ground`: the terrain's height there, or 0 where that is nearer, as over water
+//!   under a pier): a floor is ground cover within [`STEP`] of it, a footprint below [`BODY_HIGH`] above it, a
+//!   doorway or a step meets the open ground's plan from its height above it, and an outline step steps down to it.
+//!   So Eden's 94 floors of buildings on its hills (a cottage 10.3 m up) are joined to the open ground like the
+//!   town's. A box on the open ground is measured from the ground under its middle (#3241), so a fence or a tree on
+//!   a hill blocks at its foot as on flat ground; a doorway's wall and passage are read against the boxes at the
+//!   doorway's height above the ground.
 //! - **Steep cells.** A 1 m cell whose slope is above [`STEEP`] (a rise over run of 0.5774, today's) is taken from
 //!   the open ground before its cover is added back: no centre stands on it, so the mover slides along its edge and
 //!   a route goes round it. Cells are taken as they are, not grown by the radius: a body's edge may hang over one.
 //! - **Where it lives.** Here in `sim`, native only. An agent's client never loads the ground: where a described spot
 //!   is a point, the server binds the legal standing spot (E2, #2709).
+//! - **Versions** (G3, #2760). Each node's ground has a version ([`Versions`]), bumped when a committed part changes
+//!   what its scene is read from ([`touched`]): a node's shape fields, its place, its parent, it coming or going, a
+//!   link at it. A change inside a building touches every floor of it; one not under a floor of a building (the
+//!   building itself, a floor's surfaces, a wall on the open ground) touches the open ground too. The would-be ground
+//!   of the touched nodes is cut off the clock thread from the tree as the part leaves it, and installed on the tick
+//!   the part commits (`crate::walk::town::Town::install`): no tick sees new geometry over old ground. A route
+//!   records the versions it was planned on, and the walk is planned again on a mismatch (`crate::unstick`).
+//! - **Seated parts** (N19, #3341). A part seated in a bay is fixed geometry: its boxes are cut like any other's. A
+//!   thing riding a slot its parent gives no point for (`F_SLOTS`: a body's hands, a crew's carry) is carried, and is
+//!   not cut. A part moved to a new parent with its boxes (a transfer, not a creator's edit) touches its old ground and
+//!   its new, so the commit that seats or takes it asks for G3's rebuild (`crate::activity::seating::Seating::write`).
+//!   A body standing where a part would be seated is found by [`scene::stands_in`].
 //!
 //! A [`Turn`] moves the node's geometry into a turned and shifted frame before it is put on the grid; the door table
 //! (36 yaws, 25 offsets) uses it to show the cut does not depend on where the grid falls.
@@ -58,13 +78,15 @@ use i_overlay::core::overlay_rule::OverlayRule;
 use i_overlay::i_float::int::point::IntPoint;
 use i_overlay::i_shape::int::shape::{IntShape, IntShapes};
 use i_triangle::int::triangulatable::IntTriangulatable;
+use replica::effects::{Body, Change, Part, Refusal, TransferRec};
 use replica::ids::Id;
 use replica::kinds::sizes::Size;
 use replica::pose::{Quat, Vec3};
 use replica::tree::Tree;
+use replica::world_model::plain;
 pub use scene::{Doorway, Scene, Solid, Surface, Terrain, Water};
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// The clearance kept beyond the body's radius, mm.
 pub const MARGIN: i64 = 60;
@@ -370,6 +392,9 @@ struct Door {
     across: [i64; 2],
     half: i64,
     y: i64,
+    /// The open ground's height under it, µm (its terrain's, #3227): the open ground's cut, whose plan is at 0, meets
+    /// a doorway at `y` less this. 0 on a floor.
+    ground: i64,
     /// Through the wall: from `n0` to `n1` mm along `across`.
     n0: i64,
     n1: i64,
@@ -452,8 +477,19 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             None => grow(&r, d),
         };
         let bb = bounds(&gr);
-        flat.push((r, b.y0, b.y1));
-        boxes.push((gr, b.y0, b.y1, bb));
+        // On the open ground a box is measured from the ground under its middle, as a footprint is (#3241): a fence
+        // on a hill spans the body at its foot as on flat ground. The open ground's plan, cut at 0, meets it there.
+        let lift = if s.open {
+            let (x, z) = b
+                .ring
+                .iter()
+                .fold((0, 0), |(x, z), p| (x + p[0] / 4, z + p[1] / 4));
+            Terrain::ground(s.terrain.as_ref(), x, z, b.y0)
+        } else {
+            0
+        };
+        flat.push((r, b.y0 - lift, b.y1 - lift));
+        boxes.push((gr, b.y0 - lift, b.y1 - lift, bb));
     }
     let mut never = Vec::new();
     let mut doors = Vec::new();
@@ -473,6 +509,11 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             across,
             half: dw.width / 2000,
             y: dw.y,
+            ground: if s.open {
+                Terrain::ground(s.terrain.as_ref(), dw.at[0], dw.at[1], dw.y)
+            } else {
+                0
+            },
             n0: -DOOR_HALF_DEPTH,
             n1: DOOR_HALF_DEPTH,
             step: dw.step,
@@ -489,7 +530,7 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             door.point(door.half + 50, 0),
         ];
         for (r, y0, y1) in &flat {
-            if spans(*y0, *y1, dw.y) && flank.iter().any(|f| inside_convex(r, *f)) {
+            if spans(*y0, *y1, dw.y - door.ground) && flank.iter().any(|f| inside_convex(r, *f)) {
                 // A box of the door's own wall runs along it. One that meets the opening end-on (a corridor's side
                 // wall starting at the jamb) runs through it, and would make the whole corridor doorway.
                 let cs: Vec<(i64, i64)> = r.iter().map(|p| door.coords(*p)).collect();
@@ -508,11 +549,12 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
         let rect = door.rect(-door.half, door.half, door.n0, door.n1);
         let gr = grow(&rect, d);
         let bb = bounds(&gr);
-        never.push((gr, dw.y, bb));
+        never.push((gr, dw.y - door.ground, bb));
         doors.push(door);
     }
     for f in &s.footprints {
-        if f.y < BODY_HIGH * 1000 {
+        // A building on the terrain is a footprint where its floor stands on the ground under it (#3227).
+        if scene::above_ground(s.terrain.as_ref(), f) < BODY_HIGH * 1000 {
             let r = ccw(f.ring.iter().map(|p| g(*p)).collect::<Result<_, _>>()?);
             // Grown outwards: the ring turned clockwise has the outside on its left.
             let mut parts = Vec::new();
@@ -657,7 +699,7 @@ fn meets(
 ) {
     let reach = g.d + PASSAGE_REACH;
     for door in &g.doors {
-        if (door.y - y).abs() >= BODY_LOW * 1000 {
+        if (door.y - door.ground - y).abs() >= BODY_LOW * 1000 {
             continue;
         }
         let q0 = door.rect(-door.half, door.half, door.n0 - reach, door.n1 + reach);
@@ -667,7 +709,7 @@ fn meets(
         }
         let mut clip = Vec::new();
         for (r, y0, y1, bb) in &g.boxes {
-            if spans(*y0, *y1, door.y) && meets_box(bb, &window) {
+            if spans(*y0, *y1, door.y - door.ground) && meets_box(bb, &window) {
                 clip.push(r.clone());
             }
         }
@@ -766,8 +808,9 @@ impl OpenGround {
 
     /// The open ground node `ground` of `tree`, on the terrain it holds (N1b, #3197), if any.
     pub fn of(tree: &Tree, ground: Id, radius: i64) -> Result<OpenGround, String> {
-        let mut o = OpenGround::prepare(&Scene::of(tree, ground)?, radius)?;
-        o.1 = Terrain::of(tree, ground)?;
+        let s = Scene::of(tree, ground)?;
+        let mut o = OpenGround::prepare(&s, radius)?;
+        o.1 = s.terrain;
         Ok(o)
     }
 
@@ -907,6 +950,127 @@ impl OpenGround {
             meets: meets_out,
         }
     }
+}
+
+/// How a commit that is not a creator's edit asks for G3's rebuild (N19, #3341): called with the tree as it stood
+/// before `part` and the part, once the part is committed, it rebuilds the ground the part touches and installs it
+/// before the next tick (`crate::walk::town::Town::rebuild` and `Town::install`, through what holds the town).
+pub type Rebuild = Box<dyn FnMut(Tree, &Part) -> Result<(), Refusal>>;
+
+/// Each node's ground version (G3, #2760): 0 until a committed part first touches it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Versions(BTreeMap<Id, u64>);
+
+impl Versions {
+    pub fn of(&self, node: Id) -> u64 {
+        self.0.get(&node).copied().unwrap_or(0)
+    }
+
+    /// Whether no ground has changed yet.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// One more for each node of `nodes`.
+    pub fn bump<'a>(&mut self, nodes: impl IntoIterator<Item = &'a Id>) {
+        for n in nodes {
+            *self.0.entry(*n).or_default() += 1;
+        }
+    }
+}
+
+/// The fields a scene is read from: a change to any other (a door's open field, a name) leaves the ground as it was.
+const SHAPE: [u64; 11] = [
+    scene::F_OPEN_DOOR_LINK,
+    scene::F_OUTLINE,
+    scene::F_SOLIDS,
+    scene::F_SURFACES,
+    scene::F_LINE,
+    scene::F_LINE_WIDTH,
+    scene::F_WATER_LEVEL,
+    scene::F_PLACE_OF,
+    scene::F_DOORWAYS,
+    scene::F_TILE_SIZE,
+    scene::F_TILES,
+];
+
+/// The nodes whose ground a change at node `id` of `tree` changes (see the module's notes), added to `out`.
+fn grounds_of(tree: &Tree, id: Id, out: &mut BTreeSet<Id>) {
+    let kind = |h| tree.node(h).map(|n| plain(n.kind().as_str()).to_owned());
+    let mut up = tree.handle(id);
+    let mut under_floor = false;
+    while let Some(h) = up {
+        let k = kind(h).unwrap_or_default();
+        if k == scene::GROUND {
+            out.insert(tree.node(h).map_or(id, |n| n.id()));
+            return;
+        }
+        let kids = tree.children(h).unwrap_or(&[]);
+        let floors: Vec<Id> = kids
+            .iter()
+            .filter(|&&c| kind(c).as_deref() == Some(scene::FLOOR))
+            .filter_map(|&c| tree.node(c).map(|n| n.id()))
+            .collect();
+        if !floors.is_empty() {
+            out.extend(floors);
+            if under_floor {
+                return;
+            }
+        }
+        if k == scene::FLOOR && tree.node(h).is_some_and(|n| n.id() != id) {
+            under_floor = true;
+        }
+        up = tree
+            .node(h)
+            .and_then(|n| n.parent())
+            .and_then(|p| tree.handle(p));
+    }
+}
+
+/// The nodes whose ground the committed part `part` changes: read in `before` (the tree it was applied to) for what
+/// it moves or removes, and in `after` for what it places or moves. Motion samples change no ground.
+pub fn touched(before: &Tree, after: &Tree, part: &Part) -> BTreeSet<Id> {
+    let mut ids = Vec::new();
+    for e in &part.effects {
+        let changes = match &e.body {
+            Body::Changes(changes) => changes,
+            // A thing with boxes moved to a new parent (a part seated or taken out, N19 #3341): its old ground and
+            // its new. A body or a crew's node has none, so a body's hop through a doorway touches nothing.
+            Body::Transfer(TransferRec::Leave { node, .. }) => {
+                let solid = |h| {
+                    before
+                        .node(h)
+                        .is_some_and(|n| n.fields().contains_key(&scene::F_SOLIDS))
+                };
+                if before.handle(*node).is_some_and(solid) {
+                    ids.push(*node);
+                }
+                continue;
+            }
+            _ => continue,
+        };
+        for c in changes {
+            match &c.change {
+                Change::Create { node, .. }
+                | Change::Remove { node }
+                | Change::Reparent { node, .. } => ids.push(*node),
+                Change::Set { node, field, .. } if SHAPE.contains(field) => ids.push(*node),
+                Change::Link { ends, .. } => ids.extend(ends),
+                Change::Unlink { link } => {
+                    if let Some((_, ends, ..)) = before.link(*link) {
+                        ids.extend(ends);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = BTreeSet::new();
+    for id in ids {
+        grounds_of(before, id, &mut out);
+        grounds_of(after, id, &mut out);
+    }
+    out
 }
 
 /// Patches kept per node, node version and radius (G3, #2760, rebuilds one on an edit by asking with the new version).

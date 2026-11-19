@@ -1,0 +1,51 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:bench_seat (SA-X24): two seats side by side.",
+  "cases": [
+    {
+      "name": "bench_seat_two_souls_sit",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "t1"] },
+          "t1": { "kind": "eden:bench_seat" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "seat_1" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "seat_1" } }],
+            "events": [{ "event": "eden:sat_down", "node": "t1", "changes": [0] }]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "seat_1" } },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken",
+            "need": 0,
+            "fix": { "form": "sit", "args": { "seat": "seat_2" } }
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "seat_2" } },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b2", "to": { "node": "t1", "slot": "seat_2" } }],
+            "events": [{ "event": "eden:sat_down", "node": "t1", "changes": [0] }]
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:bench_seat", "slots": { "seat_1": ["b1"], "seat_2": ["b2"] } } }
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:amphitheatre_steps (SA-X24): a lower row of five and an upper row of six places to sit, each row with a first and a last.",
+  "cases": [
+    {
+      "name": "amphitheatre_steps_two_souls_sit",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "t1"] },
+          "t1": { "kind": "eden:amphitheatre_steps" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "lower_1" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "lower_1" } }],
+            "events": [{ "event": "eden:sat_down", "node": "t1", "changes": [0] }]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "lower_1" } },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken",
+            "need": 0,
+            "fix": { "form": "sit", "args": { "seat": "lower_2" } }
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "lower_2" } },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b2", "to": { "node": "t1", "slot": "lower_2" } }],
+            "events": [{ "event": "eden:sat_down", "node": "t1", "changes": [0] }]
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:amphitheatre_steps", "slots": { "lower_1": ["b1"], "lower_2": ["b2"] } } }
+    }
+  ]
+}

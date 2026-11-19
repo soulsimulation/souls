@@ -7,7 +7,7 @@
 //!
 //! - **2, owner:** `thing`, `family` (a body's family) or `place`. Kinds are not only for things.
 //! - **3, state:** fields by stable number, each `{1: name, 2: type, 3: default, 4: audience}`, and for an `enum`
-//!   `5: [values]`. Types are `bool` (0 or 1), `int`, `duration` (whole microseconds), `enum` and `text`. Numbers are
+//!   `5: [values]`. An amount (an `int`) may give `6: its unit`, `7: its min` and `8: its max`, its capacity (F4). Types are `bool` (0 or 1), `int`, `duration` (whole microseconds), `enum` and `text`. Numbers are
 //!   whole: the encoding has no floats, so a client and the world never disagree over rounding.
 //! - **4, links:** the link types it takes part in, `{1: name, 2: from (a category or a kind), 3: most, 4: most_per}`
 //!   (B17, #3338). [`Kinds::check_link`] reads them: a link's type against the kinds at its ends.
@@ -20,12 +20,14 @@
 //! A `souls-entry/1` file (`content/kinds`) is turned into this numbered form by [`entry::entry_to_kind`].
 //! - **8, forms:** what can be done with it, `{1: name, 2: steps}`, each step a move by name and then its arguments.
 //!
-//! A family's size class, height and hover height are fields of its state, read by [`sizes::Build::of`] (B12).
+//! A family's size class, height and hover height are fields of its state, read by [`sizes::Build::of`] (B12). An
+//! authored body's resources, declared actions and models are section 13, read by [`body::Decl`] (B13).
 //!
 //! Every section below 20 is in the hash, whether read here or not, so a section a later task adds (reactions,
 //! lifetime, a place's line) is read by that task and already renames the kind. A thing whose kind is missing or bad
 //! still loads, as "unknown kind", keeping its generic state; the store keeps why each refused kind was refused.
 
+pub mod body;
 pub mod entry;
 pub mod sizes;
 
@@ -63,6 +65,10 @@ pub struct Field {
     pub ty: Type,
     pub default: Value,
     pub audience: Name,
+    /// An amount's unit (`g`, `count`, ...), its least value and its capacity, whole numbers in that unit (F4).
+    pub unit: Option<Name>,
+    pub min: Option<i64>,
+    pub max: Option<i64>,
 }
 
 /// What a point is for.
@@ -137,8 +143,13 @@ pub struct KindDef {
     pub points: BTreeMap<u64, Point>,
     pub forms: BTreeMap<u64, Form>,
     pub admits: Admits,
+    /// Section 13, an authored body's declaration (B13), for a family kind that has one.
+    pub body: Option<body::Decl>,
     pub slots: BTreeMap<u64, Slot>,
     pub links: BTreeMap<u64, LinkType>,
+    /// Section 11's bound: how many children of each admitted kind (plain `namespace:name`) it holds at most. A kind
+    /// read from a list of names alone (a fixture's, no bound) has none here.
+    pub most: BTreeMap<String, u64>,
 }
 
 impl KindDef {
@@ -230,8 +241,10 @@ impl Kinds {
                             points,
                             forms,
                             admits,
+                            body,
                             slots,
                             links,
+                            most,
                         } = d;
                         let def = KindDef {
                             name,
@@ -240,8 +253,10 @@ impl Kinds {
                             points,
                             forms,
                             admits,
+                            body,
                             slots,
                             links,
+                            most,
                         };
                         self.by_hash.insert(k.hash, def);
                     }
@@ -285,6 +300,15 @@ impl Kinds {
     /// Every kind refused so far, with why.
     pub fn refused(&self) -> &[KindError] {
         &self.refused
+    }
+
+    /// Each loaded kind's section 11 bounds, by full name: how many children of each admitted kind it holds at most.
+    pub fn most(&self) -> BTreeMap<String, BTreeMap<String, u64>> {
+        self.by_hash
+            .values()
+            .filter(|k| !k.most.is_empty())
+            .map(|k| (k.name.as_str().to_owned(), k.most.clone()))
+            .collect()
     }
 
     /// What each loaded kind admits, by full name, as a commit's [`crate::tree::Rules`] reads it.
@@ -395,8 +419,10 @@ struct Sections {
     points: BTreeMap<u64, Point>,
     forms: BTreeMap<u64, Form>,
     admits: Admits,
+    body: Option<body::Decl>,
     slots: BTreeMap<u64, Slot>,
     links: BTreeMap<u64, LinkType>,
+    most: BTreeMap<String, u64>,
 }
 
 /// Reads and checks the sections this module knows.
@@ -492,6 +518,14 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
             )));
         }
         let audience = text(e.get(&4)).ok_or_else(|| why("4, the audience, is text".into()))?;
+        let unit = e
+            .get(&6)
+            .map(|u| text(Some(u)).ok_or_else(|| why("6, the unit, is text".into())));
+        let bound = |k: u64, what: &str| {
+            e.get(&k)
+                .map(|v| int(v).ok_or_else(|| why(format!("{k}, the {what}, is a whole number"))))
+                .transpose()
+        };
         state.insert(
             n,
             Field {
@@ -499,6 +533,9 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
                 ty,
                 default,
                 audience,
+                unit: unit.transpose()?,
+                min: bound(7, "min")?,
+                max: bound(8, "max")?,
             },
         );
     }
@@ -633,21 +670,38 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
             );
         }
     }
-    let children = match s.get(&SECTION_CHILDREN) {
-        None => BTreeSet::new(),
-        Some(v) => texts(Some(v))
-            .ok_or_else(|| {
-                bad(
-                    "kind-children",
-                    SECTION_CHILDREN,
-                    None,
-                    "a list of kinds or categories".into(),
-                )
-            })?
-            .iter()
-            .map(|t| t.as_str().to_owned())
-            .collect(),
-    };
+    // Section 11: each child as `{1: kind, 2: most}` (an entry's, B19), or a kind's name alone (a fixture's, no bound).
+    let mut children = BTreeSet::new();
+    let mut most = BTreeMap::new();
+    if let Some(v) = s.get(&SECTION_CHILDREN) {
+        let why = || {
+            bad(
+                "kind-children",
+                SECTION_CHILDREN,
+                None,
+                "a list of kinds or categories, each a name or {1: kind, 2: most}".into(),
+            )
+        };
+        let Value::Array(list) = v else {
+            return Err(why());
+        };
+        for c in list {
+            match c {
+                Value::Map(m) => {
+                    let name = text(m.get(&1)).ok_or_else(why)?;
+                    let bound = match m.get(&2) {
+                        Some(Value::Uint(n)) if *n > 0 => *n,
+                        _ => return Err(why()),
+                    };
+                    most.insert(name.as_str().to_owned(), bound);
+                    children.insert(name.as_str().to_owned());
+                }
+                other => {
+                    children.insert(text(Some(other)).ok_or_else(why)?.as_str().to_owned());
+                }
+            }
+        }
+    }
 
     // How a thing moves (section 18, `{1: how}`): held in one or two hands, or not held (B4, #2739).
     let hands = match s.get(&crate::world_model::SECTION_MOTION) {
@@ -660,7 +714,22 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         Some(_) => return Err(bad("kind-motion", 18, None, "{1: how}".into())),
     };
 
+    let body = match s.get(&body::SECTION_BODY) {
+        None => None,
+        Some(v) => {
+            let why = |reason: String| bad("kind-body", body::SECTION_BODY, None, reason);
+            if owner != "family" {
+                return Err(why("only a family kind declares a body".into()));
+            }
+            let Value::Map(m) = v else {
+                return Err(why("a map of numbered entries".into()));
+            };
+            Some(body::Decl::read(kind, m).map_err(why)?)
+        }
+    };
+
     Ok(Sections {
+        body,
         state,
         points,
         forms,
@@ -672,6 +741,7 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         },
         slots: named_slots,
         links,
+        most,
     })
 }
 
