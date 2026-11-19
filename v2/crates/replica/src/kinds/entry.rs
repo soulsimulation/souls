@@ -3,7 +3,8 @@
 //! K3 reads, and the ones beside them that a part needs to be named by its meaning:
 //!
 //! - **1** kind, **2** owner;
-//! - **3** state, numbered by each field's `n`: `{1: name, 2: type, 3: default, 4: audience rule}` (5: an enum's values);
+//! - **3** state, numbered by each field's `n`: `{1: name, 2: type, 3: default, 4: audience rule}` (5: an enum's values;
+//!   6, 7, 8: an amount's unit, min and max);
 //! - **4** links, numbered by each type's `n`: `{1: name, 2: from, 3: most, 4: most_per}`;
 //! - **5** points, numbered 1, 2, ... in the file's order: `{1: name, 2: at_mm, 3: role, 4: yaw_mdeg}`, and for a
 //!   `joint` (a connector) `5: connector kind, 6: the kind it mates with`;
@@ -126,6 +127,9 @@ fn state_field(n: &str, f: &Value) -> Result<String, String> {
         (3, f.get("default").map(diag).transpose()?),
         (4, rule.map(quoted).transpose()?),
         (5, f.get("values").map(diag).transpose()?),
+        (6, f.get("unit").map(quoted).transpose()?),
+        (7, f.get("min").map(diag).transpose()?),
+        (8, f.get("max").map(diag).transpose()?),
     ]))
 }
 

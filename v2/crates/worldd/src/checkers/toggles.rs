@@ -78,6 +78,7 @@ pub fn toggle(id: u64, body: Id, thing: Id) -> Act {
             })
             .to_vec(),
         recheck: None,
+        spot: None,
     }
 }
 

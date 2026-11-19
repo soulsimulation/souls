@@ -90,14 +90,18 @@ pub fn wire_world_build(first: &[u8]) -> Result<String, JsError> {
     }
 }
 
-/// The sign-in `{1: token, 2: cursor}`; `cursor` is a version's bytes, empty for a fresh stream. A refusal never
+/// The sign-in `{1: token, 2: cursor, 3: seen}`; `cursor` is a version's bytes, empty for a fresh stream, and `seen`
+/// how many frames the client applied at that version (the gateway's default, 1, when left out). A refusal never
 /// carries the token.
 #[wasm_bindgen(js_name = wireSignIn)]
-pub fn wire_sign_in(token: &str, cursor: &[u8]) -> Result<Vec<u8>, JsError> {
+pub fn wire_sign_in(token: &str, cursor: &[u8], seen: Option<u32>) -> Result<Vec<u8>, JsError> {
     let token = Name::new(token).ok_or_else(|| JsError::new("token-not-a-name"))?;
     let mut m = BTreeMap::from([(1, Value::Text(token))]);
     if !cursor.is_empty() {
         m.insert(2, decode(cursor).map_err(js)?.value);
+        if let Some(n) = seen {
+            m.insert(3, Value::Uint(u64::from(n)));
+        }
     }
     encode(&Value::Map(m)).map_err(js)
 }

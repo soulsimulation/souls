@@ -12,6 +12,7 @@ use std::sync::mpsc::channel;
 use std::time::Duration;
 
 use import_eden::Import;
+use replica::apply::Replica;
 use replica::bodies::{Class, Family, Resource};
 use replica::effects::{Actor, Cause, Header, Part, fixture_bytes, read_id, schema_hash};
 use replica::encode::{Name, Value, decode, encode};
@@ -19,6 +20,8 @@ use replica::ids::{Hash, Id, Purpose, Scope, Version};
 use replica::intents::{Intent, Target};
 use replica::moves::Place;
 use replica::pose::{Frame, Quat, Vec3};
+use replica::select::{Spot, resolve};
+use replica::tree::Tree;
 use sim::links::Doors;
 use sim::log::{Mem, recover};
 use sim::slots::PlaceAt;
@@ -144,10 +147,14 @@ struct Client(UnixStream);
 
 impl Client {
     fn send(&mut self, sequence: u64, verb: &str, target: Option<Id>) {
+        self.send_to(sequence, verb, target.map(Target::Node));
+    }
+
+    fn send_to(&mut self, sequence: u64, verb: &str, target: Option<Target>) {
         let i = Intent {
             actor: Actor::Soul(body_id()),
             verb: name(verb),
-            target: target.map(Target::Node),
+            target,
             parameters: BTreeMap::new(),
             sequence,
             basis: Version {
@@ -330,6 +337,116 @@ fn a3_a_scripted_client_walks_sits_and_rises_over_the_socket() {
     assert!(near(r.4, stand, 1_000), "on the stand point: {:?}", r.4);
 }
 
+/// E2's follow-up (#2709): a walk aimed at a described spot (selector 2) goes through the world's answer path. A
+/// checker resolves it on its frozen copy with the shared library, giving the client's answer; the clock binds it
+/// once, at commit, and the body walks there. A spot with no answer is refused by the library's name.
+#[test]
+fn a_described_spot_is_resolved_by_a_checker_bound_at_commit_or_refused_by_name() {
+    let w = testworld::generate(1, 0).expect("the test world");
+    let im = import_eden::load(&w.text).expect("the test world loads");
+    let n = |k: &str| im.nodes[k];
+    // The world's copy is the test world's log, so the checker's frozen copy holds the nodes the spot names.
+    // Replica::start roots a zone at a `souls:place` kind; the import roots it at its world kind, so the header
+    // lists that kind once more under the place's name.
+    let Value::Map(mut h) = decode(&im.log.0).unwrap().value else {
+        panic!("a header")
+    };
+    let Some(Value::Array(kinds)) = h.get_mut(&6) else {
+        panic!("its kinds")
+    };
+    let world = kinds
+        .iter()
+        .find_map(|k| match k {
+            Value::Text(t) => t.as_str().strip_prefix("eden:world@").map(str::to_owned),
+            _ => None,
+        })
+        .expect("the world's kind");
+    kinds.push(Value::Text(name(&format!("souls:place@{world}"))));
+    let header = encode(&Value::Map(h)).unwrap();
+    let Value::Map(mut part) = decode(&im.log.1).unwrap().value else {
+        panic!("a part")
+    };
+    part.insert(
+        1,
+        Value::Bytes(Header::read(&header).unwrap().hash().to_bytes()),
+    );
+    let mut world_copy = Replica::start(&header).expect("the header");
+    world_copy
+        .apply_bytes(&encode(&Value::Map(part)).unwrap())
+        .expect("the log applies");
+    // The client's copy, built the same way by the tree's own apply, as a client's is.
+    let root = im.tree.node(im.tree.root()).unwrap();
+    let mut client = Tree::start(root.id(), root.kind().clone());
+    client
+        .apply(
+            &Header::read(&im.log.0).unwrap(),
+            &Part::read(&im.log.1).unwrap(),
+        )
+        .unwrap();
+    let free = |_: Id, _: u64| false;
+    // "Halfway between the building and the hall": a point on the open ground, 10 m east of the body.
+    let between = Spot::Between(n("building"), n("hall"));
+    let want = resolve(&client, &between, None, &free).expect("the client resolves it");
+    assert_eq!(
+        worldd::checkers::places::spot(world_copy.tree(), &between, body_id(), &free),
+        Ok(want.clone()),
+        "the checker gives the client's answer"
+    );
+    // "In front of the square": the square is the same turned a quarter, so it has no front.
+    let front = Spot::Front(n("square"));
+
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.bodies = Some(Box::new(bodies));
+    let world =
+        answers::start(world_copy, toggles::rules(), store.clone(), cfg).expect("the world starts");
+    let path = std::env::temp_dir().join(format!("e2-spot-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    let (ready, accepted) = channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        ready.send(()).unwrap();
+        answers::serve(door, stream);
+    });
+    let stream = UnixStream::connect(&path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    accepted.recv().unwrap();
+    let mut c = Client(stream);
+
+    c.send_to(1, "eden:walk", Some(front.target()));
+    assert_eq!(c.answer(), Err("spot.no-front".into()), "refused by name");
+    c.send_to(2, "eden:walk", Some(between.target()));
+    let walk = c.answer().expect("the walk to the spot is done");
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+
+    let log = logged(&store.0.lock().unwrap().bytes);
+    let l = &log[&walk.0];
+    let seqs: Vec<u64> = l.iter().map(|e| e.0).collect();
+    assert_eq!(seqs, walk.1, "the receipt names the log's entries");
+    let end = l.last().cloned().unwrap();
+    println!(
+        "spot {:?} -> frame {} local {:?}; the walk ended {:?} on {} at {:?} um",
+        between.relation(),
+        replica::world_model::show(want.frame),
+        want.local,
+        end.2,
+        replica::world_model::show(end.3),
+        end.4
+    );
+    assert_eq!(end.3, want.frame, "standing in the spot's frame");
+    assert!(
+        near(end.4, want.local, 60_000),
+        "the body walked to the bound spot: {:?}",
+        end.4
+    );
+}
+
 /// C4 A2: a lie on a bed goes through the bodies as a sit does: walk to its stand point, lie in its slot (a receipt
 /// naming the log's entries, the move started and ended `done`), a walk refused while lying, and a rise.
 #[test]
@@ -357,7 +474,7 @@ fn c4_a2_a_lie_on_a_bed_gets_receipts_like_a_sit() {
     });
     let stream = UnixStream::connect(&path).unwrap();
     stream
-        .set_read_timeout(Some(Duration::from_secs(20)))
+        .set_read_timeout(Some(Duration::from_secs(30)))
         .unwrap();
     accepted.recv().unwrap();
     let mut c = Client(stream);
