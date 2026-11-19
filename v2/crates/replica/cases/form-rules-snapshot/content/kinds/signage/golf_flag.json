@@ -1,0 +1,216 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:golf_flag",
+  "owner": "thing",
+  "state": {
+    "out": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "green": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        500
+      ],
+      "yaw_mdeg": 180000
+    },
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        1000,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      600,
+      2200,
+      100
+    ]
+  },
+  "forms": {
+    "take_out": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "out",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "green"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "grip"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "out",
+          "to": true,
+          "event": "taken_out"
+        }
+      ]
+    },
+    "put_back": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "out",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "green"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "grip"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "out",
+          "to": false,
+          "event": "put_back"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:golf_flag",
+    "table": [
+      {
+        "part": "blade",
+        "field": "out",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "true": 85000,
+          "false": 0
+        },
+        "over_us": 800000
+      }
+    ],
+    "shape": {
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1100,
+            0
+          ],
+          "r": 30,
+          "h": 2200,
+          "tint": "pole",
+          "role": "blade",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1950,
+            0
+          ],
+          "size": [
+            500,
+            320,
+            20
+          ],
+          "round": 0,
+          "tint": "flag",
+          "role": "blade",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            2,
+            0
+          ],
+          "r": 60,
+          "h": 4,
+          "tint": "hole"
+        }
+      ],
+      "palette": {
+        "pole": "#f4f2ec",
+        "flag": "#d9473e",
+        "hole": "#20201c"
+      },
+      "tags": [
+        "golf",
+        "sport",
+        "green"
+      ]
+    }
+  },
+  "text": {
+    "card": "A golf green's pin, a white pole and red flag: take it out to putt.",
+    "golf": "golf",
+    "pin": "pin",
+    "flagstick": "flagstick",
+    "howto_putt": "Take the pin out, putt, then put the pin back."
+  },
+  "card": {
+    "text": "card",
+    "category": "golf",
+    "synonyms": [
+      "pin",
+      "flagstick"
+    ]
+  },
+  "howtos": {
+    "putt": {
+      "text": "howto_putt",
+      "steps": [
+        {
+          "form": "take_out"
+        },
+        {
+          "form": "put_back"
+        }
+      ]
+    }
+  }
+}

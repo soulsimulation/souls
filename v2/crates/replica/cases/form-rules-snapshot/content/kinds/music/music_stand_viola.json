@@ -1,0 +1,80 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:music_stand_viola",
+  "owner": "thing",
+  "state": {
+    "music": {"n":1,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
+  },
+  "links": {"player":{"n":1,"from":"soul","most":1,"audience":{"rule":"everyone"}}},
+  "points": {"player":{"role":"stand","at_mm":[0,0,500]}},
+  "geometry": {"bounds_mm":[500,1200,400]},
+  "forms": {
+    "play": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"}],
+      "steps": [{"step":"walk_to","point":"player"}],
+      "effects": [
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"calm","event":"played_calm"}
+      ]
+    },
+    "play_happy": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"}],
+      "steps": [{"step":"walk_to","point":"player"}],
+      "effects": [
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"happy","event":"played_happy"}
+      ]
+    },
+    "play_sad": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"}],
+      "steps": [{"step":"walk_to","point":"player"}],
+      "effects": [
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"sad","event":"played_sad"}
+      ]
+    },
+    "stop": {
+      "who": {"link":"player"},
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","not":"silent"}],
+      "steps": [],
+      "effects": [
+        {"change":"set","field":"music","to":"silent","event":"stopped_playing"},
+        {"change":"unlink","link":"player","from":"actor","event":"stepped_away"}
+      ]
+    }
+  },
+  "motion": {"how":"one_hand"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:music_stand_viola",
+    "table": [
+      {"do":"sound","sound":"tune","mood":"calm","mode":"loop","field":"music","at":{"calm":700},"reach_mm":15000},
+      {"do":"sound","sound":"tune","mood":"happy","mode":"loop","field":"music","at":{"happy":700},"reach_mm":15000},
+      {"do":"sound","sound":"tune","mood":"sad","mode":"loop","field":"music","at":{"sad":700},"reach_mm":15000}
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"collide":false,"kind":"cyl","at":[0,550,0],"r":10,"h":1100,"color":"#222222"},
+        {"collide":false,"kind":"box","at":[0,1120,0],"size":[450,300,20],"color":"#222222"},
+        {"collide":false,"kind":"box","at":[320,60,50],"size":[220,100,620],"color":"#6b2f2a"}
+      ],
+      "tags": ["music","violin"]
+    }
+  },
+  "text": {
+    "card": "A music stand with a viola case: stand at it and play, by mood.",
+    "instrument": "instrument",
+    "viola": "viola",
+    "howto_play": "Play it (play, play_happy or play_sad), then stop."
+  },
+  "card": {"text":"card","category":"instrument","synonyms":["viola"]},
+  "howtos": {"play":{"text":"howto_play","steps":[{"form":"play"},{"form":"stop"}]}}
+}

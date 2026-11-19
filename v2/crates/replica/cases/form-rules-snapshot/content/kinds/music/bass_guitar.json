@@ -1,0 +1,69 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bass_guitar",
+  "owner": "thing",
+  "state": {
+    "music": {"n":1,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
+  },
+  "points": {"neck":{"role":"grip","at_mm":[0,900,0]}},
+  "geometry": {"bounds_mm":[400,1300,100]},
+  "forms": {
+    "play": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"held_by_actor"},{"need":"hand","free":true},{"need":"state","field":"music","is":"silent"}],
+      "steps": [],
+      "effects": [{"change":"set","field":"music","to":"calm","event":"played_calm"}]
+    },
+    "play_happy": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"held_by_actor"},{"need":"hand","free":true},{"need":"state","field":"music","is":"silent"}],
+      "steps": [],
+      "effects": [{"change":"set","field":"music","to":"happy","event":"played_happy"}]
+    },
+    "play_sad": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"held_by_actor"},{"need":"hand","free":true},{"need":"state","field":"music","is":"silent"}],
+      "steps": [],
+      "effects": [{"change":"set","field":"music","to":"sad","event":"played_sad"}]
+    },
+    "stop": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"held_by_actor"},{"need":"state","field":"music","not":"silent"}],
+      "steps": [],
+      "effects": [{"change":"set","field":"music","to":"silent","event":"stopped_playing"}]
+    }
+  },
+  "motion": {"how":"one_hand"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:bass_guitar",
+    "table": [
+      {"do":"sound","sound":"tune","mood":"calm","mode":"loop","field":"music","at":{"calm":700},"reach_mm":15000},
+      {"do":"sound","sound":"tune","mood":"happy","mode":"loop","field":"music","at":{"happy":700},"reach_mm":15000},
+      {"do":"sound","sound":"tune","mood":"sad","mode":"loop","field":"music","at":{"sad":700},"reach_mm":15000}
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"collide":false,"kind":"cyl","at":[0,90,0],"r":190,"h":90,"pitch":90000,"color":"#2c3e57","role":"body"},
+        {"collide":false,"kind":"cyl","at":[0,330,0],"r":145,"h":90,"pitch":90000,"color":"#2c3e57","role":"body"},
+        {"collide":false,"kind":"cyl","at":[0,170,47],"r":50,"h":10,"pitch":90000,"color":"#1a1a1a"},
+        {"collide":false,"kind":"box","at":[0,800,0],"size":[55,660,30],"color":"#3a2616"},
+        {"collide":false,"kind":"box","at":[0,1170,0],"size":[85,160,30],"color":"#2a1d14"}
+      ],
+      "tags": ["music","bass_guitar"]
+    }
+  },
+  "text": {
+    "card": "A bass guitar: hold it and play a bass line, by mood.",
+    "instrument": "instrument",
+    "bass": "bass",
+    "howto_play": "Hold it, play it (play, play_happy or play_sad), then stop."
+  },
+  "card": {"text":"card","category":"instrument","synonyms":["bass"]},
+  "howtos": {"play":{"text":"howto_play","steps":[{"form":"play"},{"form":"stop"}]}}
+}

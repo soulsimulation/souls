@@ -1,0 +1,79 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:interval_station",
+  "owner": "thing",
+  "state": {
+    "intervals": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } },
+    "last_move": { "n": 2, "type": "enum", "values": ["none", "stretch", "jacks", "dance"], "default": "none", "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 1500], "yaw_mdeg": 180000 }
+  },
+  "geometry": { "bounds_mm": [700, 1200, 350] },
+  "forms": {
+    "stretch_interval": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "front" },
+        { "step": "move", "move": "stretch" },
+        { "step": "wait", "us": 6000000 },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "intervals", "by": 1, "event": "interval_completed" },
+        { "change": "set", "field": "last_move", "to": "stretch", "event": "last_move_noted" }
+      ]
+    },
+    "jacks_interval": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "front" },
+        { "step": "move", "move": "jump" },
+        { "step": "wait", "us": 6000000 },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "intervals", "by": 1, "event": "interval_completed" },
+        { "change": "set", "field": "last_move", "to": "jacks", "event": "last_move_noted" }
+      ]
+    },
+    "dance_interval": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "front" },
+        { "step": "move", "move": "dance" },
+        { "step": "wait", "us": 6000000 },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "intervals", "by": 1, "event": "interval_completed" },
+        { "change": "set", "field": "last_move", "to": "dance", "event": "last_move_noted" }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:interval_station",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,25,0],"size":[500,50,350],"tint":"wood"},{"kind":"cyl","at":[0,480,0],"r":35,"h":900,"tint":"wood"},{"kind":"box","at":[0,1000,0],"size":[700,400,70],"tint":"wood"},{"kind":"box","at":[-220,1000,40],"size":[120,220,15],"tint":"mark"},{"kind":"box","at":[0,1000,40],"size":[120,220,15],"tint":"mark"},{"kind":"box","at":[220,1000,40],"size":[120,220,15],"tint":"mark"},{"kind":"box","at":[0,850,40],"size":[600,60,15],"tint":"screen","role":"light"}],"palette":{"wood":"#644932","mark":"#efd15c","screen":"#3a3a3a"},"tags":["exercise","interval-training","station"]},
+    "table": [
+      { "part": "light", "field": "last_move", "do": "tint", "at": { "none": "#3a3a3a", "stretch": "#5fb36a", "jacks": "#e0902f", "dance": "#c45fb0" } },
+      { "part": "light", "field": "last_move", "do": "glow", "at": { "none": 0, "stretch": 1000, "jacks": 1000, "dance": 1000 } }
+    ]
+  },
+  "text": {
+    "card": "An interval board: 6 s of stretch, jumping jacks or dance, then 3 s of rest.",
+    "exercise": "exercise",
+    "intervals": "intervals",
+    "workout": "workout",
+    "howto_workout": "Chain intervals in the order you like, as many rounds as you like: stretch, then jumping jacks, and again."
+  },
+  "card": { "text": "card", "category": "exercise", "synonyms": ["intervals", "workout"] },
+  "howtos": { "workout": { "text": "howto_workout", "steps": [{ "form": "stretch_interval" }, { "form": "jacks_interval" }] } }
+}

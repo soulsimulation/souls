@@ -168,3 +168,51 @@ fn a_record_that_does_not_hash_to_its_name_is_refused_by_name() {
     let r = Copy::default().sync(&[world_id(0)], &mut Lying(w.served()));
     assert_eq!(r.map(|_| ()).map_err(|e| e.name), Err("sync-hash"));
 }
+
+/// A world whose answers stop after so many records requests, as a socket closed mid-sync.
+struct Cut<'a>(Served<'a>, usize);
+
+impl Source for Cut<'_> {
+    fn hashes(&mut self, ids: &[Id]) -> Result<Vec<Option<Hash>>, Refusal> {
+        self.0.hashes(ids)
+    }
+
+    fn records(&mut self, hashes: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, Refusal> {
+        if self.1 == 0 {
+            return Err(Refusal {
+                name: "cut",
+                detail: String::new(),
+            });
+        }
+        self.1 -= 1;
+        self.0.records(hashes)
+    }
+}
+
+/// #3424: a sync cut off after its first level held the place's record without the records below it, and the next
+/// sync, finding the place's hash held, never descended: `sync-missing` at every sign-in after.
+#[test]
+fn a_sync_cut_off_mid_descent_leaves_the_copy_as_it_was_and_the_next_one_completes() {
+    let h = header();
+    let mut w = World {
+        tree: base(&h),
+        records: Records::default(),
+    };
+    w.seal();
+    let scope = [world_id(0)];
+    let mut copy = Copy::default();
+    let r = copy.sync(&scope, &mut Cut(w.served(), 1));
+    assert_eq!(r.map(|_| ()).map_err(|e| e.name), Err("cut"));
+    assert!(
+        copy.roots().is_empty(),
+        "the scope's hashes are the copy's only once it finishes"
+    );
+    assert!(copy.reach().unwrap().is_empty());
+    let s = copy.sync(&scope, &mut w.served()).unwrap();
+    assert_eq!(
+        copy.roots().get(&world_id(0)),
+        w.hash(world_id(0)).map(Hash::to_bytes).as_ref()
+    );
+    assert!(s.held > 1, "the place and what is below it: {}", s.held);
+    assert_eq!(copy.reach().unwrap().len(), s.held);
+}

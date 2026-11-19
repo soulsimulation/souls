@@ -1,0 +1,53 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:barrel",
+  "owner": "thing",
+  "slots": {
+    "inside": {
+      "admits": "thing",
+      "most": 4,
+      "at_mm": [
+        0,
+        100,
+        0
+      ],
+      "fits_mm": [
+        400,
+        600,
+        400
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      600,
+      850,
+      600
+    ],
+    "front": "none"
+  },
+  "motion": {
+    "how": "pushed_by_one"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:barrel",
+    "shape": {"round":15,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,0],[250,0],[290,220],[300,425],[290,630],[250,850],[0,850]],"segments":10,"tint":"wood"},{"kind":"cyl","at":[0,200,0],"r":295,"h":50,"segments":10,"tint":"iron"},{"kind":"cyl","at":[0,650,0],"r":295,"h":50,"segments":10,"tint":"iron"}],"palette":{"wood":"#8c5f3a","iron":"#3b3a36"},"tags":["prop","street","barrel","container","market"]}
+  },
+  "text": {
+    "card": "An oak barrel with iron hoops: roll it along, keep a few things in it.",
+    "storage": "storage",
+    "cask": "cask",
+    "keg": "keg"
+  },
+  "card": {
+    "text": "card",
+    "category": "storage",
+    "synonyms": [
+      "cask",
+      "keg"
+    ]
+  }
+}
