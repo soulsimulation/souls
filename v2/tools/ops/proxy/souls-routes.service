@@ -1,0 +1,12 @@
+# The front door's map (Engine v2 O19, #2830): routes.mjs writes the directory's slugs and the sitemap into
+# /var/lib/souls-routes, which soul-game.caddy reads. @@PRODUCTION_PORT@@ is substituted at install, as in the site file.
+[Unit]
+Description=Souls front door: the map of the worlds the new system serves
+After=network.target
+
+[Service]
+Type=oneshot
+User=simworlds
+StateDirectory=souls-routes
+StateDirectoryMode=0755
+ExecStart=/usr/bin/node --no-warnings /srv/sim-worlds/production/v2/tools/ops/proxy/routes.mjs --directory http://localhost:7310 --launcher http://localhost:@@PRODUCTION_PORT@@ --origin https://soul.game --out /var/lib/souls-routes

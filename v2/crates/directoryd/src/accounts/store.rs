@@ -42,7 +42,7 @@ impl From<rusqlite::Error> for StoreError {
 }
 
 pub struct Store {
-    db: Mutex<Connection>,
+    pub(super) db: Mutex<Connection>,
 }
 
 impl Store {
@@ -74,6 +74,9 @@ impl Store {
                UNIQUE(account_id, grant_text));
              CREATE TABLE IF NOT EXISTS revoked_sessions_v1(issuer TEXT NOT NULL, session_id TEXT NOT NULL,
                revoked_at INTEGER NOT NULL, PRIMARY KEY(issuer, session_id));
+             CREATE TABLE IF NOT EXISTS mailbox_v1(id TEXT PRIMARY KEY, soul TEXT NOT NULL, text TEXT NOT NULL,
+               at INTEGER NOT NULL, state TEXT NOT NULL, outcome TEXT, closed_at INTEGER);
+             CREATE INDEX IF NOT EXISTS mailbox_v1_open ON mailbox_v1(state, at);
              COMMIT;",
         )
         .map_err(owned)?;
@@ -167,6 +170,17 @@ impl Store {
             )
             .optional()?
             .is_some())
+    }
+
+    /// When an account was made, seconds since 1970 (W3's limits for a new account).
+    pub fn made(&self, account: &str) -> Result<u64, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let at: i64 = db.query_row(
+            "SELECT created_at FROM provider_accounts_v1 WHERE account_id = ?1",
+            params![account],
+            |r| r.get(0),
+        )?;
+        Ok(at as u64)
     }
 
     /// A consistent copy of the store at `to`, taken while it is in use (SQLite's online backup), for O20 to ship.

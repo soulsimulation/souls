@@ -106,8 +106,10 @@ fn a2_an_hour_of_acts_under_a_principal_leaves_no_account_identity_in_the_log_or
         test_sign_in: false,
         view_key: None,
         origin: None,
+        mailbox_key: None,
         pairing: None,
         log: Mutex::new(Box::new(log.clone())),
+        worlds: None,
     };
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
