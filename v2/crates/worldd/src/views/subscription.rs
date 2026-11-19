@@ -63,8 +63,9 @@ type R<T> = Result<T, Refusal>;
 type Readers = Option<Arc<BTreeSet<Id>>>;
 /// A tick's entries of each body, each encoded once, whether `sampled` keeps it in any second, and who may read it.
 type ByBody = BTreeMap<Id, Vec<(Arc<[u8]>, bool, Readers)>>;
-/// An utterance of a tick: its entry encoded once, its hearers, who may read it and its words' reference.
-type Utterance = (Arc<[u8]>, BTreeSet<Id>, Readers, Id);
+/// An utterance of a tick: its entry encoded once, its hearers, who may read it and its words' reference (none for
+/// an offer, addressed like speech: C2).
+type Utterance = (Arc<[u8]>, BTreeSet<Id>, Readers, Option<Id>);
 
 /// The budget a client starts with, bytes a world second.
 pub const START_BUDGET: u64 = 8_000;
@@ -609,8 +610,13 @@ impl Hub {
                     };
                     if !hearers.is_empty() {
                         let b = bytes_of(e.to_value())?;
-                        said.push((b, hearers, readers.clone(), s.words));
+                        said.push((b, hearers, readers.clone(), Some(s.words)));
                     }
+                } else if let Some(to) = replica::activity::addressed(ev.name.as_str(), &ev.fields)
+                    && !to.is_empty()
+                {
+                    // An offer to each body asked, its decline or lapse to the asker (E8, C2): addressed like speech.
+                    said.push((bytes_of(e.to_value())?, to, readers.clone(), None));
                 }
             }
         }
@@ -642,7 +648,7 @@ impl Hub {
                     let text = self
                         .words
                         .as_ref()
-                        .and_then(|t| t.read(*words, &reader).ok());
+                        .and_then(|t| t.read((*words)?, &reader).ok());
                     s.address_said(bytes, text)?;
                 }
             }

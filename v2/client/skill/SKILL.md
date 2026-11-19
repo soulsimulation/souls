@@ -30,6 +30,10 @@ To see a place, Soul or thing: `shoot <name> --out <file.png>` (a Soul's own vie
 
 Before a long errand (across the world, several steps), `can <act>`: `yes`, `no` with its `reason` and `fix`, or `unknown` (the world decides; send it).
 
+## What happened
+
+Asked about the past ("what happened at the library", "who took my bike"): `history --at <place id>`, `--thing <id>` or `--soul <name>`, one call. It answers from the world's public record and your memory, newest first, with its span; say what it found, never more. `no-history`: tell your owner.
+
 ## Age
 
 Every answer carries `age`. With `gap` or `stale`, your copy may be behind: `look` again before you choose; never report a stale copy as now. `asleep`: the world is quiet, not broken.
