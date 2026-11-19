@@ -31,9 +31,10 @@
 //! in the slots table (`crate::bodies`).
 //!
 //! **Free text** goes to K16's text store first and the log holds its reference only (`{21: id}`, T8 rule 6). Words
-//! come in an intent as T8's `{23: words}` (CBOR text is names only, so words are bytes). K16 has no store yet, so an
-//! intent carrying words is refused `intent.text-not-stored` and logged without its intent: none of their bytes
-//! reach the log (`a5_` test).
+//! come in an intent as T8's `{23: words}` (CBOR text is names only, so words are bytes). Each is kept in K16's store
+//! ([`Config::text`]) and replaced by its reference before the intent is logged or acted on (V1b, #3361,
+//! [`crate::words`]): none of their bytes reach the log (`a5_` test). A `say`, a `whisper` or a `describe` writes its
+//! entry at once and is answered with a receipt after its tick's sync.
 //!
 //! **Sync by hash** (R5b, #3164): a frame with key 20 is R5's sync request (`replica::sync::wire`), not an intent.
 //! The clock thread answers it from the tree as last sealed, sealing first when the world has changed since, and
@@ -80,6 +81,7 @@ use crate::checkers::{self, Act, Candidate, Rules};
 use crate::engine::{self, Engine};
 use crate::measures::{self, Measures, Stamps};
 use crate::views::Tier;
+use crate::words;
 use replica::apply::Replica;
 use replica::effects::{Actor, Body, Cause, Effect, Envelope, Event as Named, Part, Refusal};
 use replica::encode::{Name, Value, decode, encode};
@@ -99,6 +101,7 @@ use sim::frozen::Publisher;
 use sim::log::{Durable, Log, Storage};
 use sim::recorder::{self, Input};
 use std::collections::BTreeMap;
+use sim::text::Store;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -334,6 +337,11 @@ pub struct Config {
     /// The world's rules and its activity kinds, for the engine's own acts (C2: activities, offers, carrying);
     /// without them those acts are refused `engine-acts-off`.
     pub engine: Option<(replica::tree::Rules, Vec<replica::activity::ActivityKind>)>,
+    /// K16's text store, where an intent's words are kept (V1b); a store in memory when none is given.
+    pub text: Option<Arc<Store>>,
+    /// Called once at start with the log's durable mark; what it gives is handed each tick's record as it is
+    /// appended (its number and bytes): a view tier's `offer`, so a stream writer follows the world (V1b).
+    pub follow: Option<Follow>,
 }
 
 /// A record on the disk ([`Config::synced`]): its number in the log, its bytes, and whether it is the recorder's input
@@ -343,6 +351,11 @@ pub struct Synced {
     pub bytes: Vec<u8>,
     pub input: bool,
 }
+
+/// See [`Config::follow`]: what each appended record (its number and bytes) is handed to.
+pub type Offer = Box<dyn FnMut(u64, Vec<u8>) + Send>;
+/// See [`Config::follow`].
+pub type Follow = Box<dyn FnOnce(Durable) -> Offer + Send>;
 
 impl Config {
     pub fn new(lineage: Scope, epoch: u64) -> Config {
@@ -364,6 +377,8 @@ impl Config {
             health: None,
             synced: None,
             engine: None,
+            text: None,
+            follow: None,
         }
     }
 }
@@ -554,6 +569,8 @@ struct Clock {
     durable: Durable,
     tick: i64,
     measures: Option<Arc<Measures>>,
+    /// K16's store, where words are kept (V1b).
+    text: Arc<Store>,
 }
 
 /// What an intent becomes: a form's act for the checkers, or a move for the bodies.
@@ -800,10 +817,24 @@ impl Clock {
             let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
             let _ = f.write_all(format!("{hex} {sequence}\n").as_bytes());
         }
-        let value = intent.to_value();
+        let mut value = intent.to_value();
+        let form = words::form(&intent);
+        let mut kept = Vec::new();
         if has_words(&value) {
-            let a = self.refusal(actor, sequence, "intent.text-not-stored");
-            return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+            // The words go to the store and the intent is logged with their references (V1b); refused, it is logged
+            // without its intent.
+            let r = match body_of(&intent) {
+                Ok(b) => words::keep(value, &self.text, words::audience(form, b), b, &mut kept)
+                    .map_err(|r| r.name),
+                Err(e) => Err(e),
+            };
+            value = match r {
+                Ok(v) => v,
+                Err(reason) => {
+                    let a = self.refusal(actor, sequence, reason);
+                    return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+                }
+            };
         }
         if expired(intent.expiry, now) {
             let a = self.refusal(actor, sequence, "intent.expired");
@@ -813,6 +844,37 @@ impl Clock {
             let a = self.refusal(actor, sequence, "intent.ids-exhausted");
             return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
         };
+        // A say, a whisper or a describe writes its entry now and is answered after its tick's sync (V1b).
+        if form != words::Form::Other {
+            let entry = match body_of(&intent) {
+                Ok(b) if self.replica.node(b).is_some() => {
+                    let env = words::envelope(self.replica.version(), now, id, actor, b);
+                    words::entry(form, &value, &kept, b, env)
+                }
+                Ok(_) => Some(Err("intent.no-body")),
+                Err(e) => Some(Err(e)),
+            };
+            if let Some(entry) = entry {
+                let reason = match entry {
+                    Ok(e) => self.write(e).err().map(|r| r.name),
+                    Err(r) => Some(r),
+                };
+                let a = match reason {
+                    None => {
+                        self.next_intent += 1;
+                        Answer::Receipt {
+                            actor,
+                            sequence,
+                            intent: id,
+                            entries: self.receipts.entries(id).to_vec(),
+                        }
+                    }
+                    Some(r) => self.refusal(actor, sequence, r),
+                };
+                let id = matches!(a, Answer::Receipt { .. }).then_some(id);
+                return self.answered(key, sequence, id, Some(value), &a, (vec![reply], stamps));
+            }
+        }
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
             Some(_) => body_of(&intent).ok().and_then(|b| bodies::read(&intent, b)),
@@ -927,25 +989,31 @@ impl Clock {
             }]),
             rest: BTreeMap::new(),
         };
+        if let Err(r) = self.write(effect) {
+            eprintln!("worldd: a move's entry was not written: {r}");
+        }
+    }
+
+    /// Applies one entry the world writes itself (a move's, or words', V1b), indexed for receipts and logged with the
+    /// tick.
+    fn write(&mut self, effect: Effect) -> R<()> {
+        let changes = matches!(&effect.body, Body::Changes(c) if !c.is_empty());
         let v = Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.replica.header().hash().to_bytes())),
             (2, Value::Array(vec![effect.to_value()])),
         ]));
-        let part = encode(&v)
+        let p = encode(&v)
             .map_err(|e| Refusal {
                 name: "encoding",
                 detail: e.to_string(),
             })
             .and_then(|b| Part::read(&b))
-            .and_then(|p| self.replica.apply(&p).map(|()| p));
-        match part {
-            Ok(p) => {
-                self.receipts.index(&p.effects);
-                self.effects.extend(p.effects.iter().cloned());
-                self.parts.push(Arc::new(p));
-            }
-            Err(r) => eprintln!("worldd: a move's entry was not written: {r}"),
-        }
+            .and_then(|p| self.replica.apply(&p).map(|()| p))?;
+        self.unsealed |= changes;
+        self.receipts.index(&p.effects);
+        self.effects.extend(p.effects.iter().cloned());
+        self.parts.push(Arc::new(p));
+        Ok(())
     }
 
     /// Steps 1 to 3 for the bodies (I4b): their due timers, skills and controller, to world time `now`; each move that
@@ -1394,6 +1462,7 @@ fn answer_loop<S: Storage + 'static>(
     tier: Option<Arc<Tier>>,
     measures: Option<Arc<Measures>>,
     synced: Option<Sender<Synced>>,
+    mut follow: Option<Offer>,
 ) {
     for (k, t) in ticks.into_iter().enumerate() {
         let k = k as u64;
@@ -1406,9 +1475,13 @@ fn answer_loop<S: Storage + 'static>(
             let Some(bytes) = bytes else { continue };
             let copy = (k == 1 && tier.is_some()).then(|| bytes.clone());
             let kept = synced.as_ref().map(|_| bytes.clone());
+            let followed = (k == 1 && follow.is_some()).then(|| bytes.clone());
             match log.append(bytes) {
                 Ok(n) => {
                     last = Some(n);
+                    if let (Some(f), Some(b)) = (follow.as_mut(), followed) {
+                        f(n, b);
+                    }
                     if let (Some(tier), Some(b)) = (&tier, copy) {
                         tier.offer(n, b);
                     }
@@ -1657,12 +1730,17 @@ pub fn start<S: Storage + 'static>(
     let durable = log.durable_mark();
     let world_durable = log.durable_mark();
     let synced = cfg.synced.take();
+    let text = match cfg.text.take() {
+        Some(t) => t,
+        None => Arc::new(crate::words::in_memory(cfg.lineage)?),
+    };
+    let follow = cfg.follow.take().map(|f| f(log.durable_mark()));
     let (answers, ticks) = channel();
     let answer_tier = tier.clone();
     let answer_measures = measures.clone();
     let answering = thread::Builder::new()
         .name("answers".into())
-        .spawn(move || answer_loop(log, ticks, answer_tier, answer_measures, synced))
+        .spawn(move || answer_loop(log, ticks, answer_tier, answer_measures, synced, follow))
         .map_err(io)?;
     let records = found.first + found.records.len() as u64;
     let clock_measures = measures.clone();
@@ -1712,6 +1790,7 @@ pub fn start<S: Storage + 'static>(
         durable,
         tick: last.unwrap_or(-1),
         measures: clock_measures,
+        text,
     };
     let lockstep = cfg.lockstep;
     let thread_beat = Arc::clone(&beat);
@@ -2121,11 +2200,16 @@ mod tests {
         let mut i = toggle(pairs[2].0, pairs[2].1, 1, now() + 60_000_000);
         let said = Value::Map([(23, Value::Bytes(words.as_bytes().to_vec()))].into());
         i.parameters.insert(1, said);
-        assert_eq!(reason(&answer(&send(&w, &i))), "intent.text-not-stored");
+        // Kept in K16's store and logged by reference (V1b, #3361): the act goes on as any other.
+        assert_eq!(read(&answer(&send(&w, &i))).0, 1);
         w.stop();
         let log = store.bytes();
-        let n = recover(&log).unwrap().records.len();
-        assert_eq!(n, 1, "the refusal is logged");
+        let records = recover(&log).unwrap().records;
+        let refs: Vec<_> = records
+            .iter()
+            .flat_map(|r| replica::audience::references(&decode(r).unwrap().value))
+            .collect();
+        assert!(!refs.is_empty(), "the intent is logged with its reference");
         assert!(
             !log.windows(words.len()).any(|b| b == words.as_bytes()),
             "none of the words' bytes are in the log"
