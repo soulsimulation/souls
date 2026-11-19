@@ -1,8 +1,8 @@
 //! A voice that carries as far as it should (Engine v2 E13, #2784): a whisper is heard by one named Soul and is in
 //! no other view (A1); a shout by every Soul within its radius, larger than talk's (A2); a device by the Souls where
 //! a receiver is on (A4); a Soul within talk's reach of two others hears both, one outside hears neither (A5). A call
-//! (A3) is `sim::activity`'s test `a3_a_call_joins_two_souls_far_apart`. `cargo test -p sim --test reach --
-//! --nocapture` prints each case's hearers.
+//! (A3) is `sim::activity`'s test `a3_a_call_joins_two_souls_far_apart`. A turn into an activity is its members'
+//! alone (E26a, #3504). `cargo test -p sim --test reach -- --nocapture` prints each case's hearers.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -20,7 +20,7 @@ use sim::controller::{Controller, Driver, Line};
 use sim::ground::Piece;
 use sim::index::place_of;
 use sim::mover::Surface;
-use sim::speech::{Carriers, Hearing, LEAVE, heard_by};
+use sim::speech::{Carriers, Hearing, LEAVE, heard_by, refused};
 
 const HEADER: &str = include_str!("../../replica/fixtures/audience/header.diag");
 const LOG: &str = include_str!("../../replica/fixtures/audience/log.diag");
@@ -396,4 +396,57 @@ fn a5_a_soul_within_talks_reach_of_two_others_hears_them_and_one_outside_does_no
         assert!(!said.hearers.contains(&outside));
     }
     assert!(from_a.hearers.contains(&b) && from_b.hearers.contains(&a));
+}
+
+/// E26a (#3504, A1 and A3): a turn into an activity is heard by its members alone, wherever they are, in an entry of
+/// the activity's audience; one by a Soul that is not a member is refused `not-a-member` and writes nothing.
+#[test]
+fn e26a_a_turn_into_an_activity_is_heard_by_its_members_alone() {
+    let (a, b, beside, near_b) = (body(1), body(2), body(3), body(4));
+    let mut s = scene(&[
+        (1, a, 0, 0),
+        (2, b, 0, 0),
+        (1, beside, 600_000, 0),
+        (2, near_b, 600_000, 0),
+    ]);
+    let act = id(0xac, 1);
+    let members = |x: Id| if x == act { vec![a, b] } else { Vec::new() };
+    let devices = BTreeMap::new();
+    let carriers = Carriers {
+        radii: Radii::default(),
+        members: &members,
+        devices: &devices,
+    };
+    let line = |n| Line {
+        words: id(0xcc, n),
+        length: length_of(WHISPER),
+        replace: true,
+        reach: Reach::Members(act),
+    };
+    s.c.say(a, s.voices[&a], line(1)).expect("says");
+    s.c.say(beside, s.voices[&beside], line(2)).expect("says");
+    let out = s.c.step(&s.surfaces, DT, s.at);
+    assert_eq!(out.said.len(), 2, "both started");
+    let bodies: Vec<Id> = s.c.bodies().map(|b| b.id).collect();
+    let said = heard_by(&mut s.hearing, s.c.near(), &carriers, bodies, &out.said);
+    let refusal = refused(&carriers, beside, &line(2)).expect("refused");
+    println!(
+        "E26a: {}'s turn into {} heard by {:?} in audience {:?}; {}'s (not a member) refused {} and written {} times",
+        show(a),
+        show(act),
+        said.first().map(|t| shown(&t.1.hearers)),
+        said.first().map(|t| match t.1.audience {
+            Audience::Of(x) => show(x),
+            Audience::Everyone => "everyone".into(),
+        }),
+        show(beside),
+        refusal.name,
+        said.iter().filter(|t| t.0 == beside).count(),
+    );
+    assert_eq!(said.len(), 1, "the non-member's turn writes nothing");
+    let (speaker, turn) = &said[0];
+    assert_eq!(*speaker, a);
+    assert_eq!(turn.audience, Audience::Of(act), "the activity's audience");
+    assert_eq!(turn.hearers, BTreeSet::from([a, b]), "its members alone");
+    assert_eq!(refusal.name, "not-a-member");
 }
