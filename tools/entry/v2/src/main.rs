@@ -18,7 +18,7 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 
 use body_script::{TICK, ground, ground_id, humanoid, place};
-use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Rest};
+use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Refusal, Rest};
 use replica::encode::{Name, Value as Cbor};
 use replica::host::{Answer, Ask, Seen};
 use replica::ids::{Id, Minter, Scope};
@@ -35,7 +35,7 @@ use sim::host::Geometry;
 use sim::mover::Surface;
 use sim::moves::{Moves, Reach, library};
 use sim::timers::DueList;
-use skills::form_runner::Limits;
+use skills::form_runner::{Arg, Args, Limits, check};
 
 /// How far from the body a thing is placed, µm: the body walks to it as the form asks.
 const AWAY: i64 = 3_000_000;
@@ -107,6 +107,10 @@ struct Stage {
     things: BTreeMap<String, Thing>,
     placed: u64,
     runs: BTreeMap<String, Run>,
+    /// Kinds refused at import, by name (F14).
+    refused: BTreeMap<String, Refusal>,
+    /// Words kept for text arguments, by reference number (a stand-in for K16).
+    words: BTreeMap<Id, String>,
 }
 
 fn obj(pairs: Vec<(&str, J)>) -> J {
@@ -162,6 +166,8 @@ impl Stage {
             things: BTreeMap::new(),
             placed: 0,
             runs: BTreeMap::new(),
+            refused: BTreeMap::new(),
+            words: BTreeMap::new(),
         };
         s.look();
         s
@@ -224,6 +230,11 @@ impl Stage {
                 (Some("bool"), Cbor::Uint(u)) => J::Bool(*u != 0),
                 (_, Cbor::Uint(u)) => J::Int(i128::from(*u)),
                 (_, Cbor::Nint(n)) => J::Int(-1 - i128::from(*n)),
+                // An enum's value by name (F14), and words by their reference, as the case gave them.
+                (_, Cbor::Text(n)) => J::Str(n.as_str().to_owned()),
+                (Some("text"), r) => replica::audience::reference(r)
+                    .and_then(|id| self.words.get(&id))
+                    .map_or(J::Null, |w| J::Str(w.clone())),
                 _ => J::Null,
             };
             let fname = fname.clone();
@@ -270,13 +281,9 @@ impl Stage {
             .filter(|e| e.envelope.cause == Cause::Intent(id))
             .flat_map(|e| e.events.iter().flatten())
             .filter(|v| v.name.as_str() == "souls:form-ended")
-            // The runner names its endings under its namespace (`souls:done`, `souls:<refusal>`); the gate compares
-            // the bare names its cases use.
             .map(|v| match v.fields.get(&3) {
-                Some(Cbor::Text(n)) => {
-                    let n = n.as_str();
-                    n.strip_prefix("souls:").unwrap_or(n).to_owned()
-                }
+                // F4 (#2769) writes an ending in the `souls` namespace; the gate reads its plain name.
+                Some(Cbor::Text(n)) => n.as_str().trim_start_matches("souls:").to_owned(),
                 _ => "(unnamed)".into(),
             })
             .next()
@@ -413,7 +420,19 @@ impl Stage {
                 ]);
             }
         }
+        // A kind refused at import (F14: a form names a point its kind does not declare) is refused by name.
+        if let Some(r) = self.refused.get(&kind) {
+            return obj(vec![
+                ("verdict", J::s("no")),
+                ("reason", J::s(r.name)),
+                ("code", J::s(r.name)),
+                ("detail", J::Str(r.detail.clone())),
+                ("receipt", J::s("refused")),
+                ("by", J::s("import")),
+            ]);
+        }
         let entry = self.entry(&kind).cloned().unwrap_or(J::Null);
+        let args = self.args_of(&entry, &form, act, ids);
         let n = self.runs.len() as u64 + 1;
         let Some(id) = Id::new(Scope([0xe3; 16]), (1 << 40) + n) else {
             return err("no intent id");
@@ -429,7 +448,7 @@ impl Stage {
         let (body, now) = (self.body, self.now);
         let asked = {
             let (mut w, forms) = self.world();
-            forms.commit(
+            forms.commit_with(
                 &mut w,
                 &BTreeMap::new(),
                 &|_| None,
@@ -437,6 +456,7 @@ impl Stage {
                 node,
                 &entry,
                 &form,
+                &args,
                 intent,
                 Limits::default(),
                 now,
@@ -464,6 +484,53 @@ impl Stage {
                 ("by", J::s("runner")),
             ]),
         }
+    }
+
+    /// The act's arguments as the world hands them to the forms (F14): a thing argument as the id its case node was
+    /// placed as, words as a reference kept here (a stand-in for K16's store), a whole number as itself, any other as a
+    /// name.
+    fn args_of(&mut self, entry: &J, form: &str, act: &J, ids: &J) -> Args {
+        let takes = entry
+            .get("forms")
+            .and_then(|f| f.get(form))
+            .and_then(|f| f.get("takes"));
+        let thing = |v: &J| {
+            let key = ids.get(v.str()?)?.str()?;
+            self.things.get(key).map(|t| t.id)
+        };
+        let mut out = Args::new();
+        for (k, v) in act.get("args").and_then(J::obj).unwrap_or(&[]) {
+            let ty = takes
+                .and_then(|t| t.get(k))
+                .and_then(|t| t.get("type"))
+                .and_then(J::str);
+            let arg = match (ty, v) {
+                (Some("text"), J::Str(words)) => {
+                    let n = self.words.len() as u64 + 1;
+                    let Some(id) = Id::new(Scope([0xe4; 16]), n) else {
+                        continue;
+                    };
+                    self.words.insert(id, words.clone());
+                    Arg::Text(id)
+                }
+                (_, J::Int(n)) => match i64::try_from(*n) {
+                    Ok(n) => Arg::Int(n),
+                    Err(_) => continue,
+                },
+                (_, J::Obj(_)) => match v.get("node").and_then(thing) {
+                    Some(id) => Arg::Node(id),
+                    None => continue,
+                },
+                (Some("thing"), _) => match thing(v) {
+                    Some(id) => Arg::Node(id),
+                    None => continue,
+                },
+                (_, J::Str(s)) => Arg::Name(s.clone()),
+                _ => continue,
+            };
+            out.insert(k.clone(), arg);
+        }
+        out
     }
 
     fn progress_of(&self, rid: &str, moving: bool) -> J {
@@ -573,6 +640,17 @@ impl Stage {
         match s("op").as_str() {
             "define" => {
                 self.kinds = q.get("kinds").cloned().unwrap_or(none);
+                // The import check (F14): a kind whose form names a point it does not declare is refused here.
+                self.refused = self
+                    .kinds
+                    .obj()
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(|(k, e)| check(e).err().map(|r| (k.clone(), r)))
+                    .collect();
+                for (k, r) in &self.refused {
+                    eprintln!("refused at import: {k}: {} ({})", r.name, r.detail);
+                }
                 obj(vec![])
             }
             "place" => self.place(&s("kind")),

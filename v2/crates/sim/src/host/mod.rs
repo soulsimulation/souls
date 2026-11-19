@@ -58,7 +58,7 @@ use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::End;
 
-use crate::controller::{Controller, Driver, Part, Track};
+use crate::controller::{Controller, Driver, Line, Part, Track};
 use crate::mover::Body as Moved;
 use crate::spots::Target;
 use crate::unit::{Ran, Units};
@@ -511,6 +511,9 @@ pub struct Runner {
     /// The last tick's refusals, each of one body (the tick went on for the others), in the order they came; each
     /// refused body's run ended by the first one's name.
     pub refused: Vec<(Id, Refusal)>,
+    /// The utterances the last tick's controller step started (B11), with when each ends: the world resolves their
+    /// hearers (`crate::speech::heard`).
+    pub said: Vec<(Id, Line, Micros)>,
     /// The bodies found off the ground after an edit (G3): held, standing, until they are walked out.
     pub off_ground: BTreeSet<Id>,
     /// The node each body stood on and that node's ground version, as of the last [`Runner::reground`] (G3).
@@ -680,6 +683,7 @@ impl Runner {
             asks: BTreeMap::new(),
             granted: BTreeMap::new(),
             refused: Vec::new(),
+            said: Vec::new(),
             off_ground: BTreeSet::new(),
             stood: BTreeMap::new(),
             grounded: None,
@@ -976,6 +980,7 @@ impl Runner {
         }
         self.now = at;
         self.refused = refused;
+        self.said = stepped.said;
         match world {
             Some(r) => Err(r),
             None => Ok(()),

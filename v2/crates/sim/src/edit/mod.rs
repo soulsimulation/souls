@@ -12,9 +12,14 @@
 //! would-be part on the copy (placed nodes under provisional ids, [`PROVISIONAL`]) and handing it to
 //! [`safety::guard`]. [`commit`] takes the plan and the bodies as they stand on its tick, and refuses the edit by the
 //! first unsafe body's name ([`safety::Guard::judge`], lookups only) before it mints or writes anything.
+//!
+//! A terrain edit (G5's [`terrain`]) is guarded the same way: planned off the clock, its Souls and resting things
+//! judged on the commit tick before the safety rule. A creator's weather is set through [`weather`].
 
 pub mod safety;
+pub mod terrain;
 pub mod undo;
+pub mod weather;
 
 use crate::commit::{off_clock, write_guarded};
 use crate::structure::Structure;
@@ -46,6 +51,7 @@ pub struct Committed {
 pub struct Planned {
     pub checked: Checked,
     guard: Guard,
+    terrain: Option<terrain::Guard>,
 }
 
 fn refused(name: &'static str, detail: impl Into<String>) -> Refused {
@@ -59,7 +65,7 @@ fn refused(name: &'static str, detail: impl Into<String>) -> Refused {
 /// Off the clock thread, after `replica::edit::check` on the same copy: the safety rule's guard for the part the edit
 /// would commit (see the module's notes). `ground` is the zone's open ground, none in a zone without one.
 pub fn plan(checked: Checked, copy: &Replica, ground: Option<Id>) -> Result<Planned, Refused> {
-    plan_with(checked, copy, |part| {
+    plan_with(checked, copy, ground, |part| {
         guard(copy.tree(), copy.header(), ground, part)
     })
 }
@@ -67,7 +73,7 @@ pub fn plan(checked: Checked, copy: &Replica, ground: Option<Id>) -> Result<Plan
 /// [`plan`] in a zone with a town (G2b, #3488): the guard cuts only what the edit can affect ([`safety::guard_on`]).
 /// `known` is the town as it stood at the copy's version.
 pub fn plan_on(checked: Checked, copy: &Replica, known: &Known) -> Result<Planned, Refused> {
-    plan_with(checked, copy, |part| {
+    plan_with(checked, copy, Some(known.ground), |part| {
         guard_on(copy.tree(), copy.header(), part, known)
     })
 }
@@ -75,6 +81,7 @@ pub fn plan_on(checked: Checked, copy: &Replica, known: &Known) -> Result<Planne
 fn plan_with(
     checked: Checked,
     copy: &Replica,
+    ground: Option<Id>,
     guard: impl FnOnce(&Part) -> Result<Guard, String>,
 ) -> Result<Planned, Refused> {
     off_clock();
@@ -90,8 +97,13 @@ fn plan_with(
     ])))
     .map_err(|e| refused("encoding", e.to_string()))?;
     let part = Part::read(&bytes).map_err(|r| refused(r.name, r.detail))?;
+    let terrain = terrain::guard(copy.tree(), copy.header(), ground, &checked, &part)?;
     let guard = guard(&part).map_err(|e| refused("edit.unchecked", e))?;
-    Ok(Planned { checked, guard })
+    Ok(Planned {
+        checked,
+        guard,
+        terrain,
+    })
 }
 
 /// Each placed node's temporary name and the id `minter` gives it.
@@ -131,6 +143,9 @@ pub fn commit_guarded(
 ) -> Result<Committed, Refused> {
     let checked = &planned.checked;
     confirm(live, checked)?;
+    if let Some(t) = &planned.terrain {
+        t.judge(bodies)?;
+    }
     let unsafe_ = planned.guard.judge(bodies);
     if let Some(first) = unsafe_.first() {
         let detail = unsafe_.iter().map(|u| u.text()).collect::<Vec<_>>();
