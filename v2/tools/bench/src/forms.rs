@@ -266,7 +266,10 @@ fn arm(
             Arm::Moves => {
                 for (body, thing, steps) in b.runs.clone() {
                     for s in &steps {
-                        if let Step::Move { name, at } = s {
+                        if let Step::Move {
+                            name, at: Some(at), ..
+                        } = s
+                        {
                             let mut mv = b
                                 .library
                                 .iter()

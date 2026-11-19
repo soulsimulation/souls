@@ -1,0 +1,39 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pull_up_bar",
+  "owner": "thing",
+  "points": {
+    "under": { "role": "stand", "at_mm": [0, 0, 450], "yaw_mdeg": 180000 },
+    "bar": { "role": "grip", "at_mm": [0, 2200, 0] }
+  },
+  "geometry": { "bounds_mm": [1400, 2300, 200] },
+  "forms": {
+    "pull_up": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "under" },
+        { "step": "move", "move": "press", "at": "bar" },
+        { "step": "wait", "us": 20000000 }
+      ],
+      "effects": []
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:pull_up_bar",
+    "shape": {"shapes":[{"kind":"cyl","at":[-650,1150,0],"r":50,"h":2300,"color":"#5d646b"},{"kind":"cyl","at":[650,1150,0],"r":50,"h":2300,"color":"#5d646b"},{"kind":"cyl","at":[0,2200,0],"r":25,"h":1300,"color":"#5d646b","roll":90000,"collide":false}],"tags":["eden","gym","sport","pull-up-bar"]}
+  },
+  "text": {
+    "card": "An outdoor pull-up bar at 2.2 m: hang from it and pull yourself up.",
+    "gym": "gym",
+    "chin_up_bar": "chin up bar",
+    "exercise": "exercise",
+    "workout": "workout",
+    "howto_workout": "Do pull ups at the bar, then lift at the weight bench."
+  },
+  "card": { "text": "card", "category": "gym", "synonyms": ["chin_up_bar", "exercise", "workout"] },
+  "howtos": { "workout": { "text": "howto_workout", "steps": [{ "form": "pull_up" }] } }
+}

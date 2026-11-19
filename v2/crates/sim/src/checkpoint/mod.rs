@@ -40,7 +40,7 @@ use std::thread::JoinHandle;
 use replica::effects::{Header, Part, Refusal, read_id};
 use replica::encode::{Value, decode, encode, to_hex};
 use replica::ids::{Minter, Scope, Version};
-use replica::tree::Tree;
+use replica::tree::{Sealed, Tree};
 use replica::world_model::Audience;
 
 use crate::log::{At, crc32c};
@@ -493,6 +493,22 @@ impl Checkpoints {
             return refuse("checkpoint-failed", f.to_string());
         }
         let sealed = tree.seal()?;
+        self.take_sealed(sealed, version, record, resume, seed)
+    }
+
+    /// As [`Checkpoints::take_at`], from a seal the caller made: its nodes are every node hashed since the last
+    /// checkpoint (a world that seals between checkpoints for R5b's sync hands those in too, with this seal's).
+    pub fn take_sealed(
+        &mut self,
+        sealed: Sealed,
+        version: Version,
+        record: u64,
+        resume: Option<(At, &Minter)>,
+        seed: &[u8],
+    ) -> R<()> {
+        if let Some(f) = &self.shared.stats().failed {
+            return refuse("checkpoint-failed", f.to_string());
+        }
         let mut new = Vec::new();
         // Only marked nodes were sealed: what changed since the last checkpoint, or a node hashed again unchanged.
         for (h, bytes) in sealed.nodes {

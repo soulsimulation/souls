@@ -14,7 +14,8 @@
 //!   from the world's seed by (day, slot), with today's regimes and weights (`edge/eyes/sight.ts`) as whole numbers and
 //!   its rule that a shower lasts one slot. The kind's levels of cloud, rain and wind are whole numbers.
 //!
-//! Not here: seasons, sun and shade, warmth, weather that changes movement, and the tick loop that writes entries.
+//! The running tick writes the entries (`worldd::answers`, #3369). Not here: seasons, sun and shade, warmth, weather that
+//! changes movement.
 
 use std::collections::BTreeMap;
 

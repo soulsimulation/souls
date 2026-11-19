@@ -1,0 +1,16 @@
+[package]
+name = "entry-v2"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "The run gate's world on Engine v2 (#3314): one body and the family's things, driven by the new engine's form runner, one JSON request a line."
+
+# Its own workspace: it lives beside the run gate (tools/entry/), not in v2/'s. tools/entry/v2.mjs builds it from v2/,
+# so v2's toolchain applies, into v2/target.
+[workspace]
+
+[dependencies]
+replica = { path = "../../../v2/crates/replica" }
+sim = { path = "../../../v2/crates/sim" }
+skills = { path = "../../../v2/crates/skills" }
+body-script = { path = "../../../v2/tools/body-script" }

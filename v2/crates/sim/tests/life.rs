@@ -90,18 +90,19 @@ fn world() -> World {
             outline: vec![corners.clone()],
             vertices: corners,
             triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: sim::gaits::Ground::Dry,
         }],
     );
     let mut mint = Minter::new(Scope([0xb3; 16]));
     let thing = mint.mint().expect("id");
     let entry = mint.mint().expect("id");
-    let seat = Place::from_value(&value(CHAIR)).expect("the chair's seat");
+    let place = Place::from_value(&value(CHAIR)).expect("the chair's place");
     let mut slots = Slots::new();
     slots
         .add(PlaceAt {
             thing,
-            point: Vec3::new(0, seat.height, 0),
-            place: seat,
+            point: Vec3::new(0, place.height, 0),
+            place,
             facing: Quat::IDENTITY,
             floor,
         })

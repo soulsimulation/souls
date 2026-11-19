@@ -1,0 +1,250 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:firewood (SA-X29, #2919), a covered stack of twelve split logs (stock). A log is taken into a free hand; an empty stack names stacking one back as its fix, full hands name putting down. A held log is stacked back while the stack has room; a full stack names no fix (nothing takes from a stack by a set), and an empty hand names taking a log.",
+  "cases": [
+    {
+      "name": "take_log_every_need_met",
+      "act": {
+        "this": "f1",
+        "form": "take_log"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "f1": {
+            "kind": "eden:firewood"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "take_log_none_left_names_stacking",
+      "act": {
+        "this": "f1",
+        "form": "take_log"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "f1": {
+            "kind": "eden:firewood",
+            "fields": {
+              "logs": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "logs",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": {
+          "form": "stack_log"
+        }
+      }
+    },
+    {
+      "name": "take_log_hands_full",
+      "act": {
+        "this": "f1",
+        "form": "take_log"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "f1": {
+            "kind": "eden:firewood"
+          },
+          "w1": {
+            "kind": "eden:firewood_log"
+          },
+          "w2": {
+            "kind": "eden:firewood_log"
+          },
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": "w2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "stack_log_every_need_met",
+      "act": {
+        "this": "f1",
+        "form": "stack_log",
+        "args": {
+          "log": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "f1": {
+            "kind": "eden:firewood",
+            "fields": {
+              "logs": 11
+            }
+          },
+          "w1": {
+            "kind": "eden:firewood_log"
+          },
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "stack_log_stack_full",
+      "act": {
+        "this": "f1",
+        "form": "stack_log",
+        "args": {
+          "log": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "f1": {
+            "kind": "eden:firewood"
+          },
+          "w1": {
+            "kind": "eden:firewood_log"
+          },
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "logs",
+          "found": 12,
+          "wanted": {
+            "at_most": 11
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "stack_log_not_holding_a_log",
+      "act": {
+        "this": "f1",
+        "form": "stack_log",
+        "args": {
+          "log": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "f1": {
+            "kind": "eden:firewood",
+            "fields": {
+              "logs": 5
+            }
+          },
+          "w1": {
+            "kind": "eden:firewood_log"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_holding_kind",
+        "need": 1,
+        "detail": {
+          "kind": "eden:firewood_log"
+        },
+        "fix": {
+          "step": "take",
+          "kind": "eden:firewood_log"
+        }
+      }
+    }
+  ]
+}

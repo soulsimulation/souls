@@ -357,6 +357,12 @@ impl Slots {
             .collect()
     }
 
+    /// The stance `body` holds its seat in, whether it is lowering, seated or rising: what a checkpoint keeps of a body
+    /// in a slot.
+    pub fn stance(&self, body: Id) -> Option<Stance> {
+        self.held.get(self.by_body.get(&body)?).map(|h| h.stance)
+    }
+
     /// A restart (K18c, #3176): `body`, standing on the floor, is handed back into the seat of `thing` in `slot` (its
     /// lowest when none is named) at `at`, held there in `stance` by a driver with no timer, as a sit that finished
     /// leaves it. The hold is this table's again, so a rise or another sit sees the seat taken. `place-unknown`,

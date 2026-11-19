@@ -1,0 +1,119 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:pigment_tray (SA-X7, #2902; from #1673): crush the chalk chunks to coarse pigment, then grind it fine.",
+  "cases": [
+    {
+      "name": "crush_then_grind_then_nothing_left_to_do",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:pigment_tray"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "grind"
+          },
+          "receipt": "rt1",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "crush"
+          },
+          "receipt": "rt2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "stage",
+                "n": 1,
+                "to": "coarse"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:crushed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "grind"
+          },
+          "receipt": "rt3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "stage",
+                "n": 1,
+                "to": "fine"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ground",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "crush"
+          },
+          "receipt": "rt4",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:pigment_tray",
+          "fields": {
+            "stage": "fine"
+          }
+        }
+      }
+    }
+  ]
+}
