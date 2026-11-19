@@ -997,7 +997,7 @@ fn c24_every_effect_content_uses_applies_and_a_replay_gives_the_same_tree() {
     // The log replayed part by part onto a fresh tree gives the same tree.
     let mut fresh = Bench::new(2, 2, &[0]);
     let mut from = b.parts[0];
-    for len in b.parts[1..].to_vec() {
+    for &len in &b.parts[1..] {
         fresh.commit(b.log[from..from + len].to_vec());
         from += len;
     }

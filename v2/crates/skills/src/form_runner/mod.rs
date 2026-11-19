@@ -517,6 +517,7 @@ fn set_value(
                 _ => not_allowed(format!("{s} is not one of its values")),
             }
         }
+        (Some("enum"), _) => not_allowed("an enum takes one of its values".into()),
         (Some("text"), Value::Null) => Ok(encode::Value::Bytes(Vec::new())),
         (Some("text"), _) => not_allowed("a text is a reference from an argument, or null".into()),
         (_, Value::Bool(b)) => Ok(encode::Value::Uint(u64::from(*b))),
