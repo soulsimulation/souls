@@ -26,8 +26,11 @@
 //! 8. **A fault stays in the tier.** A tick that does not apply stops the tier and is named in [`Stats::fault`]; the
 //!    clock goes on.
 //!
-//! Not here: budgets and the interest set (R4), the viewer's files (V1), words beside references (delivery, K16).
+//! Budgets and the interest set are R4's (`subscription.rs`, `interest.rs`). Not here: the viewer's files (V1), words beside references (delivery, K16).
 
+pub mod index;
+pub mod interest;
+pub mod subscription;
 #[cfg(test)]
 mod tests;
 
@@ -70,6 +73,12 @@ pub enum Delivery {
     },
     Snapshot {
         key: Key,
+        record: u64,
+        bytes: Arc<[u8]>,
+    },
+    /// The world-wide index and the Soul list (E1, `index.rs`).
+    Index {
+        part: index::IndexPart,
         record: u64,
         bytes: Arc<[u8]>,
     },
@@ -213,6 +222,7 @@ pub struct Stats {
 enum Cmd {
     Tick { record: u64, bytes: Vec<u8> },
     Subscribe(Arc<Inbox>),
+    SubscribeIndex(Arc<Inbox>),
 }
 
 /// The view tier of one zone's log: its thread, and the queue the clock thread hands ticks to.
@@ -230,6 +240,17 @@ impl Tier {
         redactions: Redactions,
         durable: Durable,
     ) -> R<Tier> {
+        Tier::start_with_index(header, start, redactions, durable, None)
+    }
+
+    /// As [`Tier::start`], with the world-wide index and the Soul list built from `start` (E1, `index.rs`).
+    pub fn start_with_index(
+        header: Header,
+        start: State,
+        redactions: Redactions,
+        durable: Durable,
+        index: Option<replica::index::Config>,
+    ) -> R<Tier> {
         let stats = Arc::new(Mutex::new(Stats {
             ticks: 0,
             frames: 0,
@@ -241,7 +262,9 @@ impl Tier {
             fault: None,
         }));
         let (tx, rx) = channel();
+        let index = index.map(|cfg| index::Out::new(cfg, &start));
         let run = Run {
+            index,
             header,
             before: start.clone(),
             after: start,
@@ -285,6 +308,20 @@ impl Tier {
         Subscriber { inbox }
     }
 
+    /// Subscribes to the world-wide index and the Soul list (E1): the file and the list first, then changes.
+    pub fn subscribe_index(&self, bound: usize) -> Subscriber {
+        let inbox = Arc::new(Inbox {
+            bound: bound.max(2),
+            keys: Vec::new(),
+            q: Mutex::default(),
+            ready: Condvar::new(),
+        });
+        if let Some(tx) = &self.tx {
+            let _ = tx.send(Cmd::SubscribeIndex(inbox.clone()));
+        }
+        Subscriber { inbox }
+    }
+
     pub fn stats(&self) -> Stats {
         self.stats.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
@@ -317,6 +354,7 @@ struct Slot {
 
 /// The tier's thread.
 struct Run {
+    index: Option<index::Out>,
     header: Header,
     before: State,
     after: State,
@@ -336,6 +374,7 @@ impl Run {
             let out = match cmd {
                 Cmd::Tick { record, bytes } => self.tick(record, &bytes),
                 Cmd::Subscribe(inbox) => self.subscribe(inbox),
+                Cmd::SubscribeIndex(inbox) => self.subscribe_index(inbox),
             };
             if let Err(f) = out {
                 self.stats().fault = Some(f);
@@ -366,6 +405,16 @@ impl Run {
         Ok(())
     }
 
+    fn subscribe_index(&mut self, inbox: Arc<Inbox>) -> R<()> {
+        let Some(out) = &mut self.index else {
+            return Err(fault("index-off", "this tier builds no index"));
+        };
+        let snaps = out.snapshot(self.at.unwrap_or(0))?;
+        inbox.resume(snaps);
+        out.inboxes.push(inbox);
+        Ok(())
+    }
+
     // Times frames from the sync (A4); the engine never reads this.
     #[allow(clippy::disallowed_methods)]
     fn tick(&mut self, record: u64, bytes: &[u8]) -> R<()> {
@@ -380,8 +429,12 @@ impl Run {
             !s.inboxes.is_empty()
         });
         let last = part.effects.len().saturating_sub(1);
+        let mut touched = index::Touched::default();
         for (i, e) in part.effects.iter().enumerate() {
             self.after.apply_entry(&self.header, e)?;
+            if self.index.is_some() {
+                touched.add(e);
+            }
             let arrive = matches!(e.body, Body::Transfer(TransferRec::Arrive { .. }));
             for s in &mut self.slots {
                 let carries = arrive && matches!(s.key.level, Level::Full | Level::Sampled);
@@ -408,6 +461,10 @@ impl Run {
                     bytes: bytes.clone(),
                 });
             }
+        }
+        if let Some(out) = &mut self.index {
+            let at = part.effects.last().map_or(0, |e| e.envelope.at);
+            frames += out.tick(&self.after, &touched, record, at)?;
         }
         // Readers that fell behind get snapshots.
         let mut behind: Vec<Arc<Inbox>> = Vec::new();

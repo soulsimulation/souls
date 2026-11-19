@@ -14,6 +14,7 @@
 //! first unsafe body's name ([`safety::Guard::judge`], lookups only) before it mints or writes anything.
 
 pub mod safety;
+pub mod undo;
 
 use crate::commit::{off_clock, write};
 use replica::apply::Replica;

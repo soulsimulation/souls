@@ -3,7 +3,7 @@
 
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, FIXTURE_HEADER, FIXTURES, Header,
-    Part, Rest, State, fixture_bytes,
+    Part, Rest, State, TimerRec, fixture_bytes,
 };
 use replica::encode::{Name, Value, encode};
 use replica::ids::{FIXTURE_SCOPE_A, Id};
@@ -369,4 +369,64 @@ fn a_refused_part_leaves_the_tree_as_it_was_and_commit_checks_each_change() {
         assert_eq!(t.to_state(), before, "{what}: nothing changed");
     }
     let _: BTreeSet<Id> = BTreeSet::new();
+}
+
+#[test]
+fn removing_a_node_drops_its_subtrees_timers_in_the_same_commit() {
+    // K2b (#3132): no clears are written; the remove alone drops them, as the harness's state does.
+    let (h, mut t) = base();
+    let mut s = State::start(h.zone, kind(&h, "souls:place"));
+    s.apply(&h, &part("0-base")).unwrap();
+    let (room, body, cup) = (ee(1), ee(2), ee(4));
+    let next = t.to_state().next;
+    let timers = |sequence, node, timer, due| {
+        let mut e = effect(sequence, node, vec![]);
+        e.body = Body::Timers(vec![TimerRec::Set {
+            timer,
+            due,
+            name: Name::new("souls:ring").unwrap(),
+        }]);
+        e
+    };
+    let set = part_of(
+        &h,
+        vec![
+            timers(next, body, ee(50), 9),
+            timers(next + 1, cup, ee(51), 3),
+            timers(next + 2, room, ee(52), 5),
+        ],
+    );
+    t.commit(&h, &set, &rules()).unwrap();
+    s.apply(&h, &set).unwrap();
+    let pending = t.to_state();
+
+    // A refused part puts the dropped timers back.
+    let refused = part_of(
+        &h,
+        vec![
+            effect(next + 3, body, vec![Change::Remove { node: body }]),
+            effect(next + 9, room, vec![]),
+        ],
+    );
+    let r = t.commit(&h, &refused, &rules()).unwrap_err();
+    assert_eq!(t.to_state(), pending, "refused ({r}): the timers are back");
+
+    let remove = part_of(
+        &h,
+        vec![effect(next + 3, body, vec![Change::Remove { node: body }])],
+    );
+    t.commit(&h, &remove, &rules()).unwrap();
+    s.apply(&h, &remove).unwrap();
+    let after = t.to_state();
+    assert_eq!(after, s, "the tree's state is the harness's");
+    assert_eq!(
+        after.timers.keys().copied().collect::<Vec<_>>(),
+        [ee(52)],
+        "the body's and the cup's timers went with them; the room's stays"
+    );
+    println!(
+        "K2b: removing the body (holding the cup) dropped {} of {} timers, with no clears written",
+        pending.timers.len() - after.timers.len(),
+        pending.timers.len()
+    );
 }

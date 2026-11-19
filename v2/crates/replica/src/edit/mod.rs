@@ -14,12 +14,16 @@
 //! - **Ids:** a placed node has a temporary name in the batch; the engine mints its id at commit, and the receipt maps
 //!   each name to its id.
 //!
-//! A refusal names the failing operation by its place in the batch. Not here: overlap and support, undo, the ground.
+//! A refusal names the failing operation by its place in the batch. Not here: overlap and support, the ground.
 //! The safety rule (G2, #2761) is judged in `sim::edit::safety`; its failures' names and texts are here ([`Unsafe`]),
 //! so a client reads the same names the world refuses by.
+//!
+//! - **Undo and redo** (G4, #2795) are batches like any other, committed by `sim::edit::undo`. Each names the batch it
+//!   reverses by its cause, `Cause::Effect(first)`, where `first` is the sequence of that batch's first effect, with a
+//!   creator acting ([`reverses`]).
 
 use crate::apply::Replica;
-use crate::effects::Actor;
+use crate::effects::{Actor, Cause, Effect};
 use crate::encode::{Name, Value};
 use crate::ids::Id;
 use crate::pose::{Frame, Pose, Quat, Support, Vec3};
@@ -331,6 +335,15 @@ pub fn confirm(live: &Replica, c: &Checked) -> Result<(), Refused> {
         }
     }
     Ok(())
+}
+
+/// The batch an undo or redo reverses, by the sequence of its first effect: a creator's effect caused by an earlier
+/// effect. None for any other effect.
+pub fn reverses(e: &Effect) -> Option<u64> {
+    match (e.envelope.actor, e.envelope.cause) {
+        (Actor::Creator(_), Cause::Effect(first)) => Some(first),
+        _ => None,
+    }
 }
 
 /// The safety rule's failures (G2, #2761): an edit, a thing set down, a lock or an undo that would bury a Soul's body,

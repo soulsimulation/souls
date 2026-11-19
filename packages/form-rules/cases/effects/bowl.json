@@ -1,0 +1,164 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:bowl (core/bowl@1, 160 placed): a bowl holding one portion, four spoonfuls. Eaten while held; an empty bowl is refused. Picked up with the body's pick_up.",
+ "cases": [
+  {
+   "name": "bowl_eat_four_then_empty",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bowl",
+      "fields": {}
+     },
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    },
+    "now_us": 0
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "eat"
+     },
+     "now_us": 0,
+     "receipt": "reat0",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "food",
+        "n": 1,
+        "to": 3
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:ate_a_spoonful",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "eat"
+     },
+     "now_us": 1000000,
+     "receipt": "reat1000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "food",
+        "n": 1,
+        "to": 2
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "eat"
+     },
+     "now_us": 2000000,
+     "receipt": "reat2000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "food",
+        "n": 1,
+        "to": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "eat"
+     },
+     "now_us": 3000000,
+     "receipt": "reat3000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "food",
+        "n": 1,
+        "to": 0
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "eat"
+     },
+     "now_us": 4000000,
+     "receipt": "reat4000000",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 1
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:bowl",
+     "fields": {
+      "food": 0
+     }
+    }
+   }
+  }
+ ]
+}

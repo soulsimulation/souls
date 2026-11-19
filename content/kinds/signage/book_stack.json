@@ -1,0 +1,244 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:book_stack",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      270,
+      298,
+      304
+    ]
+  },
+  "motion": {
+    "how": "two_hands"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:book_stack",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            -10,
+            25,
+            0
+          ],
+          "size": [
+            220,
+            45,
+            280
+          ],
+          "round": 0,
+          "tint": "b0",
+          "yaw": -6875
+        },
+        {
+          "kind": "box",
+          "at": [
+            -5,
+            25,
+            0
+          ],
+          "size": [
+            208,
+            36,
+            265
+          ],
+          "round": 0,
+          "tint": "pages",
+          "yaw": -6875
+        },
+        {
+          "kind": "box",
+          "at": [
+            10,
+            75,
+            0
+          ],
+          "size": [
+            200,
+            45,
+            240
+          ],
+          "round": 0,
+          "tint": "b1",
+          "yaw": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            15,
+            75,
+            0
+          ],
+          "size": [
+            188,
+            36,
+            225
+          ],
+          "round": 0,
+          "tint": "pages",
+          "yaw": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            -10,
+            125,
+            0
+          ],
+          "size": [
+            180,
+            45,
+            280
+          ],
+          "round": 0,
+          "tint": "b2",
+          "yaw": 6875
+        },
+        {
+          "kind": "box",
+          "at": [
+            -5,
+            125,
+            0
+          ],
+          "size": [
+            168,
+            36,
+            265
+          ],
+          "round": 0,
+          "tint": "pages",
+          "yaw": 6875
+        },
+        {
+          "kind": "box",
+          "at": [
+            10,
+            175,
+            0
+          ],
+          "size": [
+            220,
+            45,
+            240
+          ],
+          "round": 0,
+          "tint": "b3",
+          "yaw": -6875
+        },
+        {
+          "kind": "box",
+          "at": [
+            15,
+            175,
+            0
+          ],
+          "size": [
+            208,
+            36,
+            225
+          ],
+          "round": 0,
+          "tint": "pages",
+          "yaw": -6875
+        },
+        {
+          "kind": "box",
+          "at": [
+            -10,
+            225,
+            0
+          ],
+          "size": [
+            200,
+            45,
+            280
+          ],
+          "round": 0,
+          "tint": "b4",
+          "yaw": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            -5,
+            225,
+            0
+          ],
+          "size": [
+            188,
+            36,
+            265
+          ],
+          "round": 0,
+          "tint": "pages",
+          "yaw": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            10,
+            275,
+            0
+          ],
+          "size": [
+            180,
+            45,
+            240
+          ],
+          "round": 0,
+          "tint": "b5",
+          "yaw": 6875
+        },
+        {
+          "kind": "box",
+          "at": [
+            15,
+            275,
+            0
+          ],
+          "size": [
+            168,
+            36,
+            225
+          ],
+          "round": 0,
+          "tint": "pages",
+          "yaw": 6875
+        }
+      ],
+      "palette": {
+        "b0": "#8a3b2c",
+        "b1": "#2f5d8b",
+        "b2": "#3f6b5c",
+        "b3": "#b8913f",
+        "b4": "#5e3d27",
+        "b5": "#6a4a7a",
+        "pages": "#f2ead8"
+      },
+      "tags": [
+        "object",
+        "media"
+      ]
+    }
+  },
+  "text": {
+    "card": "A tidy pile of six books on a table or the floor; carry it in two hands.",
+    "reading": "reading",
+    "pile_of_books": "pile of books",
+    "books": "books"
+  },
+  "card": {
+    "text": "card",
+    "category": "reading",
+    "synonyms": [
+      "pile_of_books",
+      "books"
+    ]
+  }
+}

@@ -6,28 +6,44 @@
 //!   nearer its leg's end than it has ever been is progress and takes the second off its time without progress (to
 //!   no less than none); any other second adds itself. A new leg starts the clock again, and so does, while it waits for a link taken in turns
 //!   (N8), that link's owner letting someone in or turning it (the queue moves). The rungs go by this time, so a
-//!   walker circling a goal it cannot reach, or nudged forward now and then, still climbs them.
+//!   walker circling a goal it cannot reach, or nudged forward now and then, still climbs them. A new route
+//!   to the same leg's end (the reroute rung) keeps its least distance to it, so one going to and fro climbs too.
 //! - **The rungs** (the declared timings, [`REROUTE`], [`MAKE_WAY`], [`SHOULDER`], [`END`]): at 3 s it is routed
 //!   again once from where it stands; at 6 s a `make-way` is sent to the agent of each still body in its way (within
-//!   [`walk::RANGE`] of it, or within [`ROOM`] of the far end of the link it waits for) that has no order to stay
+//!   [`NEAR`] of it, or within [`ROOM`] of the far end of the link it waits for) that has no order to stay
 //!   there; at 9 s it passes with a shoulder turn (no neighbour pushes it); at 15 s its order ends by name,
 //!   `goal-unreachable`, naming what it waited for. Each is a [`Record`] in [`Ladder::log`].
 //! - **Still bodies.** The engine never moves a still body: it asks that Soul's agent. A body staying by its own order
-//!   (E3; `Walker::staying`) is sent nothing, and the walker passes it (other bodies are a preference, not a wall).
+//!   (E3; `Runner::staying`) is sent nothing, and the walker passes it (other bodies are a preference, not a wall).
 //! - **The last rung.** A body found on illegal ground (by [`crate::ground::exits::check`], on a rebuild, a size
 //!   change or a birth) walks at its own speed in a straight line to the nearest legal point, collision off: a
-//!   `walk-out` record that names it when it starts, `walked-out` when it stands on the ground again. The walk skill
-//!   holds it meanwhile (`Walker::held`). Nothing teleports: no tick moves it further than its speed allows.
-//! - **One trait.** What the ladder reads of the world beyond the walk skill's [`World`] goes through [`Unstick`].
+//!   `walk-out` record that names it when it starts, `walked-out` when it stands on the ground again. The controller
+//!   carries it, by the world's own rule ([`crate::controller::Controller::carry`]), and its walk stands meanwhile.
+//!   Nothing teleports: no tick moves it further than its speed allows.
+//! - **Through the host** (T9c #3127). The walk is a skill (`skills::route`) run by the [`Runner`]; the ladder reaches
+//!   it only by fields the world sets on the walker's body: `F_ROUTE` (routed again), `F_SHOULDER` (the shoulder
+//!   turn) and `F_HELD` (walked out). Ending an order by name ends its run ([`Runner::end`]). The ladder keeps each
+//!   walker's legs, and a leg ends when the controller has carried the body across the leg's link.
+//! - **Changed ground** (G3, #2760). Before each tick, once the runner has found its bodies again on ground an edit
+//!   changed (`Runner::reground`), the walks planned on that ground (`Town::stale`) are planned again from where
+//!   they stand: those whose body stands on a changed node at once, the rest nearest the change first (by how soon
+//!   their route reaches it), spread over [`REPLAN_WITHIN`]. A walk with no plan now ends by the plan's refusal
+//!   (`destination-gone`, `no-route`, ...); the engine chooses no other goal. A body carried across a link finishes
+//!   the crossing first, and one found off the ground is walked out first (the last rung, below).
+//! - **One trait.** What the ladder reads of the world beyond walking's [`World`] goes through [`Unstick`].
 //!
 //! Integers only: µm and µs. Not here: the order to stay (E3), refusing edits (G2), the auditor (K11), births (K10).
 
 pub mod town;
 
+use crate::controller::Track;
+use crate::host::{Runner, named, waiting};
 use crate::links::turns::ROOM;
-use crate::mover::Body;
-use crate::walk::{self, Crowd, World, node_of};
+use crate::walk::town::Town;
+use crate::walk::{Leg, World, node_of};
 use replica::effects::Refusal;
+use replica::encode::Value;
+use replica::host::{F_HELD, F_SHOULDER, Progress};
 use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::time::Micros;
@@ -44,8 +60,12 @@ pub const SHOULDER: Micros = 9_000_000;
 /// Then its order ends by name. The design's 20 s is a bound; 15 s ends a jam that starts within 5 s of a walk's
 /// start inside 20 s of it.
 pub const END: Micros = 15_000_000;
+/// A still body this near a walker is in its way, µm: the walk's push range (`skills::route::RANGE`).
+pub const NEAR: i64 = 1_200_000;
+/// The walks planned on changed ground are all planned again within this, µs (G3's bar is 2 s).
+pub const REPLAN_WITHIN: Micros = 1_000_000;
 
-/// What the ladder reads of the world beyond the walk skill's.
+/// What the ladder reads of the world beyond walking's.
 pub trait Unstick: World {
     /// When the owner of link `link` last let someone in or turned it, µs, if it takes it in turns.
     fn moved(&self, link: Id) -> Option<Micros>;
@@ -53,8 +73,6 @@ pub trait Unstick: World {
     fn far_end(&self, link: Id, node: Id, at: Vec3) -> Option<(Id, Vec3)>;
     /// The nearest legal point on `node` to `at` (µm): `at` itself when it is legal.
     fn nearest(&self, node: Id, at: Vec3) -> Option<Vec3>;
-    /// `body` standing at `at` on its node, legal ground (the mover's place).
-    fn place(&self, body: &Body, at: Vec3) -> Result<Body, Refusal>;
 }
 
 /// One rung climbed, or the last rung walked.
@@ -110,22 +128,31 @@ struct Clock {
     rung: u8,
 }
 
-/// A walk-out under way: where to, and what held the walker before (an order ended by name stays ended).
-#[derive(Clone, Copy)]
-struct Out {
-    to: Vec3,
-    was: Option<&'static str>,
+/// A walker as the ladder knows it: its order, free speed, goal (node and point, µm) and legs, the leg it walks, and
+/// whether the controller was carrying it across a link at the last tick's end.
+struct Walker {
+    order: Id,
+    speed: i64,
+    goal: (Id, Vec3),
+    legs: Vec<Leg>,
+    leg: usize,
+    carried: bool,
 }
 
-/// The ladder over one crowd.
+/// The ladder over one runner's walkers.
 #[derive(Default)]
 pub struct Ladder {
-    /// Each walker's goal: its node and point (µm), for routing again.
-    goals: BTreeMap<Id, (Id, Vec3)>,
+    walkers: BTreeMap<Id, Walker>,
     clocks: BTreeMap<Id, Clock>,
-    outs: BTreeMap<Id, Out>,
+    /// The walk-outs under way.
+    outs: BTreeSet<Id>,
     /// Every rung climbed, in order.
     pub log: Vec<Record>,
+    /// Each walk planned again on changed ground (G3): who, when (µs of world time), and the name it ended by when no
+    /// plan was found.
+    pub replans: Vec<(Id, Micros, Option<&'static str>)>,
+    /// Plans a tick for the stale walks of the ground change under way (0: none under way).
+    spread: usize,
 }
 
 fn len(a: Vec3, b: Vec3) -> i64 {
@@ -138,27 +165,31 @@ impl Ladder {
         Ladder::default()
     }
 
-    /// Adds a walker to `crowd` (the walk skill's `Crowd::add`), keeping its goal for routing again.
-    #[allow(clippy::too_many_arguments)]
-    pub fn add(
-        &mut self,
-        crowd: &mut Crowd,
-        world: &mut impl World,
-        body: Body,
-        speed: i64,
-        order: Id,
-        node: Id,
-        goal: Vec3,
-    ) -> Result<(), Refusal> {
-        let who = body.id;
-        crowd.add(world, body, speed, order, node, goal)?;
-        self.goals.insert(who, (node, goal));
-        Ok(())
+    /// Keeps a walker the runner walks along `legs` for the order `order`, at free speed `speed`, to `goal` on
+    /// `node`, for routing it again.
+    pub fn add(&mut self, who: Id, order: Id, speed: i64, node: Id, goal: Vec3, legs: Vec<Leg>) {
+        self.walkers.insert(
+            who,
+            Walker {
+                order,
+                speed,
+                goal: (node, goal),
+                legs,
+                leg: 0,
+                carried: false,
+            },
+        );
     }
 
-    /// Whether every walker has arrived or ended by name, and no walk-out is under way.
-    pub fn done(&self, crowd: &Crowd) -> bool {
-        self.outs.is_empty() && crowd.done()
+    /// The leg `who` walks as the ladder keeps it: its index in the route and the leg.
+    pub fn leg(&self, who: Id) -> Option<(usize, Leg)> {
+        let w = self.walkers.get(&who)?;
+        Some((w.leg, *w.legs.get(w.leg)?))
+    }
+
+    /// Whether every walk has ended (arrived or by name) and no walk-out is under way.
+    pub fn done(&self, runner: &Runner) -> bool {
+        self.outs.is_empty() && runner.runs.is_empty()
     }
 
     fn record(&mut self, at: Micros, who: Id, order: Id, rung: Rung) {
@@ -170,11 +201,85 @@ impl Ladder {
         });
     }
 
+    /// Ends `who`'s order by name: its run ends, and the record says why.
+    fn end(&mut self, runner: &mut Runner, who: Id, order: Id, name: &'static str, detail: String) {
+        runner.end(who, named(name));
+        self.clocks.remove(&who);
+        self.record(runner.now, who, order, Rung::Ended { name, detail });
+    }
+
+    /// Gives `who` a new route from where it stands to its goal (`F_ROUTE`), or ends its order by the plan's
+    /// refusal, which is returned. A walk planned again is no longer stale (G3).
+    fn reroute(
+        &mut self,
+        runner: &mut Runner,
+        town: &mut Town,
+        who: Id,
+    ) -> Result<(), &'static str> {
+        let (Some(w), Some(body)) = (self.walkers.get_mut(&who), runner.controller.body(who))
+        else {
+            return Ok(());
+        };
+        town.stale.remove(&who);
+        let (node, goal) = w.goal;
+        match town.plan(body, node, goal) {
+            Ok(legs) => {
+                runner.route(who, &legs);
+                (w.legs, w.leg) = (legs, 0);
+                Ok(())
+            }
+            Err(e) => {
+                let order = w.order;
+                self.end(runner, who, order, e.name, e.detail);
+                Err(e.name)
+            }
+        }
+    }
+
+    /// Changed ground (G3, see the module's notes): the stale walks planned again, those on a changed node at once and
+    /// the rest by rank, a share a tick so that all are within [`REPLAN_WITHIN`].
+    fn replan(&mut self, runner: &mut Runner, town: &mut Town) {
+        let running = runner.running_bodies();
+        town.stale
+            .retain(|who, _| running.contains(who) && self.walkers.contains_key(who));
+        if town.stale.is_empty() {
+            self.spread = 0;
+            return;
+        }
+        if self.spread == 0 {
+            let ticks = (REPLAN_WITHIN / runner.tick.max(1)).max(1) as usize;
+            self.spread = town.stale.len().div_ceil(ticks);
+        }
+        let mut order: Vec<(usize, Id)> = town
+            .stale
+            .iter()
+            .filter(|(who, _)| {
+                !runner.controller.carried(**who)
+                    && !runner.off_ground.contains(*who)
+                    && !self.outs.contains(*who)
+            })
+            .map(|(who, rank)| (*rank, *who))
+            .collect();
+        order.sort();
+        let mut budget = self.spread;
+        for (rank, who) in order {
+            if rank > 0 {
+                if budget == 0 {
+                    break;
+                }
+                budget -= 1;
+            }
+            self.clocks.remove(&who);
+            let ended = self.reroute(runner, town, who).err();
+            self.replans.push((who, runner.now, ended));
+        }
+    }
+
     /// The last rung: body `who`, found on illegal ground, walks to the nearest legal point. Refused when it is on
     /// legal ground already (`on-ground`), crossing a link (`crossing`), or its node has no ground (`no-ground`).
     pub fn walk_out(
         &mut self,
-        crowd: &mut Crowd,
+        runner: &mut Runner,
         world: &impl Unstick,
         who: Id,
     ) -> Result<(), Refusal> {
@@ -182,119 +287,157 @@ impl Ladder {
             name,
             detail: replica::world_model::show(who),
         };
-        let w = crowd
+        let w = self
             .walkers
-            .iter_mut()
-            .find(|w| w.body.id == who)
+            .get(&who)
             .ok_or_else(|| refuse("body-missing"))?;
-        if w.crossing {
+        let b = *runner
+            .controller
+            .body(who)
+            .ok_or_else(|| refuse("body-missing"))?;
+        if runner.controller.carried(who) {
             return Err(refuse("crossing"));
         }
-        let node = node_of(&w.body);
-        let from = w.body.pose.position;
+        let node = node_of(&b);
+        let from = b.pose.position;
         let to = world
             .nearest(node, from)
             .ok_or_else(|| refuse("no-ground"))?;
         if to == from {
             return Err(refuse("on-ground"));
         }
-        let was = w.held.replace("walk-out");
-        w.waiting = None;
-        w.body.linear = Vec3::ZERO;
+        let track = Track {
+            link: None,
+            line: vec![to],
+            speed: w.speed,
+            to: node,
+            arrive: None,
+        };
+        runner.controller.carry(who, track)?;
+        if runner.running(who) {
+            runner
+                .fields
+                .entry(who)
+                .or_default()
+                .insert(F_HELD, Value::Uint(1));
+        }
         let order = w.order;
-        self.outs.insert(who, Out { to, was });
-        self.record(crowd.now, who, order, Rung::WalkOut { node, from, to });
+        self.outs.insert(who);
+        self.clocks.remove(&who);
+        self.record(runner.now, who, order, Rung::WalkOut { node, from, to });
         Ok(())
     }
 
-    /// One tick: the walk-outs under way, then the crowd's tick, then each walker's clock and rungs.
-    pub fn step(&mut self, crowd: &mut Crowd, world: &mut impl Unstick) -> Result<(), Refusal> {
-        let (dt, at) = (crowd.tick, crowd.now + crowd.tick);
-        // The last rung: straight to the nearest legal point at the walker's speed, collision off.
-        let outs: Vec<Id> = self.outs.keys().copied().collect();
+    /// One tick: changed ground first (its bodies found again on it, the walks planned on it planned again, G3), then
+    /// the runner's tick (the walk-outs under way are carried in it), then each walker the tick refused
+    /// ended, then the walk-outs ended, then each walker's clock and rungs. A refusal of one walker in the runner's
+    /// tick (`Runner::refused`, #3275) is its fault alone: a walk-out under way is dropped, and its order ends by the
+    /// refusal's name, with its record ([`Rung::Ended`]); it never stops the ladder for the others. A refusal of the
+    /// world's own in the runner's tick is returned once the rungs are climbed.
+    pub fn step(&mut self, runner: &mut Runner, town: &mut Town) -> Result<(), Refusal> {
+        runner.reground(town);
+        self.replan(runner, town);
+        let ticked = runner.tick(town);
+        self.faults(runner);
+        self.climb(runner, town);
+        ticked
+    }
+
+    /// Each walker refused in the last tick (its first refusal) whose walk the tick ended or whose walk-out was under
+    /// way: the walk-out dropped, its order ended by name. A body with neither (it stood still) has nothing to end.
+    fn faults(&mut self, runner: &mut Runner) {
+        if runner.refused.is_empty() {
+            return;
+        }
+        let start = runner.now - runner.tick;
+        let mut seen = BTreeSet::new();
+        let refused: Vec<(Id, Refusal)> = runner
+            .refused
+            .iter()
+            .filter(|(who, _)| {
+                self.walkers.contains_key(who)
+                    && (self.outs.contains(who)
+                        || matches!(runner.ended.get(who), Some((t, Progress::Failed(_))) if *t == start))
+                    && seen.insert(*who)
+            })
+            .cloned()
+            .collect();
+        for (who, r) in refused {
+            if self.outs.remove(&who)
+                && let Some(f) = runner.fields.get_mut(&who)
+            {
+                f.remove(&F_HELD);
+            }
+            let order = self.walkers[&who].order;
+            self.end(runner, who, order, r.name, r.detail);
+        }
+    }
+
+    fn climb(&mut self, runner: &mut Runner, town: &mut Town) {
+        let now = runner.now;
+        // The walk-outs the controller has stood on the ground: the order, if it has one still, goes on from there.
+        let outs: Vec<Id> = self.outs.iter().copied().collect();
         for who in outs {
-            let Some(w) = crowd.walkers.iter_mut().find(|w| w.body.id == who) else {
-                self.outs.remove(&who);
+            if runner.controller.carried(who) {
+                continue;
+            }
+            self.outs.remove(&who);
+            let Some(at) = runner.controller.body(who).map(|b| b.pose.position) else {
                 continue;
             };
-            let Out { to, was } = self.outs[&who];
-            let p = w.body.pose.position;
-            let d = len(p, to);
-            let reach = w.speed * dt / 1_000_000;
-            if d > reach {
-                let q = Vec3::new(
-                    p.x + ((i128::from(to.x - p.x) * i128::from(reach)) / i128::from(d)) as i64,
-                    p.y,
-                    p.z + ((i128::from(to.z - p.z) * i128::from(reach)) / i128::from(d)) as i64,
-                );
-                w.body.linear = Vec3::new(
-                    (q.x - p.x) * 1_000_000 / dt,
-                    0,
-                    (q.z - p.z) * 1_000_000 / dt,
-                );
-                w.body.pose.position = q;
-                continue;
+            let order = self.walkers.get(&who).map_or(who, |w| w.order);
+            self.record(now, who, order, Rung::WalkedOut { at });
+            if let Some(f) = runner.fields.get_mut(&who) {
+                f.remove(&F_HELD);
             }
-            let mut b = world.place(&w.body, to)?;
-            b.linear = Vec3::new(
-                (to.x - p.x) * 1_000_000 / dt,
-                0,
-                (to.z - p.z) * 1_000_000 / dt,
-            );
-            w.body = b;
-            w.held = was;
-            let order = w.order;
-            self.outs.remove(&who);
-            self.record(at, who, order, Rung::WalkedOut { at: to });
-            // Its order, if it has one still, goes on from where it stands.
-            if w.arrived.is_none()
-                && was.is_none()
-                && let Some(&(node, goal)) = self.goals.get(&who)
-            {
-                match world.plan(&w.body, node, goal) {
-                    Ok(legs) => {
-                        w.legs = legs;
-                        w.leg = 0;
-                        self.clocks.remove(&who);
-                    }
-                    Err(e) => {
-                        w.held = Some(e.name);
-                        self.record(
-                            at,
-                            who,
-                            order,
-                            Rung::Ended {
-                                name: e.name,
-                                detail: e.detail,
-                            },
-                        );
-                    }
-                }
+            if runner.running(who) {
+                self.clocks.remove(&who);
+                let _ = self.reroute(runner, town, who);
             }
         }
-        crowd.step(world)?;
-        let now = crowd.now;
-        // Still bodies, as they stand now: no order (arrived, or ended by name), not staying.
-        let still: Vec<(Id, Id, Vec3)> = crowd
-            .walkers
-            .iter()
-            .filter(|w| {
-                !w.staying && (w.arrived.is_some() || w.held.is_some_and(|h| h != "walk-out"))
+        // Who runs, taken once (each walker below changes only its own run, after it is read).
+        let running = runner.running_bodies();
+        // Still bodies, as they stand now: no order (arrived, or ended by name), not staying, not walking out.
+        let still: Vec<(Id, Id, Vec3)> = runner
+            .controller
+            .bodies()
+            .filter(|b| {
+                !runner.staying.contains(&b.id)
+                    && !running.contains(&b.id)
+                    && !self.outs.contains(&b.id)
             })
-            .map(|w| (w.body.id, node_of(&w.body), w.body.pose.position))
+            .map(|b| (b.id, node_of(b), b.pose.position))
             .collect();
         let mut asked: BTreeSet<(Id, Id)> = BTreeSet::new();
-        for k in 0..crowd.walkers.len() {
-            let w = crowd.walkers[k].clone();
-            if w.arrived.is_some() || w.held.is_some() || w.staying || w.crossing {
-                self.clocks.remove(&w.body.id);
+        let ids: Vec<Id> = self.walkers.keys().copied().collect();
+        for who in ids {
+            let Some(body) = runner.controller.body(who).copied() else {
+                continue;
+            };
+            // A leg ends when the controller has carried the body across its link.
+            let carried = runner.controller.carrying(who).is_some();
+            let w = self.walkers.get_mut(&who).expect("a walker");
+            if w.carried && !carried {
+                w.leg += 1;
+            }
+            w.carried = carried;
+            if !running.contains(&who)
+                || self.outs.contains(&who)
+                || runner.staying.contains(&who)
+                || carried
+            {
+                self.clocks.remove(&who);
                 continue;
             }
-            let (who, order) = (w.body.id, w.order);
-            let leg = w.legs[w.leg];
-            let gap = len(w.body.pose.position, leg.to);
+            let Some(&leg) = w.legs.get(w.leg) else {
+                self.clocks.remove(&who);
+                continue;
+            };
+            let (order, speed, wleg) = (w.order, w.speed, w.leg);
+            let gap = len(body.pose.position, leg.to);
+            let waits = waiting(runner.fields.get(&who));
             let fresh = Clock {
-                leg: w.leg,
+                leg: wleg,
                 best: gap,
                 mark: gap,
                 at: now,
@@ -303,13 +446,14 @@ impl Ladder {
             };
             let c = self.clocks.entry(who).or_insert(fresh);
             // A new leg, or a queue that moved, starts the clock again.
-            let moved = w
-                .waiting
-                .and_then(|(l, _)| world.moved(l))
+            let moved = waits
+                .and_then(|(l, _)| town.moved(l))
                 .is_some_and(|m| m > c.at);
-            if c.leg != w.leg || moved {
+            if c.leg != wleg || moved {
                 *c = fresh;
-                crowd.walkers[k].shoulder = false;
+                if let Some(f) = runner.fields.get_mut(&who) {
+                    f.remove(&F_SHOULDER);
+                }
                 continue;
             }
             // Each second: coming a quarter of free speed's worth nearer the leg's end than ever is progress, and
@@ -317,7 +461,7 @@ impl Ladder {
             c.best = c.best.min(gap);
             if now - c.at >= SECOND {
                 let span = now - c.at;
-                if c.best + w.speed * span / 4_000_000 <= c.mark {
+                if c.best + speed * span / 4_000_000 <= c.mark {
                     c.idle = (c.idle - span).max(0);
                 } else {
                     c.idle += span;
@@ -325,12 +469,14 @@ impl Ladder {
                 (c.mark, c.at) = (c.best, now);
                 if c.idle == 0 {
                     c.rung = 0;
-                    crowd.walkers[k].shoulder = false;
+                    if let Some(f) = runner.fields.get_mut(&who) {
+                        f.remove(&F_SHOULDER);
+                    }
                 }
             }
             let idle = c.idle;
             if idle >= END {
-                let detail = match w.waiting {
+                let detail = match waits {
                     Some((l, _)) => format!(
                         "no progress for {} ms, waiting for {}",
                         idle / 1000,
@@ -342,78 +488,43 @@ impl Ladder {
                         gap
                     ),
                 };
-                let w = &mut crowd.walkers[k];
-                w.held = Some("goal-unreachable");
-                w.waiting = None;
-                w.shoulder = false;
-                w.body.linear = Vec3::ZERO;
-                self.clocks.remove(&who);
-                self.record(
-                    now,
-                    who,
-                    order,
-                    Rung::Ended {
-                        name: "goal-unreachable",
-                        detail,
-                    },
-                );
+                self.end(runner, who, order, "goal-unreachable", detail);
                 continue;
             }
             if idle >= SHOULDER && c.rung < 3 {
                 c.rung = 3;
-                crowd.walkers[k].shoulder = true;
+                runner
+                    .fields
+                    .entry(who)
+                    .or_default()
+                    .insert(F_SHOULDER, Value::Uint(1));
                 self.record(now, who, order, Rung::Shoulder);
             } else if idle >= MAKE_WAY && c.rung < 2 {
                 c.rung = 2;
-                let (node, p) = (node_of(&w.body), w.body.pose.position);
-                let far = w.waiting.and_then(|(l, _)| world.far_end(l, node, p));
+                let (node, p) = (node_of(&body), body.pose.position);
+                let far = waits.and_then(|(l, _)| town.far_end(l, node, p));
                 for &(s, sn, sp) in &still {
-                    let near = sn == node && len(sp, p) < walk::RANGE;
+                    let near = sn == node && len(sp, p) < NEAR;
                     let blocks = far.is_some_and(|(fnode, fp)| sn == fnode && len(sp, fp) < ROOM);
                     if (near || blocks) && asked.insert((who, s)) {
-                        self.log.push(Record {
-                            at: now,
-                            who,
-                            order,
-                            rung: Rung::MakeWay { to: s },
-                        });
+                        self.record(now, who, order, Rung::MakeWay { to: s });
                     }
                 }
             } else if idle >= REROUTE && c.rung < 1 {
                 c.rung = 1;
-                let goal = self.goals.get(&who).copied();
-                let body = w.body;
                 self.record(now, who, order, Rung::Reroute);
-                if let Some((node, goal)) = goal {
-                    match world.plan(&body, node, goal) {
-                        Ok(legs) => {
-                            let w = &mut crowd.walkers[k];
-                            w.legs = legs;
-                            w.leg = 0;
-                            let c = self.clocks.get_mut(&who).expect("its clock");
-                            c.leg = 0;
-                            c.best = len(body.pose.position, w.legs[0].to);
-                            c.mark = c.best;
-                        }
-                        Err(e) => {
-                            let w = &mut crowd.walkers[k];
-                            w.held = Some(e.name);
-                            w.waiting = None;
-                            self.clocks.remove(&who);
-                            self.record(
-                                now,
-                                who,
-                                order,
-                                Rung::Ended {
-                                    name: e.name,
-                                    detail: e.detail,
-                                },
-                            );
-                        }
+                let _ = self.reroute(runner, town, who);
+                // A new route to the same leg's end keeps the least distance to it: measured again from where the
+                // walker stands, a walker going to and fro would count each swing back as progress, and be routed
+                // again every few seconds without ever climbing further (#3168).
+                if let (Some(c), Some(w)) = (self.clocks.get_mut(&who), self.walkers.get(&who)) {
+                    c.leg = 0;
+                    if w.legs[0].to != leg.to {
+                        c.best = len(body.pose.position, w.legs[0].to);
+                        c.mark = c.best;
                     }
                 }
             }
         }
-        Ok(())
     }
 }

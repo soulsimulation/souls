@@ -445,3 +445,69 @@ fn a3_a_crossing_is_one_leave_and_arrive_at_the_same_speed() {
         assert!((a - c).abs() <= 4);
     }
 }
+
+/// A body walking exactly along a 16 m square's line into the point where four squares meet, at (0, 32) m on the
+/// test world's open ground: along x = 0 and along z = 32 m, both ways, and on the four diagonals. Each walk starts
+/// 2 m short of the corner at 1.4 m/s for 4 s; it must end at least 3 m past it (found by N13, PR #3194: it stopped
+/// at the corner for good).
+#[test]
+fn a_walk_along_a_square_line_passes_the_corner_of_four_squares() {
+    let im = testworld();
+    let s = open_ground(&im);
+    let frame = Frame {
+        node: s.node,
+        slot: None,
+    };
+    let corner = [0i64, 32_000_000];
+    let (speed, d) = (1_400_000i64, 2_000_000i64);
+    let dirs: [[i64; 2]; 8] = [
+        [0, 1],
+        [0, -1],
+        [1, 0],
+        [-1, 0],
+        [1, 1],
+        [1, -1],
+        [-1, 1],
+        [-1, -1],
+    ];
+    let mut stuck = Vec::new();
+    for dir in dirs {
+        let diag = dir[0] != 0 && dir[1] != 0;
+        // A diagonal walks at speed/√2 on each axis, from d/√2 short on each: exact multiples, so its line is exact.
+        let (v, back) = if diag {
+            (speed * 1000 / 1414, d * 1000 / 1414)
+        } else {
+            (speed, d)
+        };
+        let start = Vec3::new(corner[0] - dir[0] * back, 0, corner[1] - dir[1] * back);
+        let mut b = s
+            .place(fixture(3), frame, start, replica::pose::Quat::IDENTITY)
+            .expect("on the open ground");
+        let want = [dir[0] * v, dir[1] * v];
+        let mut run = Run::default();
+        for k in 0..80 {
+            one(&s, &mut b, want, (k + 1) * TICK, &mut run, 0);
+        }
+        let p = b.pose.position;
+        let past = (p.x - corner[0]) * dir[0] + (p.z - corner[1]) * dir[1];
+        let off = (p.x - corner[0]) * dir[1] - (p.z - corner[1]) * dir[0];
+        println!(
+            "  toward ({}, {}): ends at ({}, {}) mm, {} mm past the corner, {} of 80 steps not moved",
+            dir[0],
+            dir[1],
+            p.x / 1000,
+            p.z / 1000,
+            past / 1000,
+            run.still
+        );
+        let need = if diag {
+            3_000_000 * 1414 / 1000
+        } else {
+            3_000_000
+        };
+        if past < need || off != 0 {
+            stuck.push((dir, p.x, p.z, run.still));
+        }
+    }
+    assert!(stuck.is_empty(), "stalled at or off the corner: {stuck:?}");
+}

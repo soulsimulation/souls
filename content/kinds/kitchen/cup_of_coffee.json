@@ -1,0 +1,132 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:cup_of_coffee",
+  "owner": "thing",
+  "state": {
+    "coffee": {
+      "n": 1,
+      "type": "int",
+      "unit": "g",
+      "default": 200,
+      "min": 0,
+      "max": 200,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "sips": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        70,
+        50,
+        0
+      ]
+    },
+    "rim": {
+      "role": "contact",
+      "at_mm": [
+        -40,
+        88,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      140,
+      88,
+      184
+    ]
+  },
+  "forms": {
+    "sip": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "state",
+          "field": "coffee",
+          "at_least": 40
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "consume",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "coffee",
+          "by": -40,
+          "event": "sipped"
+        },
+        {
+          "change": "set",
+          "field": "sips",
+          "by": 1,
+          "event": "sip_counted"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:cup_of_coffee",
+    "table": [
+      {
+        "part": "fill",
+        "field": "coffee",
+        "do": "scale",
+        "axis": "y",
+        "range": [
+          0,
+          200
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      }
+    ],
+    "shape": {"round":4,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,0],[45,0],[45,88],[40,88],[40,8],[0,8]],"segments":14,"tint":"cup"},{"kind":"torus","at":[55,48,0],"r":22,"r2":6,"segments":8,"tint":"cup","pitch":90000},{"kind":"cyl","at":[0,45,0],"r":39,"h":74,"segments":14,"tint":"coffee","role":"fill","pivot":[0,8,0]}],"palette":{"cup":"#f2efe8","coffee":"#5a3b22"},"tags":["kitchen","cup","coffee","object"]}
+  },
+  "text": {
+    "card": "A cup of coffee: pick it up and sip it, five sips to a cup.",
+    "coffee": "coffee",
+    "mug": "mug",
+    "latte": "latte",
+    "drink": "drink"
+  },
+  "card": {
+    "text": "card",
+    "category": "drink",
+    "synonyms": [
+      "coffee",
+      "mug",
+      "latte"
+    ]
+  }
+}
