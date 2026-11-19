@@ -2,9 +2,10 @@
 //! other direction. Kept in the account store's file beside the mailbox, never in a world's log; the backup of that
 //! file (O20) holds them, and removing a person's words (W7) must reach `prayers_v1` as it does `mailbox_v1`.
 //!
-//! The world's creator is whoever holds a creator grant of the Soul's own scope (T3: a new scope for every world;
-//! one creator per world): the gateway has already checked the grant, so no other record is read. A prayer is
-//! `waiting` until answered; an answer may be changed, and each answer is given to the Soul's socket until its daemon
+//! A prayer is kept under its world, the Soul's own scope (T3: a new scope for every world). Its world's creator is the
+//! principal the list of worlds (W3/G9) names as that world's creator, holding the creator grant of that principal
+//! (W5's and G7's); a world the list has no row for (one started by hand, as in tests) is its own scope's creator
+//! grant's ([`creator_worlds`]). The gateway has already checked the grant. A prayer is `waiting` until answered; an answer may be changed, and each answer is given to the Soul's socket until its daemon
 //! says it has it (`delivered`). Text limits are in characters, as today's server counts them.
 
 use super::random;
@@ -41,6 +42,23 @@ pub fn scope_of<'a>(grant: &'a str, kind: &str) -> Option<&'a str> {
         && !counter.is_empty()
         && counter.bytes().all(|b| b.is_ascii_digit()))
     .then_some(scope)
+}
+
+/// The worlds (scope hex) whose creator `grant` is, given the list's rows as (lineage hex, creator principal text):
+/// those the list names its principal (`<scope hex>:<counter>`) the creator of, and the grant's own scope when no row
+/// has that lineage. `None` for a grant that is not a creator's.
+pub fn creator_worlds(grant: &str, rows: &[(String, String)]) -> Option<Vec<String>> {
+    let scope = scope_of(grant, "creator")?;
+    let principal = format!("{scope}:{}", grant.rsplit('-').next()?);
+    let mut worlds: Vec<String> = rows
+        .iter()
+        .filter(|(_, c)| *c == principal)
+        .map(|(l, _)| l.clone())
+        .collect();
+    if !rows.iter().any(|(l, _)| l == scope) {
+        worlds.push(scope.to_string());
+    }
+    Some(worlds)
 }
 
 fn sized(text: &str, most: usize) -> Result<(), &'static str> {
@@ -89,39 +107,31 @@ impl Store {
         Ok(rows)
     }
 
-    /// The prayers to `creator`'s world: waiting ones first, oldest first; with `all`, then the answered ones, newest
-    /// first. `Err` names a grant that is not a creator's.
-    pub fn prayers_to(
-        &self,
-        creator: &str,
-        all: bool,
-    ) -> Result<Result<Vec<Prayer>, &'static str>, StoreError> {
-        let Some(scope) = scope_of(creator, "creator") else {
-            return Ok(Err("prayer.not-the-creator"));
-        };
+    /// The prayers to the creator of `worlds` ([`creator_worlds`]): waiting ones first, oldest first; with `all`, then
+    /// the answered ones, newest first.
+    pub fn prayers_to(&self, worlds: &[String], all: bool) -> Result<Vec<Prayer>, StoreError> {
+        let scopes = serde_json::to_string(worlds).unwrap_or_default();
         let db = self.db.lock().expect("the store");
         let mut q = db.prepare(
             "SELECT id, soul, text, at, answer, answered_at FROM prayers_v1
-             WHERE scope = ?1 AND (answer IS NULL OR ?2)
+             WHERE scope IN (SELECT value FROM json_each(?1)) AND (answer IS NULL OR ?2)
              ORDER BY answer IS NOT NULL, CASE WHEN answer IS NULL THEN at ELSE -answered_at END, id LIMIT ?3",
         )?;
         let rows = q
-            .query_map(params![scope, all, LIST_MOST], row)?
+            .query_map(params![scopes, all, LIST_MOST], row)?
             .collect::<Result<_, _>>()?;
-        Ok(Ok(rows))
+        Ok(rows)
     }
 
-    /// `creator` answers prayer `id` of its world (again, if answered before); the prayer, or the refusal's name.
+    /// The creator of `worlds` answers prayer `id` (again, if answered before); the prayer, or the refusal's name.
     pub fn answer(
         &self,
-        creator: &str,
+        worlds: &[String],
         id: &str,
         text: &str,
         now: u64,
     ) -> Result<Result<Prayer, &'static str>, StoreError> {
-        let Some(scope) = scope_of(creator, "creator") else {
-            return Ok(Err("prayer.not-the-creator"));
-        };
+        let scopes = serde_json::to_string(worlds).unwrap_or_default();
         match sized(text, ANSWER_MOST) {
             Err("empty") => return Ok(Err("answer.empty")),
             Err(_) => return Ok(Err("answer.too-long")),
@@ -129,8 +139,9 @@ impl Store {
         }
         let db = self.db.lock().expect("the store");
         let n = db.execute(
-            "UPDATE prayers_v1 SET answer = ?3, answered_at = ?4, delivered = 0 WHERE id = ?1 AND scope = ?2",
-            params![id, scope, text.trim(), now as i64],
+            "UPDATE prayers_v1 SET answer = ?3, answered_at = ?4, delivered = 0
+             WHERE id = ?1 AND scope IN (SELECT value FROM json_each(?2))",
+            params![id, scopes, text.trim(), now as i64],
         )?;
         if n != 1 {
             return Ok(Err("prayer.not-found"));
@@ -210,39 +221,29 @@ mod tests {
     fn a_prayer_waits_until_its_creator_answers_and_the_answer_is_offered_until_taken() {
         let (s, dir) = store();
         let soul = format!("soul-{SCOPE}-2");
-        let creator = format!("creator-{SCOPE}-0");
-        let other = format!("creator-{}-0", "3c".repeat(16));
+        let creator = creator_worlds(&format!("creator-{SCOPE}-0"), &[]).unwrap();
+        let other = creator_worlds(&format!("creator-{}-0", "3c".repeat(16)), &[]).unwrap();
         let a = s.pray(&soul, "let it rain", T0).unwrap().unwrap();
         let b = s.pray(&soul, "and a bridge", T0 + 1).unwrap().unwrap();
         // The world's creator sees both waiting, oldest first; another world's creator sees none.
         let ids = |v: Vec<Prayer>| v.into_iter().map(|p| p.id).collect::<Vec<_>>();
         assert_eq!(
-            ids(s.prayers_to(&creator, false).unwrap().unwrap()),
+            ids(s.prayers_to(&creator, false).unwrap()),
             [a.as_str(), b.as_str()]
         );
-        assert!(s.prayers_to(&other, true).unwrap().unwrap().is_empty());
-        assert_eq!(
-            s.prayers_to(&soul, false).unwrap(),
-            Err("prayer.not-the-creator")
-        );
+        assert!(s.prayers_to(&other, true).unwrap().is_empty());
+        assert_eq!(creator_worlds(&soul, &[]), None);
         // Only that world's creator answers it.
         assert_eq!(
             s.answer(&other, &a, "no", T0 + 2).unwrap(),
             Err("prayer.not-found")
         );
-        assert_eq!(
-            s.answer(&soul, &a, "no", T0 + 2).unwrap(),
-            Err("prayer.not-the-creator")
-        );
         let p = s.answer(&creator, &a, "it will", T0 + 3).unwrap().unwrap();
         assert_eq!(p.answer.as_deref(), Some("it will"));
         // Waiting first; answered ones with all.
+        assert_eq!(ids(s.prayers_to(&creator, false).unwrap()), [b.as_str()]);
         assert_eq!(
-            ids(s.prayers_to(&creator, false).unwrap().unwrap()),
-            [b.as_str()]
-        );
-        assert_eq!(
-            ids(s.prayers_to(&creator, true).unwrap().unwrap()),
+            ids(s.prayers_to(&creator, true).unwrap()),
             [b.as_str(), a.as_str()]
         );
         // The answer is offered until the Soul's daemon takes it, and only its own Soul takes it.
@@ -265,10 +266,32 @@ mod tests {
     }
 
     #[test]
+    fn the_worlds_creator_is_the_principal_the_list_names() {
+        let lineage = "5e".repeat(16);
+        let principal = "7a".repeat(16);
+        let rows = [(lineage.clone(), format!("{principal}:3"))];
+        // The list's creator of a world: that world, and its own scope only when the list has no row for it.
+        assert_eq!(
+            creator_worlds(&format!("creator-{principal}-3"), &rows),
+            Some(vec![lineage.clone(), principal.clone()])
+        );
+        // Another principal, or the same principal's other counter: not that world's creator.
+        assert_eq!(
+            creator_worlds(&format!("creator-{principal}-4"), &rows),
+            Some(vec![principal.clone()])
+        );
+        // A grant whose scope is a listed world's lineage is not its creator unless the list says so.
+        assert_eq!(
+            creator_worlds(&format!("creator-{lineage}-0"), &rows),
+            Some(vec![])
+        );
+    }
+
+    #[test]
     fn a5_a_prayer_over_2000_characters_or_an_answer_over_4000_is_refused_by_name() {
         let (s, dir) = store();
         let soul = format!("soul-{SCOPE}-2");
-        let creator = format!("creator-{SCOPE}-0");
+        let creator = vec![SCOPE.to_string()];
         // Characters, not bytes: 2,000 two-byte characters are a prayer.
         assert!(s.pray(&soul, &"é".repeat(PRAYER_MOST), T0).unwrap().is_ok());
         assert_eq!(
@@ -277,7 +300,7 @@ mod tests {
         );
         assert_eq!(s.pray(&soul, "  ", T0).unwrap(), Err("prayer.empty"));
         assert_eq!(
-            s.pray(&creator, "hi", T0).unwrap(),
+            s.pray(&format!("creator-{SCOPE}-0"), "hi", T0).unwrap(),
             Err("prayer.not-a-soul")
         );
         let id = s.pray(&soul, "hear me", T0).unwrap().unwrap();
