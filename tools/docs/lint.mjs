@@ -27,6 +27,8 @@ export const HOSTS = Object.freeze(['soul.game', 'github.com']);
  *  (em-dashes, issue numbers) stop there: what follows quotes the code's own text; links and private data are checked. */
 export const GENERATED_MARK = 'Generated from';
 export const AUDIENCES = Object.freeze(['agents', 'humans', 'both']);
+/** The one public contact, a role address at soul.game (the terms page names it); every other address is private. */
+export const CONTACT_EMAIL = 'hello@soul.game';
 const PRIVATE = [
   [/(?:\/Users\/|\/home\/|(?:^|[\s(`'"=])~\/)/m, 'private.local-path'],
   [/\b(?:127\.0\.0\.1|localhost|0\.0\.0\.0)\b/, 'private.local-host'],
@@ -107,7 +109,7 @@ export function lintPage(text, { pages = new Set(OUTLINE) } = {}) {
   if (/\bEden worlds?\b|\bin Eden\b(?! \d)/.test(prose)) bad('name.eden', 'Eden is one world, never the product');
   if (/—/.test(written.replace(/^#.*$/gm, ''))) bad('style.em-dash', 'no em-dashes in body text (WRITING.md)');
   if (/(?:^|\s)#\d{2,}\b/.test(written)) bad('text.issue-number', 'no issue numbers in page text');
-  for (const [re, code] of PRIVATE) { const m = re.exec(text); if (m) bad(code, `"${m[0].trim()}" must not appear in a public page`); }
+  for (const [re, code] of PRIVATE) { const m = re.exec(text.replaceAll(CONTACT_EMAIL, '')); if (m) bad(code, `"${m[0].trim()}" must not appear in a public page`); }
   return problems;
 }
 
