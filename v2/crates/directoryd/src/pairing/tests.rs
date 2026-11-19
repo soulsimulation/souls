@@ -246,6 +246,53 @@ fn a_request_is_approved_once() {
     );
 }
 
+/// G7b (#3477): the world's creator account pairs its creator grant with nothing registered beforehand: the approval
+/// registers the grant the accounts store says it holds. Any other account is refused `not-the-creator`.
+#[test]
+fn g7b_a1_the_creator_account_pairs_the_grant_it_holds_and_others_are_refused() {
+    let (p, _) = store();
+    let creator = "creator-0123456789abcdef0123456789abcdef-1";
+    let ask_creator = || {
+        let secret = to_hex(&random::<32>());
+        let a = Ask {
+            secret_hash: sha256(secret.as_bytes()),
+            device: "studio laptop".into(),
+            label: "builder agent".into(),
+            soul: Some(creator.into()),
+            scope: "creator".into(),
+            force: false,
+        };
+        (secret, p.ask(&a, T0).expect("asked").code)
+    };
+    let holds = |account: &'static str| move |g: &str| account == "acct_creator" && g == creator;
+    // Not held by this account (nor registered by anyone): refused by name, and the daemon learns it.
+    let (secret, code) = ask_creator();
+    assert_eq!(
+        p.approve_holding("acct_other", &code, T0, holds("acct_other")),
+        Err(("not-the-creator", None))
+    );
+    assert_eq!(
+        p.poll(&secret, T0 + INTERVAL),
+        Poll::Refused("not-the-creator".into(), None)
+    );
+    // The creator account: registered at its approval, and handed a creator token.
+    let (secret, code) = ask_creator();
+    assert_eq!(
+        p.approve_holding("acct_creator", &code, T0, holds("acct_creator")),
+        Ok(creator.to_string())
+    );
+    let Poll::Token { grant, .. } = p.poll(&secret, T0 + INTERVAL) else {
+        panic!("a token")
+    };
+    assert_eq!(grant, creator);
+    // Now registered to the creator, another account is still refused.
+    let (_, code) = ask_creator();
+    assert_eq!(
+        p.approve_holding("acct_other", &code, T0, holds("acct_other")),
+        Err(("not-the-creator", None))
+    );
+}
+
 /// G7 (#2796): a creator pairs like a Soul, for a world's creator grant its account holds, and is handed a creator
 /// token, which the gateway's tokens file then lists.
 #[test]
@@ -271,7 +318,10 @@ fn g7_a_creator_pairs_with_a_creator_scope_token() {
         p.show("acct_owner", &code, T0).expect("a card").scope,
         "creator"
     );
-    assert_eq!(p.approve("acct_other", &code, T0), Err(("not-yours", None)));
+    assert_eq!(
+        p.approve("acct_other", &code, T0),
+        Err(("not-the-creator", None))
+    );
     // The holder approves once; the daemon is handed a creator token.
     let (secret, code) = creator_ask("studio laptop");
     assert_eq!(p.approve("acct_owner", &code, T0), Ok(creator.to_string()));
