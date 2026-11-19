@@ -122,7 +122,7 @@ const KEY: &str = "souls:effect";
 const STARTED: &str = "souls:form-started";
 const ENDED: &str = "souls:form-ended";
 /// The reservation's link type: from the body to the thing.
-const RESERVES: &str = "souls:reserves";
+pub(crate) const RESERVES: &str = "souls:reserves";
 
 /// An intent's keys in the log.
 struct Kept {

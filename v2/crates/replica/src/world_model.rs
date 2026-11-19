@@ -24,6 +24,9 @@ pub const SECTION_OWNER: u64 = 2;
 pub const SECTION_SLOTS: u64 = 6;
 /// The entry format's section for the children a kind admits (SA-F6a, #2846; numbered by the coordinator, #2641).
 pub const SECTION_CHILDREN: u64 = 11;
+/// The entry format's section for how a thing moves (SA-F10, #2882), read here as `{1: how}`: `one_hand` and
+/// `two_hands` are held in that many hands (Engine v2 B4, #2739); any other `how` is not held.
+pub const SECTION_MOTION: u64 = 18;
 
 /// What a kind admits (rule 5): as children, and in each numbered slot. Each list holds plain `namespace:name`s and
 /// categories (`thing`, `body`); a category is matched against the child kind's own [`Kind::owner`].
@@ -32,6 +35,8 @@ pub struct Kind {
     pub owner: String,
     pub children: BTreeSet<String>,
     pub slots: BTreeMap<u64, BTreeSet<String>>,
+    /// The hands a thing of this kind occupies when held, 1 or 2 (section 18). None: it is not held in a hand.
+    pub hands: Option<u8>,
 }
 
 /// Whether an admit list takes a child of kind `name` (plain `namespace:name`) whose kind's owner is `owner`.
@@ -528,10 +533,20 @@ pub fn parse_kinds(text_: &str) -> Result<BTreeMap<String, Kind>, Refusal> {
                 slots.insert(*n, names(Some(admits), "a slot's admits")?);
             }
         }
+        let hands = match k.get(&SECTION_MOTION) {
+            None => None,
+            Some(Value::Map(m)) => match text(m.get(&1), "section 18's how")?.as_str() {
+                "one_hand" => Some(1),
+                "two_hands" => Some(2),
+                _ => None,
+            },
+            Some(_) => return source(format!("{name}: section 18 is {{1: how}}")),
+        };
         let kind = Kind {
             owner: text(k.get(&SECTION_OWNER), "a kind's owner, section 2")?,
             children: names(k.get(&SECTION_CHILDREN), "section 11")?,
             slots,
+            hands,
         };
         let Some(full_name) = full.get(&name) else {
             return source(format!("{name} was not named by T3's kind reader"));

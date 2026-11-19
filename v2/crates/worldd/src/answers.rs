@@ -35,6 +35,12 @@
 //! intent carrying words is refused `intent.text-not-stored` and logged without its intent: none of their bytes
 //! reach the log (`a5_` test).
 //!
+//! **Sync by hash** (R5b, #3164): a frame with key 20 is R5's sync request (`replica::sync::wire`), not an intent.
+//! The clock thread answers it from the tree as last sealed, sealing first when the world has changed since, and
+//! every record a seal gave is kept, so a client compares and descends over the place, which every actor is granted.
+//! It is taken with the tick's arrivals and its answer goes to the answers thread at once, behind every tick record
+//! already sent: it never shows a change before the change is on the disk, and is never logged.
+//!
 //! **The world's tick** (K18, #3160). One loop per zone, run by K7's ticker at the clock's rate (one tick each
 //! [`Config::tick`]; world time is real time in µs from the Unix epoch, rate one). Each tick, in the trunk's order
 //! (T1: everything reads the state as of the tick's start, and what a tick writes is seen from the next):
@@ -78,6 +84,7 @@ use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
 use replica::intents::{Answer, INTENT_MOST, Intent, Target};
 use replica::pose::Pose;
+use replica::sync::{self, Records, Served, wire};
 use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use replica::views::Redactions;
 use replica::world_model::Audience;
@@ -312,6 +319,9 @@ pub struct Config {
     pub views: bool,
     /// Nodes the auditor checks a tick (K11).
     pub audit: usize,
+    /// `<version> <place hash hex>` appended after each tick that changed the world, the tree sealed for it (R5b's
+    /// relay test checks a client's copy against it).
+    pub roots: Option<File>,
     /// Stamps, the answers' block, tick phases and queue ages (O4). Off takes no stamps and adds no block.
     pub measures: bool,
     /// Where `health.json` is written every two seconds, when measures are on.
@@ -344,6 +354,7 @@ impl Config {
             checkpoints: None,
             views: false,
             audit: 64,
+            roots: None,
             measures: true,
             health: None,
             synced: None,
@@ -478,6 +489,8 @@ struct Tick {
     replies: Vec<Out>,
     started: Option<u64>,
     handed: Option<u64>,
+    /// Sync answers (R5b): sent as they are, with no block.
+    bare: Vec<(Vec<Reply>, Vec<u8>)>,
 }
 
 struct Clock {
@@ -496,6 +509,10 @@ struct Clock {
     epoch: u64,
     deadline: Micros,
     arrivals: Option<File>,
+    roots: Option<File>,
+    /// Every record the tree's seals gave, and whether the world changed since the last seal (R5b).
+    sealed: Records,
+    unsealed: bool,
     checked: Vec<(Act, Checks)>,
     replies: Vec<Out>,
     rows: Vec<Value>,
@@ -669,7 +686,49 @@ impl Clock {
         );
     }
 
+    /// Seals the tree if the world changed since the last seal, and keeps the records the seal gave.
+    fn seal(&mut self) {
+        if !self.unsealed {
+            return;
+        }
+        if let Ok(sealed) = self.replica.seal() {
+            self.sealed.keep(&sealed);
+            self.unsealed = false;
+        }
+    }
+
+    /// A sync request's answer (R5b), or none if `bytes` is not one: the place is granted to every actor.
+    fn sync(&mut self, bytes: &[u8]) -> Option<Vec<u8>> {
+        let Value::Map(mut m) = decode(bytes).ok()?.value else {
+            return None;
+        };
+        let n = m.remove(&wire::ASK)?;
+        if m.contains_key(&wire::IDS) {
+            self.seal();
+        }
+        let now = self.version();
+        let place = self.replica.header().zone;
+        let mut src = Served {
+            tree: self.replica.tree(),
+            records: &self.sealed,
+        };
+        let mut a = sync::answer(&mut src, &[place], &m, now);
+        a.insert(wire::ASK, n);
+        encode(&Value::Map(a)).ok()
+    }
+
     fn arrival(&mut self, bytes: &[u8], reply: Reply, stamps: Stamps, now: Micros) {
+        if let Some(f) = self.sync(bytes) {
+            let _ = self.answers.send(Tick {
+                inputs: None,
+                record: None,
+                replies: Vec::new(),
+                started: None,
+                handed: None,
+                bare: vec![(vec![reply], f)],
+            });
+            return;
+        }
         let intent = match Intent::read(bytes) {
             Ok(i) => i,
             Err(r) => {
@@ -956,6 +1015,7 @@ impl Clock {
             }
             match commit(&mut self.replica, &checks, now) {
                 Outcome::Applied { part, .. } => {
+                    self.unsealed = true;
                     self.receipts.index(&part.effects);
                     self.effects.extend(part.effects.iter().cloned());
                     self.parts.push(part);
@@ -1015,6 +1075,20 @@ impl Clock {
         at[6] = mark();
         // 6. The frozen copy, for the checkers and readers.
         if !self.parts.is_empty() {
+            if self.roots.is_some() {
+                self.seal();
+                let root = self.replica.tree().node(self.replica.tree().root());
+                let hash = root.and_then(|n| n.sealed()).map(|h| h.to_bytes());
+                let hex: String = hash
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
+                let line = format!("{} {hex}\n", self.replica.version());
+                if let Some(f) = self.roots.as_mut() {
+                    let _ = f.write_all(line.as_bytes());
+                }
+            }
             self.publisher.publish(std::mem::take(&mut self.parts));
         }
         // 7. The answers thread appends, syncs, hands the synced tick to the view tier, then answers.
@@ -1029,6 +1103,7 @@ impl Clock {
                 replies,
                 started: at[0],
                 handed,
+                bare: Vec::new(),
             });
         }
         self.records += written;
@@ -1184,6 +1259,11 @@ fn answer_loop<S: Storage + 'static>(
                 }
                 None => frame,
             };
+            for w in waiters {
+                let _ = w.send(frame.clone());
+            }
+        }
+        for (waiters, frame) in t.bare {
             for w in waiters {
                 let _ = w.send(frame.clone());
             }
@@ -1394,6 +1474,9 @@ pub fn start<S: Storage + 'static>(
         epoch: cfg.epoch,
         deadline: cfg.deadline,
         arrivals: cfg.arrivals,
+        roots: cfg.roots,
+        sealed: Records::default(),
+        unsealed: true,
         checked: Vec::new(),
         replies: Vec::new(),
         rows: Vec::new(),
@@ -1832,6 +1915,112 @@ mod tests {
             !log.windows(words.len()).any(|b| b == words.as_bytes()),
             "none of the words' bytes are in the log"
         );
+    }
+
+    fn ask(w: &World, m: BTreeMap<u64, Value>) -> BTreeMap<u64, Value> {
+        let (reply, rx) = channel();
+        let bytes = encode(&Value::Map(m)).unwrap();
+        assert!(w.door().arrive(bytes, reply));
+        let Value::Map(a) = decode(&answer(&rx)).unwrap().value else {
+            panic!("a map")
+        };
+        a
+    }
+
+    /// R5b A1 (#3164), the world's end: a client compares and descends through sync frames alone.
+    fn sync_by_frames(w: &World, copy: &mut sync::Copy, place: Id) -> sync::Synced {
+        let a = ask(
+            w,
+            BTreeMap::from([
+                (wire::ASK, Value::Uint(1)),
+                (wire::IDS, Value::Array(vec![])),
+            ]),
+        );
+        assert_eq!(a.get(&wire::ASK), Some(&Value::Uint(1)));
+        let (ids, hashes) = sync::read_hashes(&a).unwrap();
+        assert_eq!(ids, vec![place], "granted the place");
+        let mut d = copy.compare(&ids, hashes);
+        loop {
+            let asked = copy.ask(&mut d, wire::RECORDS_MOST);
+            if asked.is_empty() {
+                return copy.finish(d).unwrap();
+            }
+            let hs = asked.iter().cloned().map(Value::Bytes).collect();
+            let a = ask(
+                w,
+                BTreeMap::from([
+                    (wire::ASK, Value::Uint(2)),
+                    (wire::RECORDS, Value::Array(hs)),
+                ]),
+            );
+            copy.take(&mut d, &asked, sync::read_records(&a).unwrap())
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn r5b_a1_answers_sync_requests_for_the_granted_place() {
+        let roots = std::env::temp_dir().join(format!("worldd-r5b-roots-{}", std::process::id()));
+        let _ = std::fs::remove_file(&roots);
+        let built = toggles::World::build(1, 4, 0);
+        let (place, pairs) = (built.replica.header().zone, built.pairs.clone());
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.tick = Duration::from_millis(10);
+        cfg.roots = Some(File::create(&roots).unwrap());
+        let w = start(built.replica, toggles::rules(), Mem::default(), cfg).unwrap();
+        let mut copy = sync::Copy::default();
+        let first = sync_by_frames(&w, &mut copy, place);
+        assert_eq!(
+            first.held, 10,
+            "the place, its room, four bodies and their four toggles"
+        );
+        assert_eq!(first.fetched, 10);
+        let receipt = answer(&send(
+            &w,
+            &toggle(pairs[0].0, pairs[0].1, 1, now() + 60_000_000),
+        ));
+        assert_eq!(read(&receipt).0, 1, "a receipt");
+        let s = sync_by_frames(&w, &mut copy, place);
+        assert_eq!(
+            (s.changed, s.fetched, s.held),
+            (1, 3, 10),
+            "the place, the room and the one toggle switched"
+        );
+        let said = std::fs::read_to_string(&roots).unwrap();
+        let last = said
+            .lines()
+            .last()
+            .expect("a line for the tick that switched it");
+        let hex: String = copy.roots()[&place]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(
+            last.split(' ').nth(1),
+            Some(hex.as_str()),
+            "the world's hash"
+        );
+        let refused = ask(
+            &w,
+            BTreeMap::from([
+                (wire::ASK, Value::Uint(3)),
+                (wire::RECORDS, Value::Array(vec![Value::Uint(1)])),
+            ]),
+        );
+        assert!(
+            matches!(refused.get(&wire::REFUSED), Some(Value::Text(n)) if n.as_str() == "sync-ask")
+        );
+        let other = Id::new(Scope([9; 16]), 1).unwrap();
+        let a = ask(
+            &w,
+            BTreeMap::from([
+                (wire::ASK, Value::Uint(4)),
+                (wire::IDS, Value::Array(vec![other.to_value()])),
+            ]),
+        );
+        assert_eq!(sync::read_hashes(&a).unwrap().1, vec![None], "not granted");
+        w.stop();
+        let _ = std::fs::remove_file(&roots);
     }
 
     #[test]
