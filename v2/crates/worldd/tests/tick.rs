@@ -117,6 +117,15 @@ impl Skill for Panics {
 /// The walkers stand west of the square, the chair 4 m east of the first; with `panic`, a fourth body runs a skill
 /// that panics.
 fn bodies(placed: &Placed, panic: bool) -> Result<Bodies, replica::effects::Refusal> {
+    bodies_ticked(placed, panic, 50_000)
+}
+
+/// [`bodies`], stepped in ticks of `tick` µs.
+fn bodies_ticked(
+    placed: &Placed,
+    panic: bool,
+    tick: i64,
+) -> Result<Bodies, replica::effects::Refusal> {
     let (town, ground) = town();
     let frame = Frame {
         node: ground,
@@ -140,7 +149,7 @@ fn bodies(placed: &Placed, panic: bool) -> Result<Bodies, replica::effects::Refu
         Vec3::new(-42_000_000, 0, 22_000_000),
         Quat::IDENTITY,
     )?;
-    let mut b = Bodies::new(town, 50_000)?;
+    let mut b = Bodies::new(town, tick)?;
     for p in placements {
         b.add_body_at(humanoid(), p, placed)?;
     }
@@ -599,4 +608,228 @@ fn a1_the_real_clock_paces_the_loop() {
 
 fn hex(b: &[u8]) -> String {
     b.iter().take(8).map(|x| format!("{x:02x}")).collect()
+}
+
+/// K18b (#3175) A2: a walk round the ring's solid middle (its straight way is not clear, so it asks the planner for
+/// each new line, #3167) and a sit land on the clock thread, which ran no route search and no reach check: one there
+/// panics in a debug build, and is counted in a release one.
+#[test]
+fn k18b_a2_a_walk_round_an_obstacle_searches_off_the_clock() {
+    let p = pairs();
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.lockstep = true;
+    // The walk round the ring takes about two minutes.
+    cfg.deadline = 300_000_000;
+    cfg.bodies = Some(Box::new(|p: &Placed| bodies(p, false)));
+    let w = answers::start(
+        lamp_world().replica,
+        toggles::rules(),
+        Mem::with(Vec::new()),
+        cfg,
+    )
+    .expect("the world starts");
+    let (_, ground) = town();
+    // From the west of the square to the ring's walkway beyond its middle: the straight line crosses the middle.
+    let far = at(
+        &w,
+        2,
+        intent(
+            p[1].0,
+            1,
+            "eden:walk",
+            Some(ground),
+            Some(Vec3::new(88_000_000, 0, -5_000_000)),
+        ),
+    );
+    let to_chair = at(&w, 2, intent(p[0].0, 1, "eden:walk", Some(chair()), None));
+    let sit = at(&w, 400, intent(p[0].0, 2, "eden:sit", Some(chair()), None));
+    let ran = run_to(&w, 4_000);
+    println!("K18b A2: {ran:?}");
+    let (walked, to_chair, sat) = (answer(&far), answer(&to_chair), answer(&sit));
+    println!(
+        "K18b A2: walk round the ring {walked:?}, walk to the chair {to_chair:?}, sit {sat:?}"
+    );
+    walked.expect("the walk round the ring lands");
+    to_chair.expect("the walk to the chair lands");
+    sat.expect("the sit lands");
+    // The legs, and a line each time the walker needs a new one (#3167 keeps a line between searches).
+    assert!(ran.searched > 2, "the planner searched the walk's lines");
+    // No search ran on the clock: in a debug build one would have panicked the clock thread, and no answer would have
+    // come back. (`sim::commit::checks_on_clock` counts across the test binary's threads, the guard's own test
+    // included, so it is not read here.)
+    w.stop();
+}
+
+/// K18b A2: the guard. A route search on a thread marked as the clock fails (a debug build panics).
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "ran on the clock thread")]
+fn k18b_a2_a_route_search_on_the_clock_thread_fails() {
+    let (mut t, ground) = town();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let body = t.surfaces[&ground]
+        .place(
+            pairs()[0].0,
+            frame,
+            Vec3::new(-40_000_000, 0, 30_000_000),
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    sim::commit::mark_clock_thread();
+    let _ = t.line(&body, Vec3::new(88_000_000, 0, -5_000_000));
+}
+
+/// A free-running clock from one tick (`.1` µs): real time since it started, so a world's first tick is tick 1, next to
+/// lockstep's first.
+struct FromZero(std::time::Instant, i64);
+
+impl sim::clock::Clock for FromZero {
+    #[allow(clippy::disallowed_methods)] // a test's real clock
+    fn now(&mut self) -> i64 {
+        self.1 + self.0.elapsed().as_micros() as i64
+    }
+
+    fn sleep_until(&mut self, t: i64) {
+        let wait = t - self.now();
+        if wait > 0 {
+            std::thread::sleep(Duration::from_micros(wait as u64));
+        }
+    }
+}
+
+/// The recorder's `Planned` inputs: where the live run took fewer planner batches than were out.
+fn planned(log: &[u8]) -> BTreeMap<u64, u64> {
+    let records = recover(log).unwrap().records;
+    let mut out = BTreeMap::new();
+    for (_, inputs) in recorder::inputs(&records).unwrap() {
+        for i in inputs {
+            if let recorder::Input::Planned { at, taken } = i {
+                out.insert(at, taken);
+            }
+        }
+    }
+    out
+}
+
+/// The tick the log's last part holds.
+fn last_tick(log: &[u8]) -> i64 {
+    recover(log)
+        .unwrap()
+        .records
+        .iter()
+        .filter(|r| !recorder::is_input(r))
+        .filter_map(|r| match Part::read(r).unwrap().rest.get(&answers::TICK) {
+            Some(Value::Uint(n)) => Some(*n as i64),
+            _ => None,
+        })
+        .next_back()
+        .expect("a part with a tick")
+}
+
+/// K18b (#3175): a free-running world reads the planner's batches when they are back, at most its bound after each
+/// tick (here none at all, so batches come back late); the flight recorder keeps where it took fewer than were out,
+/// and the recording replayed in lockstep lands each batch at the same tick: the same effects and the same state.
+#[test]
+fn k18b_a_free_running_world_with_its_planner_replays_in_lockstep() {
+    let p = pairs();
+    let (_, ground) = town();
+    let tick_us = 10_000;
+    let config = |planned: BTreeMap<u64, u64>| {
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.tick = Duration::from_micros(tick_us as u64);
+        cfg.planner_wait = Some(Duration::ZERO);
+        cfg.planned = planned;
+        cfg.bodies = Some(Box::new(move |p: &Placed| bodies_ticked(p, false, tick_us)));
+        cfg
+    };
+    // The live run. Whether a batch comes back late depends on the machine, so the clock is held once before the walks
+    // start (O4's stuck-thread event): it then catches up in ticks run back to back, the walks' first route searches
+    // among them, and takes what is back with no wait. It still runs again (up to five times) until a batch is late.
+    let live = || {
+        let store = Mem::with(Vec::new());
+        let mut cfg = config(BTreeMap::new());
+        #[allow(clippy::disallowed_methods)] // a test's real clock
+        let zero = std::time::Instant::now();
+        cfg.clock = Some(Box::new(FromZero(zero, tick_us)));
+        let w = answers::start(lamp_world().replica, toggles::rules(), store.clone(), cfg).unwrap();
+        let to_chair = at(&w, 20, intent(p[0].0, 1, "eden:walk", Some(chair()), None));
+        let stroll = at(
+            &w,
+            21,
+            intent(
+                p[2].0,
+                1,
+                "eden:walk",
+                Some(ground),
+                Some(Vec3::new(-44_000_000, 0, 38_000_000)),
+            ),
+        );
+        while w.beat.read().0 < 5 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        w.events
+            .send(Event::Stall(Duration::from_millis(400)))
+            .unwrap();
+        let walked = answer(&to_chair);
+        let strolled = answer(&stroll);
+        let (reply, sit) = channel();
+        w.door()
+            .arrive(intent(p[0].0, 2, "eden:sit", Some(chair()), None), reply);
+        let sat = answer(&sit);
+        std::thread::sleep(Duration::from_millis(300));
+        w.stop();
+        println!("K18b free-running: walk {walked:?}, stroll {strolled:?}, sit {sat:?}");
+        walked.expect("the walk lands");
+        strolled.expect("the stroll lands");
+        sat.expect("the sit lands");
+        bytes(&store)
+    };
+    let (log, schedule) = (0..5)
+        .map(|_| {
+            let log = live();
+            let schedule = planned(&log);
+            (log, schedule)
+        })
+        .find(|(_, s)| !s.is_empty())
+        .expect("some batches came back late in one of five runs");
+    let (end, state) = (last_tick(&log), last_state(&log));
+    println!(
+        "K18b free-running: {} body ticks took batches late, last tick {end}",
+        schedule.len()
+    );
+
+    // The recording in lockstep: the intents at their ticks, the planner's batches where the live run took them.
+    let again = Mem::with(Vec::new());
+    let mut cfg = config(schedule);
+    cfg.lockstep = true;
+    let r = answers::start(lamp_world().replica, toggles::rules(), again.clone(), cfg).unwrap();
+    let answers: Vec<_> = script(&log)
+        .into_iter()
+        .map(|(t, b)| at(&r, t, b))
+        .collect();
+    let replayed = run_to(&r, end);
+    for a in &answers {
+        answer(a).expect("the same answers");
+    }
+    r.stop();
+    let (h1, h2) = (
+        recorder::effect_hash(&recover(&log).unwrap().records),
+        recorder::effect_hash(&recover(&bytes(&again)).unwrap().records),
+    );
+    println!(
+        "K18b free-running: effect hash {} replayed {}; state {} replayed {}",
+        hex(&h1),
+        hex(&h2),
+        hex(&state),
+        hex(&replayed.state)
+    );
+    assert_eq!(
+        replayed.state.to_vec(),
+        state,
+        "the replay ends in the same state"
+    );
+    assert_eq!(h1, h2, "and writes the same effects");
 }
