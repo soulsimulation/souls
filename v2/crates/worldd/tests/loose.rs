@@ -9,6 +9,7 @@
 //!   (the checkpoint's and the log's after it); the log replayed gives a tree without the thing and with no end
 //!   pending, and a third start writes no second end.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -16,17 +17,18 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
+use replica::activity::ActivityKind;
 use replica::apply::Replica;
 use replica::audience::OWNS;
 use replica::effects::{
-    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest,
+    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, fixture_bytes,
 };
-use replica::encode::{Name, Value, encode};
+use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Id, Minter, Scope};
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::time::Micros;
 use replica::tree::{Rules, Tree};
-use replica::world_model::{Audience, End, parse_kinds, plain};
+use replica::world_model::{Audience, End, Kind, parse_kinds, plain};
 use sim::expiry::{ENDS, EXPIRED};
 use sim::log::{FileStore, Log};
 use worldd::answers::{self, STATE};
@@ -134,6 +136,22 @@ struct Built {
 fn built(serve_header: bool) -> Built {
     let mut im = import_eden::load(&facts()).expect("loads");
     if serve_header {
+        // C30's served header always pins the conversation kind and admits it on open ground.
+        let bytes = fixture_bytes(include_str!(
+            "../../replica/fixtures/activities/conversation.diag"
+        ))
+        .expect("the conversation fixture encodes");
+        let activity = ActivityKind::from_value(&decode(&bytes).expect("a kind").value)
+            .expect("the conversation kind");
+        im.rules.kinds.insert(
+            activity.name.as_str().to_owned(),
+            Kind {
+                owner: "activity".into(),
+                children: Default::default(),
+                slots: Default::default(),
+                hands: None,
+            },
+        );
         // `worldd serve`'s header: the root's kind admitted as R1's replica starts it (serve.rs `build`).
         im.rules.kinds.extend(
             parse_kinds(&format!(
@@ -150,6 +168,7 @@ fn built(serve_header: bool) -> Built {
         for (k, kind) in im.rules.kinds.iter_mut() {
             if plain(k) == import_eden::GROUND {
                 kind.children.insert("body".into());
+                kind.children.insert(plain(activity.name.as_str()).into());
             }
         }
     }
@@ -355,6 +374,7 @@ fn worldd() -> Command {
 struct Served {
     child: Child,
     lines: Receiver<String>,
+    early: RefCell<Vec<String>>,
 }
 
 fn serve(dir: &Path, socket: &Path) -> Served {
@@ -379,18 +399,31 @@ fn serve(dir: &Path, socket: &Path) -> Served {
             }
         });
     }
-    Served { child, lines }
+    Served {
+        child,
+        lines,
+        early: RefCell::default(),
+    }
 }
 
 impl Served {
     // A real process on the real clock: the wait for its line is real time.
     #[allow(clippy::disallowed_methods)]
+    // The two pipes race (the clock thread's stderr line can come in before the main thread's stdout line printed
+    // first): a line passed over is kept for its own wait, never dropped (#3421).
     fn line(&self, prefix: &str) -> String {
+        let mut early = self.early.borrow_mut();
+        if let Some(i) = early.iter().position(|l| l.starts_with(prefix)) {
+            return early.remove(i);
+        }
         let end = Instant::now() + Duration::from_secs(60);
         while let Some(left) = end.checked_duration_since(Instant::now()) {
             match self.lines.recv_timeout(left) {
                 Ok(l) if l.starts_with(prefix) => return l,
-                Ok(l) => println!("  {l}"),
+                Ok(l) => {
+                    println!("  {l}");
+                    early.push(l);
+                }
                 Err(_) => break,
             }
         }
