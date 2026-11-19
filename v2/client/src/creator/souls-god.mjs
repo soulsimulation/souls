@@ -13,6 +13,8 @@
 //   souls-god.mjs batch '<json list>'            several at once, all or none: [{"op":"place","name":1,...}, ...]; a
 //                                                later op names an earlier place by its "name" number
 //   souls-god.mjs check <any of the four, or batch> ...   the same, checked on the copy only; nothing is sent
+//   souls-god.mjs prayers [--all]                the prayers of the world's Souls, waiting first (G11, #3335)
+//   souls-god.mjs answer <prayer id> <words>      the answer, which reaches the Soul's `wait`; at most 4,000 characters
 //   souls-god.mjs status | stop                  the daemon
 //   any of them [--creator <c_id>]               which creator, when the home holds more than one
 //
@@ -28,7 +30,7 @@ import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'status', 'stop'];
+export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'prayers', 'answer', 'status', 'stop'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
@@ -47,6 +49,9 @@ export const FIX = {
   'edit.unanswered': 'the world did not answer within 10 s: describe to see whether it was done',
   'edit.no-copy': 'the daemon has no copy yet: run status until connected is true',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
+  'prayer.not-found': 'use an id prayers lists',
+  'prayer.not-the-creator': 'this token is not the world\'s creator\'s: pair with --creator <its creator grant>',
+  'answer.too-long': 'at most 4,000 characters: say it shorter',
   'which-creator': 'name one with --creator',
 };
 
@@ -98,6 +103,11 @@ export function requestOf(argv) {
   if (!VERBS.includes(verb)) throw Object.assign(new Error(`one of ${VERBS.join(', ')}`), { code: 'unknown-command' });
   if (verb === 'pair') return { pair: rest[0], creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe') return { req: { op: verb }, creator };
+  if (verb === 'prayers') return { req: { op: 'prayers', all: rest.includes('--all') }, creator };
+  if (verb === 'answer') {
+    if (rest.length < 2) throw usage('answer <prayer id> <words>');
+    return { req: { op: 'answer', id: rest[0], words: rest.slice(1).join(' ') }, creator };
+  }
   if (verb === 'check') return { req: { op: 'check', ops: opsOf(rest[0], rest.slice(1)) }, creator };
   return { req: { op: 'edit', ops: opsOf(verb, rest) }, creator };
 }

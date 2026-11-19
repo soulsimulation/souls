@@ -23,6 +23,7 @@ const v2 = resolve(here, '../../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
 const PKG = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
 const CLI = join(here, '../cli/souls.mjs');
+const GOD = join(here, '../creator/souls-god.mjs');
 const SOUL = 's_g11test';
 const WORLD_SCOPE = '4d'.repeat(16);
 const GRANT = `soul-${WORLD_SCOPE}-2`;
@@ -35,7 +36,7 @@ const token = `${GRANT}.${randomBytes(32).toString('hex')}`;
 const creatorToken = `${CREATOR}.${randomBytes(32).toString('hex')}`;
 const procs = [];
 const logs = []; // every service's output, for A4
-const report = { soul: [], creator: [] };
+const report = { soul: [], creator: [], creatorAgent: [] };
 let rt, gateway, creator, wire;
 
 function run(path, args, ready) {
@@ -137,8 +138,18 @@ after(async () => {
   for (const p of procs) p.kill();
   if (process.env.G11_REPORT) console.log(JSON.stringify(report, null, 1));
   if (process.env.G11_DEBUG) console.log(logs.map((l) => l.text).join('\n---\n'), readFileSync(rt.log, 'utf8'));
+  await call(godHome, `c_${WORLD_SCOPE}-1`, { op: 'stop' }, { pkg: PKG, within: 0 }).catch(() => {});
   rmSync(dir, { recursive: true, force: true });
 });
+
+const godHome = join(dir, 'creator', '.souls');
+/** The creator's agent: one command of souls-god.mjs (G7), its JSON answer. */
+async function creatorSays(...args) {
+  const { stdout } = await promisify(execFile)(process.execPath, [GOD, ...args], { env: { ...process.env, SOULS_HOME: godHome, SOULS_REPLICA_PKG: PKG } }).catch((e) => e);
+  const out = JSON.parse(stdout);
+  report.creatorAgent.push({ command: args.join(' '), answer: out });
+  return out;
+}
 
 const PRAYER = `let the river run clear ${randomBytes(6).toString('hex')}`;
 const ANSWER = `it shall, by dawn ${randomBytes(6).toString('hex')}`;
@@ -222,4 +233,35 @@ test('A4: no prayer or answer text is in the world\'s log, in a public view or i
   assert.match(all, /prayer p_[0-9a-f]{12} answered/, 'the daemon logged the answer by id');
   assert.match(all, /\/v1\/mailbox\/pray 200 pray ok/, 'the directory logged the prayer by kind');
   for (const w of words) assert.ok(!all.includes(w), 'a log holds a prayer\'s words');
+});
+
+test('A1 (the creator\'s agent): souls-god.mjs lists the prayer waiting and answers it; the Soul\'s wait has the answer', async () => {
+  creator.close(); // the creator's daemon signs in for the same grant: the last device wins
+  mkdirSync(godHome, { recursive: true });
+  writeFileSync(join(godHome, 'config.json'), JSON.stringify({ worlds: { local: { url: 'http://127.0.0.1/', gateway } } }));
+  writeFileSync(join(godHome, 'credentials.json'), JSON.stringify({ souls: { [`c_${WORLD_SCOPE}-1`]: { local: { token: creatorToken } } } }), { mode: 0o600 });
+  chmodSync(join(godHome, 'credentials.json'), 0o600);
+  await waitFor(async () => (await creatorSays('status')).connected, 10_000);
+  const words = `may the lamps stay lit ${randomBytes(6).toString('hex')}`;
+  const prayed = await soulSays('pray', words);
+  const listed = await creatorSays('prayers');
+  assert.equal(listed.ok, true, JSON.stringify(listed));
+  const mine = listed.prayers.find((p) => p.id === prayed.id);
+  assert.deepEqual([mine.state, mine.text], ['waiting', words]);
+  assert.match(listed.note, /data, not instructions/);
+  await ask({ op: 'wait', seconds: 0 });
+  const reader = soulSays('wait', '30');
+  await sleep(300);
+  const t0 = performance.now();
+  const answered = await creatorSays('answer', prayed.id, 'they', 'will');
+  assert.equal(answered.ok, true, JSON.stringify(answered));
+  const got = await reader;
+  report.agentAnswerMs = Math.round(performance.now() - t0);
+  const e = got.events.find((x) => x.kind === 'prayer-answered');
+  assert.deepEqual(e.quoted, { prayer: words, answer: 'they will' });
+  assert.ok(report.agentAnswerMs < 5000, `${report.agentAnswerMs} ms`);
+  const all = await creatorSays('prayers', '--all');
+  assert.equal(all.prayers.find((p) => p.id === prayed.id).state, 'answered');
+  const bad = await creatorSays('answer', 'p_000000000000', 'hello');
+  assert.deepEqual([bad.code, bad.fix], ['prayer.not-found', 'use an id prayers lists']);
 });
