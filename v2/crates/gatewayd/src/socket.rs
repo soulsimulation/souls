@@ -91,6 +91,7 @@ fn refused(actor: Actor, sequence: u64, reason: &str, now: Value) -> Vec<u8> {
         reason: Name::new(reason).unwrap_or_else(|| unreachable!("a fixed name")),
         now,
         changed: Vec::new(),
+        op: None,
     })
 }
 

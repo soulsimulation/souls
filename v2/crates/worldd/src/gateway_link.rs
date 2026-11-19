@@ -7,10 +7,12 @@
 //! its sequences from the log. The world here is I3's toggles world (`checkers::toggles`), `--rooms` rooms of `--bodies`
 //! bodies, each with a toggle, and `--items` items in each room; its log is `--log` (default: the socket's path and
 //! `.log`). With `--testworld` it also has bodies that move (I4b): N2's test world with one Soul and three chairs
-//! (`worldd::testbodies`, B10 #2688).
+//! (`worldd::testbodies`, B10 #2688). With `--creator <32 hex>-<counter>` the world has that creator and the toggles
+//! world's pinned kinds (`toggles::kinds`), and commits the creator's edit intents (G1b, #3362): each is checked off
+//! the clock thread and committed through `sim::edit`; every other actor's edit is refused `edit.not-the-creator`.
 //!
 //! `worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] [--bodies <n>]
-//! [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
+//! [--items <n>] [--testworld] [--creator <32 hex>-<n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
 //! --stall-for <s>]`. With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it takes, in the order
 //! taken, so a bench can check each actor's order across restarts. With `--roots`, it appends `<version> <place hash
 //! hex>` after each tick that changed the world, so a test can check a client's copy against the place. Measures
@@ -26,8 +28,9 @@ use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use replica::edit;
 use replica::encode::from_hex;
-use replica::ids::Scope;
+use replica::ids::{Id, Scope};
 use sim::log::FileStore;
 use worldd::answers::{self, Config, Event};
 use worldd::checkers::toggles;
@@ -42,7 +45,7 @@ pub fn run(args: &[String]) -> i32 {
     let usage = || {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
-             [--bodies <n>] [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
+             [--bodies <n>] [--items <n>] [--testworld] [--creator <32 hex>-<n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
              [--stall-after <s> --stall-for <s>]"
         );
         2
@@ -62,6 +65,20 @@ pub fn run(args: &[String]) -> i32 {
     let mut cfg = Config::new(Scope(lineage), epoch);
     if args.iter().any(|a| a == "--testworld") {
         cfg.bodies = Some(Box::new(worldd::testbodies::bodies));
+    }
+    if let Some(c) = arg("--creator") {
+        let Some(creator) = c.split_once('-').and_then(|(scope, n)| {
+            Id::new(
+                Scope(from_hex(scope).ok()?.try_into().ok()?),
+                n.parse().ok()?,
+            )
+        }) else {
+            return usage();
+        };
+        cfg.edits = Some(edit::World {
+            creator,
+            kinds: toggles::kinds(),
+        });
     }
     cfg.measures = !args.iter().any(|a| a == "--no-measures");
     cfg.health =

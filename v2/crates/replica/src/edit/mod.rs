@@ -21,6 +21,8 @@
 //!   reverses by its cause, `Cause::Effect(first)`, where `first` is the sequence of that batch's first effect, with a
 //!   creator acting ([`reverses`]).
 
+pub mod wire;
+
 use crate::apply::Replica;
 use crate::effects::{Actor, Cause, Effect};
 use crate::encode::{Name, Value};

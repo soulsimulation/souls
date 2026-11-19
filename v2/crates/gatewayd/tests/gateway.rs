@@ -78,6 +78,7 @@ async fn world(listener: UnixListener) {
                     reason: Name::new("eden:out-of-reach").unwrap(),
                     now: version(sequence).to_value(),
                     changed: Vec::new(),
+                    op: None,
                 }
             } else {
                 Answer::Receipt {
@@ -85,6 +86,7 @@ async fn world(listener: UnixListener) {
                     sequence: i.sequence,
                     intent: Id::new(LINEAGE, sequence).unwrap(),
                     entries: vec![sequence],
+                    names: BTreeMap::new(),
                 }
             };
             let frame = encode(&Value::Map(

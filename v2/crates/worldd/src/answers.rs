@@ -50,10 +50,13 @@ use crate::bodies::{self, Asked, Bodies};
 use crate::checkers::{self, Act, Candidate, Rules};
 use crate::measures::{self, Measures, Stamps};
 use replica::apply::Replica;
-use replica::effects::{Actor, Body, Cause, Effect, Envelope, Event as Named, Part, Refusal};
+use replica::edit::{self, Checked, Edit, Refused};
+use replica::effects::{
+    Actor, Body, Cause, Change, Effect, Envelope, Event as Named, Part, Refusal,
+};
 use replica::encode::{Name, Value, decode, encode};
-use replica::ids::{Id, Scope, Version};
-use replica::intents::{Answer, INTENT_MOST, Intent, Target};
+use replica::ids::{Id, Minter, Scope, Version};
+use replica::intents::{Answer, INTENT_MOST, Intent, Kind, Target};
 use replica::sync::{self, Records, Served, wire};
 use replica::time::Micros;
 use replica::world_model::Audience;
@@ -94,6 +97,8 @@ pub enum Event {
         key: u64,
     },
     Checked(Box<(Act, Checks)>),
+    /// An edit checked off the clock thread on a frozen copy (G1b): to commit at the next tick, or its refusal.
+    Edited(Box<(Id, Result<Checked, Refused>)>),
     /// Holds the clock thread for this long: the stuck-thread run (O4 A4).
     Stall(Duration),
     Stop,
@@ -145,6 +150,9 @@ pub struct Config {
     /// Makes the world's bodies, on the clock thread, for move intents (I4b, #3156); without them a move is refused
     /// `intent.not-a-form-on-a-node`.
     pub bodies: Option<MakeBodies>,
+    /// The world's one creator and the kinds it pins, for edit intents (G1b, #3362); without them every edit is
+    /// refused `edit.not-the-creator`.
+    pub edits: Option<edit::World>,
 }
 
 impl Config {
@@ -161,6 +169,7 @@ impl Config {
             health: None,
             now,
             bodies: None,
+            edits: None,
         }
     }
 }
@@ -249,12 +258,17 @@ struct Clock {
     bodies: Option<Bodies>,
     /// Move intents taken since the last tick, committed at the next (I4b).
     moving: Vec<(Id, Asked)>,
+    /// Where edits go to be checked off the clock thread, when the world takes edits (G1b).
+    edits: Option<Sender<(Id, Edit)>>,
+    /// Edits checked since the last tick, committed (or refused) at the next.
+    edited: Vec<(Id, Result<Checked, Refused>)>,
 }
 
-/// What an intent becomes: a form's act for the checkers, or a move for the bodies.
+/// What an intent becomes: a form's act for the checkers, a move for the bodies, or an edit for the edit checker.
 enum Taken {
     Form(Act),
     Move(Asked),
+    Edit(Edit),
 }
 
 /// The event of the entry a move writes when it starts, and when it ends (field 2: how, by name).
@@ -342,6 +356,19 @@ impl Clock {
             reason: name(reason),
             now: self.version(),
             changed: Vec::new(),
+            op: None,
+        }
+    }
+
+    /// An edit's refusal: its name, and the operation that failed by its place in the batch.
+    fn edit_refusal(&self, actor: Actor, sequence: u64, r: &Refused) -> Answer {
+        Answer::Refused {
+            actor,
+            sequence,
+            reason: name(r.name),
+            now: self.version(),
+            changed: Vec::new(),
+            op: r.op.map(|o| o as u64),
         }
     }
 
@@ -491,9 +518,15 @@ impl Clock {
             Some(_) => body_of(&intent).ok().and_then(|b| bodies::read(&intent, b)),
             None => None,
         };
-        let taken = match moved {
-            Some(m) => m.map(Taken::Move),
-            None => act_of(&intent, self.next_intent, Cause::Intent(id)).map(Taken::Form),
+        let taken = match (moved, intent.kind()) {
+            (Some(m), _) => m.map(Taken::Move),
+            // An edit (G1b): checked off the clock thread, committed at a tick through `sim::edit`.
+            (None, Ok(Kind::Edit)) => match (&self.edits, edit::wire::edit_of(&intent, id)) {
+                (Some(_), Some(e)) => Ok(Taken::Edit(e)),
+                (None, _) => Err("edit.not-the-creator"),
+                (_, None) => Err("intent.not-an-edit"),
+            },
+            (None, _) => act_of(&intent, self.next_intent, Cause::Intent(id)).map(Taken::Form),
         };
         let taken = match taken {
             Ok(t) => t,
@@ -505,6 +538,11 @@ impl Clock {
         let body = match &taken {
             Taken::Form(a) => a.body,
             Taken::Move(m) => m.body,
+            // An edit drives no body: its deadline is kept under its actor.
+            Taken::Edit(e) => match e.actor {
+                Actor::Soul(a) | Actor::Creator(a) => a,
+                Actor::World => self.zone,
+            },
         };
         self.next_intent += 1;
         self.deadlines.open(
@@ -534,6 +572,50 @@ impl Clock {
                 let _ = self.acts.send(act);
             }
             Taken::Move(m) => self.moving.push((id, m)),
+            Taken::Edit(e) => {
+                if let Some(tx) = &self.edits {
+                    let _ = tx.send((id, e));
+                }
+            }
+        }
+    }
+
+    /// The tick's checked edits (G1b): each still open is committed through `sim::edit` on the live replica, as
+    /// generic effects under its intent, and answered with a receipt carrying the map from names to ids; or refused
+    /// whole, naming the failing operation. Placed nodes take their ids from the world's lineage, on the counter its
+    /// intent ids use, so the two never meet.
+    fn edits(&mut self, now: Micros) {
+        for (id, checked) in std::mem::take(&mut self.edited) {
+            let Some(o) = self.open.get(&id) else {
+                continue;
+            };
+            let (actor, sequence) = (o.actor, o.sequence);
+            if expired(o.expiry, now) {
+                self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
+                continue;
+            }
+            let committed = checked.and_then(|c| {
+                let mut minter = Minter::at(self.lineage, self.next_intent);
+                let done = sim::edit::commit(&mut self.replica, &mut minter, &c, now);
+                self.next_intent = minter.next();
+                done
+            });
+            match committed {
+                Ok(c) => {
+                    self.unsealed = true;
+                    self.receipts.index(&c.part.effects);
+                    self.effects.extend(c.part.effects.iter().cloned());
+                    self.parts.push(c.part);
+                    self.end(id, |k| Answer::Receipt {
+                        actor,
+                        sequence,
+                        intent: id,
+                        entries: k.receipts.entries(id).to_vec(),
+                        names: c.names,
+                    });
+                }
+                Err(r) => self.end(id, |k| k.edit_refusal(actor, sequence, &r)),
+            }
         }
     }
 
@@ -638,6 +720,7 @@ impl Clock {
                     sequence,
                     intent: id,
                     entries: c.receipts.entries(id).to_vec(),
+                    names: BTreeMap::new(),
                 });
             }
             Err(reason) => {
@@ -682,6 +765,7 @@ impl Clock {
                         sequence,
                         intent: id,
                         entries: c.receipts.entries(id).to_vec(),
+                        names: BTreeMap::new(),
                     });
                 }
                 Outcome::Recheck { version } => {
@@ -697,6 +781,7 @@ impl Clock {
                 }
             }
         }
+        self.edits(now);
         let committed = started.map(|_| measures::steady_us());
         self.moves(now);
         while let Some(id) = self.deadlines.due(now) {
@@ -826,6 +911,18 @@ pub fn start<S: Storage + 'static>(
             world.apply(&part)?;
         }
         receipts.index(&part.effects);
+        // Nodes an edit placed took their ids on the intents' counter (G1b): never give one out again.
+        for e in &part.effects {
+            if let Body::Changes(cs) = &e.body {
+                for c in cs {
+                    if let Change::Create { node, .. } = c.change
+                        && node.scope() == cfg.lineage
+                    {
+                        next_intent = next_intent.max(node.counter() + 1);
+                    }
+                }
+            }
+        }
         let Some(Value::Array(rows)) = part.rest.get(&ANSWERED) else {
             continue;
         };
@@ -848,8 +945,13 @@ pub fn start<S: Storage + 'static>(
     let mut cfg = cfg;
     let make = cfg.bodies.take();
     let publisher = Arc::new(Publisher::new(&world));
-    let (acts, checked) = checkers::start(cfg.checkers, Arc::clone(&publisher), Arc::new(rules));
     let (events, rx) = channel();
+    let edits = cfg
+        .edits
+        .take()
+        .map(|w| edit_checker(w, Arc::clone(&publisher), events.clone()))
+        .transpose()?;
+    let (acts, checked) = checkers::start(cfg.checkers, Arc::clone(&publisher), Arc::new(rules));
     let fwd = events.clone();
     thread::Builder::new()
         .name("checked".into())
@@ -900,6 +1002,8 @@ pub fn start<S: Storage + 'static>(
         measures: clock_measures,
         bodies: None,
         moving: Vec::new(),
+        edits,
+        edited: Vec::new(),
     };
     let tick = cfg.tick;
     let now = cfg.now;
@@ -937,6 +1041,7 @@ pub fn start<S: Storage + 'static>(
                         let (act, checks) = *k;
                         c.checks_back(act, checks);
                     }
+                    Ok(Event::Edited(k)) => c.edited.push(*k),
                     Ok(Event::Stall(d)) => thread::sleep(d),
                     Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => break,
                     Err(RecvTimeoutError::Timeout) => {}
@@ -952,6 +1057,29 @@ pub fn start<S: Storage + 'static>(
         measures,
         clock: Some(clock),
     })
+}
+
+/// The edit checker's thread (G1b): each edit is checked (`replica::edit::check`) on the newest frozen copy that
+/// stands at the version it was planned against, or after a second whatever it stands at, never on the live tree.
+fn edit_checker(
+    world: edit::World,
+    publisher: Arc<Publisher>,
+    events: Sender<Event>,
+) -> R<Sender<(Id, Edit)>> {
+    let (tx, rx) = channel::<(Id, Edit)>();
+    thread::Builder::new()
+        .name("edit-check".into())
+        .spawn(move || {
+            for (id, e) in rx {
+                let copy = publisher.wait_for(e.planned, Duration::from_secs(1));
+                let checked = edit::check(e, &copy, &world);
+                if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
+                    break;
+                }
+            }
+        })
+        .map_err(io)?;
+    Ok(tx)
 }
 
 /// Serves one connection of the gateway's local socket (I1's framing: a 4-byte big-endian length, then that many
