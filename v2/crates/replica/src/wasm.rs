@@ -139,8 +139,10 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
 /// A Soul's intent with no parameters, `verb` a ranked list of verbs split by spaces (the rest are its fallbacks,
 /// R7), each on `target` (a node's id as `<scope hex>-<counter>`, or empty for none), decided against `basis` (a
 /// version's bytes; empty for the zero version) and expiring at `expiry` world microseconds; read back as the world
-/// reads it.
+/// reads it. `words`, when given, is parameter 1 as T8's `{23: words}` (a say or a whisper, V1b).
 #[wasm_bindgen(js_name = wireIntent)]
+// JS calls it with positional arguments; the words came last (C4, #3368).
+#[allow(clippy::too_many_arguments)]
 pub fn wire_intent(
     scope: &[u8],
     counter: u64,
@@ -149,6 +151,7 @@ pub fn wire_intent(
     basis: &[u8],
     expiry: u64,
     target: &str,
+    words: Option<String>,
 ) -> Result<Vec<u8>, JsError> {
     let target = match target {
         "" => None,
@@ -198,7 +201,15 @@ pub fn wire_intent(
         actor: Actor::Soul(id),
         verb,
         target,
-        parameters: BTreeMap::new(),
+        parameters: words
+            .map(|w| {
+                (
+                    1,
+                    Value::Map(BTreeMap::from([(23, Value::Bytes(w.into_bytes()))])),
+                )
+            })
+            .into_iter()
+            .collect(),
         sequence,
         basis,
         expiry: i64::try_from(expiry).map_err(|_| JsError::new("expiry-too-far"))?,
