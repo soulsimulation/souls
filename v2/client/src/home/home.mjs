@@ -14,7 +14,8 @@ import { basename, dirname, join, resolve } from 'node:path';
 
 export const HOME_NAME = '.souls';
 export const CREDENTIALS = 'credentials.json';
-const SOUL_ID = /^s_[A-Za-z0-9_-]+$/;
+// A Soul's local id is `s_<scope hex>-<n>`; a world creator's (G7, #2796) is `c_<scope hex>-<n>`.
+const SOUL_ID = /^[sc]_[A-Za-z0-9_-]+$/;
 // A Unix socket's path is at most 104 bytes on macOS and 108 on Linux, its terminator included.
 const SOCKET_MOST = 100;
 const SOCKET = 'daemon.sock';
@@ -89,7 +90,8 @@ export function soulsWithTokens(root) {
 
 /**
  * What the daemon connects with: the world's gateway, the Soul's grant (its actor, the token's part before the
- * secret: `soul-<scope hex>-<counter>`) and the token. credentials.json must be mode 0600.
+ * secret: `soul-<scope hex>-<counter>`, or a world creator's, `creator-<scope hex>-<counter>`, G7 #2796) and the
+ * token. credentials.json must be mode 0600.
  */
 export function readSeat(root, soul) {
   const file = join(root, CREDENTIALS);
@@ -102,7 +104,7 @@ export function readSeat(root, soul) {
   const gateway = readJson(join(root, 'config.json')).worlds?.[key]?.gateway;
   if (typeof gateway !== 'string') throw new Refused('no-gateway', `world ${key} has no gateway`);
   const token = worlds[key].token;
-  const m = /^soul-([0-9a-f]{32})-(\d+)\.[0-9a-f]{64}$/.exec(token);
-  if (!m) throw new Refused('token-not-a-soul-token', `the token for ${soul} is not a Soul's v2 token`);
-  return { world: key, gateway, grant: { scope: m[1], counter: BigInt(m[2]) }, token };
+  const m = /^(soul|creator)-([0-9a-f]{32})-(\d+)\.[0-9a-f]{64}$/.exec(token);
+  if (!m) throw new Refused('token-not-a-soul-token', `the token for ${soul} is not a Soul's or a creator's v2 token`);
+  return { world: key, gateway, grant: { actor: m[1], scope: m[2], counter: BigInt(m[3]) }, token };
 }
