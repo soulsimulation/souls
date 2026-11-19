@@ -227,9 +227,10 @@ test('A3 carried adopt: W2 asks for an owned grant, never new; connected refusal
   const dir = folder(t), home = join(dir, '.souls'), requests = [];
   let connected = false;
   const server = createServer(async (req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.method === 'GET' && req.url === '/w/eden/views/world.json') return res.end('{"history":"history/"}');
     let raw = ''; for await (const bytes of req) raw += bytes;
     const body = JSON.parse(raw); requests.push({ path: req.url, body });
-    res.setHeader('content-type', 'application/json');
     if (req.url.endsWith('/request')) {
       if (connected && !body.force) return res.end('{"refused":"soul-connected"}');
       return res.end(JSON.stringify({ link: 'https://directory.example/pair', code: 'BCDF-GHJK', interval: 0 }));
@@ -241,6 +242,7 @@ test('A3 carried adopt: W2 asks for an owned grant, never new; connected refusal
   const url = `http://127.0.0.1:${server.address().port}/eden`;
   const first = await cli(home, ['adopt', A, url], { cwd: dir });
   assert.equal(first.code, 0, first.out + first.err); assert.equal(first.value.paired, true);
+  assert.equal(read(join(home, 'config.json')).worlds.eden.history, new URL('/w/eden/history/', url).href);
   assert.deepEqual(first.lines[0], { ok: true, step: 'approve', link: 'https://directory.example/pair', code: 'BCDF-GHJK' });
   assert.equal(requests[0].body.soul, `soul-${A.slice(2)}`); assert.equal('new' in requests[0].body, false);
   const count = requests.length;
