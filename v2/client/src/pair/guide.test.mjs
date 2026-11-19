@@ -11,8 +11,8 @@ import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { LOCAL, OPS } from '../cli/souls.mjs';
-import { pair } from '../pair/pair.mjs';
-import { guideText, writeGuide } from './guide.mjs';
+import { guideText, writeGuide } from '../home/guide.mjs';
+import { pair } from './pair.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dir = join(resolve(here, '../../../..'), '.local', `r19-guide-${randomBytes(4).toString('hex')}`);
