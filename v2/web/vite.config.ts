@@ -50,7 +50,7 @@ export default defineConfig({
   worker: { format: 'es' },
   build: {
     target: 'es2022', outDir: 'dist', assetsInlineLimit: 0, chunkSizeWarningLimit: 1024,
-    rollupOptions: { input: { main: resolve(here, 'index.html'), worlds: resolve(here, 'src/worlds/index.html'), home: resolve(here, 'src/home/index.html'), panel: resolve(here, 'src/panel/index.html') } },
+    rollupOptions: { input: { main: resolve(here, 'index.html'), worlds: resolve(here, 'src/worlds/index.html'), home: resolve(here, 'src/home/index.html'), account: resolve(here, 'src/account/index.html'), panel: resolve(here, 'src/panel/index.html') } },
   },
   plugins: [streamFiles()],
 });
