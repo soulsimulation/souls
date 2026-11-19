@@ -4,7 +4,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -29,7 +29,7 @@ async function until(f, ms = 10_000) {
 // control frames. The production encoder supplies complete unfragmented messages for these small sync answers.
 async function relay(port) {
   const sockets = new Set();
-  const r = { hold: false, held: null, scopeAnswers: 0, release: null, inject: null };
+  const r = { hold: false, held: null, scopeAnswers: 0, release: null, inject: null, observed: [] };
   const server = createServer((down) => {
     const up = createConnection(port, '127.0.0.1');
     sockets.add(up); sockets.add(down);
@@ -38,6 +38,11 @@ async function relay(port) {
     r.inject = (bytes) => {
       assert.ok(bytes.length < 126);
       down.write(Buffer.concat([Buffer.from([0x82, bytes.length]), bytes]));
+    };
+    const observed = (frame, writeCalled) => {
+      if (!frame) return;
+      r.observed.push({ ...frame, writeCalled });
+      if (r.observed.length > 24) r.observed.shift();
     };
     up.on('data', (chunk) => {
       data = Buffer.concat([data, chunk]);
@@ -53,16 +58,27 @@ async function relay(port) {
         if (data.length < at + size) return;
         const frame = data.subarray(0, at + size), payload = frame.subarray(at);
         data = data.subarray(at + size);
+        let summary = null;
         if ((frame[0] & 15) === 2) {
           const value = decode(payload);
+          if (value instanceof Map) {
+            const answer = value.get(2), request = value.get(20);
+            if (typeof request === 'number') summary = { kind: 'sync', request,
+              stage: value.has(25) ? 'scope' : value.has(22) ? 'records' : value.has(21) ? 'hashes' : 'other' };
+            else if (answer instanceof Map) summary = { kind: 'answer',
+              sequence: typeof answer.get(2) === 'number' ? answer.get(2) : null,
+              answer: typeof answer.get(3) === 'number' ? answer.get(3) : null };
+          }
           if (value instanceof Map && value.has(20) && value.has(25)) r.scopeAnswers++;
           if (r.hold && wire.wireFrame(payload).startsWith('sync ')) {
             r.hold = false; r.held = frame;
-            r.release = () => { down.write(r.held); r.held = null; };
+            observed(summary, false);
+            r.release = () => { down.write(r.held); observed(summary, true); r.held = null; };
             continue;
           }
         }
         down.write(frame);
+        observed(summary, true);
       }
     });
     for (const s of [up, down]) { s.on('error', () => {}); s.on('close', () => { up.destroy(); down.destroy(); }); }
@@ -163,11 +179,23 @@ test('R21: a held pre-birth sync cannot satisfy the successful join refresh; unr
       try { daemon = readFileSync(client.rt.log, 'utf8').slice(-4096); } catch { /* no daemon log */ }
       cases.push({ case: client.case, stage: client.stage, sent: client.sent, lastStatus: client.lastStatus,
         receipt: client.receipt ?? (client.sent?.sequence === undefined ? null : events.find((e) => e.sequence === client.sent.sequence) ?? null),
+        relay: client.proxy.observed.slice(-24),
         recentEvents: events.slice(-12), readError, daemon });
     }
-    const evidence = redact({ error: { name: error.name, message: error.message }, cases, children });
     const kept = join(v2, '..', '.local', `r21-join-sync-failure-${randomBytes(6).toString('hex')}`);
     mkdirSync(kept, { recursive: true, mode: 0o700 });
+    const worldLog = { retained: false, bytes: null, stages: 'not decoded: retained for independent intake/birth/answer inspection' };
+    try {
+      const path = join(dir, 'world', 'log');
+      if (statSync(path).size <= 16 * 1024 * 1024) {
+        const bytes = readFileSync(path);
+        if (bytes.length <= 16 * 1024 * 1024) {
+          writeFileSync(join(kept, 'world.log'), bytes, { mode: 0o600 });
+          worldLog.retained = true; worldLog.bytes = bytes.length;
+        }
+      }
+    } catch { /* A missing synthetic log is reported, not substituted with a stage claim. */ }
+    const evidence = redact({ error: { name: error.name, message: error.message }, cases, children, worldLog });
     writeFileSync(join(kept, 'diagnostics.json'), evidence + '\n', { mode: 0o600 });
     console.error(`R21 synthetic failure diagnostics (retained under ignored scratch): ${evidence}`);
     throw error;
