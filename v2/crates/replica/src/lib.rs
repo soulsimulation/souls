@@ -24,6 +24,7 @@ pub mod index;
 pub mod intent_decode;
 pub mod intents;
 pub mod kinds;
+pub mod move_check;
 pub mod moves;
 pub mod pose;
 pub mod query;
