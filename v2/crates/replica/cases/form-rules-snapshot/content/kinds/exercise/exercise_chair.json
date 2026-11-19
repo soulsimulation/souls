@@ -1,0 +1,76 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:exercise_chair",
+  "owner": "thing",
+  "state": {
+    "sets": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } },
+    "rises": { "n": 2, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } },
+    "last_set": { "n": 3, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 5, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 450], "yaw_mdeg": 180000 }
+  },
+  "slots": {
+    "seat": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 450, 0], "stand": "front" }
+  },
+  "geometry": { "bounds_mm": [450, 900, 450] },
+  "forms": {
+    "rises_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "slot_free", "slot": "seat" }, { "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "seat" },
+        { "step": "sit", "slot": "seat" },
+        { "step": "rise" },
+        { "step": "sit", "slot": "seat" },
+        { "step": "rise" },
+        { "step": "sit", "slot": "seat" },
+        { "step": "rise" }
+      ],
+      "effects": [
+        { "change": "set", "field": "sets", "by": 1, "event": "set_completed" },
+        { "change": "set", "field": "rises", "by": 3, "event": "rises_counted" },
+        { "change": "set", "field": "last_set", "to": 3, "event": "last_set_noted" }
+      ]
+    },
+    "rises_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "slot_free", "slot": "seat" }, { "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "seat" },
+        { "step": "sit", "slot": "seat" },
+        { "step": "rise" },
+        { "step": "sit", "slot": "seat" },
+        { "step": "rise" },
+        { "step": "sit", "slot": "seat" },
+        { "step": "rise" },
+        { "step": "sit", "slot": "seat" },
+        { "step": "rise" },
+        { "step": "sit", "slot": "seat" },
+        { "step": "rise" }
+      ],
+      "effects": [
+        { "change": "set", "field": "sets", "by": 1, "event": "set_completed" },
+        { "change": "set", "field": "rises", "by": 5, "event": "rises_counted" },
+        { "change": "set", "field": "last_set", "to": 5, "event": "last_set_noted" }
+      ]
+    }
+  },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:exercise_chair",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,430,0],"size":[450,40,450],"tint":"wood"},{"kind":"box","at":[-190,205,-190],"size":[40,410,40],"tint":"wood"},{"kind":"box","at":[190,205,-190],"size":[40,410,40],"tint":"wood"},{"kind":"box","at":[-190,205,190],"size":[40,410,40],"tint":"wood"},{"kind":"box","at":[190,205,190],"size":[40,410,40],"tint":"wood"},{"kind":"box","at":[0,680,-205],"size":[450,420,40],"tint":"wood"},{"kind":"box","at":[0,700,-180],"size":[300,60,10],"tint":"mark"}],"palette":{"wood":"#7a5a3a","mark":"#efd15c"},"tags":["exercise","chair","seat"]}
+  },
+  "text": {
+    "card": "A sturdy chair for sets of three or five sit-to-stand rises.",
+    "exercise": "exercise",
+    "chair_rise": "chair rise",
+    "sit_to_stand": "sit to stand",
+    "howto_rises": "With the chair empty and your hands free, sit and stand three or five times; only a whole set counts."
+  },
+  "card": { "text": "card", "category": "exercise", "synonyms": ["chair_rise", "sit_to_stand"] },
+  "howtos": { "rises": { "text": "howto_rises", "steps": [{ "form": "rises_3" }] } }
+}

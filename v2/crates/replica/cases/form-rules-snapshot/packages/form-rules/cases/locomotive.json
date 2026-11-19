@@ -1,0 +1,917 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:locomotive (core/locomotive@1, 1 placed): a ride on rails. Its fire is lit and put out at the regulator; it sets off only with the fire lit, and the fire is not put out while it is under way.",
+ "cases": [
+  {
+   "name": "locomotive_light_fire",
+   "act": {
+    "this": "t1",
+    "form": "light_fire"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": false,
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1500,
+       -1700
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "locomotive_light_fire_already_lit",
+   "act": {
+    "this": "t1",
+    "form": "light_fire"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": true,
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1500,
+       -1700
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "fire",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "put_out_fire"
+    }
+   }
+  },
+  {
+   "name": "locomotive_light_fire_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "light_fire"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": false,
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1500,
+       3000
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "regulator",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "regulator"
+    }
+   }
+  },
+  {
+   "name": "locomotive_put_out_fire",
+   "act": {
+    "this": "t1",
+    "form": "put_out_fire"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": true,
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1500,
+       -1700
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "locomotive_put_out_fire_already_out",
+   "act": {
+    "this": "t1",
+    "form": "put_out_fire"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": false,
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1500,
+       -1700
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "fire",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "light_fire"
+    }
+   }
+  },
+  {
+   "name": "locomotive_put_out_fire_while_under_way",
+   "act": {
+    "this": "t1",
+    "form": "put_out_fire"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": true,
+       "under_way": true
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1500,
+       -1700
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "under_way",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "locomotive_put_out_fire_out_of_reach",
+   "act": {
+    "this": "t1",
+    "form": "put_out_fire"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": true,
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1500,
+       3000
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 2,
+    "detail": {
+     "point": "regulator",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "regulator"
+    }
+   }
+  },
+  {
+   "name": "locomotive_drive_fire_lit",
+   "act": {
+    "this": "t1",
+    "form": "drive",
+    "args": {
+     "seat": "driver"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": true,
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "locomotive_drive_with_no_fire",
+   "act": {
+    "this": "t1",
+    "form": "drive",
+    "args": {
+     "seat": "driver"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": false,
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "fire",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "light_fire"
+    }
+   }
+  },
+  {
+   "name": "locomotive_drive_while_under_way",
+   "act": {
+    "this": "t1",
+    "form": "drive",
+    "args": {
+     "seat": "driver"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": true,
+       "under_way": true
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "under_way",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "locomotive_drive_seat_taken",
+   "act": {
+    "this": "t1",
+    "form": "drive",
+    "args": {
+     "seat": "driver"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": true,
+       "under_way": false
+      },
+      "slots": {
+       "driver": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 2,
+    "detail": {
+     "node": "t1",
+     "slot": "driver"
+    },
+    "fix": {
+     "form": "drive",
+     "args": {
+      "seat": "fireman"
+     }
+    }
+   }
+  },
+  {
+   "name": "locomotive_board_fireman_seat",
+   "act": {
+    "this": "t1",
+    "form": "board",
+    "args": {
+     "seat": "fireman"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": true,
+       "under_way": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "locomotive_board_while_under_way",
+   "act": {
+    "this": "t1",
+    "form": "board",
+    "args": {
+     "seat": "fireman"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": true,
+       "under_way": true
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "under_way",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "locomotive_board_seat_taken",
+   "act": {
+    "this": "t1",
+    "form": "board",
+    "args": {
+     "seat": "fireman"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:locomotive",
+      "fields": {
+       "fire": true,
+       "under_way": false
+      },
+      "slots": {
+       "fireman": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1000,
+       0
+      ]
+     },
+     "b2": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "t1",
+     "slot": "fireman"
+    },
+    "fix": {
+     "form": "board",
+     "args": {
+      "seat": "driver"
+     }
+    }
+   }
+  }
+ ]
+}

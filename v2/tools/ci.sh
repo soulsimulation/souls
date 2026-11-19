@@ -38,6 +38,8 @@ step install-apart bash tools/ops/install.sh check
 step cost node --test tools/ops/cost/cost.test.mjs
 # The site owner's health page, usage table and history (O21, #3325); A2 runs the supervisor the tests above built.
 step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
+# The watcher (O15, #2808): one message per trouble and recovery, none for a deploy, a stop or a sleep; no look wakes a world.
+step ops-watch node --test tools/ops/watch/watch.test.mjs
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
 step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
 # The driver's loads (I10, #2693): the shared shapes imported, the stretch merged, every kind given a verb.
@@ -67,6 +69,9 @@ step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit
 # The page's pose (V7, #2716): a body's bones as a function of its record and time, the same at 30 and 144 frames a
 # second, in any order and in a fresh process, with the hand on its contact point (web/src/pose/pose.test.ts).
 step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test web/src/pose/*.test.ts'
+# The words path (V1b, #3361): a local world's said sentence, and a body's name and description, through the page's
+# worker within the stream's lag; a whisper in no public file (web/src/source/words.test.ts).
+step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts'
 
 # The ids goldens (T3, #2640): the same WASM build in Node gives fixtures/ids/goldens.txt exactly, as the native build
 # does in `cargo test` (crates/replica/tests/ids.rs).
@@ -137,6 +142,8 @@ step client-check node --test client/src/check/*.test.mjs
 step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/src/pair/*.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs
+# The MCP endpoint on v2 (R21, #3334): six tools, each answer the thin command's; 401, 405, 413; the card and page.
+step client-mcp bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/mcp/*.test.mjs'
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
 # same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
 step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&

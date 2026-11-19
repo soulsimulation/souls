@@ -1,0 +1,19 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Knot practice (from #1730): the overhand is tied, tying it again is refused (already tied), the figure-eight is tied, both are untied, and the board is taken; each act changes only its own cord.",
+  "cases": [
+    {
+      "name": "tie_both_untie_both_take",
+      "state": {"actor":"b1","nodes":{"room":{"loose":["b1","n1"]},"n1":{"kind":"eden:knot_board"},"b1":{"hands":{"left":null,"right":null}}}},
+      "do": [
+        {"act":{"this":"n1","form":"tie_overhand"},"receipt":"rn1","expect":{"verdict":"yes","changes":[{"change":"set","node":"n1","field":"overhand","n":1,"to":1}],"events":[{"event":"eden:overhand_tied","node":"n1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"n1","form":"tie_overhand"},"receipt":"rn2","expect":{"verdict":"no","reason":"field_differs","need":0}},
+        {"act":{"this":"n1","form":"tie_eight"},"receipt":"rn3","expect":{"verdict":"yes","changes":[{"change":"set","node":"n1","field":"eight","n":2,"to":1}],"events":[{"event":"eden:eight_tied","node":"n1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"n1","form":"untie_overhand"},"receipt":"rn4","expect":{"verdict":"yes","changes":[{"change":"set","node":"n1","field":"overhand","n":1,"to":0}],"events":[{"event":"eden:overhand_untied","node":"n1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"n1","form":"untie_eight"},"receipt":"rn5","expect":{"verdict":"yes","changes":[{"change":"set","node":"n1","field":"eight","n":2,"to":0}],"events":[{"event":"eden:eight_untied","node":"n1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"n1","form":"take"},"receipt":"rn6","expect":{"verdict":"yes","changes":[{"change":"reparent","node":"n1","to":{"node":"b1","hand":"left"}}],"events":[{"event":"eden:taken","node":"n1","changes":[0]}],"timers":[]}}
+      ],
+      "after": {"n1":{"kind":"eden:knot_board","fields":{"overhand":0,"eight":0}},"b1":{"hands":{"left":"n1","right":null}}}
+    }
+  ]
+}

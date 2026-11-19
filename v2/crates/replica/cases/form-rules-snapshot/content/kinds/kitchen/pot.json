@@ -1,0 +1,129 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pot",
+  "owner": "thing",
+  "state": {
+    "food": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 12,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "rim": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        200,
+        170
+      ]
+    },
+    "left_handle": {
+      "role": "grip",
+      "at_mm": [
+        -190,
+        150,
+        0
+      ]
+    },
+    "right_handle": {
+      "role": "grip",
+      "at_mm": [
+        190,
+        150,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      470,
+      285,
+      350
+    ]
+  },
+  "forms": {
+    "serve": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "bowl": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:bowl",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "pour",
+          "at": "rim",
+          "toward": {
+            "arg": "bowl"
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "food",
+          "from": "this",
+          "into": {
+            "arg": "bowl"
+          },
+          "amount": 4,
+          "event": "served"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_hands"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:pot",
+    "shape": {"round":15,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,0],[160,0],[170,180],[170,200]],"segments":10,"tint":"metal"},{"kind":"lathe","at":[0,200,0],"profile":[[175,0],[120,40],[20,50]],"segments":10,"tint":"lid","role":"lid"},{"kind":"sphere","at":[0,260,0],"r":25,"segments":4,"tint":"knob"},{"kind":"torus","at":[190,150,0],"r":35,"r2":10,"segments":6,"tint":"metal"},{"kind":"torus","at":[-190,150,0],"r":35,"r2":10,"segments":6,"tint":"metal"}],"palette":{"metal":"#5a5f66","lid":"#6a7078","knob":"#2b2b2b"},"tags":["kitchen","pot","object"]}
+  },
+  "text": {
+    "card": "A cooking pot with two handles and a lid: serve a bowlful from it into a bowl.",
+    "saucepan": "saucepan",
+    "cooking_pot": "cooking pot",
+    "stew_pot": "stew pot",
+    "kitchen": "kitchen"
+  },
+  "card": {
+    "text": "card",
+    "category": "kitchen",
+    "synonyms": [
+      "saucepan",
+      "cooking_pot",
+      "stew_pot"
+    ]
+  }
+}
