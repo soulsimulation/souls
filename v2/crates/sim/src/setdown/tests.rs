@@ -22,8 +22,8 @@ use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{Audience, parse_kinds, plain, show};
 
-use super::{Ask, Chosen, SetDown, What, World, judge, part, plan, root_of};
-use crate::edit::safety::Who;
+use super::{Ask, Chosen, SetDown, What, World, judge, judge_on, part, plan, root_of};
+use crate::edit::safety::{Known, Who};
 use crate::ground::scene::Scene;
 use crate::ground::{HUMAN_RADIUS, OpenGround};
 use crate::ground::{Turn, cut_floor};
@@ -412,13 +412,18 @@ impl Eden {
     ) -> Result<(Chosen, Rebuild), Refusal> {
         let (sd, p) = self.plan(body, what, word, anchor, facing)?;
         let (whos, _) = self.bodies();
-        judge(
+        let whole = judge(
             &self.town.tree,
             &self.header(),
             Some(self.ground),
             &p,
             &whos,
-        )?;
+        );
+        // G2b (#3488): the guard on the town judges as the whole world's.
+        let known = Known::of(&self.town);
+        let on = judge_on(&self.town.tree, &self.header(), &p, &whos, &known);
+        assert_eq!(format!("{on:?}"), format!("{whole:?}"), "G2b: same verdict");
+        whole?;
         Ok((sd.chosen, self.commit(p)))
     }
 

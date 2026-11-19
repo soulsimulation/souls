@@ -1,0 +1,4 @@
+# An edit (Engine v2 G1b, #3362, v2/docs/intents.md rule 15): creator 1 places a crate (name 1) in node 3, moves it
+# 1 m along, sets its field 1 to 7 and removes it, all under one cause, planned against version 42. No body: an edit
+# drives none.
+{1: {1: 2, 2: [h'c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0', 1]}, 2: "souls:edit", 4: {1: [{1: 1, 2: 1, 3: "souls:crate", 4: h'122090fbc4c3f786f2765b16b6014480381b4618c4ff6a429d4873ef92cf68440426', 5: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 3], 6: {1: [1000000, 0, 0], 2: [1073741824, 0, 0, 0], 3: {1: 0}}}, {1: 2, 2: 1, 3: {1: [2000000, 0, 0], 2: [1073741824, 0, 0, 0], 3: {1: 0}}}, {1: 3, 2: 1, 3: 1, 4: 7}, {1: 4, 2: 1}]}, 5: 1, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0], 1, 42], 7: 60000000}
