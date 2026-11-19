@@ -155,6 +155,23 @@ impl Slots {
         Ok(())
     }
 
+    /// Replaces an unoccupied thing's declared places after an edit; an empty list retires them.
+    /// Occupied places and their body/hold indexes are never changed by an edit.
+    pub fn replace(&mut self, thing: Id, places: Vec<PlaceAt>) -> R<()> {
+        if self.holder(thing).is_some() {
+            return refuse("place-taken", show(thing));
+        }
+        let mut next = BTreeMap::new();
+        for p in places {
+            if p.thing != thing || next.insert((thing, p.place.slot), p).is_some() {
+                return refuse("place-duplicate", show(thing));
+            }
+        }
+        self.places.retain(|(id, _), _| *id != thing);
+        self.places.extend(next);
+        Ok(())
+    }
+
     /// Seats registered, every slot counted.
     pub fn places(&self) -> usize {
         self.places.len()

@@ -94,6 +94,20 @@ pub enum Op {
     Remove {
         node: Ref,
     },
+    /// A door leaf and its passage between two places. Geometry is in the owning building's axes, mm.
+    Doorway {
+        name: u64,
+        door: Ref,
+        from: Ref,
+        to: Ref,
+        at: [i64; 2],
+        yaw: i64,
+        width: i64,
+        height: i64,
+        wall: Ref,
+        closed: Vec<Value>,
+        open: Vec<Value>,
+    },
 }
 
 /// An edit intent: who sends it, its id (the cause of every effect it commits), the version of the zone it was planned
@@ -141,6 +155,67 @@ pub struct Checked {
     pub edit: Edit,
     pub reads: Vec<(usize, Id)>,
     pub parents: Vec<(usize, Id)>,
+    /// Wall fields prepared off-clock, indexed by the operation that installs them.
+    pub geometry: BTreeMap<usize, DoorGeometry>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DoorGeometry {
+    pub wall: Ref,
+    pub solids: Value,
+}
+
+/// A doorway leaf's owned wall patch: [wall id, closed rows, open rows].
+pub const DOOR_GEOMETRY: u64 = 28;
+const SOLIDS: u64 = 12;
+const GEOMETRY_MOST: usize = 64;
+type OwnedDoor = (Ref, Vec<Value>, Vec<Value>, [Ref; 2]);
+
+/// Only exact, unique authored rows are replaced; unrelated wall geometry is retained. Runs off-clock.
+pub fn doorway_solids(
+    current: &Value,
+    before: &[Value],
+    after: &[Value],
+) -> Result<Value, &'static str> {
+    let valid = |rows: &[Value]| {
+        rows.len() <= GEOMETRY_MOST
+            && rows.iter().all(|row| {
+                matches!(row, Value::Array(row) if row.len() == 9 && row.iter().all(|n| match n {
+                    Value::Uint(n) => *n <= (i64::MAX / 1000) as u64,
+                    Value::Nint(n) => *n < (i64::MAX / 1000) as u64,
+                    _ => false,
+                }))
+            })
+    };
+    if before.is_empty() || after.is_empty() || before == after || !valid(before) || !valid(after) {
+        return Err("edit.doorway-geometry");
+    }
+    let Value::Array(current) = current else {
+        return Err("edit.doorway-geometry");
+    };
+    let unique = |rows: &[Value]| {
+        rows.iter()
+            .enumerate()
+            .all(|(i, row)| !rows[..i].contains(row))
+    };
+    if !unique(before)
+        || !unique(after)
+        || before
+            .iter()
+            .any(|row| current.iter().filter(|r| *r == row).count() != 1)
+    {
+        return Err("edit.doorway-wall-changed");
+    }
+    let mut result: Vec<_> = current
+        .iter()
+        .filter(|row| !before.contains(row))
+        .cloned()
+        .collect();
+    if after.iter().any(|row| result.contains(row)) {
+        return Err("edit.doorway-wall-changed");
+    }
+    result.extend_from_slice(after);
+    Ok(Value::Array(result))
 }
 
 /// A placed node as the check tracks it through the batch.
@@ -167,10 +242,15 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
     }
     let tree = copy.tree();
     let mut new: BTreeMap<u64, New> = BTreeMap::new();
+    let mut links = BTreeSet::new();
+    let mut doorways = BTreeSet::new();
     let mut gone: BTreeSet<Ref> = BTreeSet::new();
     let mut changed: BTreeSet<Ref> = BTreeSet::new();
     let mut reads = Vec::new();
     let mut parents = Vec::new();
+    let mut geometry = BTreeMap::new();
+    let mut fields: BTreeMap<(Ref, u64), Value> = BTreeMap::new();
+    let mut owned: BTreeMap<Ref, OwnedDoor> = BTreeMap::new();
     for (i, op) in edit.ops.iter().enumerate() {
         let here = Some(i);
         // The kind of a node the batch names, and its parent, as the batch has left it so far.
@@ -198,6 +278,47 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                     }
                 }
             }
+        };
+        let value = |node: Ref, field: u64| {
+            fields.get(&(node, field)).cloned().or_else(|| match node {
+                Ref::Node(id) => tree
+                    .handle(id)
+                    .and_then(|h| tree.node(h))
+                    .and_then(|n| n.fields().get(&field).cloned()),
+                Ref::New(_) => None,
+            })
+        };
+        let wall_of = |wall: Ref, ends: [Ref; 2]| -> Result<(), Refused> {
+            let (kind, _) = named(wall)?;
+            if !copy.header().kinds.iter().any(|k| k.as_str() == kind)
+                || world.kinds.get(&kind).is_none_or(|k| k.owner != "thing")
+            {
+                return refuse(
+                    here,
+                    "edit.doorway-geometry",
+                    "the wall is an exact pinned thing in this world",
+                );
+            }
+            for mut end in ends {
+                let mut contained = false;
+                for _ in 0..64 {
+                    if end == wall {
+                        contained = true;
+                        break;
+                    }
+                    let (_, parent) = named(end)?;
+                    let Some(parent) = parent else { break };
+                    end = parent;
+                }
+                if !contained {
+                    return refuse(
+                        here,
+                        "edit.doorway-geometry",
+                        "both places belong to the authored wall's building",
+                    );
+                }
+            }
+            Ok(())
         };
         let admits = |parent: &str, child: &str, slot: Option<u64>| -> Result<(), Refused> {
             let (Some(pk), Some(ck)) = (world.kinds.get(parent), world.kinds.get(child)) else {
@@ -227,8 +348,16 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                 kind,
                 parent,
                 at,
+                fields: initial_fields,
                 ..
             } => {
+                if initial_fields.contains_key(&DOOR_GEOMETRY) {
+                    return refuse(
+                        here,
+                        "edit.doorway-geometry",
+                        "owned geometry is written only by the doorway operation",
+                    );
+                }
                 let k = kind.as_str();
                 if !world.kinds.contains_key(k) || !copy.header().kinds.contains(kind) {
                     return refuse(
@@ -237,7 +366,7 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                         format!("{k} is not pinned by this world"),
                     );
                 }
-                if new.contains_key(name) {
+                if new.contains_key(name) || links.contains(name) {
                     return refuse(here, "edit.name-twice", format!("{name} is placed twice"));
                 }
                 let (pk, _) = named(*parent)?;
@@ -251,6 +380,18 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                         kind: k.to_owned(),
                         parent: *parent,
                     },
+                );
+                if initial_fields
+                    .get(&7)
+                    .is_some_and(|v| crate::effects::read_id(v).is_ok())
+                {
+                    doorways.insert(Ref::New(*name));
+                }
+                fields.extend(
+                    initial_fields
+                        .iter()
+                        .map(|(k, v)| (*k, v.clone()))
+                        .map(|(k, v)| ((Ref::New(*name), k), v)),
                 );
                 changed.insert(Ref::New(*name));
             }
@@ -266,17 +407,201 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                 }
                 changed.insert(*node);
             }
-            Op::Set { node, .. } => {
+            Op::Set { node, field, to } => {
+                if *field == DOOR_GEOMETRY {
+                    return refuse(
+                        here,
+                        "edit.doorway-geometry",
+                        "owned geometry is written only by the doorway operation",
+                    );
+                }
                 named(*node)?;
                 if let Ref::Node(id) = node {
                     reads.push((i, *id));
                 }
+                fields.insert((*node, *field), to.clone());
                 changed.insert(*node);
+                if *field == 7 {
+                    if crate::effects::read_id(to).is_ok() {
+                        doorways.insert(*node);
+                    } else {
+                        doorways.remove(node);
+                    }
+                }
+            }
+            Op::Doorway {
+                name,
+                door,
+                from,
+                to,
+                at,
+                width,
+                height,
+                wall,
+                closed,
+                open,
+                ..
+            } => {
+                if new.contains_key(name) || !links.insert(*name) {
+                    return refuse(here, "edit.name-twice", format!("{name} is placed twice"));
+                }
+                let (kind, parent) = named(*door)?;
+                let already_linked = match door {
+                    Ref::Node(id) => tree
+                        .handle(*id)
+                        .and_then(|h| tree.node(h))
+                        .and_then(|n| {
+                            n.fields()
+                                .get(&7)
+                                .and_then(|v| crate::effects::read_id(v).ok())
+                        })
+                        .is_some_and(|link| tree.link(link).is_some()),
+                    Ref::New(_) => false,
+                };
+                if already_linked || !doorways.insert(*door) {
+                    return refuse(here, "edit.doorway", "the door already has a doorway");
+                }
+                if parent != Some(*from)
+                    || from == to
+                    || *width <= 0
+                    || *height <= 0
+                    || at
+                        .iter()
+                        .chain([width, height])
+                        .any(|n| n.checked_mul(1000).is_none())
+                {
+                    return refuse(
+                        here,
+                        "edit.doorway",
+                        "a door belongs to its owning end; distinct ends and positive dimensions are required",
+                    );
+                }
+                if !copy.header().kinds.iter().any(|k| k.as_str() == kind)
+                    || world.kinds.get(&kind).is_none_or(|k| k.owner != "thing")
+                {
+                    return refuse(here, "edit.kind-unknown", kind);
+                }
+                for end in [*from, *to] {
+                    let (kind, _) = named(end)?;
+                    if world.kinds.get(&kind).is_none_or(|k| k.owner != "place") {
+                        return refuse(here, "edit.doorway", "a doorway joins places");
+                    }
+                }
+                wall_of(*wall, [*from, *to])?;
+                let solids = doorway_solids(
+                    &value(*wall, SOLIDS).unwrap_or(Value::Array(Vec::new())),
+                    closed,
+                    open,
+                )
+                .map_err(|name| Refused {
+                    op: here,
+                    name,
+                    detail: "the exact authored closed wall rows must match".into(),
+                })?;
+                fields.insert((*wall, SOLIDS), solids.clone());
+                geometry.insert(
+                    i,
+                    DoorGeometry {
+                        wall: *wall,
+                        solids,
+                    },
+                );
+                owned.insert(*door, (*wall, closed.clone(), open.clone(), [*from, *to]));
+                changed.insert(*wall);
+                for r in [*door, *from, *to, *wall] {
+                    if let Ref::Node(id) = r {
+                        reads.push((i, id));
+                    }
+                }
+                changed.extend([*door, *from]);
             }
             Op::Remove { node } => {
                 let (_, parent) = named(*node)?;
                 if parent.is_none() {
                     return refuse(here, "edit.root", "the zone's root is not removed");
+                }
+                let patch = if let Some(patch) = owned.get(node) {
+                    Some(patch.clone())
+                } else if let Some(metadata) = value(*node, DOOR_GEOMETRY) {
+                    let Value::Array(row) = metadata else {
+                        return refuse(here, "edit.doorway-geometry", "owned geometry is an array");
+                    };
+                    let [wall, Value::Array(closed), Value::Array(open)] = row.as_slice() else {
+                        return refuse(
+                            here,
+                            "edit.doorway-geometry",
+                            "owned geometry is [wall,closed,open]",
+                        );
+                    };
+                    let wall = crate::effects::read_id(wall).map_err(|_| Refused {
+                        op: here,
+                        name: "edit.doorway-geometry",
+                        detail: "owned geometry wall is an id".into(),
+                    })?;
+                    let link = value(*node, 7).and_then(|v| crate::effects::read_id(&v).ok());
+                    let Some((ty, ends, owner, _)) = link.and_then(|link| tree.link(link)) else {
+                        return refuse(
+                            here,
+                            "edit.doorway-geometry",
+                            "owned geometry requires its doorway link",
+                        );
+                    };
+                    if ty.as_str() != "eden:doorway" || owner != crate::world_model::End::First {
+                        return refuse(
+                            here,
+                            "edit.doorway-geometry",
+                            "owned geometry requires its owned doorway",
+                        );
+                    }
+                    Some((
+                        Ref::Node(wall),
+                        closed.clone(),
+                        open.clone(),
+                        ends.map(Ref::Node),
+                    ))
+                } else {
+                    None
+                };
+                if let Some((wall, closed, open, ends)) = patch {
+                    wall_of(wall, ends)?;
+                    // Validate both encodings even if an incompatible current wall would refuse first.
+                    doorway_solids(&Value::Array(closed.clone()), &closed, &open).map_err(
+                        |name| Refused {
+                            op: here,
+                            name,
+                            detail: "invalid stored doorway geometry".into(),
+                        },
+                    )?;
+                    let solids = doorway_solids(
+                        &value(wall, SOLIDS).unwrap_or(Value::Array(Vec::new())),
+                        &open,
+                        &closed,
+                    )
+                    .map_err(|name| Refused {
+                        op: here,
+                        name,
+                        detail: "the owned open wall rows no longer match".into(),
+                    })?;
+                    fields.insert((wall, SOLIDS), solids.clone());
+                    geometry.insert(i, DoorGeometry { wall, solids });
+                    if let Ref::Node(wall) = wall {
+                        reads.push((i, wall));
+                    }
+                    changed.insert(wall);
+                }
+                // A door's removal also changes its passage's owner; concurrent edits to its rows must be stale.
+                if let Ref::Node(id) = node
+                    && let Some(link) = tree.handle(*id).and_then(|h| tree.node(h)).and_then(|n| {
+                        n.fields()
+                            .get(&7)
+                            .and_then(|v| crate::effects::read_id(v).ok())
+                    })
+                    && let Some((_, ends, owner, _)) = tree.link(link)
+                {
+                    reads.push((
+                        i,
+                        ends[usize::from(owner == crate::world_model::End::Second)],
+                    ));
                 }
                 // The subtree on the copy (a placed node's is in the batch), each node read and changed.
                 let mut stack: Vec<Ref> = vec![*node];
@@ -316,6 +641,7 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
         edit,
         reads,
         parents,
+        geometry,
     })
 }
 
@@ -425,5 +751,69 @@ impl Unsafe {
             name: self.name,
             detail: self.text(),
         }
+    }
+}
+
+#[cfg(test)]
+mod doorway_geometry_tests {
+    use super::*;
+    fn row(x: u64) -> Value {
+        Value::Array(vec![Value::Uint(x); 9])
+    }
+    #[test]
+    fn doorway_solids_preserve_unrelated_rows_and_refuse_ambiguous_or_incompatible_patches() {
+        let (closed, a, b, unrelated) = (row(1), row(2), row(3), row(4));
+        let original = Value::Array(vec![unrelated.clone(), closed.clone()]);
+        let open = doorway_solids(
+            &original,
+            std::slice::from_ref(&closed),
+            &[a.clone(), b.clone()],
+        )
+        .unwrap();
+        assert_eq!(
+            open,
+            Value::Array(vec![unrelated.clone(), a.clone(), b.clone()])
+        );
+        assert_eq!(
+            doorway_solids(
+                &open,
+                &[a.clone(), b.clone()],
+                std::slice::from_ref(&closed)
+            )
+            .unwrap(),
+            original
+        );
+        assert_eq!(
+            doorway_solids(
+                &original,
+                std::slice::from_ref(&a),
+                std::slice::from_ref(&b)
+            ),
+            Err("edit.doorway-wall-changed")
+        );
+        assert_eq!(
+            doorway_solids(
+                &Value::Array(vec![closed.clone(), closed.clone()]),
+                std::slice::from_ref(&closed),
+                std::slice::from_ref(&a)
+            ),
+            Err("edit.doorway-wall-changed")
+        );
+        assert_eq!(
+            doorway_solids(
+                &original,
+                &[closed.clone(), closed.clone()],
+                std::slice::from_ref(&a)
+            ),
+            Err("edit.doorway-wall-changed")
+        );
+        assert_eq!(
+            doorway_solids(&original, std::slice::from_ref(&closed), &[a.clone(), a]),
+            Err("edit.doorway-wall-changed")
+        );
+        assert_eq!(
+            doorway_solids(&original, &[closed], &[Value::Array(vec![])]),
+            Err("edit.doorway-geometry")
+        );
     }
 }

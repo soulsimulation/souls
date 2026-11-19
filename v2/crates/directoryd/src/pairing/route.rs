@@ -181,7 +181,13 @@ pub fn route(
             } else if b.get("confirm").and_then(Value::as_bool) != Some(true) {
                 refuse(400, "confirm")
             } else {
-                match p.approve(&account, &code, now()) {
+                // G7b: a world's creator grant the account holds in the accounts store is its to pair.
+                let holds = |g: &str| {
+                    app.store
+                        .grants(&account)
+                        .is_ok_and(|gs| gs.iter().any(|(h, _)| h == g))
+                };
+                match p.approve_holding(&account, &code, now(), holds) {
                     // V13c: the approving account owns the Soul, and its page follows the Soul's own body.
                     Ok(grant) => match app
                         .store
