@@ -173,6 +173,7 @@ fn controller(root: Id, bodies: &[Id]) -> Controller {
             outline: vec![corners.clone()],
             vertices: corners,
             triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: crate::gaits::Ground::Dry,
         }],
     );
     let mut c = Controller::new();
@@ -713,4 +714,5 @@ fn a4_after_a_restart_mid_activity_both_still_belong_and_either_can_leave() {
 }
 
 /// E8 (#2779): offers, accepted, declined and lapsed, on this file's world.
+mod call;
 mod offers;

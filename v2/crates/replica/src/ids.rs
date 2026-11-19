@@ -215,6 +215,8 @@ pub enum Purpose {
     Upload,
     /// A stored model of a kind's picture: the binary glTF a page fetches (V17, #2717).
     Model,
+    /// A move's meaning: its revision, by which a record and a header name it (rule 16; F13, #3383).
+    Move,
 }
 
 impl Purpose {
@@ -232,6 +234,7 @@ impl Purpose {
             Purpose::Redactions => "souls/redactions/1",
             Purpose::Upload => "souls/upload/1",
             Purpose::Model => "souls/model/1",
+            Purpose::Move => "souls/move/1",
         }
     }
 }

@@ -1,0 +1,139 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:bathtub (core/bathtub@1): run a bath (200 kg of water from the taps) and let it out; a body lies in it in its soak place. Today's fill and empty, with the level as grams.",
+ "cases": [
+  {
+   "name": "bathtub_fill_empty_fill",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bathtub",
+      "fields": {}
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       820,
+       -500
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    },
+    "now_us": 0
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "empty"
+     },
+     "now_us": 0,
+     "receipt": "rempty0",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "fill"
+     },
+     "now_us": 1000000,
+     "receipt": "rfill1000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "water",
+        "n": 1,
+        "to": 200000
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:bath_run",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "fill"
+     },
+     "now_us": 2000000,
+     "receipt": "rfill2000000",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "empty"
+     },
+     "now_us": 3000000,
+     "receipt": "rempty3000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "water",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:bath_emptied",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

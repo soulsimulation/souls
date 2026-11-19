@@ -1,0 +1,141 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:bed (SA-X24): two places to lie or sleep (sleeping pulls the quilt over), get up, and make it again once nobody is in it. It takes two Souls to move.",
+  "cases": [
+    {
+      "name": "bed_sleep_get_up_lie",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "t1"] },
+          "t1": { "kind": "eden:bed" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "sleep", "args": { "side": "left" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "left" } },
+              { "change": "link", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" },
+              { "change": "set", "node": "t1", "field": "covers", "n": 1, "to": "pulled_up" }
+            ],
+            "events": [
+              { "event": "eden:fell_asleep", "node": "t1", "changes": [0] },
+              { "event": "eden:lying_in", "node": "t1", "changes": [1] },
+              { "event": "eden:covers_pulled_up", "node": "t1", "changes": [2] }
+            ]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "sleep", "args": { "side": "left" } },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken",
+            "need": 0,
+            "fix": { "form": "sleep", "args": { "side": "right" } }
+          }
+        },
+        {
+          "act": { "this": "t1", "form": "get_up" },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "unlink", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" },
+              { "change": "reparent", "node": "b1", "to": { "node": "room" } }
+            ],
+            "events": [
+              { "event": "eden:got_up", "node": "t1", "changes": [0] },
+              { "event": "eden:stood_by", "node": "t1", "changes": [1] }
+            ]
+          }
+        },
+        {
+          "act": { "this": "t1", "form": "lie", "args": { "side": "left" } },
+          "receipt": "rc4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "left" } },
+              { "change": "link", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" }
+            ],
+            "events": [
+              { "event": "eden:lay_down", "node": "t1", "changes": [0] },
+              { "event": "eden:lying_in", "node": "t1", "changes": [1] }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:bed",
+          "fields": { "covers": "pulled_up" },
+          "slots": { "left": ["b1"] },
+          "links": { "sleeper": ["b1"] }
+        }
+      }
+    },
+    {
+      "name": "bed_get_under_covers_get_up_make",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "t1"] },
+          "t1": { "kind": "eden:bed" },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 520, 800] }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "get_under_covers", "args": { "side": "left" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "left" } },
+              { "change": "link", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" },
+              { "change": "set", "node": "t1", "field": "covers", "n": 1, "to": "pulled_up" }
+            ],
+            "events": [
+              { "event": "eden:got_into_bed", "node": "t1", "changes": [0] },
+              { "event": "eden:lying_in", "node": "t1", "changes": [1] },
+              { "event": "eden:covers_pulled_up", "node": "t1", "changes": [2] }
+            ]
+          }
+        },
+        {
+          "act": { "this": "t1", "form": "make" },
+          "receipt": "rc2",
+          "expect": { "verdict": "no", "reason": "already_linked", "need": 0 }
+        },
+        { "act": { "this": "t1", "form": "get_up" }, "receipt": "rc3", "expect": { "verdict": "yes" } },
+        {
+          "act": { "this": "t1", "form": "make" },
+          "receipt": "rc4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "t1", "field": "covers", "n": 1, "to": "turned_down" }],
+            "events": [{ "event": "eden:bed_made", "node": "t1", "changes": [0] }],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:bed",
+          "fields": { "covers": "turned_down" },
+          "slots": { "left": [] },
+          "links": { "sleeper": [] }
+        }
+      }
+    }
+  ]
+}

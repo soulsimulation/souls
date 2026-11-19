@@ -1,0 +1,66 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:speaker",
+  "owner": "thing",
+  "state": {"playing":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "links": {"feed":{"n":1,"from":"eden:microphone","most":4,"audience":{"rule":"everyone"}}},
+  "points": {"switch":{"role":"contact","at_mm":[0,1250,150]}},
+  "geometry": {"bounds_mm":[919,2179,796]},
+  "forms": {
+    "play_music": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need":"state","field":"playing","is":false},
+        {"need":"hand","free":true},
+        {"need":"within_reach","point":"switch"}
+      ],
+      "steps": [{"step":"move","move":"press","at":"switch"}],
+      "effects": [{"change":"set","field":"playing","to":true,"event":"music_started"}]
+    },
+    "stop_music": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need":"state","field":"playing","is":true},
+        {"need":"hand","free":true},
+        {"need":"within_reach","point":"switch"}
+      ],
+      "steps": [{"step":"move","move":"press","at":"switch"}],
+      "effects": [{"change":"set","field":"playing","to":false,"event":"music_stopped"}]
+    }
+  },
+  "motion": {"how":"two_hands"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:speaker",
+    "table": [
+      {"do":"sound","sound":"music","mode":"loop","field":"playing","at":{"true":500,"false":0},"reach_mm":25000},
+      {"part":"light","field":"playing","do":"glow","at":{"true":1000,"false":0}}
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"kind":"cyl","at":[0,500,250],"r":20,"h":1118,"segments":4,"tint":"stand","pitch":153438},
+        {"kind":"cyl","at":[216,500,-126],"r":20,"h":1118,"segments":4,"tint":"stand","pitch":153438,"yaw":120321},
+        {"kind":"cyl","at":[-218,500,-123],"r":20,"h":1118,"segments":4,"tint":"stand","pitch":153438,"yaw":-119347},
+        {"kind":"cyl","at":[0,1250,0],"r":25,"h":600,"segments":5,"tint":"stand"},
+        {"kind":"extrude","at":[0,1530,0],"polygon":[[-195,-145],[195,-145],[195,145],[-195,145]],"h":640,"tint":"box"},
+        {"kind":"cyl","at":[0,1720,180],"r":150,"h":20,"segments":10,"tint":"cone","pitch":90000},
+        {"kind":"cyl","at":[0,2050,180],"r":70,"h":20,"segments":8,"tint":"cone","pitch":90000},
+        {"kind":"sphere","at":[150,2120,180],"r":20,"segments":4,"tint":"lamp","role":"light"}
+      ],
+      "palette": {"stand":"#2f3133","box":"#2a2826","cone":"#4a4c4e","lamp":"#3aff9a"},
+      "tags": ["layer","sound","audio"]
+    }
+  },
+  "text": {
+    "card": "A loudspeaker on a tripod: switch music on or off; it carries a linked mic.",
+    "sound": "sound",
+    "loudspeaker": "loudspeaker",
+    "music": "music",
+    "howto_play": "Play music, then stop it."
+  },
+  "card": {"text":"card","category":"sound","synonyms":["loudspeaker","music"]},
+  "howtos": {"play":{"text":"howto_play","steps":[{"form":"play_music"},{"form":"stop_music"}]}}
+}

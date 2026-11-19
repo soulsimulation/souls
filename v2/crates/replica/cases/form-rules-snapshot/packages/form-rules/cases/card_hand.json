@@ -1,0 +1,201 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:card_hand (SA-X16, #2911): a hand's count of cards is seen only by the Soul linked as its player (SA-F8, #2947). The pack argument is given resolved. Asked by the player, the asker sees linked:player; asked by anyone else, a need on the hand is unknown.",
+  "cases": [
+    {
+      "name": "take_up_a_free_hand",
+      "act": {"this": "h1", "form": "take_up"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose": ["b1", "b2", "t1"]},
+          "t1": {"kind": "eden:card_table", "links": {}, "slots": {}, "children": ["h1"]},
+          "h1": {"kind": "eden:card_hand", "links": {}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": [["h1/link/1", 0]]}
+    },
+    {
+      "name": "take_up_a_hand_someone_holds",
+      "act": {"this": "h1", "form": "take_up"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose": ["b1", "b2", "t1"]},
+          "t1": {"kind": "eden:card_table", "links": {}, "slots": {}, "children": ["h1"]},
+          "h1": {"kind": "eden:card_hand", "links": {"player": ["b2"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "already_linked",
+        "need": 0,
+        "detail": {"link": "player", "count": 1},
+        "fix": null,
+        "read": [["h1/link/1", 1]]
+      }
+    },
+    {
+      "name": "draw_from_the_pack",
+      "act": {"this": "h1", "form": "draw", "args": {"pack": "t1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose": ["b1", "b2", "t1"]},
+          "t1": {"kind": "eden:card_table", "links": {}, "slots": {}, "children": ["h1"]},
+          "h1": {"kind": "eden:card_hand", "fields": {"cards": 4}, "links": {"player": ["b1"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}}
+        }
+      },
+      "asker": {"sees": ["public", "linked:player"]},
+      "expect": {"verdict": "yes", "read": [["t1/field/1", 52], ["h1/field/1", 4], ["t1/field/1", 52], ["h1/field/1", 4]]}
+    },
+    {
+      "name": "draw_from_an_empty_pack",
+      "act": {"this": "h1", "form": "draw", "args": {"pack": "t1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose": ["b1", "b2", "t1"]},
+          "t1": {"kind": "eden:card_table", "fields": {"cards": 0}, "links": {}, "slots": {}, "children": ["h1"]},
+          "h1": {"kind": "eden:card_hand", "fields": {"cards": 4}, "links": {"player": ["b1"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}}
+        }
+      },
+      "asker": {"sees": ["public", "linked:player"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "not_enough",
+        "need": 1,
+        "detail": {"node": "t1", "field": "cards", "has": 0, "amount": 1},
+        "fix": null,
+        "read": [["t1/field/1", 0], ["h1/field/1", 4], ["t1/field/1", 0], ["h1/field/1", 4]]
+      }
+    },
+    {
+      "name": "draw_into_a_full_hand_from_a_second_pack",
+      "act": {"this": "h1", "form": "draw", "args": {"pack": "t1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose": ["b1", "b2", "t1"]},
+          "t1": {"kind": "eden:card_table", "fields": {"cards": 1}, "links": {}, "slots": {}, "children": ["h1"]},
+          "h1": {"kind": "eden:card_hand", "fields": {"cards": 52}, "links": {"player": ["b1"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}}
+        }
+      },
+      "asker": {"sees": ["public", "linked:player"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "no_room",
+        "need": 0,
+        "detail": {"node": "h1", "field": "cards", "room": 0, "amount": 1},
+        "fix": null,
+        "read": [["t1/field/1", 1], ["h1/field/1", 52]]
+      }
+    },
+    {
+      "name": "draw_asked_by_one_who_cannot_see_the_hand",
+      "act": {"this": "h1", "form": "draw", "args": {"pack": "t1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose": ["b1", "b2", "t1"]},
+          "t1": {"kind": "eden:card_table", "links": {}, "slots": {}, "children": ["h1"]},
+          "h1": {"kind": "eden:card_hand", "fields": {"cards": 4}, "links": {"player": ["b1"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "unknown", "need": 0, "node": "h1", "field": "cards", "read": []}
+    },
+    {
+      "name": "play_a_card_onto_the_table",
+      "act": {"this": "h1", "form": "play", "args": {"pack": "t1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose": ["b1", "b2", "t1"]},
+          "t1": {"kind": "eden:card_table", "fields": {"cards": 40}, "links": {}, "slots": {}, "children": ["h1"]},
+          "h1": {"kind": "eden:card_hand", "fields": {"cards": 4}, "links": {"player": ["b1"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}}
+        }
+      },
+      "asker": {"sees": ["public", "linked:player"]},
+      "expect": {"verdict": "yes", "read": [["h1/field/1", 4], ["t1/field/1", 40], ["h1/field/1", 4], ["t1/field/1", 40]]}
+    },
+    {
+      "name": "play_from_an_empty_hand",
+      "act": {"this": "h1", "form": "play", "args": {"pack": "t1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose": ["b1", "b2", "t1"]},
+          "t1": {"kind": "eden:card_table", "fields": {"cards": 40}, "links": {}, "slots": {}, "children": ["h1"]},
+          "h1": {"kind": "eden:card_hand", "links": {"player": ["b1"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}}
+        }
+      },
+      "asker": {"sees": ["public", "linked:player"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "not_enough",
+        "need": 1,
+        "detail": {"node": "h1", "field": "cards", "has": 0, "amount": 1},
+        "fix": null,
+        "read": [["h1/field/1", 0], ["t1/field/1", 40], ["h1/field/1", 0], ["t1/field/1", 40]]
+      }
+    },
+    {
+      "name": "play_a_card_from_another_table_onto_a_full_pack",
+      "act": {"this": "h1", "form": "play", "args": {"pack": "t1"}},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose": ["b1", "b2", "t1"]},
+          "t1": {"kind": "eden:card_table", "fields": {"cards": 52}, "links": {}, "slots": {}, "children": ["h1"]},
+          "h1": {"kind": "eden:card_hand", "fields": {"cards": 1}, "links": {"player": ["b1"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}}
+        }
+      },
+      "asker": {"sees": ["public", "linked:player"]},
+      "expect": {
+        "verdict": "no",
+        "reason": "no_room",
+        "need": 0,
+        "detail": {"node": "t1", "field": "cards", "room": 0, "amount": 1},
+        "fix": null,
+        "read": [["h1/field/1", 1], ["t1/field/1", 52]]
+      }
+    },
+    {
+      "name": "lay_down_the_hand",
+      "act": {"this": "h1", "form": "lay_down"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {"loose": ["b1", "b2", "t1"]},
+          "t1": {"kind": "eden:card_table", "links": {}, "slots": {}, "children": ["h1"]},
+          "h1": {"kind": "eden:card_hand", "fields": {"cards": 4}, "links": {"player": ["b1"]}},
+          "b1": {"hands": {"left": null, "right": null}, "links": {"soul": ["s1"]}},
+          "b2": {"hands": {"left": null, "right": null}, "links": {"soul": ["s2"]}}
+        }
+      },
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes", "read": []}
+    }
+  ]
+}

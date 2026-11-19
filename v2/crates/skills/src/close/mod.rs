@@ -75,13 +75,13 @@ fn isqrt(n: i128) -> i128 {
 }
 
 /// The ground distance (x and z) from `a` to `b`, µm.
-fn apart(a: Vec3, b: Vec3) -> i64 {
+pub(crate) fn apart(a: Vec3, b: Vec3) -> i64 {
     let (dx, dz) = (i128::from(b.x - a.x), i128::from(b.z - a.z));
     i64::try_from(isqrt(dx * dx + dz * dz)).unwrap_or(i64::MAX)
 }
 
 /// A velocity along (`dx`, `dz`) at `speed` µm a second; still when the direction is none.
-fn along(dx: i64, dz: i64, speed: i64) -> Vec3 {
+pub(crate) fn along(dx: i64, dz: i64, speed: i64) -> Vec3 {
     let len = isqrt(i128::from(dx).pow(2) + i128::from(dz).pow(2));
     if len == 0 || speed <= 0 {
         return Vec3::ZERO;
@@ -90,7 +90,7 @@ fn along(dx: i64, dz: i64, speed: i64) -> Vec3 {
     Vec3::new(v(dx), 0, v(dz))
 }
 
-fn go(host: &mut dyn Host, velocity: Vec3) {
+pub(crate) fn go(host: &mut dyn Host, velocity: Vec3) {
     host.control(ControllerInput {
         velocity,
         mode: Mode::Surface,

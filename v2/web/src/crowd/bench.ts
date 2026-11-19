@@ -9,6 +9,8 @@ import * as THREE from 'three';
 import { loadModel, type BakedModel } from './bake.ts';
 import { BODIES, CLIPS, WALK_STRIDE, loadKind } from './bodies.ts';
 import { Crowd } from './crowd.ts';
+import { WorldSky } from '../sky/sky.ts';
+import { WATER } from '../draw/drapes.ts';
 
 const q = new URLSearchParams(location.search);
 const base = q.get('bodies') ?? './bodies/';
@@ -27,7 +29,8 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xbcd3e6);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x556644, 1.6));
+const hemi = new THREE.HemisphereLight(0xffffff, 0x556644, 1.6);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
@@ -36,6 +39,10 @@ const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400).rotateX(-Math.PI
 ground.receiveShadow = true;
 scene.add(ground);
 const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 1000);
+// V19 (#2763): `sky=1` adds the sky and rain of a dusk shower and a water area, drawn every frame as the page draws them.
+const sky = q.get('sky') ? new WorldSky(scene, hemi, sun) : null;
+sky?.apply([{ sky: { 60: 86_400, 61: 0, 62: [[0, 0]], 75: 'souls:rain', 76: 90, 77: 60, 78: 30 } }]);
+if (sky) scene.add(new THREE.Mesh(new THREE.PlaneGeometry(60, 30).rotateX(-Math.PI / 2).translate(0, 0.05, -25), new THREE.MeshLambertMaterial({ color: WATER })));
 
 // The crowd fills the ground the camera sees: a sector about the camera's foot, from NEAR m out to `far` (about
 // `area` m² a body), as wide as the view. The camera is raised and tilted so the sector's near and far edges meet the
@@ -126,6 +133,7 @@ async function main() {
     }
     crowd.step(dt);
     crowd.draw(camera);
+    sky?.update(19.5 * 3_600_000_000 + now * 1000, camera);
     renderer.render(scene, camera);
     if (probe.on) probe.work.push(performance.now() - w0);
     const s = crowd.stats;
