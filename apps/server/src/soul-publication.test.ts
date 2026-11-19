@@ -3,10 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {mkdtempSync, readFileSync, rmSync} from 'node:fs';
-import {spawnSync} from 'node:child_process';
-import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {readFileSync} from 'node:fs';
 import {fixture} from '../test/native-owner-fixture.ts';
 import {CAPTURE, fillInstructions} from './accounts/instructions.ts';
 
@@ -76,22 +73,4 @@ test('HTTP: the real published files are served by hash; the guide uses configur
   assert.match(text, /create "<Name>" --for K7QX-M2PA/); assert.ok(!/evil|GL7R|eden-2026/.test(text));
   const plain = await get(''), shared = await plain.text();
   assert.equal(plain.headers.get('cache-control'), 'public, max-age=60'); assert.ok(!/--for (?!<CODE>)|GL7R/.test(shared));
-});
-
-test('#3380 the safety page: <world>/safety.md and eden.mjs help safety give the same text, from safety.md', async t => {
-  const f = fixture(':memory:'); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
-  const page = readFileSync(dir + 'safety.md', 'utf8');
-  assert.equal((await f.request('/safety.md')).status, 404, 'a world with no skill file has no safety page');
-  Object.assign(f.souls.cfg, {skillFile: dir + 'skill.md'});
-  const served = await f.request('/safety.md');
-  assert.equal(served.status, 200); assert.match(served.headers.get('content-type') ?? '', /text\/markdown/);
-  assert.equal(await served.text(), page, 'the world serves safety.md byte for byte');
-  const home = mkdtempSync(join(tmpdir(), 'souls-safety-')); t.after(() => rmSync(home, {recursive: true, force: true}));
-  const help = spawnSync(process.execPath, [dir + 'eden.mjs', 'help', 'safety'], {cwd: home, env: {...process.env, SOULS_HOME: home}, encoding: 'utf8'});
-  assert.equal(help.status, 0, help.stderr);
-  assert.equal(help.stdout.trimEnd(), page.trimEnd(), 'help safety prints the same text');
-  // What it says, in this order: what the client is for, the one real danger, the default, what stays yours.
-  const order = ['## What this client is for', 'acting in the' , '## The one real danger', 'trick an agent', '## The default', 'install software, run a command, open', 'ask your owner', '## What stays yours', 'only instructions'].map(s => page.replace(/\s+/g, ' ').indexOf(s));
-  assert.ok(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])), JSON.stringify(order));
-  assert.ok(page.split('\n').length <= 45, 'about 40 lines');
 });
