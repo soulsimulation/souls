@@ -339,3 +339,163 @@ fn w9_a1_the_account_lists_its_souls_and_devices_and_revokes_one() {
         Poll::Token { .. }
     ));
 }
+
+/// A PNG of `side` by `side` RGB pixels, all zero, its pixel data in one stored (uncompressed) zlib block; `text`
+/// adds a tEXt chunk, metadata G6's check strips.
+fn png(side: u32, text: Option<&str>) -> Vec<u8> {
+    fn chunk(out: &mut Vec<u8>, ty: &[u8; 4], data: &[u8]) {
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        let start = out.len();
+        out.extend_from_slice(ty);
+        out.extend_from_slice(data);
+        let mut c = !0u32;
+        for &x in &out[start..] {
+            c ^= u32::from(x);
+            for _ in 0..8 {
+                c = if c & 1 != 0 {
+                    0xedb8_8320 ^ (c >> 1)
+                } else {
+                    c >> 1
+                };
+            }
+        }
+        out.extend_from_slice(&(!c).to_be_bytes());
+    }
+    let raw = vec![0u8; (side as usize * 3 + 1) * side as usize];
+    let (mut a, mut b) = (1u32, 0u32);
+    for &x in &raw {
+        a = (a + u32::from(x)) % 65_521;
+        b = (b + a) % 65_521;
+    }
+    let mut z = vec![0x78, 0x01, 0x01];
+    z.extend_from_slice(&(raw.len() as u16).to_le_bytes());
+    z.extend_from_slice(&(!(raw.len() as u16)).to_le_bytes());
+    z.extend_from_slice(&raw);
+    z.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut ihdr = side.to_be_bytes().to_vec();
+    ihdr.extend_from_slice(&side.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+    chunk(&mut out, b"IHDR", &ihdr);
+    if let Some(t) = text {
+        chunk(&mut out, b"tEXt", t.as_bytes());
+    }
+    chunk(&mut out, b"IDAT", &z);
+    chunk(&mut out, b"IEND", &[]);
+    out
+}
+
+/// A new Soul's request naming its world, approved: the Soul's token and its grant.
+fn pair_in(p: &Pairing, account: &str, world: &str) -> (String, String) {
+    let (secret, code) = ask(p, "studio laptop", None, false, T0);
+    p.ask_world(&code, world).expect("a world");
+    let grant = p.approve(account, &code, T0).expect("approved");
+    let Poll::Token { token, .. } = p.poll(&secret, T0 + INTERVAL) else {
+        panic!("a token")
+    };
+    (token, grant)
+}
+
+#[test]
+fn w11_a2_the_list_shows_each_souls_world_and_connection_from_one_read() {
+    let (p, _) = store();
+    let (_, grant) = pair_in(&p, "acct_owner", "mars");
+    assert_eq!(p.ask_world("XXXX-XXXX", "Not A World"), Err("world"));
+    let mine = p.mine("acct_owner").expect("souls");
+    assert_eq!(mine.len(), 1);
+    assert_eq!(
+        (
+            mine[0].soul.as_str(),
+            mine[0].device.as_deref(),
+            mine[0].world.as_deref()
+        ),
+        (grant.as_str(), Some("studio laptop"), Some("mars"))
+    );
+    p.revoke("acct_owner", &grant).expect("revoked");
+    assert_eq!(
+        p.mine("acct_owner").expect("souls")[0].device,
+        None,
+        "no agent connected"
+    );
+    assert!(
+        p.mine("acct_other").expect("souls").is_empty(),
+        "no other account's Souls"
+    );
+}
+
+#[test]
+fn w11_a3_name_description_and_picture_are_the_owners_and_the_picture_passes_g6() {
+    let (p, _) = store();
+    let (_, grant) = pair_in(&p, "acct_owner", "mars");
+    let named = souls::Profile {
+        name: Some("Oriel".into()),
+        description: Some("Quiet and curious.".into()),
+    };
+    assert_eq!(
+        p.set_profile("acct_other", &grant, &named),
+        Err("not-yours")
+    );
+    p.set_profile("acct_owner", &grant, &named).expect("named");
+    // A field left out keeps what it had.
+    let renamed = souls::Profile {
+        name: Some("Oriel II".into()),
+        description: None,
+    };
+    p.set_profile("acct_owner", &grant, &renamed)
+        .expect("renamed");
+    let long = souls::Profile {
+        name: None,
+        description: Some("x".repeat(souls::DESCRIPTION_MOST + 1)),
+    };
+    assert_eq!(
+        p.set_profile("acct_owner", &grant, &long),
+        Err("description")
+    );
+    // G6's check: over the portrait's side is refused by its code, and a glTF is not a picture.
+    let wide = png(souls::PICTURE_SIDE as u32 + 1, None);
+    assert!(p.set_picture("acct_owner", &grant, &wide).is_err());
+    assert!(p.set_picture("acct_owner", &grant, b"glTF").is_err());
+    let tagged = png(8, Some("Comment\0secret place"));
+    p.set_picture("acct_owner", &grant, &tagged)
+        .expect("a picture");
+    let m = &p.mine("acct_owner").expect("souls")[0];
+    assert_eq!(
+        (m.name.as_deref(), m.description.as_deref()),
+        (Some("Oriel II"), Some("Quiet and curious."))
+    );
+    let (format, bytes) = m.picture.clone().expect("the picture");
+    assert_eq!(format, "png");
+    assert!(
+        !bytes.windows(6).any(|w| w == b"secret"),
+        "metadata stripped"
+    );
+}
+
+#[test]
+fn w11_a4_a_retire_takes_effect_only_after_the_owners_confirmed_post() {
+    let (p, tokens) = store();
+    let (token, grant) = pair_in(&p, "acct_owner", "mars");
+    let hash = to_hex(&sha256(token.as_bytes()));
+    // The agent asks: nothing changes but the ask.
+    assert_eq!(p.ask_retire("not a token"), Err("unknown-token"));
+    assert_eq!(p.ask_retire(&token), Ok(grant.clone()));
+    let m = &p.mine("acct_owner").expect("souls")[0];
+    assert!(m.retire_asked && m.device.is_some());
+    let file = || std::fs::read_to_string(&tokens).unwrap();
+    assert!(file().contains(&hash), "the token still works");
+    // Another account cannot retire it; the owner can.
+    assert_eq!(p.retire("acct_other", &grant, T0), Err("not-yours"));
+    p.retire("acct_owner", &grant, T0).expect("retired");
+    assert!(!file().contains(&hash), "the token is refused");
+    assert!(
+        p.mine("acct_owner").expect("souls").is_empty(),
+        "off the list"
+    );
+    // A retired Soul is not paired again, and not retired twice.
+    let (_, code) = ask(&p, "new laptop", Some(&grant), false, T0 + 100);
+    assert_eq!(
+        p.approve("acct_owner", &code, T0 + 100),
+        Err(("soul-retired", None))
+    );
+    assert_eq!(p.retire("acct_owner", &grant, T0), Err("soul-retired"));
+}
