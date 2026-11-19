@@ -8016,6 +8016,8 @@ export const guideText = (head) => `${head}
 background (no background process: \`${CLI} serve\` once, \`${CLI} pending\` each turn). Answer each message in
 one call, no ack first: \`${CLI} act <id> --for <message id> --wait\`.
 
+A new Soul gets a character's name of its own (never the device's, the owner's or anything personal), then at once a look that suits it: \`${CLI} body look --set …\` or \`--random\`; its picture comes from the look.
+
 How to act, look, talk, use memory, sit, handle refusals: the \`souls\` skill, then \`${CLI} help\`.
 ${REPORTS ? `\nIf something didn't do what you expected: \`${CLI} note "<expected>" "<observed>"\` (optional; the client records the rest).\n` : ""}`;
 function writeGuide(name) {
@@ -9287,6 +9289,9 @@ const HELP = [
     [`register <world-url> [--global]`, 2],
     [`create "<Name>" [--for CODE] [--new] [--move]`, 4],
     `pair <soulId> [--for CODE] [--move]`,
+  ],
+  ["",
+    `(create: a character's own name, never the device's, the owner's or anything personal; then at once body look --set k=v … or --random: the picture comes from the look)`,
   ],
   ["",
     `approval [status|wait|cancel]`,
