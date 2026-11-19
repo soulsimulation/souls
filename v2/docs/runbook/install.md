@@ -2,7 +2,7 @@
 
 Engine v2 O17 (#2810). One script, `v2/tools/ops/install.sh`, puts the new programs on one Linux machine beside
 today's system. It serves nothing public and starts nothing: the preview is a path on the public name that the proxy
-sends to these programs once the owner places its site file. Routing between the systems is O19; releases are O18.
+sends to these programs once the owner places its site file. Routing between the systems is O19 (`v2/tools/ops/proxy/README.md`); releases are O18.
 
 ## What it makes
 
