@@ -7,6 +7,8 @@
 //! is a line in `<dir>/<UTC day>.jsonl` (see `receipts.rs`). With `--view-key <file>` (64 hex digits, the key the
 //! directory signs view tokens with, V13b) a page signs in with a view token for a view socket. With `--mailbox
 //! <directory addr:port> --mailbox-key <file>`, the owner's messages reach their Souls' sockets (R13, `mailbox.rs`).
+//! With `--creator <32 hex>-<n> --directory <addr:port>`, a page signed in as that creator exchanges its session for a
+//! short token (W5, `creator.rs`).
 //!
 //! On SIGTERM or SIGINT it stops accepting, closes every signed-in socket with 1012 and exits within [`DRAIN`]
 //! (O16, #2809; `v2/docs/runbook/gateway-upgrade.md`).
@@ -16,8 +18,9 @@ use std::time::Duration;
 
 use gatewayd::receipts::Receipts;
 use gatewayd::token::{Source, Tokens, ViewKey};
-use gatewayd::{Gateway, mailbox, socket, stderr_log, world_link};
+use gatewayd::{Gateway, creator, mailbox, socket, stderr_log, world_link};
 use replica::encode::from_hex;
+use replica::ids::{Id, Scope};
 use tokio::signal::unix::{SignalKind, signal};
 
 /// How long a stopping gateway waits for its sockets' 1012 closes to go out before it exits anyway.
@@ -53,7 +56,7 @@ async fn main() {
         arg("--build"),
     ) else {
         eprintln!(
-            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>] [--views <path>] [--view-key <file>] [--mailbox <addr:port> --mailbox-key <file>]"
+            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>] [--views <path>] [--view-key <file>] [--mailbox <addr:port> --mailbox-key <file>] [--creator <32 hex>-<n> --directory <addr:port>]"
         );
         std::process::exit(2);
     };
@@ -85,6 +88,18 @@ async fn main() {
         let key = key.trim().to_owned();
         let _ = gw.mailbox.set(mailbox::Mailbox { addr, key });
         tokio::spawn(mailbox::run(gw.clone()));
+    }
+    if let (Some(c), Some(directory)) = (arg("--creator"), arg("--directory")) {
+        let Some(creator) = c.split_once('-').and_then(|(scope, n)| {
+            Id::new(
+                Scope(from_hex(scope).ok()?.try_into().ok()?),
+                n.parse().ok()?,
+            )
+        }) else {
+            eprintln!("gatewayd: --creator is <32 hex>-<counter>");
+            std::process::exit(2);
+        };
+        let _ = gw.exchange.set(creator::Exchange { creator, directory });
     }
     let views = arg("--views").map_or_else(
         || PathBuf::from(&world).with_extension("views"),
