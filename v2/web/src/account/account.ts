@@ -8,6 +8,8 @@
 // - Signed in means W1's session token (kept by the web app in sessionStorage as `souls.session`), or on a test world
 //   W1's test person typed here. Neither is ever put in a URL.
 
+import { REFRESH_MS, drawMine, type Mine } from '../souls/mine.ts';
+
 export type Soul = { soul: string; device: string | null };
 export type WorldRow = { name: string; label: string; unlisted?: boolean; closed?: boolean };
 
@@ -54,26 +56,19 @@ function page(): void {
       list.replaceChildren(Object.assign(document.createElement('li'), { className: 'muted', textContent: `Could not read your Souls: ${body.refused ?? 'no answer'}` }));
       return;
     }
-    const rows = (body.souls as Soul[]).map((s) => {
-      const li = document.createElement('li'), name = document.createElement('code'), d = document.createElement('span');
-      name.textContent = s.soul;
-      d.className = 'muted';
-      d.textContent = deviceText(s);
-      li.append(name, d);
-      if (s.device) {
-        const b = Object.assign(document.createElement('button'), { textContent: 'Revoke' });
-        b.onclick = async () => {
-          if (!confirm(`Revoke ${s.device}'s hold on this Soul? Its agent is disconnected at once.`)) return;
-          b.disabled = true;
-          const r = await call('/v1/account/souls/revoke', 'account', { soul: s.soul });
-          said.textContent = r.ok ? `Revoked: ${s.device} no longer holds the Soul.` : `Refused: ${r.body.refused}`;
-          void souls();
-        };
-        li.append(b);
-      }
-      return li;
+    // W11 (#2749): each Soul's world, connection, name, description and picture, its edits and its retire.
+    drawMine(list, body.souls as Mine[], (path, b) => call(path, 'account', b), (s) => (said.textContent = s), () => void souls(), (s) => {
+      if (!s.device) return [];
+      const b = Object.assign(document.createElement('button'), { textContent: 'Revoke', type: 'button' });
+      b.onclick = async () => {
+        if (!confirm(`Revoke ${s.device}'s hold on this Soul? Its agent is disconnected at once.`)) return;
+        b.disabled = true;
+        const r = await call('/v1/account/souls/revoke', 'account', { soul: s.soul });
+        said.textContent = r.ok ? `Revoked: ${s.device} no longer holds the Soul.` : `Refused: ${r.body.refused}`;
+        void souls();
+      };
+      return [b];
     });
-    list.replaceChildren(...(rows.length ? rows : [Object.assign(document.createElement('li'), { className: 'muted', textContent: 'no Souls yet' })]));
   }
 
   let world: WorldRow | null = null;
@@ -105,6 +100,7 @@ function page(): void {
       void settings({});
     }
     void souls();
+    setInterval(() => void souls(), REFRESH_MS);
   };
   $<HTMLFormElement>('who').onsubmit = (e) => {
     e.preventDefault();
