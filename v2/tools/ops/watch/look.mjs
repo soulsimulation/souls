@@ -15,12 +15,14 @@
 //   `stalled`      its health file was rewritten between two reads PAUSE_MS apart and no tick was counted;
 //   `lag`          a queue's oldest item is older than the declared bound (`--lag-bound-ms`, default LAG_BOUND_MS);
 //   `restart-loop` the supervisor's own verdict: five starts in five minutes and not serving.
+// It also carries the page-error service's new kinds (O25, #3336): `page_errors`, from its `health.json` (default
+// `<root>/../page-errors/health.json`, `--page-errors`), each new kind's fingerprint, kind and scrubbed text.
 // Each look writes `<root>/watcher.json` ({"at_unix_ms"}), which the site owner's health page shows as the watcher's
 // last look (A4). It reports; it restarts nothing.
 //
-//   node look.mjs --root <worlds root> [--alarms <directory>/alarms/<machine>] [--lag-bound-ms 5000] [--port 8091] [--host 127.0.0.1]
+//   node look.mjs --root <worlds root> [--alarms <directory>/alarms/<machine>] [--lag-bound-ms 5000] [--page-errors <health.json>] [--port 8091] [--host 127.0.0.1]
 // With WATCH_TOKEN set, a look needs `Authorization: Bearer $WATCH_TOKEN`. The answer carries world ids and trouble
-// codes only: no Soul, account, token or words.
+// codes only, and page errors' scrubbed text: no Soul, account, token or words.
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
@@ -43,7 +45,7 @@ export function asleep(alarms) {
 }
 
 /** One look at every world on the machine: `{at_unix_ms, worlds: [{world, state, trouble, detail}]}`. */
-export async function look(root, { alarms, lagBoundMs = LAG_BOUND_MS, now = Date.now, pause = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+export async function look(root, { alarms, lagBoundMs = LAG_BOUND_MS, pageErrors = join(root, '..', 'page-errors', 'health.json'), now = Date.now, pause = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
   const sleeping = asleep(alarms);
   const all = worlds(root);
   const first = new Map(all.map((w) => [w, healthFile(root, w)]));
@@ -67,11 +69,13 @@ export async function look(root, { alarms, lagBoundMs = LAG_BOUND_MS, now = Date
   });
   const tmp = join(root, 'watcher.json.tmp');
   try { writeFileSync(tmp, JSON.stringify({ at_unix_ms: t })); renameSync(tmp, join(root, 'watcher.json')); } catch { /* the page shows the last look that was written */ }
-  return { at_unix_ms: t, worlds: rows };
+  const pe = json(pageErrors);
+  const page_errors = Array.isArray(pe?.new) ? { build: String(pe.build), new: pe.new.slice(0, 20).map((k) => ({ fp: String(k.fp), kind: String(k.kind), message: String(k.message ?? '') })) } : null;
+  return { at_unix_ms: t, worlds: rows, page_errors };
 }
 
 /** A server for the look alone. */
-export function serve({ root, alarms, lagBoundMs, token = process.env.WATCH_TOKEN, pause }) {
+export function serve({ root, alarms, lagBoundMs, pageErrors, token = process.env.WATCH_TOKEN, pause }) {
   return createServer(async (req, res) => {
     const send = (status, body) => {
       res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -79,13 +83,13 @@ export function serve({ root, alarms, lagBoundMs, token = process.env.WATCH_TOKE
     };
     if (new URL(req.url, 'http://x').pathname !== PATH || req.method !== 'GET') return send(404, { error: 'not-found' });
     if (token && req.headers.authorization !== `Bearer ${token}`) return send(401, { error: 'not-the-watcher' });
-    send(200, await look(root, { alarms, lagBoundMs, pause }));
+    send(200, await look(root, { alarms, lagBoundMs, pageErrors, pause }));
   });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; };
   const root = opt('root', process.env.WORLDS_ROOT ?? '/var/lib/souls/worlds');
-  const server = serve({ root, alarms: opt('alarms', join(root, 'directory', 'alarms', process.env.SOULS_MACHINE ?? 'local')), lagBoundMs: Number(opt('lag-bound-ms', LAG_BOUND_MS)) });
+  const server = serve({ root, alarms: opt('alarms', join(root, 'directory', 'alarms', process.env.SOULS_MACHINE ?? 'local')), lagBoundMs: Number(opt('lag-bound-ms', LAG_BOUND_MS)), pageErrors: opt('page-errors') });
   server.listen(Number(opt('port', 8091)), opt('host', '127.0.0.1'), () => console.log(`watch look ${server.address().port}`));
 }
