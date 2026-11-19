@@ -106,6 +106,13 @@ impl Geometry for Sight<'_> {
         }
     }
 
+    fn stand_near(&self, body: Id, at: Vec3, reach: i64) -> Option<Vec3> {
+        let me = self.bodies.get(&body)?;
+        self.view
+            .as_ref()?
+            .stand_near(sim::walk::node_of(me), at, reach, Some(me))
+    }
+
     fn read(&self, node: Id) -> Option<Seen> {
         let b = self.bodies.get(&node)?;
         Some(Seen {

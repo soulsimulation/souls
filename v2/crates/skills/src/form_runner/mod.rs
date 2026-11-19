@@ -43,6 +43,11 @@
 //!   node's orientation in the tree before the run starts ([`turn`]), so a thing turned 90 degrees is walked to on its
 //!   turned front.
 //!
+//! - **No room at the point** (C15, #3447). A point a body cannot stand on (a chair's front under its table, a grip
+//!   inside the thing, a bed's side against a wall) is walked to from the nearest place within [`REACH`] of it where a
+//!   body may stand, as the world chooses it (`Host::stand_near`, N9's spot tables); with none, the walk to the point
+//!   itself ends `souls:no-way`.
+//!
 //! Not here: who may (F6), stages of long forms (F11), a thing made or set down where there is no slot (E4).
 
 use std::collections::BTreeMap;
@@ -73,6 +78,10 @@ pub enum Step {
     /// the body. When it is the form's first hand step, its transfer is the effect's instant.
     Hand,
 }
+
+/// How far from a point a walk to it may end, µm, when a body cannot stand on the point itself (C15, #3447): an arm
+/// (the longest reach a move may state) and a body, as today's engine counts a stand point's reach.
+pub const REACH: i64 = replica::moves::REACH_MOST + 600_000;
 
 /// The step kinds of SA-F1's closed list that later tasks build. A form that has one is refused `step-not-built`.
 pub const NOT_BUILT: [&str; 4] = ["sit", "rise", "use_held", "settle"];
@@ -626,6 +635,8 @@ impl Runner {
                     node.position.y.saturating_add(at.y),
                     node.position.z.saturating_add(at.z),
                 );
+                // From the nearest place within reach where a body may stand (C15); unanswered, to the point itself.
+                let to = host.stand_near(to, REACH).unwrap_or(to);
                 self.timer = Some(host.set_timer(self.limits.walk, name("souls:form-deadline")));
                 let leg = Leg { to, link: None };
                 Next::Walk(Box::new(Route::new(

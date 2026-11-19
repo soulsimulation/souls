@@ -304,6 +304,28 @@ fn a1_racks_turned_90_and_180_degrees_park_and_unpark_a_bicycle() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// C15 (#3447) A1: a form whose point a body cannot stand on acts from the nearest place within reach of it, and one
+/// with no such place answers `souls:no-way`, on a seeded Eden. The toy blocks by the hall (`by` lies within a
+/// body's clearance of the hall's wall) are knocked down from a place 0.1 m off `by`; the market stall whose
+/// `customer` point a barrel stands on (no place a body can stand within 4 m of it) refuses `take_apple` by name.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c15_a_point_with_no_room_is_acted_at_from_the_nearest_place_within_reach() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    // The toy blocks (cd:9948) and the market stall (cd:9311).
+    let (blocks, stall) = (im.nodes["e_1b5f1fe9"], im.nodes["e_3d03a31f"]);
+    let (served, mut soul, dir) = serve(&facts, "44.0,27.5", "c15", im.nodes["world"].scope());
+    let knocked = soul.act("eden:knock_down", Some(blocks), BTreeMap::new());
+    println!("knock the toy blocks down: {knocked:?}");
+    let apple = soul.act("eden:take_apple", Some(stall), BTreeMap::new());
+    println!("take an apple at the market stall: {apple:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    knocked.expect("acted from the nearest place within reach");
+    assert_eq!(apple, Err("souls:no-way".to_owned()));
+}
+
 /// Every `souls-entry/1` file under `dir`, `(kind, entry)`, as `worldd seed` reads them.
 fn entries(dir: &Path, out: &mut Vec<(String, replica::rules::json::Value)>) {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
@@ -403,6 +425,10 @@ struct Measured {
     standing: usize,
     cannot: BTreeMap<String, Vec<String>>,
     not_points: BTreeMap<String, usize>,
+    /// C15 (#3447): of those it cannot stand on, the ones a body acts at from a place within reach, and the ones it
+    /// does not (by `kind:point (role, why)`, with each thing's id).
+    nearby: usize,
+    still: BTreeMap<String, Vec<String>>,
 }
 
 impl Measured {
@@ -425,8 +451,23 @@ impl Measured {
             self.cannot(false),
             self.not_points.values().sum::<usize>()
         );
+        let still: usize = self.still.values().map(Vec::len).sum();
+        println!(
+            "  of those it cannot stand on: acted at from a place within reach {}; not {} (stand points {})",
+            self.nearby,
+            still,
+            self.still
+                .iter()
+                .filter(|(k, _)| k.contains("(stand,"))
+                .map(|(_, ids)| ids.len())
+                .sum::<usize>()
+        );
     }
 }
+
+/// How far today's engine looks for clear ground to act from, µm (`forms-adapter.ts`: `standableNearV1`, 16 rings of
+/// 0.25 m).
+const TODAY: i64 = 4_000_000;
 
 /// For every point a form walks to on each of Eden's things with an entry in `found`, turned by the thing's
 /// orientation as the world turns it ([`skills::form_runner::turn`]; not, when not `turned`), whether a body can
@@ -434,7 +475,7 @@ impl Measured {
 /// building's floor) and placed on that node's ground as the walk cuts it ([`sim::walk::town::Town::relocate`]: a
 /// body's radius and margin clear of every solid, `off-surface` when not).
 fn measure(
-    town: &sim::walk::town::Town,
+    town: &mut sim::walk::town::Town,
     tree: &replica::tree::Tree,
     things: &std::collections::BTreeSet<Id>,
     found: &BTreeMap<String, replica::rules::json::Value>,
@@ -442,7 +483,7 @@ fn measure(
 ) -> Measured {
     use replica::pose::{Frame, Pose, Quat, Support, Vec3};
     use replica::world_model::{plain, show};
-    let stand = |node: Id, at: Vec3| {
+    let stand = |town: &sim::walk::town::Town, node: Id, at: Vec3| {
         let body = sim::mover::Body {
             id: Id::new(Scope([0xc1; 16]), 1).unwrap(),
             pose: Pose {
@@ -497,7 +538,7 @@ fn measure(
             let (mut at, mut on) = (place.position.plus(at).unwrap(), parent);
             let near = at;
             let why = loop {
-                match stand(on, at) {
+                match stand(town, on, at) {
                     Err("no-surface") => {
                         let up = tree.node(tree.handle(on).unwrap()).unwrap();
                         let (Some(pl), Some(parent)) = (up.place(), up.parent()) else {
@@ -512,13 +553,43 @@ fn measure(
                     r => break r,
                 }
             };
-            match why {
-                Ok(()) => m.standing += 1,
-                Err(why) => m
-                    .cannot
-                    .entry(format!("{kind}:{point} ({role}, {why})"))
+            let Err(why) = why else {
+                m.standing += 1;
+                continue;
+            };
+            let named = format!("{} by {}", show(id), blocked_by(tree, id, near));
+            m.cannot
+                .entry(format!("{kind}:{point} ({role}, {why})"))
+                .or_default()
+                .push(named.clone());
+            // C15: the place within reach the walk goes to instead, and whether the walk's cut stands a body there.
+            let reach = skills::form_runner::REACH;
+            match town.view().stand_near(on, at, reach, None) {
+                Some(p) if stand(town, on, p).is_ok() => m.nearby += 1,
+                Some(_) => m
+                    .still
+                    .entry(format!(
+                        "{kind}:{point} ({role}, place within reach off the cut)"
+                    ))
                     .or_default()
-                    .push(format!("{} by {}", show(id), blocked_by(tree, id, near))),
+                    .push(named),
+                // Named by how far the nearest place is, out to today's approach (rings of 0.25 m out to 4 m).
+                None => {
+                    let far = match town.view().stand_near(on, at, TODAY, None) {
+                        Some(p) if stand(town, on, p).is_ok() => {
+                            let d = sim::spots::flat(p, at) / 100_000;
+                            format!("the nearest {}.{} m away", d / 10, d % 10)
+                        }
+                        _ => "none within 4 m".to_owned(),
+                    };
+                    m.still
+                        .entry(format!(
+                            "{kind}:{point} ({role}, no place within {} mm; {far})",
+                            reach / 1000
+                        ))
+                        .or_default()
+                        .push(named)
+                }
             }
         }
     }
@@ -551,16 +622,16 @@ fn a2_every_point_a_form_walks_to_on_eden_can_be_stood_on() {
     let tree = import_eden::load(&text).expect("Eden loads").tree;
     let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
     let next = im.tree.to_state().next;
-    let town = sim::walk::town::Town::new(
+    let mut town = sim::walk::town::Town::new(
         im.tree,
         im.nodes["ground"],
         sim::links::Doors::new(header, im.rules, next),
     )
     .expect("the town");
 
-    let unturned = measure(&town, &tree, &things, &written, false);
-    let before = measure(&town, &tree, &things, &written, true);
-    let after = measure(&town, &tree, &things, &imported, true);
+    let unturned = measure(&mut town, &tree, &things, &written, false);
+    let before = measure(&mut town, &tree, &things, &written, true);
+    let after = measure(&mut town, &tree, &things, &imported, true);
     unturned.show("as written, the points not turned (C12)");
     before.show("as written, turned");
     println!("the import report ({} lines):", report.len());
@@ -579,6 +650,20 @@ fn a2_every_point_a_form_walks_to_on_eden_can_be_stood_on() {
                 .push(thing.to_owned());
         }
         println!("  cannot: {k}: {}", ids.len());
+        for (what, things) in by {
+            println!("    {what}: {} {}", things.len(), things.join(" "));
+        }
+    }
+    for (k, ids) in &after.still {
+        println!("  not within reach: {k}: {}", ids.len());
+        let mut by: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for i in ids {
+            let (thing, why) = i.split_once(" by ").unwrap();
+            let what = why.rsplit_once(" cd:").map_or(why, |(w, _)| w);
+            by.entry(what.to_owned())
+                .or_default()
+                .push(thing.to_owned());
+        }
         for (what, things) in by {
             println!("    {what}: {} {}", things.len(), things.join(" "));
         }

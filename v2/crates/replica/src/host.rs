@@ -109,6 +109,11 @@ pub trait Host {
     }
     /// An answer about geometry, in integers, or none.
     fn ask(&self, q: &Ask) -> Option<Answer>;
+    /// Where the body may stand within `reach` of `at` (µm, the frame of the node it stands on) to act there (C15,
+    /// #3447): `at` itself, else the nearest such place; `None` when there is none, or the world does not say.
+    fn stand_near(&self, _at: Vec3, _reach: i64) -> Option<Vec3> {
+        None
+    }
     /// A timer on the body, due `after` microseconds of world time from now, named for what it is for (T6 rule 15).
     fn set_timer(&mut self, after: Micros, name: Name) -> Id;
     /// Clears a timer the skill set (fired or cancelled).

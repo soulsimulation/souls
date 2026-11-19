@@ -20,6 +20,10 @@
 //! - **Released** when its holder no longer asks for it: it left (its mark asks for another target or none,
 //!   `spot-left`) or its order ended (no mark, `order-ended`).
 //!
+//! - **A place to act from** (C15, #3447, [`within`]). A form's walk to a point a body cannot stand on goes to the
+//!   nearest place within the body's reach of it, by the same rule on finer rings ([`REACH_PITCH`]), held by no one:
+//!   the act is brief, and the walk keeps bodies apart.
+//!
 //! Refusals: `spot-none-near` (no walkable place on the rings), `spot-none-free` (every place held or out of reach).
 //! Not here: seats (B3), facing (B11), formations and conversation circles, spots described in words (E2), perches
 //! and staying in a doorway or on a stair (E3), spots by a thing's kind (K3).
@@ -250,6 +254,69 @@ impl Table {
     }
 }
 
+/// Between the rings [`within`] tries, and between neighbouring places on a ring, µm.
+pub const REACH_PITCH: i64 = 100_000;
+
+/// Where a body may stand to act at `target` (C15, #3447): the target itself when a body may stand there; else the
+/// nearest place within `reach` of it, on rings [`REACH_PITCH`] apart (`⌊2πk⌋` places on ring `k`), on walkable
+/// ground and out of doorways and off stairs, as a table's places are. Nearest as a table's nearest: the least walk
+/// from `from` (the asker's node and where it stands) plus [`WEIGHT`] times the place's gap to the target, ties by
+/// (ring, place), a place with no walk there skipped; with no `from`, by the gap alone. `None` when no place is.
+pub fn within(
+    g: &mut dyn Ground,
+    target: Target,
+    reach: i64,
+    from: Option<(Id, Vec3)>,
+) -> Option<Vec3> {
+    let t = target.point();
+    if g.stand(target.node, t).is_some() {
+        return Some(t);
+    }
+    let from = from.and_then(|(node, p)| Some((node, p, g.stand(node, p)?.1)));
+    // Places by a bound below their cost: the straight way there plus the weighted gap.
+    let mut order: Vec<(i64, i64, i64, Vec3)> = Vec::new();
+    for ring in 1..=reach / REACH_PITCH {
+        let n = 6_283 * ring / 1_000;
+        for k in 0..n {
+            let off = Quat::from_yaw_mdeg(k * 360_000 / n)
+                .and_then(|q| q.rotate(Vec3::new(0, 0, ring * REACH_PITCH)))
+                .unwrap_or(Vec3::ZERO);
+            let Some((at, world)) = g.stand(target.node, Vec3::new(t.x + off.x, t.y, t.z + off.z))
+            else {
+                continue;
+            };
+            if g.passage(target.node, at) {
+                continue;
+            }
+            let gap = WEIGHT * flat(at, t);
+            order.push((
+                gap + from.map_or(0, |(_, _, a)| flat(world, a)),
+                ring,
+                k,
+                at,
+            ));
+        }
+    }
+    order.sort_unstable_by_key(|&(bound, ring, k, _)| (bound, ring, k));
+    let Some((node, p, _)) = from else {
+        return order.first().map(|o| o.3);
+    };
+    let mut best: Option<(i64, i64, i64, Vec3)> = None;
+    for (bound, ring, k, at) in order {
+        if best.is_some_and(|b| bound > b.0) {
+            break;
+        }
+        let Some(walk) = g.walk(node, p, target.node, at) else {
+            continue;
+        };
+        let key = (walk + WEIGHT * flat(at, t), ring, k, at);
+        if best.is_none_or(|b| (key.0, key.1, key.2) < (b.0, b.1, b.2)) {
+            best = Some(key);
+        }
+    }
+    best.map(|b| b.3)
+}
+
 impl Spots {
     pub fn new() -> Spots {
         Spots::default()
@@ -357,3 +424,6 @@ impl Spots {
         refused.map_or(Ok(()), Err)
     }
 }
+
+#[cfg(test)]
+mod tests;

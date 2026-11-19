@@ -1011,6 +1011,25 @@ impl View<'_> {
         Ok(c)
     }
 
+    /// Where a body may stand within `reach` of `at` (µm, `node`'s frame) to act there, for `from` (C15, #3447):
+    /// [`crate::spots::within`] over this town's ground.
+    pub fn stand_near(&self, node: Id, at: Vec3, reach: i64, from: Option<&Body>) -> Option<Vec3> {
+        let (map, from) = (
+            &mut **self.map.borrow_mut(),
+            from.map(|b| (node_of(b), b.pose.position)),
+        );
+        let (tree, surfaces, buildings, ground) =
+            (self.tree, self.surfaces, self.buildings, self.ground);
+        let mut g = Grounds {
+            tree,
+            map,
+            surfaces,
+            buildings,
+            ground,
+        };
+        crate::spots::within(&mut g, Target::new(node, at), reach, from)
+    }
+
     /// The planning call (#3167): the line from where `body` stands toward `to` on its node, `[here, to]` when a
     /// straight walk reaches `to`, else the first line of N5's route there. Counted. It reads the body's place, the
     /// surfaces, the map and the tree and writes only the map's caches, so the world's tick (K18, #3160) may run it
