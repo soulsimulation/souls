@@ -18,7 +18,7 @@ use replica::rules::json::{self, parse};
 use replica::time::Micros;
 use replica::tree::{Rules, Tree};
 use replica::world_model::{parse_kinds, parse_world};
-use skills::form_runner::{Limits, bind, bind_effects_with};
+use skills::form_runner::{Limits, bind, bind_effects_all, bind_effects_with};
 
 use super::amounts::View;
 use super::{Asked, Forms, Intent, World};
@@ -42,8 +42,11 @@ const ENTRY: &str = r#"{
   "kind": "f4:vessel",
   "owner": "thing",
   "state": {
-    "amount": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 1000, "audience": { "rule": "everyone" } }
+    "amount": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 1000, "audience": { "rule": "everyone" } },
+    "mood": { "n": 2, "type": "enum", "values": ["calm", "sad"], "default": "calm", "audience": { "rule": "everyone" } },
+    "words": { "n": 3, "type": "text", "default": "", "audience": { "rule": "everyone" } }
   },
+  "links": { "user": { "n": 1, "from": "body", "most": 1, "audience": { "rule": "everyone" } } },
   "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] } },
   "slots": { "rest": { "admits": "thing" } },
   "forms": {
@@ -60,7 +63,34 @@ const ENTRY: &str = r#"{
     "make_set": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
       "effects": [{ "change": "create", "kind": "KIND", "into": "rest", "event": "made" }] },
     "remove": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
-      "effects": [{ "change": "remove", "what": { "arg": "other" }, "event": "used_up" }] }
+      "effects": [{ "change": "remove", "what": { "arg": "other" }, "event": "used_up" }] },
+    "begin": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "link", "link": "user", "from": "actor", "event": "begun" },
+        { "change": "set", "field": "mood", "to": "sad", "event": "saddened" },
+        { "change": "timer", "form": "calm_down", "after_us": 1000000, "event": "will_calm" }] },
+    "end": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "unlink", "link": "user", "from": "actor", "event": "ended" },
+        { "change": "set", "field": "mood", "to": "calm", "event": "calmed" }] },
+    "free_all": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "unlink", "link": "user", "from": "all", "event": "freed" }] },
+    "calm_down": { "who": "world", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "set", "field": "mood", "to": "calm", "event": "calmed" }] },
+    "write": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }], "takes": { "words": { "type": "text" } },
+      "effects": [{ "change": "set", "field": "words", "to": { "arg": "words" }, "event": "written" }] },
+    "wipe": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "set", "field": "words", "to": null, "event": "wiped" }] },
+    "hold_long": { "who": "anyone", "steps": [{ "step": "wait", "us": 5000000 }],
+      "effects": [{ "change": "link", "link": "user", "from": "actor", "event": "begun" }] },
+    "lift_other": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "reparent", "what": { "arg": "other" }, "into": "actor_hand", "event": "lifted" }] },
+    "stay": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": "here", "event": "stayed" }] },
+    "sit_in": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": "rest", "event": "sat" }] },
+    "grieve": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "set", "field": "mood", "to": "angry", "event": "angered" }] },
+    "overfill": { "who": "anyone", "steps": [{ "step": "wait", "us": 50000 }],
+      "effects": [{ "change": "set", "field": "amount", "to": 5000, "event": "overfilled" }] }
   }
 }"#;
 
@@ -187,6 +217,8 @@ struct Bench {
     bodies: Vec<Id>,
     ground: BTreeMap<Id, Surface>,
     now: Micros,
+    /// Each committed part's length, in order (C24's replay).
+    parts: Vec<usize>,
 }
 
 fn surface() -> Surface {
@@ -258,6 +290,7 @@ impl Bench {
             bodies: (0..bodies).map(|b| id(2 + b)).collect(),
             ground: BTreeMap::from([(id(1), surface())]),
             now: 0,
+            parts: Vec::new(),
         };
         b.restart(Forms::new());
         // The starting amounts, written by the world.
@@ -353,6 +386,7 @@ impl Bench {
                 )
             });
         self.next += entries.len() as u64;
+        self.parts.push(entries.len());
         self.log.extend(entries);
     }
 
@@ -791,4 +825,186 @@ fn a3_a_made_thing_appears_where_its_form_names_and_a_place_not_free_is_refused(
     let (how, made) = run(&mut b, "make_set");
     println!("make into the taken slot: {how}");
     assert_eq!((how.as_str(), made.len()), ("slot-occupied", 0));
+}
+
+/// Starts `form` of `entry` by `body` at `node` with thing argument `other` and value arguments `vals` (C24).
+#[allow(clippy::too_many_arguments)]
+fn start(
+    b: &mut Bench,
+    entry: &json::Value,
+    body: Id,
+    node: Id,
+    form: &str,
+    other: Id,
+    vals: &[(&str, Value)],
+    n: u64,
+) -> Result<(), String> {
+    let things = BTreeMap::from([("other".to_owned(), other)]);
+    let vals = vals
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), v.clone()))
+        .collect();
+    let effects = bind_effects_all(entry, form, &things, &BTreeMap::new(), &vals)
+        .map_err(|r| r.name.to_owned())?;
+    let steps = bind(entry, form).map_err(|r| r.name.to_owned())?;
+    let now = b.now;
+    let (mut w, forms) = b.world();
+    let started = forms.start(
+        &mut w,
+        body,
+        node,
+        intent(body, n),
+        steps,
+        effects,
+        Limits::default(),
+        now,
+    );
+    assert!(matches!(started, Ok(Asked::Started(_))), "{started:?}");
+    Ok(())
+}
+
+/// C24 (#3495) A1, A2, A3: link, unlink (the actor's and all), a timer, a set to an enum value and to text (and
+/// cleared), a reparent of a thing into the hand and of the actor `here`, each applied through the forms' commit
+/// path onto a real tree; each refused by name where it cannot be (`already-linked`, `link-full`, `not-linked`,
+/// `not-allowed`, `out-of-range`, `body-moves-by-step`, BUILDSAFE's `thing-reserved`); then the log, replayed part by
+/// part onto a fresh tree, gives the same tree.
+#[test]
+fn c24_every_effect_content_uses_applies_and_a_replay_gives_the_same_tree() {
+    let mut b = Bench::new(2, 2, &[0]);
+    let entry = b.entry.clone();
+    let (b0, b1, a, other) = (id(2), id(3), id(100), id(101));
+    let ns = b.full.split(':').next().expect("a namespace").to_owned();
+    let mut n = 100;
+    let mut run = |b: &mut Bench, body: Id, form: &str, vals: &[(&str, Value)]| {
+        n += 1;
+        start(b, &entry, body, a, form, other, vals, n)?;
+        while !b.p.forms.is_empty() {
+            b.tick();
+            b.flush();
+        }
+        let e = b.p.forms.ended.pop().expect("ended");
+        Ok::<String, String>(e.how.as_str().to_owned())
+    };
+    let field = |b: &Bench, f: u64| {
+        b.tree
+            .node(b.tree.handle(a).expect("a"))
+            .expect("a node")
+            .fields()
+            .get(&f)
+            .cloned()
+    };
+    let users = |b: &Bench| -> Vec<Id> {
+        b.tree
+            .links_at(a)
+            .iter()
+            .filter(|e| b.tree.ty(e).as_str() == format!("{ns}:user"))
+            .map(|e| e.other)
+            .collect()
+    };
+    let timers = |b: &Bench| -> Vec<(Micros, String)> {
+        b.tree
+            .timers()
+            .values()
+            .filter(|t| t.node == a)
+            .map(|t| (t.due, t.name.as_str().to_owned()))
+            .collect()
+    };
+    let text =
+        |t: &str| Value::Text(replica::encode::Name::new(&format!("{ns}:{t}")).expect("a name"));
+
+    // Bound with what the field allows, or refused by name.
+    assert_eq!(run(&mut b, b0, "grieve", &[]), Err("not-allowed".into()));
+    assert_eq!(run(&mut b, b0, "overfill", &[]), Err("out-of-range".into()));
+    assert_eq!(
+        run(&mut b, b0, "sit_in", &[]),
+        Err("body-moves-by-step".into())
+    );
+    assert_eq!(run(&mut b, b0, "write", &[]), Err("arg-missing".into()));
+    assert_eq!(
+        run(&mut b, b0, "write", &[("words", text("not_a_reference"))]),
+        Err("not-allowed".into())
+    );
+
+    // A link, a set to a value and a timer, one effect each.
+    let at = b.now;
+    assert_eq!(run(&mut b, b0, "begin", &[]), Ok("done".into()));
+    println!(
+        "begin: users {:?}, mood {:?}, timers {:?}",
+        users(&b),
+        field(&b, 2),
+        timers(&b)
+    );
+    assert_eq!(users(&b), vec![b0]);
+    assert_eq!(field(&b, 2), Some(text("sad")));
+    let first = timers(&b);
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].1, format!("{ns}:calm_down"));
+    assert!(first[0].0 > at + 1_000_000 && first[0].0 <= b.now + 1_000_000);
+    // A second link by the same body, one past the type's most, and an unlink with none are refused by name.
+    assert_eq!(run(&mut b, b0, "begin", &[]), Ok("already-linked".into()));
+    assert_eq!(run(&mut b, b1, "begin", &[]), Ok("link-full".into()));
+    assert_eq!(run(&mut b, b1, "end", &[]), Ok("not-linked".into()));
+    // The actor's unlink, then a new link whose timer replaces the one pending.
+    assert_eq!(run(&mut b, b0, "end", &[]), Ok("done".into()));
+    assert_eq!((users(&b), field(&b, 2)), (vec![], Some(text("calm"))));
+    assert_eq!(run(&mut b, b1, "begin", &[]), Ok("done".into()));
+    let second = timers(&b);
+    println!("a second begin: timers {second:?}");
+    assert_eq!(second.len(), 1, "the pending timer is replaced");
+    assert_ne!(second, first);
+    assert_eq!(run(&mut b, b0, "free_all", &[]), Ok("done".into()));
+    assert!(users(&b).is_empty());
+
+    // Text: a reference from the text store, then cleared.
+    let reference = Value::Bytes(vec![7; 24]);
+    assert_eq!(
+        run(&mut b, b0, "write", &[("words", reference.clone())]),
+        Ok("done".into())
+    );
+    assert_eq!(field(&b, 3), Some(reference));
+    assert_eq!(run(&mut b, b0, "wipe", &[]), Ok("done".into()));
+    assert_eq!(field(&b, 3), Some(Value::Bytes(Vec::new())));
+    assert_eq!(run(&mut b, b0, "stay", &[]), Ok("done".into()));
+
+    // BUILDSAFE: a thing another run holds is refused, not moved from under it; once free it moves into the hand.
+    start(&mut b, &entry, b1, other, "hold_long", other, &[], 900).expect("started");
+    start(&mut b, &entry, b0, a, "lift_other", other, &[], 901).expect("started");
+    let mut lifted = None;
+    while lifted.is_none() {
+        b.tick();
+        b.flush();
+        lifted =
+            b.p.forms
+                .ended
+                .iter()
+                .find(|e| e.body == b0)
+                .map(|e| e.how.as_str().to_owned());
+    }
+    println!("lift a thing another run holds: {lifted:?}");
+    assert_eq!(lifted.as_deref(), Some("thing-reserved"));
+    while !b.p.forms.is_empty() {
+        b.tick();
+        b.flush();
+    }
+    b.p.forms.ended.clear();
+    assert_eq!(run(&mut b, b0, "lift_other", &[]), Ok("done".into()));
+    let held = b
+        .tree
+        .node(b.tree.handle(other).expect("other"))
+        .expect("a node");
+    assert_eq!(held.parent(), Some(b0));
+
+    // The log replayed part by part onto a fresh tree gives the same tree.
+    let mut fresh = Bench::new(2, 2, &[0]);
+    let mut from = b.parts[0];
+    for len in b.parts[1..].to_vec() {
+        fresh.commit(b.log[from..from + len].to_vec());
+        from += len;
+    }
+    println!(
+        "replayed {} parts, {} entries",
+        b.parts.len() - 1,
+        b.log.len() - b.parts[0]
+    );
+    assert_eq!(fresh.tree.to_state(), b.tree.to_state());
 }

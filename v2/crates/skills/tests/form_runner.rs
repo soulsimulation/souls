@@ -292,3 +292,84 @@ fn c17_a_sit_step_binds_its_slot_and_posture_and_runs_through_the_seat() {
     let end = r.wake(&mut h, Woke::Moved(Name::new("done").unwrap()));
     assert_eq!(ended(&end), Some("done"));
 }
+
+/// C24 (#3495): every effect kind content uses binds: a link and an unlink by the kind's link type, a timer by its
+/// form, a set with a rate on a timed field (with and without its value), a reparent of a thing into the hand or a
+/// slot as a take or a put, of the actor `here`; and each is refused by name where it cannot be.
+#[test]
+fn c24_link_unlink_timer_timed_set_and_reparent_bind_or_are_refused_by_name() {
+    use skills::form_runner::{Effect, Of, bind_effects};
+    let entry = parse(
+        r#"{"format":"souls-entry/1","kind":"t:x",
+        "state":{"level":{"n":1,"type":"timed","unit":"g","default":{"value":40,"per_s":-5,"set_us":0},"min":0,"max":100}},
+        "links":{"user":{"n":1,"from":"soul","most":2},"owner":{"n":2,"from":"soul","most":1}},
+        "slots":{"rest":{"admits":"thing"}},
+        "forms":{
+          "a":{"steps":[{"step":"wait","us":1}],"effects":[
+            {"change":"link","link":"user","from":"actor"},{"change":"unlink","link":"owner","from":"all"},
+            {"change":"timer","form":"b","after_us":5},
+            {"change":"set","field":"level","to":100,"rate":-5},{"change":"set","field":"level","rate":2},
+            {"change":"reparent","what":"this","into":"actor_hand"},{"change":"reparent","what":"this","into":"rest"},
+            {"change":"reparent","what":"actor","into":"here"}]},
+          "b":{"steps":[{"step":"wait","us":1}]},
+          "no_link":{"steps":[{"step":"wait","us":1}],"effects":[{"change":"link","link":"friend","from":"actor"}]},
+          "no_form":{"steps":[{"step":"wait","us":1}],"effects":[{"change":"timer","form":"zz","after_us":5}]},
+          "over":{"steps":[{"step":"wait","us":1}],"effects":[{"change":"set","field":"level","to":101,"rate":0}]},
+          "down":{"steps":[{"step":"wait","us":1}],"effects":[{"change":"reparent","what":"this","into":"here"}]}}}"#,
+    )
+    .expect("JSON");
+    let name = |t: &str| Name::new(t).unwrap();
+    let three = replica::timed::Timed {
+        value: 40,
+        per_s: -5,
+        set_us: 0,
+    };
+    let bounds = replica::timed::Bounds {
+        min: Some(0),
+        max: Some(100),
+    };
+    assert_eq!(
+        bind_effects(&entry, "a").expect("binds"),
+        vec![
+            Effect::Link {
+                ty: name("t:user"),
+                soul: true,
+                most: Some(2)
+            },
+            Effect::Unlink {
+                ty: name("souls:owns"),
+                soul: true,
+                all: true
+            },
+            Effect::Timer {
+                form: name("t:b"),
+                after: 5
+            },
+            Effect::Timed {
+                field: 1,
+                to: Some(100),
+                per_s: -5,
+                default: three,
+                bounds
+            },
+            Effect::Timed {
+                field: 1,
+                to: None,
+                per_s: 2,
+                default: three,
+                bounds
+            },
+            Effect::Take { what: Of::This },
+            Effect::Put {
+                what: Of::This,
+                slot: 1
+            },
+            Effect::Here,
+        ]
+    );
+    let refused = |form: &str| bind_effects(&entry, form).unwrap_err().name;
+    assert_eq!(refused("no_link"), "link-unknown");
+    assert_eq!(refused("no_form"), "form-unknown");
+    assert_eq!(refused("over"), "out-of-range");
+    assert_eq!(refused("down"), "no-slot-here");
+}

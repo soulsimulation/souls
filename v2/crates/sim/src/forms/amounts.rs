@@ -16,18 +16,30 @@
 //! - **Remove** takes only a thing the node contains or the body holds (`not-held` otherwise), written by its own
 //!   entry; its subtree goes with it (T2).
 //!
+//! - **Links, timers, timed and named values, a body staying** (C24, #3495). A link is one `Link` change from the
+//!   actor (its Soul when the kind's link is from a soul) to the node, refused `already-linked` or past its most
+//!   `link-full`; an unlink ends the actor's (`not-linked` with none) or every end (`from: "all"`, refused
+//!   `thing-reserved` while another run holds the node). A timer is the node's timer record, clearing that form's timer
+//!   pending there. A timed set settles the value to the effect's instant and writes the three numbers. BUILDSAFE: a
+//!   take or put of a thing another run reserves, or one holding it, is refused `thing-reserved`, never moved from
+//!   under the body using it. The actor `here` moves nothing (`body-seated` while it is in a slot of the node).
+//!
 //! Not here: a source whose amount changes with time (F5's timed fields are not transferred), a thing made or set down
 //! where there is no slot (E4), the second hand a two-handed thing fills (B4's `free_hands` reads the zone's rules).
 
 use std::collections::BTreeMap;
 
-use replica::effects::{Body, Change, ChangeRec, Effect, Header, Refusal, Rest, TransferRec};
+use replica::effects::{
+    Body, Change, ChangeRec, Effect, Header, Refusal, Rest, TimerRec, TransferRec,
+};
 use replica::encode::{Name, Value};
 use replica::ids::{Id, Minter};
 use replica::kinds::Kinds;
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
+use replica::time::Micros;
+use replica::timed::Timed;
 use replica::tree::Tree;
-use replica::world_model::{Audience, plain, show};
+use replica::world_model::{Audience, End, plain, show};
 use skills::form_runner::{Amount, Effect as Bound, Of, Place};
 
 use crate::slots::{Entry, in_slot, transfer};
@@ -215,6 +227,73 @@ impl View<'_> {
             .map_or(Audience::Everyone, |n| n.audience())
     }
 
+    /// Field `field` of `node` as written: the last value written this tick, else the tree's (C24).
+    pub fn field(&self, node: Id, field: u64) -> Option<Value> {
+        let written = self.changes().find_map(|c| match c {
+            Change::Set {
+                node: n,
+                field: f,
+                to,
+                ..
+            } if *n == node && *f == field => Some(to.clone()),
+            _ => None,
+        });
+        written.or_else(|| {
+            let n = self.tree.node(self.tree.handle(node)?)?;
+            n.fields().get(&field).cloned()
+        })
+    }
+
+    /// The links of type `ty` at `node`, with their other ends: the tree's, then those written this tick (C24).
+    pub fn links(&self, node: Id, ty: &Name) -> Vec<(Id, Id)> {
+        let mut all: Vec<(Id, Id)> = self
+            .tree
+            .links_at(node)
+            .iter()
+            .filter(|e| self.tree.ty(e) == ty)
+            .map(|e| (e.link, e.other))
+            .collect();
+        for c in self.out.iter().flat_map(Effect::changes) {
+            match &c.change {
+                Change::Link {
+                    link, ty: t, ends, ..
+                } if t == ty && ends.contains(&node) => {
+                    let other = if ends[0] == node { ends[1] } else { ends[0] };
+                    all.push((*link, other));
+                }
+                Change::Unlink { link } => all.retain(|(l, _)| l != link),
+                _ => {}
+            }
+        }
+        all
+    }
+
+    /// The timers pending on `node` named `name`: the tree's, then those set and cleared this tick (C24).
+    pub fn timers(&self, node: Id, name: &Name) -> Vec<Id> {
+        let mut all: Vec<Id> = self
+            .tree
+            .timers()
+            .iter()
+            .filter(|(_, t)| t.node == node && &t.name == name)
+            .map(|(id, _)| *id)
+            .collect();
+        for e in self.out {
+            let Body::Timers(ts) = &e.body else { continue };
+            for t in ts {
+                match t {
+                    TimerRec::Set { timer, name: n, .. }
+                        if e.envelope.node == node && n == name =>
+                    {
+                        all.push(*timer);
+                    }
+                    TimerRec::Clear { timer } => all.retain(|t| t != timer),
+                    _ => {}
+                }
+            }
+        }
+        all
+    }
+
     /// Field `field` of `node`: the last value written, else the tree's, else `None` (the kind's default).
     pub fn amount(&self, node: Id, field: u64) -> Option<i64> {
         let written = self.changes().find_map(|c| match c {
@@ -247,6 +326,8 @@ pub(super) struct Cx<'a> {
     pub node: Id,
     /// The things other runs reserve: none is removed, nor anything holding one.
     pub reserved: &'a [Id],
+    /// The effect's instant, world time (C24: a timed field settles to it, a timer counts from it).
+    pub now: Micros,
 }
 
 fn set(node: Id, field: u64, to: i64, by: i64) -> Entry {
@@ -353,6 +434,11 @@ impl Cx<'_> {
             Bound::Make { .. } => vec![self.node],
             Bound::Remove { what } | Bound::Take { what } => vec![self.of(*what)],
             Bound::Put { what, .. } => vec![self.of(*what), self.node],
+            Bound::Link { .. }
+            | Bound::Unlink { .. }
+            | Bound::Timer { .. }
+            | Bound::Timed { .. }
+            | Bound::Here => Vec::new(),
         };
         let missing = |t: &Id| self.view.at(*t).is_none() || self.view.removed(*t);
         if let Some(t) = named.iter().find(|t| missing(t)) {
@@ -493,6 +579,7 @@ impl Cx<'_> {
             }
             Bound::Take { what } => {
                 let thing = self.of(*what);
+                self.not_in_use(thing)?;
                 let to = self.free_hand()?;
                 self.transfer(m, thing, to)
             }
@@ -519,9 +606,160 @@ impl Cx<'_> {
                         format!("{} is {} or in it", show(self.node), show(thing)),
                     );
                 }
+                self.not_in_use(thing)?;
                 let to = self.free_slot(*slot)?;
                 self.transfer(m, thing, to)
             }
+            Bound::Link { ty, soul, most } => {
+                let from = self.actor(*soul);
+                let ends = self.view.links(self.node, ty);
+                if ends.iter().any(|(_, o)| *o == from) {
+                    return refuse(
+                        "already-linked",
+                        format!("{} to {}", ty.as_str(), show(self.node)),
+                    );
+                }
+                if most.is_some_and(|m| ends.len() as u64 >= m) {
+                    return refuse(
+                        "link-full",
+                        format!("{} of {} has {}", ty.as_str(), show(self.node), ends.len()),
+                    );
+                }
+                Ok(vec![self.changes(vec![Change::Link {
+                    link: mint(m)?,
+                    ty: ty.clone(),
+                    ends: [from, self.node],
+                    owner: End::Second,
+                    audience: Audience::Everyone,
+                }])])
+            }
+            Bound::Unlink { ty, soul, all } => {
+                let ends = self.view.links(self.node, ty);
+                let gone: Vec<Id> = if *all {
+                    // Every end freed changes what those bodies use (BUILDSAFE): refused while another run holds it.
+                    if self.reserved.contains(&self.node) {
+                        return refuse(
+                            "thing-reserved",
+                            format!("{} is held by another run", show(self.node)),
+                        );
+                    }
+                    ends.iter().map(|(l, _)| *l).collect()
+                } else {
+                    let from = self.actor(*soul);
+                    match ends.iter().find(|(_, o)| *o == from) {
+                        Some((l, _)) => vec![*l],
+                        None => {
+                            return refuse(
+                                "not-linked",
+                                format!("{} to {}", ty.as_str(), show(self.node)),
+                            );
+                        }
+                    }
+                };
+                Ok(vec![
+                    self.changes(
+                        gone.into_iter()
+                            .map(|link| Change::Unlink { link })
+                            .collect(),
+                    ),
+                ])
+            }
+            Bound::Timer { form, after } => {
+                let mut timers: Vec<TimerRec> = self
+                    .view
+                    .timers(self.node, form)
+                    .into_iter()
+                    .map(|timer| TimerRec::Clear { timer })
+                    .collect();
+                timers.push(TimerRec::Set {
+                    timer: mint(m)?,
+                    due: self.now.saturating_add(*after),
+                    name: form.clone(),
+                });
+                Ok(vec![(self.node, Audience::Everyone, Body::Timers(timers))])
+            }
+            Bound::Timed {
+                field,
+                to,
+                per_s,
+                default,
+                bounds,
+            } => {
+                let held = self
+                    .view
+                    .field(self.node, *field)
+                    .and_then(|v| Timed::from_value(&v))
+                    .unwrap_or(*default);
+                let now = held.at(*bounds, self.now).map_err(|e| Refusal {
+                    name: e.name(),
+                    detail: format!("field {field} of {}", show(self.node)),
+                })?;
+                let three = Timed {
+                    value: to.unwrap_or(now),
+                    per_s: *per_s,
+                    set_us: self.now,
+                };
+                Ok(vec![self.changes(vec![Change::Set {
+                    node: self.node,
+                    field: *field,
+                    to: three.to_value(),
+                    by: None,
+                }])])
+            }
+            Bound::Here => match self.view.at(self.body) {
+                Some(f) if f.node == self.node && f.slot.is_some() => refuse(
+                    "body-seated",
+                    format!(
+                        "{} is in a slot of {}: a rise stands it up",
+                        show(self.body),
+                        show(self.node)
+                    ),
+                ),
+                _ => Ok(vec![self.changes(Vec::new())]),
+            },
+        }
+    }
+
+    /// The actor's end of a link: its Soul (by `souls:body-of`) when the kind's link is from a soul and the body has
+    /// one, else the body.
+    fn actor(&self, soul: bool) -> Id {
+        let of = || {
+            self.view
+                .tree
+                .links_at(self.body)
+                .iter()
+                .find(|e| self.view.tree.ty(e).as_str() == super::BODY_OF)
+                .map(|e| e.other)
+        };
+        soul.then(of).flatten().unwrap_or(self.body)
+    }
+
+    /// One entry on the node holding `changes`.
+    fn changes(&self, changes: Vec<Change>) -> Entry {
+        (
+            self.node,
+            Audience::Everyone,
+            Body::Changes(
+                changes
+                    .into_iter()
+                    .map(|change| ChangeRec {
+                        change,
+                        rest: Rest::new(),
+                    })
+                    .collect(),
+            ),
+        )
+    }
+
+    /// BUILDSAFE for a take or a put (C24): a thing another run reserves, or one holding such a thing (a seat a body
+    /// uses, a bed it lies in), is refused `thing-reserved`, never moved from under it.
+    fn not_in_use(&self, thing: Id) -> R<()> {
+        match self.reserved.iter().find(|t| self.view.within(**t, thing)) {
+            Some(t) => refuse(
+                "thing-reserved",
+                format!("{} is held by another run", show(*t)),
+            ),
+            None => Ok(()),
         }
     }
 }

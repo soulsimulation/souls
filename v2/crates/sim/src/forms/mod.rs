@@ -737,6 +737,7 @@ impl Forms {
                 hands: &hands,
                 node: fr.node,
                 reserved: &reserved,
+                now: at,
             };
             let entries = match cx.entries(mint, e) {
                 Ok(x) => x,
@@ -1053,7 +1054,7 @@ pub fn span(steps: &[Step], limits: &Limits) -> Micros {
 }
 
 /// The type of a body's link to its Soul (contract T2).
-const BODY_OF: &str = "souls:body-of";
+pub(crate) const BODY_OF: &str = "souls:body-of";
 
 /// Who may, on the world's side (F6): whether `body` may do form `form` of `entry` at `node`, as the tree stands. The
 /// test is [`who_may::test`], the client's own. The actor's Soul is the far end of the body's `souls:body-of` link,

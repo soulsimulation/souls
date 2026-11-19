@@ -650,6 +650,7 @@ fn thing_args(intent: &Intent) -> acts::Args {
             && let [Value::Bytes(k), v] = kv.as_slice()
             && let Ok(k) = String::from_utf8(k.clone())
         {
+            args.values.insert(k.clone(), v.clone());
             if let Value::Uint(n) = v {
                 args.slots.insert(k, *n);
             } else if let Ok(id) = replica::effects::read_id(v) {

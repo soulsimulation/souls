@@ -54,6 +54,13 @@
 //!   A `walk_to` asks the world for its legs ([`Host::legs`]): the point carried onto the floor a body stands on and
 //!   the route there across doors and stairs; before a sit, to a place within [`SIT_REACH`] of the stand point.
 //!
+//! - **Every effect content uses** (C24, #3495). [`bind_effects_all`] also binds `link` and `unlink` from the actor
+//!   (or every end, `from: "all"`) by the kind's link type, `timer` (a form of the node started by the world later),
+//!   a set with a `rate` on a timed field (F5's three numbers), a set to an enum's value (a name in the kind's
+//!   namespace) or to text (a text-store reference from an argument, or cleared), each checked against the field
+//!   (`out-of-range`, `not-allowed`), and a `reparent` no step carries: a thing into the hand or a slot as a take or a
+//!   put, the actor `here`. A body moves into a slot only by a `sit` or `lie` step (`body-moves-by-step`).
+//!
 //! Not here: who may (F6), stages of long forms (F11), a thing made or set down where there is no slot (E4).
 
 use std::collections::BTreeMap;
@@ -329,6 +336,29 @@ pub enum Effect {
     Take { what: Of },
     /// A `put` step's transfer (B4's, at its contact): `what`, held by the body, into slot `slot` of the node.
     Put { what: Of, slot: u64 },
+    /// A link of type `ty` from the actor to the node (C24): from its Soul when the kind's link is `from` a soul and
+    /// the body has one, else from the body. At most `most` of that type on the node.
+    Link {
+        ty: Name,
+        soul: bool,
+        most: Option<u64>,
+    },
+    /// The actor's link of type `ty` to the node ends, or every link of that type on it (`all`, C24).
+    Unlink { ty: Name, soul: bool, all: bool },
+    /// Form `form` (`namespace:form`) of the node, started by the world `after` µs from now (C24); it replaces that
+    /// form's timer pending on the node.
+    Timer { form: Name, after: Micros },
+    /// A timed field (F5's three numbers) settled now and given rate `per_s`, from value `to` when given (C24).
+    Timed {
+        field: u64,
+        to: Option<i64>,
+        per_s: i64,
+        default: replica::timed::Timed,
+        bounds: replica::timed::Bounds,
+    },
+    /// The actor stands where it is (a `reparent` of the actor `here` that no step carries, C24): nothing moves, and
+    /// a body in a slot of the node is refused `body-seated` (a `rise` step stands it up).
+    Here,
 }
 
 /// A thing an effect names: the node the form is done at, or a thing argument, bound to its id.
@@ -402,10 +432,10 @@ fn slot_n(entry: &Value, slot: &str) -> Result<u64, Refusal> {
 
 /// Binds form `form`'s effects, all or none, with its thing arguments `args` (name to id): first each `take` or `put`
 /// step's transfer, in step order, then the form's `effects`: `set ... to` on the node, `transfer`, `create` into the
-/// actor's hand or a slot (`into`: `"actor_hand"` or a slot's name) and `remove`. Refused: `effect-not-built` for any
-/// other change (a `create` `here` is E4's), `field-unknown`, `slot-unknown`, `arg-missing`, `effect-malformed` for a
-/// value that is not a whole number or a flag (a flag is 0 or 1), or an amount that is not a whole number above zero
-/// or `"room"`.
+/// actor's hand or a slot (`into`: `"actor_hand"` or a slot's name), `remove`, and C24's ([`bind_effects_all`]).
+/// Refused: `effect-not-built` for any other change (a `create` `here` is E4's), `field-unknown`, `slot-unknown`,
+/// `arg-missing`, `out-of-range` and `not-allowed` for a value the field does not take, `effect-malformed` for a
+/// value that is no value at all, or an amount that is not a whole number above zero or `"room"`.
 pub fn bind_effects_with(
     entry: &Value,
     form: &str,
@@ -417,12 +447,132 @@ pub fn bind_effects_with(
 /// [`bind_effects_with`], with the form's slot arguments `slots` (name to slot number). A `put` names its slot, or a
 /// slot argument (`{"arg": a}`). A `take` or `put` with no `what` moves the thing the form's `reparent` effect names
 /// into the actor's hand (a take) or into that slot (a put), else the node itself; that `reparent` is the step's
-/// transfer, bound once (C12). A `reparent` no take or put carries is `effect-not-built`.
+/// transfer, bound once (C12). A `reparent` no take, put or sit carries is bound by [`bind_effects_all`] (C24).
 pub fn bind_effects_in(
     entry: &Value,
     form: &str,
     args: &BTreeMap<String, Id>,
     slots: &BTreeMap<String, u64>,
+) -> Result<Vec<Effect>, Refusal> {
+    bind_effects_all(entry, form, args, slots, &BTreeMap::new())
+}
+
+/// A set's value (C24), checked against the field's type in the kind's `state`: a flag, a whole number within the
+/// field's `min` and `max` (`out-of-range`), one of an enum's `values` (`not-allowed`), or for a text field a
+/// text-store reference (bytes) from an argument, or `null` to clear it (empty bytes; free words never enter the log,
+/// K16). `{"arg": a}` takes the value from `vals` (`arg-missing`).
+fn set_value(
+    entry: &Value,
+    field: &str,
+    to: &Value,
+    vals: &BTreeMap<String, encode::Value>,
+) -> Result<encode::Value, Refusal> {
+    let def = entry.get("state").and_then(|s| s.get(field));
+    let ty = def.and_then(|d| d.get("type")).and_then(Value::str);
+    let bound = |k: &str| match def.and_then(|d| d.get(k)) {
+        Some(Value::Int(n)) => i64::try_from(*n).ok(),
+        _ => None,
+    };
+    let int = |n: i64| match u64::try_from(n) {
+        Ok(u) => encode::Value::Uint(u),
+        Err(_) => encode::Value::Nint(n.unsigned_abs() - 1),
+    };
+    let not_allowed = |what: String| refuse("not-allowed", format!("{field}: {what}"));
+    if let Some(a) = to.get("arg").and_then(Value::str) {
+        let v = vals.get(a).ok_or_else(|| Refusal {
+            name: "arg-missing",
+            detail: a.to_owned(),
+        })?;
+        return match (ty, v) {
+            (Some("text"), encode::Value::Bytes(_)) => Ok(v.clone()),
+            (Some("enum"), encode::Value::Text(t)) => {
+                set_value(entry, field, &Value::Str(t.as_str().to_owned()), vals)
+            }
+            (Some("int" | "bool"), encode::Value::Uint(u)) => match i64::try_from(*u) {
+                Ok(n) => set_value(entry, field, &Value::Int(i128::from(n)), vals),
+                Err(_) => refuse("out-of-range", format!("{field}: {u}")),
+            },
+            (Some("int"), encode::Value::Nint(n)) => match i64::try_from(*n) {
+                Ok(n) => set_value(entry, field, &Value::Int(-1 - i128::from(n)), vals),
+                Err(_) => refuse("out-of-range", field.to_owned()),
+            },
+            _ => not_allowed(format!("{a} is not a value of type {}", ty.unwrap_or("?"))),
+        };
+    }
+    match (ty, to) {
+        // A value is written as a name in the kind's namespace (`eden:sad`): the log's only text is a name (rule 10).
+        (Some("enum"), Value::Str(s)) => {
+            let values = def
+                .and_then(|d| d.get("values"))
+                .and_then(Value::arr)
+                .unwrap_or(&[]);
+            let v = s.split_once(':').map_or(s.as_str(), |(_, v)| v);
+            let ns = entry
+                .get("kind")
+                .and_then(Value::str)
+                .and_then(|k| k.split_once(':'))
+                .map_or("souls", |(ns, _)| ns);
+            match Name::new(&format!("{ns}:{v}")) {
+                Some(n) if values.iter().any(|x| x.str() == Some(v)) => Ok(encode::Value::Text(n)),
+                _ => not_allowed(format!("{s} is not one of its values")),
+            }
+        }
+        (Some("text"), Value::Null) => Ok(encode::Value::Bytes(Vec::new())),
+        (Some("text"), _) => not_allowed("a text is a reference from an argument, or null".into()),
+        (_, Value::Bool(b)) => Ok(encode::Value::Uint(u64::from(*b))),
+        (Some("bool"), Value::Int(n)) if (0..=1).contains(n) => Ok(encode::Value::Uint(*n as u64)),
+        (_, Value::Int(n)) => {
+            let Ok(n) = i64::try_from(*n) else {
+                return refuse("effect-malformed", "set.to: out of range");
+            };
+            if bound("min").is_some_and(|m| n < m) || bound("max").is_some_and(|m| n > m) {
+                return refuse("out-of-range", format!("{field}: {n}"));
+            }
+            Ok(int(n))
+        }
+        _ => refuse(
+            "effect-malformed",
+            "set.to: a whole number, a flag, a value or text",
+        ),
+    }
+}
+
+/// The link type `t` of the kind (`<namespace>:t`, `souls:owns` for `owner`, as [`replica::audience::link_type`]
+/// reads it) and its declaration: whether it is from a soul, and its `most`. `link-unknown` when the kind does not
+/// declare it.
+fn link_of(entry: &Value, t: &str) -> Result<(Name, bool, Option<u64>), Refusal> {
+    let def = entry
+        .get("links")
+        .and_then(|l| l.get(t))
+        .ok_or_else(|| Refusal {
+            name: "link-unknown",
+            detail: t.to_owned(),
+        })?;
+    let kind = entry.get("kind").and_then(Value::str).unwrap_or("souls:");
+    let ty = a_name(&replica::audience::link_type(kind, t))?;
+    let most = match def.get("most") {
+        Some(Value::Int(n)) => u64::try_from(*n).ok(),
+        _ => None,
+    };
+    Ok((
+        ty,
+        def.get("from").and_then(Value::str) == Some("soul"),
+        most,
+    ))
+}
+
+/// [`bind_effects_in`], with the form's value arguments `vals` (name to value, C24): a set's `{"arg": a}`. Also bound
+/// here (C24): `link` and `unlink` from the actor (`from: "all"` ends every link of the type), `timer`, a set with a
+/// `rate` (a timed field), and a `reparent` no step carries: of a thing into the actor's hand (a take) or into a slot
+/// (a put), or of the actor `here` ([`Effect::Here`]). A reparent of the actor into a slot is a `sit` or `lie` step's
+/// hand-off and nothing else: without one it is refused `body-moves-by-step` (a body moves by its moves, never by an
+/// effect). A thing set down `here` is E4's (`no-slot-here`).
+pub fn bind_effects_all(
+    entry: &Value,
+    form: &str,
+    args: &BTreeMap<String, Id>,
+    slots: &BTreeMap<String, u64>,
+    vals: &BTreeMap<String, encode::Value>,
 ) -> Result<Vec<Effect>, Refusal> {
     let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
         return refuse("form-unknown", form);
@@ -482,19 +632,147 @@ pub fn bind_effects_in(
             continue;
         }
         let change = text(e.get("change"), "effect.change")?;
+        let int = |k: &str| match e.get(k) {
+            Some(Value::Int(n)) => i64::try_from(*n).ok(),
+            _ => None,
+        };
         out.push(match (change, e.get("to")) {
-            ("set", Some(to)) => {
-                let field = field_n(entry, text(e.get("field"), "effect.field")?)?;
-                let to = match to {
-                    Value::Bool(b) => encode::Value::Uint(u64::from(*b)),
-                    Value::Int(n) => match (u64::try_from(*n), i64::try_from(*n)) {
-                        (Ok(u), _) => encode::Value::Uint(u),
-                        (_, Ok(i)) => encode::Value::Nint(i.unsigned_abs() - 1),
-                        _ => return refuse("effect-malformed", "set.to: out of range"),
-                    },
-                    _ => return refuse("effect-malformed", "set.to: a whole number or a flag"),
+            ("set", _) if e.get("rate").is_some() => {
+                let name = text(e.get("field"), "effect.field")?;
+                let def = entry.get("state").and_then(|s| s.get(name));
+                let three = def.and_then(|d| d.get("default"));
+                let n3 = |k: &str| match three.and_then(|t| t.get(k)) {
+                    Some(Value::Int(n)) => i64::try_from(*n).ok(),
+                    _ => None,
                 };
-                Effect::Set { field, to }
+                let bound = |k: &str| match def.and_then(|d| d.get(k)) {
+                    Some(Value::Int(n)) => i64::try_from(*n).ok(),
+                    _ => None,
+                };
+                let (Some(per_s), Some(value), Some(rate), Some(set_us)) =
+                    (int("rate"), n3("value"), n3("per_s"), n3("set_us"))
+                else {
+                    return refuse(
+                        "effect-malformed",
+                        format!("set {name}: a timed field and a whole rate"),
+                    );
+                };
+                let to = match e.get("to") {
+                    None => None,
+                    Some(_) => Some(int("to").ok_or_else(|| Refusal {
+                        name: "effect-malformed",
+                        detail: "set.to: a whole number".into(),
+                    })?),
+                };
+                let bounds = replica::timed::Bounds {
+                    min: bound("min"),
+                    max: bound("max"),
+                };
+                if to.is_some_and(|t| {
+                    bounds.min.is_some_and(|m| t < m) || bounds.max.is_some_and(|m| t > m)
+                }) {
+                    return refuse("out-of-range", format!("{name}: {to:?}"));
+                }
+                Effect::Timed {
+                    field: field_n(entry, name)?,
+                    to,
+                    per_s,
+                    default: replica::timed::Timed {
+                        value,
+                        per_s: rate,
+                        set_us,
+                    },
+                    bounds,
+                }
+            }
+            ("set", Some(to)) => {
+                let name = text(e.get("field"), "effect.field")?;
+                let field = field_n(entry, name)?;
+                Effect::Set {
+                    field,
+                    to: set_value(entry, name, to, vals)?,
+                }
+            }
+            ("link" | "unlink", _) => {
+                let (ty, soul, most) = link_of(entry, text(e.get("link"), "link.link")?)?;
+                match (change, e.get("from").and_then(Value::str)) {
+                    ("link", Some("actor") | None) => Effect::Link { ty, soul, most },
+                    ("unlink", Some("actor") | None) => Effect::Unlink {
+                        ty,
+                        soul,
+                        all: false,
+                    },
+                    ("unlink", Some("all")) => Effect::Unlink {
+                        ty,
+                        soul,
+                        all: true,
+                    },
+                    _ => {
+                        return refuse(
+                            "effect-malformed",
+                            format!("{change}.from: \"actor\" or \"all\""),
+                        );
+                    }
+                }
+            }
+            ("timer", _) => {
+                let form = text(e.get("form"), "timer.form")?;
+                let after = int("after_us")
+                    .filter(|us| *us > 0)
+                    .ok_or_else(|| Refusal {
+                        name: "effect-malformed",
+                        detail: "timer.after_us: whole microseconds above zero".into(),
+                    })?;
+                if entry.get("forms").and_then(|fs| fs.get(form)).is_none() {
+                    return refuse("form-unknown", form);
+                }
+                let ns = entry
+                    .get("kind")
+                    .and_then(Value::str)
+                    .and_then(|k| k.split_once(':'))
+                    .map_or("souls", |(ns, _)| ns);
+                Effect::Timer {
+                    form: a_name(&format!("{ns}:{form}"))?,
+                    after,
+                }
+            }
+            ("reparent", _) => {
+                let into = e.get("into").ok_or_else(|| Refusal {
+                    name: "effect-malformed",
+                    detail: "reparent.into: a place".into(),
+                })?;
+                let actor = e.get("what").and_then(Value::str) == Some("actor");
+                match (actor, into.str()) {
+                    (true, Some("here")) => Effect::Here,
+                    (true, _) => {
+                        return refuse(
+                            "body-moves-by-step",
+                            "a body goes into a slot by a sit or lie step, not by an effect",
+                        );
+                    }
+                    (false, Some("actor_hand")) => Effect::Take {
+                        what: of(e.get("what"), args)?,
+                    },
+                    (false, Some("here")) => {
+                        return refuse(
+                            "no-slot-here",
+                            "a thing set down where there is no slot (E4)",
+                        );
+                    }
+                    (false, _) => {
+                        let slot = match into.get("arg").and_then(Value::str) {
+                            Some(a) => *slots.get(a).ok_or_else(|| Refusal {
+                                name: "arg-missing",
+                                detail: a.to_owned(),
+                            })?,
+                            None => slot_n(entry, text(Some(into), "reparent.into")?)?,
+                        };
+                        Effect::Put {
+                            what: of(e.get("what"), args)?,
+                            slot,
+                        }
+                    }
+                }
             }
             ("set", None) if e.get("by").is_some() => Effect::Add {
                 field: field_n(entry, text(e.get("field"), "effect.field")?)?,
