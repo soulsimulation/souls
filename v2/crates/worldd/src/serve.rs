@@ -5,7 +5,11 @@
 //!
 //! - `world.json`: `{"format": "souls/world/1", "name", "souls": [[counter, x mm, z mm], ...], "souls_scope",
 //!   "entry": [x mm, z mm]}`. The name is the world's instance name, `<lineage hex>-<zone scope hex>-<zone counter>`
-//!   (`worldd@<name>`); the entry is where Souls' bodies are born (C3), `seed`'s `--at`.
+//!   (`worldd@<name>`); the entry is where Souls' bodies are born (C3), `seed`'s `--at`. With
+//!   `"creator": "<32 hex>-<n>"` (`seed --creator`, G7b #3477) the world takes that creator's edit intents (G1b),
+//!   checked against its own kinds. `world.kinds` keeps the unchanged pinned kinds text and explicit
+//!   `# souls-boot-body <full place kind>` and `# souls-boot-activity <full place kind> <full activity pin>`
+//!   lines for the creator's local checks of the existing boot registrations and admissions.
 //! - `facts.json`: the facts file N1's exporter wrote (`v2/tools/import-eden`, or X6's `v2/tools/import-world` for a
 //!   live world). The world as built is read from it at each start: its header and the walkers' town.
 //! - `entries/`: the Soul Actions entries (`souls-entry/1`), one file each, read into the checkers' rules by kind.
@@ -70,7 +74,7 @@
 //! (the list's row for its lineage and zone, then that name's record, `directoryd::worlds::list::creator_of`), read
 //! at the start and again every 30 s. Only that creator's edits are taken, each judged by G2's rule on the town before
 //! it commits (`answers`'s edit checker); every other actor's, and every edit while the record names none, is refused
-//! `edit.not-the-creator`. Without a store the world takes no edits.
+//! `edit.not-the-creator`. Without a store, only an explicit `world.json` creator may edit a standalone seeded world.
 //!
 //! Not here: a G9 fork as a seed (a fork's checkpoint has no facts file for the walkers' town).
 
@@ -89,7 +93,7 @@ use archive::{Archiver, Shared};
 use directoryd::accounts::principal_text;
 use directoryd::directory::Directory;
 use directoryd::directory::store::{Object, Store, When};
-use directoryd::worlds::list::creator_of;
+use directoryd::worlds::list::creator_of as directory_creator_of;
 use replica::activity::{ActivityKind, Role};
 use replica::apply::Replica;
 use replica::bodies::{Class, Family, Resource, Want};
@@ -185,6 +189,8 @@ struct Built {
     root: Id,
     /// The world's rules (T2), for the engine's own acts (C2).
     rules: replica::tree::Rules,
+    /// The kind lines and boot body admissions the creator's client keeps (G7b, #3477).
+    kinds_text: String,
     /// A Soul's body kind, its full name (C3).
     body_kind: String,
     /// The activity kinds the engine runs (C30): the conversation's, then the entries'.
@@ -275,25 +281,45 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
     }
     // R1's replica starts a zone's root as the header's `souls:place` kind (as stream-check's Eden): one here,
     // admitting what the loader's world admits, so the log replays onto an empty replica.
-    im.rules.kinds.extend(
-        parse_kinds(&format!(
-            "{{1: \"souls:place\", 2: \"place\", 11: [\"{}\"]}}",
-            import_eden::GROUND
-        ))
-        .map_err(|e| format!("the root's kind: {e:?}"))?,
+    let root_kind = format!(
+        "{{1: \"souls:place\", 2: \"place\", 11: [\"{}\"]}}",
+        import_eden::GROUND
     );
-    // A Soul's body (C3): K10's `souls:body`, a family's node on the open ground holding a thing in each hand (B4).
-    let body =
-        parse_kinds("{1: \"souls:body\", 2: \"family\", 6: {1: [\"thing\"], 2: [\"thing\"]}}")
-            .map_err(|e| format!("the body's kind: {e:?}"))?;
+    im.rules
+        .kinds
+        .extend(parse_kinds(&root_kind).map_err(|e| format!("the root's kind: {e:?}"))?);
+    // Register and export the same generated body definition; pinned imported definitions keep their bytes.
+    let body_kind_text = "{1: \"souls:body\", 2: \"family\", 6: {1: [\"thing\"], 2: [\"thing\"]}}";
+    let body = parse_kinds(body_kind_text).map_err(|e| format!("the body's kind: {e:?}"))?;
     let body_kind = body.keys().next().cloned().ok_or("the body's kind")?;
     im.rules.kinds.extend(body);
+    let mut boot_body = Vec::new();
     for (name, kind) in im.rules.kinds.iter_mut() {
         if plain(name) == import_eden::GROUND {
             kind.children.insert("body".into());
+            boot_body.push(name.clone());
             for a in &activities {
                 kind.children.insert(plain(a.name.as_str()).to_owned());
             }
+        }
+    }
+    let mut kinds_text = String::new();
+    for line in im
+        .kind_lines
+        .iter()
+        .map(String::as_str)
+        .chain([root_kind.as_str(), body_kind_text])
+    {
+        kinds_text.push_str(line);
+        kinds_text.push('\n');
+    }
+    for name in boot_body {
+        kinds_text.push_str(&format!("# souls-boot-body {name}\n"));
+        for a in &activities {
+            kinds_text.push_str(&format!(
+                "# souls-boot-activity {name} {}\n",
+                a.name.as_str()
+            ));
         }
     }
     let (root, ground) = match (im.nodes.get("world"), im.nodes.get("ground")) {
@@ -327,9 +353,23 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
         ground,
         root,
         rules,
+        kinds_text,
         body_kind,
         activities,
     })
+}
+
+/// A world creator's principal as `world.json` and `seed --creator` write it, `<32 hex>-<counter>` (its grant is
+/// `creator-<32 hex>-<counter>`, G7b).
+fn creator_of(text: &str) -> R<Id> {
+    text.split_once('-')
+        .and_then(|(scope, n)| {
+            Id::new(
+                Scope(from_hex(scope).ok()?.try_into().ok()?),
+                n.parse().ok()?,
+            )
+        })
+        .ok_or_else(|| format!("a creator is <32 hex>-<counter>, not {text}"))
 }
 
 /// The world's instance name: `<lineage hex>-<zone scope hex>-<zone counter>`, the zone being the root.
@@ -419,7 +459,7 @@ pub fn seed(args: &[String]) -> i32 {
 fn seed_in(args: &[String]) -> R<String> {
     let (Some(facts), Some(dir)) = (arg(args, "--facts"), arg(args, "--dir")) else {
         return Err("usage: worldd seed --facts <facts.json> --dir <new folder> [--entries <dir>] [--souls <n>] \
-                    [--at <x m>,<z m>]"
+                    [--at <x m>,<z m>] [--creator <32 hex>-<n>]"
             .into());
     };
     let dir = PathBuf::from(dir);
@@ -487,9 +527,14 @@ fn seed_in(args: &[String]) -> R<String> {
     let n = log.append(built.part).map_err(refusal)?;
     log.wait_durable(n + 1).map_err(refusal)?;
     drop(log.close());
+    // The world's one creator (G7b), if named: `serve` takes its edits.
+    let creator = match arg(args, "--creator") {
+        Some(c) => format!(", \"creator\": \"{c}\"", c = creator_of(c).map(|_| c)?),
+        None => String::new(),
+    };
     let meta = format!(
         "{{\"format\": \"souls/world/1\", \"name\": \"{name}\", \"souls_scope\": \"{}\", \"souls\": [{}], \
-         \"entry\": [{}, {}]}}\n",
+         \"entry\": [{}, {}]{creator}}}\n",
         to_hex(&scope),
         rows.join(", "),
         (x * 1000.0) as i64,
@@ -814,7 +859,7 @@ fn off_machine(
 fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
     let store = supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?;
     let (lineage, zone) = (built.root.scope().0, built.header.zone);
-    let read = move || creator_of(&store, &lineage, zone);
+    let read = move || directory_creator_of(&store, &lineage, zone);
     let creator = Arc::new(Creator::new(read().map_err(refusal)?));
     let say = |c: Option<Id>| c.map_or_else(|| "none".to_owned(), principal_text);
     println!("creator: {}", say(creator.get()));
@@ -972,7 +1017,8 @@ fn serve(args: &[String]) -> R<()> {
     cfg.sky = Some(eden_sky(built.root.scope()));
     // The engine's own acts (C2) and the activities they run (C30).
     cfg.engine = Some((built.rules.clone(), built.activities.clone()));
-    // G1e (#3532): with a directory, the world's one creator edits it, as its record names it now.
+    // With a directory, its authoritative creator (including none) is always used; static metadata is only the
+    // standalone seeded-world fallback. Lookup failures have already refused startup above.
     if let Some(c) = creator {
         cfg.edits = Some(Editing {
             // Not read: the checker takes the creator from `cfg.creator`.
@@ -980,7 +1026,15 @@ fn serve(args: &[String]) -> R<()> {
             kinds: built.rules.kinds.clone(),
         });
         cfg.creator = Some(c);
+    } else if let Some(c) = meta.get("creator").and_then(Json::str) {
+        cfg.edits = Some(Editing {
+            creator: creator_of(c)?,
+            kinds: built.rules.kinds.clone(),
+        });
     }
+    let kinds_path = dir.join("world.kinds");
+    std::fs::write(&kinds_path, &built.kinds_text).map_err(io(&kinds_path))?;
+
     let (town, planner, ground) = (built.town, built.planner, built.ground);
 
     // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
@@ -1097,6 +1151,95 @@ fn serve(args: &[String]) -> R<()> {
         std::thread::spawn(move || answers::serve(door, stream));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn creator_export_preserves_pins_and_names_the_boot_body_admission() {
+        let facts = testworld::generate(1, 0).expect("test world").text;
+        let imported = import_eden::load(&facts).expect("loads");
+        let entries = vec![(
+            "creator:table".to_owned(),
+            replica::rules::json::parse(r#"{"roles":{"creator:a":{},"creator:b":{}}}"#)
+                .expect("roles"),
+        )];
+        let built = build(&facts, &entries).expect("builds");
+        assert_eq!(
+            built.activities.len(),
+            2,
+            "conversation and entry runtime pins"
+        );
+        let prefix = imported.kind_lines.join("\n") + "\n";
+        assert!(
+            built.kinds_text.starts_with(&prefix),
+            "imported kind bytes are unchanged"
+        );
+        let mut exported = std::collections::BTreeMap::new();
+        for line in built.kinds_text.lines() {
+            exported.extend(parse_kinds(line).expect("a kind or boot annotation"));
+            if let Some(projection) = line.strip_prefix("# souls-boot-activity ") {
+                let (target, activity) = projection.split_once(' ').expect("target and activity");
+                assert_eq!(exported[target].owner, "place");
+                exported.insert(
+                    activity.to_owned(),
+                    Kind {
+                        owner: "activity".into(),
+                        children: Default::default(),
+                        slots: Default::default(),
+                        hands: None,
+                    },
+                );
+            }
+        }
+        assert_eq!(
+            exported.keys().collect::<Vec<_>>(),
+            built.rules.kinds.keys().collect::<Vec<_>>(),
+            "exported pins match the runtime, including generated body and runtime activities"
+        );
+        assert_eq!(exported[&built.body_kind].owner, "family");
+        for a in &built.activities {
+            assert_eq!(
+                exported[a.name.as_str()],
+                built.rules.kinds[a.name.as_str()]
+            );
+        }
+        let extended: Vec<_> = built
+            .kinds_text
+            .lines()
+            .filter_map(|l| l.strip_prefix("# souls-boot-body "))
+            .collect();
+        let ground: Vec<_> = built
+            .rules
+            .kinds
+            .iter()
+            .filter(|(n, _)| plain(n) == import_eden::GROUND)
+            .collect();
+        assert_eq!(extended.len(), ground.len());
+        assert!(!extended.is_empty());
+        for (name, runtime) in ground {
+            assert!(runtime.children.contains("body"));
+            let mut projected = exported[name].clone();
+            projected.children.insert("body".into());
+            for a in &built.activities {
+                assert!(built.kinds_text.lines().any(
+                    |line| line == format!("# souls-boot-activity {name} {}", a.name.as_str())
+                ));
+                projected.children.insert(plain(a.name.as_str()).to_owned());
+            }
+            assert_eq!(&projected, runtime, "exact boot admission and Kind parity");
+            assert!(
+                !exported[name].children.contains("body"),
+                "the pinned definition itself was not rewritten"
+            );
+            assert!(
+                extended.contains(&name.as_str()),
+                "the exact runtime extension is explicit"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
