@@ -772,12 +772,36 @@ impl Forms {
         limits: Limits,
         now: Micros,
     ) -> Result<Asked, Refusal> {
+        let args = form_runner::Args::new();
+        self.commit_with(
+            w, audiences, names, body, node, entry, form, &args, intent, limits, now,
+        )
+    }
+
+    /// [`Forms::commit`] with the act's arguments `args` (F14, #3384), bound into the form's steps and effects
+    /// ([`form_runner::bind_with`], [`form_runner::bind_effects_args`]). Refused as [`Forms::commit`] is, and
+    /// `arg-missing` for an argument the form uses and the act does not give.
+    #[allow(clippy::too_many_arguments)]
+    pub fn commit_with<G: Geometry, R: Reach>(
+        &mut self,
+        w: &mut World<'_, G, R>,
+        audiences: &BTreeMap<Id, BTreeSet<Id>>,
+        names: &dyn Fn(Id) -> Option<String>,
+        body: Id,
+        node: Id,
+        entry: &replica::rules::json::Value,
+        form: &str,
+        args: &form_runner::Args,
+        intent: Intent,
+        limits: Limits,
+        now: Micros,
+    ) -> Result<Asked, Refusal> {
         // A long form (F11) binds as its stages; any other as its steps and effects.
         let bound = match bind_stages(entry, form)? {
             Some(stages) => Err(stages),
             None => Ok((
-                form_runner::bind(entry, form)?,
-                form_runner::bind_effects(entry, form)?,
+                form_runner::bind_with(entry, form, args)?,
+                form_runner::bind_effects_args(entry, form, args)?,
             )),
         };
         let known =
@@ -966,7 +990,9 @@ impl Forms {
                     return self.wake(w, run, Woke::Moved(name("move-unknown")), now);
                 };
                 let mut found = found.clone();
-                found.contact = at;
+                if let Some(at) = at {
+                    found.contact = at;
+                }
                 match w.moves.start(
                     w.controller,
                     w.due,

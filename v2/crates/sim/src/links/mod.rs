@@ -47,9 +47,10 @@
 //!   ground or dry ground meets swimming water, a [`Kind::Swim`] (`souls:swim`). No link of the tree (its id is
 //!   derived, [`shore_id`]): the routes find them along the edges the open ground's pieces share (`crate::routes`).
 //!
-//! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), rides (N12), a
+//! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), boarding a moving frame (N12, [`boarding`]), a
 //! locked door (the door's `locked` field is not read yet), the durable log (K4).
 
+pub mod boarding;
 pub mod turns;
 
 use crate::ground::scene::{DOORWAY, F_OPEN_DOOR_LINK, FLOOR, Terrain, Xform};
@@ -113,6 +114,9 @@ pub enum Kind {
     Wade,
     /// A shore between wading ground, or dry ground, and swimming water (N11c, #3218): no link of the tree, swum.
     Swim,
+    /// Between the ground at a stop and a moving frame's deck, crossable only while the frame stands at that stop
+    /// ([`boarding`], N12): walked.
+    Boarding,
 }
 
 impl Kind {
@@ -129,7 +133,7 @@ impl Kind {
     /// The move that crosses it (contract T4).
     pub fn move_name(self) -> &'static str {
         match self {
-            Kind::Doorway | Kind::Ramp | Kind::Step => "souls:walk",
+            Kind::Doorway | Kind::Ramp | Kind::Step | Kind::Boarding => "souls:walk",
             Kind::Stairs => "souls:stairs",
             Kind::Ladder => "souls:climb",
             Kind::Wade => "souls:wade",

@@ -617,12 +617,12 @@ fn stdin_lines() -> Receiver<String> {
     rx
 }
 
-/// `ops world <source|target> <dir> <bucket> <t0 µs> <machine> [--restart]`.
+/// `ops world <source|target> <dir> <bucket> <t0 µs> <machine> [--restart | --restore]`.
 pub fn run(args: &[String]) -> R<()> {
     let [role, dir, bucket, t0, machine, rest @ ..] = args else {
         return refuse(
             "usage",
-            "ops world <source|target> <dir> <bucket> <t0> <machine> [--restart]",
+            "ops world <source|target> <dir> <bucket> <t0> <machine> [--restart | --restore]",
         );
     };
     let dir = PathBuf::from(dir);
@@ -631,38 +631,46 @@ pub fn run(args: &[String]) -> R<()> {
         .or_else(|_| refuse("usage", "t0 is µs since 1970"))?;
     let machine = Name::new(machine).ok_or_else(|| err("usage", "a machine name"))?;
     let restart = rest.iter().any(|a| a == "--restart");
+    let restore = rest.iter().any(|a| a == "--restore");
     let store = Shared(Arc::new(Folder::new(PathBuf::from(bucket))));
     let scratch = dir.with_extension("scratch");
     let rx = stdin_lines();
     let mut wr;
-    if restart {
+    if restore {
+        wr = restore_world(store, machine, &dir, t0, &scratch)?;
+    } else if restart {
         wr = restart_world(store, machine, &dir, t0, &scratch)?;
     } else if role == "source" {
-        // A new world: built here, its build's parts the first records of the log.
-        wr = Writer::new(store, machine, &dir, t0, World::new());
-        wr.hook_log();
-        for _ in 0..ROOMS {
-            wr.w.room(10, THINGS);
-        }
-        let mut d = wr.directory();
-        d.set_build(&wr.lineage, wr.zone, &BUILD)?;
-        let claim = d.claim(&wr.lineage, wr.zone)?;
-        wr.claimed(claim);
-        wr.open_log(0)?;
-        let parts: Vec<Vec<u8>> = wr.queue_parts.borrow_mut().drain(..).collect();
-        let log = wr.log.as_mut().ok_or_else(|| err("no-log", ""))?;
-        for p in parts {
-            let acts = Part::read(&p)?.effects.len() as u64;
-            let record = log.append(p.clone())?;
-            wr.pending.push_back((record, p, acts, Vec::new(), 0));
-        }
-        wr.appended = wr.pending.len() as u64;
-        wr.open_shipper(0)?;
-        wr.start_clock(0);
+        wr = source_world(store, machine, &dir, t0)?;
     } else {
         wr = Writer::new(store, machine, &dir, t0, ids_world());
     }
     wr.serve(rx, &scratch)
+}
+
+/// A new world: built here, its build's parts the first records of the log, claimed and serving from tick 0.
+fn source_world(store: Bucket, machine: Name, dir: &Path, t0: u64) -> R<Writer> {
+    let mut wr = Writer::new(store, machine, dir, t0, World::new());
+    wr.hook_log();
+    for _ in 0..ROOMS {
+        wr.w.room(10, THINGS);
+    }
+    let mut d = wr.directory();
+    d.set_build(&wr.lineage, wr.zone, &BUILD)?;
+    let claim = d.claim(&wr.lineage, wr.zone)?;
+    wr.claimed(claim);
+    wr.open_log(0)?;
+    let parts: Vec<Vec<u8>> = wr.queue_parts.borrow_mut().drain(..).collect();
+    let log = wr.log.as_mut().ok_or_else(|| err("no-log", ""))?;
+    for p in parts {
+        let acts = Part::read(&p)?.effects.len() as u64;
+        let record = log.append(p.clone())?;
+        wr.pending.push_back((record, p, acts, Vec::new(), 0));
+    }
+    wr.appended = wr.pending.len() as u64;
+    wr.open_shipper(0)?;
+    wr.start_clock(0);
+    Ok(wr)
 }
 
 /// A world whose process died, rebuilt and claimed again: its log after its base record, and the bucket before it.
@@ -742,4 +750,157 @@ fn restart_world(store: Bucket, machine: Name, dir: &Path, t0: u64, scratch: &Pa
     wr.hook_log();
     wr.start_clock(last.map_or(0, |t| t + 1));
     Ok(wr)
+}
+
+/// O12 (#2807): a world from the bucket alone, on a machine that holds only the build and the bucket's credentials
+/// (`v2/docs/runbook/restore.md`). Fetch: the directory record, the checkpoint pointer, one checkpoint and the pieces
+/// after it ([`shipping::fetch`], each piece's CRC checked). Check: the checkpoint's records against their hashes and
+/// its tree against its root's state hashes (K5's restore), then the pieces replayed. Raise the epoch: a claim from
+/// the mark plus one, so a returning writer's mark is refused and its later pieces are ignored. The fetched records
+/// the new claim now holds (from its start, or from the piece the pointer resumes in if later) are shipped again
+/// under it, the last as one that waits for the mark, so a reader from the pointer finds them and the mark moves past
+/// them. Start: an empty log at the record after the last fetched, the clock at the tick after the last one a record
+/// names. Says `restored <records> <bytes fetched> <fetch ms> <check ms> <claim ms> <checkpoint hashes equal>
+/// <state hash>` before `claimed` and `serving`.
+fn restore_world(store: Bucket, machine: Name, dir: &Path, t0: u64, scratch: &Path) -> R<Writer> {
+    let t = unix_us();
+    let mut wr = Writer::new(store.clone(), machine, dir, t0, ids_world());
+    let (lineage, zone) = (wr.lineage, wr.zone);
+    let f = shipping::fetch(&store, &lineage, zone)?;
+    let fetched = unix_us();
+    let mut bytes = f.checkpoint.as_ref().map_or(0, |c| c.1.len() as u64);
+    for p in &f.pieces {
+        bytes += p.to_bytes()?.len() as u64;
+    }
+    let (mut records, mut equal, mut last) = (0, true, None);
+    if let Some((at, b)) = &f.checkpoint {
+        let _ = std::fs::remove_dir_all(scratch);
+        io(std::fs::create_dir_all(scratch))?;
+        io(std::fs::write(scratch.join(format!("ckpt-{at:020}")), b))?;
+        let r = sim::checkpoint::restore(scratch);
+        let _ = std::fs::remove_dir_all(scratch);
+        let Some(r) = r? else {
+            return refuse("checkpoint-missing", "the shipped checkpoint did not read");
+        };
+        // The one file: a rejection means it failed its hashes, and restore refuses it rather than pass it over.
+        equal = r.rejected.is_empty() && r.root.record == *at;
+        wr.w.tree = r.tree;
+        wr.blobs = Some(r.blobs);
+        records = r.root.record;
+    } else {
+        wr.w.tree = World::new().tree;
+    }
+    for p in &f.pieces {
+        if p.first + p.records.len() as u64 > records {
+            records = apply(&mut wr.w, p.first, &p.records, records, &mut last)?;
+        }
+    }
+    // The last tick a record names, though the checkpoint holds it (a tick with no acts writes no record).
+    if let Some(b) = f.pieces.last().and_then(|p| p.records.last())
+        && let Some(at) = Part::read(b)?.effects.iter().map(|e| e.envelope.at).max()
+    {
+        last = Some(last.map_or(tick_of(at), |l| l.max(tick_of(at))));
+    }
+    wr.appended = records;
+    wr.w.next = wr.w.tree.next();
+    let hash = version_of(&wr.w, records, last.unwrap_or(0))?.hash;
+    let checked = unix_us();
+    let mut d = wr.directory();
+    let claim = d.claim(&lineage, zone)?;
+    let from = claim.takeover.from;
+    let claimed = unix_us();
+    let ship_from = from.max(f.pieces.first().map_or(records, |p| p.first));
+    if ship_from > records {
+        return refuse(
+            "restore-gap",
+            format!("the claim starts at {from}; the bucket gave records to {records}"),
+        );
+    }
+    say(&format!(
+        "restored {records} {bytes} {} {} {} {equal} {hash}",
+        (fetched - t) / 1000,
+        (checked - fetched) / 1000,
+        (claimed - checked) / 1000
+    ));
+    wr.claimed(claim);
+    wr.open_log(records)?;
+    wr.open_shipper(ship_from)?;
+    if let Some((tx, _, _)) = &wr.ship {
+        for p in &f.pieces {
+            for (i, b) in p.records.iter().enumerate() {
+                let record = p.first + i as u64;
+                if record < ship_from {
+                    continue;
+                }
+                tx.send(Item {
+                    record,
+                    bytes: b.clone(),
+                    acts: Part::read(b)?.effects.len() as u64,
+                    // The last one waits for the mark: the mark moves past the records taken over.
+                    stakes: record + 1 == records,
+                })
+                .or_else(|_| refuse("ship-stopped", "the shipper stopped"))?;
+            }
+        }
+    }
+    wr.hook_log();
+    wr.start_clock(last.map_or(0, |t| t + 1));
+    Ok(wr)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn name(s: &str) -> Name {
+        Name::new(s).expect("a name")
+    }
+
+    /// O12 (#2807): a world restored from the bucket alone holds exactly the state its lost writer shipped, under a
+    /// raised epoch; the lost writer's next mark is refused; and the history the restore leaves reads from the bucket
+    /// through every record shipped.
+    #[test]
+    fn a_world_restores_from_the_bucket_alone() -> R<()> {
+        let root = std::env::temp_dir().join(format!("ops-o12-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let store = Shared(Arc::new(Folder::new(root.join("bucket"))));
+        let t0 = unix_us();
+        let mut a = source_world(store.clone(), name("machine-a"), &root.join("a"), t0)?;
+        for tick in 0..40u64 {
+            for agent in 0..20u32 {
+                a.intents
+                    .push_back((tick * 20 + u64::from(agent), agent + (tick % 5) as u32 * 20));
+            }
+            a.run_tick()?;
+            a.ack()?;
+        }
+        a.seal()?;
+        let shipped = version_of(&a.w, a.appended, a.tick - 1)?;
+        let mut stale = a.claim.clone().expect("a claim");
+        io(std::fs::remove_dir_all(root.join("a")))?;
+        let mut b = restore_world(
+            store.clone(),
+            name("machine-b"),
+            &root.join("b"),
+            t0,
+            &root.join("b.scratch"),
+        )?;
+        assert_eq!(b.appended, shipped.records);
+        assert_eq!(
+            version_of(&b.w, b.appended, shipped.tick)?.hash,
+            shipped.hash
+        );
+        assert_eq!((b.epoch, b.tick), (2, shipped.tick + 1));
+        let refused = a.directory().ship(&mut stale, a.appended - 1);
+        assert_eq!(refused.err().map(|e| e.name), Some("claim-taken"));
+        b.seal()?;
+        let f = shipping::fetch(&store, &b.lineage, b.zone)?;
+        let end = f
+            .pieces
+            .last()
+            .map_or(0, |p| p.first + p.records.len() as u64);
+        assert_eq!(end, shipped.records);
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
+    }
 }
