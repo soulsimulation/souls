@@ -131,7 +131,15 @@ fn run(mut hub: Hub, rx: &Receiver<Cmd>) {
                     .and_then(|(r, a)| hub.subscribe_as(r, a));
                 match made {
                     Ok(i) => {
-                        subs.insert((conn, n), (i, out));
+                        let sent = hub.drain(i).into_iter().all(|o| {
+                            out.send(frame(n, 2, Value::Bytes(o.bytes.to_vec())))
+                                .is_ok()
+                        });
+                        if sent {
+                            subs.insert((conn, n), (i, out));
+                        } else {
+                            hub.unsubscribe(i);
+                        }
                     }
                     Err(e) => {
                         let name =
@@ -244,6 +252,40 @@ mod tests {
     use std::time::Duration;
 
     const LINEAGE: Scope = Scope([9; 16]);
+
+    #[test]
+    fn subscription_grant_arrives_without_any_record() {
+        let feed = start().unwrap();
+        let (out, items) = channel();
+        feed.tx
+            .send(Cmd::Subscribe {
+                conn: 1,
+                n: 7,
+                request: Value::Map(
+                    [
+                        (
+                            1,
+                            Value::Array(vec![Value::Map(
+                                [(2, Id::new(LINEAGE, 1).unwrap().to_value())].into(),
+                            )]),
+                        ),
+                        (2, Value::Uint(2)),
+                        (3, Value::Uint(8000)),
+                    ]
+                    .into(),
+                ),
+                audiences: Value::Array(Vec::new()),
+                out,
+            })
+            .unwrap();
+        let bytes = items
+            .recv_timeout(Duration::from_millis(500))
+            .expect("grant without a tick");
+        let Value::Map(frame) = decode(&bytes).unwrap().value else {
+            panic!("frame")
+        };
+        assert_eq!(kind(frame.get(&2).unwrap()), Some(5));
+    }
 
     fn toggle(body: Id, thing: Id, sequence: u64) -> Vec<u8> {
         let i = Intent {

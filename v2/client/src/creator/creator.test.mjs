@@ -221,6 +221,57 @@ test('boot-body admission is shared by describe and local checks without revisin
   assert.deepEqual(JSON.parse(wire.editKinds(KINDS)), original, 'absent-annotation behavior is unchanged');
 });
 
+test('runtime activity projection shares exact pins and boot admissions across describe and checks', async () => {
+  await connected();
+  const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
+  wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
+  const original = JSON.parse(wire.editKinds(KINDS));
+  const placeKind = Object.keys(original).find((n) => n.startsWith('souls:place@'));
+  const itemKind = Object.keys(original).find((n) => n.startsWith('souls:item@'));
+  const pins = [`creator:activity@1220${'ab'.repeat(32)}`, `creator:activity@1220${'cd'.repeat(32)}`];
+  const source = KINDS + `# souls-boot-body ${placeKind}\n` + pins.map((pin) => `# souls-boot-activity ${placeKind} ${pin}\n`).join('');
+  const projected = JSON.parse(wire.editKinds(source));
+  const file = join(home, 'kinds', 'local.kinds');
+  writeFileSync(file, source);
+  try {
+    const described = await god('describe');
+    const place = described.nodes.find((n) => n.kind === 'souls:place');
+    assert.deepEqual(Object.keys(described.kinds).sort(), [...Object.keys(original), ...pins].sort());
+    for (const pin of pins) {
+      assert.deepEqual(projected[pin], { owner: 'activity', admits: [], slots: {} });
+      assert.deepEqual(described.kinds[pin], { admits: [] });
+    }
+    assert.deepEqual(described.kinds[placeKind].admits, ['body', 'creator:activity', 'souls:room']);
+    for (const [name, kind] of Object.entries(original)) if (name !== placeKind) assert.deepEqual(projected[name], kind);
+    const before = relay.up;
+    for (const pin of pins) {
+      const checked = await god('check', 'batch', JSON.stringify([
+        { op: 'place', name: 1, kind: pin, in: place.id },
+        { op: 'move', node: 1, at: [1, 0, 1] },
+      ]));
+      assert.equal(checked.ok, true, JSON.stringify(checked));
+    }
+    assert.equal(relay.up, before, 'runtime admission checks ask the world nothing');
+    const copy = new wire.Copy(), ops = JSON.stringify([{ op: 'remove', node: place.id }]);
+    const invalid = [
+      '# souls-boot-activity', `# souls-boot-activity ${placeKind} creator:activity`,
+      `# souls-boot-activity ${placeKind} creator:activity@pin`,
+      `# souls-boot-activity ${placeKind} creator:activity@1220${'AB'.repeat(32)}`,
+      `# souls-boot-activity unknown@pin ${pins[0]}`, `# souls-boot-activity ${itemKind} ${pins[0]}`,
+      `# souls-boot-activity ${placeKind} ${itemKind}`, // existing wrong-owner collision
+      `# souls-boot-activity ${placeKind} ${placeKind}`, // existing place collision
+      `# souls-boot-activity ${placeKind} ${pins[0]} extra`,
+    ];
+    for (const annotation of invalid) {
+      assert.throws(() => wire.editKinds(KINDS + annotation + '\n'), /kinds-text/);
+      assert.equal(JSON.parse(wire.editCheck(copy, ops, KINDS + annotation + '\n')).code, 'edit.kinds-text');
+    }
+    assert.deepEqual(JSON.parse(wire.editKinds(source + `# souls-boot-activity ${placeKind} ${pins[0]}\n`)), projected, 'identical repeated projection is harmless');
+    copy.free();
+  } finally { writeFileSync(file, KINDS); }
+  assert.deepEqual(JSON.parse(wire.editKinds(KINDS)), original, 'absent annotation behavior is unchanged');
+});
+
 test('coexisting pinned revisions stay described and checkable by full name', async () => {
   const revisions = '{1: "creator:fixture", 2: "thing", 19: "first"}\n{1: "creator:fixture", 2: "thing", 19: "second"}\n';
   const file = join(home, 'kinds', 'local.kinds');
