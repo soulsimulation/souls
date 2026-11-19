@@ -9,7 +9,7 @@
 //! - **5** points, numbered 1, 2, ... in the file's order: `{1: name, 2: at_mm, 3: role, 4: yaw_mdeg}`, and for a
 //!   `joint` (a connector) `5: connector kind, 6: the kind it mates with`;
 //! - **6** slots, numbered 1, 2, ... in the file's order: `{1: what it admits, 2: at_mm, 3: name}`;
-//! - **7** geometry `{1: bounds_mm}`, **18** motion `{1: how}`, **19** loose `{1: 1}` (ever) or `{2: us}`;
+//! - **7** geometry `{1: bounds_mm, 2: front}` (E4: `"none"` for a thing with no front), **18** motion `{1: how}`, **19** loose `{1: 1}` (ever) or `{2: us}`;
 //! - **11** children, each named child as `{1: kind, 2: most}`, in the file's order (B19: a frame admits its crew's
 //!   activity as it holds it); `most`, how many such children at most, is part of the meaning, so the kind's hash
 //!   covers it, and a child with none is refused (`entry-value`), as the format bounds every child.
@@ -37,7 +37,13 @@ pub fn entry_to_kind(json: &str) -> Result<String, String> {
             "points" => (5, in_order(v, point)?),
             "slots" => (6, in_order(v, slot)?),
             "children" => (11, children(v)?),
-            "geometry" => (7, map(&[(1, v.get("bounds_mm").map(diag).transpose()?)])),
+            "geometry" => (
+                7,
+                map(&[
+                    (1, v.get("bounds_mm").map(diag).transpose()?),
+                    (2, v.get("front").map(quoted).transpose()?),
+                ]),
+            ),
             "motion" => (18, map(&[(1, v.get("how").map(quoted).transpose()?)])),
             "loose" => (
                 19,

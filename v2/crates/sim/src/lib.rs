@@ -24,6 +24,7 @@ pub mod random;
 pub mod recorder;
 pub mod refresh;
 pub mod routes;
+pub mod setdown;
 pub mod slots;
 pub mod speech;
 pub mod spots;
