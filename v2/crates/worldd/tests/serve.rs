@@ -3,6 +3,7 @@
 //! the stream's files appear under `views/`; the process is killed with SIGKILL mid-run and started again: it resumes
 //! from a checkpoint with the last logged tick's state hash, bodies included (A1, A2, A5).
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -31,10 +32,13 @@ fn scratch(tag: &str) -> PathBuf {
     d
 }
 
-/// A running `worldd serve`, its stderr lines on a channel.
+/// A running `worldd serve`, its stdout and stderr lines on one channel.
 struct Served {
     child: Child,
     lines: Receiver<String>,
+    /// Lines taken off the channel while waiting for another: the two pipes race (a clock thread's stderr line can
+    /// come in before the main thread's stdout line printed first), so a line is never dropped for coming early.
+    early: RefCell<Vec<String>>,
 }
 
 fn serve(dir: &Path, socket: &Path) -> Served {
@@ -64,23 +68,18 @@ fn serve_with(dir: &Path, socket: &Path, more: &[&std::ffi::OsStr]) -> Served {
             }
         });
     }
-    Served { child, lines }
+    Served {
+        child,
+        lines,
+        early: RefCell::default(),
+    }
 }
 
 impl Served {
     /// The first line starting with `prefix`, within 60 s.
-    // A real process on the real clock: the wait for its line is real time.
-    #[allow(clippy::disallowed_methods)]
     fn line(&self, prefix: &str) -> String {
-        let end = Instant::now() + Duration::from_secs(60);
-        while let Some(left) = end.checked_duration_since(Instant::now()) {
-            match self.lines.recv_timeout(left) {
-                Ok(l) if l.starts_with(prefix) => return l,
-                Ok(_) => {}
-                Err(_) => break,
-            }
-        }
-        panic!("no line {prefix:?}");
+        first_line(&self.lines, &self.early, prefix, Duration::from_secs(60))
+            .unwrap_or_else(|| panic!("no line {prefix:?}"))
     }
 
     fn kill(mut self) {
@@ -88,6 +87,55 @@ impl Served {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+/// The first line starting with `prefix`: one that came early first, else the next on the channel within `wait`,
+/// keeping those passed over for a later wait.
+// A real process on the real clock: the wait for its line is real time.
+#[allow(clippy::disallowed_methods)]
+fn first_line(
+    lines: &Receiver<String>,
+    early: &RefCell<Vec<String>>,
+    prefix: &str,
+    wait: Duration,
+) -> Option<String> {
+    let mut early = early.borrow_mut();
+    if let Some(i) = early.iter().position(|l| l.starts_with(prefix)) {
+        return Some(early.remove(i));
+    }
+    let end = Instant::now() + wait;
+    while let Some(left) = end.checked_duration_since(Instant::now()) {
+        match lines.recv_timeout(left) {
+            Ok(l) if l.starts_with(prefix) => return Some(l),
+            Ok(l) => early.push(l),
+            Err(_) => break,
+        }
+    }
+    None
+}
+
+/// The clock thread's "started at tick" (stderr) can come in before the "restart:" the main thread printed first
+/// (stdout): on two-core runners it did, and the wait for "restart:" dropped it, so the start looked hung (#3421).
+#[test]
+fn a_line_that_comes_before_the_one_awaited_is_kept_for_its_own_wait() {
+    let (tx, rx) = channel();
+    let early = RefCell::default();
+    for l in [
+        "worldd: started at tick 7 state 00",
+        "restart: checkpoint None",
+    ] {
+        tx.send(l.to_owned()).unwrap();
+    }
+    let wait = Duration::from_millis(100);
+    assert_eq!(
+        first_line(&rx, &early, "restart: ", wait).as_deref(),
+        Some("restart: checkpoint None")
+    );
+    assert_eq!(
+        first_line(&rx, &early, "worldd: started at tick", wait).as_deref(),
+        Some("worldd: started at tick 7 state 00")
+    );
+    assert_eq!(first_line(&rx, &early, "restart: ", wait), None);
 }
 
 // A real process on the real clock: the wait for its socket is real time.
