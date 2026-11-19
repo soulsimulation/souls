@@ -1,0 +1,386 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:kiosk (today's core-kiosk): its shutter opens and closes; it is locked only while closed, and opens only while unlocked (today's rules, anyone may).",
+  "cases": [
+    {
+      "name": "open_a_closed_kiosk",
+      "act": {
+        "this": "t1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:kiosk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "open_when_open_fixed_by_close",
+      "act": {
+        "this": "t1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:kiosk",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "open",
+          "found": true,
+          "wanted": {
+            "is": false
+          }
+        },
+        "fix": {
+          "form": "close"
+        }
+      }
+    },
+    {
+      "name": "open_when_locked_fixed_by_unlock",
+      "act": {
+        "this": "t1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:kiosk",
+            "fields": {
+              "locked": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "locked",
+          "found": true,
+          "wanted": {
+            "is": false
+          }
+        },
+        "fix": {
+          "form": "unlock"
+        }
+      }
+    },
+    {
+      "name": "close_an_open_kiosk",
+      "act": {
+        "this": "t1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:kiosk",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "close_when_closed_fixed_by_open",
+      "act": {
+        "this": "t1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:kiosk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "open",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": {
+          "form": "open"
+        }
+      }
+    },
+    {
+      "name": "lock_a_closed_kiosk",
+      "act": {
+        "this": "t1",
+        "form": "lock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:kiosk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "lock_when_locked_fixed_by_unlock",
+      "act": {
+        "this": "t1",
+        "form": "lock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:kiosk",
+            "fields": {
+              "locked": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "locked",
+          "found": true,
+          "wanted": {
+            "is": false
+          }
+        },
+        "fix": {
+          "form": "unlock"
+        }
+      }
+    },
+    {
+      "name": "lock_while_open_fixed_by_close",
+      "act": {
+        "this": "t1",
+        "form": "lock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:kiosk",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "open",
+          "found": true,
+          "wanted": {
+            "is": false
+          }
+        },
+        "fix": {
+          "form": "close"
+        }
+      }
+    },
+    {
+      "name": "unlock_a_locked_kiosk",
+      "act": {
+        "this": "t1",
+        "form": "unlock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:kiosk",
+            "fields": {
+              "locked": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "unlock_when_unlocked_fixed_by_lock",
+      "act": {
+        "this": "t1",
+        "form": "unlock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:kiosk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "locked",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": {
+          "form": "lock"
+        }
+      }
+    }
+  ]
+}

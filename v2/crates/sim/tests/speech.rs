@@ -8,7 +8,7 @@ use replica::bodies::{Class, Family, Resource, SkillShape, Want};
 use replica::encode::{Name, decode, encode};
 use replica::ids::{Id, Scope};
 use replica::pose::{Frame, Mode, Quat, Vec3};
-use replica::speech::{Said, length_of};
+use replica::speech::{Reach, Said, length_of};
 use replica::time::Micros;
 use replica::world_model::{Audience, show};
 use sim::controller::{Controller, Gaze, Line, Part};
@@ -187,6 +187,7 @@ fn hall_run() -> Run {
         words: id(0xcc, 1),
         length: length_of(WORDS),
         replace: false,
+        reach: Reach::Talk,
     };
     c.say(speaker, v, line.clone()).expect("says");
     let out = c.step(&surfaces, DT, at);
@@ -310,6 +311,7 @@ fn a3_one_body_walks_holds_something_and_speaks_at_once() {
         words: id(0xcc, n),
         length: length_of(WORDS),
         replace,
+        reach: Reach::Talk,
     };
     assert_eq!(
         c.say(body, walk, line(1, false)).map_err(|r| r.name),
@@ -399,6 +401,7 @@ fn a_body_in_a_slot_speaks_its_lines_in_turn_and_its_voice_is_found() {
         words: id(0xcc, n),
         length: length_of(WORDS),
         replace: false,
+        reach: Reach::Talk,
     };
     c.say(body, voice, line(1)).expect("speaks");
     c.say(body, voice, line(2)).expect("waits behind");

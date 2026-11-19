@@ -1,0 +1,678 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:wooden_blank and eden:wood_carving_bench (from #1709). A blank is carved once, at a carving bench, into a leaf, a bird or a totem: ten seconds of work with a hand free cut this same block for good and credit its maker (a link, not a name). A carved blank refuses another carving ('This wood is already carved; removed material cannot be restored or recarved.'); full hands refuse ('Put down what you are holding before carving.'); a blank away from any bench cannot be carved. The original's one choice is three forms (a set whose value comes from an argument is a later format). Handed back: the blank resting on the bench's surface, both hands empty, and the bench's own count of finished carvings.",
+ "cases": [
+  {
+   "name": "carve_leaf_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "carve_leaf",
+    "args": {
+     "bench": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:wooden_blank"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench",
+      "slots": {
+       "top": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "w1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "carve_leaf_already_carved_cannot_be_recarved",
+   "act": {
+    "this": "t1",
+    "form": "carve_leaf",
+    "args": {
+     "bench": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:wooden_blank",
+      "fields": {
+       "carving": "totem"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench",
+      "slots": {
+       "top": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "w1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "carving",
+     "found": "totem",
+     "wanted": {
+      "is": "blank"
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "carve_leaf_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "carve_leaf",
+    "args": {
+     "bench": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:wooden_blank"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench",
+      "slots": {
+       "top": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "w1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "carve_leaf_bench_elsewhere",
+   "act": {
+    "this": "t1",
+    "form": "carve_leaf",
+    "args": {
+     "bench": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:wooden_blank"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench"
+     },
+     "shed": {
+      "loose": [
+       "w1"
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 2,
+    "detail": {
+     "thing": "w1"
+    },
+    "fix": {
+     "step": "walk_to",
+     "thing": "w1"
+    }
+   }
+  },
+  {
+   "name": "carve_bird_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "carve_bird",
+    "args": {
+     "bench": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:wooden_blank"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench",
+      "slots": {
+       "top": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "w1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "carve_bird_already_carved_cannot_be_recarved",
+   "act": {
+    "this": "t1",
+    "form": "carve_bird",
+    "args": {
+     "bench": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:wooden_blank",
+      "fields": {
+       "carving": "totem"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench",
+      "slots": {
+       "top": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "w1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "carving",
+     "found": "totem",
+     "wanted": {
+      "is": "blank"
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "carve_bird_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "carve_bird",
+    "args": {
+     "bench": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:wooden_blank"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench",
+      "slots": {
+       "top": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "w1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "carve_bird_bench_elsewhere",
+   "act": {
+    "this": "t1",
+    "form": "carve_bird",
+    "args": {
+     "bench": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:wooden_blank"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench"
+     },
+     "shed": {
+      "loose": [
+       "w1"
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 2,
+    "detail": {
+     "thing": "w1"
+    },
+    "fix": {
+     "step": "walk_to",
+     "thing": "w1"
+    }
+   }
+  },
+  {
+   "name": "carve_totem_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "carve_totem",
+    "args": {
+     "bench": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:wooden_blank"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench",
+      "slots": {
+       "top": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "w1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "carve_totem_already_carved_cannot_be_recarved",
+   "act": {
+    "this": "t1",
+    "form": "carve_totem",
+    "args": {
+     "bench": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:wooden_blank",
+      "fields": {
+       "carving": "leaf"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench",
+      "slots": {
+       "top": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "w1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "carving",
+     "found": "leaf",
+     "wanted": {
+      "is": "blank"
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "carve_totem_hands_full",
+   "act": {
+    "this": "t1",
+    "form": "carve_totem",
+    "args": {
+     "bench": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:wooden_blank"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench",
+      "slots": {
+       "top": [
+        "t1"
+       ]
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "w1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "carve_totem_bench_elsewhere",
+   "act": {
+    "this": "t1",
+    "form": "carve_totem",
+    "args": {
+     "bench": "w1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:wooden_blank"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       900,
+       400
+      ]
+     },
+     "w1": {
+      "kind": "eden:wood_carving_bench"
+     },
+     "shed": {
+      "loose": [
+       "w1"
+      ]
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 2,
+    "detail": {
+     "thing": "w1"
+    },
+    "fix": {
+     "step": "walk_to",
+     "thing": "w1"
+    }
+   }
+  }
+ ]
+}

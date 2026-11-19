@@ -1,7 +1,8 @@
 The Soul Actions form-rules cases R2's required test reads (Engine v2 R2, #2685), copied unchanged from main.
 
-commit: 22b6b56dd4cafaca3f68909585172ad85265bf4c (main, 2026-11-18T08:36:14Z)
-copied: packages/form-rules/cases and content/kinds, at the same paths under this folder
+commit: 10151c54cc006e484fff29fb3dc09a4f1edddacb (main, 2026-11-19T01:30:47Z)
+copied: packages/form-rules/cases and content/kinds, at the same paths under this folder (F12, #3382: SA-F2's
+current need vocabulary, ported)
 
 The TypeScript rules (packages/form-rules/src/rules.ts) are the truth the library tracks. The daily full run of
 v2/tools/ci.sh reports any drift between this library and the live cases (tests/rules.rs,

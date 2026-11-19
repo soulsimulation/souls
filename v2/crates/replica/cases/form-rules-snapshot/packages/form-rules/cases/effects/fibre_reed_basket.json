@@ -1,0 +1,18 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Reed basket (from #1892): five natural courses (reeds 8 to 3), three rust (3 to 0), one more refused (no reeds left), the basket finished (open), and further weaving refused (finished). Reeds and courses always sum to eight.",
+  "cases": [
+    {
+      "name": "weave_all_eight_finish",
+      "state": {"actor":"b1","nodes":{"room":{"loose":["b1","r1"]},"r1":{"kind":"eden:reed_basket_frame"},"b1":{"hands":{"left":null,"right":null}}}},
+      "do": [
+        {"act":{"this":"r1","form":"weave_natural","args":{"courses":5}},"receipt":"rr1","expect":{"verdict":"yes","changes":[{"change":"set","node":"r1","field":"reeds","n":1,"to":3,"by":-5},{"change":"set","node":"r1","field":"natural","n":2,"to":5,"by":5}],"events":[{"event":"eden:woven_natural","node":"r1","changes":[0,1]}],"timers":[]}},
+        {"act":{"this":"r1","form":"weave_rust","args":{"courses":3}},"receipt":"rr2","expect":{"verdict":"yes","changes":[{"change":"set","node":"r1","field":"reeds","n":1,"to":0,"by":-3},{"change":"set","node":"r1","field":"rust","n":3,"to":3,"by":3}],"events":[{"event":"eden:woven_rust","node":"r1","changes":[0,1]}],"timers":[]}},
+        {"act":{"this":"r1","form":"weave_rust","args":{"courses":1}},"receipt":"rr3","expect":{"verdict":"no","reason":"not_enough","need":1}},
+        {"act":{"this":"r1","form":"finish"},"receipt":"rr4","expect":{"verdict":"yes","changes":[{"change":"set","node":"r1","field":"open","n":4,"to":1}],"events":[{"event":"eden:opened","node":"r1","changes":[0]}],"timers":[]}},
+        {"act":{"this":"r1","form":"weave_natural","args":{"courses":1}},"receipt":"rr5","expect":{"verdict":"no","reason":"field_differs","need":0}}
+      ],
+      "after": {"r1":{"kind":"eden:reed_basket_frame","fields":{"reeds":0,"natural":5,"rust":3,"open":1}}}
+    }
+  ]
+}
