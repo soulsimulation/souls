@@ -24,6 +24,17 @@
 //!   it only by fields the world sets on the walker's body: `F_ROUTE` (routed again), `F_SHOULDER` (the shoulder
 //!   turn) and `F_HELD` (walked out). Ending an order by name ends its run ([`Runner::end`]). The ladder keeps each
 //!   walker's legs, and a leg ends when the controller has carried the body across the leg's link.
+//! - **Water** (N11b, #3198). Water is legal ground for a body that may use it ([`may_stand`]: wading ground with
+//!   wading, water with swimming), and illegal for any other: [`in_water`] lists a body on water it may not use
+//!   (`in-water`), which the last rung walks out to the nearest ground it may stand on (a walker's surface holds dry
+//!   ground only), and a body afloat on water with no way to a shore (`no-shore`: no chain of wet pieces, each
+//!   touching the next, reaches dry ground). A swimmer whose order ends stays afloat where it is.
+//! - **Changed ground** (G3, #2760). Before each tick, once the runner has found its bodies again on ground an edit
+//!   changed (`Runner::reground`), the walks planned on that ground (`Town::stale`) are planned again from where
+//!   they stand: those whose body stands on a changed node at once, the rest nearest the change first (by how soon
+//!   their route reaches it), spread over [`REPLAN_WITHIN`]. A walk with no plan now ends by the plan's refusal
+//!   (`destination-gone`, `no-route`, ...); the engine chooses no other goal. A body carried across a link finishes
+//!   the crossing first, and one found off the ground is walked out first (the last rung, below).
 //! - **One trait.** What the ladder reads of the world beyond walking's [`World`] goes through [`Unstick`].
 //!
 //! Integers only: µm and µs. Not here: the order to stay (E3), refusing edits (G2), the auditor (K11), births (K10).
@@ -31,8 +42,12 @@
 pub mod town;
 
 use crate::controller::Track;
+use crate::gaits::Ground;
+use crate::ground::Piece;
+use crate::ground::exits::{self, Finding};
 use crate::host::{Runner, named, waiting};
 use crate::links::turns::ROOM;
+use crate::routes::Mask;
 use crate::walk::town::Town;
 use crate::walk::{Leg, World, node_of};
 use replica::effects::Refusal;
@@ -56,6 +71,94 @@ pub const SHOULDER: Micros = 9_000_000;
 pub const END: Micros = 15_000_000;
 /// A still body this near a walker is in its way, µm: the walk's push range (`skills::route::RANGE`).
 pub const NEAR: i64 = 1_200_000;
+/// The walks planned on changed ground are all planned again within this, µs (G3's bar is 2 s).
+pub const REPLAN_WITHIN: Micros = 1_000_000;
+
+/// Whether a body with abilities `has` may stand on `ground` (the routes' own rule, N11c #3218).
+pub use crate::routes::may_stand;
+
+/// Whether two pieces touch: a corner of either lies on an edge of the other, within [`exits::ON`].
+fn touch(a: &Piece, b: &Piece) -> bool {
+    let bounds = |p: &Piece| {
+        p.outline
+            .iter()
+            .flatten()
+            .fold([i64::MAX, i64::MAX, i64::MIN, i64::MIN], |r, v| {
+                let (x, z) = (i64::from(v[0]), i64::from(v[2]));
+                [r[0].min(x), r[1].min(z), r[2].max(x), r[3].max(z)]
+            })
+    };
+    let (ba, bb) = (bounds(a), bounds(b));
+    let on = exits::ON;
+    if ba[0] > bb[2] + on || bb[0] > ba[2] + on || ba[1] > bb[3] + on || bb[1] > ba[3] + on {
+        return false;
+    }
+    let meets = |p: &Piece, q: &Piece| {
+        p.outline.iter().flatten().any(|v| {
+            let c = [i128::from(v[0]), i128::from(v[2])];
+            q.outline.iter().any(|ring| {
+                (0..ring.len()).any(|k| {
+                    let (s, e) = (ring[k], ring[(k + 1) % ring.len()]);
+                    let (s, e) = (
+                        [i128::from(s[0]), i128::from(s[2])],
+                        [i128::from(e[0]), i128::from(e[2])],
+                    );
+                    let d = [e[0] - s[0], e[1] - s[1]];
+                    let dd = d[0] * d[0] + d[1] * d[1];
+                    let t = ((c[0] - s[0]) * d[0] + (c[1] - s[1]) * d[1]).clamp(0, dd.max(1));
+                    let n = if dd == 0 {
+                        s
+                    } else {
+                        [s[0] + d[0] * t / dd, s[1] + d[1] * t / dd]
+                    };
+                    let (x, z) = (c[0] - n[0], c[1] - n[1]);
+                    x * x + z * z <= i128::from(on * on)
+                })
+            })
+        })
+    };
+    meets(a, b) || meets(b, a)
+}
+
+/// Of `bodies` (each with its abilities and its centre, µm, in the node's frame), the ones standing in water among
+/// `pieces` (one node's dry and wet ground, mm): on water it may not use (`in-water`), or afloat with no way to a
+/// shore (`no-shore`), in the order given.
+pub fn in_water(pieces: &[Piece], bodies: &[(Id, Mask, Vec3)]) -> Vec<Finding> {
+    // The wet pieces a shore is reached from: touching dry ground, or a wet piece that does.
+    let mut shore: Vec<bool> = pieces.iter().map(|p| p.ground == Ground::Dry).collect();
+    let mut grew = true;
+    while grew {
+        grew = false;
+        for q in 0..pieces.len() {
+            if !shore[q] && (0..pieces.len()).any(|o| shore[o] && touch(&pieces[q], &pieces[o])) {
+                shore[q] = true;
+                grew = true;
+            }
+        }
+    }
+    bodies
+        .iter()
+        .filter_map(|&(body, has, at)| {
+            let q = exits::piece_of(pieces, at)?;
+            let ground = pieces[q as usize].ground;
+            let why = if ground == Ground::Dry {
+                return None;
+            } else if !may_stand(ground, has) {
+                "in-water"
+            } else if !shore[q as usize] {
+                "no-shore"
+            } else {
+                return None;
+            };
+            Some(Finding {
+                body,
+                at,
+                why,
+                piece: Some(q),
+            })
+        })
+        .collect()
+}
 
 /// What the ladder reads of the world beyond walking's.
 pub trait Unstick: World {
@@ -140,6 +243,11 @@ pub struct Ladder {
     outs: BTreeSet<Id>,
     /// Every rung climbed, in order.
     pub log: Vec<Record>,
+    /// Each walk planned again on changed ground (G3): who, when (µs of world time), and the name it ended by when no
+    /// plan was found.
+    pub replans: Vec<(Id, Micros, Option<&'static str>)>,
+    /// Plans a tick for the stale walks of the ground change under way (0: none under way).
+    spread: usize,
 }
 
 fn len(a: Vec3, b: Vec3) -> i64 {
@@ -196,22 +304,69 @@ impl Ladder {
     }
 
     /// Gives `who` a new route from where it stands to its goal (`F_ROUTE`), or ends its order by the plan's
-    /// refusal.
-    fn reroute(&mut self, runner: &mut Runner, world: &mut impl World, who: Id) {
+    /// refusal, which is returned. A walk planned again is no longer stale (G3).
+    fn reroute(
+        &mut self,
+        runner: &mut Runner,
+        town: &mut Town,
+        who: Id,
+    ) -> Result<(), &'static str> {
         let (Some(w), Some(body)) = (self.walkers.get_mut(&who), runner.controller.body(who))
         else {
-            return;
+            return Ok(());
         };
+        town.stale.remove(&who);
         let (node, goal) = w.goal;
-        match world.plan(body, node, goal) {
+        match town.plan(body, node, goal) {
             Ok(legs) => {
                 runner.route(who, &legs);
                 (w.legs, w.leg) = (legs, 0);
+                Ok(())
             }
             Err(e) => {
                 let order = w.order;
                 self.end(runner, who, order, e.name, e.detail);
+                Err(e.name)
             }
+        }
+    }
+
+    /// Changed ground (G3, see the module's notes): the stale walks planned again, those on a changed node at once and
+    /// the rest by rank, a share a tick so that all are within [`REPLAN_WITHIN`].
+    fn replan(&mut self, runner: &mut Runner, town: &mut Town) {
+        let running = runner.running_bodies();
+        town.stale
+            .retain(|who, _| running.contains(who) && self.walkers.contains_key(who));
+        if town.stale.is_empty() {
+            self.spread = 0;
+            return;
+        }
+        if self.spread == 0 {
+            let ticks = (REPLAN_WITHIN / runner.tick.max(1)).max(1) as usize;
+            self.spread = town.stale.len().div_ceil(ticks);
+        }
+        let mut order: Vec<(usize, Id)> = town
+            .stale
+            .iter()
+            .filter(|(who, _)| {
+                !runner.controller.carried(**who)
+                    && !runner.off_ground.contains(*who)
+                    && !self.outs.contains(*who)
+            })
+            .map(|(who, rank)| (*rank, *who))
+            .collect();
+        order.sort();
+        let mut budget = self.spread;
+        for (rank, who) in order {
+            if rank > 0 {
+                if budget == 0 {
+                    break;
+                }
+                budget -= 1;
+            }
+            self.clocks.remove(&who);
+            let ended = self.reroute(runner, town, who).err();
+            self.replans.push((who, runner.now, ended));
         }
     }
 
@@ -268,12 +423,15 @@ impl Ladder {
         Ok(())
     }
 
-    /// One tick: the runner's tick (the walk-outs under way are carried in it), then each walker the tick refused
+    /// One tick: changed ground first (its bodies found again on it, the walks planned on it planned again, G3), then
+    /// the runner's tick (the walk-outs under way are carried in it), then each walker the tick refused
     /// ended, then the walk-outs ended, then each walker's clock and rungs. A refusal of one walker in the runner's
     /// tick (`Runner::refused`, #3275) is its fault alone: a walk-out under way is dropped, and its order ends by the
     /// refusal's name, with its record ([`Rung::Ended`]); it never stops the ladder for the others. A refusal of the
     /// world's own in the runner's tick is returned once the rungs are climbed.
     pub fn step(&mut self, runner: &mut Runner, town: &mut Town) -> Result<(), Refusal> {
+        runner.reground(town);
+        self.replan(runner, town);
         let ticked = runner.tick(town);
         self.faults(runner);
         self.climb(runner, town);
@@ -329,7 +487,7 @@ impl Ladder {
             }
             if runner.running(who) {
                 self.clocks.remove(&who);
-                self.reroute(runner, town, who);
+                let _ = self.reroute(runner, town, who);
             }
         }
         // Who runs, taken once (each walker below changes only its own run, after it is read).
@@ -450,7 +608,7 @@ impl Ladder {
             } else if idle >= REROUTE && c.rung < 1 {
                 c.rung = 1;
                 self.record(now, who, order, Rung::Reroute);
-                self.reroute(runner, town, who);
+                let _ = self.reroute(runner, town, who);
                 // A new route to the same leg's end keeps the least distance to it: measured again from where the
                 // walker stands, a walker going to and fro would count each swing back as progress, and be routed
                 // again every few seconds without ever climbing further (#3168).

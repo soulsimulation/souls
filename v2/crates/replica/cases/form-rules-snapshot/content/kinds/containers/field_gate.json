@@ -1,0 +1,400 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:field_gate",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        700
+      ],
+      "yaw_mdeg": 180000
+    },
+    "back": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        -700
+      ],
+      "yaw_mdeg": 0
+    },
+    "latch": {
+      "role": "grip",
+      "at_mm": [
+        600,
+        980,
+        75
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1580,
+      1320,
+      200
+    ]
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "side": {
+          "type": "part"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "side"
+          }
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "latch"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "opened"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "side": {
+          "type": "part"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "side"
+          }
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "latch"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "shut"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:field_gate",
+    "table": [
+      {
+        "part": "door",
+        "field": "open",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "true": -90000,
+          "false": 0
+        },
+        "over_us": 900000
+      }
+    ],
+    "shape": {
+      "round": 10,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            -730,
+            660,
+            0
+          ],
+          "size": [
+            120,
+            1320,
+            120
+          ],
+          "round": 10,
+          "tint": "post"
+        },
+        {
+          "kind": "box",
+          "at": [
+            730,
+            660,
+            0
+          ],
+          "size": [
+            120,
+            1320,
+            120
+          ],
+          "round": 10,
+          "tint": "post"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            200,
+            0
+          ],
+          "size": [
+            1300,
+            85,
+            40
+          ],
+          "round": 0,
+          "tint": "leaf",
+          "role": "door",
+          "pivot": [
+            -660,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            420,
+            0
+          ],
+          "size": [
+            1300,
+            85,
+            40
+          ],
+          "round": 0,
+          "tint": "leaf",
+          "role": "door",
+          "pivot": [
+            -660,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            640,
+            0
+          ],
+          "size": [
+            1300,
+            85,
+            40
+          ],
+          "round": 0,
+          "tint": "leaf",
+          "role": "door",
+          "pivot": [
+            -660,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            860,
+            0
+          ],
+          "size": [
+            1300,
+            85,
+            40
+          ],
+          "round": 0,
+          "tint": "leaf",
+          "role": "door",
+          "pivot": [
+            -660,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1080,
+            0
+          ],
+          "size": [
+            1300,
+            85,
+            40
+          ],
+          "round": 0,
+          "tint": "leaf",
+          "role": "door",
+          "pivot": [
+            -660,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -610,
+            640,
+            35
+          ],
+          "size": [
+            80,
+            980,
+            30
+          ],
+          "round": 0,
+          "tint": "leaf",
+          "role": "door",
+          "pivot": [
+            -660,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            610,
+            640,
+            35
+          ],
+          "size": [
+            80,
+            980,
+            30
+          ],
+          "round": 0,
+          "tint": "leaf",
+          "role": "door",
+          "pivot": [
+            -660,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            640,
+            -30
+          ],
+          "size": [
+            1380,
+            70,
+            25
+          ],
+          "round": 0,
+          "roll": -37815,
+          "tint": "leaf",
+          "role": "door",
+          "pivot": [
+            -660,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            600,
+            980,
+            75
+          ],
+          "size": [
+            120,
+            35,
+            30
+          ],
+          "round": 0,
+          "tint": "chrome",
+          "role": "door",
+          "pivot": [
+            -660,
+            0,
+            0
+          ]
+        }
+      ],
+      "palette": {
+        "post": "#7a5c3e",
+        "leaf": "#b08d62",
+        "chrome": "#9aa0a3"
+      },
+      "tags": [
+        "civic",
+        "gate",
+        "fence",
+        "garden",
+        "farm",
+        "door"
+      ]
+    }
+  },
+  "text": {
+    "card": "A five-bar field gate: lift the latch and swing it open, or shut.",
+    "gate": "gate",
+    "farm_gate": "farm gate",
+    "five_bar": "five-bar gate"
+  },
+  "card": {
+    "text": "card",
+    "category": "gate",
+    "synonyms": [
+      "farm_gate",
+      "five_bar"
+    ]
+  }
+}

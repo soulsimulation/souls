@@ -12,6 +12,14 @@
 //!   never an account), in id order, worked out by the world when it writes the entry. A replay and every view read
 //!   this list; nothing works hearers out again when read.
 //! - **Its length in time** comes from its words at [`RATE`] characters a second, at least [`SHORTEST`]: one timer.
+//! - **Heard, as a Soul's view stream carries it** (C6, #3390): the view tier addresses an utterance to each
+//!   subscription that follows one of its hearers, as R4's item `{1: 9, 2: entry, 3: words}`, the words read from
+//!   the store for that subscriber's audiences; [`heard`] reads it back.
+//!
+//! - **Its reach, from a closed list** (E13, #2784): [`Reach`] is what the speaker asks for, a whisper to one named
+//!   Soul, talk, a raised voice, the members of an activity it is in (a call), or through a thing ([`Device`]). Field 2
+//!   is how far the voice carries in the air; a call's or a device's hearers beyond it are in field 3. How far each
+//!   carries is data on the world ([`Radii`]).
 //!
 //! Not here: who hears (the world's `sim::speech`), the voice resource (`sim::controller`), refusing oversized text
 //! (the gateway, I2).
@@ -19,8 +27,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::audience::REFERENCE;
-use crate::effects::{Event, Refusal, read_id};
-use crate::encode::{Name, Value};
+use crate::effects::{Effect, Event, Refusal, read_id};
+use crate::encode::{Name, Value, decode};
 use crate::ids::Id;
 use crate::time::Micros;
 use crate::world_model::Audience;
@@ -41,12 +49,69 @@ pub fn length_of(words: &str) -> Micros {
     Micros::try_from(us).unwrap_or(Micros::MAX).max(SHORTEST)
 }
 
+/// An utterance's reach (E13): who it is for, from a closed list. The world works out its hearers when it writes it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Reach {
+    /// To one named Soul within arm's length ([`Radii::whisper`]): its body hears it and its Soul alone may read it
+    /// (an audience of one, never the public).
+    Whisper { body: Id, soul: Id },
+    /// Ordinary talk: the Souls whose interest set holds the speaker (B11). Public.
+    #[default]
+    Talk,
+    /// A raised voice: every Soul within [`Radii::loud`] of the speaker, on its node. Public.
+    Loud,
+    /// To the members of an activity the speaker is in, at any distance (a call is an activity both joined, E8), and
+    /// to talk's hearers. Public.
+    Members(Id),
+    /// Through a thing: to the Souls near each receiver of the device link it sends on that is on ([`Device`]), and
+    /// to talk's hearers. Public.
+    Through(Id),
+}
+
+/// How far a voice carries, µm: data on the world, so a shipped world keeps its own. The defaults start from today's
+/// (the server's earshot is 12 m); talk's reach is the interest set's (R4, `sim::speech::LEAVE`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Radii {
+    /// A whisper's, arm's length.
+    pub whisper: i64,
+    /// A raised voice's, farther than talk's.
+    pub loud: i64,
+}
+
+impl Default for Radii {
+    fn default() -> Radii {
+        Radii {
+            whisper: 1_000_000,
+            loud: 12_000_000,
+        }
+    }
+}
+
+/// One receiver of a device link: the thing, the node it is in and where on it (µm), whether it is on, and how far
+/// it is heard from, µm (its volume).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Receiver {
+    pub thing: Id,
+    pub node: Id,
+    pub at: [i64; 2],
+    pub on: bool,
+    pub radius: i64,
+}
+
+/// A device link (E13): from a sender thing to its receivers. A voice through the sender is heard by the Souls within
+/// the radius of each receiver that is on, in that receiver's node, wherever the sender is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Device {
+    pub sender: Id,
+    pub receivers: Vec<Receiver>,
+}
+
 /// One utterance, as written.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Said {
     /// The reference its words are kept under.
     pub words: Id,
-    /// How far the voice carries, mm: the farthest a hearer can be.
+    /// How far the voice carries in the air, mm: the farthest a hearer can be but through an activity or a device.
     pub reach_mm: u64,
     /// Who may read it: the entry's audience (T8), not a field of the event.
     pub audience: Audience,
@@ -127,4 +192,63 @@ impl Said {
             length: Micros::try_from(*length).unwrap_or(Micros::MAX),
         })
     }
+}
+
+/// R4's addressed item's kind (`{1: 9, 2: entry}`).
+pub const ADDRESSED: u64 = 9;
+/// The field of an addressed item that holds an utterance's words, as read for its subscriber (C6, #3390).
+pub const HEARD_WORDS: u64 = 3;
+
+/// An utterance as a Soul's view stream hands it on: who said it, when, to which audience, and its words when the
+/// subscriber may read them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Heard {
+    /// Its entry's place in the log.
+    pub sequence: u64,
+    pub at: Micros,
+    /// The body that said it: the node its entry is written by.
+    pub speaker: Id,
+    pub said: Said,
+    pub words: Option<Vec<u8>>,
+}
+
+fn unread(e: impl std::fmt::Display) -> Refusal {
+    Refusal {
+        name: "not-an-utterance",
+        detail: e.to_string(),
+    }
+}
+
+/// An utterance from one of R4's items (`{1: 9, 2: entry, 3: words}`), or none when the item is anything else.
+pub fn heard(item: &[u8]) -> R<Option<Heard>> {
+    let Value::Map(mut m) = decode(item).map_err(unread)?.value else {
+        return bad("an item is a map");
+    };
+    if m.get(&1) != Some(&Value::Uint(ADDRESSED)) {
+        return Ok(None);
+    }
+    let Some(Value::Bytes(entry)) = m.remove(&2) else {
+        return bad("2 is an entry's bytes");
+    };
+    let e = Effect::read(decode(&entry).map_err(unread)?.value)?;
+    let Some(ev) = e
+        .events
+        .iter()
+        .flatten()
+        .find(|ev| ev.name.as_str() == SAID)
+    else {
+        return Ok(None);
+    };
+    let said = Said::read(&ev.to_value(), e.envelope.audience)?;
+    let words = match m.remove(&HEARD_WORDS) {
+        Some(Value::Bytes(w)) => Some(w),
+        _ => None,
+    };
+    Ok(Some(Heard {
+        sequence: e.envelope.sequence,
+        at: e.envelope.at,
+        speaker: e.envelope.node,
+        said,
+        words,
+    }))
 }

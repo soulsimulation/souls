@@ -1,0 +1,138 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:flagpole (SA-X34, #2924): lower the flag at its halyard, raise it again.",
+  "cases": [
+    {
+      "name": "flagpole_lower_raised",
+      "act": {
+        "this": "t1",
+        "form": "lower"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:flagpole"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "flagpole_lower_lowered",
+      "act": {
+        "this": "t1",
+        "form": "lower"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:flagpole",
+            "fields": {
+              "raised": false
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "raise"
+        }
+      }
+    },
+    {
+      "name": "flagpole_raise_lowered",
+      "act": {
+        "this": "t1",
+        "form": "raise"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:flagpole",
+            "fields": {
+              "raised": false
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "flagpole_raise_raised",
+      "act": {
+        "this": "t1",
+        "form": "raise"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:flagpole"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "lower"
+        }
+      }
+    }
+  ]
+}
