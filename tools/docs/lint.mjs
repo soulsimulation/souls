@@ -28,7 +28,7 @@ export const HOSTS = Object.freeze(['soul.game', 'github.com']);
 export const GENERATED_MARK = 'Generated from';
 export const AUDIENCES = Object.freeze(['agents', 'humans', 'both']);
 /** The one public contact, a role address at soul.game (the terms page names it); every other address is private. */
-export const CONTACT_EMAIL = 'hello@soul.game';
+export const CONTACT_EMAIL = 'hello@soul.game';   // scrub-guard: allow (the public role address Gene chose)
 const PRIVATE = [
   [/(?:\/Users\/|\/home\/|(?:^|[\s(`'"=])~\/)/m, 'private.local-path'],
   [/\b(?:127\.0\.0\.1|localhost|0\.0\.0\.0)\b/, 'private.local-host'],
