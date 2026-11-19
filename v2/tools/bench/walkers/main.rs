@@ -59,6 +59,7 @@ use sim::host::{Runner, waiting};
 use sim::links::Doors;
 use sim::mover::Body;
 use sim::routes::HANDS;
+use sim::speech::Hearing;
 use sim::unstick::{Ladder, Unstick};
 use sim::walk::town::{Spent, Town};
 use sim::walk::{World, node_of};
@@ -691,6 +692,8 @@ fn main() {
     let mut fault_at: BTreeMap<String, u64> = BTreeMap::new();
     let mut faulted: std::collections::BTreeSet<Id> = std::collections::BTreeSet::new();
     let mut ended_names: BTreeMap<String, u64> = BTreeMap::new();
+    // #3231: the tick's hearing (`Hearing::update`, after the ladder's step), timed apart from the tick, ns.
+    let (mut hearing, mut hear_ns) = (Hearing::new(), Vec::with_capacity(ticks as usize));
     while ticker.next_tick() < ticks {
         let mut body = |tick: i64, start: Micros| {
             // The clock catches up after an overrun: never past the run's last tick.
@@ -813,6 +816,9 @@ fn main() {
             ];
             tick_us.push(total / 1000);
             phase_us.push(ph.map(|v| v / 1000));
+            let h0 = Instant::now();
+            hearing.update(runner.controller.near(), (0..n as u64).map(walker_id));
+            hear_ns.push(h0.elapsed().as_nanos() as i64);
             corner_parts.push([
                 (s2.clears - s0.clears) as i64,
                 ((s2.clear_ns - s0.clear_ns) / 1000) as i64,
@@ -1026,6 +1032,12 @@ fn main() {
     for l in &by_phase {
         println!("walkers: phase {l}");
     }
+    let h = &mut hear_ns;
+    let (hm, h99) = (pct(h, 50), pct(h, 99));
+    println!(
+        "walkers: hearing median {hm} ns, p99 {h99} ns, max {} ns",
+        h.last().unwrap_or(&0)
+    );
     println!(
         "walkers: clock: ticks {}, overruns {}, longest {} us, most lag {} us",
         s.ticks, s.overruns, s.max_tick_us, s.max_lag_us
@@ -1036,6 +1048,18 @@ fn main() {
         r90 / 1000,
         rmax / 1000
     );
+    // Every walker's end: its node and position, in id order. Equal digests, equal walks (a speed-up changes none).
+    let mut end = Vec::new();
+    for b in runner.controller.bodies() {
+        for id in [b.id, node_of(b)] {
+            end.extend(id.scope().0);
+            end.extend(id.counter().to_le_bytes());
+        }
+        for v in [b.pose.position.x, b.pose.position.y, b.pose.position.z] {
+            end.extend(v.to_le_bytes());
+        }
+    }
+    println!("walkers: end digest {}", Hash::of(Purpose::Fixture, &end));
     println!(
         "walkers: longest without progress under a live order {} ms (walker {}); orders past 30 s by state {over:?}; rungs {rungs:?}",
         worst.0 / 1000,

@@ -1,0 +1,164 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:fire_laying_site (from #1648). One supplied set of stones and logs (supplies, a count, 0 or 1). With empty hands a Soul walks to the site's stand and lays them for ten seconds; the set is used and one eden:campfire is made on the site's out place. Refused with the original's words: no set left ('This site has no supplied stones and logs left to arrange.'), the place taken ('The marked fire site is occupied; clear it before laying a campfire.') and anything in hand ('Put down what you are holding before laying the campfire.'). Nothing restocks the site, so an empty site names no fix.",
+ "cases": [
+  {
+   "name": "lay_every_need_met",
+   "act": {
+    "this": "k1",
+    "form": "lay"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "k1": {
+      "kind": "eden:fire_laying_site"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "lay_no_supplies_left",
+   "act": {
+    "this": "k1",
+    "form": "lay"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "k1": {
+      "kind": "eden:fire_laying_site",
+      "fields": {
+       "supplies": 0
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "supplies",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": null,
+    "says": "no_supplies"
+   }
+  },
+  {
+   "name": "lay_site_occupied",
+   "act": {
+    "this": "k1",
+    "form": "lay"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "k1": {
+      "kind": "eden:fire_laying_site",
+      "slots": {
+       "out": [
+        "c1"
+       ]
+      }
+     },
+     "c1": {
+      "kind": "eden:campfire"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "k1",
+     "slot": "out"
+    },
+    "fix": null,
+    "says": "occupied"
+   }
+  },
+  {
+   "name": "lay_holding_something",
+   "act": {
+    "this": "k1",
+    "form": "lay"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "k1": {
+      "kind": "eden:fire_laying_site"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "put_down_first"
+   }
+  }
+ ]
+}

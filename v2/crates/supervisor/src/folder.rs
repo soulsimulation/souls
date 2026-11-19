@@ -1,6 +1,8 @@
 //! An object store in a folder, for one machine with no object store (a test machine, a laptop): each object a file
-//! at its key, its ETag the SHA-256 of its bytes. Its conditional writes hold for one writer at a time, which is all
-//! a single machine's `supervisor pin` needs; a fleet uses the real store ([`directoryd::directory::s3::S3`]).
+//! at its key, its ETag the SHA-256 of its bytes. A conditional write holds an exclusive lock on the folder's
+//! `.lock` file from its read to its rename, so its condition holds across processes too (O9, #2828: two processes
+//! on one machine stand in for two machines, and the directory's claim is decided here); a fleet uses the real store
+//! ([`directoryd::directory::s3::S3`]).
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,6 +31,31 @@ impl Folder {
         self.reachable.store(reachable, Ordering::SeqCst);
     }
 
+    /// Every key under `prefix`, in order (the bucket's names).
+    pub fn keys(&self, prefix: &str) -> Vec<String> {
+        fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<String>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for e in entries.flatten() {
+                let path = e.path();
+                if path.is_dir() {
+                    walk(root, &path, out);
+                } else if let Ok(rel) = path.strip_prefix(root) {
+                    let key = rel.to_string_lossy().into_owned();
+                    if !key.starts_with('.') && !key.ends_with(".new") {
+                        out.push(key);
+                    }
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.root, &self.root, &mut out);
+        out.retain(|k| k.starts_with(prefix));
+        out.sort();
+        out
+    }
+
     fn reach(&self) -> R<()> {
         if self.reachable.load(Ordering::SeqCst) && self.root.is_dir() {
             Ok(())
@@ -52,6 +79,18 @@ impl Store for Folder {
     }
 
     fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+        self.reach()?;
+        // Held until this function returns: no other process reads and writes between our read and our rename.
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(self.root.join(".lock"))
+            .and_then(|f| f.lock().map(|()| f));
+        let _lock = match lock {
+            Ok(f) => f,
+            Err(e) => return refuse("store-error", format!(".lock: {e}")),
+        };
         let now = self.get(key)?.map(|o| o.etag);
         match (when, now.as_deref()) {
             (When::Absent, None) => {}

@@ -1,0 +1,9 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:terrace",
+  "owner": "place",
+  "geometry": {"bounds_mm":[30000,2000,30000]},
+  "looks": {"model":"look:terrace"},
+  "text": {"card":"Ground cut level, or a hillside cut into steps.","ground":"ground","level":"level","steps":"steps"},
+  "card": {"text":"card","category":"ground","synonyms":["level","steps"]}
+}

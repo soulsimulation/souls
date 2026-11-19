@@ -1,0 +1,149 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The twinkle lights (core/twinkle-lights@1, 4 placed). Today they have state on and no forms; here they switch like the festoon, at a plate on the left post.",
+ "cases": [
+  {
+   "name": "twinkle_lights_switch_on_then_switch_off_then_switch_on",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "l1"
+      ]
+     },
+     "l1": {
+      "kind": "eden:twinkle_lights"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       -3960,
+       1200,
+       245
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "l1",
+      "form": "switch_off"
+     },
+     "now_us": 0,
+     "receipt": "rtwinkle_lights0",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0,
+      "fix": {
+       "form": "switch_on"
+      }
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "switch_on"
+     },
+     "now_us": 1000000,
+     "receipt": "rtwinkle_lights1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "on",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:switched_on",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "switch_off"
+     },
+     "now_us": 2000000,
+     "receipt": "rtwinkle_lights2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "on",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:switched_off",
+        "node": "l1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "switch_on"
+     },
+     "now_us": 4000000,
+     "receipt": "rtwinkle_lights3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "l1",
+        "field": "on",
+        "n": 1,
+        "to": 1
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "l1": {
+     "kind": "eden:twinkle_lights",
+     "fields": {
+      "on": 1
+     }
+    }
+   }
+  }
+ ]
+}

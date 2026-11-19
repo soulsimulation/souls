@@ -1,0 +1,196 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:hall",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      14000,
+      6000,
+      12000
+    ]
+  },
+  "areas": {
+    "hall": {
+      "at_mm": [
+        0,
+        100,
+        0
+      ],
+      "radius_mm": 5780
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:hall",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            2000,
+            0
+          ],
+          "size": [
+            14000,
+            4000,
+            12000
+          ],
+          "tint": "wall"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            5688,
+            3050
+          ],
+          "size": [
+            14300,
+            3376,
+            6200
+          ],
+          "tint": "roof"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            5688,
+            -3050
+          ],
+          "size": [
+            14300,
+            3376,
+            6200
+          ],
+          "yaw": 180000,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1300,
+            6020
+          ],
+          "size": [
+            1200,
+            2400,
+            60
+          ],
+          "tint": "doorway"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -4200,
+            1550,
+            6015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -1800,
+            1550,
+            6015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            1800,
+            1550,
+            6015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            4200,
+            1550,
+            6015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "wall": "#efe6d4",
+        "trim": "#5e412b",
+        "roof": "#6f4a35",
+        "doorway": "#2b2622",
+        "glass": "#9fb8c4"
+      },
+      "tags": [
+        "structure",
+        "building",
+        "hall"
+      ]
+    }
+  },
+  "text": {
+    "card": "A meeting hall: one big room, entered through its doors.",
+    "building": "building",
+    "meeting_hall": "meeting hall",
+    "assembly_room": "assembly room"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "meeting_hall",
+      "assembly_room"
+    ]
+  }
+}

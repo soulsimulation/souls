@@ -1,0 +1,142 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:croissant",
+  "owner": "thing",
+  "state": {
+    "bites": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 1,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        30,
+        0
+      ]
+    },
+    "edge": {
+      "role": "contact",
+      "at_mm": [
+        60,
+        30,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      142,
+      60,
+      80
+    ]
+  },
+  "forms": {
+    "bite": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "state",
+          "field": "bites",
+          "at_least": 2
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "consume",
+          "at": "edge"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "bites",
+          "by": -1,
+          "event": "took_a_bite"
+        }
+      ]
+    },
+    "finish": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "state",
+          "field": "bites",
+          "at_most": 1
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "consume",
+          "at": "edge"
+        }
+      ],
+      "effects": [
+        {
+          "change": "remove",
+          "what": "this",
+          "event": "finished"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:croissant",
+    "table": [
+      {
+        "part": "fill",
+        "field": "bites",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          1,
+          4
+        ],
+        "to": [
+          250,
+          1000
+        ]
+      }
+    ],
+    "shape": {"round":10,"shapes":[{"kind":"sphere","at":[0,30,0],"r":32,"segments":10,"tint":"crust","role":"fill","pivot":[-70,30,0]},{"kind":"cone","at":[-50,25,0],"r":22,"h":50,"segments":8,"tint":"crust","roll":90000},{"kind":"cone","at":[50,25,0],"r":22,"h":50,"segments":8,"tint":"crust","roll":-90000}],"palette":{"crust":"#c98a3c"},"tags":["food","bread","pastry","object"]}
+  },
+  "text": {
+    "card": "A croissant: pick it up and eat it, four bites, the last one finishes it.",
+    "pastry": "pastry",
+    "breakfast": "breakfast",
+    "food": "food"
+  },
+  "card": {
+    "text": "card",
+    "category": "food",
+    "synonyms": [
+      "pastry",
+      "breakfast"
+    ]
+  }
+}

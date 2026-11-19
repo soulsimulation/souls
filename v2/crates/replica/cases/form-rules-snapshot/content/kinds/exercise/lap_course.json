@@ -1,0 +1,47 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:lap_course",
+  "owner": "thing",
+  "state": {
+    "laps": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "start": { "role": "stand", "at_mm": [0, 0, -2000], "yaw_mdeg": 0 },
+    "corner_1": { "role": "stand", "at_mm": [-3000, 0, -2000] },
+    "corner_2": { "role": "stand", "at_mm": [-3000, 0, 2000] },
+    "corner_3": { "role": "stand", "at_mm": [3000, 0, 2000] },
+    "corner_4": { "role": "stand", "at_mm": [3000, 0, -2000] }
+  },
+  "geometry": { "bounds_mm": [7100, 1300, 5400] },
+  "forms": {
+    "walk_lap": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "start" },
+        { "step": "walk_to", "point": "corner_1" },
+        { "step": "walk_to", "point": "corner_2" },
+        { "step": "walk_to", "point": "corner_3" },
+        { "step": "walk_to", "point": "corner_4" },
+        { "step": "walk_to", "point": "start" }
+      ],
+      "effects": [{ "change": "set", "field": "laps", "by": 1, "event": "lap_completed" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:lap_course",
+    "shape": {"round":0,"shapes":[{"kind":"cone","at":[-3400,200,-2400],"r":130,"h":400,"tint":"cone","collide":false},{"kind":"cone","at":[-3400,200,2400],"r":130,"h":400,"tint":"cone","collide":false},{"kind":"cone","at":[3400,200,-2400],"r":130,"h":400,"tint":"cone","collide":false},{"kind":"cone","at":[3400,200,2400],"r":130,"h":400,"tint":"cone","collide":false},{"kind":"box","at":[0,3,-2000],"size":[1200,6,220],"tint":"stripe","collide":false},{"kind":"box","at":[800,500,-2600],"size":[50,1000,50],"tint":"post","collide":false},{"kind":"box","at":[800,1100,-2600],"size":[650,350,40],"tint":"stripe","collide":false}],"palette":{"cone":"#dd7030","stripe":"#eee4c6","post":"#575b57"},"tags":["exercise","outdoors","laps","cones"]}
+  },
+  "text": {
+    "card": "A start stripe and four corner cones: walk a whole lap round them and back.",
+    "exercise": "exercise",
+    "laps": "laps",
+    "walking": "walking",
+    "howto_lap": "From the start stripe, walk round the four cones and back to the stripe; a lap stopped early does not count."
+  },
+  "card": { "text": "card", "category": "exercise", "synonyms": ["laps", "walking"] },
+  "howtos": { "lap": { "text": "howto_lap", "steps": [{ "form": "walk_lap" }] } }
+}

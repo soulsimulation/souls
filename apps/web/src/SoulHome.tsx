@@ -15,6 +15,7 @@ import type { AuthCtx } from './Shell.tsx';
 import type { Api, Souls } from './useSouls.ts';
 import { Call } from './BrainPanels.tsx';
 import { steerReceipt, type SteerReceipt } from './steer-receipt.ts';
+import { retireSoul } from './soul-retire.ts';
 
 type MySoul = { id: string; name: string; description: string; entityId: string; hasToken: boolean; tokenLabel: string | null; tokenCreatedAt: number | null; tokenLastUsed: number | null };
 type Dash = { status: any; agent: { attached: boolean; label: string | null; since: number | null; last_used: number | null }; spend: { calls: number; cost: number }; created_at: number };
@@ -251,7 +252,7 @@ function Dashboard({ sim, api, soul, isAdmin, base, refresh, onGone, active }: {
         <h2>More</h2>
         <div className="row"><button onClick={async () => { const r = await api(`/v1/souls/${soul.id}/shot`, {}); setShot(r.data.shot ?? r.data); }}>ask for the most cinematic camera shot of {soul.name}</button></div>
         {shot && <pre className="json">{JSON.stringify(shot, null, 2)}</pre>}
-        <div className="row"><button onClick={async () => { if (confirm(`Retire ${soul.name}? They leave the world for good.`)) { const r = await api(`/v1/souls/${soul.id}`, undefined, 'DELETE'); if (r.status === 200) onGone(); } }}>retire {soul.name}</button></div>
+        <div className="row"><button onClick={async () => { if (await retireSoul(api, soul)) onGone(); }}>retire {soul.name}</button></div>
       </section>
     </>
   );
