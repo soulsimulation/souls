@@ -128,6 +128,7 @@ test('A1: 1,000 matching events send 1,000 intents, the daemon\'s own delay unde
     if (process.env.R9_REPORT) console.log(JSON.stringify({ repeat, sent, model_turns: 0, p50_ms: +p(0.5).toFixed(4), p99_ms: +p(0.99).toFixed(4), max_ms: +delays.at(-1).toFixed(4) }));
     assert.equal(sent, 1000);
     assert.equal(t.changed().length, 1000);
-    assert.ok(p(0.99) < 5, `p99 ${p(0.99)} ms`);
+    // A speed bar (real time): asserted only in the speed-bar step (ci.sh, V2_SPEED_BARS=1); R9_REPORT prints it.
+    if (process.env.V2_SPEED_BARS) assert.ok(p(0.99) < 5, `p99 ${p(0.99)} ms`);
   }
 });

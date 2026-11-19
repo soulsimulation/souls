@@ -143,6 +143,16 @@ fn built(serve_header: bool) -> Built {
             ))
             .expect("the root's kind"),
         );
+        // And a Soul's body kind, admitted on the open ground (C3, serve.rs `build`).
+        im.rules.kinds.extend(
+            parse_kinds("{1: \"souls:body\", 2: \"family\", 6: {1: [\"thing\"], 2: [\"thing\"]}}")
+                .expect("the body's kind"),
+        );
+        for (k, kind) in im.rules.kinds.iter_mut() {
+            if plain(k) == import_eden::GROUND {
+                kind.children.insert("body".into());
+            }
+        }
     }
     let (root, ground) = (im.nodes["world"], im.nodes["ground"]);
     let header = import_eden::header(root, &im.rules).expect("a header");

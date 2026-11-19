@@ -31,15 +31,17 @@ doubled.
 ## Commands
 
 ```sh
-# On the machine, as root: put the build in place and restart each named world's gateway onto it, one at a time.
-WORLDS_ROOT=/var/lib/souls/worlds gateway-upgrade <new gatewayd> <world> [<world> ...]
+# On the machine, as root, after the install put the new gatewayd in place: every world's gateway onto it, in turn.
+bash v2/tools/ops/gateway-upgrade.sh
 ```
 
-It prints its timeline (ms from its start), then `upgraded`, or `refused: <name>` and exits 1:
+It runs the installed `gateway-upgrade <new gatewayd> <world> [<world> ...]` with the install's
+`/usr/local/lib/souls/gatewayd` and every world under `/var/lib/souls/worlds/worlds/`. It prints its timeline (ms from its start), then `upgraded`, or `refused: <name>` and exits 1:
 `gateway-upgrade.world-deploying` (a deploy runs: wait for it), `gateway-upgrade.restart-failed: <unit>` or
 `gateway-upgrade.not-active: <unit>` (the new build did not come up within 10 s: put the old one back with the same
-command). The build is installed once for the machine (`/usr/local/lib/souls/gatewayd`, `--lib` to change), so a
-world's gateway that restarts on its own afterwards also runs the new build: name every world the machine serves.
+command after putting the old bundle back). The build is installed once for the machine
+(`/usr/local/lib/souls/gatewayd`), so a world's gateway that restarts on its own afterwards also runs the new build:
+the script names every world the machine serves. A release (O18) runs the same program from its own staged build.
 
 ## The proof run
 
@@ -51,9 +53,7 @@ and the time from the event to current: p50, p99, slowest) and the intents' row 
 world, and every acknowledged intent among the log's answered rows).
 
 ```sh
-cd v2 && cargo build --release -p ops -p worldd -p gatewayd && ulimit -n 8192
-node tools/driver/loads.mjs target --agents 1000 --seconds 60 --seed 1 --out <run folder>/schedule.txt
-target/release/o16-run --dir <run folder>/run --schedule <run folder>/schedule.txt
+bash v2/tools/ops/o16-run.sh     # builds, writes the uneven schedule, runs it (scratch in .local/o16-run)
 ```
 
 ## Known limits
