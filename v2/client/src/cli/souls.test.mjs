@@ -7,7 +7,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -94,7 +94,7 @@ after(async () => {
 });
 
 test('the arguments make the daemon request: act takes a ranked list, find its words, wait its seconds', () => {
-  assert.deepEqual(requestOf(['act', 'eden:sit', 'eden:lean', '--soul', 's_x']), { req: { op: 'act', verbs: ['eden:sit', 'eden:lean'] }, soul: 's_x' });
+  assert.deepEqual(requestOf(['act', 'eden:sit', 'eden:lean', '--soul', 's_x']), { req: { op: 'act', acts: ['eden:sit', 'eden:lean'] }, soul: 's_x' });
   assert.deepEqual(requestOf(['find', 'the', 'red', 'cup', '--limit', '3']).req, { op: 'find', words: 'the red cup', limit: 3 });
   assert.deepEqual(requestOf(['wait', '5']).req, { op: 'wait', seconds: 5 });
   assert.equal(requestOf(['dance']).refused, 'unknown-command');
@@ -168,4 +168,44 @@ test('A3: the command loads no WASM, and its median time is under 100 ms', async
 
 test('the daemon\'s log and state hold no token', () => {
   for (const f of [rtA.log, rtA.state]) assert.ok(!readFileSync(f, 'utf8').includes(a.token.split('.')[1]));
+});
+
+test('C4: say, whisper and lie make their daemon requests', () => {
+  assert.deepEqual(requestOf(['say', 'the', 'bread', 'is', 'warm']).req, { op: 'say', words: 'the bread is warm' });
+  assert.deepEqual(requestOf(['whisper', LAMP_B, 'just', 'you']).req, { op: 'whisper', to: LAMP_B, words: 'just you' });
+  assert.deepEqual(requestOf(['lie', LAMP_B]).req, { op: 'lie', this: LAMP_B });
+});
+
+/** Every file under `d`, as one buffer. */
+const filesUnder = (d) => Buffer.concat(readdirSync(d, { recursive: true }).map((f) => join(d, f)).filter((f) => statSync(f).isFile()).map((f) => readFileSync(f)));
+
+test('C4 A1: say and whisper send T8 words through the daemon; the world keeps them and answers with a receipt', async () => {
+  const said = 'the bread is still warm', whispered = 'meet me by the lamp';
+  const say = souls(['say', said]);
+  const whisper = souls(['whisper', `${WORLD_SCOPE}-4`, whispered]); // the other Soul's body
+  for (const [what, r] of [['say', say], ['whisper', whisper]]) {
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.sent, true, `${what} sent at once`);
+    assert.equal(r.verb, `local:${what}`, 'a form verb in the world\'s namespace');
+  }
+  const got = [];
+  await waitFor(async () => {
+    got.push(...(await request(rtA.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer'));
+    return [say, whisper].every((r) => got.some((e) => e.sequence === r.sequence));
+  });
+  for (const r of [say, whisper]) assert.equal(got.find((e) => e.sequence === r.sequence).answer, 1, `a receipt: ${JSON.stringify(got)}`);
+  // The words are in the world's text store (K16), and no byte of them is in its log (T8 rule 6).
+  const store = filesUnder(join(dir, 'w.text')), log = readFileSync(join(dir, 'w.log'));
+  for (const w of [said, whispered]) {
+    assert.ok(store.includes(w), `"${w}" kept in the text store`);
+    assert.ok(!log.includes(w), `"${w}" not in the log`);
+  }
+  // Refused by name before anything is sent: no words, a whisper to no one, a lie on nothing.
+  const refused = (args) => {
+    const r = spawnSync(process.execPath, [CLI, ...args, '--soul', A], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8' });
+    return JSON.parse(r.stdout).code;
+  };
+  assert.equal(refused(['say']), 'words-empty-or-long');
+  assert.equal(refused(['whisper', 'bob', 'hi']), 'whisper-names-a-body');
+  assert.equal(refused(['lie']), 'lie-names-a-thing');
 });

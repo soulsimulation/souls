@@ -7,7 +7,7 @@
 //! its sequences from the log. The world here is I3's toggles world (`checkers::toggles`), `--rooms` rooms of `--bodies`
 //! bodies, each with a toggle, and `--items` items in each room; its log is `--log` (default: the socket's path and
 //! `.log`). With `--testworld` it also has bodies that move (I4b): N2's test world with one Soul and three chairs
-//! (`worldd::testbodies`, B10 #2688).
+//! (`worldd::testbodies`, B10 #2688), and prints `testworld <id> <name>` for the Soul's body, the square and the chairs.
 //!
 //! `worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] [--bodies <n>]
 //! [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
@@ -127,6 +127,14 @@ pub fn run(args: &[String]) -> i32 {
     let mut cfg = Config::new(Scope(lineage), epoch);
     if args.iter().any(|a| a == "--testworld") {
         cfg.bodies = Some(Box::new(worldd::testbodies::bodies));
+        // C10 (#3414): the ids a client acts on, `testworld <id> <name>`.
+        for (name, id) in worldd::testbodies::named().unwrap_or_default() {
+            println!(
+                "testworld {}-{} {name}",
+                to_hex(&id.scope().0),
+                id.counter()
+            );
+        }
     }
     cfg.measures = !args.iter().any(|a| a == "--no-measures");
     cfg.health =
