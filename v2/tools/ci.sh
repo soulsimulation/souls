@@ -146,8 +146,10 @@ step client-memory node --test client/src/memory/*.test.mjs
 step client-history node --test client/src/history/*.test.mjs
 # A home on today's client comes across (R18, #2821): the released 2.36.2 client against the new answers, from v2/ alone.
 step client-upgrade node --test client/test/compat/*.test.mjs client/src/upgrade/*.test.mjs
-# Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else.
-step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/src/pair/*.test.mjs'
+# Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else;
+# pairing to a served world writes the history it advertises, which `history --at` reads (R16b, #3480).
+step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p testworld --locked --quiet &&
+  node --test client/src/pair/*.test.mjs'
 # The served client (R17, #2818): the served files against the release's manifest; the one line, upgrade, rollback.
 step client-served bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/served/*.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
@@ -179,6 +181,10 @@ step rules-equal node --input-type=module -e '
 # from the same WASM build in Node as natively (tools/facts/wasm.mjs).
 step facts-wasm bash -c 'cargo run -p facts --release --locked --quiet -- vectors target/facts-vectors &&
   node tools/facts/wasm.mjs target/wasm-load/pkg target/facts-vectors'
+# R16's history against the sheet (R16b, #3480): a 120 s recording's event index, asked by place, thing and Soul.
+step facts-history bash -c 'cargo run -p facts --release --locked --quiet -- record target/facts-history 120 &&
+  cargo run -p facts --release --locked --quiet -- sheet target/facts-history history 0 120 target/facts-history/sheet &&
+  node tools/facts/history.mjs target/facts-history target/facts-history/sheet 120'
 # The code hatch (F8, #2823): the world's 1,000 chess-move cases (crates/sim/tests/hatch.rs, in the tests step) through
 # the same WASM build in Node, the daemon's runtime, and in a headless browser, each giving the world's table exactly.
 step hatch-three-hosts bash -c 'node --test client/src/hatch/*.test.mjs && node web/src/hatch/hatch.browser.mjs'

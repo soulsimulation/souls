@@ -38,7 +38,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Verdict {
     Yes,
-    /// R2's reason, or the checker's own (`effect_unsupported`, `unknown`).
+    /// R2's reason, the binder's (`effect-not-built`, ...), or the checker's own (`unknown`).
     No(String),
 }
 

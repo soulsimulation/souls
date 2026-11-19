@@ -85,12 +85,18 @@ function totals(bytes) {
 
 /**
  * Where the record ends, from the coarse counts: the end of the newest ten minutes with an event. Years are read from
- * 0 until one is missing (a world's first years; two or three small requests). Also gives the year counts read, by day.
+ * the first one held until one is missing (two or three small requests): year 0 for a world whose time starts at 0,
+ * else, for a world on the machine's clock (`worldd serve`), this year or the two before it (R16b). Also gives the
+ * year counts read, by day.
  */
-async function recordEnd(get) {
+async function recordEnd(get, now) {
   const byDay = new Map();
-  let newest = null;
-  for (let y = 0; ; y++) {
+  let newest = null, first = 0;
+  if (!(await get(keys.yearCounts(0)))) {
+    const year = Math.floor(Math.floor(now / DAY) / YEAR_DAYS);
+    for (first = year; first > year - 3 && !(await get(keys.yearCounts(first)));) first--;
+  }
+  for (let y = first; ; y++) {
     const b = await get(keys.yearCounts(y));
     if (!b) break;
     for (const [slot, n] of totals(b)) { byDay.set(y * YEAR_DAYS + slot, n); newest = Math.max(newest ?? -Infinity, y * YEAR_DAYS + slot); }
@@ -191,10 +197,10 @@ export function memoryLines(records, { by, id, me, nameOf = (x) => x }) {
  * a history file's bytes or null; `rows` is the copy's rows by id; `names` names Souls as the asker's memory knows them
  * (before the copy's names, and for a Soul that has left); `memory` is the asker's memory records; `me` its Soul id.
  */
-export async function history(ask, { get, rows = new Map(), names = new Map(), memory = [], me = null }) {
+export async function history(ask, { get, rows = new Map(), names = new Map(), memory = [], me = null, now = Date.now() * 1000 }) {
   const { by, id } = ask;
   const nameOf = (x) => (x === me ? 'me' : names.get(x) ?? rows.get(x)?.name ?? x);
-  const { end, byDay } = await recordEnd(get);
+  const { end, byDay } = await recordEnd(get, now);
   const to = ask.until ?? end;
   const mine = memoryLines(memory, { by, id, me, nameOf });
   const out = { ok: true, by, about: nameOf(id), memory: mine };
