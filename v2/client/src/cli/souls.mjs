@@ -40,6 +40,8 @@
 //                                             `in 10m`), a world time (`20:00`), or R9's pattern as JSON. The daemon
 //                                             sends it, with no model turn
 //   souls.mjs schedule [list] | schedule remove <id>   the entries and what became of each
+//   souls.mjs upgrade [--rollback]            brings today's client's Souls across, one owner approval each (R18); with
+//                                             --rollback, today's client again
 //   any of them [--soul <id>]                 which Soul, when the home has more than one
 //
 // The home is SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG.
@@ -173,9 +175,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
   const asked = requestOf(process.argv.slice(2)), { req, soul: named, refused, detail } = asked;
   try {
-    if (refused) throw Object.assign(new Error(detail), { code: refused });
+    if (refused && process.argv[2] !== 'upgrade') throw Object.assign(new Error(detail), { code: refused });
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
-    if (asked.local) out(await local(asked, home));
+    if (process.argv[2] === 'upgrade') out(await (await import('../upgrade/upgrade.mjs')).main(process.argv.slice(3)));
+    else if (asked.local) out(await local(asked, home));
     else if (req.op === 'pair') { out(await pairing(home, req.url)); process.exit(0); }
     else {
       const souls = soulsWithTokens(home);
