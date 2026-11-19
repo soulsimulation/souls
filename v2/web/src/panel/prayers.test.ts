@@ -3,7 +3,7 @@
 // anything is sent. The whole path to the Soul is v2/client/src/daemon/pray.test.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ANSWER_MOST, Prayers, prayerRefusal, type Prayer } from './prayers.ts';
+import { ANSWER_MOST, EVERY_MS, Prayers, prayerRefusal, type Prayer } from './prayers.ts';
 
 const waiting: Prayer = { id: 'p_000000000001', soul: `soul-${'4d'.repeat(16)}-2`, text: 'let it rain', at: 1, state: 'waiting', answer: null };
 
@@ -50,4 +50,30 @@ test('an answer over 4,000 characters is refused by name, and a refusal from the
   assert.equal(await p.answer(waiting.id, 'hello'), 'prayer.not-found');
   assert.match(prayerRefusal('answer.too-long'), /at most 4,000 characters/);
   assert.match(prayerRefusal('something.else'), /something\.else/);
+});
+
+
+test('closing a creator socket stops polling, settles pending answers, and refuses later sends', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const { p, sent } = gateway(() => ({ ok: true, prayers: [] }));
+  p.start();
+  await Promise.resolve();
+  assert.equal(sent.length, 1);
+  t.mock.timers.tick(EVERY_MS);
+  await Promise.resolve();
+  assert.equal(sent.length, 2, 'open socket polls');
+  p.stop();
+  t.mock.timers.tick(EVERY_MS * 2);
+  await p.refresh();
+  assert.equal(sent.length, 2, 'closed socket never sends again');
+  let sends = 0;
+  const closed = new Prayers({ send() { sends++; } });
+  const pending = closed.answer(waiting.id, 'yes');
+  closed.stop();
+  assert.equal(await pending, 'prayer.unanswered');
+  assert.equal(await closed.answer(waiting.id, 'again'), 'prayer.unanswered');
+  assert.equal(sends, 1, 'pending answer settled without retry');
+  const throws = new Prayers({ send() { throw new Error('socket closed'); } });
+  assert.equal(await throws.answer(waiting.id, 'yes'), 'prayer.unanswered', 'socket error becomes a named refusal');
+  throws.stop();
 });

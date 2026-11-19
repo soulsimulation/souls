@@ -15,7 +15,7 @@ import type { NodeRec } from '../source/source.ts';
 import { idOf, type Frame, type Op } from './edit.ts';
 import { CreatorSession } from './session.ts';
 import { Drag, refusalText, soulName, type At, type Body } from './drag.ts';
-import { ANSWER_MOST, EVERY_MS, Prayers, prayerRefusal, type Prayer } from './prayers.ts';
+import { ANSWER_MOST, Prayers, prayerRefusal, type Prayer } from './prayers.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>('map');
@@ -267,19 +267,25 @@ async function open(name: string) {
   await init();
   const ws = new WebSocket(new URL('/v2/ws', location.href.replace(/^http/, 'ws')));
   ws.binaryType = 'arraybuffer';
+  const waiting = new Prayers({ send: (t) => ws.send(t) });
   ws.onopen = () => {
     session = new CreatorSession(ws, idOf(body.grant!.replace(/^creator-/, '')), wireHello(), wireSignIn(body.token!, new Uint8Array(0)), Date.now() * 1000);
-    prayers = new Prayers({ send: (t) => ws.send(t) });
+    prayers = waiting;
     prayers.onChange = () => { if (!answering) showPrayers(); };
     session.onOpen = () => {
-      void prayers!.refresh();
-      setInterval(() => void prayers?.refresh(), EVERY_MS);
+      waiting.start();
       status.textContent = 'signed in as the creator · edits sent 0';
       document.body.classList.replace('refused', 'creator') || document.body.classList.add('creator');
     };
   };
-  ws.onmessage = (e) => (typeof e.data === 'string' ? void prayers?.text(e.data) : session?.frame(new Uint8Array(e.data as ArrayBuffer)));
-  ws.onclose = () => (status.textContent = `the socket closed${session?.outcome ? ` (${session.outcome})` : ''}`);
+  ws.onmessage = (e) => (typeof e.data === 'string' ? void waiting.text(e.data) : session?.frame(new Uint8Array(e.data as ArrayBuffer)));
+  ws.onclose = () => {
+    waiting.stop();
+    if (prayers === waiting) {
+      prayers = null;
+      status.textContent = `the socket closed${session?.outcome ? ` (${session.outcome})` : ''}`;
+    }
+  };
 }
 $<HTMLFormElement>('signin').addEventListener('submit', (e) => {
   e.preventDefault();

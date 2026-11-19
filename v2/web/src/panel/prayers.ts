@@ -20,6 +20,8 @@ export class Prayers {
   private readonly asked = new Map<number, (r: Reply) => void>();
   private readonly sock: { send(t: string): void };
   onChange: () => void = () => {};
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private closed = false;
 
   constructor(sock: { send(t: string): void }) {
     this.sock = sock;
@@ -36,12 +38,31 @@ export class Prayers {
     return true;
   }
 
+  /** Polls only while this creator socket is open. */
+  start(): void {
+    if (this.closed || this.timer !== null) return;
+    void this.refresh();
+    this.timer = setInterval(() => void this.refresh(), EVERY_MS);
+  }
+
+  /** Closes this socket's polling and settles its pending requests. */
+  stop(): void {
+    this.closed = true;
+    if (this.timer !== null) clearInterval(this.timer);
+    this.timer = null;
+    for (const [n, reply] of this.asked) reply({ n, ok: false, refused: 'prayer.unanswered' });
+    this.asked.clear();
+  }
+
   private ask(kind: 'prayers' | 'answer', body: object): Promise<Reply> {
     const n = ++this.n;
-    this.sock.send(JSON.stringify({ [kind]: { n, ...body } }));
+    if (this.closed) return Promise.resolve({ n, ok: false, refused: 'prayer.unanswered' });
     return new Promise((ok) => {
       const t = setTimeout(() => { this.asked.delete(n); ok({ n, ok: false, refused: 'prayer.unanswered' }); }, REPLY_WITHIN);
-      this.asked.set(n, (r) => { clearTimeout(t); ok(r); });
+      const reply = (r: Reply) => { clearTimeout(t); this.asked.delete(n); ok(r); };
+      this.asked.set(n, reply);
+      try { this.sock.send(JSON.stringify({ [kind]: { n, ...body } })); }
+      catch { reply({ n, ok: false, refused: 'prayer.unanswered' }); }
     });
   }
 
