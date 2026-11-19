@@ -2012,7 +2012,7 @@ impl Clock {
                 now,
             );
             match r {
-                Ok(sim::forms::Asked::Applied(_)) => self.form_ended(id, "done".into(), now),
+                Ok(sim::forms::Asked::Applied(_)) => self.form_ended(id, "done".into(), None, now),
                 Ok(sim::forms::Asked::Started(run)) => self.form_started(id, run, now),
                 Ok(_) => {}
                 Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
@@ -2079,8 +2079,8 @@ impl Clock {
                 });
             }
         }
-        for (id, how) in self.forms.ended() {
-            self.form_ended(id, how, now);
+        for (id, how, why) in self.forms.ended() {
+            self.form_ended(id, how, why, now);
         }
     }
 
@@ -2124,11 +2124,13 @@ impl Clock {
         true
     }
 
-    /// A form's run ended: an entry naming how, then its intent's answer, a receipt when `done`.
-    fn form_ended(&mut self, id: Id, how: String, now: Micros) {
+    /// A form's run ended: an entry naming how (and for a walk that stalled, what blocked it: C21), then its intent's
+    /// answer, a receipt when `done`.
+    fn form_ended(&mut self, id: Id, how: String, why: Option<String>, now: Micros) {
         let Some(o) = self.open.get(&id) else { return };
         let (actor, sequence) = (o.actor, o.sequence);
-        self.note(id, FORM_ENDED, Some(&how), now);
+        let noted = why.map_or_else(|| how.clone(), |w| format!("{how}: {w}"));
+        self.note(id, FORM_ENDED, Some(&noted), now);
         if how == "done" {
             self.end(id, |c| Answer::Receipt {
                 actor,

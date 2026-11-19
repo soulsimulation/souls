@@ -786,7 +786,7 @@ fn c24_a_forms_timer_fires_and_starts_its_form_with_the_world_as_actor() {
         [(_, Ok(sim::forms::Asked::Started(_)))]
     ));
     assert_eq!(ended.len(), 2, "the act's run, then the timer's");
-    assert!(ended.iter().all(|(_, how)| how == "done"), "{ended:?}");
+    assert!(ended.iter().all(|(_, how, _)| how == "done"), "{ended:?}");
     assert_eq!(
         ended[1].0, fired[0].0,
         "the timer's run is keyed by the timer"

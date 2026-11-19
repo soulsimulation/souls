@@ -1502,7 +1502,7 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
                         how = acts
                             .ended()
                             .into_iter()
-                            .find(|(i, _)| *i == id)
+                            .find(|(i, _, _)| *i == id)
                             .map(|e| e.1);
                     }
                     Ok(how.unwrap_or_else(|| "never-ended".to_owned()))
@@ -1755,4 +1755,71 @@ fn c25_a2_a3_a_slot_walked_to_rise_settle_and_use_held_on_eden() {
     assert!(out[0].is_ok(), "rises_3 done: {:?}", out[0]);
     assert!(out[1].is_ok(), "meditate done: {:?}", out[1]);
     assert_eq!(out[2], Err("not-held".to_owned()), "juggle: not held");
+}
+
+/// C21 (#3484) A1, A3: C20's stall. A Soul born 40 m north of the street sandpit (today's e_1f394e0b, at (52.4, 67.4)
+/// m, turned 17.2 degrees) builds a sandcastle by the sandpit's own entry (`build_sandcastle`: a walk to its `edge`,
+/// then a 20 s pause). The act either ends `done` or `walk.blocked`, within 5 s of the walk's last progress.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c21_the_sandpit_walk_arrives_or_ends_blocked() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let sandpit = im.nodes["e_1f394e0b"];
+    let (served, mut soul, dir) = serve(&facts, "52.4,27.4", "c21", im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(900)))
+        .unwrap();
+    let built = soul.act("eden:build_sandcastle", Some(sandpit), BTreeMap::new());
+    println!("from 40 m north, build a sandcastle: {built:?}");
+    let walked = track(&dir);
+    let mut last: Option<(u64, f64, f64)> = None;
+    for (tick, _, x, z) in &walked {
+        if last.is_none_or(|(_, lx, lz)| (x - lx).hypot(z - lz) > 0.5) {
+            println!("  tick {tick}: ({x:.2}, {z:.2})");
+            last = Some((*tick, *x, *z));
+        }
+    }
+    let (end, x, z) = walked.last().map(|b| (b.0, b.2, b.3)).unwrap();
+    println!("  last tick {end}: ({x:.2}, {z:.2})");
+    // Where it stopped, in the ground's frame: what keeps a body from standing there.
+    let at = replica::pose::Vec3::new((x * 1e6) as i64, 0, (z * 1e6) as i64);
+    println!("  there: {}", blocked_by(&im.tree, sandpit, at));
+    // The tick it last came 0.25 m nearer the sandpit's edge, and the time from then to its end.
+    let edge = (51.97, 68.79);
+    let gap = |x: f64, z: f64| (x - edge.0).hypot(z - edge.1);
+    let mut best = (f64::MAX, 0);
+    for (tick, _, x, z) in &walked {
+        if gap(*x, *z) < best.0 - 0.25 {
+            best = (gap(*x, *z), *tick);
+        }
+    }
+    let ticks = end - best.1;
+    println!(
+        "  last progress at tick {} ({:.2} m from the edge): {ticks} ticks before its end",
+        best.1, best.0
+    );
+    // The act's ending entry, as the log holds it: how it ended, and what blocked it.
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            for v in e.events.unwrap_or_default() {
+                if v.name.as_str() == answers::FORM_ENDED
+                    && let Some(Value::Bytes(how)) = v.fields.get(&2)
+                {
+                    println!("  {}: {}", v.name.as_str(), String::from_utf8_lossy(how));
+                }
+            }
+        }
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    match built {
+        Ok(_) => {}
+        Err(how) => assert!(how == "walk.blocked", "ended {how}"),
+    }
+    assert!(ticks <= 100, "ended within 5 s of its last progress");
 }
