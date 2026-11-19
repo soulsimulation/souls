@@ -20,6 +20,9 @@
 //! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
 //! how) and is answered: a receipt naming both entries when done, else a refusal naming how it ended
 //! (`claim-taken`, `resource-held`, `out-of-reach`, ...). One answer, at its end: I7's accept-then-resolve is not here.
+//! No move outlives its act: a walk still going at its act's deadline stops in that tick and ends `act.timed-out`; a
+//! sit, a lie or a rise runs to its end (a seat is never left half taken) and ends so then; a walk a new move
+//! replaces ends `claim-taken` in the tick the new move starts.
 //!
 //! **A restart** starts from the newest checkpoint that verifies, when the world takes them (K5, K18c #3176): its
 //! tree, and its carry (each actor's last sequence and kept answers, the next intent id, every body's pose and seat,
@@ -82,7 +85,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use crate::acts::{self, Acts};
-use crate::bodies::{self, Ask, Asked, Bodies, Placed};
+use crate::bodies::{self, Ask, Asked, Bodies, Cut, Placed};
 use crate::buildsafe;
 use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
 use crate::engine::{self, Engine};
@@ -599,6 +602,9 @@ struct Clock {
     bodies: Option<Bodies>,
     /// Move intents taken since the last tick, committed at the next (I4b).
     moving: Vec<(Id, Asked)>,
+    /// Acts whose deadline passed while their sit, lie or rise was going: each ends `act.timed-out` when its move
+    /// ends, so no move outlives its act.
+    overdue: BTreeSet<Id>,
     /// Where edits go to be checked off the clock thread, when the world takes edits (G1b).
     edits: Option<Sender<(Id, Edit)>>,
     /// Edits checked since the last tick, committed (or refused) at the next.
@@ -735,6 +741,8 @@ pub const FORM_ENDED: &str = "souls:act-ended";
 /// The event of the entry a move writes when it starts, and when it ends (field 2: how, by name).
 pub const MOVE_STARTED: &str = "souls:move-started";
 pub const MOVE_ENDED: &str = "souls:move-ended";
+/// How an act still going at its deadline ends (C8), and the move it drove with it.
+pub const TIMED_OUT: &str = "act.timed-out";
 
 fn name(s: &str) -> Name {
     Name::new(s).unwrap_or_else(|| Name::new("act.refused").expect("a name"))
@@ -1597,7 +1605,12 @@ impl Clock {
             }
         }
         let started = b.start(asks);
+        // A walk a new move replaced stopped in this tick: its end is written now, before the new move's start.
+        let replaced = b.replaced();
         self.bodies = Some(b);
+        for (id, how) in replaced {
+            self.settle(id, how, now);
+        }
         for (id, r) in started {
             match r {
                 Ok(()) => self.note(id, MOVE_STARTED, None, now),
@@ -1611,9 +1624,14 @@ impl Clock {
         }
     }
 
-    /// Ends open move `id` as it ended: its entry, then its answer.
+    /// Ends open move `id` as it ended: its entry, then its answer. A move whose act's deadline passed while it
+    /// went ends `act.timed-out`, however it ended.
     fn settle(&mut self, id: Id, how: Result<(), String>, now: Micros) {
         let Some(o) = self.open.get(&id) else { return };
+        let how = match self.overdue.remove(&id) {
+            true => Err(TIMED_OUT.to_owned()),
+            false => how,
+        };
         let (actor, sequence) = (o.actor, o.sequence);
         match how {
             Ok(()) => {
@@ -1671,21 +1689,26 @@ impl Clock {
             }
         }
         at[2] = mark();
-        // 1. Due timers: acts whose deadline passed.
+        // 1. Due timers: acts whose deadline passed. A walk going for one stops in this tick and its end is written
+        // by the deadline's name; a sit, a lie or a rise runs to its end, and the act ends with it.
         while let Some(id) = self.deadlines.due(now) {
-            if let Some(b) = self.bodies.as_mut() {
-                b.cancel(id);
-            }
+            let Some(o) = self.open.get(&id) else {
+                continue;
+            };
+            let (actor, sequence, body) = (o.actor, o.sequence, o.body);
+            let cut = self.bodies.as_mut().and_then(|b| b.cancel(id));
             // A form's run whose act timed out is left: it ends at its next stable moment (F3).
-            if let Some(o) = self.open.get(&id) {
-                let body = o.body;
-                self.forms
-                    .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+            self.forms
+                .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+            match cut {
+                Some(Cut::Stopped) => self.note(id, MOVE_ENDED, Some(TIMED_OUT), now),
+                Some(Cut::Finishing) => {
+                    self.overdue.insert(id);
+                    continue;
+                }
+                None => {}
             }
-            if let Some(o) = self.open.get(&id) {
-                let (actor, sequence) = (o.actor, o.sequence);
-                self.end(id, |c| c.refusal(actor, sequence, "act.timed-out"));
-            }
+            self.end(id, |c| c.refusal(actor, sequence, TIMED_OUT));
         }
         // 1. The world node's sky: its timers due in this tick, each at its due time (E6, #3369).
         self.fire_sky(now);
@@ -2312,6 +2335,7 @@ pub fn start<S: Storage + 'static>(
         parts: Vec::new(),
         bodies: None,
         moving: Vec::new(),
+        overdue: BTreeSet::new(),
         edits,
         edited: Vec::new(),
         walkers,
