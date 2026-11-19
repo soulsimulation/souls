@@ -271,6 +271,27 @@ impl Town {
         })
     }
 
+    /// The tree and the ground as N9's spot tables read it, for a reader that is not a walker (E4's set-down, #2772).
+    pub fn with_ground<T>(&mut self, f: impl FnOnce(&Tree, &mut dyn Ground) -> T) -> T {
+        let Town {
+            map,
+            tree,
+            buildings,
+            ground,
+            surfaces,
+            ..
+        } = self;
+        let tree: &Tree = tree;
+        let mut g = Grounds {
+            tree,
+            map,
+            surfaces,
+            buildings,
+            ground: *ground,
+        };
+        f(tree, &mut g)
+    }
+
     /// What [`Town::rebuild`] reads besides the tree, as the ground stands now.
     pub fn basis(&self) -> Basis {
         self.basis.clone()

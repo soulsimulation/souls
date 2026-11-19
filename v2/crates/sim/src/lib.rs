@@ -22,6 +22,7 @@ pub mod mover;
 pub mod moves;
 pub mod refresh;
 pub mod routes;
+pub mod setdown;
 pub mod slots;
 pub mod speech;
 pub mod spots;

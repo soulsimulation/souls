@@ -1051,6 +1051,8 @@ pub fn touched(before: &Tree, after: &Tree, part: &Part) -> BTreeSet<Id> {
         };
         for c in changes {
             match &c.change {
+                // A node made with no field a scene is read from (a chalk mark set down, E4 #2772) cuts no ground.
+                Change::Create { fields, .. } if !SHAPE.iter().any(|f| fields.contains_key(f)) => {}
                 Change::Create { node, .. }
                 | Change::Remove { node }
                 | Change::Reparent { node, .. } => ids.push(*node),
