@@ -34,11 +34,6 @@ path = "src/gateway_upgrade.rs"
 name = "o16-run"
 path = "src/gateway_run.rs"
 
-# The scratch machine's probe for O18's release proof (v2/tools/ops/release/scratch.sh).
-[[bin]]
-name = "o18-probe"
-path = "release/probe.rs"
-
 [dependencies]
 replica = { path = "../../crates/replica" }
 # K4's log and K5's checkpoints.
@@ -53,6 +48,8 @@ supervisor = { path = "../../crates/supervisor" }
 gatewayd = { path = "../../crates/gatewayd" }
 # O20 (#2812): the world's stores outside its log, restored as one step of O12's restore.
 backup = { path = "backup" }
+# A probe made from a seeded world's facts: its ground (O18b, #3498).
+import-eden = { path = "../import-eden" }
 # The benches' scripted world and the shared store (V3, O3).
 archive = { path = "../archive" }
 # O7's run drives 100 agents through the gateway's socket.

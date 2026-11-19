@@ -387,3 +387,17 @@ async fn a4_a_lowered_level_arrives_as_the_grant_item() {
     );
     println!("A4: grants in the stream {grants:?}");
 }
+
+/// V13 (#2745) A4: the socket that carries an owner's private view is answered `cache-control: no-store`, so no cache
+/// keeps a response of it; its items are not kept or written (the A2/A3 test above).
+#[tokio::test]
+async fn v13_a4_the_view_socket_is_no_store() {
+    let r = start("v13-a4", Receipts::off()).await;
+    let (_ws, res) = tokio_tungstenite::connect_async(&r.url).await.unwrap();
+    assert_eq!(
+        res.headers()
+            .get("cache-control")
+            .and_then(|v| v.to_str().ok()),
+        Some("no-store")
+    );
+}
