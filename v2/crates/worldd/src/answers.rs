@@ -1855,7 +1855,17 @@ pub fn start<S: Storage + 'static>(
     let served = cfg.served.take();
     let answering = thread::Builder::new()
         .name("answers".into())
-        .spawn(move || answer_loop(log, ticks, answer_tier, answer_measures, synced, served, follow))
+        .spawn(move || {
+            answer_loop(
+                log,
+                ticks,
+                answer_tier,
+                answer_measures,
+                synced,
+                served,
+                follow,
+            )
+        })
         .map_err(io)?;
     let records = found.first + found.records.len() as u64;
     let sky = Heavens::of(&world, cfg.sky.take());

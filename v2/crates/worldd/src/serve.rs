@@ -466,7 +466,7 @@ fn serve(args: &[String]) -> R<()> {
         stream::dir(&built.header, &key)
     );
     view_out::write_whole(&views.join("world.json"), pointer.as_bytes()).map_err(refusal)?;
-    let writing = view_out::follow(writer, sub, Arc::new(AtomicBool::new(false)));
+    let writing = view_out::follow(writer, sub, Arc::new(AtomicBool::new(false)), answers::now);
     for (k, bytes) in found.records.into_iter().enumerate() {
         if !recorder::is_input(&bytes) {
             tier.offer(found.first + k as u64, bytes);
