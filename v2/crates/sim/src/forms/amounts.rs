@@ -348,7 +348,7 @@ impl Cx<'_> {
     /// that is gone (removed, or under a thing removed, this tick or before) is refused `thing-missing`.
     pub fn entries(&self, m: &mut Minter, e: &Bound) -> R<Vec<Entry>> {
         let named = match e {
-            Bound::Set { .. } => Vec::new(),
+            Bound::Set { .. } | Bound::Add { .. } => Vec::new(),
             Bound::Transfer { from, into, .. } => vec![self.of(*from), self.of(*into)],
             Bound::Make { .. } => vec![self.node],
             Bound::Remove { what } | Bound::Take { what } => vec![self.of(*what)],
@@ -375,6 +375,33 @@ impl Cx<'_> {
                     rest: Rest::new(),
                 }]),
             )]),
+            // A count moved by a whole number (C22): its value now (or its default) plus `by`, within its least and
+            // its capacity, written as a plain set, as today's engine writes it; nothing balances it.
+            Bound::Add { field, by } => {
+                let l = self.limit(self.node, *field)?;
+                let has = self.view.amount(self.node, *field).unwrap_or(l.default);
+                match has.checked_add(*by) {
+                    Some(to) if to >= l.min.unwrap_or(0) && l.max.is_none_or(|m| to <= m) => {
+                        Ok(vec![(
+                            self.node,
+                            Audience::Everyone,
+                            Body::Changes(vec![ChangeRec {
+                                change: Change::Set {
+                                    node: self.node,
+                                    field: *field,
+                                    to: value(to),
+                                    by: None,
+                                },
+                                rest: Rest::new(),
+                            }]),
+                        )])
+                    }
+                    _ => refuse(
+                        "out-of-range",
+                        format!("field {field} of {}: {has} by {by}", show(self.node)),
+                    ),
+                }
+            }
             Bound::Transfer {
                 field,
                 from,

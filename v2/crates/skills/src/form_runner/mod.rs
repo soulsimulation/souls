@@ -311,6 +311,8 @@ pub fn turn(steps: &mut [Step], q: Quat) -> Result<(), Refusal> {
 pub enum Effect {
     /// Field `field` (its number in the kind's `state`) of the node the form is done at is set to `to`.
     Set { field: u64, to: encode::Value },
+    /// Field `field` of the node moved by `by` (`set ... by`, C22): refused when that leaves the kind's bounds.
+    Add { field: u64, by: i64 },
     /// An amount of field `field` moved from `from` to `into` (F4): the least of what is asked, what the source has
     /// above its least and the room the target has left, written as the source's and the target's sets in one part.
     Transfer {
@@ -494,6 +496,17 @@ pub fn bind_effects_in(
                 };
                 Effect::Set { field, to }
             }
+            ("set", None) if e.get("by").is_some() => Effect::Add {
+                field: field_n(entry, text(e.get("field"), "effect.field")?)?,
+                by: match e.get("by") {
+                    Some(Value::Int(n)) => i64::try_from(*n).ok(),
+                    _ => None,
+                }
+                .ok_or_else(|| Refusal {
+                    name: "effect-malformed",
+                    detail: "set.by: a whole number".into(),
+                })?,
+            },
             // Between two fields of one thing is not built here.
             ("transfer", _) if e.get("into_field").is_some() => {
                 return refuse("effect-not-built", "transfer into_field");

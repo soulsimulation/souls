@@ -8,8 +8,9 @@
 //!   checks who may (F6) and starts the run. Its candidates are tried in rank order; the first refusal is the answer
 //!   when none starts.
 //! - **The world the runner reaches** is the bodies' own: their controller (B1), their town for a walk's corners (N7),
-//!   and a due list, moves (B2) and a minter of the forms' own. A move's reach is measured from the body's feet to
-//!   the node's place in the tree, across x and z.
+//!   and a due list, moves (B2) and a minter of the forms' own. A move's reach is measured across x and z from the
+//!   body's edge to the nearer of the thing's point the move names and its nearest surface (its entry's bounds), on
+//!   the floor the body stands on (C22, #3485); from the feet to the node's place when its entry gives neither.
 //! - **Written once.** What the runner writes ([`Forms::out`]) is numbered at the replica's version, applied as one
 //!   part with the tick's other entries and handed back to [`Forms::logged`] (F2's log hook, #3257, as its issue
 //!   describes it). A run's end is its intent's answer: `done` a receipt naming every entry the intent caused, else
@@ -53,13 +54,31 @@ use crate::bodies::Bodies;
 
 type R<T> = Result<T, Refusal>;
 
-const MOVES: [&str; 5] = [
+const MOVES: [&str; 6] = [
     include_str!("../../replica/fixtures/moves/lie.diag"),
     include_str!("../../replica/fixtures/moves/pour.diag"),
     include_str!("../../replica/fixtures/moves/press.diag"),
     include_str!("../../replica/fixtures/moves/rise.diag"),
     include_str!("../../replica/fixtures/moves/sit.diag"),
+    SLIDE,
 ];
+
+/// A slide (C22, #3485), as today's engine gives it (`content/moves/slide.json`): one hand reaches the thing's named
+/// point, as a press does, and keeps contact while it slides along the surface. Contact begins when start-up ends.
+const SLIDE: &str = r#"
+{
+  1: "souls:slide", 2: 1,
+  3: [{1: 2, 2: 2}],                        # claims any one manipulator
+  4: [2],                                   # blocks the other manipulators while it runs
+  5: [2],                                   # a new claim on a manipulator cancels it
+  6: [{1: "souls:start-up", 2: 250000},     # contact at its end
+      {1: "souls:slide", 2: 400000},        # the contact window
+      {1: "souls:recovery", 2: 300000}],
+  7: {1: 2},                                # reaches with the hand it holds
+  8: 600000,
+  9: "souls:surface"
+}
+"#;
 
 /// The longest a form's walk may take, µs (C20, #3469): about 250 m at a body's free speed (1.4 m/s), most of the way
 /// across Eden's town round its buildings, through doors and up stairs. A walk that cannot go on ends by its own name,
@@ -90,6 +109,8 @@ struct Sight<'a> {
     view: Option<View<'a>>,
     tree: &'a Tree,
     kind: Name,
+    /// The world's entries by kind, for a thing's points and bounds.
+    kinds: &'a Json,
 }
 
 impl Sight<'_> {
@@ -175,22 +196,106 @@ impl Geometry for Sight<'_> {
     }
 }
 
+/// `[x, z]` µm across x and z from `a` to `b`.
+fn flat(a: [i64; 2], b: [i64; 2]) -> i64 {
+    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+    i64::try_from((d(a[0], b[0]) + d(a[1], b[1])).isqrt()).unwrap_or(i64::MAX)
+}
+
+/// How far point `q` is from the closed quadrilateral `ring` (convex, its corners in order), across x and z: 0 inside.
+fn to_ring(q: [i64; 2], ring: &[[i64; 2]; 4]) -> i64 {
+    let edge = |a: [i64; 2], b: [i64; 2]| {
+        let (d, w) = (
+            [i128::from(b[0] - a[0]), i128::from(b[1] - a[1])],
+            [i128::from(q[0] - a[0]), i128::from(q[1] - a[1])],
+        );
+        (d[0] * w[1] - d[1] * w[0], d, w)
+    };
+    let sides: Vec<i128> = (0..4).map(|i| edge(ring[i], ring[(i + 1) % 4]).0).collect();
+    if sides.iter().all(|&c| c >= 0) || sides.iter().all(|&c| c <= 0) {
+        return 0;
+    }
+    (0..4)
+        .map(|i| {
+            let (a, (_, d, w)) = (ring[i], edge(ring[i], ring[(i + 1) % 4]));
+            let len = (d[0] * d[0] + d[1] * d[1]).max(1);
+            let t = (d[0] * w[0] + d[1] * w[1]).clamp(0, len);
+            let near = |k: usize| a[k] + i64::try_from(d[k] * t / len).unwrap_or(0);
+            flat(q, [near(0), near(1)])
+        })
+        .min()
+        .unwrap_or(i64::MAX)
+}
+
+/// Whole millimetres `[x, y, z]` in µm.
+fn um(v: Option<&Json>) -> Option<Vec3> {
+    let n = |v: &Json| match v {
+        Json::Int(n) => i64::try_from(*n).ok()?.checked_mul(1000),
+        _ => None,
+    };
+    match v?.arr()? {
+        [x, y, z] => Some(Vec3::new(n(x)?, n(y)?, n(z)?)),
+        _ => None,
+    }
+}
+
+impl Sight<'_> {
+    /// How far a body standing at `from` on floor `floor` is from thing `target` across x and z (C22, #3485): from
+    /// the body's edge (a standard body's radius from its feet, [`sim::ground::HUMAN_RADIUS`]: a hand reaches from the
+    /// shoulder, not the feet) to the nearer of the thing's point `point` its entry names and its nearest surface, the
+    /// box its entry's `geometry.bounds_mm` gives (centred on its place), each turned with the thing and carried onto
+    /// that floor ([`View::on_floor`]). `None` when its entry gives neither, or the thing is not over that floor.
+    fn to_thing(&self, floor: Id, from: Vec3, target: Id, point: &Name) -> Option<i64> {
+        let view = self.view.as_ref()?;
+        let n = self.tree.node(self.tree.handle(target)?)?;
+        let entry = self.kinds.get(plain(n.kind()))?;
+        let on = |p: Vec3| {
+            view.on_floor(target, p)
+                .filter(|(f, ..)| *f == floor)
+                .map(|(_, p, _)| [p.x, p.z])
+        };
+        let q = [from.x, from.z];
+        let named = um(entry
+            .get("points")
+            .and_then(|ps| ps.get(point.as_str()))
+            .and_then(|p| p.get("at_mm")))
+        .and_then(on)
+        .map(|p| flat(q, p));
+        let surface = um(entry.get("geometry").and_then(|g| g.get("bounds_mm"))).and_then(|b| {
+            let (x, z) = (b.x / 2, b.z / 2);
+            let c = |u: i64, v: i64| on(Vec3::new(u, 0, v));
+            let ring = [c(-x, -z)?, c(x, -z)?, c(x, z)?, c(-x, z)?];
+            Some(to_ring(q, &ring))
+        });
+        let d = match (named, surface) {
+            (Some(a), Some(b)) => a.min(b),
+            (a, b) => a.or(b)?,
+        };
+        Some(d.saturating_sub(sim::ground::HUMAN_RADIUS * 1000).max(0))
+    }
+}
+
 impl Reach for Sight<'_> {
+    /// To another body, from feet to feet; to a thing, from the body's edge to its point or its nearest surface
+    /// ([`Sight::to_thing`]), else to its place in the tree; across x and z.
     fn distance(
         &self,
         body: Id,
         _: &Effector,
         _: Option<&Name>,
         target: Id,
-        _: &Name,
+        point: &Name,
     ) -> Option<i64> {
-        let a = self.bodies.get(&body)?.pose.position;
+        let me = self.bodies.get(&body)?;
+        let a = me.pose.position;
+        if let Some(d) = self.to_thing(sim::walk::node_of(me), a, target, point) {
+            return Some(d);
+        }
         let b = match self.bodies.get(&target) {
             Some(t) => t.pose.position,
             None => self.place(target)?,
         };
-        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
-        i64::try_from((d(a.x, b.x) + d(a.z, b.z)).isqrt()).ok()
+        Some(flat([a.x, a.z], [b.x, b.z]))
     }
 }
 
@@ -302,6 +407,7 @@ impl Acts {
             view,
             tree,
             kind: Name::new("souls:body").unwrap_or_else(|| unreachable!("a literal name")),
+            kinds: &self.kinds,
         };
         let mut w = World {
             tree,

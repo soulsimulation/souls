@@ -1091,3 +1091,321 @@ fn blocked_by(tree: &replica::tree::Tree, id: Id, mut at: replica::pose::Vec3) -
     }
     "no solid: off the walked ground".into()
 }
+
+/// C22 (#3485): a Soul born at `at` (`x,z` m) does `verb` (an Eden form by its own entry) at thing `today` (today's id):
+/// the receipt's entries (world time, events), printed, and the act's answer.
+fn act_at(at: &str, today: &str, verb: &str, tag: &str) -> Result<Vec<u64>, String> {
+    act_in(&facts_path(), at, today, verb, tag)
+}
+
+/// [`act_at`] on the facts file `facts`.
+fn act_in(facts: &str, at: &str, today: &str, verb: &str, tag: &str) -> Result<Vec<u64>, String> {
+    let im = import_eden::load(&std::fs::read_to_string(facts).unwrap()).expect("Eden loads");
+    let thing = im.nodes[today];
+    let (served, mut soul, dir) = serve(facts, at, tag, im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .unwrap();
+    let done = soul.act(verb, Some(thing), BTreeMap::new());
+    println!("{verb} at {today}: {done:?}");
+    if let Some(b) = track(&dir).last() {
+        println!("  the body at the end: ({:.3}, {:.3}) m", b.2, b.3);
+    }
+    let entries = receipt_entries(&dir, done.as_deref().unwrap_or(&[]));
+    for (at, names, _) in &entries {
+        println!("  {at} µs: {names:?}");
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    done
+}
+
+/// C22 (#3485) A1: born outside the hall's front door, a Soul walks to the arcade cabinet in its bar (today's
+/// e_263477b5) and plays it by its own entry (`play`: a walk to `player`, a press at `joystick`, 60 s): a press is
+/// measured to the joystick or the cabinet's nearest surface, not its origin, and the act ends `done`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c22_a1_the_arcade_cabinets_play_ends_done() {
+    act_at("297.5,-14.0", "e_263477b5", "eden:play", "c22a1").expect("played, done");
+}
+
+/// C22 (#3485) A2: born outside the library's door, a Soul walks to the reading room's desk (today's e_0f7fb44b) and
+/// writes at it by its own entry (`write`: a walk to `front`, a slide at `top`, 60 s, the page count up by one). On
+/// Eden as it is, its chair (e_975f923a) stands on the desk's `front`, as a chair does at every desk on Eden: the walk
+/// stops behind the chair, 1.3 m from the desk's edge, and the slide ends `out-of-reach` (a content cause, C18). With
+/// that chair taken out of the facts, the write ends `done`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c22_a2_the_desks_write_ends_done() {
+    use replica::rules::json::{Value as J, parse};
+    let blocked = act_at("74.0,-1.0", "e_0f7fb44b", "eden:write", "c22a2b");
+    assert_eq!(
+        blocked,
+        Err("out-of-reach".to_owned()),
+        "the chair on its front"
+    );
+    let mut facts = parse(&std::fs::read_to_string(facts_path()).unwrap()).unwrap();
+    if let J::Obj(o) = &mut facts
+        && let Some((_, J::Arr(things))) = o.iter_mut().find(|(k, _)| k == "things")
+    {
+        things.retain(|t| t.get("id").and_then(J::str) != Some("e_975f923a"));
+    }
+    let path = std::env::temp_dir().join(format!("eden-c22-{}.facts.json", std::process::id()));
+    std::fs::write(&path, facts.to_json()).unwrap();
+    let done = act_in(
+        path.to_str().unwrap(),
+        "74.0,-1.0",
+        "e_0f7fb44b",
+        "eden:write",
+        "c22a2",
+    );
+    let _ = std::fs::remove_file(&path);
+    done.expect("written, done");
+}
+
+/// How one form of a sweep ended ([`sweep`]): `done`, `refused <name>` at its start, `failed <name>` by its run's
+/// ending, or `never-ended` past its deadline.
+fn ending(r: Result<String, String>) -> String {
+    match r {
+        Ok(how) if how == "done" => how,
+        Ok(how) => format!("failed {how}"),
+        Err(name) => format!("refused {name}"),
+    }
+}
+
+/// C22 (#3485) A3: every form an act starts (`starts: act`) of every entry in `content/kinds` that has a thing on
+/// Eden, run once on the first such thing (by today's id), by a body set down at the form's stand point (its first
+/// walk's point, else the thing's first `stand` point, else the thing's own place; the nearest clear place within a
+/// form's reach when a body cannot stand there), through worldd's own form runner ([`worldd::acts::Acts`]) and
+/// bodies, as `worldd seed` and `worldd serve` build them (stand points cleared, seats registered), in world time
+/// stepped 50 ms a tick. A slot argument is given slot 1; a thing argument is not given. What a run writes is not
+/// applied, so each form runs on Eden as seeded. Each form's body is taken out after it. Returns each ending with
+/// its forms (`kind form thing`), and the entries with no thing on Eden.
+fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
+    use replica::pose::{Frame, Quat, Vec3};
+    use replica::rules::json::Value as J;
+    use replica::world_model::{plain, show};
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(facts_path()).expect("the Eden facts file");
+    let im = import_eden::load(&text).expect("Eden loads");
+    let mut found = Vec::new();
+    entries(Path::new(&format!("{root}/content/kinds")), &mut found);
+    import_eden::clear_stand_points(&im, &mut found);
+    let tree = import_eden::load(&text).expect("Eden loads").tree;
+    let (world, ground) = (im.nodes["world"], im.nodes["ground"]);
+    let header = import_eden::header(world, &im.rules).unwrap();
+    let mut things: BTreeMap<String, Id> = BTreeMap::new();
+    for &id in im.nodes.values() {
+        if let Some(n) = tree.handle(id).and_then(|h| tree.node(h)) {
+            things
+                .entry(plain(n.kind().as_str()).to_owned())
+                .or_insert(id);
+        }
+    }
+    let next = im.tree.to_state().next;
+    let town = sim::walk::town::Town::new(
+        im.tree,
+        ground,
+        sim::links::Doors::new(header.clone(), im.rules, next),
+    )
+    .expect("the town");
+    let mut bodies = worldd::bodies::Bodies::new(town, 50_000).unwrap();
+    // The seats, as `worldd serve` registers them: a stand point a body cannot stand on moved within reach.
+    let (seats, _) = import_eden::body_slots(&bodies.town.tree, &found);
+    for s in &seats {
+        let view = bodies.town.view();
+        let Some((floor, point, facing)) = view.on_floor(s.thing, s.at) else {
+            continue;
+        };
+        let mut place = sim::slots::PlaceAt {
+            thing: s.thing,
+            place: replica::moves::Place {
+                slot: s.slot,
+                height: s.at.y.max(0),
+                stand: [s.stand.x - s.at.x, s.stand.z - s.at.z],
+            },
+            point,
+            facing,
+            floor,
+        };
+        let stand = place.stand().map(|p| Vec3::new(p.x, point.y - s.at.y, p.z));
+        let [w, x, y, z] = facing.parts();
+        let back = Quat::new(w, -x, -y, -z);
+        if let (Ok(stand), Ok(back)) = (stand, back)
+            && view.stand_near(floor, stand, 1, None).is_none()
+            && let Some(clear) = view.stand_near(floor, stand, skills::form_runner::REACH, None)
+            && let Ok(d) = back.rotate(Vec3::new(clear.x - point.x, 0, clear.z - point.z))
+        {
+            place.place.stand = [d.x, d.z];
+        }
+        let _ = bodies.add_place(place);
+    }
+    let family = {
+        use replica::bodies::{Class, Family, Resource};
+        let r = |n: &str, class, slot| Resource {
+            name: name(n),
+            class,
+            slot,
+        };
+        Family {
+            name: name("souls:humanoid"),
+            resources: vec![
+                r("souls:leg-left", Class::Locomotion, None),
+                r("souls:leg-right", Class::Locomotion, None),
+                r("souls:hand-left", Class::Manipulator, Some(1)),
+                r("souls:hand-right", Class::Manipulator, Some(2)),
+            ],
+        }
+    };
+    let mut acts = worldd::acts::Acts::new(
+        replica::rules::json::Value::Obj(found.clone()),
+        worldd::acts::library().expect("the moves"),
+        header,
+        Scope([0xc2; 16]),
+    );
+    let (mut now, mut tick, mut n) = (1_000_000_000_i64, 0u64, 0u64);
+    bodies.begin(now);
+    let (mut out, mut absent): (BTreeMap<String, Vec<String>>, Vec<String>) = Default::default();
+    for (kind, entry) in &found {
+        let Some(&thing) = things.get(plain(kind)) else {
+            absent.push(kind.clone());
+            continue;
+        };
+        let point = |p: &str| -> Option<Vec3> {
+            let at = entry.get("points")?.get(p)?.get("at_mm")?.arr()?;
+            let mm: Vec<i64> = at
+                .iter()
+                .filter_map(|v| match v {
+                    J::Int(n) => i64::try_from(*n).ok(),
+                    _ => None,
+                })
+                .collect();
+            match mm[..] {
+                [x, y, z] => Some(Vec3::new(x * 1000, y * 1000, z * 1000)),
+                _ => None,
+            }
+        };
+        let first_stand = entry.get("points").and_then(J::obj).and_then(|ps| {
+            ps.iter()
+                .find(|(_, d)| d.get("role").and_then(J::str) == Some("stand"))
+                .map(|(p, _)| p.clone())
+        });
+        for (form, f) in entry.get("forms").and_then(J::obj).unwrap_or(&[]) {
+            if f.get("starts").and_then(J::str) != Some("act") {
+                continue;
+            }
+            let label = format!("{} {form} {}", plain(kind), show(thing));
+            let walk = f
+                .get("steps")
+                .and_then(J::arr)
+                .unwrap_or(&[])
+                .iter()
+                .find(|s| s.get("step").and_then(J::str) == Some("walk_to"))
+                .and_then(|s| s.get("point").and_then(J::str).map(str::to_owned));
+            let at = walk
+                .or_else(|| first_stand.clone())
+                .and_then(|p| point(&p))
+                .unwrap_or(Vec3::ZERO);
+            let view = bodies.town.view();
+            let Some((floor, at, _)) = view.on_floor(thing, at) else {
+                out.entry("no floor under the thing".into())
+                    .or_default()
+                    .push(label);
+                continue;
+            };
+            // Within a form's reach, else out to today's 4 m (C13's `TODAY`): a body set down where it can stand.
+            let at = view
+                .stand_near(floor, at, skills::form_runner::REACH, None)
+                .or_else(|| view.stand_near(floor, at, TODAY, None))
+                .unwrap_or(at);
+            n += 1;
+            let body = Id::new(Scope([0xc1; 16]), 1000 + n).unwrap();
+            let frame = Frame {
+                node: floor,
+                slot: None,
+            };
+            let placed = bodies.town.surfaces[&floor].place(body, frame, at, Quat::IDENTITY);
+            let Ok(placed) = placed else {
+                out.entry("no place to stand".into())
+                    .or_default()
+                    .push(label);
+                continue;
+            };
+            bodies.add_body(family.clone(), placed).unwrap();
+            let mut args = worldd::acts::Args::default();
+            for (a, t) in f.get("takes").and_then(J::obj).unwrap_or(&[]) {
+                if t.get("type").and_then(J::str) == Some("slot") {
+                    args.slots.insert(a.clone(), 1);
+                }
+            }
+            let id = Id::new(Scope([0xc3; 16]), n).unwrap();
+            let intent =
+                worldd::acts::intent(id, now + 3_600_000_000, Actor::Soul(body), label.as_bytes());
+            let started = acts.start(
+                &tree,
+                Some(&mut bodies),
+                body,
+                &[(thing, form.clone())],
+                &args,
+                intent,
+                tick,
+                now,
+            );
+            let how = match started {
+                Err(r) => Err(r.name.to_owned()),
+                Ok(sim::forms::Asked::Applied(_)) => Ok("done".to_owned()),
+                Ok(sim::forms::Asked::Started(run) | sim::forms::Asked::Running(run)) => {
+                    let due = acts.forms.due(run).unwrap_or(now) + 1_000_000;
+                    let mut how = None;
+                    while how.is_none() && now <= due {
+                        now += 50_000;
+                        tick += 1;
+                        let _ = bodies.step(now);
+                        acts.tick(&tree, Some(&mut bodies), tick, now);
+                        let _ = acts.out();
+                        how = acts
+                            .ended()
+                            .into_iter()
+                            .find(|(i, _)| *i == id)
+                            .map(|e| e.1);
+                    }
+                    Ok(how.unwrap_or_else(|| "never-ended".to_owned()))
+                }
+            };
+            // The body out, and its seat freed, before the next form.
+            let _ = bodies.slots.release_body(body);
+            bodies.runner.controller.remove(body);
+            out.entry(ending(how)).or_default().push(label);
+        }
+    }
+    (out, absent)
+}
+
+/// C22 (#3485) A3: the sweep ([`sweep`]): the count of each ending, then each form that did not end `done`, by
+/// ending.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file (see the module doc)"]
+fn c22_a3_every_form_of_every_eden_entry_runs_once_from_its_stand_point() {
+    let (out, absent) = sweep();
+    let all: usize = out.values().map(Vec::len).sum();
+    let kinds: std::collections::BTreeSet<&str> = out
+        .values()
+        .flatten()
+        .filter_map(|l| l.split(' ').next())
+        .collect();
+    println!(
+        "C22 sweep: {all} forms of {} entries with a thing on Eden; {} entries with none",
+        kinds.len(),
+        absent.len()
+    );
+    for (how, forms) in &out {
+        println!("  {how}: {}", forms.len());
+    }
+    for (how, forms) in out.iter().filter(|(h, _)| *h != "done") {
+        println!("{how} ({}):", forms.len());
+        for f in forms {
+            println!("    {f}");
+        }
+    }
+    assert!(out.contains_key("done"));
+}
