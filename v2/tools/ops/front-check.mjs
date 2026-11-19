@@ -7,7 +7,7 @@
 //   worlds   /w/<v2>/ is the new system's page and /w/<today>/ today's; /w/<v2>/v1/edge/ (an old API path) is answered
 //            by today's launcher, never redirected
 //   client   /w/<v2>/eden.mjs and /v1/config answer from v2, with the client's SHA-256 equal to soulClient.sha256;
-//            the same paths for --today still come from today's launcher
+//            /llms.txt is the current instructions; client and config paths for --today still come from today's launcher
 //   aliases  each old alias, at /w/<old>/ and /worlds/w/<old>/, is a same-origin 308 to /w/<slug>/ keeping the query, and
 //            lands on the system that serves the slug
 //   domains  the primary and each older domain send GET/HEAD (301) and POST (308) to the public name, path and query kept
@@ -67,6 +67,10 @@ export async function frontCheck({ public: pub = 'https://soul.game', primary = 
         if (path === 'eden.mjs') sha = createHash('sha256').update(body).digest('hex');
         else if (JSON.parse(body).soulClient?.sha256 !== sha) bad('client', 'eden.mjs SHA-256 differs from soulClient.sha256');
       }
+      const guide = await get(`${pub}/w/${v2}/llms.txt`), text = await guide.text();
+      const instructions = await get(`${pub}/w/${v2}/instructions.md`);
+      seen.push(`client: /w/${v2}/llms.txt -> ${guide.status} ${system(guide)}`);
+      if (guide.status !== 200 || system(guide) !== 'v2' || guide.headers.get('cache-control') !== 'no-cache' || text !== await instructions.text()) bad('client', 'llms.txt must serve the current v2 instructions with no-cache');
       // The stopped-launcher run checks only the new system; the full run also checks today's slugs.
       if (today) for (const path of ['eden.mjs', 'v1/config']) {
         const r = await done(await get(`${pub}/w/${today}/${path}`));

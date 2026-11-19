@@ -58,6 +58,12 @@ test('served client: world GET/HEAD routes serve the installed bytes and matchin
   const head = await fetch(`${base}/w/eden/v1/config`, { method: 'HEAD' });
   assert.equal(head.status, 200);
   assert.equal(await head.text(), '');
+  for (const method of ['GET', 'HEAD']) {
+    const guide = await fetch(`${base}/w/eden/llms.txt`, { method });
+    assert.equal(guide.status, 200);
+    assert.equal(guide.headers.get('cache-control'), 'no-cache');
+    assert.equal(await guide.text(), method === 'HEAD' ? '' : readFileSync(join(dir, 'client', 'instructions.md'), 'utf8'));
+  }
   assert.equal((await fetch(`${base}/w/eden/eden.mjs`, { method: 'POST' })).status, 405);
   assert.equal((await fetch(`${base}/w/eden/soul-client.json`)).status, 404, 'manifest is not a public client address');
   const missing = createOrigin(join(dir, 'views'), { client: join(dir, 'missing') }).server;

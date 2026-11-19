@@ -53,7 +53,7 @@ https://soul.game {
 			root * /usr/local/lib/souls/web
 			file_server
 		}
-		@client path_regexp ^/w/[^/]+/(eden\.mjs|skill\.md|creator\.md|instructions\.md|replica\.js|replica_bg\.wasm|v1/config)$
+		@client path_regexp ^/w/[^/]+/(eden\.mjs|skill\.md|creator\.md|instructions\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1/config)$
 		handle @client {
 			header X-Souls-System v2
 			reverse_proxy localhost:7320 {
