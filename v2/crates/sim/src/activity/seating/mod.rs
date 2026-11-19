@@ -99,6 +99,9 @@ pub struct Seating {
     tracks: BTreeMap<Id, Owner>,
     /// G3's rebuild, asked for by each commit when the ground is kept (N19, #3341): a seated part is fixed geometry.
     pub rebuild: Option<crate::ground::Rebuild>,
+    /// Each kind's section 11 bounds, by full name (`replica::kinds::Kinds::most`): a crew that would stay on as a
+    /// part's holders is refused when the part already holds that many crews (`crew.over-most`). Empty: unbounded.
+    pub most: BTreeMap<String, BTreeMap<String, u64>>,
 }
 
 fn leave(header: &Header, transfer: Id, node: Id, pose: Pose) -> Body {
@@ -155,6 +158,7 @@ impl Seating {
             parts: Vec::new(),
             tracks: BTreeMap::new(),
             rebuild: None,
+            most: BTreeMap::new(),
         }
     }
 
@@ -219,8 +223,44 @@ impl Seating {
         Ok(())
     }
 
+    /// `crew.over-most`: `part`'s kind bounds the children of the crew's kind (section 11) and it already holds that
+    /// many, so `activity`'s node cannot stay on under it as its holders.
+    fn within_most(&self, tree: &Tree, activity: Id, part: Id) -> R<()> {
+        let plain = |k: &Name| k.as_str().split('@').next().unwrap_or("").to_owned();
+        let kind_of = |id: Id| {
+            tree.handle(id)
+                .and_then(|h| tree.node(h))
+                .map(|n| n.kind().clone())
+        };
+        let (Some(pk), Some(ak)) = (kind_of(part), kind_of(activity)) else {
+            return Ok(());
+        };
+        let crew = plain(&ak);
+        let Some(&most) = self.most.get(pk.as_str()).and_then(|b| b.get(&crew)) else {
+            return Ok(());
+        };
+        let held = tree
+            .handle(part)
+            .and_then(|h| tree.children(h))
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|h| tree.node(*h))
+            .filter(|n| n.id() != activity && plain(n.kind()) == crew)
+            .count();
+        if u64::try_from(held).unwrap_or(u64::MAX) >= most {
+            return refuse(
+                "crew.over-most",
+                format!(
+                    "{} already holds {held} {crew} (its kind holds at most {most})",
+                    show(part)
+                ),
+            );
+        }
+        Ok(())
+    }
+
     /// The refusals before anyone moves, for `part` to go to `target` with `activity`'s crew, whose standing reach is
-    /// `reach` µm: `crew.size`, `slot.occupied`, `reach.too-high`, `site.occupied` (a body stands where the part would
+    /// `reach` µm: `crew.size`, `crew.over-most` (B19's bound, section 11), `slot.occupied`, `reach.too-high`, `site.occupied` (a body stands where the part would
     /// be, N19), then B18's on the seating as it would be committed.
     #[allow(clippy::too_many_arguments)]
     pub fn check(
@@ -242,6 +282,9 @@ impl Seating {
                     show(activity)
                 ),
             );
+        }
+        if target.hold {
+            self.within_most(tree, activity, part)?;
         }
         if let Some(slot) = target.to.slot
             && let Some(other) = in_slot(tree, target.to.node, slot)

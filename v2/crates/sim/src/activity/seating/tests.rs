@@ -445,13 +445,15 @@ fn world() -> W {
         vec![crew_kind()],
     );
     acts.structure = structure(&kinds, &files);
-    let seating = Seating::new(
+    let mut seating = Seating::new(
         header.clone(),
         rules,
         structure(&kinds, &files),
         ground,
         Audience::Everyone,
     );
+    // The frame entry's section 11: a frame holds at most two crews (`content/kinds/construction/rack_upright.json`).
+    seating.most = kinds.most();
     let joint = n(&format!(
         "{}:joint",
         plain(&beam).split(':').next().expect("a namespace")
@@ -1090,6 +1092,24 @@ fn a5_each_refusal_is_returned_before_anyone_moves() {
     let r = check(&mut w, other, fb, &t, REACH).expect_err("refused");
     println!("A5: frame B into frame A's slot: {}: {}", r.0, r.1);
     assert_eq!(r.0, "slot.occupied");
+    // crew.over-most: frame A's entry holds at most two crews (section 11). It holds `act`'s; a second crew is
+    // proposed on it, so a third asked to stay on as its holders is refused.
+    let upright = w
+        .seating
+        .most
+        .iter()
+        .find(|(k, _)| k.starts_with("mars:rack_upright@"));
+    let bound = upright.and_then(|(_, b)| b.get("mars:rack_crew")).copied();
+    assert_eq!(bound, Some(2), "the frame entry's bound on its crews");
+    let second = w.crew(fa, &[1]);
+    assert_eq!(
+        w.parent(second).0,
+        Some(fa),
+        "the second crew is frame A's child"
+    );
+    let r = check(&mut w, other, fa, &t, REACH).expect_err("refused");
+    println!("A5: a third crew to hold frame A: {}: {}", r.0, r.1);
+    assert_eq!(r.0, "crew.over-most");
 }
 
 /// The run as V14's trace (`v2/tools/birdseye/src/main.rs`): a `u32` header length, the header, zero bytes to a

@@ -424,7 +424,8 @@
  },
  "children": {
   "crew": {
-   "kind": "mars:rack_crew"
+   "kind": "mars:rack_crew",
+   "most": 2
   }
  },
  "motion": {

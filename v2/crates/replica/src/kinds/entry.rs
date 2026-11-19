@@ -9,8 +9,9 @@
 //!   `joint` (a connector) `5: connector kind, 6: the kind it mates with`;
 //! - **6** slots, numbered 1, 2, ... in the file's order: `{1: what it admits, 2: at_mm, 3: name}`;
 //! - **7** geometry `{1: bounds_mm}`, **18** motion `{1: how}`, **19** loose `{1: 1}` (ever) or `{2: us}`;
-//! - **11** children, the list of each named child's `kind` (B19: a frame admits its crew's activity as it holds it);
-//!   a child that states `most` is refused (`entry-section-not-read: children most`), as K3 reads no bound.
+//! - **11** children, each named child as `{1: kind, 2: most}`, in the file's order (B19: a frame admits its crew's
+//!   activity as it holds it); `most`, how many such children at most, is part of the meaning, so the kind's hash
+//!   covers it, and a child with none is refused (`entry-value`), as the format bounds every child.
 //!
 //! Any other meaning section (forms, areas, ...) is refused by name, `entry-section-not-read`, rather than
 //! dropped: a kind named without it would be named by less than its meaning. Sections 20 and up (looks, text, card)
@@ -153,17 +154,23 @@ fn point(n: &str, p: &Value) -> Result<String, String> {
 }
 
 fn children(v: &Value) -> Result<String, String> {
-    let mut kinds = Vec::new();
+    let mut out = Vec::new();
     for (n, c) in v.obj().unwrap_or(&[]) {
-        if c.get("most").is_some() {
-            return Err("entry-section-not-read: children most".into());
-        }
         let k = c
             .get("kind")
             .ok_or(format!("entry-value: child {n} names no kind"))?;
-        kinds.push(quoted(k)?);
+        // The format bounds every child (`docs/soul-actions/entry-format.md` section 11): a whole number above zero.
+        let most = match c.get("most") {
+            Some(Value::Int(m)) if *m > 0 => *m,
+            _ => {
+                return Err(format!(
+                    "entry-value: child {n}'s most is not a whole number above zero"
+                ));
+            }
+        };
+        out.push(map(&[(1, Some(quoted(k)?)), (2, Some(most.to_string()))]));
     }
-    Ok(format!("[{}]", kinds.join(", ")))
+    Ok(format!("[{}]", out.join(", ")))
 }
 
 fn slot(n: &str, s: &Value) -> Result<String, String> {
