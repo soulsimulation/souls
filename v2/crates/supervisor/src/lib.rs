@@ -17,6 +17,7 @@
 //!
 //! Moving a live world to another machine (O9, #2828) is [`moving`].
 
+pub mod bucket;
 pub mod deploy;
 pub mod folder;
 pub mod health;

@@ -317,6 +317,10 @@ async fn a3_a_revoked_token_is_refused_and_no_token_is_in_any_log_line() {
     assert_eq!(outcome(&next(&mut ws).await.unwrap()), "stream.started");
     put(&mut ws, intent(soul(13), 1)).await;
     assert!(next(&mut ws).await.is_some(), "an answer");
+    // Revoked while signed in (W9, #2827): the next intent is refused by name.
+    r.gw.tokens.write().unwrap().revoke(&fresh.hash());
+    put(&mut ws, intent(soul(13), 2)).await;
+    assert_eq!(outcome(&next(&mut ws).await.unwrap()), "token.refused");
 
     let lines = r.lines.lock().unwrap().clone();
     assert!(lines.iter().any(|l| l.contains("refused")), "{lines:?}");

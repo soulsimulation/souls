@@ -192,3 +192,53 @@ fn a5_a_limit_names_itself_and_when_to_retry() {
         .expect_err("label");
     assert_eq!(e.name, "label-taken");
 }
+
+#[test]
+fn w9_settings_by_the_creator_alone_and_off_the_list_wakes_no_world() {
+    let (store, gets, forks) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let w = worlds(&store, &gets, forks.clone());
+    w.create(&ask("k1", "mine", "Ann"), person(1), 0, 10 * DAY)
+        .expect("made");
+    let keys = store.keys();
+    // Only its creator.
+    let e = w
+        .settings("mine", person(2), Some(true), None)
+        .expect_err("not hers");
+    assert_eq!(e.name, "not-the-creator");
+    assert_eq!(
+        w.settings("nowhere", person(1), Some(true), None)
+            .expect_err("missing")
+            .name,
+        "world-missing"
+    );
+    // Closed to visitors: the row says so on the list.
+    let row = w
+        .settings("mine", person(1), None, Some(true))
+        .expect("closed");
+    assert_eq!(row["closed"], true);
+    assert_eq!(w.list().expect("a list")["worlds"][0]["closed"], true);
+    // Off the list (A4): gone from it here and on a cold machine; nothing but the list's object is written, and no
+    // world is started.
+    w.settings("mine", person(1), Some(true), None)
+        .expect("off the list");
+    assert_eq!(w.list().expect("a list")["worlds"], json!([]));
+    let (gets2, forks2) = (AtomicUsize::new(0), Arc::new(AtomicUsize::new(0)));
+    assert_eq!(
+        worlds(&store, &gets2, forks2).list().expect("a list")["worlds"],
+        json!([])
+    );
+    assert_eq!(store.keys(), keys, "only the list's object changed");
+    assert_eq!(forks.load(Ordering::SeqCst), 1, "the create's fork alone");
+    // Read back by its creator, and back on the list.
+    assert_eq!(
+        w.settings("mine", person(1), None, None).expect("read")["unlisted"],
+        true
+    );
+    w.settings("mine", person(1), Some(false), None)
+        .expect("listed");
+    assert_eq!(w.list().expect("a list")["worlds"][0]["name"], "mine");
+}

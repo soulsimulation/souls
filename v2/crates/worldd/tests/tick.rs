@@ -315,11 +315,17 @@ fn a2_a3_ten_minutes_replayed_and_a_kill_restarted() {
     };
     let first = run_to(&w, 40);
     println!("tick 40: {first:?}");
-    // The kill: the log as the disk held it, mid-walk.
-    std::thread::sleep(Duration::from_millis(200));
-    let killed = {
+    // The kill: the log as the disk held it, mid-walk, once the syncer has made the 40 ticks durable (polled for 30 s).
+    let mut polls = 0;
+    let killed = loop {
         let d = store.0.lock().unwrap();
-        d.bytes[..d.durable].to_vec()
+        if d.durable > 0 && d.durable == d.bytes.len() {
+            break d.bytes.clone();
+        }
+        drop(d);
+        polls += 1;
+        assert!(polls < 6_000, "the log durable within 30 s");
+        std::thread::sleep(Duration::from_millis(5));
     };
     let sit = at(&w, 400, intent(walker, 2, "eden:sit", Some(chair()), None));
     let end = run_to(&w, TEN_MINUTES);
@@ -541,24 +547,54 @@ fn a4_a_panic_in_a_unit_is_contained() {
     w.stop();
 }
 
-/// A1: the same loop paced by the machine's clock runs at its rate.
+/// A1: the same loop paced by the machine's clock runs at its rate. Asserted as work and order, which hold on a
+/// loaded runner: the loop starts, 40 more ticks run, and none ends before its start's real time (tick n starts n
+/// ticks from the epoch on the real line). The rate itself, the ticks' time within 10%, is a speed bar
+/// (`V2_SPEED_BARS`).
 #[test]
 fn a1_the_real_clock_paces_the_loop() {
     let w = lamp_world();
     let mut cfg = Config::new(LINEAGE, 1);
+    let tick_us = i64::try_from(cfg.tick.as_micros()).unwrap();
     cfg.bodies = Some(Box::new(|p: &Placed| bodies(p, false)));
     let world = answers::start(w.replica, toggles::rules(), Mem::with(Vec::new()), cfg).unwrap();
-    std::thread::sleep(Duration::from_millis(200));
-    let (t0, _) = world.beat.read();
-    std::thread::sleep(Duration::from_secs(2));
-    let (t1, _) = world.beat.read();
+    // The heartbeat once it reaches tick `least` (it reads −1 until the first tick ends), polled for 30 s.
+    let beat = |least: i64| {
+        for _ in 0..6_000 {
+            let (t, at) = world.beat.read();
+            if t >= least {
+                return (t, at);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("tick {least} within 30 s, at {}", world.beat.read().0)
+    };
+    let (t0, at0) = beat(0);
+    let (t1, at1) = beat(t0 + 40);
     world.stop();
-    println!("A1: {} ticks in 2 s", t1 - t0);
-    assert!(
-        (36..=44).contains(&(t1 - t0)),
-        "about 40 ticks in 2 s, got {}",
-        t1 - t0
+    println!(
+        "A1: ticks {t0} to {t1} ({}) in {} ms",
+        t1 - t0,
+        (at1 - at0) / 1_000
     );
+    assert!(t1 >= t0 + 40, "the loop went on: {t0} to {t1}");
+    for (t, at) in [(t0, at0), (t1, at1)] {
+        assert!(
+            at >= t * tick_us,
+            "tick {t} ended at {at}, before its start {}",
+            t * tick_us
+        );
+    }
+    if std::env::var_os("V2_SPEED_BARS").is_some() {
+        let (took, due) = (at1 - at0, (t1 - t0) * tick_us);
+        assert!(
+            (due * 9 / 10..=due * 11 / 10).contains(&took),
+            "{} ticks in about {} ms, took {} ms",
+            t1 - t0,
+            due / 1_000,
+            took / 1_000
+        );
+    }
 }
 
 fn hex(b: &[u8]) -> String {
