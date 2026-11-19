@@ -550,7 +550,12 @@ fn o18d_a2_root_asks_do_not_hide_refused_acts_and_rollback_retires_pending_probe
     let root = PathBuf::new();
     let state = supervisor::deploy::state_path(&root, &instance);
     assert!(
-        state.join("gateway.sock").as_os_str().as_encoded_bytes().len() < 104,
+        state
+            .join("gateway.sock")
+            .as_os_str()
+            .as_encoded_bytes()
+            .len()
+            < 104,
         "the complete fixture socket path fits SUN_LEN"
     );
     std::fs::create_dir_all(&state).unwrap();
@@ -754,12 +759,11 @@ fn o18d_a3_interrupted_operator_watch_recovers_its_pending_identity() {
         .unwrap();
     let until = Instant::now() + Duration::from_secs(10);
     let saved = loop {
-        if let Ok(bytes) = std::fs::read(&receipt) {
-            if let Ok(Value::Map(m)) = decode(&bytes).map(|d| d.value) {
-                if m.get(&3) == Some(&Value::Uint(2)) {
-                    break m;
-                }
-            }
+        if let Ok(bytes) = std::fs::read(&receipt)
+            && let Ok(Value::Map(m)) = decode(&bytes).map(|d| d.value)
+            && m.get(&3) == Some(&Value::Uint(2))
+        {
+            break m;
         }
         assert!(
             Instant::now() < until,
@@ -790,23 +794,20 @@ fn o18d_a3_interrupted_operator_watch_recovers_its_pending_identity() {
     let mut births = 0;
     for p in parts(&d) {
         for e in p.effects {
-            if e.envelope.actor == Actor::Soul(owner) {
-                if let replica::effects::Body::Changes(c) = e.body {
-                    for c in c {
-                        match c.change {
-                            replica::effects::Change::Create { node, .. } => {
-                                assert!(
-                                    live.is_empty(),
-                                    "old body retired before fresh watch birth"
-                                );
-                                live.insert(node);
-                                births += 1;
-                            }
-                            replica::effects::Change::Remove { node } => {
-                                live.remove(&node);
-                            }
-                            _ => {}
+            if e.envelope.actor == Actor::Soul(owner)
+                && let replica::effects::Body::Changes(c) = e.body
+            {
+                for c in c {
+                    match c.change {
+                        replica::effects::Change::Create { node, .. } => {
+                            assert!(live.is_empty(), "old body retired before fresh watch birth");
+                            live.insert(node);
+                            births += 1;
                         }
+                        replica::effects::Change::Remove { node } => {
+                            live.remove(&node);
+                        }
+                        _ => {}
                     }
                 }
             }
