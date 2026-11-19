@@ -25,6 +25,12 @@
 //!   up the tree onto the floor a body stands on ([`View::on_floor`], [`View::plan`]); its crossings are carried by
 //!   the town's links after the forms' tick (`sim::host::carry`), and the walk sees itself carried ([`F_CROSSING`]).
 //!
+//! - **Planning off the clock** (C28). Form legs, standing targets and obstructed corners use the bodies' existing
+//!   planner worker and recorded batches. Questions retain body, intent, stage, step, payload generation and one
+//!   shared map-version snapshot; a cancelled cursor or stale answer cannot replace a current result. Pending plans
+//!   keep the original walk timer and re-read a dynamic target. Corner answers are consumed once, then the town
+//!   follows its kept line and asks for a new one only when needed. K18d separately propagates committed map changes.
+//!
 //! - **Deadlines** (C20, #3469). A form's act is due when its run's steps are, from the run's start ([`limits`],
 //!   `sim::forms::span`): a walk across the town and a long pause are its own time, not the 10 s an act gets at its
 //!   arrival.
@@ -42,8 +48,12 @@
 //! yet); a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
 //! nodes); resuming a run after a restart.
 
+use replica::host::WalkPlan;
+use sim::ground::Versions;
+use sim::planner::{FormAnswer, FormKey, FormKind, FormQuery, FormQuestion, FormResult};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use replica::effects::{Actor, Body, Effect, Refusal, TimerRec};
 use replica::encode::Name;
@@ -60,7 +70,6 @@ use sim::host::{Geometry, Staged};
 use sim::mover::Body as Moved;
 use sim::moves::{Moves, Reach};
 use sim::timers::{DueList, Timer};
-use sim::walk::Leg;
 use sim::walk::stall::{Watch, blocker};
 use sim::walk::town::View;
 use skills::form_runner::Limits;
@@ -96,6 +105,97 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
 /// A walker's ask for its way (C21): the node it stands on, where it stands, the corner it aims at and its leg's end.
 type Way = (Id, [i64; 2], [i64; 2], [i64; 2]);
 
+/// The current request for each exact form cursor. A new payload or map gets a new generation.
+#[derive(Default)]
+struct Planning {
+    generation: u64,
+    current: BTreeMap<FormKey, (FormQuestion, Arc<Versions>)>,
+    answers: BTreeMap<FormKey, FormAnswer>,
+    queued: BTreeMap<FormKey, FormQuestion>,
+}
+
+impl Planning {
+    fn keep(&mut self, context: &BTreeMap<Id, (Id, usize, usize)>) {
+        self.current
+            .retain(|k, _| context.get(&k.body) == Some(&(k.intent, k.stage, k.step)));
+        self.answers.retain(|k, _| self.current.contains_key(k));
+        self.queued.retain(|k, _| self.current.contains_key(k));
+    }
+
+    fn receive(&mut self, answers: BTreeMap<FormKey, FormAnswer>) {
+        for (key, a) in answers {
+            if self
+                .current
+                .get(&key)
+                .is_some_and(|(q, map)| q.generation == a.generation && Arc::ptr_eq(map, &a.map))
+            {
+                self.answers.insert(key, a);
+            }
+        }
+    }
+
+    fn answer(&self, key: &FormKey, map: &Arc<Versions>) -> Option<&FormResult> {
+        let (q, current_map) = self.current.get(key)?;
+        let a = self.answers.get(key)?;
+        (q.generation == a.generation && Arc::ptr_eq(current_map, map) && Arc::ptr_eq(&a.map, map))
+            .then_some(&a.result)
+    }
+
+    /// A line answer is one-shot, like the ordinary planner's Found batch. Keeping it after use would reinstall
+    /// the same partial/blocked line instead of asking for a new search. Duplicate late batches are then ignored.
+    fn line(
+        &mut self,
+        key: FormKey,
+        body: Moved,
+        to: Vec3,
+        map: &Arc<Versions>,
+    ) -> Option<Result<sim::walk::town::Line, Refusal>> {
+        let matches = self
+            .current
+            .get(&key)
+            .is_some_and(|(q, _)| q.body == body && q.query == (FormQuery::Line { to }));
+        let answer = self.answer(&key, map).cloned();
+        if answer.is_some() {
+            self.current.remove(&key);
+            self.answers.remove(&key);
+            self.queued.remove(&key);
+        }
+        match answer {
+            Some(FormResult::Line(line)) if matches => Some(line),
+            _ => None,
+        }
+    }
+
+    fn ask(
+        &mut self,
+        key: FormKey,
+        body: Moved,
+        query: FormQuery,
+        map: &Arc<Versions>,
+    ) -> Option<FormResult> {
+        let unchanged = self
+            .current
+            .get(&key)
+            .is_some_and(|(q, m)| q.body == body && q.query == query && Arc::ptr_eq(m, map));
+        if !unchanged {
+            self.generation += 1;
+            let q = FormQuestion {
+                key,
+                generation: self.generation,
+                body,
+                query,
+            };
+            self.current.insert(key, (q, Arc::clone(map)));
+            self.answers.remove(&key);
+        }
+        if let Some(answer) = self.answer(&key, map) {
+            return Some(answer.clone());
+        }
+        self.queued.insert(key, self.current[&key].0.clone());
+        None
+    }
+}
+
 /// What the runner sees: the bodies as the controller had them at the call, the town's corners and the tree.
 struct Sight<'a> {
     bodies: BTreeMap<Id, Moved>,
@@ -111,9 +211,23 @@ struct Sight<'a> {
     /// Each walker that asked its way this call (C21): the node it stands on, where it stands, the corner it aims at
     /// and its leg's end, x and z µm.
     asked: RefCell<BTreeMap<Id, Way>>,
+    context: BTreeMap<Id, (Id, usize, usize)>,
+    planning: &'a RefCell<Planning>,
+    map: Arc<Versions>,
 }
 
 impl Sight<'_> {
+    fn key(&self, body: Id, step: usize, kind: FormKind) -> Option<FormKey> {
+        let &(intent, stage, _) = self.context.get(&body)?;
+        Some(FormKey {
+            body,
+            intent,
+            stage,
+            step,
+            kind,
+        })
+    }
+
     /// A node's place in the tree, its parents' positions added (their turns are not: things stand upright).
     fn place(&self, node: Id) -> Option<Vec3> {
         let mut at = Vec3::ZERO;
@@ -142,7 +256,41 @@ impl Geometry for Sight<'_> {
             Ask::Toward { to, .. } => {
                 let me = self.bodies.get(&body)?;
                 let [x, z] = match &self.view {
-                    Some(v) => v.corner(me, *to).ok()?,
+                    Some(v) => {
+                        let step = self.context.get(&body)?.2;
+                        let key = self.key(body, step, FormKind::Line)?;
+                        let found = self
+                            .planning
+                            .borrow_mut()
+                            .line(key, *me, *to, &self.map)
+                            .map(|line| BTreeMap::from([(body, (*to, line))]))
+                            .unwrap_or_default();
+                        let asked = RefCell::new(Vec::new());
+                        let corner = v
+                            .corner_planned(
+                                me,
+                                *to,
+                                &sim::walk::town::Plans {
+                                    found: &found,
+                                    asked: &asked,
+                                },
+                            )
+                            .ok()?;
+                        let pending = asked.into_inner();
+                        for (sample, goal) in &pending {
+                            self.planning.borrow_mut().ask(
+                                key,
+                                *sample,
+                                FormQuery::Line { to: *goal },
+                                &self.map,
+                            );
+                        }
+                        // Waiting for the existing planner is not evidence that a physical walk stalled.
+                        if !pending.is_empty() {
+                            return Some(Answer::Point(me.pose.position));
+                        }
+                        corner
+                    }
                     None => [to.x, to.z],
                 };
                 let y = if [x, z] == [to.x, to.z] { to.y } else { 0 };
@@ -157,26 +305,28 @@ impl Geometry for Sight<'_> {
         }
     }
 
-    fn stand_near(&self, body: Id, at: Vec3, reach: i64) -> Option<Vec3> {
-        let me = self.bodies.get(&body)?;
-        self.view
-            .as_ref()?
-            .stand_near(sim::walk::node_of(me), at, reach, Some(me))
-    }
-
-    /// The point carried onto the floor a body stands on, the nearest place within reach of it (or the point), and
-    /// the town's route there from where the body stands, across links; no legs when there is no way.
-    fn legs(&self, body: Id, node: Id, at: Vec3, reach: i64) -> Option<Vec<Leg>> {
-        let (me, view) = (self.bodies.get(&body)?, self.view.as_ref()?);
-        let (floor, at, _) = view.on_floor(node, at)?;
-        let here = sim::walk::node_of(me);
-        let to = view.stand_near(floor, at, reach, Some(me));
-        // On the body's own ground the walk goes to the point itself when there is no place: it ends there by name.
-        let Some(to) = to.or_else(|| (floor == here).then_some(at)) else {
-            return Some(Vec::new());
+    fn plan_walk(&self, body: Id, step: usize, node: Id, at: Vec3, reach: i64) -> WalkPlan {
+        if self.view.is_none() {
+            return WalkPlan::Unplanned;
+        }
+        let Some(key) = self.key(body, step, FormKind::Walk) else {
+            return WalkPlan::Pending;
         };
-        // A same-ground route may enter and leave a building: keep its doorway crossings as legs too (C28).
-        Some(view.plan(me, floor, to).unwrap_or_default())
+        let Some(me) = self.bodies.get(&body) else {
+            return WalkPlan::Legs(Vec::new());
+        };
+        let mut planning = self.planning.borrow_mut();
+        match planning.ask(key, *me, FormQuery::Walk { node, at, reach }, &self.map) {
+            Some(FormResult::Walk(legs)) => {
+                // A later stage may start in this same call before Sight's context is refreshed: it must request its
+                // own answer, even when its step number and target repeat the preceding stage.
+                planning.current.remove(&key);
+                planning.answers.remove(&key);
+                planning.queued.remove(&key);
+                WalkPlan::Legs(legs.into_iter().map(|l| (l.to, l.link)).collect())
+            }
+            _ => WalkPlan::Pending,
+        }
     }
 
     fn read(&self, node: Id) -> Option<Seen> {
@@ -403,6 +553,7 @@ pub struct Acts {
     watch: Watch,
     /// What blocked each body whose walk ended [`BLOCKED`], until its run's ending is read.
     blocked: BTreeMap<Id, String>,
+    planning: RefCell<Planning>,
 }
 
 /// The moves a form's step may name: every move content declares, and the body's own (C23, [`crate::moves`]).
@@ -452,6 +603,7 @@ impl Acts {
             fired: Vec::new(),
             watch: Watch::new(),
             blocked: BTreeMap::new(),
+            planning: RefCell::new(Planning::default()),
         }
     }
 
@@ -463,13 +615,28 @@ impl Acts {
         seed: u64,
         f: impl FnOnce(&mut Forms, &mut World<'_, Sight<'_>, Sight<'_>>) -> T,
     ) -> T {
-        let (controller, view, slots) = match bodies {
-            Some(b) => (
-                &mut b.runner.controller,
-                Some(b.town.view()),
-                Some(&mut b.slots),
+        let context = self.forms.planning_context();
+        self.planning.borrow_mut().keep(&context);
+        let (controller, view, slots, map, questions) = match bodies {
+            Some(b) => {
+                self.planning
+                    .borrow_mut()
+                    .receive(std::mem::take(&mut b.form_answers));
+                (
+                    &mut b.runner.controller,
+                    Some(b.town.view()),
+                    Some(&mut b.slots),
+                    Arc::clone(&b.form_map),
+                    Some(&mut b.form_questions),
+                )
+            }
+            None => (
+                &mut self.own,
+                None,
+                None,
+                Arc::new(Versions::default()),
+                None,
             ),
-            None => (&mut self.own, None, None),
         };
         let places = match (slots, view.as_ref()) {
             (Some(slots), Some(v)) => Some(Places {
@@ -491,6 +658,9 @@ impl Acts {
             kinds: &self.kinds,
             toward: &self.toward,
             asked: RefCell::new(BTreeMap::new()),
+            context,
+            planning: &self.planning,
+            map,
         };
         let mut w = World {
             tree,
@@ -504,7 +674,14 @@ impl Acts {
             seed,
             places,
         };
-        f(&mut self.forms, &mut w)
+        let result = f(&mut self.forms, &mut w);
+        let context = self.forms.planning_context();
+        self.planning.borrow_mut().keep(&context);
+        if let Some(out) = questions {
+            out.retain(|k, _| context.get(&k.body) == Some(&(k.intent, k.stage, k.step)));
+            out.extend(std::mem::take(&mut self.planning.borrow_mut().queued));
+        }
+        result
     }
 
     /// Starts the act's first candidate that starts (`(node, form)` in rank order) for intent `intent` on `body`, or

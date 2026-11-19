@@ -90,9 +90,17 @@ struct Snap {
     things: BTreeMap<Id, (Vec3, BTreeMap<String, Vec3>)>,
     /// Every distance is this far, when set.
     far: bool,
+    defer_walk: bool,
 }
 
 impl Geometry for Snap {
+    fn plan_walk(&self, _: Id, _: usize, _: Id, _: Vec3, _: i64) -> replica::host::WalkPlan {
+        if self.defer_walk {
+            replica::host::WalkPlan::Pending
+        } else {
+            replica::host::WalkPlan::Unplanned
+        }
+    }
     fn ask(&self, _: Id, q: &Ask) -> Option<Answer> {
         match q {
             Ask::Toward { to, .. } => Some(Answer::Point(*to)),
@@ -922,4 +930,51 @@ fn f6_commit_checks_who_may_before_a_run_starts() {
     );
     let ok = commit(&mut b, owner);
     assert!(matches!(ok, Ok(Asked::Started(_))), "{ok:?}");
+}
+
+#[test]
+fn pending_form_plan_holds_the_existing_walk_claim_and_cleans_up_when_replaced() {
+    let (entry, form) = entries().remove(0);
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::ZERO, Vec3::new(5_000_000, 0, 0));
+    let walk = skills::route::Route::sent(0, 0);
+    let old = b.c.claim(body, &walk.shape()).unwrap();
+    b.snap.defer_walk = true;
+    b.start(body, node, &entry, &form, Limits::default());
+    assert!(
+        !b.c.claims(body).unwrap().running().contains_key(&old),
+        "the previous walk is cancelled at step start"
+    );
+    let run = b.forms.by_body[&body];
+    let held = b.forms.runs[&run].walk.unwrap();
+    assert!(b.c.claims(body).unwrap().running().contains_key(&held));
+    b.snap.defer_walk = false;
+    let now = b.now;
+    let (mut w, forms) = b.world();
+    forms.tick(&mut w, now);
+    assert_eq!(
+        b.forms.runs[&run].walk,
+        Some(held),
+        "the planned route reuses the original claim"
+    );
+    let now = b.now;
+    let (mut w, forms) = b.world();
+    forms.leave(&mut w, body, now).unwrap();
+    b.clean();
+
+    b.snap.defer_walk = true;
+    b.start(body, node, &entry, &form, Limits::default());
+    let newer = b.c.claim(body, &walk.shape()).unwrap();
+    let now = b.now;
+    let (mut w, forms) = b.world();
+    forms.tick(&mut w, now);
+    assert!(
+        b.forms
+            .ended
+            .iter()
+            .any(|e| e.how.as_str() == "claim-taken")
+    );
+    assert!(b.forms.planning.is_empty());
+    b.c.release(body, newer).unwrap();
+    b.clean();
 }

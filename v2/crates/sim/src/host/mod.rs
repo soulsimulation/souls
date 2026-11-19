@@ -62,7 +62,7 @@ use replica::effects::{Change, Event, Refusal, read_id};
 use replica::encode::{Name, Value};
 use replica::host::{
     Answer, Ask, F_CROSSING, F_HELD, F_ROUTE, F_SETTLED, F_SHOULDER, F_WAITING, Host, Near,
-    Progress, Seen, Skill,
+    Progress, Seen, Skill, WalkPlan,
 };
 use replica::ids::{Id, Minter, Scope};
 use replica::pose::{ControllerInput, Vec3};
@@ -87,6 +87,13 @@ pub trait Geometry {
     /// The legs of `body`'s walk to `at` of `node`'s frame, or near it ([`Host::legs`], C17); `None` by default.
     fn legs(&self, _body: Id, _node: Id, _at: Vec3, _reach: i64) -> Option<Vec<Leg>> {
         None
+    }
+    /// One form step's plan, with Pending distinct from a missing geometry interface.
+    fn plan_walk(&self, body: Id, _step: usize, node: Id, at: Vec3, reach: i64) -> WalkPlan {
+        self.legs(body, node, at, reach)
+            .map_or(WalkPlan::Unplanned, |legs| {
+                WalkPlan::Legs(legs.into_iter().map(|l| (l.to, l.link)).collect())
+            })
     }
     /// A node the world holds outside the tree for now (a body's pose in the controller, a link's turn state, T9b
     /// A3), as of the tick's start; `None` reads the tree.
@@ -304,6 +311,11 @@ impl<G: Geometry> Host for WorldHost<'_, G> {
         self.count();
         let legs = self.geometry.legs(self.body, node, at, reach)?;
         Some(legs.into_iter().map(|l| (l.to, l.link)).collect())
+    }
+
+    fn plan_walk(&self, step: usize, node: Id, at: Vec3, reach: i64) -> WalkPlan {
+        self.count();
+        self.geometry.plan_walk(self.body, step, node, at, reach)
     }
 
     fn set_timer(&mut self, after: Micros, name: Name) -> Id {
@@ -655,6 +667,8 @@ pub struct Wants {
     pub lines: Vec<(Moved, Vec3)>,
     /// Reach questions (B2, B3), retaining exact slot and pending move identity.
     pub reach: Vec<ReachQuestion>,
+    pub form_map: Option<std::sync::Arc<crate::ground::Versions>>,
+    pub forms: Vec<crate::planner::FormQuestion>,
 }
 
 /// A walk's place and legs, or a refusal's name.
@@ -675,6 +689,7 @@ pub struct Planned {
     pub reach: BTreeMap<ReachKey, [i64; 2]>,
     /// Route searches run for these answers (legs and lines).
     pub searched: u64,
+    pub forms: BTreeMap<crate::planner::FormKey, crate::planner::FormAnswer>,
 }
 
 impl Planned {
@@ -683,6 +698,15 @@ impl Planned {
         self.places.extend(later.places);
         self.lines.extend(later.lines);
         self.reach.extend(later.reach);
+        for (key, answer) in later.forms {
+            if self
+                .forms
+                .get(&key)
+                .is_none_or(|old| old.generation <= answer.generation)
+            {
+                self.forms.insert(key, answer);
+            }
+        }
         self.searched += later.searched;
     }
 }

@@ -38,7 +38,10 @@
 //!
 //! Not here: I7's accept-then-resolve (one answer, at the move's end), plans (I9).
 
+use sim::ground::Versions;
+use sim::planner::{FormAnswer, FormKey, FormQuestion};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use replica::bodies::Family;
@@ -195,6 +198,9 @@ pub struct Bodies {
     late: Vec<(Micros, u64)>,
     /// The planner's answers for the next tick.
     planned: Planned,
+    pub(crate) form_map: Arc<Versions>,
+    pub(crate) form_answers: BTreeMap<FormKey, FormAnswer>,
+    pub(crate) form_questions: BTreeMap<FormKey, FormQuestion>,
     /// The reach distances last found, by body and seat.
     reached: BTreeMap<ReachKey, [i64; 2]>,
     /// Sits and rises waiting for their reach, in the order asked.
@@ -277,6 +283,9 @@ impl Bodies {
             reached: BTreeMap::new(),
             waiting: Vec::new(),
             runner: Runner::new(tick),
+            form_map: Arc::new(town.versions.clone()),
+            form_answers: BTreeMap::new(),
+            form_questions: BTreeMap::new(),
             town,
             slots: Slots::new(),
             moves: Moves::new(),
@@ -483,6 +492,15 @@ impl Bodies {
                         .is_some_and(|p| p.thing == *thing && p.place.slot == *slot))
         });
         self.reached.extend(p.reach.iter().map(|(k, v)| (*k, *v)));
+        for (key, answer) in std::mem::take(&mut p.forms) {
+            if self
+                .form_answers
+                .get(&key)
+                .is_none_or(|old| old.generation <= answer.generation)
+            {
+                self.form_answers.insert(key, answer);
+            }
+        }
         self.planned.merge(p);
     }
 
@@ -810,6 +828,15 @@ impl Bodies {
                 .filter_map(|(b, (id, _))| Some((*b, self.slots.held_by(*b)?, *id)))
                 .collect();
             wants.reach = self.reach_of(seated);
+            // One metadata snapshot per map revision, shared by all form questions in the batch.
+            if *self.form_map != self.town.versions {
+                self.form_map = Arc::new(self.town.versions.clone());
+                self.form_answers.clear();
+            }
+            wants.form_map = Some(Arc::clone(&self.form_map));
+            wants.forms = std::mem::take(&mut self.form_questions)
+                .into_values()
+                .collect();
             self.planner.send(wants);
             // Who hears each utterance the step started, as the bodies stand after it (B11, #3369): every body in the
             // zone, a seated or lying one included (#3393).

@@ -1175,6 +1175,8 @@ impl Default for Limits {
 pub enum Woke {
     /// The run starts.
     Start,
+    /// Retry a deferred walk plan, retaining the original walk deadline.
+    Planning,
     /// A timer on the body fired, by id.
     Timer(Id),
     /// The walk the runner started ended.
@@ -1191,6 +1193,8 @@ pub enum Woke {
 pub enum Next {
     /// Run this walk skill on the body until it ends, then wake the runner with [`Woke::Walked`].
     Walk(Box<dyn Skill>),
+    /// The current walk step awaits its off-clock geometry answer.
+    Planning,
     /// Start move `name` toward point `at` of `node` (B2; with no point, the move's own contact), then wake the runner
     /// with [`Woke::Moved`].
     Move {
@@ -1223,6 +1227,7 @@ pub struct Runner {
     /// The runner's timer: the step's deadline, or a pause's end.
     timer: Option<Id>,
     ended: bool,
+    planning: bool,
     /// The hand step: the first `move` (or [`Step::Hand`]) step, whose contact is the effect's instant.
     hand: Option<usize>,
     /// The effect's instant came and the world has not taken it; `effected` once it came.
@@ -1247,6 +1252,7 @@ impl Runner {
             at: 0,
             timer: None,
             ended: false,
+            planning: false,
             hand,
             effect: false,
             effected: false,
@@ -1290,7 +1296,9 @@ impl Runner {
 
     /// Starts step `self.at`, or ends the run `done` past the last.
     fn begin(&mut self, host: &mut dyn Host) -> Next {
-        if let Some(t) = self.timer.take() {
+        if !self.planning
+            && let Some(t) = self.timer.take()
+        {
             host.clear_timer(t);
         }
         let Some(step) = self.steps.get(self.at).cloned() else {
@@ -1317,15 +1325,30 @@ impl Runner {
                     Some(Step::Sit { .. }) => SIT_REACH,
                     _ => REACH,
                 };
-                let legs = match node.parent.and_then(|p| host.legs(p, to, reach)) {
-                    Some(l) if l.is_empty() => return self.end(host, name("souls:no-way")),
-                    Some(l) => l.into_iter().map(|(to, link)| Leg { to, link }).collect(),
-                    None => vec![Leg {
+                let plan = node.parent.map_or(replica::host::WalkPlan::Unplanned, |p| {
+                    host.plan_walk(self.at, p, to, reach)
+                });
+                if self.timer.is_none() {
+                    self.timer =
+                        Some(host.set_timer(self.limits.walk, name("souls:form-deadline")));
+                }
+                let legs = match plan {
+                    replica::host::WalkPlan::Pending => {
+                        self.planning = true;
+                        return Next::Planning;
+                    }
+                    replica::host::WalkPlan::Legs(l) if l.is_empty() => {
+                        return self.end(host, name("souls:no-way"));
+                    }
+                    replica::host::WalkPlan::Legs(l) => {
+                        l.into_iter().map(|(to, link)| Leg { to, link }).collect()
+                    }
+                    replica::host::WalkPlan::Unplanned => vec![Leg {
                         to: host.stand_near(to, reach).unwrap_or(to),
                         link: None,
                     }],
                 };
-                self.timer = Some(host.set_timer(self.limits.walk, name("souls:form-deadline")));
+                self.planning = false;
                 Next::Walk(Box::new(Route::new(
                     legs,
                     self.limits.speed,
@@ -1416,6 +1439,7 @@ impl Runner {
             };
         }
         match (why, step) {
+            (Woke::Planning, Some(Step::WalkTo { .. })) if self.planning => self.begin(host),
             (Woke::Start, _) if self.at == 0 && self.timer.is_none() => self.begin(host),
             (Woke::Timer(id), Some(step)) if self.timer == Some(id) => {
                 self.timer = None;
