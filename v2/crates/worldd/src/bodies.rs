@@ -18,21 +18,30 @@
 //!   time at each tick: a late tick steps them more than once, never skips a step. Move phases are timers on K9's due
 //!   list, fired against the same time.
 //!
-//! Not here: I7's accept-then-resolve (one answer, at the move's end), plans (I9), bodies in the log (a restart puts
-//! them back where the world was built).
+//! - **In the log** (K18, #3160). Each tick's part lists the bodies whose pose changed ([`Bodies::moved`]), a body in
+//!   a seat with its stance ([`row`]); a restart builds each where the log last had it standing
+//!   ([`Bodies::add_body_at`]) and hands each that sat back into its seat ([`Bodies::seat_placed`], K18c #3176), so
+//!   the seat is held in the slots table again and a rise or another sit sees it.
+//!
+//! - **Who hears** (#3369). After each step of the controller the bodies call `sim::speech::heard`, which brings every
+//!   body's interest set up to date and gives each utterance the step started its hearers as they are then; the world
+//!   writes each as `sim::speech::entry` says ([`Bodies::heard`]).
+//!
+//! Not here: I7's accept-then-resolve (one answer, at the move's end), plans (I9).
 
 use std::collections::BTreeMap;
 
 use replica::bodies::Family;
 use replica::effects::{Actor, Refusal, fixture_bytes};
-use replica::encode::{Name, decode};
+use replica::encode::{Name, Value, decode};
 use replica::host::Progress;
 use replica::ids::{Id, Minter, Scope};
 use replica::intents::Intent;
 use replica::move_check::{self, Seen, Verdict};
 use replica::moves::{Effector, Move};
-use replica::pose::{Support, Vec3};
+use replica::pose::{Pose, Support, Vec3};
 use replica::select::{self, Spot};
+use replica::speech::Said;
 use replica::time::Micros;
 use sim::commit::bind::{Bound, Slot, bind};
 use sim::commit::spot;
@@ -41,6 +50,7 @@ use sim::host::Runner;
 use sim::mover::Body as Moved;
 use sim::moves::{Fired, Instance, Moves, Reach};
 use sim::slots::{PlaceAt, Request, Slots};
+use sim::speech::{self, Hearing};
 use sim::spots::Target;
 use sim::timers::DueList;
 use sim::walk::town::Town;
@@ -129,6 +139,48 @@ pub struct Bodies {
     ended: Vec<(Id, Result<(), String>)>,
     /// The candidate each started intent took: its rank in the ranked list and its target (C14).
     took: BTreeMap<Id, (usize, Option<Id>)>,
+    /// Each body's pose as last written to the log ([`Bodies::moved`]).
+    logged: BTreeMap<Id, Pose>,
+    /// Every body's interest set (B11, R4), kept as the bodies move.
+    hearing: Hearing,
+    /// The utterances started since the world last took them, each with its speaker, its record (hearers resolved
+    /// when it started) and the world time it started: the world writes each.
+    pub heard: Vec<(Id, Said, Micros)>,
+}
+
+/// Where the log last had each body: its pose, and its stance when that pose is in a seat's slot (K18, #3160;
+/// K18c, #3176). What a restart builds its bodies at.
+pub type Placed = BTreeMap<Id, (Pose, Option<Stance>)>;
+
+/// A body's row in a tick's part (K18's `answers::BODIES`): `[body, pose]`, or `[body, pose, stance]` in a seat
+/// (1 sit, 2 lie).
+pub fn row(body: Id, pose: &Pose, stance: Option<Stance>) -> Value {
+    let mut r = vec![body.to_value(), pose.to_value()];
+    match stance {
+        Some(Stance::Sit) => r.push(Value::Uint(1)),
+        Some(Stance::Lie) => r.push(Value::Uint(2)),
+        _ => {}
+    }
+    Value::Array(r)
+}
+
+/// A row read back: the body, its pose and its stance in a seat.
+pub fn read_row(v: &Value) -> Option<(Id, Pose, Option<Stance>)> {
+    let Value::Array(p) = v else { return None };
+    let (id, pose, rest) = match p.as_slice() {
+        [id, pose, rest @ ..] => (id, pose, rest),
+        _ => return None,
+    };
+    let stance = match rest {
+        [Value::Uint(1)] => Some(Stance::Sit),
+        [Value::Uint(2)] => Some(Stance::Lie),
+        _ => None,
+    };
+    Some((
+        replica::effects::read_id(id).ok()?,
+        Pose::from_value(pose).ok()?,
+        stance,
+    ))
 }
 
 fn load(text: &str) -> R<Move> {
@@ -157,6 +209,9 @@ impl Bodies {
             live: BTreeMap::new(),
             ended: Vec::new(),
             took: BTreeMap::new(),
+            logged: BTreeMap::new(),
+            hearing: Hearing::new(),
+            heard: Vec::new(),
         })
     }
 
@@ -174,6 +229,98 @@ impl Bodies {
     pub fn pose(&self, body: Id) -> Option<(Id, Vec3)> {
         let p = self.runner.controller.body(body)?.pose;
         Some((p.frame.node, p.position))
+    }
+
+    /// Adds a body of `family`: where the log last had it standing (`placed`, K18 #3160), else as the mover placed it.
+    /// A body that sat is added standing as the mover placed it; [`Bodies::seat_placed`] then seats it.
+    pub fn add_body_at(&mut self, family: Family, body: Moved, placed: &Placed) -> R<()> {
+        let body = match placed.get(&body.id) {
+            Some((p, _)) => match p.support {
+                Support::Surface { surface, .. } => match self.town.surfaces.get(&surface) {
+                    Some(s) => s.place(body.id, p.frame, p.position, p.orientation)?,
+                    None => body,
+                },
+                _ => body,
+            },
+            None => body,
+        };
+        self.logged.insert(body.id, body.pose);
+        self.add_body(family, body)
+    }
+
+    /// Restart, after the seats are added (K18c, #3176): each body the log last had in a seat's slot is handed back
+    /// into it from where it was added, at body time `at`, and its seat is held again. A seat gone or taken leaves it
+    /// standing, named in the result.
+    pub fn seat_placed(&mut self, placed: &Placed, at: Micros) -> Vec<(Id, Refusal)> {
+        let mut out = Vec::new();
+        for (&body, (pose, stance)) in placed {
+            if pose.support != Support::Slot || self.runner.controller.body(body).is_none() {
+                continue;
+            }
+            let thing = pose.frame.node;
+            let r = self.slots.restore(
+                &mut self.runner.controller,
+                body,
+                thing,
+                stance.unwrap_or(Stance::Sit),
+                at,
+            );
+            match r {
+                Ok(()) => {
+                    if let Some(b) = self.runner.controller.body(body) {
+                        self.logged.insert(body, b.pose);
+                    }
+                }
+                Err(e) => out.push((body, e)),
+            }
+        }
+        out
+    }
+
+    /// Every body the controller holds, in id order: those it steps and those resting in a seat's slot (which it keeps
+    /// apart), a rising one included, each with its stance when in a slot.
+    fn every(&self) -> Placed {
+        let c = &self.runner.controller;
+        c.ids()
+            .filter_map(|id| {
+                let b = c.body(id)?;
+                let stance = match b.pose.support {
+                    Support::Slot => self.slots.stance(id),
+                    _ => None,
+                };
+                Some((id, (b.pose, stance)))
+            })
+            .collect()
+    }
+
+    /// Where each body is now, a seated one with its stance: what a checkpoint carries (K18c, #3176).
+    pub fn placed(&self) -> Placed {
+        self.every()
+    }
+
+    /// The bodies whose pose changed since the last call, in id order, a body in a seat's slot with its stance: what
+    /// the tick's record keeps of them (K18), so a restart stands each where it last stood or seats it again.
+    pub fn moved(&mut self) -> Vec<(Id, Pose, Option<Stance>)> {
+        let mut out = Vec::new();
+        for (id, (pose, stance)) in self.every() {
+            if !matches!(pose.support, Support::Surface { .. } | Support::Slot) {
+                continue;
+            }
+            if self.logged.get(&id) != Some(&pose) {
+                self.logged.insert(id, pose);
+                out.push((id, pose, stance));
+            }
+        }
+        out
+    }
+
+    /// Every body's pose as the controller holds it, in id order, a seated one's included (K18c): part of the zone's
+    /// state hash.
+    pub fn poses(&self) -> Vec<(Id, Pose)> {
+        self.every()
+            .into_iter()
+            .map(|(id, (p, _))| (id, p))
+            .collect()
     }
 
     /// Body time starts at world time `now`.
@@ -394,8 +541,8 @@ impl Bodies {
     pub fn step(&mut self, now: Micros) -> Vec<(Id, Result<(), String>)> {
         let mut out = std::mem::take(&mut self.ended);
         while self.runner.now + self.runner.tick <= now {
-            // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
-            let _ = self.runner.tick(&mut self.town);
+            // The tick's order (K18, #3160): due timers first, at the tick's start, then the skills through the
+            // host and the controller.
             let at = self.runner.now;
             while let Some(t) = self.due.fire(at + 1) {
                 let geo = self.geo(
@@ -427,6 +574,18 @@ impl Bodies {
                 };
                 self.live.remove(&t.node);
                 out.push((id, if how == "done" { Ok(()) } else { Err(how) }));
+            }
+            // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
+            // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
+            let _ = self.runner.tick(&mut self.town);
+            // Who hears each utterance the step started, as the bodies stand after it (B11, #3369): every body in the
+            // zone, a seated or lying one included (#3393).
+            let said = std::mem::take(&mut self.runner.said);
+            let c = &self.runner.controller;
+            let ids: Vec<Id> = c.ids().collect();
+            let at = self.runner.now;
+            for (speaker, s) in speech::heard(&mut self.hearing, c.near(), ids, &said) {
+                self.heard.push((speaker, s, at));
             }
             let walks: Vec<(Id, Id)> = self
                 .live

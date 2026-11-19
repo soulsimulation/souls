@@ -8,8 +8,9 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::extract::State;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::http::HeaderMap;
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
+use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderMap, HeaderValue};
 use axum::response::Response;
 use axum::routing::get;
 use replica::effects::Actor;
@@ -22,7 +23,8 @@ use crate::receipts::{Outcome, Who};
 use crate::resume::Cursor;
 use crate::times;
 use crate::token::{self, Grant, Token};
-use crate::world_link::{RESTARTING, Sent, sync_refused};
+use crate::views;
+use crate::world_link::{FRAME_MOST, RESTARTING, Sent, sync_refused};
 use replica::sync::wire;
 use std::collections::BTreeMap;
 
@@ -35,6 +37,12 @@ const READ_BUFFER: usize = 4096;
 /// The largest message a client may send: an intent's frame limit, from the limits file (I2, #2689). A sign-in is far
 /// smaller. tungstenite refuses a longer frame from its header's length, before reading or reserving its payload.
 const MESSAGE_MOST: usize = LIMITS.frame_bytes as usize;
+/// The largest message the gateway may send: a frame from the world (a sync answer: one room's record lists each
+/// child's hash, 36 bytes each), with the client's own request number in place of the gateway's and the WebSocket
+/// header. tungstenite refuses to send a message over its write buffer's limit and the socket ends (1006 at the
+/// client); at 64 KiB a first sync stopped at a room of about 1,800 children (#3424). It bounds one message in
+/// flight, not memory held: each send is flushed before the next (`write_buffer_size(0)`).
+const SEND_MOST: usize = FRAME_MOST + 64;
 /// How long a socket has to send its first frame and to sign in.
 const SIGN_IN_WITHIN: Duration = Duration::from_secs(10);
 
@@ -69,9 +77,10 @@ async fn upgrade(
         .iter()
         .find_map(|h| headers.get(*h).and_then(|v| v.to_str().ok()))
         .map(str::to_owned);
-    ws.read_buffer_size(READ_BUFFER)
+    let mut res = ws
+        .read_buffer_size(READ_BUFFER)
         .write_buffer_size(0)
-        .max_write_buffer_size(64 * 1024)
+        .max_write_buffer_size(SEND_MOST)
         .max_message_size(MESSAGE_MOST)
         .max_frame_size(MESSAGE_MOST)
         .on_upgrade(move |socket| async move {
@@ -83,7 +92,11 @@ async fn upgrade(
                 client,
             )
             .await;
-        })
+        });
+    // The socket carries an owner's private view (V13, #2745): no cache keeps any response of it.
+    res.headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    res
 }
 
 fn control(name: &str) -> Vec<u8> {
@@ -113,6 +126,7 @@ fn refuse(
         reason: Name::new(reason).unwrap_or_else(|| unreachable!("a fixed name")),
         now: now.clone(),
         changed: Vec::new(),
+        op: None,
     };
     let Some(at) = Cursor::from_value(&now) else {
         return Some(own_answer(answer));
@@ -211,29 +225,78 @@ async fn serve(
         ok = ok && send(&mut socket, times::finish(frame)).await;
     }
 
-    // 4. Intents in, the stream out.
+    // 4. Intents in, the stream out; view items out once it subscribes, to this socket alone (`views.rs`). Until the
+    // gateway stops: then the socket closes with 1012 (O16).
+    let mut view: Option<(u64, tokio::sync::mpsc::Receiver<Vec<u8>>)> = None;
+    let mut closing = gw.closing.subscribe();
     while ok {
         tokio::select! {
+            _ = stopped(&mut closing) => {
+                let close = CloseFrame { code: crate::RESTART, reason: "gateway.restarting".into() };
+                let _ = socket.send(Message::Close(Some(close))).await;
+                break;
+            }
             incoming = socket.recv() => {
                 let received = times::stamp();
                 let bytes = match incoming {
                     Some(Ok(Message::Binary(b))) => b.to_vec(),
                     Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                    // R13: a message's close, the mailbox's alone.
+                    Some(Ok(Message::Text(t))) => {
+                        crate::mailbox::on_text(&gw, grant, t.as_str());
+                        continue;
+                    }
                     _ => break,
                 };
+                if let Some(request) = views::request(&bytes) {
+                    if let Some((n, _)) = view.take() {
+                        gw.views.end(n);
+                    }
+                    view = Some(gw.views.subscribe(request, &views::audiences(grant)));
+                    continue;
+                }
                 if let Some(answer) = take_intent(&gw, actor, grant, bytes, received) {
                     gw.receipts.write(&who, Outcome::Refusal);
                     ok = send(&mut socket, answer).await;
                 }
+            }
+            Some(mail) = attached.mail.recv() => {
+                ok = socket.send(Message::Text(mail.into())).await.is_ok();
             }
             out = attached.frames.recv() => match out {
                 Some(frame) => ok = send(&mut socket, times::finish(frame)).await,
                 // Another socket signed in for this grant, or this one fell too far behind.
                 None => break,
             },
+            item = async {
+                match view.as_mut() {
+                    Some((_, items)) => items.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => match item {
+                Some(frame) => ok = send(&mut socket, frame).await,
+                // Its view queue was full: let go, as a slow stream is.
+                None => break,
+            },
         }
     }
+    if let Some((n, _)) = view {
+        gw.views.end(n);
+    }
     gw.detach(grant, attached.session);
+}
+
+/// Returns once the gateway is stopping (at once if it already is).
+async fn stopped(closing: &mut tokio::sync::watch::Receiver<bool>) {
+    loop {
+        let set = *closing.borrow_and_update();
+        if set {
+            return;
+        }
+        if closing.changed().await.is_err() {
+            return std::future::pending().await;
+        }
+    }
 }
 
 /// Reads an intent and hands it to the world; the gateway's own answer to send now, if it gives one not kept

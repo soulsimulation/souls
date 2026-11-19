@@ -166,6 +166,16 @@ impl Slots {
         self.by_body.get(&body).copied()
     }
 
+    /// Releases the seat `body` holds (a retirement, K10 #2673): the seat's thing, and the sit or rise under way.
+    pub fn release_body(&mut self, body: Id) -> Option<(Id, Option<Instance>)> {
+        let thing = self.by_body.remove(&body)?;
+        let under_way = match self.held.remove(&thing)?.state {
+            State::Lowering { instance, .. } | State::Rising(instance) => Some(instance),
+            State::Seated(_) => None,
+        };
+        Some((thing, under_way))
+    }
+
     /// Seats held.
     pub fn len(&self) -> usize {
         self.held.len()
@@ -248,6 +258,69 @@ impl Slots {
         );
         self.by_body.insert(r.body, r.thing);
         Ok(instance)
+    }
+
+    /// The bodies in a slot, with the seat's thing and the stance: those whose sit has handed them over (seated, or
+    /// in the slot with the sit still finishing). What a restart seats again (K18c, #3176).
+    pub fn seated(&self) -> Vec<(Id, Id, Stance)> {
+        self.held
+            .iter()
+            .filter(|(_, h)| {
+                matches!(
+                    h.state,
+                    State::Seated(_) | State::Lowering { in_slot: true, .. }
+                )
+            })
+            .map(|(t, h)| (h.body, *t, h.stance))
+            .collect()
+    }
+
+    /// The stance `body` holds its seat in, whether it is lowering, seated or rising: what a checkpoint keeps of a body
+    /// in a slot.
+    pub fn stance(&self, body: Id) -> Option<Stance> {
+        self.held.get(self.by_body.get(&body)?).map(|h| h.stance)
+    }
+
+    /// A restart (K18c, #3176): `body`, standing on the floor, is handed back into the seat of `thing` at `at`, held
+    /// there in `stance` by a driver with no timer, as a sit that finished leaves it. The hold is this table's again,
+    /// so a rise or another sit sees the seat taken. `place-unknown`, `place-taken` or `place-already-held` as for a sit.
+    pub fn restore(
+        &mut self,
+        c: &mut Controller,
+        body: Id,
+        thing: Id,
+        stance: Stance,
+        at: Micros,
+    ) -> R<()> {
+        let Some(place) = self.places.get(&thing) else {
+            return refuse("place-unknown", show(thing));
+        };
+        if let Some(h) = self.held.get(&thing) {
+            return refuse(
+                "place-taken",
+                format!("{}: held by {}", show(thing), show(h.body)),
+            );
+        }
+        if self.by_body.contains_key(&body) {
+            return refuse("place-already-held", show(body));
+        }
+        let frame = Frame {
+            node: thing,
+            slot: Some(place.place.slot),
+        };
+        let d = c.claim(body, &seated_shape())?;
+        c.slot_in(body, d, frame, at)?;
+        c.set(body, d, Part::Stance(stance))?;
+        self.held.insert(
+            thing,
+            Hold {
+                body,
+                stance,
+                state: State::Seated(Some(d)),
+            },
+        );
+        self.by_body.insert(body, thing);
+        Ok(())
     }
 
     /// Starts `body` rising from its seat by move `mv` at `now`: the seated driver ends and the rise claims the legs,

@@ -1,16 +1,19 @@
 //! Subscriptions (Engine v2 R4, #2698): a client holds more than one scope, and a change of room adds the new before
 //! dropping the old (A5); events addressed to it all arrive under a small budget, which no second passes (A2, A3);
 //! a budget below the least is refused; the interest set enters and leaves at two distances. A1 to A4 at scale are
-//! measured by `v2/tools/bench/subscription`.
+//! measured by `v2/tools/bench/subscription`. A turn into an activity reaches its members alone, live and in a replay
+//! (E26a, #3504).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest};
 use replica::encode::{Name, Value, encode};
 use replica::ids::{Hash, Id, Purpose, Scope as IdScope};
 use replica::pose::{Frame, HandOff, Owner, Pose, Quat, Support, Vec3};
+use replica::speech::{Said, heard};
 use replica::views::Level;
-use replica::world_model::Audience;
+use replica::world_model::{Audience, End, show};
 use worldd::views::interest::{ENTER, LEAVE};
 use worldd::views::subscription::{Hub, Kind, Request, Scope};
 
@@ -328,4 +331,127 @@ fn r4b_counts_by_cell_come_whole_on_join_then_as_changes_that_rebuild_the_table(
     assert!(emptied > 0, "a cell that empties is sent as 0");
     assert_eq!(whole, 1, "whole only on join");
     assert!(changes >= 4, "changes every second after: {changes}");
+}
+
+/// E26a (#3504, A1 and A2): a turn into an activity is sent to its members' subscriptions, each with the entry of the
+/// activity's audience and its words, while each is a member, and stops when one leaves; a Soul beside the speaker
+/// that is not a member and a public viewer following a member never get it, live or when the log is read again.
+#[test]
+fn e26a_a_turn_into_an_activity_reaches_its_members_alone_live_and_in_a_replay() {
+    let (hall, m1, m2, outsider, act) = (id(1), id(10), id(11), id(12), id(50));
+    let store = Arc::new(worldd::words::in_memory(IdScope([9; 16])).expect("a store"));
+    let line = |w: &str| {
+        store
+            .write(w.as_bytes(), Audience::Of(act), m1)
+            .expect("kept")
+    };
+    let (first, second) = (line("shall we go"), line("after the rain"));
+    let member = |w: &mut W, link: Id, body: Id| {
+        let c = Change::Link {
+            link,
+            ty: Name::new("souls:member").expect("a name"),
+            ends: [body, act],
+            owner: End::Second,
+            audience: Audience::Everyone,
+        };
+        w.entry(act, c)
+    };
+    // A turn by m1 as the world writes it: its hearers the members' bodies at write, in the activity's audience.
+    let turn = |w: &mut W, words: Id, hearers: BTreeSet<Id>| {
+        let said = Said {
+            words,
+            reach_mm: 5_000,
+            audience: Audience::Of(act),
+            hearers,
+            length: 1_000_000,
+        };
+        let mut e = w.entry(m1, Change::Unlink { link: id(999) });
+        e.envelope.audience = Audience::Of(act);
+        e.body = Body::Changes(Vec::new());
+        e.events = Some(vec![said.event()]);
+        e
+    };
+    let mut w = w();
+    let bodies = vec![
+        w.body(m1, hall, 0),
+        w.body(m2, hall, 30_000_000),
+        w.body(outsider, hall, 500_000),
+    ];
+    let mut parts = vec![w.part(bodies)];
+    let links = vec![member(&mut w, id(60), m1), member(&mut w, id(61), m2)];
+    parts.push(w.part(links));
+    let both = BTreeSet::from([m1, m2]);
+    let t = turn(&mut w, first, both.clone());
+    parts.push(w.part(vec![t]));
+    let gone = w.entry(act, Change::Unlink { link: id(61) });
+    parts.push(w.part(vec![gone]));
+    // Written as if m2 were still a hearer: the hub's own check keeps it from a Soul that left.
+    let t = turn(&mut w, second, both);
+    parts.push(w.part(vec![t]));
+
+    // Each subscriber: its name, its audiences and the body it follows. The viewer follows m1, as the public.
+    let subscribers = [
+        ("m1", vec![m1], m1),
+        ("m2", vec![m2], m2),
+        ("outsider", vec![outsider], outsider),
+        ("public viewer", vec![], m1),
+    ];
+    // The log read live (subscribed once the bodies are made), then read again by a new hub from its first part.
+    let mut seen = BTreeMap::new();
+    for replay in [false, true] {
+        let mut hub = Hub::with_words(store.clone());
+        if !replay {
+            hub.tick(&parts[0]).expect("a tick");
+        }
+        let subs: Vec<usize> = subscribers
+            .iter()
+            .map(|(_, a, b)| {
+                let r = Request {
+                    scopes: vec![Scope::Follow(*b)],
+                    level: Level::Full,
+                    budget: 64_000,
+                };
+                hub.subscribe_as(r, a.iter().copied().collect())
+                    .expect("subscribed")
+            })
+            .collect();
+        for p in &parts[usize::from(!replay)..] {
+            hub.tick(p).expect("a tick");
+        }
+        for ((who, _, _), s) in subscribers.iter().zip(subs) {
+            let got: Vec<(Audience, Option<String>)> = hub
+                .drain(s)
+                .iter()
+                .filter_map(|o| heard(&o.bytes).expect("an item"))
+                .map(|h| {
+                    let w = h.words.map(|w| String::from_utf8(w).expect("utf-8"));
+                    (h.said.audience, w)
+                })
+                .collect();
+            seen.insert((replay, *who), got);
+        }
+    }
+    for ((replay, who), got) in &seen {
+        println!(
+            "E26a A2 ({}): {who} heard {:?} of the turns into {}",
+            if *replay { "replay" } else { "live" },
+            got.iter().map(|(_, w)| w.clone()).collect::<Vec<_>>(),
+            show(act)
+        );
+    }
+    let private = |w: &str| (Audience::Of(act), Some(w.to_string()));
+    for replay in [false, true] {
+        assert_eq!(
+            seen[&(replay, "m1")],
+            vec![private("shall we go"), private("after the rain")],
+            "a member hears every turn, in the activity's audience, with its words"
+        );
+        assert_eq!(
+            seen[&(replay, "m2")],
+            vec![private("shall we go")],
+            "m2 hears while a member and not after it leaves"
+        );
+        assert!(seen[&(replay, "outsider")].is_empty(), "not a member");
+        assert!(seen[&(replay, "public viewer")].is_empty(), "the public");
+    }
 }

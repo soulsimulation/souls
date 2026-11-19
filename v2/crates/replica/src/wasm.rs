@@ -117,6 +117,13 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
     if let Some(Value::Text(name)) = m.get(&4) {
         return Ok(format!("outcome {}", name.as_str()));
     }
+    // A view item (C6), which `wireHeard` reads, or the world's refusal of the subscription.
+    if m.contains_key(&VIEW_ITEM) {
+        return Ok("item".to_owned());
+    }
+    if let Some(Value::Text(name)) = m.get(&VIEW_REFUSED) {
+        return Ok(format!("view-refused {}", name.as_str()));
+    }
     if let Some(Value::Uint(n)) = m.get(&wire::ASK) {
         return Ok(match m.get(&wire::REFUSED) {
             Some(Value::Text(name)) => format!("sync {n} {}", name.as_str()),
@@ -140,12 +147,72 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
     Ok(format!("answer {sequence} {version} {kind} {name}"))
 }
 
+/// The gateway's view frames (`gatewayd::views`, #3292): a subscribe in, an item or a refusal out.
+const VIEW_SUBSCRIBE: u64 = 30;
+const VIEW_ITEM: u64 = 31;
+const VIEW_REFUSED: u64 = 32;
+/// The level a Soul's daemon subscribes at: outline. What it reads is addressed to it, sent at every level (R4 rule 5).
+const HEARING_LEVEL: u64 = 3;
+
+fn id_text(id: Id) -> String {
+    format!("{}-{}", to_hex(&id.scope().0), id.counter())
+}
+
+/// A Soul's subscription to what it hears (C6, #3390): `{30: {1: [{2: body}], 2: outline, 3: budget}}`, its own body
+/// followed, so the world addresses to it each utterance that body hears (R4 rule 5).
+#[wasm_bindgen(js_name = wireSubscribe)]
+pub fn wire_subscribe(scope: &[u8], counter: u64, budget: u64) -> Result<Vec<u8>, JsError> {
+    let scope = Scope(
+        scope
+            .try_into()
+            .map_err(|_| JsError::new("scope-not-16-bytes"))?,
+    );
+    let body = Id::new(scope, counter).ok_or_else(|| JsError::new("id-counter-exhausted"))?;
+    let request = Value::Map(BTreeMap::from([
+        (
+            1,
+            Value::Array(vec![Value::Map(BTreeMap::from([(2, body.to_value())]))]),
+        ),
+        (2, Value::Uint(HEARING_LEVEL)),
+        (3, Value::Uint(budget)),
+    ]));
+    encode(&Value::Map(BTreeMap::from([(VIEW_SUBSCRIBE, request)]))).map_err(js)
+}
+
+/// An utterance in a view item frame (`{31: item}`) as a line, `heard <sequence> <world µs> <speaker id> <audience id
+/// or -> <words hex or ->`, the audience `-` for the public; empty when the item is not an utterance.
+#[wasm_bindgen(js_name = wireHeard)]
+pub fn wire_heard(frame: &[u8]) -> Result<String, JsError> {
+    let Value::Map(mut m) = decode(frame).map_err(js)?.value else {
+        return Err(JsError::new("frame-not-a-record"));
+    };
+    let Some(Value::Bytes(item)) = m.remove(&VIEW_ITEM) else {
+        return Err(JsError::new("frame-not-an-item"));
+    };
+    let Some(h) = crate::speech::heard(&item).map_err(js)? else {
+        return Ok(String::new());
+    };
+    let audience = match h.said.audience {
+        crate::world_model::Audience::Everyone => "-".to_owned(),
+        crate::world_model::Audience::Of(a) => id_text(a),
+    };
+    let words = h.words.as_deref().map_or_else(|| "-".to_owned(), to_hex);
+    Ok(format!(
+        "heard {} {} {} {audience} {words}",
+        h.sequence,
+        h.at,
+        id_text(h.speaker)
+    ))
+}
+
 /// A Soul's intent with no parameters, `verb` a ranked list of verbs split by spaces (the rest are its fallbacks,
 /// R7), each on `target` (a node's id as `<scope hex>-<counter>`, or empty for none), decided against `basis` (a
 /// version's bytes; empty for the zero version) and expiring at `expiry` world microseconds; read back as the world
-/// reads it. `words`, when given, is parameter 1 as T8's `{23: words}` (a say or a whisper, V1b).
+/// reads it. `words`, when given, is parameter 1 as T8's `{23: words}` (a say or a whisper, V1b). C10 (#3414): `target`
+/// may be one id per verb, split by spaces; `args`, the first verb's thing arguments as `name=<id>` split by spaces, is
+/// parameter 1 as C2's `[[name, id], ...]`.
 #[wasm_bindgen(js_name = wireIntent)]
-// JS calls it with positional arguments; the words came last (C4, #3368).
+// JS calls it with positional arguments; the words came last (C4, #3368), then the arguments (C10, #3414).
 #[allow(clippy::too_many_arguments)]
 pub fn wire_intent(
     scope: &[u8],
@@ -156,19 +223,39 @@ pub fn wire_intent(
     expiry: u64,
     target: &str,
     words: Option<String>,
+    args: Option<String>,
 ) -> Result<Vec<u8>, JsError> {
-    let target = match target {
-        "" => None,
-        t => {
-            let (scope, counter) = t
-                .split_once('-')
-                .and_then(|(s, c)| Some((from_hex(s).ok()?.try_into().ok()?, c.parse().ok()?)))
-                .ok_or_else(|| JsError::new("target-not-an-id"))?;
-            let id =
-                Id::new(Scope(scope), counter).ok_or_else(|| JsError::new("target-not-an-id"))?;
-            Some(Target::Node(id))
-        }
+    let node = |t: &str| -> Result<Option<Target>, JsError> {
+        Ok(match t {
+            "" => None,
+            t => {
+                let (scope, counter) = t
+                    .split_once('-')
+                    .and_then(|(s, c)| Some((from_hex(s).ok()?.try_into().ok()?, c.parse().ok()?)))
+                    .ok_or_else(|| JsError::new("target-not-an-id"))?;
+                let id = Id::new(Scope(scope), counter)
+                    .ok_or_else(|| JsError::new("target-not-an-id"))?;
+                Some(Target::Node(id))
+            }
+        })
     };
+    let mut targets = target
+        .split(' ')
+        .map(node)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter();
+    let target = targets.next().flatten();
+    let args = (args
+        .unwrap_or_default()
+        .split(' ')
+        .filter(|a| !a.is_empty()))
+    .map(|a| match a.split_once('=').map(|(k, v)| (k, node(v))) {
+        Some((k, Ok(Some(Target::Node(id))))) => {
+            Ok(Value::Array(vec![Value::Bytes(k.into()), id.to_value()]))
+        }
+        _ => Err(JsError::new("arg-not-name-and-id")),
+    })
+    .collect::<Result<Vec<_>, _>>()?;
     let scope = Scope(
         scope
             .try_into()
@@ -195,7 +282,7 @@ pub fn wire_intent(
         .map(|v| {
             v.map(|verb| Fallback {
                 verb,
-                target: target.clone(),
+                target: targets.next().flatten().or_else(|| target.clone()),
                 parameters: BTreeMap::new(),
                 resources: Vec::new(),
             })
@@ -213,6 +300,7 @@ pub fn wire_intent(
                 )
             })
             .into_iter()
+            .chain((!args.is_empty()).then_some((1, Value::Array(args))))
             .collect(),
         sequence,
         basis,
@@ -275,6 +363,10 @@ impl WasmCopy {
         let (ids, hashes) = read_hashes(&m).map_err(js)?;
         let version = m.get(&1).ok_or_else(|| JsError::new("sync-answer"))?;
         let version = to_hex(&encode(version).map_err(js)?);
+        // A sync cut off before it finished (its socket closed) is let go first (#3424).
+        if let Some(old) = self.descent.take() {
+            self.copy.abandon(old);
+        }
         self.descent = Some(self.copy.compare(&ids, hashes));
         Ok(version)
     }

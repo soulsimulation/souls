@@ -24,7 +24,7 @@
 //!
 //! Not here: the tick loop that calls this and writes the entries, moves (B2), sleep and wake (O2), timed values (F5).
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use replica::effects::{Refusal, TimerState};
 use replica::encode::Name;
@@ -51,8 +51,8 @@ pub type Key = (Micros, Id);
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DueList {
     due: BTreeMap<Key, (Id, Name)>,
-    by_id: HashMap<Id, Micros>,
-    by_node: HashMap<Id, BTreeSet<Id>>,
+    by_id: BTreeMap<Id, Micros>,
+    by_node: BTreeMap<Id, BTreeSet<Id>>,
 }
 
 fn refusal(name: &'static str, id: Id) -> Refusal {
@@ -178,6 +178,13 @@ impl DueList {
         }
         gone.sort_by_key(|t| (t.due, t.id));
         gone
+    }
+
+    /// Cancels every timer of `node` alone (a body, which the tree does not hold yet: K10 #2673), in key order.
+    pub fn cancel_node(&mut self, node: Id) -> Vec<Timer> {
+        let ids = self.by_node.get(&node).cloned().unwrap_or_default();
+        let keys: Vec<Key> = ids.into_iter().map(|id| (self.by_id[&id], id)).collect();
+        keys.into_iter().filter_map(|k| self.take(k)).collect()
     }
 
     /// Applies a tick's staged timers from the host (K13a): each set, then each clear, every one for the body that

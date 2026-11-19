@@ -70,8 +70,9 @@ step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit
 # second, in any order and in a fresh process, with the hand on its contact point (web/src/pose/pose.test.ts).
 step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test web/src/pose/*.test.ts'
 # The words path (V1b, #3361): a local world's said sentence, and a body's name and description, through the page's
-# worker within the stream's lag; a whisper in no public file (web/src/source/words.test.ts).
-step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts'
+# worker within the stream's lag; a whisper in no public file (web/src/source/words.test.ts). A still world is drawn
+# at once and kept live (V5b, web/src/source/still.test.ts).
+step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts web/src/source/still.test.ts'
 
 # The ids goldens (T3, #2640): the same WASM build in Node gives fixtures/ids/goldens.txt exactly, as the native build
 # does in `cargo test` (crates/replica/tests/ids.rs).
@@ -133,17 +134,28 @@ step client-sync node --test client/src/sync/*.test.mjs
 # The resident daemon (R6, #2700): ten forced drops against the real gateway and the world's end of it (I4); R5b's resync after a long cut.
 step client-daemon bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/daemon/*.test.mjs'
 # The thin command, the brief and find (R7, #2701): 100 scripted command sequences against the same gateway and world.
-step client-command node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs
+step client-command bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet &&
+  node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs'
 # The client's trace and stats (R10, #2702): per achieved intent, local only, with the network refused.
 step client-stats node --test client/src/stats/*.test.mjs
 # The local check (R8, #2703): R2's rules on the copy, at `can` and again at send time (the daemon's side is above).
 step client-check node --test client/src/check/*.test.mjs
+# A Soul's memory (R14, #2754): a 30-day home opened unchanged, an hour of named events, digest, consolidate, aliases.
+step client-memory node --test client/src/memory/*.test.mjs
+# Asking what happened (R16, #2817): a recorded Eden of 100 acting Souls in V4's files, by place, thing and Soul.
+step client-history node --test client/src/history/*.test.mjs
 # Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else.
 step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/src/pair/*.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs
+# Wake rules and the owner's messages (R13, #2753): the budget, merging with no reader, the mailbox through the gateway.
+step client-wake bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/wake/*.test.mjs'
 # The MCP endpoint on v2 (R21, #3334): six tools, each answer the thin command's; 401, 405, 413; the card and page.
 step client-mcp bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/mcp/*.test.mjs'
+# A creator's terrain (G5, #2762): a landform's patches by today's packages/ground (zod is its one dependency; this job
+# runs no pnpm install), and its expansion into one edit.
+step creator-terrain bash -c 'npm install --no-save --no-package-lock --no-audit --no-fund --prefix ../packages/ground zod@4.6.7 &&
+  node --test tools/terrain/*.test.ts client/src/creator/terrain/*.test.mjs'
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
 # same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
 step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&
@@ -161,6 +173,9 @@ step rules-equal node --input-type=module -e '
 # from the same WASM build in Node as natively (tools/facts/wasm.mjs).
 step facts-wasm bash -c 'cargo run -p facts --release --locked --quiet -- vectors target/facts-vectors &&
   node tools/facts/wasm.mjs target/wasm-load/pkg target/facts-vectors'
+# The code hatch (F8, #2823): the world's 1,000 chess-move cases (crates/sim/tests/hatch.rs, in the tests step) through
+# the same WASM build in Node, the daemon's runtime, and in a headless browser, each giving the world's table exactly.
+step hatch-three-hosts bash -c 'node --test client/src/hatch/*.test.mjs && node web/src/hatch/hatch.browser.mjs'
 # The form rules' drift report (R2, #2685): the live packages/form-rules cases against this library, whose required
 # test reads a pinned snapshot. Only the daily full run on main (schedule) or V2_FULL=1, never per change; it prints
 # each disagreement and never fails the job.

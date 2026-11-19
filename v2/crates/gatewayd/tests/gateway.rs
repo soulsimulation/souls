@@ -87,6 +87,7 @@ async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
                     reason: Name::new("act.refused").unwrap(),
                     now: version(sequence).to_value(),
                     changed: Vec::new(),
+                    op: None,
                 }
             } else if i.sequence >= 100 {
                 sequence += 1;
@@ -96,6 +97,7 @@ async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
                     reason: Name::new("eden:out-of-reach").unwrap(),
                     now: version(sequence).to_value(),
                     changed: Vec::new(),
+                    op: None,
                 }
             } else {
                 sequence += 1;
@@ -104,6 +106,7 @@ async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
                     sequence: i.sequence,
                     intent: Id::new(LINEAGE, sequence).unwrap(),
                     entries: vec![sequence],
+                    names: BTreeMap::new(),
                 }
             };
             let frame = encode(&Value::Map(
@@ -686,4 +689,25 @@ async fn r4_scripted_run_for_the_usage_rollup() {
     let (root, _, lines) = scripted_run("receipts-r4").await;
     assert_eq!(lines.len(), 7);
     println!("r4: {} lines under {}", lines.len(), root.display());
+}
+
+/// O16 (#2809): a stopping gateway closes every signed-in socket with 1012, Service Restart; the client reconnects.
+#[tokio::test]
+async fn o16_a_stopping_gateway_closes_each_socket_with_1012() {
+    let mut tokens = Tokens::default();
+    let (a, b) = (issue(&mut tokens, soul(1)), issue(&mut tokens, soul(2)));
+    let r = start("o16-stop", tokens).await;
+    let (mut wa, _) = connect(&r.url, a.reveal(), None).await;
+    let (mut wb, _) = connect(&r.url, b.reveal(), None).await;
+    r.gw.closing.send_replace(true);
+    for ws in [&mut wa, &mut wb] {
+        let code = loop {
+            match ws.next().await {
+                Some(Ok(Message::Close(Some(f)))) => break Some(u16::from(f.code)),
+                Some(Ok(_)) => {}
+                _ => break None,
+            }
+        };
+        assert_eq!(code, Some(gatewayd::RESTART));
+    }
 }

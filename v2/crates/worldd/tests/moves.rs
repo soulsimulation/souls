@@ -236,7 +236,12 @@ fn logged(log: &[u8]) -> BTreeMap<Id, Logged> {
         _ => panic!("an int"),
     };
     let mut out: BTreeMap<Id, Logged> = BTreeMap::new();
-    for r in recover(log).unwrap().records {
+    for r in recover(log)
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|r| !sim::recorder::is_input(r))
+    {
         for e in Part::read(&r).unwrap().effects {
             let Cause::Intent(id) = e.envelope.cause else {
                 continue;
@@ -272,7 +277,7 @@ fn a3_a_scripted_client_walks_sits_and_rises_over_the_socket() {
     let store = Mem::with(Vec::new());
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.tick = Duration::from_millis(50);
-    cfg.bodies = Some(Box::new(bodies));
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
     let world = answers::start(
         toggles::World::build(0, 0, 0).replica,
         toggles::rules(),
@@ -419,7 +424,7 @@ fn a_described_spot_is_resolved_by_a_checker_bound_at_commit_or_refused_by_name(
     let store = Mem::with(Vec::new());
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.tick = Duration::from_millis(50);
-    cfg.bodies = Some(Box::new(bodies));
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
     let world =
         answers::start(world_copy, toggles::rules(), store.clone(), cfg).expect("the world starts");
     let path = std::env::temp_dir().join(format!("e2-spot-{}.sock", std::process::id()));
@@ -475,7 +480,7 @@ fn c4_a2_a_lie_on_a_bed_gets_receipts_like_a_sit() {
     let store = Mem::with(Vec::new());
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.tick = Duration::from_millis(50);
-    cfg.bodies = Some(Box::new(bodies_and_bed));
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies_and_bed()));
     let world = answers::start(
         toggles::World::build(0, 0, 0).replica,
         toggles::rules(),
@@ -582,7 +587,12 @@ fn c14_bodies() -> Result<Bodies, replica::effects::Refusal> {
 
 /// The move a started entry says its intent took (C14): its rank and its target.
 fn took(log: &[u8], intent: Id) -> (u64, Option<Id>) {
-    for r in recover(log).unwrap().records {
+    for r in recover(log)
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|r| !sim::recorder::is_input(r))
+    {
         for e in Part::read(&r).unwrap().effects {
             if e.envelope.cause != Cause::Intent(intent) {
                 continue;
@@ -626,7 +636,7 @@ fn c14_a_walk_to_a_place_ranked_fallbacks_and_the_local_check() {
     let store = Mem::with(Vec::new());
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.tick = Duration::from_millis(50);
-    cfg.bodies = Some(Box::new(c14_bodies));
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| c14_bodies()));
     let world = answers::start(
         toggles::World::build(0, 0, 0).replica,
         toggles::rules(),

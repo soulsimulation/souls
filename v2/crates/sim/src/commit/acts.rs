@@ -16,7 +16,7 @@ use replica::effects::{Cause, Effect};
 use replica::encode::Name;
 use replica::ids::Id;
 use replica::time::Micros;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 /// Answers kept per actor, to answer a repeat with.
 pub const KEPT: usize = 16;
@@ -41,7 +41,7 @@ struct Last {
 /// Each actor's last answered sequence and its last [`KEPT`] answers, by the actor's encoded bytes.
 #[derive(Default)]
 pub struct Sequences {
-    actors: HashMap<Vec<u8>, Last>,
+    actors: BTreeMap<Vec<u8>, Last>,
 }
 
 impl Sequences {
@@ -55,6 +55,26 @@ impl Sequences {
         match l.kept.iter().find(|(s, _)| *s == sequence) {
             Some((_, a)) => Seen::Kept(a.clone()),
             None => Seen::Stale,
+        }
+    }
+
+    /// Each actor's last answered sequence and its kept answers, oldest first, by the actor's bytes: what a checkpoint
+    /// carries so a restart from it keeps them (K18c, #3176).
+    pub fn kept(
+        &self,
+    ) -> impl Iterator<Item = (&[u8], u64, impl Iterator<Item = &(u64, Vec<u8>)>)> {
+        self.actors
+            .iter()
+            .map(|(a, l)| (a.as_slice(), l.last, l.kept.iter()))
+    }
+
+    /// Puts back one actor's last sequence and kept answers, oldest first, as [`Sequences::kept`] gave them.
+    pub fn restore(&mut self, actor: &[u8], last: u64, kept: Vec<(u64, Vec<u8>)>) {
+        let l = self.actors.entry(actor.to_vec()).or_default();
+        l.last = l.last.max(last);
+        l.kept = kept.into_iter().collect();
+        while l.kept.len() > KEPT {
+            l.kept.pop_front();
         }
     }
 
@@ -72,7 +92,7 @@ impl Sequences {
 /// The index from an intent to the entries it caused: its receipt.
 #[derive(Default)]
 pub struct Receipts {
-    by_intent: HashMap<Id, Vec<u64>>,
+    by_intent: BTreeMap<Id, Vec<u64>>,
 }
 
 impl Receipts {

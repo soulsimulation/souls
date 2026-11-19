@@ -4,12 +4,13 @@
 //!
 //! - **1** kind, **2** owner;
 //! - **3** state, numbered by each field's `n`: `{1: name, 2: type, 3: default, 4: audience rule}` (5: an enum's values;
-//!   6, 7, 8: an amount's unit, min and max);
+//!   6, 7, 8: an amount's unit, min and max; 9: a list's most records or a text's most bytes; 10: a list's record
+//!   fields, `{1: name, 2: type, 5: values}`);
 //! - **4** links, numbered by each type's `n`: `{1: name, 2: from, 3: most, 4: most_per}`;
 //! - **5** points, numbered 1, 2, ... in the file's order: `{1: name, 2: at_mm, 3: role, 4: yaw_mdeg}`, and for a
 //!   `joint` (a connector) `5: connector kind, 6: the kind it mates with`;
 //! - **6** slots, numbered 1, 2, ... in the file's order: `{1: what it admits, 2: at_mm, 3: name}`;
-//! - **7** geometry `{1: bounds_mm}`, **18** motion `{1: how}`, **19** loose `{1: 1}` (ever) or `{2: us}`;
+//! - **7** geometry `{1: bounds_mm, 2: front}` (E4: `"none"` for a thing with no front), **18** motion `{1: how}`, **19** loose `{1: 1}` (ever) or `{2: us}`;
 //! - **11** children, each named child as `{1: kind, 2: most}`, in the file's order (B19: a frame admits its crew's
 //!   activity as it holds it); `most`, how many such children at most, is part of the meaning, so the kind's hash
 //!   covers it, and a child with none is refused (`entry-value`), as the format bounds every child.
@@ -37,7 +38,13 @@ pub fn entry_to_kind(json: &str) -> Result<String, String> {
             "points" => (5, in_order(v, point)?),
             "slots" => (6, in_order(v, slot)?),
             "children" => (11, children(v)?),
-            "geometry" => (7, map(&[(1, v.get("bounds_mm").map(diag).transpose()?)])),
+            "geometry" => (
+                7,
+                map(&[
+                    (1, v.get("bounds_mm").map(diag).transpose()?),
+                    (2, v.get("front").map(quoted).transpose()?),
+                ]),
+            ),
             "motion" => (18, map(&[(1, v.get("how").map(quoted).transpose()?)])),
             "loose" => (
                 19,
@@ -125,15 +132,36 @@ fn name(n: &str) -> Result<String, String> {
 
 fn state_field(n: &str, f: &Value) -> Result<String, String> {
     let rule = f.get("audience").and_then(|a| a.get("rule"));
+    // A text field with no words yet has `null` for its default: no reference, `{}`.
+    let default = match f.get("default") {
+        Some(Value::Null) if f.get("type").and_then(Value::str) == Some("text") => {
+            Some("{}".into())
+        }
+        d => d.map(diag).transpose()?,
+    };
     Ok(map(&[
         (1, Some(name(n)?)),
         (2, f.get("type").map(quoted).transpose()?),
-        (3, f.get("default").map(diag).transpose()?),
+        (3, default),
         (4, rule.map(quoted).transpose()?),
         (5, f.get("values").map(diag).transpose()?),
         (6, f.get("unit").map(quoted).transpose()?),
         (7, f.get("min").map(diag).transpose()?),
         (8, f.get("max").map(diag).transpose()?),
+        (9, f.get("most").map(diag).transpose()?),
+        (
+            10,
+            f.get("of").map(|o| in_order(o, record_field)).transpose()?,
+        ),
+    ]))
+}
+
+/// A list record's field: `{1: name, 2: type, 5: values}` (F11, #2774).
+fn record_field(n: &str, f: &Value) -> Result<String, String> {
+    Ok(map(&[
+        (1, Some(name(n)?)),
+        (2, f.get("type").map(quoted).transpose()?),
+        (5, f.get("values").map(diag).transpose()?),
     ]))
 }
 
