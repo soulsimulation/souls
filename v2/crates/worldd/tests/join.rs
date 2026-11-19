@@ -1,0 +1,673 @@
+//! Engine v2 C3 (#3367): Souls join and leave a running world, through the world's end of the gateway's socket (I1's
+//! framing), on N2's test world. No body stands in the world until its Soul acts.
+//!
+//! - A1: a Soul's first intent births its body by K10: a `souls:body` node on the ground by the entry, linked
+//!   `souls:body-of` to its Soul. A join's words name it: the node is created with its name and description as
+//!   references (fields 30 and 31), the words themselves in no log record. The joined Soul then takes a vessel and
+//!   puts it in a rack (C2's acts, now on a born body). A Soul whose first intent is a take is born unnamed, and the
+//!   take is then carried out.
+//! - A2: a leave retires the body by K10's path, mid-sit: the sit ends `retired`, its seat is free (another Soul sits
+//!   there), its link to its Soul and its activity's link are gone with its node, no timer of it fires after, and
+//!   the thing in its hand is set down on the ground.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::{Read, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::time::Duration;
+
+use import_eden::Import;
+use replica::activity::ActivityKind;
+use replica::apply::Replica;
+use replica::audience::REFERENCE;
+use replica::bodies::{Class, Family, Resource};
+use replica::effects::{
+    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, fixture_bytes,
+    schema_hash,
+};
+use replica::encode::{Name, Value, decode, encode};
+use replica::ids::{Hash, Id, Purpose, Scope, Version};
+use replica::intents::{Intent, Target};
+use replica::moves::Place;
+use replica::pose::{Frame, Pose, Quat, Support, Vec3};
+use replica::rules::json::{Value as Json, parse};
+use replica::tree::Rules as TreeRules;
+use replica::world_model::{Audience, Kind};
+use sim::links::Doors;
+use sim::log::{Mem, recover};
+use sim::slots::PlaceAt;
+use sim::walk::town::Town;
+use worldd::answers::{self, Config, JOIN, Join, LEAVE};
+use worldd::bodies::Bodies;
+use worldd::checkers::Rules;
+use worldd::words::{DESCRIPTION, NAME, WORDS};
+
+const LINEAGE: Scope = Scope([0xc3; 16]);
+const CHAIR: &str = include_str!("../../replica/fixtures/seats/chair.diag");
+
+fn name(s: &str) -> Name {
+    Name::new(s).unwrap()
+}
+
+fn full(plain: &str, n: u8) -> String {
+    format!("{plain}@1220{}{n:02x}", "00".repeat(31))
+}
+
+const PLACE: &str = "souls:place";
+const VESSEL: &str = "test:vessel";
+const RACK: &str = "test:rack";
+const PAIR: &str = "test:pair";
+/// K10's body kind, as a birth writes it.
+const BODY: &str = "souls:body";
+
+fn kinds() -> Vec<(&'static str, String)> {
+    [PLACE, VESSEL, RACK, PAIR, BODY]
+        .iter()
+        .enumerate()
+        .map(|(i, k)| (*k, full(k, i as u8 + 1)))
+        .collect()
+}
+
+fn fullname(plain: &str) -> String {
+    kinds().into_iter().find(|(p, _)| *p == plain).unwrap().1
+}
+
+fn humanoid() -> Family {
+    let r = |n: &str, class, slot| Resource {
+        name: name(n),
+        class,
+        slot,
+    };
+    Family {
+        name: name("souls:humanoid"),
+        resources: vec![
+            r("souls:leg-left", Class::Locomotion, None),
+            r("souls:leg-right", Class::Locomotion, None),
+            r("souls:hand-left", Class::Manipulator, Some(1)),
+            r("souls:hand-right", Class::Manipulator, Some(2)),
+            r("souls:voice", Class::Voice, None),
+        ],
+    }
+}
+
+/// N2's test world as a town and its ground.
+fn town() -> (Town, Id) {
+    let w = testworld::generate(1, 0).expect("the test world");
+    let Import {
+        tree, rules, nodes, ..
+    } = import_eden::load(&w.text).expect("the test world loads");
+    let v = Value::Map(BTreeMap::from([
+        (
+            1,
+            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/c3-town/1").to_bytes()),
+        ),
+        (2, Value::Bytes(schema_hash().to_bytes())),
+        (3, Value::Bytes(nodes["world"].scope().0.to_vec())),
+        (4, nodes["world"].to_value()),
+        (5, Value::Uint(0)),
+        (6, Value::Array(Vec::new())),
+        (7, Value::Array(Vec::new())),
+    ]));
+    let header = Header::read(&encode(&v).unwrap()).unwrap();
+    let next = tree.to_state().next;
+    let ground = nodes["ground"];
+    let town = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
+    (town, ground)
+}
+
+fn ground() -> Id {
+    town().1
+}
+
+fn id(n: u64) -> Id {
+    Id::new(Scope([0x7d; 16]), n).unwrap()
+}
+
+/// The Souls: actors only, with no node until they join.
+fn ada() -> Id {
+    Id::new(Scope([0x5a; 16]), 1).unwrap()
+}
+fn bo() -> Id {
+    Id::new(Scope([0x5a; 16]), 2).unwrap()
+}
+fn vessel() -> Id {
+    id(3)
+}
+fn rack() -> Id {
+    id(4)
+}
+fn chair() -> Id {
+    id(5)
+}
+
+/// The world's entry on the open ground, west of the square, µm: the first birth stands 1 m east of it (K10's ring).
+fn entry() -> Vec3 {
+    Vec3::new(-40_000_000, 0, 30_000_000)
+}
+fn first_spot() -> Vec3 {
+    Vec3::new(-39_000_000, 0, 30_000_000)
+}
+
+fn header(zone: Id) -> Header {
+    let v = Value::Map(BTreeMap::from([
+        (
+            1,
+            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/c3-join/1").to_bytes()),
+        ),
+        (2, Value::Bytes(schema_hash().to_bytes())),
+        (3, Value::Bytes(zone.scope().0.to_vec())),
+        (4, zone.to_value()),
+        (5, Value::Uint(0)),
+        (
+            6,
+            Value::Array(
+                kinds()
+                    .into_iter()
+                    .map(|(_, f)| Value::Text(name(&f)))
+                    .collect(),
+            ),
+        ),
+        (7, Value::Array(Vec::new())),
+    ]));
+    Header::read(&encode(&v).unwrap()).unwrap()
+}
+
+/// The world's rules (T2): the ground takes bodies, things and activities; a body holds a thing in each hand.
+fn tree_rules() -> TreeRules {
+    let k = |owner: &str, children: &[&str], slots: &[u64], hands| Kind {
+        owner: owner.into(),
+        children: children.iter().map(|c| (*c).to_owned()).collect(),
+        slots: slots
+            .iter()
+            .map(|s| (*s, BTreeSet::from(["thing".to_owned()])))
+            .collect(),
+        hands,
+    };
+    TreeRules {
+        kinds: BTreeMap::from([
+            (
+                fullname(PLACE),
+                k("place", &["body", "thing", PAIR], &[], None),
+            ),
+            (fullname(BODY), k("family", &[], &[1, 2], None)),
+            (fullname(VESSEL), k("thing", &[], &[], Some(1))),
+            (fullname(RACK), k("thing", &[], &[1], None)),
+            (fullname(PAIR), k("activity", &[], &[], None)),
+        ]),
+        souls: BTreeSet::new(),
+        audiences: BTreeMap::new(),
+    }
+}
+
+fn pair_kind() -> ActivityKind {
+    let role = |r: &str| {
+        Value::Map(BTreeMap::from([
+            (1, Value::Text(name(r))),
+            (2, Value::Text(name(&format!("{r}-place")))),
+            (
+                3,
+                Value::Array(vec![Value::Map(BTreeMap::from([
+                    (1, Value::Uint(2)),
+                    (2, Value::Uint(4)),
+                ]))]),
+            ),
+        ]))
+    };
+    ActivityKind::from_value(&Value::Map(BTreeMap::from([
+        (1, Value::Text(name(&fullname(PAIR)))),
+        (2, Value::Uint(1)),
+        (
+            3,
+            Value::Array(vec![role("test:first"), role("test:second")]),
+        ),
+        (4, Value::Uint(60_000_000)),
+        (5, Value::Uint(400_000)),
+    ])))
+    .expect("an activity kind")
+}
+
+/// The forms' entries (`souls-entry/1`): the vessel's take and the rack's put.
+fn entries() -> Json {
+    let vessel = parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:vessel", "owner": "thing",
+      "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] } },
+      "forms": { "take": { "who": "anyone", "steps": [{ "step": "take", "move": "press", "at": "grip" }] } } }"#,
+    )
+    .unwrap();
+    let rack = parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:rack", "owner": "thing",
+      "points": { "edge": { "role": "rest", "at_mm": [0, 400, 0] } },
+      "slots": { "rest": { "admits": "thing" } },
+      "forms": { "put": { "who": "anyone",
+        "steps": [{ "step": "put", "move": "press", "at": "edge", "what": { "arg": "item" }, "slot": "rest" }] } } }"#,
+    )
+    .unwrap();
+    Json::Obj(vec![(VESSEL.into(), vessel), (RACK.into(), rack)])
+}
+
+fn create(sequence: u64, node: Id, kind: &str, parent: Id, at: Vec3) -> Value {
+    Effect {
+        envelope: Envelope {
+            sequence,
+            at: 0,
+            cause: Cause::World,
+            actor: Actor::World,
+            audience: Audience::Everyone,
+            node: parent,
+        },
+        body: Body::Changes(vec![ChangeRec {
+            change: Change::Create {
+                node,
+                kind: name(&fullname(kind)),
+                pose: Pose {
+                    frame: Frame {
+                        node: parent,
+                        slot: None,
+                    },
+                    position: at,
+                    orientation: Quat::IDENTITY,
+                    support: Support::Surface {
+                        surface: parent,
+                        height: 0,
+                    },
+                },
+                audience: Audience::Everyone,
+                fields: BTreeMap::new(),
+            },
+            rest: Rest::new(),
+        }]),
+        events: None,
+        rest: Rest::new(),
+    }
+    .to_value()
+}
+
+/// The world as built: a vessel 300 mm east of the first birth's spot, a rack 400 mm south of it. No body.
+fn world() -> Replica {
+    let g = ground();
+    let h = header(g);
+    let mut r = Replica::start(h.stored()).expect("a replica");
+    let s = first_spot();
+    let effects = vec![
+        create(0, vessel(), VESSEL, g, Vec3::new(s.x + 300_000, 0, s.z)),
+        create(1, rack(), RACK, g, Vec3::new(s.x, 0, s.z + 400_000)),
+    ];
+    let part = encode(&Value::Map(BTreeMap::from([
+        (1, Value::Bytes(h.hash().to_bytes())),
+        (2, Value::Array(effects)),
+    ])))
+    .unwrap();
+    r.apply(&Part::read(&part).unwrap())
+        .expect("the world as built");
+    r
+}
+
+/// The world's bodies: none; one seat, its stand point at the first birth's spot.
+fn bodies() -> Result<Bodies, replica::effects::Refusal> {
+    let (town, ground) = town();
+    let mut b = Bodies::new(town, 50_000)?;
+    let chair_def = decode(&fixture_bytes(CHAIR)?).unwrap();
+    let s = first_spot();
+    b.add_place(PlaceAt {
+        thing: chair(),
+        place: Place::from_value(&chair_def.value)?,
+        point: Vec3::new(s.x, 450_000, s.z - 300_000),
+        facing: Quat::IDENTITY,
+        floor: ground,
+    })?;
+    Ok(b)
+}
+
+/// A scripted client on the world's socket, one per Soul.
+struct Client(UnixStream, Id, u64);
+
+impl Client {
+    fn send(&mut self, verb: &str, target: Option<Id>, parameters: BTreeMap<u64, Value>) {
+        self.2 += 1;
+        let i = Intent {
+            actor: Actor::Soul(self.1),
+            verb: name(verb),
+            target: target.map(Target::Node),
+            parameters,
+            sequence: self.2,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: 0,
+            }
+            .to_value(),
+            expiry: answers::now() + 60_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+        };
+        let bytes = encode(&i.to_value()).unwrap();
+        self.0
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        self.0.write_all(&bytes).unwrap();
+    }
+
+    /// The next answer: (its sequence, a receipt's entries or a refusal's reason).
+    fn answer(&mut self) -> (u64, Result<Vec<u64>, String>) {
+        let mut len = [0u8; 4];
+        self.0.read_exact(&mut len).expect("an answer");
+        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+        self.0.read_exact(&mut frame).unwrap();
+        let Value::Map(m) = decode(&frame).unwrap().value else {
+            panic!("a frame")
+        };
+        let Some(Value::Map(a)) = m.get(&2) else {
+            panic!("an answer")
+        };
+        let seq = match a.get(&2) {
+            Some(Value::Uint(s)) => *s,
+            _ => 0,
+        };
+        let r = match (a.get(&3), a.get(&5)) {
+            (Some(Value::Uint(1)), Some(Value::Array(e))) => Ok(e
+                .iter()
+                .map(|v| match v {
+                    Value::Uint(n) => *n,
+                    _ => panic!("an entry"),
+                })
+                .collect()),
+            (Some(Value::Uint(2)), _) => match a.get(&4) {
+                Some(Value::Text(t)) => Err(t.as_str().to_owned()),
+                other => panic!("a refusal: {other:?}"),
+            },
+            other => panic!("an answer: {other:?}"),
+        };
+        (seq, r)
+    }
+
+    fn act(
+        &mut self,
+        verb: &str,
+        target: Option<Id>,
+        p: BTreeMap<u64, Value>,
+    ) -> Result<Vec<u64>, String> {
+        self.send(verb, target, p);
+        self.answer().1
+    }
+}
+
+struct Run {
+    world: answers::World,
+    store: Mem,
+    path: std::path::PathBuf,
+}
+
+fn serve(tag: &str) -> (Run, Client, Client) {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    cfg.engine = Some((tree_rules(), vec![pair_kind()]));
+    cfg.join = Some(Join {
+        entry: (ground(), entry()),
+        family: humanoid(),
+        kind: name(&fullname(BODY)),
+        per_tick: 8,
+    });
+    let rules = Rules {
+        kinds: entries(),
+        moves: Json::Obj(Vec::new()),
+    };
+    let world = answers::start(world(), rules, store.clone(), cfg).expect("the world starts");
+    let path = std::env::temp_dir().join(format!("c3-{tag}-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let door = door.clone();
+            std::thread::spawn(move || answers::serve(door, stream));
+        }
+    });
+    let client = |soul| {
+        let s = UnixStream::connect(&path).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+        Client(s, soul, 0)
+    };
+    let (a, b) = (client(ada()), client(bo()));
+    (Run { world, store, path }, a, b)
+}
+
+impl Run {
+    fn log(&self) -> Vec<Part> {
+        let log = self.store.0.lock().unwrap().bytes.clone();
+        recover(&log)
+            .unwrap()
+            .records
+            .into_iter()
+            .filter(|r| !sim::recorder::is_input(r))
+            .map(|r| Part::read(&r).unwrap())
+            .collect()
+    }
+
+    fn bytes(&self) -> Vec<u8> {
+        self.store.0.lock().unwrap().bytes.clone()
+    }
+
+    /// The world's replica as of now: the world as built with every logged part applied.
+    fn replay(&self) -> Replica {
+        let mut r = world();
+        for p in self.log() {
+            if !p.effects.is_empty() {
+                r.apply(&p).expect("the log replays");
+            }
+        }
+        r
+    }
+
+    /// The body born for `soul`: its node, by its `souls:body-of` link.
+    fn body_of(&self, soul: Id) -> Option<Id> {
+        let r = self.replay();
+        let t = r.tree();
+        t.links_at(soul)
+            .iter()
+            .filter(|e| t.ty(e).as_str() == "souls:body-of")
+            .find_map(|e| Some(t.link(e.link)?.1[0]))
+    }
+
+    fn stop(self) {
+        self.world.stop();
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn parent(r: &Replica, node: Id) -> (Option<Id>, Option<u64>) {
+    let t = r.tree();
+    let n = t.node(t.handle(node).expect("the node")).expect("the node");
+    (n.parent(), n.slot())
+}
+
+fn words(w: &str) -> Value {
+    Value::Map(BTreeMap::from([(
+        WORDS,
+        Value::Bytes(w.as_bytes().to_vec()),
+    )]))
+}
+
+fn p(pairs: &[(u64, Value)]) -> BTreeMap<u64, Value> {
+    pairs.iter().cloned().collect()
+}
+
+#[test]
+fn a1_a_first_intent_births_the_body_named_by_its_join_and_it_takes_and_puts() {
+    let (run, mut a, mut b) = serve("a1");
+    assert!(run.body_of(ada()).is_none(), "no body before the join");
+    let joined = a.act(
+        JOIN,
+        None,
+        p(&[
+            (1, words("Ada Quill")),
+            (2, words("keeps the west rack tidy")),
+        ]),
+    );
+    println!("A1 join: {joined:?}");
+    let joined = joined.expect("the join is answered with its birth");
+    assert_eq!(joined.len(), 1, "one entry: the birth");
+    let body = run.body_of(ada()).expect("a body linked to its Soul");
+    assert_ne!(body, ada(), "the body is a node of its own");
+    let r = run.replay();
+    let t = r.tree();
+    let n = t.node(t.handle(body).unwrap()).unwrap();
+    println!(
+        "A1 body {body:?}: kind {}, parent {:?}, at {:?}, fields {:?}",
+        n.kind().as_str(),
+        n.parent(),
+        n.place().map(|p| p.position),
+        n.fields()
+    );
+    assert_eq!(n.kind().as_str(), fullname(BODY), "the world's body kind");
+    assert_eq!(n.parent(), Some(ground()), "on the open ground");
+    for f in [NAME, DESCRIPTION] {
+        assert!(
+            matches!(n.fields().get(&f), Some(Value::Map(m)) if m.contains_key(&REFERENCE)),
+            "field {f} is a reference"
+        );
+    }
+    let log = run.bytes();
+    for w in ["Ada Quill", "keeps the west rack tidy"] {
+        assert!(
+            !log.windows(w.len()).any(|x| x == w.as_bytes()),
+            "{w:?} is not in the log"
+        );
+    }
+    // A second join is a describe: the body is renamed, never born twice.
+    let again = a.act(JOIN, None, p(&[(1, words("Ada"))]));
+    println!("A1 join again: {again:?}");
+    again.expect("renamed");
+    assert_eq!(run.body_of(ada()), Some(body), "still the one body");
+
+    // C2's acts on the born body: a take into its hand, a put into the rack's slot.
+    let take = a.act("test:take", Some(vessel()), BTreeMap::new());
+    println!("A1 take: {take:?}");
+    take.expect("the take lands");
+    let held = parent(&run.replay(), vessel());
+    assert_eq!(held.0, Some(body), "held by the born body");
+    assert!(matches!(held.1, Some(1 | 2)), "in a hand's slot");
+    let item = Value::Array(vec![Value::Array(vec![
+        Value::Bytes(b"item".to_vec()),
+        vessel().to_value(),
+    ])]);
+    let put = a.act("test:put", Some(rack()), p(&[(1, item)]));
+    println!("A1 put: {put:?}");
+    put.expect("the put lands");
+    assert_eq!(parent(&run.replay(), vessel()), (Some(rack()), Some(1)));
+
+    // A first intent that is not a join: born unnamed, then the intent is taken.
+    let g = ground();
+    let proposed = b.act(
+        "activity:propose",
+        Some(g),
+        p(&[(1, Value::Text(name(&fullname(PAIR))))]),
+    );
+    println!("A1 Bo's first intent, a propose: {proposed:?}");
+    proposed.expect("born, then proposed");
+    let bo_body = run.body_of(bo()).expect("Bo was born");
+    let r = run.replay();
+    let t = r.tree();
+    let n = t.node(t.handle(bo_body).unwrap()).unwrap();
+    assert!(n.fields().get(&NAME).is_none(), "unnamed");
+    run.stop();
+}
+
+#[test]
+fn a2_a_leave_frees_the_seat_the_links_and_the_timers() {
+    let (run, mut a, mut b) = serve("a2");
+    a.act(JOIN, None, p(&[(1, words("Ada"))]))
+        .expect("Ada joins");
+    let body = run.body_of(ada()).expect("born");
+    // A link of the body's own beyond its Soul's: Ada proposes a pair and joins it.
+    let g = ground();
+    let proposed = a
+        .act(
+            "activity:propose",
+            Some(g),
+            p(&[(1, Value::Text(name(&fullname(PAIR))))]),
+        )
+        .expect("proposed");
+    let activity = run
+        .log()
+        .iter()
+        .flat_map(|p| p.effects.clone())
+        .filter(|e| proposed.contains(&e.envelope.sequence))
+        .find_map(|e| match e.body {
+            Body::Changes(cs) => cs.into_iter().find_map(|c| match c.change {
+                Change::Create { node, .. } => Some(node),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .expect("the activity");
+    a.act(
+        "activity:join",
+        Some(activity),
+        p(&[(1, Value::Text(name("test:first")))]),
+    )
+    .expect("Ada joins it");
+    // And a thing in its hand.
+    a.act("test:take", Some(vessel()), BTreeMap::new())
+        .expect("Ada takes the vessel");
+    assert_eq!(parent(&run.replay(), vessel()).0, Some(body));
+    let r = run.replay();
+    let links_before = r.tree().links_at(body).len();
+    println!("A2 the body's links before: {links_before}");
+    assert!(links_before >= 2, "its Soul's and its activity's");
+
+    // Ada sits, and leaves while the sit is under way: its phase timers are pending.
+    a.send("test:sit", Some(chair()), BTreeMap::new());
+    let sit_seq = a.2;
+    std::thread::sleep(Duration::from_millis(150));
+    a.send(LEAVE, None, BTreeMap::new());
+    let leave_seq = a.2;
+    let (s1, r1) = a.answer();
+    let (s2, r2) = a.answer();
+    let mut answers = BTreeMap::from([(s1, r1), (s2, r2)]);
+    let (sit, left) = (
+        answers.remove(&sit_seq).unwrap(),
+        answers.remove(&leave_seq).unwrap(),
+    );
+    println!("A2 sit {sit:?}, leave {left:?}");
+    assert_eq!(sit, Err("retired".to_owned()), "the sit ends retired");
+    let left = left.expect("the leave is answered with its entry");
+    let r = run.replay();
+    assert!(r.tree().handle(body).is_none(), "the node is gone");
+    assert!(r.tree().links_at(ada()).is_empty(), "no link to the Soul");
+    assert!(r.tree().links_at(body).is_empty(), "no link of the body");
+    assert!(run.body_of(ada()).is_none());
+    assert_eq!(
+        parent(&r, vessel()),
+        (Some(ground()), None),
+        "what it held is set down, not taken out of the world"
+    );
+
+    // No timer of the body fires after the leave: no later entry names it.
+    std::thread::sleep(Duration::from_millis(1_500));
+    let last = *left.iter().max().unwrap();
+    let named = run
+        .log()
+        .iter()
+        .flat_map(|p| p.effects.clone())
+        .filter(|e| e.envelope.sequence > last)
+        .filter(|e| format!("{e:?}").contains(&format!("{body:?}")))
+        .count();
+    assert_eq!(named, 0, "nothing of the body after its leave");
+
+    // Its seat is free: Bo, born next, walks to it and sits.
+    b.act(JOIN, None, p(&[(1, words("Bo"))])).expect("Bo joins");
+    let walked = b.act("test:walk", Some(chair()), BTreeMap::new());
+    let sat = b.act("test:sit", Some(chair()), BTreeMap::new());
+    println!("A2 Bo walk {walked:?}, sit {sat:?}");
+    sat.expect("the seat was freed");
+
+    // A leave with no body is refused by name.
+    assert_eq!(
+        a.act(LEAVE, None, BTreeMap::new()),
+        Err("soul-not-embodied".to_owned())
+    );
+    run.stop();
+}
