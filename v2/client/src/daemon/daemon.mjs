@@ -28,6 +28,8 @@
 //     {"op":"stats"}                      per achieved intent: commands, bytes printed, first-send result by cause
 //   and R8's (#2703), checking with R2's form rules on the copy (`../check/`), kind entries from `<home>/kinds/`:
 //     {"op":"can","intent":{"verb":"..","this":"<id>","form":".."}}   yes, no with the reason, or unknown, and `current`
+//       (a move, `<ns>:walk|sit|lie|rise` with `this` and a walk's `point`, is checked with the world's own move
+//       check instead, C14 #3442: `moves.mjs`)
 //     {"op":"act","verbs":[{"verb":"..","this":"<id>","form":".."}, "..."]}   each candidate with a form is checked
 //       again at send time on a copy brought current; a current `no` drops it; none left is `stopped-locally`, with
 //       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
@@ -56,6 +58,7 @@ import { find } from '../find/find.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
 import { ageOf } from './age.mjs';
+import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
 import { Table } from '../reflex/reflex.mjs';
@@ -146,6 +149,7 @@ const startedAt = performance.now();
 let confirmedAt = null, changedAt = null, cutAt = startedAt, cutWhy = 'not-connected';
 const trace = openTrace(rt.dir);
 const rankedOf = new Map(); // sequence → how many verbs it ranked, until answered
+const movesOf = new Map(); // sequence → its move's form (C14), until answered: a receipt says whether the body sits
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
 let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now();
@@ -249,6 +253,7 @@ function connect() {
         if (k >= 0) { state.unanswered.splice(k, 1); counts.answered++; }
         trace.write({ k: 'answer', seq: s, cause: causeOf(Number(c), d, rankedOf.get(s)), achieved: achievedOf(Number(c), d) });
         if (Number(c) !== 3) rankedOf.delete(s); // an accepted move is resolved later
+        if (movesOf.has(s) && Number(c) !== 3) { state.seated = seatedAfter(movesOf.get(s), Number(c), state.seated ?? null); movesOf.delete(s); }
       }
       save();
       // C4: the answer's kind (1 receipt, 2 refused, 3 accepted, 4 resolved, 5 unread) and its reason, by name.
@@ -350,6 +355,7 @@ function sendIntent(ranked, { target, words, basis, expiry }) {
     basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words);
   save();
   const sequence = state.sequence, sent = signedIn;
+  if (moveForm(ranked[0])) movesOf.set(sequence, moveForm(ranked[0]));
   if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
   return { sequence, sent };
 }
@@ -380,6 +386,13 @@ async function answer(req) {
       return closing({ ok: true, events: got, ...(got.some((e) => e.kind !== 'synced') ? {} : { timedOut: true }) });
     }
     case 'can': {
+      if (moveForm(req.intent?.verb)) {
+        // C14: a move is checked as the world checks it, on the copy and the body's last known posture.
+        const age = await ageAfter();
+        const nodes = stateOf(copy, kindsIn(join(home, 'kinds')), ME).nodes;
+        const v = moveVerdict(wire.move_check, req.intent, { nodes, seated: state.seated ?? null });
+        return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
+      }
       const c = candidateOf(req.intent);
       const age = await ageAfter();
       const [v] = verdicts([c]);
