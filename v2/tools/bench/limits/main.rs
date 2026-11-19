@@ -12,6 +12,8 @@
 
 // A bench times runs with the wall clock; the wall-clock rule (K7, v2/clippy.toml) is for the engine, not a bench.
 #![allow(clippy::disallowed_methods)]
+// The repeat rule's map ban (K12, v2/clippy.toml) is `sim`'s; this bench's maps are lookups.
+#![allow(clippy::disallowed_types)]
 
 use replica::effects::Actor;
 use sim::commit::{Outcome, commit, mark_clock_thread};
