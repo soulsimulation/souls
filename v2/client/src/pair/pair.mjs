@@ -2,10 +2,14 @@
 // It keeps a secret and sends the directory only its hash, prints a link and a short code for the owner to approve
 // signed in, polls every `interval` seconds (5 more on "slow_down"), and writes the token it is handed once into
 // credentials.json (mode 0600), the one file the daemon (R6) reads it from. The token is never printed or logged.
+// It also writes the world's `history` into config.json, from what the world advertises (R16b, #3480): its
+// `views/world.json` (`--advert`, else `<directory>/w/<world>/views/world.json`, where the origin serves a placed
+// world), whose `history` is relative to the world's folder. No advert, no `history`; the pairing still succeeds.
 //
 //   node v2/client/src/pair/pair.mjs --directory <origin> --world <key> --gateway <ws url> --device <name>
-//        --label <agent label> [--soul <grant> [--force]]
-//   Prints one JSON line with the link and code, then one with the outcome: `{ok, soul}` or `{ok: false, code}`.
+//        --label <agent label> [--soul <grant> [--force]] [--advert <url of world.json>]
+//   Prints one JSON line with the link and code, then one with the outcome: `{ok, soul, history}` or
+//   `{ok: false, code}`.
 //   The home is SOULS_HOME, else the nearest .souls, else ./.souls.
 
 import { createHash, randomBytes } from 'node:crypto';
@@ -31,6 +35,26 @@ function writePrivate(file, value) {
   renameSync(`${file}.tmp`, file);
 }
 
+/** Where a world advertises itself by default: its folder under the origin's `w/` (as the page's `?world=`). */
+export const advertOf = (directory, world) => new URL(`w/${encodeURIComponent(world)}/views/world.json`, `${new URL(directory).origin}/`).href;
+
+/**
+ * The history address a world advertises, as an absolute http(s) url ending in `/`, or null: `history` in its
+ * `world.json`, relative to the world's folder (the advert's parent's parent).
+ */
+export async function advertisedHistory(advert, { within = 5000 } = {}) {
+  try {
+    const r = await fetch(advert, { signal: AbortSignal.timeout(within) });
+    if (!r.ok) return null;
+    const h = (await r.json())?.history;
+    if (typeof h !== 'string') return null;
+    const u = new URL(h.replace(/\/?$/, '/'), new URL('../', advert));
+    return ['http:', 'https:'].includes(u.protocol) ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The local id the daemon knows a Soul by, from its grant: `soul-<scope>-<n>` is `s_<scope>-<n>`. */
 export const localId = (grant) => `s_${grant.slice('soul-'.length)}`;
 
@@ -39,7 +63,7 @@ export const localId = (grant) => `s_${grant.slice('soul-'.length)}`;
  * given the code; `unit` is the milliseconds in a second of polling interval (tests shorten it). Resolves to
  * `{soul, grant}`; rejects with a `Refused` naming why (and the device, for `soul-connected`).
  */
-export async function pair({ home, directory, world, gateway, device, label, soul, force = false, onAsk, unit = 1000, sleep, onPoll }) {
+export async function pair({ home, directory, world, gateway, device, label, soul, force = false, onAsk, unit = 1000, sleep, onPoll, advert }) {
   const wait = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   // The token comes back in the poll's answer: over https, or plain http to this machine only.
   const at = new URL(directory);
@@ -67,9 +91,10 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     if (typeof got.token !== 'string' || typeof got.grant !== 'string') throw new Refused('pair-answer', 'no token in the answer');
     mkdirSync(home, { recursive: true, mode: 0o700 });
     const id = localId(got.grant);
+    const history = await advertisedHistory(advert ?? advertOf(directory, world));
     const configFile = join(home, 'config.json');
     const config = readJson(configFile);
-    config.worlds = { ...config.worlds, [world]: { ...config.worlds?.[world], url: directory, gateway } };
+    config.worlds = { ...config.worlds, [world]: { ...config.worlds?.[world], url: directory, gateway, ...(history ? { history } : {}) } };
     writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');
     const credFile = join(home, CREDENTIALS);
     const creds = existsSync(credFile) ? readJson(credFile) : {};
@@ -78,7 +103,7 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     // R19: the folder's guide names who lives here now. The Soul is paired whether or not the guide could be written.
     let guide;
     try { guide = writeGuide(home); } catch (e) { guide = { failed: String(e.message ?? e).slice(0, 120) }; }
-    return { soul: id, grant: got.grant, guide };
+    return { soul: id, grant: got.grant, history, guide };
   }
 }
 
@@ -92,7 +117,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const out = await pair({
       home, directory: opt('--directory'), world: opt('--world'), gateway: opt('--gateway'),
       device: opt('--device') ?? hostname().slice(0, 64), label: opt('--label') ?? 'agent',
-      soul: opt('--soul'), force: args.includes('--force'),
+      soul: opt('--soul'), force: args.includes('--force'), advert: opt('--advert'),
       onAsk: ({ link, code }) => say({ ok: true, step: 'approve', link, code, say: 'Open the link signed in, check the code matches, and approve.' }),
     });
     say({ ok: true, ...out });
