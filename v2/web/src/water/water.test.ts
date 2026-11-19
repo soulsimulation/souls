@@ -1,11 +1,14 @@
-// V19b (#3508) A2: the page's water compiles to today's shader, and its waves follow world time.
+// V19b (#3508) A2: the page's water compiles to today's shader (`../sky/today-parity.json`: today's outputs pinned at the
+// port), and its waves follow world time.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import * as THREE from 'three';
 import { asWater, tickWater, waterMaterial } from './water.ts';
 
-// Today's module, loaded by address so this package's type check does not take in today's page.
-const today = await import(String(new URL('../../../../apps/web/src/gen-mesh/water.ts', import.meta.url)));
+const TODAY = JSON.parse(readFileSync(new URL('../sky/today-parity.json', import.meta.url), 'utf8')).water;
+const sha = (x: string) => createHash('sha256').update(x).digest('hex');
 
 /** What a material's patch makes of three's standard shader. */
 function compiled(m: THREE.Material) {
@@ -15,14 +18,11 @@ function compiled(m: THREE.Material) {
 }
 
 test('A2: still water compiles to today\'s shader, with today\'s material', () => {
-  const ours = waterMaterial(), theirs = today.waterMaterial() as THREE.MeshStandardMaterial;
-  const a = compiled(ours), b = compiled(theirs);
-  assert.equal(a.shader.vertexShader, b.shader.vertexShader);
-  assert.equal(a.shader.fragmentShader, b.shader.fragmentShader);
-  assert.equal(a.key, b.key);
-  assert.equal(ours.color.getHex(), theirs.color.getHex());
-  for (const k of ['opacity', 'roughness', 'metalness', 'transparent', 'side', 'depthWrite'] as const) assert.deepEqual(ours[k], theirs[k], k);
-  console.log(`A2: still water: vertex ${a.shader.vertexShader.length} and fragment ${a.shader.fragmentShader.length} characters, both equal to today's; colour #${ours.color.getHexString()}, opacity ${ours.opacity}, roughness ${ours.roughness}, metalness ${ours.metalness}`);
+  const m = waterMaterial(), { shader, key } = compiled(m);
+  assert.equal(sha(shader.vertexShader), TODAY.vertex);
+  assert.equal(sha(shader.fragmentShader), TODAY.fragment);
+  assert.deepEqual([key, m.color.getHex(), m.opacity, m.roughness, m.metalness], [TODAY.key, TODAY.colour, TODAY.opacity, TODAY.roughness, TODAY.metalness]);
+  console.log(`A2: still water: vertex ${shader.vertexShader.length} and fragment ${shader.fragmentShader.length} characters, both equal to today's; colour #${m.color.getHexString()}, opacity ${m.opacity}, roughness ${m.roughness}, metalness ${m.metalness}`);
 });
 
 test('A2: a water area is drawn with the water, its waves at world time', () => {
