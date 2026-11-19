@@ -192,6 +192,35 @@ impl Store {
         Ok(())
     }
 
+    /// The Soul X11 brought over for today's Soul `former` at `world` (`imported_souls_v1`, R18): its grant and the
+    /// account that owns it (`souls_v1`). `None` when the store holds no import or none for that Soul.
+    pub fn imported_soul(
+        &self,
+        world: &str,
+        former: &str,
+    ) -> Result<Option<(String, String)>, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let tables: i64 = db.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('imported_souls_v1', 'souls_v1')",
+            [],
+            |r| r.get(0),
+        )?;
+        if tables < 2 {
+            return Ok(None);
+        }
+        let row: Option<(String, String)> = db
+            .query_row(
+                "SELECT i.soul, s.account_id FROM imported_souls_v1 i JOIN souls_v1 s ON s.soul = i.soul
+                 WHERE i.world = ?1 AND i.old_soul = ?2",
+                params![world, former],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(row.and_then(|(soul, account)| {
+            principal_from_text(&soul).map(|id| (super::view::grant_text("soul", id), account))
+        }))
+    }
+
     /// How many accounts the store holds.
     pub fn accounts(&self) -> Result<u64, StoreError> {
         let db = self.db.lock().expect("the store");

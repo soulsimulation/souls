@@ -89,6 +89,8 @@ pub struct Card {
     pub force: bool,
     /// The device the Soul is connected to now, if any.
     pub connected: Option<String>,
+    /// The id today's client knew the Soul by, for a Soul X11 brought over (R18), if the request named one.
+    pub former: Option<String>,
 }
 
 pub struct Pairing {
@@ -159,6 +161,8 @@ fn new_code() -> String {
 }
 
 type Row = (String, String, Option<String>, String, bool, u64, String);
+/// Finds the Soul X11 brought over for `(world, former id)`: its grant and its owning account (R18).
+pub type Imported<'a> = &'a dyn Fn(&str, &str) -> Result<Option<(String, String)>, &'static str>;
 type PollRow = (
     String,
     String,
@@ -340,6 +344,7 @@ impl Pairing {
             Some(g) => self.soul_of(g)?.and_then(|(_, d)| d),
             None => None,
         };
+        let former = self.former_of(&code)?.map(|(_, f)| f);
         Ok(Card {
             device,
             label,
@@ -349,6 +354,7 @@ impl Pairing {
             scope,
             force,
             connected,
+            former,
         })
     }
 
@@ -360,8 +366,22 @@ impl Pairing {
         code: &str,
         now: u64,
     ) -> Result<String, (&'static str, Option<String>)> {
+        self.approve_with(account, code, now, &|_, _| Ok(None))
+    }
+
+    /// [`Pairing::approve`], where a request that names a `former` Soul (R18) is the Soul `imported(world, former)`
+    /// finds X11 brought over, as `(grant, owning account)`. A former Soul not brought over, or brought over for
+    /// another account, is refused `unknown-soul`, the same refusal either way.
+    pub fn approve_with(
+        &self,
+        account: &str,
+        code: &str,
+        now: u64,
+        imported: Imported<'_>,
+    ) -> Result<String, (&'static str, Option<String>)> {
         let (code, _, soul, _, force, _, _) =
             self.guess(account, code, now).map_err(|e| (e, None))?;
+
         // Each change is made only to a request still pending: of two approvals at once, one finds it gone.
         let refuse = |name: &'static str, device: Option<String>| {
             let changed = self.db.lock().expect("the store").execute(
@@ -374,6 +394,20 @@ impl Pairing {
                 Ok(_) => Err((name, device)),
                 Err(_) => Err(("store", None)),
             }
+        };
+        // R18: a request naming a former Soul pairs the Soul X11 brought over for it, only for its own account.
+        let soul = match (soul, self.former_of(&code).map_err(|e| (e, None))?) {
+            (None, Some((world, former))) => {
+                match imported(&world, &former).map_err(|e| (e, None))? {
+                    Some((grant, owner)) if owner == account && is_soul_grant(&grant) => {
+                        self.register(&grant, account)
+                            .map_err(|_| ("store", None))?;
+                        Some(grant)
+                    }
+                    _ => return refuse("unknown-soul", None),
+                }
+            }
+            (soul, _) => soul,
         };
         let grant = match soul {
             Some(g) => match self.soul_of(&g).map_err(|e| (e, None))? {

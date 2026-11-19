@@ -499,3 +499,58 @@ fn w11_a4_a_retire_takes_effect_only_after_the_owners_confirmed_post() {
     );
     assert_eq!(p.retire("acct_owner", &grant, T0), Err("soul-retired"));
 }
+
+#[test]
+fn r18_a_former_soul_pairs_only_as_the_soul_x11_brought_over_for_its_owner() {
+    let (p, _) = store();
+    let brought = format!("soul-{}-0", "ab".repeat(16));
+    let imported = |world: &str, former: &str| {
+        Ok((world == "eden" && former == "s_ada")
+            .then(|| (brought.clone(), "acct_owner".to_string())))
+    };
+    let former = |p: &Pairing, f: &str| {
+        let (secret, code) = ask(p, "studio laptop", None, false, T0);
+        p.ask_world(&code, "eden").expect("a world");
+        p.ask_former(&code, f).expect("a former id");
+        (secret, code)
+    };
+    // The owner's approval pairs the Soul brought over, and the poll can say the former id back.
+    let (secret, code) = former(&p, "s_ada");
+    let card = p.show("acct_owner", &code, T0).expect("a card");
+    assert_eq!(card.former.as_deref(), Some("s_ada"));
+    assert_eq!(
+        p.approve_with("acct_owner", &code, T0, &imported),
+        Ok(brought.clone())
+    );
+    let Poll::Token { grant, .. } = p.poll(&secret, T0 + INTERVAL) else {
+        panic!("a token")
+    };
+    assert_eq!(grant, brought);
+    assert_eq!(p.former_by_secret(&secret).as_deref(), Some("s_ada"));
+    assert_eq!(
+        p.souls("acct_owner"),
+        Ok(vec![(brought.clone(), Some("studio laptop".into()))])
+    );
+    // Another account, or a former id not brought over, is refused by name, and its daemon learns it.
+    let (secret, code) = former(&p, "s_ada");
+    assert_eq!(
+        p.approve_with("acct_other", &code, T0, &imported),
+        Err(("unknown-soul", None))
+    );
+    assert_eq!(
+        p.poll(&secret, T0 + INTERVAL),
+        Poll::Refused("unknown-soul".into(), None)
+    );
+    let (_, code) = former(&p, "s_nobody");
+    assert_eq!(
+        p.approve_with("acct_owner", &code, T0, &imported),
+        Err(("unknown-soul", None))
+    );
+    // Without an import, a former Soul is never made a new one.
+    let (_, code) = former(&p, "s_ada");
+    assert_eq!(
+        p.approve("acct_owner", &code, T0),
+        Err(("unknown-soul", None))
+    );
+    assert!(p.ask_former("BCDF-GHJK", "not-a-former").is_err());
+}

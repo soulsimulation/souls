@@ -68,7 +68,7 @@
     $('code').textContent = body.code;
     $('device').textContent = body.device;
     $('label').textContent = body.label;
-    $('soul').textContent = body.soul ?? 'a new Soul';
+    $('soul').textContent = body.soul ?? (body.former ? `${body.former}, brought over from today's client` : 'a new Soul');
     $('age').textContent = age(body.age);
     $('connected').textContent = body.connected
       ? `${body.connected}${body.force ? ' (this request replaces it)' : ' (this request will be refused unless the agent forces it)'}`
