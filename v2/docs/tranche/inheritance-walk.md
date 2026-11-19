@@ -31,8 +31,9 @@ runs no import and makes no claim that a preview exists.
 
 1. Before walking, post this fixed row list and its revision on #2835, name the four role recordings, and record
    the actual preview release head. Check the real address serves Eden with Soul Actions loaded; otherwise hand
-   back without claiming A2. Keep deployment mappings and test identity bindings private. The signed drop list
-   currently authorizes row 84 only; older proposed drops below are unresolved, not accepted exclusions.
+   back without claiming A2. Keep deployment mappings and test identity bindings private. The only new parity drop
+   is row 84. The already approved architecture/history replacements below remain decided under #2636; do not
+   ask Gene to decide them again or reintroduce old APIs, a central mind or admin clock controls.
 2. **Owner (O).** In a fresh isolated home, follow the served instructions and real-provider approval, join and
    perform the O rows using the released client. Exercise login once, adopt/pair without another code, and the
    explicit device-move refusal. Exercise the former-Soul migration with an approved synthetic imported identity:
@@ -96,8 +97,12 @@ agenda checkpoint is [#1960, 19 Nov](https://github.com/soulsimulation/souls/iss
   (body selection) are observed open. Their own evidence remains attached to their own source heads.
 - PR #3580 is observed draft: C30's fifth served journey failed at recipient body-follow after join; #3594 carries
   the required refresh repair and original remaining journey. All five failed journeys remain failed evidence.
-- PR #3592 is observed draft: B7b's third served journey stalled at furniture. A permitted clear-approach proof
-  cannot establish #3593's obstructed approach. K18b's static-map checks cannot establish #3595's current-map proof.
+- PR #3592 remains draft: [B7b's fourth served trial](https://github.com/soulsimulation/souls/issues/3489#issuecomment-7018008443)
+  proves A1 FIFO seating at the selected clear fixture only. A2 stopped at the leader's `act.timed-out`; A2/A3
+  remain unproved and [depend on C29 #3544](https://github.com/soulsimulation/souls/issues/3489#issuecomment-7018033966).
+  No fifth trial is authorized. All four trials remain recorded; the clear fixture cannot establish #3593's
+  obstructed approach. This is source evidence only, not X12 preview acceptance. K18b's static-map checks cannot
+  establish #3595's current-map proof.
 - The previous X12 scripted pass belongs to its recorded integration tip in
   [the handback](https://github.com/soulsimulation/souls/issues/2835#issuecomment-7014357148): scripted rows 2, 4, 5
   and HTTP/stream metadata row 72 passed; failures and unchecked rows 32/45 are retained. None was rerun here.
@@ -105,6 +110,15 @@ agenda checkpoint is [#1960, 19 Nov](https://github.com/soulsimulation/souls/iss
 - Row 36's old reachability/set-down finding remains open: C18 #3454 / PR #3507 is the recorded reachability
   source, but the generic set-down gap still needs a bounded next-task proposal from the coordinator. A4 is not
   claimed complete by this preparation. Rows 32 and 45 still need the retained focused rehearsal before real input.
+
+## Existing design dispositions
+
+[#2636, Already decided](https://github.com/soulsimulation/souls/issues/2636) retains recorded history rather than
+re-execution, a clean start with old history expendable, and the trunk contracts. Rows 70/71/96 below record those
+existing history/edge-mind dispositions. Rows 12/13/97 retain their original A9/#1754 and Gene 16 Nov/12 Nov anchors.
+They are approved replacements of the old design, not six new parity drops or requests for fresh decisions.
+Only the feedback form (84) is the new parity drop. These dispositions do not supply real-preview observations:
+A2–A5 remain unproved until their full acceptance is evidenced.
 
 ## The rows
 
@@ -126,8 +140,8 @@ Task: the issue or PR carrying the row; issue closure alone does not establish a
 | 9 | O | Two Souls in one home; move one to a second machine (free, refused naming the device, `--move`) | R6, W2, I12 | |
 | 10 | O | Travel to another world and home again | X9 #2840 | |
 | 11 | O | Run a Soul from an app that takes only a URL (`/mcp`, the `eden_*` tools) | R21 #3334 | |
-| 12 | O | Old steering API, intents v2, mandates, cards, central mind, `eden-agent.mjs` | unresolved carry/drop: older proposal needs Gene’s signed decision; blocks A5 | |
-| 13 | O | Server-built menus and exact route planning | unresolved carry/drop: older proposal needs Gene’s signed decision; blocks A5 | |
+| 12 | — | Old steering API, intents v2, mandates, cards, central mind, `eden-agent.mjs` | recorded architecture replacement (A9, #1754); old steering/central mind retired | |
+| 13 | — | Server-built menus and exact route planning | recorded architecture replacement (Gene, 16 Nov); agent copy replaces server menus/routes | |
 
 ### The client and the home
 
@@ -210,8 +224,8 @@ Task: the issue or PR carrying the row; issue closure alone does not establish a
 | 67 | C | Rename a world, take it off the list, close it to visitors | W9 #2827 | |
 | 68 | C | Hand a world to another account; archive and restore | W16 #3583, W17 #3584; W3b #3588 (carry approved, Gene 19 Nov) | |
 | 69 | V | Each world's built content, creator and Souls are there | X6 #2819, X11 #2820, X10 #2837 | 5 |
-| 70 | Op | Worlds' pasts before the switch | unresolved carry/drop: older proposal needs Gene’s signed decision; blocks A5 | |
-| 71 | Op | Re-running history as a promise | unresolved carry/drop: older proposal needs Gene’s signed decision; blocks A5 | |
+| 70 | — | Worlds' pasts before the switch | recorded history disposition (#2636; Gene, 16 Nov): clean start, old history expendable | |
+| 71 | — | Re-running history as a promise | recorded history disposition (#2636; design 6b): recorded history, not re-execution | |
 
 ### Viewing, cameras and history
 
@@ -247,8 +261,8 @@ Task: the issue or PR carrying the row; issue closure alone does not establish a
 | 93 | Op | Floods and hostile clients held off; world-making limits | I2, I8, O8, W3 | |
 | 94 | V | Owners' words and private fields stay out of public views | T8, W1, F6, O11, W7 | |
 | 95 | Op | Framing refused; API answers not indexed; robots and sitemap list only listed worlds | O19 #2830; O19b #3587 | |
-| 96 | Op | The model budget and the central mind | unresolved carry/drop: older proposal needs Gene’s signed decision; blocks A5 | |
-| 97 | Op | Admin pause, clock rate, invites | unresolved carry/drop: older proposal needs Gene’s signed decision; blocks A5 | |
+| 96 | — | The model budget and the central mind | recorded trunk disposition (#2636): minds at the edge, no world model calls or central mind | |
+| 97 | — | Admin pause, clock rate, invites | recorded replacement (Gene, 12 Nov): world time never stops; invites already off | |
 
 ### Assets and the CDN
 
