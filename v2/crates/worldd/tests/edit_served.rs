@@ -178,14 +178,41 @@ fn record(bucket: &Path, w: &Seeded, creator: Id) {
 }
 
 fn serve(w: &Seeded, socket: &Path, bucket: &Path) -> Served {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_worldd"))
+    serve_with(w, socket, Some(bucket))
+}
+
+fn static_creator(w: &Seeded, creator: Id) {
+    let path = w.dir.join("world.json");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let (fields, trailing) = text.rsplit_once('}').unwrap();
+    assert!(trailing.trim().is_empty());
+    std::fs::write(
+        path,
+        format!(
+            "{fields}, \"creator\": \"{}-{}\"}}",
+            replica::encode::to_hex(&creator.scope().0),
+            creator.counter()
+        ),
+    )
+    .unwrap();
+}
+
+fn serve_with(w: &Seeded, socket: &Path, bucket: Option<&Path>) -> Served {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_worldd"));
+    command
         .args(["serve", "--dir"])
         .arg(&w.dir)
         .arg("--socket")
-        .arg(socket)
-        .arg("--store")
-        .arg(format!("folder:{}", bucket.display()))
+        .arg(socket);
+    if let Some(bucket) = bucket {
+        command
+            .arg("--store")
+            .arg(format!("folder:{}", bucket.display()));
+    }
+    let mut child = command
         .args(["--machine", "test-machine"])
+        .env_remove("WORLDD_STORE")
+        .env_remove("DIRECTORY_STORE_URL")
         .env_remove("SOULS_BACKUP_URL")
         .env_remove("SOULS_BACKUP_KEY_FILE")
         .stdout(Stdio::piped())
@@ -423,7 +450,8 @@ async fn g1e_a1_the_worlds_record_names_its_one_creator() {
         (-40, 30),
     );
     let bucket = d.join("bucket");
-    let ((c, creator), (_, other)) = (creator(0xc0), creator(0xc1));
+    let ((c, creator), (stale, other)) = (creator(0xc0), creator(0xc1));
+    static_creator(&w, stale); // Directory authority must override this stale standalone metadata.
     record(&bucket, &w, c);
     let socket = d.join("s");
     let s = serve(&w, &socket, &bucket);
@@ -448,6 +476,47 @@ async fn g1e_a1_the_worlds_record_names_its_one_creator() {
     .await;
     println!("A1: the record's creator's edit: {got:?}");
     assert_eq!(got.kind, 1, "the creator's wall commits: {got:?}");
+    std::fs::remove_file(bucket.join(NameRecord::key("g1e")))
+        .expect("revoke the test world's creator");
+    assert_eq!(
+        s.line("creator: ", 60),
+        "creator: none",
+        "the live directory reader observes revocation"
+    );
+    for (socket, actor) in [(&mut ws, creator), (&mut theirs, other)] {
+        let (refused, _) = send(
+            socket,
+            edit_intent(&w, actor, 2, got.version, wall(&w, -25 * M, 30 * M)),
+        )
+        .await;
+        assert_eq!(
+            (refused.kind, refused.reason.as_str()),
+            (2, "edit.not-the-creator"),
+            "neither the revoked creator nor stale metadata may edit"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn g7b_standalone_metadata_creator_still_edits_without_a_directory() {
+    let d = scratch("g7b-standalone");
+    let w = seed(&d, &testworld::generate(1, 0).unwrap().text, 1, (-40, 30));
+    let (id, actor) = creator(0xc2);
+    static_creator(&w, id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 60);
+    let (url, tokens) = gateway(&socket, &[actor]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, actor, 1, 0, wall(&w, -30 * M, 30 * M)),
+    )
+    .await;
+    assert_eq!(
+        got.kind, 1,
+        "the explicit standalone creator's wall commits: {got:?}"
+    );
 }
 
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'
