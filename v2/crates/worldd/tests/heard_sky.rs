@@ -1,5 +1,8 @@
 //! Engine v2 C5 (#3369): hearing and the world's sky in the running tick. In K18's loop (lockstep), a Soul speaks and
-//! the utterance's entry in the log names its hearers: the Soul beside it and itself, not the one 10 m away (A1).
+//! the utterance's entry in the log names its hearers: the Soul beside it and itself, not the one 10 m away (A1). The
+//! world node's light, day and weather are set at start and fired by the due list; a world stopped after its first
+//! tick and started again 48 hours later writes the same log, byte for byte, as one stepped tick by tick (A2).
+//! `cargo test -p worldd --test heard_sky -- --nocapture` prints the numbers.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -9,8 +12,10 @@ use replica::effects::{Effect, Header, Part, read_id, schema_hash};
 use replica::encode::{Name, Value, encode};
 use replica::ids::{Hash, Id, Purpose, Scope};
 use replica::pose::{Frame, Quat, Vec3};
+use replica::sky::{self, Calendar, DAY_US, days_from_civil};
 use replica::speech::{SAID, length_of};
 use sim::controller::Line;
+use sim::daylight;
 use sim::links::Doors;
 use sim::log::{Mem, recover};
 use sim::recorder;
@@ -181,5 +186,135 @@ fn a1_an_utterance_in_the_running_tick_records_its_hearers() {
         said[0].2,
         Value::Map(BTreeMap::from([(21, words().to_value())])),
         "A1: its words by reference"
+    );
+}
+
+const HOUR: i64 = 3_600_000_000;
+/// 48 hours of one-second ticks.
+const TWO_DAYS: i64 = 172_800;
+
+/// Today's sky on a real-time calendar whose world time 0 is local midnight of 18 Nov 2026, five hours behind UTC.
+fn sky() -> daylight::Config {
+    let cal = Calendar {
+        day_s: 86_400,
+        origin: days_from_civil(2026, 11, 18) * DAY_US + 5 * HOUR,
+        offsets: vec![(0, -5 * HOUR)],
+    };
+    daylight::Config::today(cal, 3369)
+}
+
+/// A world of the lamps' tree, no bodies, one-second ticks, its sky as [`sky`], in lockstep.
+fn sky_world(store: Mem) -> World {
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.lockstep = true;
+    cfg.tick = std::time::Duration::from_secs(1);
+    cfg.views = true;
+    cfg.sky = Some(sky());
+    answers::start(
+        toggles::World::build(1, 3, 0).replica,
+        toggles::rules(),
+        store,
+        cfg,
+    )
+    .expect("the world starts")
+}
+
+/// The named events of the world's entries, with their world times.
+fn events(log: &[u8]) -> Vec<(i64, String, BTreeMap<u64, Value>)> {
+    entries(log)
+        .iter()
+        .flat_map(|e| {
+            e.events
+                .iter()
+                .flatten()
+                .map(move |v| (e.envelope.at, v.name.as_str().to_owned(), v.fields.clone()))
+        })
+        .collect()
+}
+
+#[test]
+fn a2_the_sky_in_the_running_tick_and_a_48_hour_jump_writes_what_stepping_writes() {
+    // Stepped: the caller moves the clock one tick at a time through 48 hours.
+    let stepped = Mem::with(Vec::new());
+    let w = sky_world(stepped.clone());
+    for n in 0..=TWO_DAYS {
+        run_to(&w, n);
+    }
+    let tier = w.tier.as_ref().map(|t| t.stats()).expect("the view tier");
+    w.stop();
+    let stepped = stepped.0.lock().unwrap().bytes.clone();
+
+    // Jumped: the world starts, stops after its first tick, and is started again from its log 48 hours later; the
+    // ticks it owes run back to back.
+    let jumped = Mem::with(Vec::new());
+    let w = sky_world(jumped.clone());
+    run_to(&w, 0);
+    w.stop();
+    let first = jumped.0.lock().unwrap().bytes.clone();
+    let jumped = Mem::with(first);
+    let w = sky_world(jumped.clone());
+    let end = run_to(&w, TWO_DAYS);
+    w.stop();
+    let jumped = jumped.0.lock().unwrap().bytes.clone();
+
+    let ev = events(&stepped);
+    let light: Vec<(i64, Value)> = ev
+        .iter()
+        .filter(|e| e.0 > 0 && e.1 == sky::EV_LIGHT)
+        .map(|e| (e.0, e.2[&1].clone()))
+        .collect();
+    let days = ev.iter().filter(|e| e.0 > 0 && e.1 == sky::EV_DAY).count();
+    let weather = ev
+        .iter()
+        .filter(|e| e.0 > 0 && e.1 == sky::EV_WEATHER)
+        .count();
+    println!(
+        "A2: 48 h: {} light, {days} new days, {weather} weather changes; tier ticks {}, fault {:?}; log {} bytes \
+         stepped, {} jumped; end {end:?}",
+        light.len(),
+        tier.ticks,
+        tier.fault,
+        stepped.len(),
+        jumped.len()
+    );
+    // The start: the first light, date and weather, on the world node at world time 0.
+    let start: Vec<&str> = ev
+        .iter()
+        .filter(|e| e.0 == 0)
+        .map(|e| e.1.as_str())
+        .collect();
+    assert_eq!(
+        start,
+        [sky::EV_LIGHT, sky::EV_DAY, sky::EV_WEATHER],
+        "A2: set at start"
+    );
+    // Each change of light at its boundary, local 05:30, 07:00, 18:00, 19:30 and 21:00, on both days.
+    let table = [
+        (330, "dawn"),
+        (420, "day"),
+        (1080, "evening"),
+        (1170, "dusk"),
+        (1260, "night"),
+    ];
+    let want: Vec<(i64, Value)> = (0..2)
+        .flat_map(|d| {
+            table.map(|(m, n)| {
+                (
+                    d * 24 * HOUR + m * 60_000_000,
+                    Value::Text(name(&format!("souls:{n}"))),
+                )
+            })
+        })
+        .collect();
+    assert_eq!(light, want, "A2: fired by the due list at each boundary");
+    assert_eq!(days, 2, "A2: a new day at each local midnight");
+    assert!(weather > 0, "A2: the weather changes");
+    assert!(
+        tier.ticks > 0 && tier.fault.is_none(),
+        "A2: the view tier read the ticks"
+    );
+    assert!(
+        jumped == stepped,
+        "A2: the 48-hour jump writes the same log as stepping tick by tick"
     );
 }
