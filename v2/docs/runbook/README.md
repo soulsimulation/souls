@@ -20,6 +20,7 @@ Never run a drill (each page's last section) on a machine that serves worlds.
 | 5 | Deploy a build to one world, and roll it back | the deploy prints `Kept`, `RolledBack { fault }`, `NotDeployed { why }` or `Refused { why }` | `bash v2/tools/ops/world-deploy.sh <world>` (the installed `worldd`); undo: `bash v2/tools/ops/world-rollback.sh <world>` | [deploy-and-roll-back.md](deploy-and-roll-back.md#commands) |
 | 6 | Move a world to another machine | a pause under half a second; the directory's epoch names the new machine | the drill only, so far: `bash v2/tools/ops/o9-move.sh` on a machine with no worlds | [move-a-world.md](move-a-world.md) |
 | 7 | Read what a world costs | dollars per world per day, by part, then "unused" and the machine | `bash v2/tools/ops/world-cost.sh <world>` | [read-the-cost.md](read-the-cost.md#read-the-page) |
+| 8 | A machine lost: bring back what is not in the log | accounts sign in, agents reconnect, words read, removals hold, uploads serve; at most five minutes lost, counted | the drill only, so far: `bash v2/tools/ops/backup/o20-drill.sh` on a machine with no worlds | [restore-stores.md](restore-stores.md) |
 
 ## Background, read once
 
@@ -34,5 +35,4 @@ the install's, run by the release owner. `node v2/tools/ops/runbook-check.mjs` c
 
 Each adds its own row when it lands: sleep and wake (O2, #2731), visitors' page errors (O25, #3336), a placed world
 served behind the gateway (C1, #3365), a full disk and a bucket out of reach (O10, #2806), restore from the archive
-(O12, #2807), a gateway upgrade (O16, #2809), a release (O18, #2811), the front door (O19, #2830) and backups (O20,
-#2812).
+(O12, #2807), a gateway upgrade (O16, #2809), a release (O18, #2811) and the front door (O19, #2830).

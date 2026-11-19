@@ -3,6 +3,7 @@
 // by implementing `Source`. Times are world microseconds; positions micrometres in the node's parent frame (T4).
 
 import type { Happened } from '../sound/record.ts';
+import type { SkyFields } from '../sky/record.ts';
 
 /** One node as the page needs it, read from R1's replica after a part. */
 export type NodeRec = {
@@ -36,6 +37,8 @@ export type NodeRec = {
   /** A body's public name and one-line description (fields 30, 31, by reference; V1b), null while unknown. */
   name?: string | null;
   description?: string | null;
+  /** The world node's day, night and weather fields (E6; V19, `sky/record.ts`). */
+  sky?: SkyFields;
 };
 
 /** Where the world is: its newest part's end, world time against wall time, and the world time up to which a still
