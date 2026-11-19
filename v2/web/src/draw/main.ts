@@ -21,6 +21,7 @@ import { arrive } from '../worlds/arrive.ts';
 import { WorldSky } from '../sky/sky.ts';
 import { tickWater } from '../water/water.ts';
 import { installNightLighting, nightPools, paintNightSources, setNightStrength } from './night.ts';
+import { installCapture } from '../capture/capture.ts';
 
 installNightLighting(); // V19b: the lamps' night pools, before any lit material compiles
 
@@ -79,6 +80,7 @@ const things = pageThings(scene, world, new URLSearchParams(location.search));
 const souls = pageSouls(canvas, world, new URLSearchParams(location.search)); // W4: chips, status, speech, a Soul's page
 const director = new CameraDirector(cam, canvas, world, souls, new URLSearchParams(location.search), moment !== null); // V20: broadcast, follow, find
 Object.assign(globalThis, { v2: { renderer, scene, sky, cam, director, world, things, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
+installCapture(globalThis as any, q, document); // G10: `shoot` names a place, Soul or thing and the camera goes there
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
 loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
 

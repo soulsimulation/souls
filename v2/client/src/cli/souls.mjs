@@ -23,6 +23,8 @@
 //                                             names which Soul asks, when the home has more than one
 //   souls.mjs stats                           per achieved intent: commands, bytes printed, first-send result (R10)
 //   souls.mjs stop                            ends the daemon
+//   souls.mjs shoot <place|soul|thing> [--eyes] [--page <url>] [--out f.png]   a picture drawn here from the public
+//                                             stream (G10, shoot/shoot.mjs); with no browser, words and why
 //   souls.mjs digest [--since <time>] [--refs]   the owner's update from the Soul's memory log (R14); no daemon
 //   souls.mjs consolidate [--force]           the owner's opt-in pass over the memory's journal (R14); no daemon
 //   souls.mjs schedule add "<when>" <act> [<act>...] | wake "<why>"  [--until <time>] [--missed drop|tell|late <n>m]
@@ -43,6 +45,7 @@ import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
 import { consolidateIn, digestOf, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
+import { runShoot } from '../shoot/shoot.mjs';
 
 export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'lie', 'wait', 'history', 'stats', 'stop'];
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
@@ -150,8 +153,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
   const asked = requestOf(process.argv.slice(2)), { req, soul: named, refused, detail } = asked;
   try {
-    if (refused) throw Object.assign(new Error(detail), { code: refused });
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
+    if (process.argv[2] === 'shoot') { // G10: drawn here, in a browser, from the public stream; no daemon unless it must use words
+      const souls = soulsWithTokens(home), ask = souls.length === 1 ? (r) => call(home, souls[0], r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
+      out(await runShoot(process.argv.slice(3), { home, env: process.env, ask }));
+      process.exit(0);
+    }
+    if (refused) throw Object.assign(new Error(detail), { code: refused });
     if (asked.local) out(await local(asked, home));
     else if (req.op === 'pair') { out(await pairing(home, req.url)); process.exit(0); }
     else {

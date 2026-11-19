@@ -4,7 +4,7 @@
 //!    `{"worlds": [{name, label, template, lineage, zone, creator, made}]}`, written after G9's create on condition of
 //!    the version read (rows are only added). The list request is answered from this machine's cached copy of it,
 //!    read from the store at most once; it asks no world anything, so it wakes none. Awake or asleep comes from the
-//!    world records this machine's directory has cached, never from the store or a world. No picture yet (G10).
+//!    world records this machine's directory has cached, never from the store or a world.
 //! 2. **Create** takes a name, a template and the creator's label, and runs G9's create
 //!    ([`crate::worlds::create`]) with the starter: the fork, in its own process (`worldd fork`).
 //! 3. **A request key.** Each create carries the page's key for that one click. Creates are made one at a time, and
@@ -16,6 +16,9 @@
 //!    off the list (the row's flag alone: it wakes no world), and `closed` closes it to visitors (today's one travel
 //!    switch; it refuses nothing until travel exists, X9). Each is a field of the row, written on condition of the
 //!    version read, and the list shows it from this machine's copy at once.
+//! 7. **The list's picture** (G10, #2800), set by the creator with the settings, from a shot: it passes G6's check
+//!    and hold point with [`PICTURE_BYTES`] and [`PICTURE_SIDE`], is kept stripped of metadata, and is one field of
+//!    the world's row, `picture`, a `data:` URL; a row without one lists `picture: null`.
 
 pub mod http;
 
@@ -35,6 +38,42 @@ use crate::worlds::create::{Create, Source, create};
 
 /// The list's one object.
 pub const KEY: &str = "world-list";
+/// The most bytes a world's list picture may have, after its metadata is stripped (rule 7).
+pub const PICTURE_BYTES: u64 = 131_072;
+/// The longest side of a world's list picture, px (rule 7).
+pub const PICTURE_SIDE: u64 = 1280;
+
+/// A file as the list's picture (rule 7): G6's check with the picture's limits, then the hold point; the stripped
+/// bytes as a `data:` URL, or the refusal's name.
+pub fn list_picture(file: &[u8]) -> Result<String, String> {
+    let limits = assets::check::Limits {
+        bytes: PICTURE_BYTES,
+        image_bytes: PICTURE_BYTES,
+        side: PICTURE_SIDE,
+        textures: 1,
+        pixels: PICTURE_SIDE * PICTURE_SIDE,
+        ..assets::check::Limits::default()
+    };
+    let checked = assets::check::check(file, &limits).map_err(|r| r.code.to_string())?;
+    if checked.format == assets::check::Format::Glb {
+        return Err("picture-format".into());
+    }
+    let checked = std::sync::Arc::new(checked);
+    match assets::hold::judge(
+        std::sync::Arc::new(assets::hold::NoClassifier),
+        checked.clone(),
+        assets::hold::CLASSIFY_WITHIN,
+    ) {
+        assets::hold::Verdict::Allow => {}
+        assets::hold::Verdict::Hold(_) => return Err("picture-held".into()),
+        assets::hold::Verdict::Reject(_) => return Err("picture-rejected".into()),
+    }
+    let mut b = crate::accounts::b64url(&checked.bytes)
+        .replace('-', "+")
+        .replace('_', "/");
+    b.push_str(&"=".repeat((4 - b.len() % 4) % 4));
+    Ok(format!("data:image/{};base64,{b}", checked.format.name()))
+}
 
 /// Per-account limits (rule 4), as settings.
 #[derive(Clone, Copy, Debug)]
@@ -223,7 +262,9 @@ impl<S: Store> Worlds<S> {
                 Some(rec.current().is_some() && rec.wake.is_none())
             })();
             row["awake"] = json!(awake.unwrap_or(false));
-            row["picture"] = Json::Null;
+            if row.get("picture").is_none() {
+                row["picture"] = Json::Null;
+            }
         }
         Ok(json!({"worlds": rows, "templates": self.templates.keys().collect::<Vec<_>>()}))
     }
@@ -328,14 +369,16 @@ impl<S: Store> Worlds<S> {
         Ok(json!({"world": row, "epoch": claim.takeover.epoch}))
     }
 
-    /// A world's settings (rule 6): `creator` sets `unlisted` and `closed` on the row of `world` (either may be
-    /// `None`, left as it is; both `None` reads the row). Answers the row. Writes the list's one object alone.
+    /// A world's settings (rules 6 and 7): `creator` sets `unlisted`, `closed` and the list's `picture` (a checked
+    /// `data:` URL, [`list_picture`]) on the row of `world` (each may be `None`, left as it is; all `None` reads the
+    /// row). Answers the row. Writes the list's one object alone.
     pub fn settings(
         &self,
         world: &str,
         creator: Id,
         unlisted: Option<bool>,
         closed: Option<bool>,
+        picture: Option<&str>,
     ) -> Result<Json, Refusal> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let who = principal_text(creator);
@@ -355,9 +398,12 @@ impl<S: Store> Worlds<S> {
                     row[k] = json!(v);
                 }
             }
+            if let Some(p) = picture {
+                row["picture"] = json!(p);
+            }
             Ok(row.clone())
         };
-        if unlisted.is_none() && closed.is_none() {
+        if unlisted.is_none() && closed.is_none() && picture.is_none() {
             return set(&mut rows.clone());
         }
         let (rows, row) = write_rows(&inner.dir.store, etag, rows, set)?;

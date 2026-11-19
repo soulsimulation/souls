@@ -26,6 +26,8 @@ No Soul yet (`which-soul`): `pair <world url>`. It prints a link and a short cod
 4. **Read the answer.** Accepted isn't arrived: `ok: true` means sent and taken. `look` again to see it held.
 5. **Report** what happened. A fallback is not the first choice: say which one held.
 
+To see a place, Soul or thing: `shoot <name> --out <file.png>` (a Soul's own view: `--eyes`), drawn on this machine from what any visitor sees; read the file and show it. No browser here: it answers in words and says why.
+
 Before a long errand (across the world, several steps), `can <act>`: `yes`, `no` with its `reason` and `fix`, or `unknown` (the world decides; send it).
 
 ## Age
