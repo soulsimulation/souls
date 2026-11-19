@@ -3,7 +3,8 @@
 // world the picture is, and the clock's state.
 import * as THREE from 'three';
 import { FreeCamera } from '../camera/camera.ts';
-import { PlaybackClock } from '../clock/clock.ts';
+import { CameraDirector } from '../camera/director.ts';
+import { PlaybackClock, caughtUp } from '../clock/clock.ts';
 import type { Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
@@ -14,6 +15,7 @@ import { pageThings } from '../things/page.ts';
 import { HistoryPage, readMoment } from '../history/page.ts';
 import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
+import { arrive } from '../worlds/arrive.ts';
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
@@ -55,7 +57,8 @@ scene.add(world.group);
 const clock = new PlaybackClock();
 const things = pageThings(scene, world, new URLSearchParams(location.search));
 const souls = pageSouls(canvas, world, new URLSearchParams(location.search)); // W4: chips, status, speech, a Soul's page
-Object.assign(globalThis, { v2: { renderer, scene, cam, world, things, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
+const director = new CameraDirector(cam, canvas, world, souls, new URLSearchParams(location.search), moment !== null); // V20: broadcast, follow, find
+Object.assign(globalThis, { v2: { renderer, scene, cam, director, world, things, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
 loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
 
@@ -76,6 +79,7 @@ addEventListener('resize', resize);
 resize();
 cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 
+const firstFrame = arrive(worldName, status);
 const live = (address: string) => new StreamSource(address).start({
   pointer: (p) => (pointer = p),
   part: (p) => {
@@ -83,6 +87,7 @@ const live = (address: string) => new StreamSource(address).start({
     things.apply(p.nodes, p.removed);
     sound.part(p.nodes, p.removed, p.samples, p.happened ?? []);
     souls.apply(p);
+    director.part(p);
     newestTo = p.to;
     played++;
     if (p.hash !== null) (hashes++, p.hash && hashesEqual++);
@@ -121,20 +126,21 @@ renderer.setAnimationLoop((now) => {
   const dt = now - last;
   fps = fps * 0.95 + (1000 / Math.max(1, dt)) * 0.05;
   last = now;
-  cam.update(Math.min(100, dt));
   things.update(cam.camera.position);
   // The shadow's square moves in whole texels, so standing shadows don't shimmer as the camera moves.
   const texel = (2 * SHADOW) / sun.shadow.mapSize.x, at = cam.controls.target;
   sun.target.position.set(Math.round(at.x / texel) * texel, at.y, Math.round(at.z / texel) * texel);
   sun.position.copy(sun.target.position).add(SUN);
   const worldNow = pointer ? pointer.anchorWorld + (Date.now() - pointer.anchorWallMs) * 1000 : null;
-  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : clock.step(dt, worldNow, newestTo);
+  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : clock.step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
+  director.update(Math.min(100, dt), t);
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
   let drawn = 0;
   if (t !== null) {
     drawn = world.draw(t, cam.camera);
     if (!framed && drawn > 0) {
       framed = true;
+      firstFrame();
       cam.setExtent(world.extent);
       const at = world.crowd(t);
       if (at) cam.look(at, 0.6, -0.6, 55);

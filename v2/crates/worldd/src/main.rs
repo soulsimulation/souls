@@ -9,8 +9,8 @@ mod watchdog;
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("fork") => std::process::exit(fork::run(&args)),
         Some("gateway-link") => std::process::exit(gateway_link::run(&args)),
+        Some("fork") => std::process::exit(fork::run(&args)),
         // A real world from its folder, behind the gateway (C1, #3365); `seed` makes the folder.
         Some("serve") => std::process::exit(serve::run(&args)),
         Some("seed") => std::process::exit(serve::seed(&args)),
