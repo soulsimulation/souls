@@ -80,6 +80,7 @@
 #![allow(clippy::disallowed_types)]
 
 pub mod exits;
+pub mod open;
 pub mod scene;
 pub mod sizes;
 
@@ -153,7 +154,7 @@ pub struct Piece {
 /// Where a doorway link meets a piece: the segment `a`–`b` (mm, with height) where the passage's narrowest width
 /// reaches this side's piece, the side of the wall (+1 the way the opening faces, −1 behind it), and that width left
 /// for the centre at the doorway's middle (0: nothing passes).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Meet {
     pub link: Id,
     pub piece: u32,
@@ -1083,7 +1084,9 @@ impl Versions {
 }
 
 /// The fields a scene is read from: a change to any other (a door's open field, a name) leaves the ground as it was.
-const SHAPE: [u64; 11] = [
+/// A floor's stairs, ramps and ladders (`crate::links::F_STAIRS`) are read with it: they are the map's links (G2b).
+const SHAPE: [u64; 12] = [
+    crate::links::F_STAIRS,
     scene::F_OPEN_DOOR_LINK,
     scene::F_OUTLINE,
     scene::F_SOLIDS,
@@ -1133,6 +1136,24 @@ fn grounds_of(tree: &Tree, id: Id, out: &mut BTreeSet<Id>) {
 /// The nodes whose ground the committed part `part` changes: read in `before` (the tree it was applied to) for what
 /// it moves or removes, and in `after` for what it places or moves. Motion samples change no ground.
 pub fn touched(before: &Tree, after: &Tree, part: &Part) -> BTreeSet<Id> {
+    let ids = changed(before, part);
+    let mut out = BTreeSet::new();
+    grounds(before, &ids, &mut out);
+    grounds(after, &ids, &mut out);
+    out
+}
+
+/// The nodes whose ground a change at the nodes `ids` changes, read in `tree`, added to `out`: [`touched`] is these
+/// in the tree before the part and in the tree after it.
+pub fn grounds(tree: &Tree, ids: &[Id], out: &mut BTreeSet<Id>) {
+    for &id in ids {
+        grounds_of(tree, id, out);
+    }
+}
+
+/// The nodes the committed part `part` changes in a way its ground reads (see [`touched`]), read in `before` (the tree
+/// it was applied to) for what it moves or removes.
+pub fn changed(before: &Tree, part: &Part) -> Vec<Id> {
     let mut ids = Vec::new();
     for e in &part.effects {
         let changes = match &e.body {
@@ -1170,12 +1191,7 @@ pub fn touched(before: &Tree, after: &Tree, part: &Part) -> BTreeSet<Id> {
             }
         }
     }
-    let mut out = BTreeSet::new();
-    for id in ids {
-        grounds_of(before, id, &mut out);
-        grounds_of(after, id, &mut out);
-    }
-    out
+    ids
 }
 
 /// Patches kept per node, node version and radius (G3, #2760, rebuilds one on an edit by asking with the new version).

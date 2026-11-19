@@ -142,12 +142,22 @@ step client-stats node --test client/src/stats/*.test.mjs
 step client-check node --test client/src/check/*.test.mjs
 # A Soul's memory (R14, #2754): a 30-day home opened unchanged, an hour of named events, digest, consolidate, aliases.
 step client-memory node --test client/src/memory/*.test.mjs
+# Asking what happened (R16, #2817): a recorded Eden of 100 acting Souls in V4's files, by place, thing and Soul.
+step client-history node --test client/src/history/*.test.mjs
 # Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else.
 step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/src/pair/*.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs
+# Wake rules and the owner's messages (R13, #2753): the budget, merging with no reader, the mailbox through the gateway.
+step client-wake bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/wake/*.test.mjs'
+# The Soul's own schedule (R15, #2757): sent on time with no model turn, once across a kill, missed while off told.
+step client-schedule bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/schedule/*.test.mjs'
 # The MCP endpoint on v2 (R21, #3334): six tools, each answer the thin command's; 401, 405, 413; the card and page.
 step client-mcp bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/mcp/*.test.mjs'
+# A creator's terrain (G5, #2762): a landform's patches by today's packages/ground (zod is its one dependency; this job
+# runs no pnpm install), and its expansion into one edit.
+step creator-terrain bash -c 'npm install --no-save --no-package-lock --no-audit --no-fund --prefix ../packages/ground zod@4.6.7 &&
+  node --test tools/terrain/*.test.ts client/src/creator/terrain/*.test.mjs'
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
 # same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
 step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&

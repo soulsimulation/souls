@@ -15,11 +15,21 @@
 //   souls.mjs say "<words>"                   says the words out loud, to whoever is near
 //   souls.mjs whisper <body id> "<words>"     says them to that one body alone
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
-//   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened, or at the timeout
+//   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened (an answer, or words
+//                                             said to or near it: `heard`, also in the next look), or at the timeout
+//   souls.mjs history --at <place> | --thing <id> | --soul <name> [--since <µs>] [--until <µs>]
+//                                             what happened, from the public history and this Soul's memory: a day by
+//                                             default, at most seven, five lines, the rest counted (R16); --as <id>
+//                                             names which Soul asks, when the home has more than one
 //   souls.mjs stats                           per achieved intent: commands, bytes printed, first-send result (R10)
 //   souls.mjs stop                            ends the daemon
 //   souls.mjs digest [--since <time>] [--refs]   the owner's update from the Soul's memory log (R14); no daemon
 //   souls.mjs consolidate [--force]           the owner's opt-in pass over the memory's journal (R14); no daemon
+//   souls.mjs schedule add "<when>" <act> [<act>...] | wake "<why>"  [--until <time>] [--missed drop|tell|late <n>m]
+//                                             an entry in memory/schedule.md (R15): <when> is a real time (ISO, or
+//                                             `in 10m`), a world time (`20:00`), or R9's pattern as JSON. The daemon
+//                                             sends it, with no model turn
+//   souls.mjs schedule [list] | schedule remove <id>   the entries and what became of each
 //   any of them [--soul <id>]                 which Soul, when the home has more than one
 //
 // The home is SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG.
@@ -30,12 +40,13 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
-import { findHome, soulsWithTokens } from '../home/home.mjs';
+import { findHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
 import { consolidateIn, digestOf, soulDirOf } from '../memory/memory.mjs';
+import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
 
-export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'lie', 'wait', 'stats', 'stop'];
+export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'lie', 'wait', 'history', 'stats', 'stop'];
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
-export const LOCAL = ['digest', 'consolidate'];
+export const LOCAL = ['digest', 'consolidate', 'schedule'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /**
@@ -74,11 +85,19 @@ async function pairing(home, url, { within = 15_000 } = {}) {
 /** The daemon request the arguments make, or a refusal by name. */
 export function requestOf(argv) {
   const args = [...argv], opts = {};
-  for (const name of ['--soul', '--limit', '--since']) {
+  // history's --soul is its question; --as is the Soul asking.
+  const asking = args.includes('history');
+  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed']) {
     const k = args.indexOf(name);
     if (k >= 0) { opts[name.slice(2)] = args[k + 1]; args.splice(k, 2); }
+    if (name === '--missed' && opts.missed === 'late') { opts.missed = `late ${args[k]}`; args.splice(k, 1); }
   }
+  if (asking) [opts.of, opts.soul] = [opts.soul, opts.as];
   const [op = 'status', ...rest] = args;
+  if (op === 'schedule') {
+    const [sub = 'list', ...more] = rest;
+    return { local: op, soul: opts.soul, sub, args: more, until: opts.until, missed: opts.missed };
+  }
   if (LOCAL.includes(op)) return { local: op, soul: opts.soul, since: opts.since ?? null, refs: rest.includes('--refs'), force: rest.includes('--force') };
   if (!OPS.includes(op)) return { refused: 'unknown-command', detail: `one of ${OPS.join(', ')}` };
   const req = { op };
@@ -89,16 +108,42 @@ export function requestOf(argv) {
   if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
   if (op === 'lie') req.this = rest[0];
   if (op === 'wait' && rest[0] !== undefined) req.seconds = Number(rest[0]);
+  if (op === 'history') {
+    for (const [k, v] of [['at', opts.at], ['thing', opts.thing], ['soul', opts.of], ['since', opts.since], ['until', opts.until]]) if (v !== undefined) req[k] = v;
+  }
   return { req, soul: opts.soul };
 }
 
 /** A local command: the Soul named, else the home's only Soul with a memory folder. */
-async function local({ local: op, soul: named, since, refs, force }, home) {
+async function local({ local: op, soul: named, since, refs, force, ...asked }, home) {
+  if (op === 'schedule') return schedule(home, named, asked);
   const souls = existsSync(join(home, 'souls')) ? readdirSync(join(home, 'souls')).filter((s) => existsSync(join(soulDirOf(home, s), 'memory'))) : [];
   const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
   if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a memory'}`), { code: 'which-soul' });
   if (op === 'digest') return { ok: true, soul, ...digestOf(soulDirOf(home, soul), { since, refs }) };
   return { ok: true, soul, ...(await consolidateIn(home, soulDirOf(home, soul), { force })) };
+}
+
+/**
+ * R15 (#2757): the Soul's schedule, in its memory/schedule.md. Written here, with no daemon and no world; the daemon
+ * reads the file when it changes. `add` starts the daemon if the Soul has a token, so the entry runs.
+ */
+async function schedule(home, named, { sub, args, until, missed }) {
+  const souls = soulsWithTokens(home);
+  const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
+  if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a token'}`), { code: 'which-soul' });
+  const file = join(soulDirOf(home, soul), 'memory', 'schedule.md');
+  if (sub === 'add') {
+    const [when, ...does] = args;
+    const e = addEntry(file, { when, does: does[0] === 'wake' ? `wake ${does.slice(1).join(' ')}` : `act ${does.join(' ')}`, until, missed }, Date.now());
+    await call(home, soul, { op: 'status' }, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }).catch(() => {});
+    return { ok: true, soul, added: shown(e), then: e.wake ? 'end your turn: it wakes you then, within your budget' : 'end your turn: your daemon sends it then, with no turn of yours' };
+  }
+  if (sub === 'remove') return { ok: true, soul, removed: shown(removeEntry(file, args[0])) };
+  if (sub !== 'list') throw Object.assign(new Error('schedule add|list|remove'), { code: 'schedule-unknown' });
+  let marks = {};
+  try { marks = JSON.parse(readFileSync(runtimeOf(home, soul).state, 'utf8')).schedule?.marks ?? {}; } catch { /* no daemon yet */ }
+  return { ok: true, soul, file: 'memory/schedule.md', ...listed(readSchedule(file), marks, Date.now()) };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
