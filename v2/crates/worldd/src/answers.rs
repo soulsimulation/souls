@@ -543,8 +543,10 @@ struct Open {
     sequence: u64,
     body: Id,
     expiry: Micros,
-    /// Its deadline, world time: set at its arrival, and for a form's act at its run's start (C20).
+    /// Its deadline at its arrival, world time.
     due: Micros,
+    /// A form's act: its run's deadline, from the run's start (C20).
+    run_due: Option<Micros>,
     intent: Value,
     waiters: Vec<Reply>,
     stamps: Stamps,
@@ -587,8 +589,9 @@ struct Clock {
     unsealed: bool,
     checked: Vec<(Act, Checks)>,
     replies: Vec<Out>,
-    /// Progress answers (C20): sent after the tick's sync with its answers, as they are, never kept or logged.
-    progress: Vec<(Vec<Reply>, Vec<u8>)>,
+    /// Progress answers (C20), by act: sent after the tick's sync with its answers, as they are, never kept or logged;
+    /// one whose act ends in the same tick is dropped, as its answer says more.
+    progress: Vec<(Id, Vec<Reply>, Vec<u8>)>,
     rows: Vec<Value>,
     effects: Vec<Effect>,
     parts: Vec<Arc<Part>>,
@@ -675,7 +678,7 @@ pub const LEFT: u64 = 5;
 /// A progress answer (C20, #3469): `{1: version, 2: {1: actor, 2: sequence, 3: 3, 4: intent id, 5: µs left}}`, T10's
 /// accepted (`replica::intents::Answer::Accepted`) with how long the act has left until its deadline. It is not the
 /// act's answer: that follows, by the deadline, and a repeat is never given this one. Sent, with no block, when a
-/// form's run gives its act a later deadline than the one set at its arrival.
+/// form's act is still running at the deadline it got on arrival and its run is due later.
 pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: Micros) -> Vec<u8> {
     let mut answer = match (Answer::Accepted {
         actor,
@@ -811,6 +814,7 @@ impl Clock {
         };
         self.in_flight.remove(&(o.key.clone(), o.sequence));
         self.deadlines.close(o.body, id);
+        self.progress.retain(|p| p.0 != id);
         if let Some(m) = &self.measures {
             if o.stamps.0[2].is_none() {
                 m.ended_unchecked(id.counter());
@@ -1055,6 +1059,7 @@ impl Clock {
                 body,
                 expiry: intent.expiry,
                 due,
+                run_due: None,
                 intent: value,
                 waiters: vec![reply],
                 stamps,
@@ -1614,8 +1619,8 @@ impl Clock {
 
     /// A form's run started (C20, #3469): its act's deadline becomes the run's own, its start plus its steps' span
     /// (`sim::forms::span`: its walk, its moves and its pauses), written as an [`ACT_DEADLINE`] entry its receipt
-    /// names. When that is later than the deadline set at its arrival, the act is answered in progress
-    /// ([`progress`]), so the gateway waits for it rather than answering `act.timed-out` itself.
+    /// names. The due list keeps the sooner of that and the deadline set at its arrival: an act still running at its
+    /// arrival deadline with a later run deadline is answered in progress then ([`Clock::still_running`]).
     fn form_started(&mut self, id: Id, run: sim::forms::RunId, now: Micros) {
         let Some(due) = self.forms.forms.due(run) else {
             return;
@@ -1623,23 +1628,33 @@ impl Clock {
         let Some(o) = self.open.get_mut(&id) else {
             return;
         };
-        let (body, was) = (o.body, o.due);
-        o.due = due;
+        o.run_due = Some(due);
+        let (body, first) = (o.body, o.due.min(due));
         self.deadlines.close(body, id);
-        self.deadlines.open(body, id, due);
+        self.deadlines.open(body, id, first);
         self.note_with(id, ACT_DEADLINE, None, Some(due), now);
-        if due > was
-            && let Some(o) = self.open.get(&id)
-        {
-            let frame = progress(
-                &self.version(),
-                o.actor,
-                o.sequence,
-                id,
-                due.saturating_sub(now),
-            );
-            self.progress.push((o.waiters.clone(), frame));
-        }
+    }
+
+    /// A deadline of act `id` passed at `now` (C20): when it is a form's act whose run's deadline is later, its
+    /// deadline moves there and it is answered in progress ([`progress`]), so the gateway waits for it rather than
+    /// answering `act.timed-out` itself. Whether it did.
+    fn still_running(&mut self, id: Id, now: Micros) -> bool {
+        let Some(o) = self.open.get(&id) else {
+            return false;
+        };
+        let Some(due) = o.run_due.filter(|d| *d > now) else {
+            return false;
+        };
+        let frame = progress(
+            &self.version(),
+            o.actor,
+            o.sequence,
+            id,
+            due.saturating_sub(now),
+        );
+        self.progress.push((id, o.waiters.clone(), frame));
+        self.deadlines.open(o.body, id, due);
+        true
     }
 
     /// A form's run ended: an entry naming how, then its intent's answer, a receipt when `done`.
@@ -1749,6 +1764,10 @@ impl Clock {
         at[2] = mark();
         // 1. Due timers: acts whose deadline passed.
         while let Some(id) = self.deadlines.due(now) {
+            // A form's act whose run is due later is answered in progress, and kept to the run's deadline (C20).
+            if self.still_running(id, now) {
+                continue;
+            }
             if let Some(b) = self.bodies.as_mut() {
                 b.cancel(id);
             }
@@ -1866,7 +1885,10 @@ impl Clock {
         let bytes = inputs.as_ref().map_or(0, Vec::len) + record.as_ref().map_or(0, Vec::len);
         let written = u64::from(inputs.is_some()) + u64::from(record.is_some());
         let handed = mark();
-        let progress = std::mem::take(&mut self.progress);
+        let progress: Vec<_> = std::mem::take(&mut self.progress)
+            .into_iter()
+            .map(|(_, to, frame)| (to, frame))
+            .collect();
         if written > 0 || !replies.is_empty() || !progress.is_empty() {
             let _ = self.answers.send(Tick {
                 inputs,

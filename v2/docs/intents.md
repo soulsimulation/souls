@@ -58,8 +58,8 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
    node). A refusal is `{.., 3: 2, 4: reason, 5: version now, 6: [node, ...]}`, naming what changed since its basis
    (6 left out when empty). Bytes refused before an actor and a sequence are read get `{3: 5, 4: reason}`. How an act
    ends later (done, failed, timed out) is I4's. A form's act is due by its run's start plus its steps' own time (its
-   walk, moves and pauses, C20); when that is later than the deadline it got on arrival it is first answered in
-   progress, `{.., 3: 3, 4: intent id, 5: µs left}`, and its receipt or refusal follows by then.
+   walk, moves and pauses, C20); one still running at the deadline it got on arrival is answered in progress then,
+   `{.., 3: 3, 4: intent id, 5: µs left}`, and its receipt or refusal follows by its own deadline.
 9. **A move inside a joint activity is accepted, then resolved:** `{.., 3: 3, 4: intent id}`, then `{.., 3: 4, 4:
    outcome}`; a miss is an outcome, not a refusal. Its parameter may name one of the activity's next beats, at most
    about two seconds ahead (B8): a parameter of a move already accepted, not an order waiting on the world.
