@@ -43,6 +43,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, runtimeOf, soulsWithTokens } from '../home/home.mjs';
+import { chooseSoul, HOME_COMMANDS, homeCommand } from '../home/commands.mjs';
 import { consolidateIn, digestOf, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
 
@@ -86,6 +87,7 @@ async function pairing(home, url, { within = 15_000 } = {}) {
 
 /** The daemon request the arguments make, or a refusal by name. */
 export function requestOf(argv) {
+  if (HOME_COMMANDS.includes(argv[0])) return { home: argv[0], args: argv.slice(1) };
   const args = [...argv], opts = {};
   // history's --soul is its question; --as is the Soul asking.
   const asking = args.includes('history');
@@ -120,8 +122,7 @@ export function requestOf(argv) {
 async function local({ local: op, soul: named, since, refs, force, ...asked }, home) {
   if (op === 'schedule') return schedule(home, named, asked);
   const souls = existsSync(join(home, 'souls')) ? readdirSync(join(home, 'souls')).filter((s) => existsSync(join(soulDirOf(home, s), 'memory'))) : [];
-  const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
-  if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a memory'}`), { code: 'which-soul' });
+  const soul = chooseSoul(home, named, souls);
   if (op === 'digest') return { ok: true, soul, ...digestOf(soulDirOf(home, soul), { since, refs }) };
   return { ok: true, soul, ...(await consolidateIn(home, soulDirOf(home, soul), { force })) };
 }
@@ -132,8 +133,7 @@ async function local({ local: op, soul: named, since, refs, force, ...asked }, h
  */
 async function schedule(home, named, { sub, args, until, missed }) {
   const souls = soulsWithTokens(home);
-  const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
-  if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a token'}`), { code: 'which-soul' });
+  const soul = chooseSoul(home, named, souls);
   const file = join(soulDirOf(home, soul), 'memory', 'schedule.md');
   if (sub === 'add') {
     const [when, ...does] = args;
@@ -154,13 +154,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     if (refused && process.argv[2] !== 'upgrade') throw Object.assign(new Error(detail), { code: refused });
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
-    if (process.argv[2] === 'upgrade') out(await (await import('../upgrade/upgrade.mjs')).main(process.argv.slice(3)));
+    if (asked.home) out(await homeCommand(home, asked.home, asked.args, { onAsk: (a) => out({ ok: true, step: 'approve', ...a }) }));
+    else if (process.argv[2] === 'upgrade') out(await (await import('../upgrade/upgrade.mjs')).main(process.argv.slice(3)));
     else if (asked.local) out(await local(asked, home));
     else if (req.op === 'pair') { out(await pairing(home, req.url)); process.exit(0); }
     else {
       const souls = soulsWithTokens(home);
-      const soul = named ?? (souls.length === 1 ? souls[0] : undefined);
-      if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a token'}`), { code: 'which-soul' });
+      const soul = chooseSoul(home, named, souls);
       const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : 5000;
       out(await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms }));
     }
