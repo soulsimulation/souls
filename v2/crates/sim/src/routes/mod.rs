@@ -92,7 +92,7 @@ const LACKS: [(Mask, &str); 4] = [
 pub fn needs(kind: Kind) -> Mask {
     match kind {
         Kind::Ladder => HANDS | CLIMB,
-        Kind::Doorway | Kind::Stairs | Kind::Ramp | Kind::Step => 0,
+        Kind::Doorway | Kind::Stairs | Kind::Ramp | Kind::Step | Kind::Boarding => 0,
         Kind::Wade => WADE,
         Kind::Swim => SWIM,
     }

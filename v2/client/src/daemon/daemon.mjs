@@ -31,6 +31,9 @@
 //   `asleep` when its world has written nothing for a while (`age.mjs`); each command, send and answer goes into the
 //   local trace (`../stats/trace.mjs`), which nothing sends anywhere:
 //     {"op":"stats"}                      per achieved intent: commands, bytes printed, first-send result by cause
+//   and R16's (#2817), from the world's public history (`history` in its config) and the Soul's memory, the copy as
+//   it is (naming only), so it ends with `at` and not `changed`:
+//     {"op":"history","at":"<place>"} | {"thing":"<id>"} | {"soul":"<id or name>"}, "since"/"until": world µs
 //   and R8's (#2703), checking with R2's form rules on the copy (`../check/`), kind entries from `<home>/kinds/`:
 //     {"op":"can","intent":{"verb":"..","this":"<id>","form":".."}}   yes, no with the reason, or unknown, and `current`
 //     {"op":"can","acts":["sit:<id>"]}  and  {"op":"act","acts":["sit:<id>","sit:<id>"]}   C10's (#3414): the thin
@@ -66,6 +69,8 @@ import { ageOf } from './age.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
 import { Table } from '../reflex/reflex.mjs';
+import { history } from '../history/history.mjs';
+import { readLog, soulDirOf } from '../memory/memory.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -366,7 +371,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'read', 'stats', 'reflex', 'stop']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'history', 'read', 'stats', 'reflex', 'stop']);
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
 // the world's key when it is a plain name.
@@ -493,12 +498,33 @@ async function answer(req) {
       const { sequence, sent } = sendIntent([f.verb], { target: f.target, words: f.words, basis });
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis) }, null, { now: true });
     }
+    case 'history': return historyAnswer(req);
     case 'read': return { ok: true, events: events.splice(0) };
     case 'stats': return stats(trace.read(), { transcript: transcriptOf(home) });
     case 'reflex': return reflexes.op(req, Date.now());
     case 'stop': setImmediate(stop); return { ok: true };
     default: return { ok: false, code: 'unknown-op' };
   }
+}
+
+/**
+ * R16 (#2817): what happened at a place, to a thing or with a Soul. Named from the copy as it is and from memory; a
+ * name that is not an id is looked up there. History files come from the world's `history` base, as any viewer's.
+ */
+async function historyAnswer(req) {
+  if (!seat.history) return { ok: false, code: 'no-history', detail: `world ${seat.world} names no history in config.json` };
+  const by = req.at != null ? 'place' : req.thing != null ? 'thing' : req.soul != null ? 'soul' : null;
+  if (!by) return { ok: false, code: 'history-asks-one', detail: 'history --at <place> | --thing <id> | --soul <name>' };
+  const memory = readLog(soulDirOf(home, soul)), rows = rowsOf(copy), names = new Map();
+  for (const { value: v } of memory) if (v?.person?.id && v.person.name) names.set(v.person.id, String(v.person.name).slice(0, 40));
+  const asked = String(req.at ?? req.thing ?? req.soul), low = asked.toLowerCase();
+  const id = ID.test(asked) ? asked : low === 'me' ? ME
+    : [...rows.values()].find((r) => r.name.toLowerCase() === low)?.id ?? [...names].find(([, n]) => n.toLowerCase() === low)?.[0];
+  if (!id) return { ok: false, code: 'history-unknown', detail: `no ${by} named ${asked.slice(0, 60)} in the copy or memory` };
+  const num = (v) => (v == null ? undefined : Number(v));
+  const get = async (key) => { const r = await fetch(new URL(key, seat.history)); return r.ok ? new Uint8Array(await r.arrayBuffer()) : null; };
+  const a = await history({ by, id, since: num(req.since), until: num(req.until) }, { get, rows, names, memory, me: ME });
+  return { ...a, at: sequenceOf(copyVersion) };
 }
 
 const server = createServer((c) => {
