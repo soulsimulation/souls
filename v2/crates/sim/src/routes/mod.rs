@@ -755,6 +755,21 @@ impl Map {
             .collect()
     }
 
+    /// The pieces the ends of the `k`th link (in [`Map::links`]' order) lie on, both ends together.
+    pub fn link_pieces(&self, k: usize) -> Vec<u32> {
+        self.links[k]
+            .ends
+            .iter()
+            .flatten()
+            .map(|&p| self.portals[p as usize].pieces[0])
+            .collect()
+    }
+
+    /// Whether the map holds a floor's patch for `node`.
+    pub fn is_floor(&self, node: Id) -> bool {
+        self.by_patch.contains_key(&(node, None))
+    }
+
     /// A piece of the map.
     pub fn piece(&self, q: u32) -> &Piece {
         &self.pieces[q as usize].piece

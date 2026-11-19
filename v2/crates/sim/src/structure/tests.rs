@@ -26,6 +26,7 @@ use super::Structure;
 use crate::activity::{Activities, Ask};
 use crate::commit::{Checked, Checks, Outcome, Verdict, commit_guarded, write_guarded};
 use crate::controller::Controller;
+use crate::edit::plan;
 use crate::ground::Piece;
 use crate::mover::Surface;
 use crate::moves::Moves;
@@ -708,8 +709,10 @@ fn a2b_a_creators_edit_that_removes_the_frame_under_four_beams_is_refused_naming
         &world,
     )
     .expect("the edit's own checks pass");
-    let r = crate::edit::commit_guarded(&mut live, &mut mint, &checked, 1_000, &rack.structure)
-        .expect_err("refused");
+    let planned = plan(checked, &live.frozen(), None).expect("planned");
+    let r =
+        crate::edit::commit_guarded(&mut live, &mut mint, &planned, &[], 1_000, &rack.structure)
+            .expect_err("refused");
     println!("remove frame a: {} {}", r.name, r.detail);
     assert_eq!(r.name, "support.none");
     assert!(
@@ -738,8 +741,10 @@ fn a2b_a_creators_edit_that_removes_the_frame_under_four_beams_is_refused_naming
         &world,
     )
     .expect("the edit's own checks pass");
-    let r = crate::edit::commit_guarded(&mut live, &mut mint, &checked, 2_000, &rack.structure)
-        .expect_err("refused");
+    let planned = plan(checked, &live.frozen(), None).expect("planned");
+    let r =
+        crate::edit::commit_guarded(&mut live, &mut mint, &planned, &[], 2_000, &rack.structure)
+            .expect_err("refused");
     println!("a loose beam: {} {}", r.name, r.detail);
     assert_eq!(r.name, "support.none");
     assert!(r.detail.contains("would hang by nothing"), "{}", r.detail);
@@ -755,7 +760,8 @@ fn a2b_a_creators_edit_that_removes_the_frame_under_four_beams_is_refused_naming
         })
         .collect();
     let checked = edit_check(edit(ops), &live.frozen(), &world).expect("checks");
-    crate::edit::commit_guarded(&mut live, &mut mint, &checked, 3_000, &rack.structure)
+    let planned = plan(checked, &live.frozen(), None).expect("planned");
+    crate::edit::commit_guarded(&mut live, &mut mint, &planned, &[], 3_000, &rack.structure)
         .expect("a safe order is accepted");
     let _ = b.root;
 }
