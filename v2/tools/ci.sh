@@ -34,6 +34,8 @@ step tests cargo test --workspace --locked
 step origin-headers node --test tools/origin/origin.test.mjs
 # What a world costs (O11, #2721): the scripted hour, the sum check, a stopped world, the not-metered rule, the page.
 step cost node --test tools/ops/cost/cost.test.mjs
+# The site owner's health page, usage table and history (O21, #3325); A2 runs the supervisor the tests above built.
+step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
 step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
 
