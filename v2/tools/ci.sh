@@ -40,6 +40,8 @@ step cost node --test tools/ops/cost/cost.test.mjs
 step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
 # The watcher (O15, #2808): one message per trouble and recovery, none for a deploy, a stop or a sleep; no look wakes a world.
 step ops-watch node --test tools/ops/watch/watch.test.mjs
+# Visitors' page errors (O25, #3336): today's tests carried over, the service, the scrub, the imports and the beacon.
+step page-errors node --test tools/page-errors/page-errors.test.mjs tools/page-errors/serve.test.mjs web/src/report/beacon.test.ts
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
 step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
 # The driver's loads (I10, #2693): the shared shapes imported, the stretch merged, every kind given a verb.

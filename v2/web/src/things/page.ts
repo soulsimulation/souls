@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import type { NodeRec } from '../source/source.ts';
 import { STRUCTURE, type WorldView } from '../draw/world.ts';
-import { fetchIndex } from './models.ts';
+import { fetchIndex, fetchModel } from './models.ts';
 import { ThingLayer } from './things.ts';
 
 const MM = 1e-3;
@@ -69,7 +69,7 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
     const copies = Number(params.get('copies') ?? 1);
     layer = new ThingLayer({
       index, copies,
-      fetch: (h) => fetch(new URL(`worlds/models/${h}.glb`, base)).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status))))),
+      fetch: (h) => fetchModel(new URL(`worlds/models/${h}.glb`, base)),
     });
     out.layer = layer;
     scene.add(layer.group);

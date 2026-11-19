@@ -37,6 +37,8 @@ export default defineConfig({
   base: './',
   resolve: { alias: { replica: resolve(pkg, 'replica.js') } },
   server: { fs: { allow: [here, pkg] } },
+  // O25: the build the page-error beacon names (`dev` keeps it off unless the page has `?errors=1`).
+  define: { __BUILD__: JSON.stringify(process.env.V2_BUILD ?? 'dev') },
   worker: { format: 'es' },
   build: { target: 'es2022', outDir: 'dist', assetsInlineLimit: 0, chunkSizeWarningLimit: 1024 },
   plugins: [streamFiles()],

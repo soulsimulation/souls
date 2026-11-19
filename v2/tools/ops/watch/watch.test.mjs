@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import { readWorlds } from '../health/read.mjs';
 import { look, serve } from './look.mjs';
 import { run } from './watch.mjs';
+import { pageErrors } from '../../page-errors/serve.mjs';
 
 const W = (n) => `00aa${n}-01-0`;
 
@@ -44,7 +45,7 @@ function machine() {
 }
 
 async function instance(name, m) {
-  const server = serve({ root: m.root, alarms: m.alarms, token: 'look-token', pause: async () => m.beat() });
+  const server = serve({ root: m.root, alarms: m.alarms, pageErrors: join(m.root, 'page-errors', 'health.json'), token: 'look-token', pause: async () => m.beat() });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
   return { server, port, inst: { name, url: `http://127.0.0.1:${port}/ops/watch`, token_env: 'LOOK_TOKEN' } };
@@ -104,7 +105,7 @@ test('one message when a world is killed, its clock stalls or a machine is gone,
   state = await run([A.inst, B.inst], state, send, io);
   assert.equal(sent.length, 1, 'nothing while it stays down');
   a.set(W(1), { frozen: false, ageMs: 0 }); a.set(W(2), { stalled: false });
-  const B2 = serve({ root: b.root, alarms: b.alarms, token: 'look-token', pause: async () => b.beat() });
+  const B2 = serve({ root: b.root, alarms: b.alarms, pageErrors: join(b.root, 'page-errors', 'health.json'), token: 'look-token', pause: async () => b.beat() });
   await new Promise((r) => B2.listen(B.port, '127.0.0.1', r));
   state = await run([A.inst, B.inst], state, send, io);
   assert.equal(sent.length, 2);
@@ -152,4 +153,32 @@ test('a look without the watcher\'s token is refused', async () => {
   const A = await instance('a', machine());
   assert.equal((await fetch(A.inst.url)).status, 401);
   A.server.close();
+});
+
+test('O25: a kind of page error new since the build went live sends one message; a repeat none; a release starts again (A4)', async () => {
+  const m = machine();
+  m.set(W(1), { state: 'running' });
+  const A = await instance('a', m);
+  const svc = (build) => pageErrors({ dir: join(m.root, 'page-errors'), build, log: () => {} });
+  let pe = svc('v2-one');
+  const post = (e, ip) => pe.errors.ingest(ip, 'Mozilla/5.0 Chrome/141.0 Safari/537.36', Buffer.from(JSON.stringify({ b: 'v2-one', e })));
+  const sent = [], send = async (text) => (sent.push(text), true), io = { sleep: async () => {}, env };
+  let state = await run([A.inst], {}, send, io);
+  assert.deepEqual(sent, [], 'no page error yet');
+  post([{ k: 'gl', m: 'context lost' }], '192.0.2.1'); pe.writeHealth();
+  state = await run([A.inst], state, send, io);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /^Souls: a new kind of error in visitors' pages\n- [0-9a-f]{12} on a: gl: context lost \(new since build v2-one\)$/);
+  post([{ k: 'gl', m: 'context lost', n: 40 }], '192.0.2.2'); pe.writeHealth();   // the same kind again, from someone else
+  state = await run([A.inst], state, send, io);
+  assert.equal(sent.length, 1, 'a repeat sends nothing');
+  post([{ k: 'stream', m: 'failed 3 times in a row: HTTP 503' }], '192.0.2.3'); pe.writeHealth();
+  state = await run([A.inst], state, send, io);
+  assert.equal(sent.length, 2);
+  assert.match(sent[1], /stream: failed 3 times in a row: HTTP 503/); assert.doesNotMatch(sent[1], /gl:/, 'only the new kind');
+  assert.deepEqual(Object.keys(state.checks), [], 'a page error is no world trouble');
+  pe.close(); pe = svc('v2-two');                                              // a release: nothing is new
+  state = await run([A.inst], state, send, io);
+  assert.equal(sent.length, 2); assert.deepEqual(state.pageErrors, {});
+  pe.close(); A.server.close();
 });

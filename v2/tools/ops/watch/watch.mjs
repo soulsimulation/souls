@@ -11,6 +11,9 @@
 // recoveries in another, nothing while a check stays down. A message that fails to send is sent again next run (the
 // change is only recorded once delivered). It reports; it restarts nothing.
 //
+// One rule more (O25, #3336): a kind of visitors' page error new since the page build went live (the look's
+// `page_errors`) sends one message; while the look still lists it, nothing more. A new release starts the list again.
+//
 //   node watch.mjs --instances <instances.json> --state <state.json> --sink <sink> [--every 60]
 // instances.json: {"instances": [{"name": "<short name>", "url": "https://<host>/ops/watch", "token_env": "<VAR>"}]}
 //   (the token, when the look asks one, is read from that environment variable, never from the file).
@@ -22,6 +25,9 @@ import { fileURLToPath } from 'node:url';
 export const LOOKS = 3;
 export const GAP_MS = 10_000;
 export const TIMEOUT_MS = 8_000;   // a look pauses 2.5 s between its two reads
+
+/** The prefix of a page-error check: not a trouble that goes down and up, but a kind told once (O25). */
+export const PAGE = 'page error';
 
 const stamp = (ms) => new Date(ms).toISOString().slice(11, 16) + ' UTC';
 
@@ -40,6 +46,7 @@ export async function lookAt(inst, { fetchImpl = fetch, env = process.env } = {}
   if (!Array.isArray(body?.worlds)) return { [name]: 'the look is not JSON with worlds' };
   const out = { [name]: null };
   for (const w of body.worlds) out[`world ${w.world} on ${inst.name}`] = w.trouble ? `${w.trouble}: ${w.detail}` : null;
+  for (const k of body.page_errors?.new ?? []) out[`${PAGE} ${k.fp} on ${inst.name}`] = `${k.kind}: ${k.message} (new since build ${body.page_errors.build})`;
   return out;
 }
 
@@ -82,13 +89,25 @@ export function transitions(prev, seen, instances, now) {
 export async function run(instances, state, send, { now = Date.now, ...io } = {}) {
   const seen = await looks(instances, io);
   const t = now();
+  const page = Object.entries(seen).filter(([k]) => k.startsWith(`${PAGE} `));
+  for (const [k] of page) delete seen[k];
   const { down, up, checks } = transitions(state.checks ?? {}, seen, instances.map((i) => i.name), t);
+  // O25: each page-error kind on any look; told once, forgotten once an answering look no longer lists it (a new
+  // release). An instance that did not answer keeps what was told of it.
+  const pageNow = Object.fromEntries(page.map(([k, v]) => [k, v.findLast((x) => typeof x === 'string')]).filter(([, v]) => v));
+  for (const [k, v] of Object.entries(state.pageErrors ?? {})) if (!seen[`instance ${k.split(' on ').at(-1)}`]?.every((x) => x === null)) pageNow[k] ??= v;
+  const fresh = Object.entries(pageNow).filter(([k]) => !(state.pageErrors ?? {})[k]);
   const msgs = [];
   if (down.length) msgs.push(`Souls alert: a world or machine is in trouble\n${down.join('\n')}`);
   if (up.length) msgs.push(`Souls recovered:\n${up.join('\n')}`);
+  if (fresh.length) msgs.push(`Souls: a new kind of error in visitors' pages\n${fresh.map(([k, v]) => `- ${k.slice(PAGE.length + 1)}: ${v}`).join('\n')}`);
   let delivered = true;
   for (const m of msgs) delivered = (await send(m)) && delivered;
-  return { checks: delivered ? checks : (state.checks ?? {}), last: { at: t, seen, sent: msgs, delivered } };
+  return {
+    checks: delivered ? checks : (state.checks ?? {}),
+    pageErrors: delivered ? pageNow : (state.pageErrors ?? {}),
+    last: { at: t, seen, sent: msgs, delivered },
+  };
 }
 
 /** `file:<path>` or `discord-dm`. */

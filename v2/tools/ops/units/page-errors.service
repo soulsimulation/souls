@@ -1,0 +1,31 @@
+# Visitors' page errors (Engine v2 O25, #3336): the service behind /__sim/client-errors, in the pattern of the other
+# units: an unprivileged user and its own data folder. On loopback only; the front door routes the address to it (O19)
+# and the install puts it beside the others (O17). Runbook: v2/docs/runbook/page-errors.md.
+#
+# SOULS_BUILD names the page build that is live (kinds first seen from then on are new); the release sets it in
+# /etc/souls/page-errors.env. The data folder holds the table of kinds, the rotated event log (at most 512 KB) and
+# health.json, which the watcher's look reads.
+[Unit]
+Description=Souls visitors' page errors
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=souls
+Group=souls
+Slice=souls.slice
+Environment=SOULS_BUILD=dev
+EnvironmentFile=-/etc/souls/page-errors.env
+StateDirectory=souls/page-errors
+ExecStart=/usr/bin/env node /usr/local/lib/souls/page-errors/serve.mjs --data /var/lib/souls/page-errors --port 7330 --host 127.0.0.1
+Restart=always
+RestartSec=1s
+MemoryMax=128M
+MemorySwapMax=0
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

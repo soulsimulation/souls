@@ -1,6 +1,7 @@
 // Engine v2's page (V5, #2714): plays one stream of V1's files and draws it. The address is the stream's directory,
 // given as the page's `stream` parameter; it is read here and sent nowhere else. The status shows how far behind the
 // world the picture is, and the clock's state.
+import { expectArrival, report } from '../report/beacon.ts'; // O25: first, so it hears what goes wrong from here on
 import * as THREE from 'three';
 import { FreeCamera } from '../camera/camera.ts';
 import { PlaybackClock } from '../clock/clock.ts';
@@ -50,11 +51,12 @@ const clock = new PlaybackClock();
 const things = pageThings(scene, world, new URLSearchParams(location.search));
 Object.assign(globalThis, { v2: { renderer, scene, cam, world, things, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
-loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
+const bodies = new URLSearchParams(location.search).get('bodies') ?? './bodies/';
+loadCrowd(bodies).then((c) => world.attach(new CrowdBodies(c)), (e) => (report('asset', 'bodies', new URL(bodies, location.href).href), console.warn('bodies stay capsules:', e)));
 
 let pointer: Pointer | null = null;
 let newestTo: number | null = null;
-let played = 0, hashes = 0, hashesEqual = 0, framed = false;
+let played = 0, hashes = 0, hashesEqual = 0, framed = false, arrived = false;
 let error = '';
 
 const resize = () => {
@@ -82,7 +84,7 @@ let history = moment && new HistoryPage(moment, cam, {
 });
 if (history) (framed = true), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, history, clock } });
 else if (!address) status.textContent = 'no stream: open this page with ?stream=<the stream directory>';
-else live(address);
+else (expectArrival(), live(address));
 
 const secs = (us: number) => (us / 1e6).toFixed(2);
 const clockText = (us: number) => {
@@ -106,6 +108,7 @@ renderer.setAnimationLoop((now) => {
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
   let drawn = 0;
   if (t !== null) {
+    if (!arrived) (arrived = true), performance.mark('sim:first-live-frame'); // O25: the first frame of the world
     drawn = world.draw(t, cam.camera);
     if (!framed && drawn > 0) {
       framed = true;

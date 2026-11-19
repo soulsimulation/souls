@@ -4,6 +4,7 @@
 // matrix in the model's frame each. The page admits no file of its own: what it draws is what the bake wrote.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { report } from '../report/beacon.ts';
 
 /** One drawn part of a model. `glow`: the parts a light's `on` (or `lit`) state brightens. */
 export type Part = { geometry: THREE.BufferGeometry; material: THREE.Material; matrix: THREE.Matrix4; key: string; glow: boolean };
@@ -19,8 +20,8 @@ export type ModelIndex = {
 type ModelsJson = { kinds: { models: Record<string, string>; states?: Record<string, string[]> }[]; things?: Record<string, string> };
 
 export async function fetchIndex(root: string): Promise<ModelIndex> {
-  const res = await fetch(new URL('models.json', root));
-  if (!res.ok) throw new Error(`models.json: ${res.status}`);
+  const url = new URL('models.json', root), res = await fetch(url).catch((e) => (report('asset', 'network', url.href), Promise.reject(e)));
+  if (!res.ok) throw (report('asset', String(res.status), url.href), new Error(`models.json: ${res.status}`));
   return indexOf((await res.json()) as ModelsJson);
 }
 
@@ -28,6 +29,13 @@ export function indexOf(j: ModelsJson): ModelIndex {
   const states = new Map<string, Record<string, string[]>>();
   for (const k of j.kinds) for (const h of Object.values(k.models)) if (h && k.states) states.set(h, k.states);
   return { things: j.things ?? {}, states };
+}
+
+/** A model file's bytes; a file that fails is reported (O25) and drawn as a box. */
+export async function fetchModel(url: URL): Promise<ArrayBuffer> {
+  const res = await fetch(url).catch((e) => (report('asset', 'network', url.href), Promise.reject(e)));
+  if (!res.ok) throw (report('asset', String(res.status), url.href), new Error(String(res.status)));
+  return res.arrayBuffer();
 }
 
 /** Materials are shared by what they look like, so one-off shapes with the same material go in one batch. */
