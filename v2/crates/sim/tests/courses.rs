@@ -69,6 +69,7 @@ fn ground() -> Surface {
                 [-10_000, 0, 40_000],
             ],
             triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: sim::gaits::Ground::Dry,
         }],
     )
 }
