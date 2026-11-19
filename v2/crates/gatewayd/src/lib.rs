@@ -70,6 +70,8 @@ pub const OUTBOUND: usize = 64;
 /// The gateway's shared state.
 pub struct Gateway {
     pub tokens: RwLock<Tokens>,
+    /// The tokens file, read again at a sign-in when it changed (C3, #3367); unset, the tokens are as given.
+    pub tokens_file: std::sync::OnceLock<token::Source>,
     /// The world's pinned build hash, sent in the first frame (T10 rule 12).
     pub build: Vec<u8>,
     pub link: world_link::Link,
@@ -132,6 +134,7 @@ impl Gateway {
     ) -> Arc<Gateway> {
         Arc::new(Gateway {
             tokens: RwLock::new(tokens),
+            tokens_file: std::sync::OnceLock::new(),
             build,
             link: world_link::Link::default(),
             views: views::Views::default(),

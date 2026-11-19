@@ -201,6 +201,9 @@ async fn serve(
             _ => return,
         },
     };
+    if let Some(f) = gw.tokens_file.get() {
+        f.refresh(&gw.tokens);
+    }
     let signed = token.and_then(|t| {
         let tokens = gw.tokens.read().unwrap_or_else(|e| e.into_inner());
         let grant = tokens.check(&t)?;
