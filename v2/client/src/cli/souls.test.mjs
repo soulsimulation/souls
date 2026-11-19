@@ -94,7 +94,7 @@ after(async () => {
 });
 
 test('the arguments make the daemon request: act takes a ranked list, find its words, wait its seconds', () => {
-  assert.deepEqual(requestOf(['act', 'eden:sit', 'eden:lean', '--soul', 's_x']), { req: { op: 'act', verbs: ['eden:sit', 'eden:lean'] }, soul: 's_x' });
+  assert.deepEqual(requestOf(['act', 'eden:sit', 'eden:lean', '--soul', 's_x']), { req: { op: 'act', acts: ['eden:sit', 'eden:lean'] }, soul: 's_x' });
   assert.deepEqual(requestOf(['find', 'the', 'red', 'cup', '--limit', '3']).req, { op: 'find', words: 'the red cup', limit: 3 });
   assert.deepEqual(requestOf(['wait', '5']).req, { op: 'wait', seconds: 5 });
   assert.equal(requestOf(['dance']).refused, 'unknown-command');
