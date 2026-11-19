@@ -51,6 +51,8 @@ worldd = { path = "../../crates/worldd" }
 supervisor = { path = "../../crates/supervisor" }
 # The gate that holds and releases intents (O9).
 gatewayd = { path = "../../crates/gatewayd" }
+# O20 (#2812): the world's stores outside its log, restored as one step of O12's restore.
+backup = { path = "backup" }
 # The benches' scripted world and the shared store (V3, O3).
 archive = { path = "../archive" }
 # O7's run drives 100 agents through the gateway's socket.

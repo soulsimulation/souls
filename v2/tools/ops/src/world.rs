@@ -767,6 +767,8 @@ fn restore_world(store: Bucket, machine: Name, dir: &Path, t0: u64, scratch: &Pa
     let mut wr = Writer::new(store.clone(), machine, dir, t0, ids_world());
     let (lineage, zone) = (wr.lineage, wr.zone);
     let f = shipping::fetch(&store, &lineage, zone)?;
+    // O20 (#2812): the world's stores outside its log (its words, uploads and removal list), from the same bucket.
+    backup::restore_world(&store, &to_hex(&lineage), dir)?;
     let fetched = unix_us();
     let mut bytes = f.checkpoint.as_ref().map_or(0, |c| c.1.len() as u64);
     for p in &f.pieces {

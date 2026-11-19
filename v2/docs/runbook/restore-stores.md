@@ -1,0 +1,72 @@
+# What is not in the log: backed up, and restored
+
+Engine v2 O20 (#2812). A world's log reaches the bucket as O3's pieces and comes back with O12's restore
+([restore.md](restore.md)). Everything else a machine keeps (accounts, pairings and their token hashes, the owner's
+mailbox, words, removals, uploads) is listed in `v2/tools/ops/stores.json`, shipped to the same bucket and restored
+from it alone. Code: `v2/tools/ops/backup/` (the list, the copies, the shipper, the restore and the drill).
+
+## The stores (Step 0)
+
+Each has one owning program; the list says how each is copied.
+
+| store | owner | path under the data folder | copy | ships |
+|---|---|---|---|---|
+| accounts (W1); the owner's mailbox is a table in it (R13, #2753, not yet on main) | directoryd | `directory/accounts.sqlite` | SQLite's online backup, through the owner (it holds the file exclusively: `Store::backup`) | each 270 s, when changed |
+| pairing, with each paired Soul's token hash (W2) | directoryd | `directory/pairing.sqlite` | SQLite's online backup | each 270 s, when changed |
+| the gateway's tokens file (W2) | directoryd | `directory/gateway-tokens` | as it is (written whole, renamed) | each 270 s, when changed |
+| words and uploads: the text store (K16, V1b) | worldd | `worlds/<world>/log.text/` | `text`, then `uploads/`, then `removed`, in that order | each 270 s, when changed |
+| the removal list (K16) | worldd | `worlds/<world>/log.text/removed` | as it is (append-only); the longer copy wins | within a second of a change |
+| usage, health history (O21) | ops | `ops/usage.sqlite`, `ops/health-history/` | online backup; every file | each 270 s, when changed |
+
+The log and its checkpoints are listed too, as `o3`: O3 ships them. A task that adds a store adds a line;
+`cargo test -p backup` makes a data folder with every program's own open calls and fails on any file no line covers.
+
+**The copy.** SQLite's online backup, never a file copy. Each copy is sealed (AES-256-GCM, the object's key bound
+in) under a key derived from the recovery passphrase, and put at `store/<name>` (a world's at
+`store/worlds/<world>/<name>`) in the world's bucket, beside O3's `part/` pieces. The bucket holds the newest copy of
+each store. The shape is today's offsite target's: an S3-compatible bucket and its key pair
+(`BACKUP_OFFSITE_URL`, `BACKUP_S3_KEY_ID`, `BACKUP_S3_SECRET`; W8's S3 client reads them as `DIRECTORY_STORE_*`).
+
+**The recovery key** is a passphrase kept off the machine: the maintainer's password manager and the repository
+secret `BACKUP_RECOVERY_PASSWORD`, as today's ([operations.md](../../../docs/operations.md#off-site-copy)). A
+machine that ships holds a file with it (`SOULS_BACKUP_KEY_FILE`, root only); a machine that restores is given it
+from the secret, never from the lost machine's disk.
+
+**Erased words in the bucket.** An erasure ships within a second (the removal list), and a restore opens the text
+store, which finishes every erasure the list names (K16 rule 6) before anything reads it. The words' own copy in
+the bucket still holds an erased sentence until the next copy of the text store replaces it: at most 270 s after
+the erasure, plus however long the bucket keeps a replaced object if versioning is on (keep it off, or expire
+replaced objects within a day).
+
+## Restoring
+
+O12's one command ([restore.md](restore.md#the-one-command)) restores a world's own stores as part of its fetch step
+(`backup::restore_world`, the key from `SOULS_BACKUP_KEY_FILE`; a world with no copies in the bucket needs no key).
+The directory's stores are restored by `backup::restore` with the machine's data folder as the root, before
+directoryd starts. Restoring a text store ends by opening it, which applies its removal list again. The loss bar: at
+most five minutes of writes, counted.
+
+Not yet: the shipper runs in the drill's machine-a, not yet inside directoryd and worldd (the account store's copy
+needs its owner, so directoryd must run it), and C1's `worldd serve` keeps its words in memory, with no text store on
+disk to ship. Both are named under the PR's known limits with their next task.
+
+## The drill
+
+```sh
+bash v2/tools/ops/backup/o20-drill.sh     # two runs, seeds 1 and 2
+```
+
+Machine-a keeps the account store, pairing and its tokens file and a world's text store, each opened by its owner's
+code. It signs a person in each second, pairs an agent each 5 s, says a sentence each quarter second, erases one
+each 3 s and uploads a file each 10 s, printing each write once acknowledged, and ships the listed stores to a
+folder store standing in for the offsite bucket. At a random second from 280 to 560 (after the first full copy at
+270 s, up to one whole interval past it) it is killed (SIGKILL) and its data folder deleted. Machine-b, holding only
+the bucket and the passphrase, restores, then checks every acknowledged write with the owners' code: an account
+signs in as itself; a paired agent's token is accepted by the gateway's tokens file with no new approval; a sentence
+reads; an erased one is refused `removed`; an upload's bytes have the hash acknowledged. It counts every write that
+did not come back and the oldest one's age at the loss. No host, bucket or service is touched; a real scratch bucket
+instead, never production's bucket or keys.
+
+## The first measurement (19 Nov 2026, a laptop, the folder store)
+
+RESULTS
