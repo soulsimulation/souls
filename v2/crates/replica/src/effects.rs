@@ -1543,6 +1543,7 @@ impl State {
                 self.nodes.retain(|id, _| !gone.contains(id));
                 self.links
                     .retain(|_, l| !gone.contains(&l.ends[0]) && !gone.contains(&l.ends[1]));
+                self.timers.retain(|_, t| !gone.contains(&t.node));
             }
             Change::Reparent { node, from, pose } => {
                 own.check(*node)?;

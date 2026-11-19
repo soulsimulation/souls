@@ -40,6 +40,8 @@ step cost node --test tools/ops/cost/cost.test.mjs
 step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
 # The log's sync table on this runner's disk (K4, #2668): one append and one sync per tick, 1,000 ticks, two repeats.
 step log-sync cargo run -p log-crash --locked --quiet -- sync target/log-sync 1000 2
+# The driver's loads (I10, #2693): the shared shapes imported, the stretch merged, every kind given a verb.
+step driver-loads node --test tools/driver/loads.test.mjs
 
 # The WASM build: one artifact (wasm-bindgen --target web) that Node loads with initSync and a page with init().
 # The command's version is the wasm-bindgen crate's in Cargo.lock; it is installed under target/, which CI caches.
@@ -133,6 +135,8 @@ step client-stats node --test client/src/stats/*.test.mjs
 step client-check node --test client/src/check/*.test.mjs
 # Pairing a Soul to an agent (W2, #2705): from an empty folder to an accepted act, and the token found nowhere else.
 step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/src/pair/*.test.mjs'
+# The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
+step client-reflex node --test client/src/reflex/*.test.mjs
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
 # same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
 step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&

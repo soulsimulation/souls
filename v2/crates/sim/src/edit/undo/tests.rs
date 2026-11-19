@@ -63,6 +63,7 @@ impl W {
             owner: "thing".to_owned(),
             children: names(children),
             slots: slots.into_iter().map(|(s, l)| (s, names(l))).collect(),
+            hands: None,
         };
         let kinds = BTreeMap::from([
             (
