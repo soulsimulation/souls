@@ -15,9 +15,15 @@
 //! - `checkpoints/`: K5's, taken by K18c's rule; a start resumes from the newest that verifies.
 //! - `tokens`: the gateway's tokens file, `<grant> <sha-256 hex>` per Soul, never a token. `souls.tokens` (mode 0600)
 //!   holds the Souls' tokens themselves, for a local client; it is never copied off the machine.
+//! - `log.text/`: K16's text store, every word said in the world (O20b, #3523).
 //! - `views/`: V1's stream of the zone's root (full, everyone), written by a view tier of the process's own, and
-//!   `views/world.json`, `{"stream": <its folder>, "history": "../history/"}`, which the page reads for `?world=`.
-//! - `gateway.sock` (or `--socket`): the gateway's local socket (I1's framing, `answers::serve`). `health.json`: O4's.
+//!   `views/world.json`, `{"stream": "views/<its folder>/", "history": "history/"}`, both relative to the world's
+//!   folder, which the page reads for `?world=` and pairing for the Soul's `history` (R16b, #3480). With a store
+//!   (below) the history is the archive's, `../../s/h/<world name>/<lineage hex>/`: the origin serves worlds under
+//!   `w/` and the store beside them under `s/`, as the page's own links do (V9).
+//! - `gateway.sock`: the gateway's local socket (I1's framing, `answers::serve`), unless `--socket` or
+//!   `$WORLDD_SOCKET` names another (a placed world's: a socket's path is at most 108 bytes, and a world folder's
+//!   name is 67). `health.json`: O4's.
 //!
 //! **A start** reads the log through once (its records feed the stream from record 0), then hands it to K18's loop
 //! (`answers::start`), which restores the newest checkpoint and replays the records after it. It prints `worldd:
@@ -34,14 +40,25 @@
 //! gateway reads the file again: no restart.
 //!
 //! **Seats** (C17, #3453). A start registers the seats the world's entries declare on its things for the gateway's sit,
-//! lie and rise and a form's sit ([`places`]): each thing whose kind's entry has a slot admitting a body gets its first
-//! such slot as a seat (B3 holds one seat per thing), its point carried up the tree onto the floor a body stands on.
+//! lie and rise and a form's sit ([`places`]): every slot admitting a body that a thing's kind's entry declares is a
+//! seat (a sofa's three, a bed's two; C19, #3457), its point carried up the tree onto the floor a body stands on.
 //! It prints `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor;
 //! <moved> stand points moved to clear ground`. A stand point a body cannot stand on is moved to the nearest clear ground
 //! within a form's reach (C15's rule), so a rise sets the body down where it can stand.
 //!
-//! Not here: shipping and archiving the log (O3's shipper, in #3308, not yet on this base), a G9 fork as a seed (a
-//! fork's checkpoint has no facts file for the walkers' town).
+//! **Off the machine** (O3b, #3458), when `--store <store>`, `$WORLDD_STORE` or the directory's `$DIRECTORY_STORE_URL`
+//! names a store (O3c, #3529: the offsite bucket, `s3:https://<host>/<bucket>[/<prefix>]` with its keys in `AWS_*`, or
+//! O9's folder store, `folder:<path>` or a path; `supervisor::bucket`): the world is claimed under `--machine <name>` (`$WORLDD_MACHINE`, default
+//! `local`), its build pinned on a first claim. Each record on the disk and each checkpoint is shipped by O3's
+//! shipper under that claim. A restart claims again ([`shipping::take_over`], as the ops tool's restart): the claim
+//! starts at the directory's mark plus one, and the shipper takes the log's records from there, so the history read
+//! from the store has every record once, in order. V3's archiver packs each tick's part (not the recorder's inputs,
+//! numbered from 0 among the parts) under `h/<world name>/<lineage hex>/`, with the T6 header as `header`: the
+//! bundles the page's history plays (`#w=<world name>&l=<lineage hex>&t=<µs>`, its files served under `s/`). The
+//! day's bundle index is written again each time a bundle closes. A restart archives again from record 0: what was
+//! stored is passed over when the same and written over when made from more records ([`Again`]).
+//!
+//! Not here: a G9 fork as a seed (a fork's checkpoint has no facts file for the walkers' town).
 
 // The process reads the wall clock once for the stream's anchor (V1 rule 5); the engine never does.
 #![allow(clippy::disallowed_methods)]
@@ -51,8 +68,11 @@ use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 
+use archive::{Archiver, Shared};
+use directoryd::directory::Directory;
+use directoryd::directory::store::{Object, Store, When};
 use replica::apply::Replica;
 use replica::bodies::{Class, Family, Resource};
 use replica::effects::{Effect, Refusal};
@@ -68,9 +88,11 @@ use sim::log::{FileStore, Log};
 use sim::recorder;
 use sim::slots::PlaceAt;
 use sim::walk::town::Town;
+use supervisor::bucket::Under;
 use worldd::answers::{self, Config, Join};
 use worldd::bodies::{Bodies, Placed};
 use worldd::checkers::Rules;
+use worldd::shipping::{self, Item, Shipper, Wall};
 use worldd::view_out::{self, Writer};
 use worldd::views::Tier;
 
@@ -82,6 +104,36 @@ const EPOCH: u64 = 1;
 const EVERY: u64 = 8 << 20;
 /// The stream writer's queue in the tier: deliveries it may fall behind by before it is handed a snapshot.
 const BOUND: usize = 1 << 16;
+/// Eden's zone, America/New_York (today's default, `apps/server/src/god/real-clock.ts`): standard time is UTC−5, and
+/// from 2 AM on March's second Sunday to 2 AM on November's first it is UTC−4. Offsets are written to 2100.
+const EST_US: i64 = -5 * HOUR_US;
+const HOUR_US: i64 = 3_600_000_000;
+const SKY_UNTIL_YEAR: i64 = 2100;
+
+/// Today's sky on Eden's calendar: world time is the machine's clock (µs from the Unix epoch, [`answers::now`]), so the
+/// civil origin is 0 and a day is 86,400 s; the weather is seeded from the world's lineage.
+fn eden_sky(lineage: Scope) -> sim::daylight::Config {
+    use replica::sky::{Calendar, DAY_US, days_from_civil};
+    // The day number of the `n`th Sunday on or after day `d` (1970-01-01, day 0, was a Thursday).
+    let sunday = |d: i64, n: i64| d + (7 - (d + 4).rem_euclid(7)) % 7 + 7 * (n - 1);
+    let mut offsets = vec![(0, EST_US)];
+    for y in 1970..=SKY_UNTIL_YEAR {
+        let spring = sunday(days_from_civil(y, 3, 1), 2) * DAY_US + 2 * HOUR_US - EST_US;
+        let autumn =
+            sunday(days_from_civil(y, 11, 1), 1) * DAY_US + 2 * HOUR_US - (EST_US + HOUR_US);
+        offsets.push((spring, EST_US + HOUR_US));
+        offsets.push((autumn, EST_US));
+    }
+    let cal = Calendar {
+        day_s: 86_400,
+        origin: 0,
+        offsets,
+    };
+    let mut seed = [0; 8];
+    seed.copy_from_slice(&lineage.0[..8]);
+    sim::daylight::Config::today(cal, u64::from_le_bytes(seed))
+}
+
 /// Souls stand this far apart along x on a first start, mm.
 const APART_MM: i64 = 2_000;
 
@@ -220,6 +272,17 @@ fn humanoid() -> R<Family> {
             leg("souls:leg-right")?,
             hand("souls:hand-left", 1)?,
             hand("souls:hand-right", 2)?,
+            // The eyes and the voice B2's humanoid has (a look claims the gaze, a cheer the voice: C23).
+            Resource {
+                name: n("souls:eyes")?,
+                class: Class::Gaze,
+                slot: None,
+            },
+            Resource {
+                name: n("souls:voice")?,
+                class: Class::Voice,
+                slot: None,
+            },
         ],
     })
 }
@@ -357,9 +420,9 @@ fn souls(meta: &Json) -> R<Vec<(Id, i64, i64)>> {
 /// body stands on: its point and facing there, and its stand point in the slot's frame. A stand point a body cannot
 /// stand on (under a table, against a wall) is moved to the nearest place within a form's reach of it where a body
 /// can (C15's rule, `skills::form_runner::REACH`), so a rise always sets the body down on clear ground. Returns the
-/// seats, the count of every body slot on those things, the seats that could not be placed (no floor above the
-/// thing) and the stand points moved.
-fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize) {
+/// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
+/// floor above the thing) and the stand points moved.
+fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize, usize) {
     let (found, all) = import_eden::body_slots(&town.tree, kinds);
     let view = town.view();
     let (mut out, mut moved) = (Vec::new(), 0);
@@ -393,7 +456,9 @@ fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, us
         out.push(place);
     }
     let left = found.len() - out.len();
-    (out, all, left, moved)
+    let mut things: Vec<Id> = out.iter().map(|p| p.thing).collect();
+    things.dedup();
+    (out, things.len(), all, left, moved)
 }
 
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
@@ -429,7 +494,204 @@ fn bodies(
     Ok(b)
 }
 
-/// `worldd serve --dir <world folder> [--socket <path>]`: runs the world until killed.
+type Bucket = Shared<supervisor::bucket::Bucket>;
+
+/// How often a running world's open event index is written, at most (R16b): a question sees acts this old.
+const VIEWS_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The archive's store on a restart (O3b): V3's shelf starts from record 0 again and writes its bundles and indexes
+/// as new. A create refused because the key exists is passed when the bytes are the same, and otherwise writes over
+/// them (a day's index, or a window closed at a graceful stop, made again from more records).
+#[derive(Clone)]
+struct Again(Under<Bucket>);
+
+impl Store for Again {
+    fn get(&self, key: &str) -> Result<Option<Object>, Refusal> {
+        self.0.get(key)
+    }
+
+    fn put(&self, key: &str, bytes: &[u8], when: When) -> Result<String, Refusal> {
+        match self.0.put(key, bytes, when) {
+            Err(e) if e.name == "precondition-failed" && when == When::Absent => {
+                match self.0.get(key)? {
+                    Some(o) if o.bytes == bytes => Ok(o.etag),
+                    Some(o) => self.0.put(key, bytes, When::Is(&o.etag)),
+                    None => self.0.put(key, bytes, When::Absent),
+                }
+            }
+            r => r,
+        }
+    }
+}
+
+/// Where each record on the disk goes off the machine: the shipper, and the archiver (parts only, numbered among
+/// the parts).
+struct Off {
+    ship: Sender<Item>,
+    archive: Option<Sender<(u64, Vec<u8>)>>,
+    parts: u64,
+}
+
+impl Off {
+    fn take(&mut self, record: u64, bytes: &[u8], input: bool) {
+        let acts = if input {
+            0
+        } else {
+            replica::effects::Part::read(bytes).map_or(0, |p| p.effects.len() as u64)
+        };
+        let _ = self.ship.send(Item {
+            record,
+            bytes: bytes.to_vec(),
+            acts,
+            stakes: false,
+        });
+        if !input && let Some(a) = &self.archive {
+            let _ = a.send((self.parts, bytes.to_vec()));
+            self.parts += 1;
+        }
+    }
+}
+
+/// Reports a helper thread that stopped; the world goes on.
+fn report<T: Send + 'static>(what: &'static str, h: std::thread::JoinHandle<Result<T, Refusal>>) {
+    std::thread::spawn(move || match h.join() {
+        Ok(Err(e)) => eprintln!("worldd: {what} stopped, the world goes on: {}", refusal(e)),
+        Err(_) => eprintln!("worldd: {what} panicked, the world goes on"),
+        Ok(Ok(_)) => {}
+    });
+}
+
+/// V3's archiver on a thread of its own: each part as it comes, and the day's bundle index written again each time a
+/// bundle closes, so a running world's bundles are found before its day ends. The open day's event index and counts
+/// (V4) are written as they stand at most each [`VIEWS_EVERY`] while new parts come, so R16's `history` reads a
+/// running world's day (R16b, #3480).
+fn archiving(
+    mut a: Archiver<Again>,
+    rx: Receiver<(u64, Vec<u8>)>,
+) -> std::thread::JoinHandle<Result<(), Refusal>> {
+    std::thread::spawn(move || {
+        let mut indexed = a.shelf.writes.bundles;
+        let (mut fresh, mut viewed) = (false, std::time::Instant::now());
+        loop {
+            match rx.recv_timeout(shipping::POLL * 20) {
+                Ok((n, bytes)) => {
+                    a.push(n, bytes)?;
+                    fresh = true;
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return a.flush(),
+            }
+            if a.shelf.writes.bundles != indexed {
+                a.shelf.flush()?;
+                indexed = a.shelf.writes.bundles;
+            }
+            if fresh && viewed.elapsed() >= VIEWS_EVERY {
+                for (k, v) in a.open_views()? {
+                    a.shelf.put_view(&k, &v)?;
+                }
+                (fresh, viewed) = (false, std::time::Instant::now());
+            }
+        }
+    })
+}
+
+/// Claims the world in the store `spec` names ([`supervisor::bucket::Bucket`]) and starts its shipper and archiver,
+/// handed the log's records read at the start (numbered from `first`) from the claim's start on.
+fn off_machine(
+    spec: &str,
+    machine: &str,
+    built: &Built,
+    name: &str,
+    dir: &Path,
+    first: u64,
+    records: &[Vec<u8>],
+) -> R<Off> {
+    let store: Bucket = Shared(Arc::new(
+        supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?,
+    ));
+    println!("store: {}", store.0.what());
+    let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
+    let mut d = Directory::new(store.clone(), machine);
+    let (lineage, zone) = (built.root.scope().0, built.header.zone);
+    match d.world(&lineage, zone) {
+        Err(e) if e.name == "record-missing" => {
+            // The build pinned on a first claim: the launcher's hash (`$WORLDD_BUILD`), as a SHA-256 multihash.
+            let pin = std::env::var("WORLDD_BUILD").unwrap_or_else(|_| "unpinned".to_owned());
+            let mut build = vec![0x12, 0x20];
+            build.extend_from_slice(&sha256(pin.as_bytes()));
+            d.set_build(&lineage, zone, &build).map_err(refusal)?;
+        }
+        Err(e) => return Err(refusal(e)),
+        Ok(_) => {}
+    }
+    let end = first + records.len() as u64;
+    let claim = shipping::take_over(&mut d, &lineage, zone, first..end).map_err(refusal)?;
+    let from = claim.takeover.from;
+    println!(
+        "shipping: epoch {} from record {from} of {end}",
+        claim.takeover.epoch
+    );
+    let shipper = Shipper::open(
+        d,
+        claim,
+        lineage,
+        zone,
+        built.header.stored(),
+        from,
+        Wall::start(),
+    )
+    .map_err(refusal)?
+    .checkpoints(&dir.join("checkpoints"), shipping::CHECKPOINT_GAP_US);
+    let (ship, _, h) = shipper.spawn();
+    report("the shipper", h);
+    let kind = built
+        .header
+        .kinds
+        .iter()
+        .find(|k| k.as_str().starts_with("souls:place@"))
+        .cloned();
+    let archive = match kind {
+        Some(kind) => {
+            // The history's keys as a store of their own: the day's index names each bundle by its key, which the
+            // page reads relative to the history's folder.
+            let prefix = format!("h/{name}/{}/", to_hex(&lineage));
+            let again = Again(Under { store, prefix });
+            again
+                .put("header", built.header.stored(), When::Absent)
+                .map_err(refusal)?;
+            let a = Archiver::open(again, "", &built.header, zone, kind).map_err(refusal)?;
+            let (tx, rx) = channel();
+            report("the archiver", archiving(a, rx));
+            Some(tx)
+        }
+        None => {
+            eprintln!("worldd: the header names no souls:place root; the history is not archived");
+            None
+        }
+    };
+    let mut off = Off {
+        ship,
+        archive,
+        parts: 0,
+    };
+    for (k, bytes) in records.iter().enumerate() {
+        let record = first + k as u64;
+        let input = recorder::is_input(bytes);
+        if record >= from {
+            off.take(record, bytes, input);
+        } else if !input {
+            // Shipped before; archived again from 0 (the archiver passes over what it holds).
+            if let Some(a) = &off.archive {
+                let _ = a.send((off.parts, bytes.clone()));
+            }
+            off.parts += 1;
+        }
+    }
+    Ok(off)
+}
+
+/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] [--machine
+/// <name>]`: runs the world until killed. A checkpoint is taken each `--checkpoint-every` bytes of log (default 8 MiB).
 pub fn run(args: &[String]) -> i32 {
     match serve(args) {
         Ok(()) => 0,
@@ -441,10 +703,14 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn serve(args: &[String]) -> R<()> {
-    let dir = PathBuf::from(
-        arg(args, "--dir").ok_or("usage: worldd serve --dir <world folder> [--socket <path>]")?,
-    );
-    let socket = arg(args, "--socket").map_or_else(|| dir.join("gateway.sock"), PathBuf::from);
+    let dir = PathBuf::from(arg(args, "--dir").ok_or(
+        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] \
+         [--machine <name>]",
+    )?);
+    let socket = arg(args, "--socket")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("WORLDD_SOCKET").map(PathBuf::from))
+        .unwrap_or_else(|| dir.join("gateway.sock"));
     let meta_path = dir.join("world.json");
     let meta = json::parse(&std::fs::read_to_string(&meta_path).map_err(io(&meta_path))?)?;
     if meta.get("format").and_then(Json::str) != Some("souls/world/1") {
@@ -468,12 +734,12 @@ fn serve(args: &[String]) -> R<()> {
         souls.len()
     );
     let mut built = built;
-    let (places, all, left, moved) = places(&mut built.town, &kinds);
+    let (places, things, all, left, moved) = places(&mut built.town, &kinds);
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
          moved to clear ground",
         places.len(),
-        places.len() + left
+        things
     );
     let rules = Rules {
         kinds: Json::Obj(kinds),
@@ -484,11 +750,55 @@ fn serve(args: &[String]) -> R<()> {
     let (log, found) =
         Log::open(FileStore::open(&log_path).map_err(refusal)?, EPOCH).map_err(refusal)?;
     let store = log.close();
+    let bucket = arg(args, "--store")
+        .cloned()
+        .or_else(|| std::env::var("WORLDD_STORE").ok())
+        .or_else(|| std::env::var(directoryd::directory::s3::URL_ENV).ok())
+        .filter(|s| !s.trim().is_empty());
+    let mut off = match bucket {
+        Some(spec) => {
+            let machine = arg(args, "--machine")
+                .cloned()
+                .or_else(|| std::env::var("WORLDD_MACHINE").ok())
+                .unwrap_or_else(|| "local".to_owned());
+            Some(off_machine(
+                &spec,
+                &machine,
+                &built,
+                &name,
+                &dir,
+                found.first,
+                &found.records,
+            )?)
+        }
+        None => None,
+    };
     let (tx, synced) = channel();
     let mut cfg = Config::new(built.root.scope(), EPOCH);
-    cfg.checkpoints = Some((dir.join("checkpoints"), EVERY));
+    let every = arg(args, "--checkpoint-every").map_or(Ok(EVERY), |n| {
+        n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
+    })?;
+    cfg.checkpoints = Some((dir.join("checkpoints"), every));
     cfg.health = Some(dir.join("health.json"));
+    // K16's text store on the disk, `<dir>/log.text` beside the log as `gateway-link` keeps it (O20b, #3523): a
+    // world's words outlive a restart, and O20's shipper has them to ship.
+    let text = sim::text::Store::open_dir(
+        &dir.join("log.text"),
+        replica::ids::Minter::new(worldd::words::scope(built.root.scope())),
+    )
+    .map_err(|e| format!("the text store: {}", refusal(e)))?;
+    cfg.text = Some(Arc::new(text));
+    // O20's shipper for the world's own stores (its words, uploads and removal list), keyed by its lineage as O12's
+    // restore reads them back (O20b, #3523); with no bucket set it says so once and ships nothing.
+    let lineage = to_hex(&built.root.scope().0);
+    let stores = directoryd::backup::owned_by("worldd", &[&lineage]).map_err(refusal)?;
+    let strip = format!("worlds/{lineage}/");
+    let backup = directoryd::backup::run("worldd", dir.clone(), stores, Default::default(), &strip)
+        .map_err(|e| format!("refusing to start: {}", refusal(e)))?;
+    println!("{backup}");
     cfg.synced = Some(tx);
+    // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
+    cfg.sky = Some(eden_sky(built.root.scope()));
     // The engine's own acts (C2): the world's rules; no activity kinds are loaded from a world folder yet.
     cfg.engine = Some((built.rules.clone(), Vec::new()));
     let (town, ground) = (built.town, built.ground);
@@ -545,12 +855,17 @@ fn serve(args: &[String]) -> R<()> {
     let now = answers::now();
     let writer =
         Writer::create(&views, &built.header, &key, (now, (now / 1000) as u64)).map_err(refusal)?;
+    // The history the world advertises (R16b): the archive's when it runs, as the origin serves the store.
+    let history = match off.as_ref().and_then(|o| o.archive.as_ref()) {
+        Some(_) => format!("../../s/h/{name}/{}/", to_hex(&built.root.scope().0)),
+        None => "history/".to_owned(),
+    };
     let pointer = format!(
-        "{{\"stream\": \"{}\", \"history\": \"../history/\"}}\n",
+        "{{\"stream\": \"views/{}/\", \"history\": \"{history}\"}}\n",
         stream::dir(&built.header, &key)
     );
     view_out::write_whole(&views.join("world.json"), pointer.as_bytes()).map_err(refusal)?;
-    let writing = view_out::follow(writer, sub, Arc::new(AtomicBool::new(false)));
+    let writing = view_out::follow(writer, sub, Arc::new(AtomicBool::new(false)), answers::now);
     for (k, bytes) in found.records.into_iter().enumerate() {
         if !recorder::is_input(&bytes) {
             tier.offer(found.first + k as u64, bytes);
@@ -561,6 +876,9 @@ fn serve(args: &[String]) -> R<()> {
         .name("synced".into())
         .spawn(move || {
             for s in synced {
+                if let Some(o) = &mut off {
+                    o.take(s.record, &s.bytes, s.input);
+                }
                 if !s.input {
                     fed.offer(s.record, s.bytes);
                 }

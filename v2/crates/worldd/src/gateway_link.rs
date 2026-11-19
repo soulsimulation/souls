@@ -7,12 +7,16 @@
 //! its sequences from the log. The world here is I3's toggles world (`checkers::toggles`), `--rooms` rooms of `--bodies`
 //! bodies, each with a toggle, and `--items` items in each room; its log is `--log` (default: the socket's path and
 //! `.log`). With `--testworld` it also has bodies that move (I4b): N2's test world with one Soul and three chairs
-//! (`worldd::testbodies`, B10 #2688).
+//! (`worldd::testbodies`, B10 #2688), and prints `testworld <id> <name>` for the Soul's body, the square and the chairs.
+//! With `--creator <32 hex>-<counter>` the world has that creator and the toggles world's pinned kinds
+//! (`toggles::kinds`), and commits the creator's edit intents (G1b, #3362): each is checked off the clock thread and
+//! committed through `sim::edit`; every other actor's edit is refused `edit.not-the-creator`.
 //!
 //! `worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] [--bodies <n>]
-//! [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
-//! --stall-for <s>]`. With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it takes, in the order
-//! taken, so a bench can check each actor's order across restarts. With `--roots`, it appends `<version> <place hash
+//! [--items <n>] [--testworld] [--creator <32 hex>-<n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
+//! --stall-for <s>] [--www <dir>] [--views <path>]`. Subscriptions are served on `--views` (default: the socket's path with
+//! `.views`; `worldd::views::served`). With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it
+//! takes, in the order taken, so a bench can check each actor's order across restarts. With `--roots`, it appends `<version> <place hash
 //! hex>` after each tick that changed the world, so a test can check a client's copy against the place. Measures
 //! (O4, #2694) are on unless `--no-measures`; `health.json` goes to `--health` (default: the log's path with
 //! `.health.json`). `--stall-after` holds the clock thread `--stall-for` seconds, once, that many seconds after
@@ -24,7 +28,7 @@
 //! <path under dir>` and `body <scope hex>-<counter>` for each body, and needs a log with no records.
 //!
 //! The same socket carries R5's sync requests (R5b, #3164; `replica::sync::wire`), which the world answers for every
-//! actor over the place (`worldd::answers`).
+//! actor over the place, on the sync thread, never the clock thread (`worldd::answers`; C16, #3450).
 
 use std::fs::OpenOptions;
 use std::os::unix::net::UnixListener;
@@ -35,8 +39,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use replica::apply::Replica;
+use replica::edit;
 use replica::encode::{from_hex, to_hex};
-use replica::ids::{Minter, Scope};
+use replica::ids::{Id, Minter, Scope};
 use replica::views::{Key, Level, Redactions};
 use replica::world_model::Audience;
 use sim::log::FileStore;
@@ -92,7 +97,12 @@ fn stream(world: &Replica, www: PathBuf, text: Arc<Store>) -> Follow {
                 .display()
         );
         // The writer runs until the process ends.
-        drop(follow(writer, sub, Arc::new(AtomicBool::new(false))));
+        drop(follow(
+            writer,
+            sub,
+            Arc::new(AtomicBool::new(false)),
+            answers::now,
+        ));
         Box::new(move |n, bytes| tier.offer(n, bytes))
     })
 }
@@ -107,8 +117,8 @@ pub fn run(args: &[String]) -> i32 {
     let usage = || {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
-             [--bodies <n>] [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
-             [--stall-after <s> --stall-for <s>] [--www <dir>]"
+             [--bodies <n>] [--items <n>] [--testworld] [--creator <32 hex>-<n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
+             [--stall-after <s> --stall-for <s>] [--www <dir>] [--watchdog-ms <ms>] [--views <path>]"
         );
         2
     };
@@ -124,11 +134,47 @@ pub fn run(args: &[String]) -> i32 {
         return usage();
     };
     let log = arg("--log").map_or_else(|| path.with_extension("log"), PathBuf::from);
+    let views = arg("--views").map_or_else(|| path.with_extension("views"), PathBuf::from);
     let mut cfg = Config::new(Scope(lineage), epoch);
     if args.iter().any(|a| a == "--testworld") {
         cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| {
             worldd::testbodies::bodies()
         }));
+        // C10 (#3414): the ids a client acts on, `testworld <id> <name>`.
+        for (name, id) in worldd::testbodies::named().unwrap_or_default() {
+            println!(
+                "testworld {}-{} {name}",
+                to_hex(&id.scope().0),
+                id.counter()
+            );
+        }
+    }
+    // V19 (#2763): `--sky <civil µs at world time 0> <seed>`, today's light and weather on a real-time UTC calendar.
+    if let Some(i) = args.iter().position(|a| a == "--sky") {
+        let n = |k: usize| args.get(i + k).and_then(|v| v.parse::<i64>().ok());
+        let (day_s, offsets) = (86_400, vec![(0, 0)]);
+        if let (Some(origin), Some(seed)) = (n(1), n(2)) {
+            let cal = replica::sky::Calendar {
+                day_s,
+                origin,
+                offsets,
+            };
+            cfg.sky = Some(sim::daylight::Config::today(cal, seed.unsigned_abs()));
+        }
+    }
+    if let Some(c) = arg("--creator") {
+        let Some(creator) = c.split_once('-').and_then(|(scope, n)| {
+            Id::new(
+                Scope(from_hex(scope).ok()?.try_into().ok()?),
+                n.parse().ok()?,
+            )
+        }) else {
+            return usage();
+        };
+        cfg.edits = Some(edit::World {
+            creator,
+            kinds: toggles::kinds(),
+        });
     }
     cfg.measures = !args.iter().any(|a| a == "--no-measures");
     cfg.health =
@@ -162,6 +208,15 @@ pub fn run(args: &[String]) -> i32 {
     };
     cfg.text = Some(Arc::clone(&text));
     let built = toggles::World::build(rooms, bodies, items);
+    // The view tier: seeded with the bodies as built, and reading words for those who hear them (C6, #3390).
+    let mut hub = worldd::views::subscription::Hub::with_words(Arc::clone(&text));
+    hub.seed(built.replica.tree());
+    let feed = worldd::views::served::start_with(hub);
+    cfg.served = feed.as_ref().ok().cloned();
+    if let Err(e) = feed.and_then(|f| worldd::views::served::listen(f, &views)) {
+        eprintln!("worldd: views: {e}");
+        return 1;
+    }
     if let Some(www) = arg("--www") {
         if std::fs::metadata(&log).is_ok_and(|m| m.len() > 0) {
             eprintln!("worldd: --www needs a log with no records");
@@ -182,11 +237,12 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     // K7's watchdog on the world's own loop (K18): no tick for the limit ends the process by name.
-    crate::watchdog::watch(
-        world.beat.clone(),
-        crate::watchdog::Real::start(),
-        crate::watchdog::LIMIT_MS,
-    );
+    // `--watchdog-ms` widens it for a test that needs it, as `worldd --dir` takes. A sync never does: it is answered on
+    // the sync thread (C16, #3450), not the clock's.
+    let limit = arg("--watchdog-ms")
+        .and_then(|m| m.parse().ok())
+        .unwrap_or(crate::watchdog::LIMIT_MS);
+    crate::watchdog::watch(world.beat.clone(), crate::watchdog::Real::start(), limit);
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,

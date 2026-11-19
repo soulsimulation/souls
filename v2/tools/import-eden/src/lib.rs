@@ -6,7 +6,9 @@
 //! - world -> open ground -> each thing placed at the world root. A thing's children are its plain children and those
 //!   in its slots (slot number = the slot's place in its bake, from 1). A room slot is not a slot: it is a room node.
 //! - a thing with rooms, floors or stairs -> one floor node per level -> its rooms. A thing placed in a room slot is a
-//!   child of that room. A window is a node under the room it opens from, with its width, height and sill.
+//!   child of that room. A window is a node under the room it opens from, with its width, height and sill. A thing
+//!   standing on a building's own floor (at the root, or in a slot of the building on that floor: a roof terrace) is
+//!   a child of that floor, or of its room there (C27, `on_floor`).
 //! - a doorway (a door, gate or arch opening) is a link between the room it opens from and the room it leads to, or
 //!   the open ground; one with no rooms (a wall's gate) joins its thing to the open ground. The door thing standing in
 //!   it keeps the link's id and its open state. A stair, ramp or ladder is a link between two floor nodes. Links carry
@@ -15,6 +17,8 @@
 //!   its child: a place is found by its outline.
 //! - the terrain (N1b, #3197) is two fields of the open ground: its tile side and every tile's heights and classes,
 //!   byte for byte as exported (`F_TILE_SIZE`, `F_TILES`). `ground::scene::Terrain` reads them.
+//! - how today's page draws the world's sky (V19c, #3521) is three fields of the world node, from the facts' `sky`:
+//!   the date the sky is drawn on, the palette and the morning mist (`replica::sky::Presentation`).
 //!
 //! Positions are micrometres (the facts are whole millimetres, times 1,000); yaws become orientations only through
 //! `Quat::from_yaw_mdeg`. Human words (names) are stored by reference: the field holds the text's SHA-256, and
@@ -33,6 +37,7 @@ use replica::effects::{
 use replica::encode::{Name, Value, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, sha256};
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
+use replica::sky::{Mist, Presentation};
 use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, End, parse_kinds, plain};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
@@ -91,8 +96,13 @@ pub struct Import {
     pub by_ref: BTreeMap<String, i64>,
     /// Things the import could not place as the facts say, each with its reason.
     pub notes: Vec<String>,
+    /// Things today's facts put in a slot another thing already holds: each stays a plain child of the same parent
+    /// at its own place, out of the slot (one occupant per slot), with what holds the slot.
+    pub left_out: Vec<String>,
     /// Today's def ref to its form: point, path or area.
     pub forms: BTreeMap<String, String>,
+    /// The header and the one part the tree was committed from, as bytes: a client's copy is built from them.
+    pub log: (Vec<u8>, Vec<u8>),
     /// Every entry the import committed, in order: what a stream of the world starts from (V5, #2714).
     pub effects: Vec<Effect>,
 }
@@ -179,6 +189,7 @@ struct Build {
     specs: Vec<Spec>,
     texts: BTreeMap<[u8; 32], String>,
     notes: Vec<String>,
+    left_out: Vec<String>,
 }
 
 impl Build {
@@ -233,6 +244,77 @@ impl Build {
     }
 }
 
+/// Pose `p` (`[x, y, z, yaw mdeg]`, mm) given in the frame `frame` is in, carried into `frame`'s own.
+fn into(frame: [i64; 4], p: [i64; 4]) -> R<[i64; 4]> {
+    let e = |e| format!("{e:?}");
+    let d = Vec3::new(p[0] - frame[0], p[1] - frame[1], p[2] - frame[2]);
+    let back = Quat::from_yaw_mdeg((-frame[3]).rem_euclid(360_000)).map_err(e)?;
+    let q = back
+        .rotate(Vec3::new(d.x * 1000, d.y * 1000, d.z * 1000))
+        .map_err(e)?;
+    let mm = |v: i64| (v + v.signum() * 500) / 1000;
+    Ok([
+        mm(q.x),
+        mm(q.y),
+        mm(q.z),
+        (p[3] - frame[3]).rem_euclid(360_000),
+    ])
+}
+
+/// Whether `[x, z]` lies inside the polygon `poly` (`[[x, z] …]` mm), by crossings.
+fn inside(q: [i64; 2], poly: &Json) -> bool {
+    let pts: Vec<[i64; 2]> = poly
+        .arr()
+        .iter()
+        .filter_map(|p| match p.arr() {
+            [x, z] => Some([x.int()?, z.int()?]),
+            _ => None,
+        })
+        .collect();
+    let mut odd = false;
+    for k in 0..pts.len() {
+        let (a, c) = (pts[k], pts[(k + pts.len() - 1) % pts.len()]);
+        if (a[1] > q[1]) != (c[1] > q[1]) {
+            // x of the edge at q's z, compared without dividing: (q.x - a.x)·(c.z - a.z) < (c.x - a.x)·(q.z - a.z).
+            let (l, r) = (
+                i128::from(q[0] - a[0]) * i128::from(c[1] - a[1]),
+                i128::from(c[0] - a[0]) * i128::from(q[1] - a[1]),
+            );
+            if (c[1] > a[1] && l < r) || (c[1] < a[1] && l > r) {
+                odd = !odd;
+            }
+        }
+    }
+    odd
+}
+
+/// The floor of thing `host` that a thing at `local` (its pose in `host`'s frame) stands on, as `floor-<n>` or the
+/// room there that holds it, with the thing's pose in that node's frame (C27, #3509). Only a floor of the thing's own:
+/// one with a room on its level, or raised more than a step (`BODY_SPAN.0`, the walk's step) above the thing's
+/// origin. A lower floor with no room (a lawn, a path) is ground cover, walked as the open ground. The thing stands
+/// within a step of it.
+fn on_floor(host: &Json, local: [i64; 4]) -> R<Option<(String, [i64; 4])>> {
+    let rooms = need(host, "rooms").map(Json::arr).unwrap_or(&[]);
+    for fl in need(host, "floors").map(Json::arr).unwrap_or(&[]) {
+        let (lv, y) = (int(fl, "level")?, int(fl, "y")?);
+        let roomed = rooms.iter().any(|r| int(r, "floor").ok() == Some(lv));
+        if (local[1] - y).abs() > BODY_SPAN.0
+            || !(roomed || y > BODY_SPAN.0)
+            || !inside([local[0], local[2]], need(fl, "polygon")?)
+        {
+            continue;
+        }
+        for r in rooms.iter().filter(|r| int(r, "floor").ok() == Some(lv)) {
+            let q = into(pose4(need(r, "pose")?)?, local)?;
+            if inside([q[0], q[2]], need(r, "polygon")?) {
+                return Ok(Some((s(r, "id")?.to_owned(), q)));
+            }
+        }
+        return Ok(Some((format!("floor-{lv}"), local)));
+    }
+    Ok(None)
+}
+
 fn pose4(j: &Json) -> R<[i64; 4]> {
     let a = j.arr();
     if a.len() != 4 {
@@ -284,7 +366,8 @@ pub fn load(text: &str) -> R<Import> {
         ),
         (
             FLOOR,
-            format!("{{1: \"{FLOOR}\", 2: \"place\", 11: [\"{ROOM}\"]}}"),
+            // A thing on a floor outside its rooms (a deck's, a roof terrace's) is the floor's (C27).
+            format!("{{1: \"{FLOOR}\", 2: \"place\", 11: [\"thing\", \"{ROOM}\"]}}"),
         ),
         (
             ROOM,
@@ -337,6 +420,7 @@ pub fn load(text: &str) -> R<Import> {
         specs: Vec::new(),
         texts: BTreeMap::new(),
         notes: Vec::new(),
+        left_out: Vec::new(),
     };
     let root = b.node("world")?;
     let ground = b.add("ground", root, None, &full[GROUND], [0; 4], terrain(&f)?)?;
@@ -398,6 +482,7 @@ pub fn load(text: &str) -> R<Import> {
             slot_at.insert((s(t, "id")?, int(sl, "n")?), [n(0)?, n(1)?, n(2)?]);
         }
     }
+    let mut held: HashMap<(Id, u64), &str> = HashMap::new();
     for t in things {
         let id = s(t, "id")?;
         let r = s(t, "ref")?;
@@ -413,7 +498,23 @@ pub fn load(text: &str) -> R<Import> {
                     Some(sl) if sl.get("room").is_some() => {
                         (b.node(&format!("{p}/{}", s(sl, "room")?))?, None)
                     }
-                    Some(sl) if sl.get("n").is_some() => (pid, Some(int(sl, "n")? as u64)),
+                    Some(sl) if sl.get("n").is_some() => {
+                        // One occupant per slot (K11's `slot-over-full`): today a slot may hold several things, so
+                        // the first keeps it and each later one stays a plain child at its own place, reported.
+                        let n = int(sl, "n")? as u64;
+                        match held.get(&(pid, n)) {
+                            Some(first) => {
+                                b.left_out.push(format!(
+                                    "{id} ({r}): slot {n} of {p} already holds {first}; left out of the slot, a plain child at its own place"
+                                ));
+                                (pid, None)
+                            }
+                            None => {
+                                held.insert((pid, n), id);
+                                (pid, Some(n))
+                            }
+                        }
+                    }
                     Some(sl) => {
                         b.notes.push(format!(
                             "{id}: slot {:?} of {p} is not in its bake; placed as a plain child",
@@ -684,6 +785,65 @@ pub fn load(text: &str) -> R<Import> {
         }
     }
 
+    // --- On another thing's floor (C27, #3509): a thing at the root standing on a building's own floor (a pavilion's,
+    // a deck's), or in a building's slot that lies on one of its floors (a roof terrace), stands on that floor, in
+    // the room there that holds it: the open ground is cut out under such a floor, and a roof is no ground. Moved
+    // after every node has its id, so no id changes. A decor thing stays where it is: scenery may reach far past the
+    // building its origin is in (a cableway from its valley station).
+    let decor: BTreeSet<&str> = need(&f, "kinds")?
+        .arr()
+        .iter()
+        .filter(|k| k.get("layer").and_then(Json::str) == Some("decor"))
+        .filter_map(|k| k.get("ref").and_then(Json::str))
+        .collect();
+    let hosts: Vec<&Json> = things
+        .iter()
+        .filter(|t| t.get("parent").and_then(Json::str).is_none() && t.get("floors").is_some())
+        .collect();
+    let mut at: HashMap<Id, usize> = HashMap::new();
+    for (k, sp) in b.specs.iter().enumerate() {
+        at.insert(sp.id, k);
+    }
+    for t in things {
+        if t.get("floors").is_some() || t.get("rooms").is_some() || decor.contains(s(t, "ref")?) {
+            continue;
+        }
+        let found = match (t.get("parent").and_then(Json::str), t.get("slot")) {
+            (None, _) => {
+                let w = pose4(need(t, "pose")?)?;
+                let mut found = None;
+                for h in &hosts {
+                    let local = into(pose4(need(h, "pose")?)?, w)?;
+                    if let Some(f) = on_floor(h, local)? {
+                        found = Some((s(h, "id")?, f));
+                        break;
+                    }
+                }
+                found
+            }
+            (Some(p), Some(sl)) if sl.get("n").is_some() => {
+                match hosts
+                    .iter()
+                    .find(|h| h.get("id").and_then(Json::str) == Some(p))
+                {
+                    Some(h) => on_floor(h, pose4(need(t, "pose")?)?)?.map(|f| (p, f)),
+                    None => None,
+                }
+            }
+            _ => None,
+        };
+        if let Some((host, (key, pose))) = found {
+            let (Some(&node), Some(&parent)) = (
+                b.nodes.get(s(t, "id")?),
+                b.nodes.get(&format!("{host}/{key}")),
+            ) else {
+                continue;
+            };
+            let sp = &mut b.specs[at[&node]];
+            (sp.parent, sp.slot, sp.pose) = (parent, None, pose);
+        }
+    }
+
     // --- Commit: every node by its parent's entry, parents first; then every link by its owning end. -----------------
     let mut tree = Tree::start(root, name(&full[WORLD])?);
     let header = header(root, &rules)?;
@@ -776,17 +936,29 @@ pub fn load(text: &str) -> R<Import> {
         };
         effects.push(entry(effects.len() as u64, ends[0], vec![change]));
     }
-    let part = Part::read(
-        &encode(&Value::Map(BTreeMap::from([
-            (1, Value::Bytes(header.hash().to_bytes())),
-            (
-                2,
-                Value::Array(effects.iter().map(Effect::to_value).collect()),
-            ),
-        ])))
-        .map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| format!("{}: {}", e.name, e.detail))?;
+    // V19c (#3521): how today's page draws the world's sky, on the world node.
+    let shown = presentation(&f)?.fields();
+    if !shown.is_empty() {
+        let sets = shown
+            .into_iter()
+            .map(|(field, to)| Change::Set {
+                node: root,
+                field,
+                to,
+                by: None,
+            })
+            .collect();
+        effects.push(entry(effects.len() as u64, root, sets));
+    }
+    let part_bytes = encode(&Value::Map(BTreeMap::from([
+        (1, Value::Bytes(header.hash().to_bytes())),
+        (
+            2,
+            Value::Array(effects.iter().map(Effect::to_value).collect()),
+        ),
+    ])))
+    .map_err(|e| e.to_string())?;
+    let part = Part::read(&part_bytes).map_err(|e| format!("{}: {}", e.name, e.detail))?;
     tree.commit(&header, &part, &rules)
         .map_err(|e| format!("commit refused: {}: {}", e.name, e.detail))?;
 
@@ -811,9 +983,61 @@ pub fn load(text: &str) -> R<Import> {
         bake,
         by_ref,
         notes: b.notes,
+        left_out: b.left_out,
         forms,
+        log: (
+            encode(&header.to_value()).map_err(|e| e.to_string())?,
+            part_bytes,
+        ),
         effects,
     })
+}
+
+/// The world's sky as today's page draws it (V19c, #3521), from the facts' optional `sky`: `calendar` "MM-DD" (the
+/// date the sky is drawn on), `palette` (today's name, stored as `souls:<palette>`) and `mist` `[peak minute, half-width
+/// minutes, strength 0 to 100]` (today's morning mist). A world without `sky` gets none of them.
+fn presentation(f: &Json) -> R<Presentation> {
+    let Some(sky) = f.get("sky") else {
+        return Ok(Presentation::default());
+    };
+    let date = match sky.get("calendar").and_then(Json::str) {
+        Some(c) => {
+            let md = c
+                .split_once('-')
+                .and_then(|(m, d)| Some([m.parse().ok()?, d.parse().ok()?]));
+            Some(md.ok_or_else(|| format!("sky calendar {c:?} is not MM-DD"))?)
+        }
+        None => None,
+    };
+    let palette = match sky.get("palette").and_then(Json::str) {
+        Some(p) => {
+            Some(Name::new(&format!("souls:{p}")).ok_or_else(|| format!("sky palette {p:?}"))?)
+        }
+        None => None,
+    };
+    let mist = match sky.get("mist").map(Json::arr) {
+        Some([peak, half, strength]) => {
+            let n = |j: &Json| j.int().ok_or("sky mist: whole numbers");
+            Some(Mist {
+                peak: n(peak)? * 60_000_000,
+                half: n(half)? * 60_000_000,
+                strength: n(strength)?,
+            })
+        }
+        Some(_) => return Err("sky mist: [peak minute, half-width minutes, strength]".into()),
+        None => None,
+    };
+    let p = Presentation {
+        date,
+        palette,
+        mist,
+    };
+    // Every setting given must read back: a malformed one is refused here, not dropped by a copy.
+    let back = Presentation::read(&p.fields().into_iter().collect());
+    if back != p {
+        return Err(format!("sky settings out of range: {p:?}"));
+    }
+    Ok(p)
 }
 
 /// The open ground's fields: its terrain tiles (`F_TILE_SIZE`, `F_TILES`), byte for byte as exported, when the facts
@@ -1209,9 +1433,10 @@ pub struct BodySlot {
     pub stand: Vec3,
 }
 
-/// Every thing of `tree` whose kind's entry (`entries`, `(kind, souls-entry/1 entry)` as `worldd seed` reads them)
-/// has a slot that admits a body, with the first such slot ([`BodySlot`]), in id order; and the count of every such slot
-/// on those things. A slot with no stand point, or a point not in whole millimetres, is left out.
+/// Every slot that admits a body ([`BodySlot`]) on the things of `tree` whose kind's entry (`entries`, `(kind,
+/// souls-entry/1 entry)` as `worldd seed` reads them) declares one, by thing id and slot (C19, #3457: a sofa's three,
+/// a bed's two); and the count of every such slot on those things. A slot with no stand point, or a point not in whole
+/// millimetres, is left out.
 pub fn body_slots(
     tree: &Tree,
     entries: &[(String, replica::rules::json::Value)],
@@ -1254,15 +1479,14 @@ pub fn body_slots(
             continue;
         };
         all += found.len();
-        let (slot, lie, at, stand) = found[0];
-        out.push(BodySlot {
+        out.extend(found.iter().map(|&(slot, lie, at, stand)| BodySlot {
             thing: n.id(),
             slot,
             lie,
             at,
             stand,
-        });
+        }));
     }
-    out.sort_by_key(|s| s.thing);
+    out.sort_by_key(|s| (s.thing, s.slot));
     (out, all)
 }

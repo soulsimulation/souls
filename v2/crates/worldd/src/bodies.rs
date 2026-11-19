@@ -1,15 +1,20 @@
-//! A committed move reaches the body (Engine v2 I4b, #3156): walk, sit and rise from the gateway.
+//! A committed move reaches the body (Engine v2 I4b, #3156): walk, sit, lie and rise from the gateway.
 //!
-//! [`crate::answers`] takes a move intent (a form's verb named `walk`, `sit` or `rise`, as `eden:sit`; T10 rule 4
+//! [`crate::answers`] takes a move intent (a form's verb named `walk`, `sit`, `lie` or `rise`, as `eden:sit`; T10 rule 4
 //! keeps `souls:` verbs for the engine's own) like any act: an id, a deadline and a place in the next tick. At that
 //! tick it is committed here, and the body is driven only through what already moves bodies (`v2/docs/bodies.md`): a
 //! walk is N7's walk skill run behind the host (`sim::host::Runner`, T9b/T9c), sent to a point (N9); a sit is B3's
-//! reserved seat and B2's sit move (`sim::slots`, `sim::moves`); a rise is B3's rise. Each steps the one controller
+//! reserved seat and B2's sit move (`sim::slots`, `sim::moves`); a lie is the same with B2's lie move and the stance
+//! lie (C4, #3368); a rise is B3's rise. Each steps the one controller
 //! (B1). Nothing here sets a pose or a position.
 //!
 //! - **Checked at commit.** A move's checks are its own: the controller's claims (T9 rule 4), the reach (B2), the seat
 //!   free and in reach (B3), a route (N7). They are made on the clock thread when the move starts, as B3 reserves a
-//!   seat: one tick's sits are taken together, in B3's stable order. A move refused there ends by that name.
+//!   seat: one tick's sits are taken one by one, in B3's stable order. A move refused there ends by that name.
+//! - **A thing with several seats** (C19, #3457). A sit names a thing; the world picks its free slot whose stand point
+//!   is nearest the body (`Slots::free`, ties by slot), so three Souls share a sofa, each in its own slot, and a fourth
+//!   is refused `place-taken`. A walk to a thing with no point goes to that slot's stand point. A restart hands each
+//!   seated body back into the slot its logged pose names.
 //! - **Ends by name.** A walk ends when its skill does: done, or failed by name. A sit or a rise ends when its move
 //!   does: `done`, or cancelled by name (`claim-taken`, `out-of-reach`). A new move on a body whose walk is still
 //!   going ends that walk `claim-taken`.
@@ -22,6 +27,10 @@
 //!   ([`Bodies::add_body_at`]) and hands each that sat back into its seat ([`Bodies::seat_placed`], K18c #3176), so
 //!   the seat is held in the slots table again and a rise or another sit sees it.
 //!
+//! - **Who hears** (#3369). After each step of the controller the bodies call `sim::speech::heard`, which brings every
+//!   body's interest set up to date and gives each utterance the step started its hearers as they are then; the world
+//!   writes each as `sim::speech::entry` says ([`Bodies::heard`]).
+//!
 //! Not here: I7's accept-then-resolve (one answer, at the move's end), plans (I9).
 
 use std::collections::BTreeMap;
@@ -31,16 +40,22 @@ use replica::effects::{Actor, Refusal, fixture_bytes};
 use replica::encode::{Name, Value, decode};
 use replica::host::Progress;
 use replica::ids::{Id, Minter, Scope};
-use replica::intents::{Intent, Target as Aim};
+use replica::intents::Intent;
+use replica::move_check::{self, Seen, Verdict};
 use replica::moves::{Effector, Move};
 use replica::pose::{Pose, Support, Vec3};
+use replica::select::{self, Spot};
+use replica::speech::Said;
 use replica::time::Micros;
+use sim::commit::bind::{Bound, Slot, bind};
+use sim::commit::spot;
 use sim::controller::Stance;
 use sim::host::Runner;
 use sim::life::{Born, Life, Retired, Standing};
 use sim::mover::Body as Moved;
 use sim::moves::{Fired, Instance, Moves, Reach};
 use sim::slots::{PlaceAt, Request, Slots};
+use sim::speech::{self, Hearing};
 use sim::spots::Target;
 use sim::timers::DueList;
 use sim::walk::town::Town;
@@ -50,39 +65,21 @@ type R<T> = Result<T, Refusal>;
 
 const SIT: &str = include_str!("../../replica/fixtures/moves/sit.diag");
 const RISE: &str = include_str!("../../replica/fixtures/moves/rise.diag");
+const LIE: &str = include_str!("../../replica/fixtures/moves/lie.diag");
 
 /// A walk's speed, µm a second.
 pub const WALK: i64 = 1_400_000;
 
-/// What a move intent asks.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Ask {
-    /// Walk to `point` (µm, the frame of `node`), or, with no point, to the stand point of `node`'s seat.
-    Walk {
-        node: Id,
-        point: Option<Vec3>,
-    },
-    /// Sit on the seat of `thing`.
-    Sit {
-        thing: Id,
-    },
-    Rise,
-}
+pub use replica::move_check::Ask;
 
-/// A move intent read: who moves, and what it asks.
+/// A move intent read: who moves, and what it asks, then its ranked fallbacks (moves of the same form on other
+/// targets, C14 #3442).
 #[derive(Clone, Debug)]
 pub struct Asked {
     pub body: Id,
     pub actor: Actor,
     pub ask: Ask,
-}
-
-fn int(v: &Value) -> Option<i64> {
-    match v {
-        Value::Uint(u) => i64::try_from(*u).ok(),
-        Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
-        _ => None,
-    }
+    pub fallbacks: Vec<Ask>,
 }
 
 /// Whether `v` is a form's arguments: a list of `[name, value]` pairs, a name as bytes.
@@ -95,41 +92,25 @@ fn form_args(v: Option<&Value>) -> bool {
     }
 }
 
-/// Reads a move intent: `None` when its verb is not a move, else the ask or the reason it is not one. A walk's point
-/// is parameter 1, `[x, y, z]` µm in its target's frame.
+/// Reads a move intent (`replica::move_check::read`, the client's own reading): `None` when its verb is not a move,
+/// else the ask and its fallbacks or the reason it is not one. A walk's point is parameter 1, `[x, y, z]` µm in its
+/// target's frame.
 pub fn read(intent: &Intent, body: Id) -> Option<Result<Asked, &'static str>> {
-    let node = match &intent.target {
-        Some(Aim::Node(n)) => Some(*n),
-        _ => None,
-    };
-    // A form's verb (T10 rule 4: `souls:` verbs are the engine's own), by its form: `eden:sit` as the T10 fixtures.
-    let form = match intent.verb.as_str().split_once(':') {
-        Some((ns, form)) if ns != "souls" => form,
-        _ => return None,
-    };
-    let ask = match form {
-        "walk" => node.ok_or("move.no-target").and_then(|node| {
-            let point = match intent.parameters.get(&1) {
-                None => None,
-                Some(Value::Array(p)) => match p.iter().map(int).collect::<Option<Vec<_>>>() {
-                    Some(p) if p.len() == 3 => Some(Vec3::new(p[0], p[1], p[2])),
-                    _ => return Err("move.bad-point"),
-                },
-                Some(_) => return Err("move.bad-point"),
-            };
-            Ok(Ask::Walk { node, point })
-        }),
-        // A sit naming a form's arguments (`[[name, value], ...]`, its seat) is the entry's own form, run by the
-        // form runner with its walk (C17, #3453); a bare sit is the move.
-        "sit" if form_args(intent.parameters.get(&1)) => return None,
-        "sit" => node.ok_or("move.no-target").map(|thing| Ask::Sit { thing }),
-        "rise" => Ok(Ask::Rise),
-        _ => return None,
-    };
-    Some(ask.map(|ask| Asked {
-        body,
-        actor: intent.actor,
-        ask,
+    // A sit naming a form's arguments (`[[name, value], ...]`, its seat) is the entry's own form, run by the form
+    // runner with its walk (C17, #3453); a bare sit is the move.
+    if matches!(intent.verb.as_str().split_once(':'), Some((ns, "sit")) if ns != "souls")
+        && form_args(intent.parameters.get(&1))
+    {
+        return None;
+    }
+    Some(move_check::read(intent)?.map(|mut asks| {
+        let ask = asks.remove(0);
+        Asked {
+            body,
+            actor: intent.actor,
+            ask,
+            fallbacks: asks,
+        }
     }))
 }
 
@@ -174,13 +155,21 @@ pub struct Bodies {
     due: DueList,
     mint: Minter,
     sit: Move,
+    lie: Move,
     rise: Move,
     /// The move each body is doing for an intent.
     live: BTreeMap<Id, (Id, Live)>,
     /// Intents ended between steps (a walk replaced): the intent and how.
     ended: Vec<(Id, Result<(), String>)>,
+    /// The candidate each started intent took: its rank in the ranked list and its target (C14).
+    took: BTreeMap<Id, (usize, Option<Id>)>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
     logged: BTreeMap<Id, Pose>,
+    /// Every body's interest set (B11, R4), kept as the bodies move.
+    hearing: Hearing,
+    /// The utterances started since the world last took them, each with its speaker, its record (hearers resolved
+    /// when it started) and the world time it started: the world writes each.
+    pub heard: Vec<(Id, Said, Micros)>,
 }
 
 /// Where the log last had each body: its pose, and its stance when that pose is in a seat's slot (K18, #3160;
@@ -239,10 +228,14 @@ impl Bodies {
             due: DueList::new(),
             mint: Minter::new(Scope([0xb4; 16])),
             sit: load(SIT)?,
+            lie: load(LIE)?,
             rise: load(RISE)?,
             live: BTreeMap::new(),
             ended: Vec::new(),
+            took: BTreeMap::new(),
             logged: BTreeMap::new(),
+            hearing: Hearing::new(),
+            heard: Vec::new(),
         })
     }
 
@@ -280,7 +273,8 @@ impl Bodies {
     }
 
     /// Restart, after the seats are added (K18c, #3176): each body the log last had in a seat's slot is handed back
-    /// into it from where it was added, at body time `at`, and its seat is held again. A seat gone or taken leaves it
+    /// into that slot (its pose's frame names the thing and the slot, C19) from where it was added, at body time `at`,
+    /// and its seat is held again. A seat gone or taken leaves it
     /// standing, named in the result.
     pub fn seat_placed(&mut self, placed: &Placed, at: Micros) -> Vec<(Id, Refusal)> {
         let mut out = Vec::new();
@@ -288,11 +282,10 @@ impl Bodies {
             if pose.support != Support::Slot || self.runner.controller.body(body).is_none() {
                 continue;
             }
-            let thing = pose.frame.node;
             let r = self.slots.restore(
                 &mut self.runner.controller,
                 body,
-                thing,
+                (pose.frame.node, pose.frame.slot),
                 stance.unwrap_or(Stance::Sit),
                 at,
             );
@@ -308,19 +301,20 @@ impl Bodies {
         out
     }
 
-    /// Every body in id order, those the controller steps and those resting in a seat's slot (which it keeps apart),
-    /// each with its stance when in a slot.
+    /// Every body the controller holds, in id order: those it steps and those resting in a seat's slot (which it keeps
+    /// apart), a rising one included, each with its stance when in a slot.
     fn every(&self) -> Placed {
         let c = &self.runner.controller;
-        let mut out: Placed = c.bodies().map(|b| (b.id, (b.pose, None))).collect();
-        for (body, _, stance) in self.slots.seated() {
-            if let Some(b) = c.body(body)
-                && b.pose.support == Support::Slot
-            {
-                out.insert(body, (b.pose, Some(stance)));
-            }
-        }
-        out
+        c.ids()
+            .filter_map(|id| {
+                let b = c.body(id)?;
+                let stance = match b.pose.support {
+                    Support::Slot => self.slots.stance(id),
+                    _ => None,
+                };
+                Some((id, (b.pose, stance)))
+            })
+            .collect()
     }
 
     /// Where each body is now, a seated one with its stance: what a checkpoint carries (K18c, #3176).
@@ -358,14 +352,15 @@ impl Bodies {
         self.runner.now = now;
     }
 
-    fn geo(&self, bodies: &[Id], places: &[Id]) -> Geo {
+    /// The geometry for `bodies` and `places`, each place of a different thing (one body's seat, C19).
+    fn geo(&self, bodies: &[Id], places: &[&PlaceAt]) -> Geo {
         let c = &self.runner.controller;
         let points = bodies
             .iter()
             .filter_map(|&b| {
                 let p = c.body(b)?.pose;
-                let at = match (p.support, self.slots.held_by(b)) {
-                    (Support::Slot, Some(t)) => self.slots.place(t)?.stand().ok()?,
+                let at = match (p.support, self.slots.held_place(b)) {
+                    (Support::Slot, Some(s)) => s.stand().ok()?,
                     _ => p.position,
                 };
                 Some((b, at))
@@ -373,10 +368,7 @@ impl Bodies {
             .collect();
         let places = places
             .iter()
-            .filter_map(|&t| {
-                let s = self.slots.place(t)?;
-                Some((t, [s.point, s.stand().ok()?]))
-            })
+            .filter_map(|s| Some((s.thing, [s.point, s.stand().ok()?])))
             .collect();
         Geo(points, places)
     }
@@ -390,7 +382,95 @@ impl Bodies {
         }
     }
 
+    /// Where a walk to `node` goes: `point` in its frame; with none, the stand point of `node`'s seat; else a free
+    /// standing spot in `node` (C14): its middle by E2's shared library (`replica::select`, a client's answer at the
+    /// same version), for N9's table to grant the nearest free legal standing spot to, the same every run.
+    fn goal(&self, body: Id, node: Id, point: Option<Vec3>) -> R<Target> {
+        if let Some(p) = point {
+            return Ok(Target::new(node, p));
+        }
+        // The stand point of the free slot the world picks for `body` (C19), else of the thing's seat.
+        let place = self
+            .slots
+            .free(&self.runner.controller, body, node)
+            .and_then(|slot| self.slots.place_in(node, slot))
+            .or_else(|| self.slots.place(node));
+        if let Some(s) = place {
+            return s.stand().map(|p| Target::new(s.floor, p));
+        }
+        let r = select::resolve(&self.town.tree, &Spot::Middle(node), None, &|_, _| false)?;
+        match spot::once(&r) {
+            spot::Spot::Stand(t) => Ok(t),
+            spot::Spot::Slot { .. } => Err(refusal("move.no-point", node)),
+        }
+    }
+
+    /// What the world knows of `ask` by `body`, for `replica::move_check::check`, the check a client runs (R8).
+    fn seen(&self, body: Id, ask: &Ask) -> Seen {
+        let t = ask.target();
+        Seen {
+            has: t.is_some_and(|t| {
+                self.slots.place(t).is_some() || self.town.tree.handle(t).is_some()
+            }),
+            seated: Some(self.slots.held_by(body).is_some()),
+            free: t.and_then(|t| {
+                self.slots.place(t)?;
+                Some(self.slots.free(&self.runner.controller, body, t).is_some())
+            }),
+        }
+    }
+
+    /// The candidate of `a`'s ranked list that is taken, and its rank (C14): a sit's or a lie's through I5's
+    /// selector (`sim::commit::bind`, named slots: the first free one binds), a walk's the first with somewhere to go.
+    fn bind(&self, a: &Asked) -> R<(usize, Ask)> {
+        if a.fallbacks.is_empty() {
+            return Ok((0, a.ask.clone()));
+        }
+        let list: Vec<&Ask> = std::iter::once(&a.ask).chain(&a.fallbacks).collect();
+        match a.ask {
+            Ask::Sit { .. } | Ask::Lie { .. } => {
+                let slots: Vec<Slot> = list
+                    .iter()
+                    .filter_map(|k| k.target().map(Slot::Named))
+                    .collect();
+                let free = |t: Id| {
+                    self.slots
+                        .free(&self.runner.controller, a.body, t)
+                        .is_some()
+                };
+                match bind(&slots, free, 0, true) {
+                    Bound::Slot { rank, .. } => Ok((rank, list[rank].clone())),
+                    Bound::Ended(n) => Err(Refusal {
+                        name: n,
+                        detail: format!("none of the {} free", slots.len()),
+                    }),
+                    Bound::Recheck { .. } => Err(refusal("place-taken", a.body)),
+                }
+            }
+            Ask::Walk { .. } => {
+                let mut last = None;
+                for (rank, k) in list.iter().enumerate() {
+                    if let Ask::Walk { node, point } = k {
+                        match self.goal(a.body, *node, *point) {
+                            Ok(_) => return Ok((rank, (*k).clone())),
+                            Err(r) => last = Some(r),
+                        }
+                    }
+                }
+                Err(last.unwrap_or_else(|| refusal("move.no-point", a.body)))
+            }
+            Ask::Rise => Ok((0, Ask::Rise)),
+        }
+    }
+
+    /// The candidate intent `id` took when it started, its rank in its ranked list and its target, read once.
+    pub fn took(&mut self, id: Id) -> Option<(usize, Option<Id>)> {
+        self.took.remove(&id)
+    }
+
     /// Starts one tick's moves, each for its intent, at body time: refused ones come back with their reason by name.
+    /// A ranked list is bound first, the move taken is checked as a client checks it (`replica::move_check`), then
+    /// started.
     pub fn start(&mut self, asks: Vec<(Id, Asked)>) -> Vec<(Id, R<()>)> {
         let now = self.runner.now;
         let mut out = Vec::new();
@@ -400,16 +480,21 @@ impl Bodies {
                 out.push((id, Err(refusal("body-unknown", a.body))));
                 continue;
             }
-            match a.ask {
+            let (rank, ask) = match self.bind(&a) {
+                Ok(t) => t,
+                Err(r) => {
+                    out.push((id, Err(r)));
+                    continue;
+                }
+            };
+            if let Verdict::No(n) = move_check::check(&ask, &self.seen(a.body, &ask)) {
+                out.push((id, Err(refusal(n, ask.target().unwrap_or(a.body)))));
+                continue;
+            }
+            self.took.insert(id, (rank, ask.target()));
+            match ask {
                 Ask::Walk { node, point } => {
-                    let goal = match point {
-                        Some(p) => Ok(Target::new(node, p)),
-                        None => match self.slots.place(node).map(|s| (s.floor, s.stand())) {
-                            Some((floor, Ok(p))) => Ok(Target::new(floor, p)),
-                            Some((_, Err(r))) => Err(r),
-                            None => Err(refusal("move.no-point", node)),
-                        },
-                    };
+                    let goal = self.goal(a.body, node, point);
                     self.replace(a.body);
                     let walk = Box::new(Route::sent(WALK, self.runner.tick));
                     let r = goal.and_then(|g| self.runner.send(a.body, walk, g, id));
@@ -420,12 +505,16 @@ impl Bodies {
                 }
                 Ask::Sit { thing } => {
                     self.replace(a.body);
-                    sits.push((id, a.body, thing));
+                    sits.push((id, a.body, thing, Stance::Sit));
+                }
+                Ask::Lie { thing } => {
+                    self.replace(a.body);
+                    sits.push((id, a.body, thing, Stance::Lie));
                 }
                 Ask::Rise => {
                     self.replace(a.body);
-                    let thing = self.slots.held_by(a.body);
-                    let geo = self.geo(&[a.body], &thing.into_iter().collect::<Vec<_>>());
+                    let held: Vec<&PlaceAt> = self.slots.held_place(a.body).into_iter().collect();
+                    let geo = self.geo(&[a.body], &held);
                     let r = self.slots.rise(
                         &mut self.runner.controller,
                         &mut self.due,
@@ -440,34 +529,41 @@ impl Bodies {
                 }
             }
         }
-        if !sits.is_empty() {
-            let bodies: Vec<Id> = sits.iter().map(|s| s.1).collect();
-            let things: Vec<Id> = sits.iter().map(|s| s.2).collect();
-            let geo = self.geo(&bodies, &things);
-            let requests: Vec<Request> = sits
-                .iter()
-                .map(|&(_, body, thing)| Request {
-                    body,
-                    thing,
-                    mv: &self.sit,
-                    stance: Stance::Sit,
-                })
+        // Taken one by one in B3's stable order (body, then thing), each into the free slot the world picks for it
+        // (C19), its reach measured to that slot's stand point.
+        sits.sort_by_key(|s| (s.1, s.2));
+        for (id, body, thing, stance) in sits {
+            let slot = self.slots.free(&self.runner.controller, body, thing);
+            let place: Vec<&PlaceAt> = slot
+                .and_then(|s| self.slots.place_in(thing, s))
+                .into_iter()
                 .collect();
-            let done = self.slots.commit(
-                &mut self.runner.controller,
-                &mut self.due,
-                &mut self.mint,
-                &mut self.moves,
-                &geo,
-                &requests,
-                now,
-            );
-            // Taken in B3's stable order, and each matched back to its intent by its body.
-            for (body, r) in done {
-                if let Some(&(id, ..)) = sits.iter().find(|s| s.1 == body) {
-                    out.push((id, self.started(id, body, r)));
-                }
-            }
+            let geo = self.geo(&[body], &place);
+            let request = Request {
+                body,
+                thing,
+                slot,
+                mv: if stance == Stance::Lie {
+                    &self.lie
+                } else {
+                    &self.sit
+                },
+                stance,
+            };
+            let r = self
+                .slots
+                .commit(
+                    &mut self.runner.controller,
+                    &mut self.due,
+                    &mut self.mint,
+                    &mut self.moves,
+                    &geo,
+                    &[request],
+                    now,
+                )
+                .pop()
+                .map_or_else(|| Err(refusal("place-unknown", thing)), |(_, r)| r);
+            out.push((id, self.started(id, body, r)));
         }
         out
     }
@@ -487,10 +583,8 @@ impl Bodies {
             // host and the controller.
             let at = self.runner.now;
             while let Some(t) = self.due.fire(at + 1) {
-                let geo = self.geo(
-                    &[t.node],
-                    &self.slots.held_by(t.node).into_iter().collect::<Vec<_>>(),
-                );
+                let held: Vec<&PlaceAt> = self.slots.held_place(t.node).into_iter().collect();
+                let geo = self.geo(&[t.node], &held);
                 let fired = self.slots.fire(
                     &mut self.runner.controller,
                     &mut self.due,
@@ -520,6 +614,15 @@ impl Bodies {
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
             let _ = self.runner.tick(&mut self.town);
+            // Who hears each utterance the step started, as the bodies stand after it (B11, #3369): every body in the
+            // zone, a seated or lying one included (#3393).
+            let said = std::mem::take(&mut self.runner.said);
+            let c = &self.runner.controller;
+            let ids: Vec<Id> = c.ids().collect();
+            let at = self.runner.now;
+            for (speaker, s) in speech::heard(&mut self.hearing, c.near(), ids, &said) {
+                self.heard.push((speaker, s, at));
+            }
             let walks: Vec<(Id, Id)> = self
                 .live
                 .iter()
@@ -541,18 +644,23 @@ impl Bodies {
         out
     }
 
-    /// Intent `id` timed out: its walk stops where the body is. A sit or a rise is short and runs to its end, so a
-    /// seat is never left half taken.
-    pub fn cancel(&mut self, id: Id) {
-        let Some((&body, _)) = self
-            .live
-            .iter()
-            .find(|(_, (i, l))| *i == id && matches!(l, Live::Walk))
-        else {
-            return;
-        };
+    /// The moves that ended between steps (a walk replaced by a new move, `claim-taken`), taken now, so the world
+    /// writes each ending in the tick its walk stopped.
+    pub fn replaced(&mut self) -> Vec<(Id, Result<(), String>)> {
+        std::mem::take(&mut self.ended)
+    }
+
+    /// Intent `id` ended (its deadline passed): its walk stops where the body is, now ([`Cut::Stopped`]). A sit, a lie
+    /// or a rise is short and runs to its end, so a seat is never left half taken ([`Cut::Finishing`]): the world
+    /// ends the act when its move ends. `None`: no move is going for it.
+    pub fn cancel(&mut self, id: Id) -> Option<Cut> {
+        let (&body, &(_, live)) = self.live.iter().find(|(_, (i, _))| *i == id)?;
+        if !matches!(live, Live::Walk) {
+            return Some(Cut::Finishing);
+        }
         self.runner.end_order(body);
         self.live.remove(&body);
+        Some(Cut::Stopped)
     }
 
     /// Births into this world's controller (K10, C3 #3367): the births `life` takes at world time `now`, each body
@@ -582,6 +690,15 @@ impl Bodies {
         self.logged.remove(&r.body);
         Ok((r, open))
     }
+}
+
+/// What ending an intent did to its move ([`Bodies::cancel`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cut {
+    /// Its walk stopped where the body stands.
+    Stopped,
+    /// Its sit, lie or rise runs to its end, a few seconds at most.
+    Finishing,
 }
 
 fn refusal(name: &'static str, node: Id) -> Refusal {

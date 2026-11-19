@@ -13,7 +13,7 @@
 //! compares and descends through the gateway, one request at a time (R5b, #3164).
 
 use crate::apply::Replica;
-use crate::effects::Actor;
+use crate::effects::{Actor, Body, Effect, read_id};
 use crate::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use crate::ids::{Id, Scope, Version};
 use crate::intents::{Fallback, Hello, Intent, PROTOCOL, Target};
@@ -90,14 +90,18 @@ pub fn wire_world_build(first: &[u8]) -> Result<String, JsError> {
     }
 }
 
-/// The sign-in `{1: token, 2: cursor}`; `cursor` is a version's bytes, empty for a fresh stream. A refusal never
+/// The sign-in `{1: token, 2: cursor, 3: seen}`; `cursor` is a version's bytes, empty for a fresh stream, and `seen`
+/// how many frames the client applied at that version (the gateway's default, 1, when left out). A refusal never
 /// carries the token.
 #[wasm_bindgen(js_name = wireSignIn)]
-pub fn wire_sign_in(token: &str, cursor: &[u8]) -> Result<Vec<u8>, JsError> {
+pub fn wire_sign_in(token: &str, cursor: &[u8], seen: Option<u32>) -> Result<Vec<u8>, JsError> {
     let token = Name::new(token).ok_or_else(|| JsError::new("token-not-a-name"))?;
     let mut m = BTreeMap::from([(1, Value::Text(token))]);
     if !cursor.is_empty() {
         m.insert(2, decode(cursor).map_err(js)?.value);
+        if let Some(n) = seen {
+            m.insert(3, Value::Uint(u64::from(n)));
+        }
     }
     encode(&Value::Map(m)).map_err(js)
 }
@@ -112,6 +116,13 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
     };
     if let Some(Value::Text(name)) = m.get(&4) {
         return Ok(format!("outcome {}", name.as_str()));
+    }
+    // A view item (C6), which `wireHeard` reads, or the world's refusal of the subscription.
+    if m.contains_key(&VIEW_ITEM) {
+        return Ok("item".to_owned());
+    }
+    if let Some(Value::Text(name)) = m.get(&VIEW_REFUSED) {
+        return Ok(format!("view-refused {}", name.as_str()));
     }
     if let Some(Value::Uint(n)) = m.get(&wire::ASK) {
         return Ok(match m.get(&wire::REFUSED) {
@@ -136,11 +147,147 @@ pub fn wire_frame(frame: &[u8]) -> Result<String, JsError> {
     Ok(format!("answer {sequence} {version} {kind} {name}"))
 }
 
+/// The gateway's view frames (`gatewayd::views`, #3292): a subscribe in, an item or a refusal out.
+const VIEW_SUBSCRIBE: u64 = 30;
+const VIEW_ITEM: u64 = 31;
+const VIEW_REFUSED: u64 = 32;
+/// The level a Soul's daemon subscribes at: sampled, so every entry of a body near it that is not a plain motion
+/// sample reaches it (R4 rule 2; R9b, #3201). What is addressed to it is sent at every level (R4 rule 5).
+const FOLLOW_LEVEL: u64 = 2;
+/// R4's entry item (`worldd::views::subscription::Kind::Entry`): `{1: 1, 2: entry}`.
+const ENTRY_ITEM: u64 = 1;
+
+fn id_text(id: Id) -> String {
+    format!("{}-{}", to_hex(&id.scope().0), id.counter())
+}
+
+/// A Soul's subscription to what it hears (C6, #3390) and to the entries of the bodies near it (R9b, #3201): `{30:
+/// {1: [{2: body}], 2: sampled, 3: budget}}`, its own body followed, so the world addresses to it each utterance that
+/// body hears (R4 rule 5) and sends it the entries of its interest set (R4 rule 2, [`wire_entry`]).
+#[wasm_bindgen(js_name = wireSubscribe)]
+pub fn wire_subscribe(scope: &[u8], counter: u64, budget: u64) -> Result<Vec<u8>, JsError> {
+    let scope = Scope(
+        scope
+            .try_into()
+            .map_err(|_| JsError::new("scope-not-16-bytes"))?,
+    );
+    let body = Id::new(scope, counter).ok_or_else(|| JsError::new("id-counter-exhausted"))?;
+    let request = Value::Map(BTreeMap::from([
+        (
+            1,
+            Value::Array(vec![Value::Map(BTreeMap::from([(2, body.to_value())]))]),
+        ),
+        (2, Value::Uint(FOLLOW_LEVEL)),
+        (3, Value::Uint(budget)),
+    ]));
+    encode(&Value::Map(BTreeMap::from([(VIEW_SUBSCRIBE, request)]))).map_err(js)
+}
+
+/// An utterance in a view item frame (`{31: item}`) as a line, `heard <sequence> <world µs> <speaker id> <audience id
+/// or -> <words hex or ->`, the audience `-` for the public; empty when the item is not an utterance.
+#[wasm_bindgen(js_name = wireHeard)]
+pub fn wire_heard(frame: &[u8]) -> Result<String, JsError> {
+    let Value::Map(mut m) = decode(frame).map_err(js)?.value else {
+        return Err(JsError::new("frame-not-a-record"));
+    };
+    let Some(Value::Bytes(item)) = m.remove(&VIEW_ITEM) else {
+        return Err(JsError::new("frame-not-an-item"));
+    };
+    let Some(h) = crate::speech::heard(&item).map_err(js)? else {
+        return Ok(String::new());
+    };
+    let audience = match h.said.audience {
+        crate::world_model::Audience::Everyone => "-".to_owned(),
+        crate::world_model::Audience::Of(a) => id_text(a),
+    };
+    let words = h.words.as_deref().map_or_else(|| "-".to_owned(), to_hex);
+    Ok(format!(
+        "heard {} {} {} {audience} {words}",
+        h.sequence,
+        h.at,
+        id_text(h.speaker)
+    ))
+}
+
+/// The largest integer a JavaScript number holds exactly.
+const SAFE_MOST: u64 = (1 << 53) - 1;
+
+/// An event field's value as JSON: an integer, a name, an id as `<scope hex>-<counter>`, or any other value as its
+/// encoding's hex (quoted).
+fn json_value(v: &Value) -> Result<String, JsError> {
+    Ok(match v {
+        Value::Uint(u) if *u <= SAFE_MOST => u.to_string(),
+        Value::Nint(n) if *n < SAFE_MOST => format!("-{}", n + 1),
+        // A name holds letters, digits and `_ - . : / @` only (T0 rule 6): nothing to escape.
+        Value::Text(name) => format!("\"{}\"", name.as_str()),
+        _ => match read_id(v) {
+            Ok(id) => format!("\"{}\"", id_text(id)),
+            Err(_) => format!("\"{}\"", to_hex(&encode(v).map_err(js)?)),
+        },
+    })
+}
+
+/// An entry in a view item frame (R4's `{1: 1, 2: entry}`: an entry of a body in the interest set) as JSON, for the
+/// daemon to follow (R9b, #3201): `{"sequence":n,"at":n,"actor":"<id>"|null,"node":"<id>","changes":n,"events":
+/// [{"name":"..","fields":{"<n>":<value>}}]}`, `actor` null for the world or a creator; empty when the item is not
+/// an entry.
+#[wasm_bindgen(js_name = wireEntry)]
+pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
+    let Value::Map(mut m) = decode(frame).map_err(js)?.value else {
+        return Err(JsError::new("frame-not-a-record"));
+    };
+    let Some(Value::Bytes(item)) = m.remove(&VIEW_ITEM) else {
+        return Err(JsError::new("frame-not-an-item"));
+    };
+    let Value::Map(mut item) = decode(&item).map_err(js)?.value else {
+        return Err(JsError::new("item-not-a-record"));
+    };
+    if item.get(&1) != Some(&Value::Uint(ENTRY_ITEM)) {
+        return Ok(String::new());
+    }
+    let entry = item
+        .remove(&2)
+        .ok_or_else(|| JsError::new("item-without-entry"))?;
+    let e = Effect::read(entry).map_err(js)?;
+    let actor = match e.envelope.actor {
+        Actor::Soul(id) => format!("\"{}\"", id_text(id)),
+        Actor::Creator(_) | Actor::World => "null".to_owned(),
+    };
+    let changes = match &e.body {
+        Body::Changes(c) => c.len(),
+        _ => 0,
+    };
+    let mut events = Vec::new();
+    for ev in e.events.iter().flatten() {
+        let mut fields = Vec::new();
+        for (k, v) in &ev.fields {
+            fields.push(format!("\"{k}\":{}", json_value(v)?));
+        }
+        events.push(format!(
+            r#"{{"name":"{}","fields":{{{}}}}}"#,
+            ev.name.as_str(),
+            fields.join(",")
+        ));
+    }
+    Ok(format!(
+        r#"{{"sequence":{},"at":{},"actor":{actor},"node":"{}","changes":{changes},"events":[{}]}}"#,
+        e.envelope.sequence,
+        e.envelope.at,
+        id_text(e.envelope.node),
+        events.join(",")
+    ))
+}
+
 /// A Soul's intent with no parameters, `verb` a ranked list of verbs split by spaces (the rest are its fallbacks,
 /// R7), each on `target` (a node's id as `<scope hex>-<counter>`, or empty for none), decided against `basis` (a
 /// version's bytes; empty for the zero version) and expiring at `expiry` world microseconds; read back as the world
-/// reads it.
+/// reads it. `words`, when given, is parameter 1 as T8's `{23: words}` (a say or a whisper, V1b). C10 (#3414): `target`
+/// may be one id per verb, split by spaces; `args`, the first verb's thing arguments as `name=<id>` split by spaces, is
+/// parameter 1 as C2's `[[name, id], ...]`. E26 (#3329): `params`, a JSON object of numbered parameters for an engine
+/// act (`activity:offer`): a whole number, a name, an id (`<scope hex>-<counter>`), or a list of those.
 #[wasm_bindgen(js_name = wireIntent)]
+// JS calls it with positional arguments; the words came last (C4, #3368), then the arguments (C10, #3414).
+#[allow(clippy::too_many_arguments)]
 pub fn wire_intent(
     scope: &[u8],
     counter: u64,
@@ -149,19 +296,41 @@ pub fn wire_intent(
     basis: &[u8],
     expiry: u64,
     target: &str,
+    words: Option<String>,
+    args: Option<String>,
+    params: Option<String>,
 ) -> Result<Vec<u8>, JsError> {
-    let target = match target {
-        "" => None,
-        t => {
-            let (scope, counter) = t
-                .split_once('-')
-                .and_then(|(s, c)| Some((from_hex(s).ok()?.try_into().ok()?, c.parse().ok()?)))
-                .ok_or_else(|| JsError::new("target-not-an-id"))?;
-            let id =
-                Id::new(Scope(scope), counter).ok_or_else(|| JsError::new("target-not-an-id"))?;
-            Some(Target::Node(id))
-        }
+    let node = |t: &str| -> Result<Option<Target>, JsError> {
+        Ok(match t {
+            "" => None,
+            t => {
+                let (scope, counter) = t
+                    .split_once('-')
+                    .and_then(|(s, c)| Some((from_hex(s).ok()?.try_into().ok()?, c.parse().ok()?)))
+                    .ok_or_else(|| JsError::new("target-not-an-id"))?;
+                let id = Id::new(Scope(scope), counter)
+                    .ok_or_else(|| JsError::new("target-not-an-id"))?;
+                Some(Target::Node(id))
+            }
+        })
     };
+    let mut targets = target
+        .split(' ')
+        .map(node)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter();
+    let target = targets.next().flatten();
+    let args = (args
+        .unwrap_or_default()
+        .split(' ')
+        .filter(|a| !a.is_empty()))
+    .map(|a| match a.split_once('=').map(|(k, v)| (k, node(v))) {
+        Some((k, Ok(Some(Target::Node(id))))) => {
+            Ok(Value::Array(vec![Value::Bytes(k.into()), id.to_value()]))
+        }
+        _ => Err(JsError::new("arg-not-name-and-id")),
+    })
+    .collect::<Result<Vec<_>, _>>()?;
     let scope = Scope(
         scope
             .try_into()
@@ -188,7 +357,7 @@ pub fn wire_intent(
         .map(|v| {
             v.map(|verb| Fallback {
                 verb,
-                target: target.clone(),
+                target: targets.next().flatten().or_else(|| target.clone()),
                 parameters: BTreeMap::new(),
                 resources: Vec::new(),
             })
@@ -198,7 +367,17 @@ pub fn wire_intent(
         actor: Actor::Soul(id),
         verb,
         target,
-        parameters: BTreeMap::new(),
+        parameters: words
+            .map(|w| {
+                (
+                    1,
+                    Value::Map(BTreeMap::from([(23, Value::Bytes(w.into_bytes()))])),
+                )
+            })
+            .into_iter()
+            .chain((!args.is_empty()).then_some((1, Value::Array(args))))
+            .chain(numbered(params.as_deref(), &node)?)
+            .collect(),
         sequence,
         basis,
         expiry: i64::try_from(expiry).map_err(|_| JsError::new("expiry-too-far"))?,
@@ -210,6 +389,40 @@ pub fn wire_intent(
     let bytes = encode(&intent.to_value()).map_err(js)?;
     Intent::read(&bytes).map_err(js)?;
     Ok(bytes)
+}
+
+/// E26: `wireIntent`'s numbered parameters, read from a JSON object; a text is an id when it reads as one.
+fn numbered(
+    params: Option<&str>,
+    node: &dyn Fn(&str) -> Result<Option<Target>, JsError>,
+) -> Result<Vec<(u64, Value)>, JsError> {
+    use crate::rules::json::{Value as Json, parse};
+    let bad = || JsError::new("params-not-numbered");
+    fn one(
+        v: &Json,
+        node: &dyn Fn(&str) -> Result<Option<Target>, JsError>,
+    ) -> Result<Value, JsError> {
+        Ok(match v {
+            Json::Int(n) => {
+                Value::Uint(u64::try_from(*n).map_err(|_| JsError::new("param-negative"))?)
+            }
+            Json::Str(t) => match node(t) {
+                Ok(Some(Target::Node(id))) => id.to_value(),
+                _ => Value::Text(Name::new(t).ok_or_else(|| JsError::new("param-not-a-name"))?),
+            },
+            Json::Arr(a) => Value::Array(a.iter().map(|x| one(x, node)).collect::<Result<_, _>>()?),
+            _ => return Err(JsError::new("param-unsupported")),
+        })
+    }
+    let Some(text) = params.filter(|t| !t.is_empty()) else {
+        return Ok(Vec::new());
+    };
+    let Json::Obj(m) = parse(text).map_err(|_| bad())? else {
+        return Err(bad());
+    };
+    m.iter()
+        .map(|(k, v)| Ok((k.parse().map_err(|_| bad())?, one(v, node)?)))
+        .collect()
 }
 
 fn sync_map(frame: &[u8]) -> Result<BTreeMap<u64, Value>, JsError> {
@@ -260,6 +473,10 @@ impl WasmCopy {
         let (ids, hashes) = read_hashes(&m).map_err(js)?;
         let version = m.get(&1).ok_or_else(|| JsError::new("sync-answer"))?;
         let version = to_hex(&encode(version).map_err(js)?);
+        // A sync cut off before it finished (its socket closed) is let go first (#3424).
+        if let Some(old) = self.descent.take() {
+            self.copy.abandon(old);
+        }
         self.descent = Some(self.copy.compare(&ids, hashes));
         Ok(version)
     }

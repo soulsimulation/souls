@@ -1,0 +1,778 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:pruning_shrub (from #1748). Six named soft shoots, each a bool that starts true, and a count of the cuttings kept in the shrub's own tray. Anyone with a free hand prunes one chosen shoot (one form, `prune`, whose `shoot` argument is one of the six shoot fields the form lists): walks to the stand, pinches at that shoot's tip for four seconds, the shoot is gone for good and one more cutting lies in the tray. Refused, as the original refused: a shoot already pruned ('That shoot has already been pruned; it cannot regrow.') and no free hand ('Put down what you hold before hand pruning.'). No form sets a shoot back to true, so a pruned shoot names no fix. A shoot outside the form's own list (here `cuttings`, a field of the shrub the form does not name) is bad input, so the form never writes a field it does not name.",
+  "cases": [
+    {
+      "name": "prune_left_low_every_need_met",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "left_low"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "prune_left_low_already_pruned",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "left_low"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub",
+            "fields": {
+              "left_low": false,
+              "cuttings": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "left_low",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "prune_left_low_hands_full",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "left_low"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "prune_right_low_every_need_met",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "right_low"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "prune_right_low_already_pruned",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "right_low"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub",
+            "fields": {
+              "right_low": false,
+              "cuttings": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "right_low",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "prune_right_low_hands_full",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "right_low"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "prune_left_mid_every_need_met",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "left_mid"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "prune_left_mid_already_pruned",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "left_mid"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub",
+            "fields": {
+              "left_mid": false,
+              "cuttings": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "left_mid",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "prune_left_mid_hands_full",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "left_mid"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "prune_right_mid_every_need_met",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "right_mid"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "prune_right_mid_already_pruned",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "right_mid"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub",
+            "fields": {
+              "right_mid": false,
+              "cuttings": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "right_mid",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "prune_right_mid_hands_full",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "right_mid"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "prune_left_high_every_need_met",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "left_high"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "prune_left_high_already_pruned",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "left_high"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub",
+            "fields": {
+              "left_high": false,
+              "cuttings": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "left_high",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "prune_left_high_hands_full",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "left_high"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "prune_right_high_every_need_met",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "right_high"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "prune_right_high_already_pruned",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "right_high"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub",
+            "fields": {
+              "right_high": false,
+              "cuttings": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "right_high",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "prune_right_high_hands_full",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "right_high"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "t1": {
+            "kind": "eden:tomato"
+          },
+          "t2": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": "t2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "prune_a_field_the_form_does_not_name",
+      "act": {
+        "this": "sh1",
+        "form": "prune",
+        "args": {
+          "shoot": "cuttings"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "bad_input",
+        "need": -1,
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "shoot",
+          "value": "cuttings"
+        },
+        "fix": null
+      }
+    }
+  ]
+}

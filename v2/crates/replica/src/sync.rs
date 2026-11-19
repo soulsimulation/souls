@@ -138,11 +138,14 @@ pub struct Synced {
     pub held: usize,
 }
 
-/// A sync under way ([`Copy::compare`]): the records still to ask for in this level, the next level's, and the count.
+/// A sync under way ([`Copy::compare`]): the records still to ask for in this level, the next level's, the count,
+/// the scope's new hashes (the copy's own only once it finishes), and the records it has taken so far.
 pub struct Descent {
     want: Vec<Vec<u8>>,
     next: Vec<Vec<u8>>,
     s: Synced,
+    roots: BTreeMap<Id, Vec<u8>>,
+    taken: Vec<Vec<u8>>,
 }
 
 /// A client's copy of its scope: each scope node's hash, and the records it reaches, by hash.
@@ -213,8 +216,13 @@ impl Copy {
             if asked.is_empty() {
                 return self.finish(d);
             }
-            let got = src.records(&asked)?;
-            self.take(&mut d, &asked, got)?;
+            if let Err(e) = src
+                .records(&asked)
+                .and_then(|got| self.take(&mut d, &asked, got))
+            {
+                self.abandon(d);
+                return Err(e);
+            }
         }
     }
 
@@ -241,11 +249,12 @@ impl Copy {
             }
             roots.insert(*id, h);
         }
-        self.roots = roots;
         Descent {
             want: Vec::new(),
             next: want,
             s,
+            roots,
+            taken: Vec::new(),
         }
     }
 
@@ -280,17 +289,33 @@ impl Copy {
             d.s.got += bytes.len() as u64;
             d.s.fetched += 1;
             self.records.insert(h.clone(), bytes);
+            d.taken.push(h.clone());
         }
         Ok(())
     }
 
-    /// Rule 3's let go, once [`Copy::ask`] gives nothing more.
-    pub fn finish(&mut self, d: Descent) -> R<Synced> {
-        let mut s = d.s;
-        let reached = self.reach()?;
+    /// Rule 3's let go, once [`Copy::ask`] gives nothing more: the scope's new hashes become the copy's.
+    pub fn finish(&mut self, mut d: Descent) -> R<Synced> {
+        let reached = match self.reach_from(&d.roots) {
+            Ok(r) => r,
+            Err(e) => {
+                self.abandon(d);
+                return Err(e);
+            }
+        };
+        self.roots = std::mem::take(&mut d.roots);
         self.records.retain(|h, _| reached.contains(h));
-        s.held = reached.len();
-        Ok(s)
+        d.s.held = reached.len();
+        Ok(d.s)
+    }
+
+    /// A sync that will not finish (its socket closed, or an answer was refused): the records it took are let go and
+    /// the copy is as it was. Compare only descends from a hash it does not hold, so it must never hold a record
+    /// without the records below it, or the next sync would stop short of them (`sync-missing`, #3424).
+    pub fn abandon(&mut self, d: Descent) {
+        for h in d.taken {
+            self.records.remove(&h);
+        }
     }
 
     /// The bytes of every record held: what a snapshot of the scope (a sync from nothing) would fetch.
@@ -300,8 +325,12 @@ impl Copy {
 
     /// The hashes the scope reaches, each record held and checked; refused by name if one is missing.
     pub fn reach(&self) -> R<BTreeSet<Vec<u8>>> {
+        self.reach_from(&self.roots)
+    }
+
+    fn reach_from(&self, roots: &BTreeMap<Id, Vec<u8>>) -> R<BTreeSet<Vec<u8>>> {
         let mut seen = BTreeSet::new();
-        let mut stack: Vec<Vec<u8>> = self.roots.values().cloned().collect();
+        let mut stack: Vec<Vec<u8>> = roots.values().cloned().collect();
         while let Some(h) = stack.pop() {
             if seen.contains(&h) {
                 continue;

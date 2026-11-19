@@ -476,3 +476,267 @@ fn a5_one_owner_and_a_consistent_copy_while_in_use() {
         "{counts:?} then {total}"
     );
 }
+
+/// One request: its status, its headers and its JSON body (`null` when empty).
+fn request(
+    addr: &str,
+    method: &str,
+    path: &str,
+    bearer: Option<&str>,
+    body: &str,
+) -> (u16, String, Value) {
+    let mut s = TcpStream::connect(addr).expect("connects");
+    let auth = bearer.map_or(String::new(), |t| format!("authorization: Bearer {t}\r\n"));
+    write!(
+        s,
+        "{method} {path} HTTP/1.1\r\nhost: {addr}\r\n{auth}content-length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    let (head, body) = out.split_once("\r\n\r\n").unwrap();
+    let body = if body.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_str(body).unwrap()
+    };
+    (head[9..12].parse().unwrap(), head.to_string(), body)
+}
+
+const VIEW_KEY: [u8; 32] = [0x5a; 32];
+
+fn soul_grant(n: u64) -> String {
+    format!("soul-{}-{n}", "01".repeat(16))
+}
+
+/// V13b (#3407) A1: a test person's session exchanges for a view token scoped to what they own, signed with the key the
+/// gateways hold; it reaches neither the log nor the store, and only the page's origin may read the answer.
+#[test]
+fn v13b_a1_a_session_exchanges_for_a_view_token_of_what_the_account_owns() {
+    let dir = scratch("v13b-a1");
+    let store = dir.join("accounts.sqlite");
+    let key = dir.join("view.key");
+    std::fs::write(&key, replica::encode::to_hex(&VIEW_KEY)).unwrap();
+    let own = format!("Ada={}@0707.10", soul_grant(1));
+    let own2 = format!("Ada={}", soul_grant(4));
+    let mut child = directoryd(&[
+        "--listen",
+        "127.0.0.1:0",
+        "--public-url",
+        "http://127.0.0.1:8080",
+        "--store",
+        store.to_str().unwrap(),
+        "--test-sign-in",
+        "--view-key",
+        key.to_str().unwrap(),
+        "--test-own",
+        &own,
+        "--test-own",
+        &own2,
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .spawn()
+    .expect("starts");
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let addr = line
+        .trim()
+        .strip_prefix("listening on ")
+        .expect("listening")
+        .to_string();
+
+    let before = directoryd::accounts::serve::now();
+    let (status, head, got) = request(
+        &addr,
+        "POST",
+        "/v1/account/view-token",
+        None,
+        r#"{"name":"Ada"}"#,
+    );
+    let (none, _, nothing) = request(
+        &addr,
+        "POST",
+        "/v1/account/view-token",
+        None,
+        r#"{"name":"Bo"}"#,
+    );
+    let (pre, pre_head, _) = request(&addr, "OPTIONS", "/v1/account/view-token", None, "");
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let mut log = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut log)
+        .unwrap();
+
+    assert_eq!(status, 200, "{got}");
+    let token = got["token"].as_str().unwrap();
+    let (body, mac) = token.rsplit_once('.').unwrap();
+    let expires = got["expires"].as_u64().unwrap();
+    assert_eq!(
+        body,
+        format!("view.{expires}.{}/{}", soul_grant(1), soul_grant(4)),
+        "scoped to what Ada owns"
+    );
+    let k = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &VIEW_KEY);
+    ring::hmac::verify(&k, body.as_bytes(), &directoryd_hex(mac))
+        .expect("signed with the shared key");
+    let ttl = directoryd::accounts::view::VIEW_TTL_S;
+    assert!(
+        expires >= before + ttl && expires <= before + ttl + 2,
+        "short-lived"
+    );
+    assert_eq!(got["owned"][0]["follow"], "0707.10");
+    assert_eq!(got["owned"][1]["follow"], Value::Null);
+    assert!(head.contains("cache-control: no-store"));
+    assert!(head.contains("access-control-allow-origin: http://127.0.0.1:8080"));
+    assert_eq!(
+        (none, nothing["refused"].as_str()),
+        (404, Some("nothing-owned"))
+    );
+    assert_eq!(pre, 204);
+    assert!(pre_head.contains("access-control-allow-headers: authorization, content-type"));
+    assert!(
+        !log.contains(mac) && !log.contains("view."),
+        "the token is never logged: {log}"
+    );
+    let file = std::fs::read(&store).unwrap();
+    assert!(
+        !file.windows(mac.len()).any(|w| w == mac.as_bytes()),
+        "nor stored"
+    );
+    println!(
+        "v13b a1: owned {}; expires in {} s; log:\n{log}",
+        got["owned"],
+        expires - before
+    );
+}
+
+fn directoryd_hex(text: &str) -> Vec<u8> {
+    replica::encode::from_hex(text).unwrap()
+}
+
+/// V13b (#3407) A3: an expired provider session, or one signed out, gets no view token; a live one does.
+#[test]
+fn v13b_a3_an_expired_or_signed_out_session_gets_no_view_token() {
+    use directoryd::accounts::serve::{App, now, run};
+    use directoryd::accounts::view::ViewKey;
+    let dir = scratch("v13b-a3");
+    let p = Published::default();
+    let k = Key::new("k1");
+    p.publish(&k);
+    let store = Store::open(&dir.join("accounts.sqlite")).unwrap();
+    let account = store.sign_in(ISSUER, "user_1", now()).unwrap().account;
+    store
+        .own(&account, &soul_grant(1), Some("0707.10"))
+        .unwrap();
+    let app = App {
+        store,
+        verifier: Some(verifier(&p)),
+        test_sign_in: false,
+        view_key: Some(ViewKey::new(&VIEW_KEY)),
+        origin: Some(PAGE.to_string()),
+        mailbox_key: None,
+        pairing: None,
+        log: Mutex::new(Box::new(std::io::sink())),
+        worlds: None,
+    };
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    std::thread::spawn(move || run(listener, Arc::new(app)));
+
+    let t = now();
+    let live = k.token(&claims(t, "user_1"));
+    let mut old = claims(t, "user_1");
+    old["exp"] = json!(t - 60);
+    let expired = k.token(&old);
+    let path = "/v1/account/view-token";
+    let (s1, _, a) = request(&addr, "POST", path, Some(&live), "");
+    let (s2, _, b) = request(&addr, "POST", path, Some(&expired), "");
+    let (s3, _, _) = request(&addr, "POST", "/v1/account/sign-out", Some(&live), "");
+    let (s4, _, c) = request(&addr, "POST", path, Some(&live), "");
+    println!("v13b a3: live {s1}; expired {s2} {b}; signed out {s3}; after sign-out {s4} {c}");
+    assert_eq!(s1, 200);
+    assert!(a["token"].as_str().unwrap().starts_with("view."));
+    assert_eq!((s2, b["refused"].as_str()), (401, Some("token-expired")));
+    assert_eq!(s3, 200);
+    assert_eq!((s4, c["refused"].as_str()), (401, Some("session-revoked")));
+    assert!(b.get("token").is_none() && c.get("token").is_none());
+}
+
+/// V13c (#3418) A1: a completed pairing (W2) records the Soul, and the body the page follows (the Soul's own), under
+/// the approving account; the account's session then exchanges for a view token of it.
+#[test]
+fn v13c_a1_a_completed_pairing_records_the_soul_under_the_approving_account() {
+    use directoryd::accounts::serve::{App, run};
+    use directoryd::accounts::view::{ViewKey, follow_of};
+    use directoryd::pairing::Pairing;
+    let dir = scratch("v13c-a1");
+    let pairing = Pairing::open(&dir.join("pairing.sqlite"), None, "http://127.0.0.1:1").unwrap();
+    let app = Arc::new(App {
+        store: Store::open(&dir.join("accounts.sqlite")).unwrap(),
+        verifier: None,
+        test_sign_in: true,
+        view_key: Some(ViewKey::new(&VIEW_KEY)),
+        origin: None,
+        mailbox_key: None,
+        pairing: Some(pairing),
+        log: Mutex::new(Box::new(std::io::sink())),
+        worlds: None,
+    });
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let served = app.clone();
+    std::thread::spawn(move || run(listener, served));
+
+    // Before: Ada owns nothing, so her session gets no view.
+    let ada = json!({"name": "Ada"}).to_string();
+    let (s0, _, b0) = request(&addr, "POST", "/v1/account/view-token", None, &ada);
+    assert_eq!((s0, b0["refused"].as_str()), (404, Some("nothing-owned")));
+    // A daemon asks for a new Soul; Ada approves once on the card.
+    let ask =
+        json!({"secret_hash": "ab".repeat(32), "device": "laptop", "label": "agent", "new": true});
+    let (s1, _, asked) = request(&addr, "POST", "/v1/pair/request", None, &ask.to_string());
+    assert_eq!(s1, 200);
+    let approve = json!({"test_person": "Ada", "code": asked["code"], "confirm": true});
+    let (s2, _, approved) = request(
+        &addr,
+        "POST",
+        "/v1/pair/approve",
+        None,
+        &approve.to_string(),
+    );
+    assert_eq!(s2, 200, "{approved}");
+    let grant = approved["soul"].as_str().unwrap().to_string();
+
+    let account = app
+        .store
+        .sign_in(start::TEST_ISSUER, "Ada", 0)
+        .unwrap()
+        .account;
+    let owned = app.store.grants(&account).unwrap();
+    println!("v13c a1: Ada owns {owned:?}");
+    assert!(follow_of(&grant).is_some());
+    assert_eq!(owned, vec![(grant.clone(), follow_of(&grant))]);
+    // Bea, who approved nothing, owns nothing.
+    let bea = app
+        .store
+        .sign_in(start::TEST_ISSUER, "Bea", 0)
+        .unwrap()
+        .account;
+    assert!(app.store.grants(&bea).unwrap().is_empty());
+    // After: Ada's session exchanges for a view of her paired Soul, following its own body.
+    let (s3, _, view) = request(&addr, "POST", "/v1/account/view-token", None, &ada);
+    assert_eq!(s3, 200);
+    assert!(view["token"].as_str().unwrap().contains(&grant));
+    assert_eq!(
+        view["owned"],
+        json!([{"grant": grant, "follow": follow_of(&grant)}])
+    );
+}

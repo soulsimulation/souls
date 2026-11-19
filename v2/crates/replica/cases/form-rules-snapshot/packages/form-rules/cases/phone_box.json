@@ -1,0 +1,331 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:phone_box (SA-X34, #2924): open the door, step inside (one at a time), step out, close the door.",
+  "cases": [
+    {
+      "name": "phone_box_open_shut",
+      "act": {
+        "this": "t1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:phone_box"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "phone_box_open_open",
+      "act": {
+        "this": "t1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:phone_box",
+            "fields": {
+              "open": true
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "close"
+        }
+      }
+    },
+    {
+      "name": "phone_box_close_open",
+      "act": {
+        "this": "t1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:phone_box",
+            "fields": {
+              "open": true
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "phone_box_close_shut",
+      "act": {
+        "this": "t1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:phone_box"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "open"
+        }
+      }
+    },
+    {
+      "name": "phone_box_step_in_open_empty",
+      "act": {
+        "this": "t1",
+        "form": "step_in"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:phone_box",
+            "fields": {
+              "open": true
+            },
+            "slots": {
+              "inside": []
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "phone_box_step_in_shut",
+      "act": {
+        "this": "t1",
+        "form": "step_in"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:phone_box",
+            "slots": {
+              "inside": []
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "open"
+        }
+      }
+    },
+    {
+      "name": "phone_box_step_in_taken",
+      "act": {
+        "this": "t1",
+        "form": "step_in"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:phone_box",
+            "fields": {
+              "open": true
+            },
+            "slots": {
+              "inside": [
+                "b2"
+              ]
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1
+      }
+    },
+    {
+      "name": "phone_box_step_out_open",
+      "act": {
+        "this": "t1",
+        "form": "step_out"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:phone_box",
+            "fields": {
+              "open": true
+            },
+            "slots": {
+              "inside": [
+                "b1"
+              ]
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "phone_box_step_out_shut",
+      "act": {
+        "this": "t1",
+        "form": "step_out"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:phone_box",
+            "slots": {
+              "inside": [
+                "b1"
+              ]
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "open"
+        }
+      }
+    }
+  ]
+}

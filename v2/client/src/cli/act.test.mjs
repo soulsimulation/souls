@@ -1,0 +1,179 @@
+// The thin command pairs, checks and acts on a target (Engine v2 C10, #3414): `pair <world url>` against the real
+// directory (`directoryd`, W2), `can <act>` answered by the daemon's local check (R8), and `act <act> [<arg id>...]`
+// walking to a named thing and sitting on a chosen chair of N2's test world (`worldd gateway-link --testworld`, I4b)
+// through the real gateway (`gatewayd`, I1), each ending with its receipt. Run from v2/ after
+//   cargo build -p directoryd -p gatewayd -p worldd --locked, and replica's wasm-bindgen package in target/wasm-load/pkg.
+
+import { strict as assert } from 'node:assert';
+import { spawn, spawnSync } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createServer as netServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { after, before, test } from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { decode } from '../brief/copy.mjs';
+import { DEFAULT_PKG, request } from '../daemon/client.mjs';
+import { runtimeOf } from '../home/home.mjs';
+import { requestOf, worldOf } from './souls.mjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const v2 = resolve(here, '../../..');
+const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
+const PKG = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
+const CLI = join(here, 'souls.mjs');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const dir = mkdtempSync(join(tmpdir(), 'souls-c10-'));
+const procs = [];
+const daemons = [];
+
+function run(path, args, ready) {
+  const p = spawn(path, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  procs.push(p);
+  return new Promise((ok, fail) => {
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; const m = ready.exec(out); if (m) ok({ p, m, out: () => out }); });
+    p.stderr.on('data', (d) => { out += d; });
+    p.on('exit', (c) => fail(new Error(`${path} ended (${c}): ${out}`)));
+  });
+}
+
+async function waitFor(f, ms = 30_000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const v = await f();
+    if (v) return v;
+    if (Date.now() > until) throw new Error('timed out');
+    await sleep(20);
+  }
+}
+
+/** The thin command, as a harness runs it. */
+function souls(home, args) {
+  const r = spawnSync(process.execPath, [CLI, ...args], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8' });
+  return JSON.parse(r.stdout.trim().split('\n').at(-1));
+}
+
+/** The answer event for `sequence`, read from the daemon. */
+async function answerOf(rt, sequence) {
+  const got = [];
+  return waitFor(async () => {
+    got.push(...(await request(rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer'));
+    return got.find((e) => e.sequence === sequence);
+  }, 60_000);
+}
+
+const freePort = () => new Promise((ok) => { const s = netServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => ok(port)); }); });
+
+let world, gateway, named;
+before(async () => {
+  world = join(dir, 'w.sock');
+  const w = spawn(bin('worldd'), ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1', '--rooms', '1', '--bodies', '1', '--testworld'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  procs.push(w);
+  let out = '';
+  w.stdout.on('data', (d) => { out += d; });
+  await waitFor(() => { try { return statSync(world).isSocket(); } catch { return false; } });
+  named = Object.fromEntries(out.trim().split('\n').map((l) => l.split(' ')).filter((p) => p[0] === 'testworld').map(([, id, ...name]) => [name.join(' '), id]));
+});
+
+after(async () => {
+  for (const rt of daemons) await request(rt.socket, { op: 'stop' }).catch(() => {});
+  for (const p of procs) p.kill();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('the arguments: pair takes a world url, can and act take act words; a world url names its directory and gateway', () => {
+  assert.deepEqual(requestOf(['act', 'sit:ab-1', 'walk:ab-2']).req, { op: 'act', acts: ['sit:ab-1', 'walk:ab-2'] });
+  assert.deepEqual(requestOf(['can', 'fill:ab-1', 'ab-2']).req, { op: 'can', acts: ['fill:ab-1', 'ab-2'] });
+  assert.deepEqual(requestOf(['pair', 'https://soul.game/eden']).req, { op: 'pair', url: 'https://soul.game/eden' });
+  assert.deepEqual(worldOf('https://soul.game/eden'), { directory: 'https://soul.game', world: 'eden', gateway: 'wss://soul.game/v2/ws' });
+  assert.deepEqual(worldOf('http://127.0.0.1:9/local?gateway=ws://127.0.0.1:8/v2/ws'), { directory: 'http://127.0.0.1:9', world: 'local', gateway: 'ws://127.0.0.1:8/v2/ws' });
+  assert.throws(() => worldOf('eden'), { code: 'pair-names-a-world' });
+});
+
+test('A2: an act carries each candidate\'s own target, and the first one\'s thing arguments in parameter 1 (C2)', async () => {
+  const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
+  wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
+  const [s, a, b, c] = ['07'.repeat(16), `${'07'.repeat(16)}-9004`, `${'07'.repeat(16)}-9002`, `${'0a'.repeat(16)}-3`];
+  const bytes = wire.wireIntent(Buffer.from(s, 'hex'), 9001n, 'local:fill local:sit', 1n, new Uint8Array(), 10n ** 15n, `${a} ${b}`, undefined, `tap=${c}`);
+  const m = decode(bytes), id = (v) => `${Buffer.from(v[0]).toString('hex')}-${v[1]}`;
+  assert.equal(id(m.get(3)), a, 'the first candidate on its own target');
+  const [fallback] = m.get(9);
+  assert.equal(fallback.get(2), 'local:sit');
+  assert.equal(id(fallback.get(3)), b, 'the fallback on its own target');
+  const [[name, arg]] = m.get(4).get(1);
+  assert.equal(Buffer.from(name).toString(), 'tap');
+  assert.equal(id(arg), c, 'the thing argument, by name, in parameter 1');
+  assert.throws(() => wire.wireIntent(Buffer.from(s, 'hex'), 9001n, 'local:fill', 1n, new Uint8Array(), 10n ** 15n, a, undefined, 'tap'), /arg-not-name-and-id/);
+});
+
+test('A1, A2: can answers from the local check; a walk to a named thing and a sit on a chosen chair each end with their receipt', async () => {
+  // The test world's one Soul, signed in with a token the gateway knows.
+  const grant = `soul-${named.soul}`, token = `${grant}.${randomBytes(32).toString('hex')}`;
+  const tokens = join(dir, 'tokens.txt');
+  writeFileSync(tokens, `${grant} ${createHash('sha256').update(token).digest('hex')}\n`);
+  const { m } = await run(bin('gatewayd'), ['--listen', '127.0.0.1:0', '--world', world, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
+  gateway = `ws://${m[1]}/v2/ws`;
+  const home = join(dir, 'acts', '.souls'), soul = `s_${named.soul}`;
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ worlds: { local: { url: 'http://127.0.0.1/', gateway } } }));
+  writeFileSync(join(home, 'credentials.json'), JSON.stringify({ souls: { [soul]: { local: { token } } } }), { mode: 0o600 });
+  chmodSync(join(home, 'credentials.json'), 0o600);
+  const rt = runtimeOf(home, soul);
+  daemons.push(rt);
+  souls(home, ['status']);
+  await waitFor(async () => { const s = await request(rt.socket, { op: 'status' }); return s.connected && !s.syncing; });
+
+  const chair = named['the west chair'];
+  const can = souls(home, ['can', `sit:${chair}`]);
+  assert.equal(can.ok, true, JSON.stringify(can));
+  assert.ok(['yes', 'no', 'unknown'].includes(can.can), 'R8\'s verdict, not unknown-command');
+  assert.equal(souls(home, ['can']).code, 'act-candidate');
+
+  const walk = souls(home, ['act', chair]);
+  assert.equal(walk.ok, true, JSON.stringify(walk));
+  const walked = await answerOf(rt, walk.sequence);
+  assert.equal(walked.answer, 1, `the walk ends with a receipt: ${JSON.stringify(walked)}`);
+  const sit = souls(home, ['act', `sit:${chair}`, `sit:${named['the chair in the square']}`]);
+  assert.equal(sit.ok, true, JSON.stringify(sit));
+  const sat = await answerOf(rt, sit.sequence);
+  assert.equal(sat.answer, 1, `the sit ends with a receipt: ${JSON.stringify(sat)}`);
+  // A thing argument the copy cannot name is refused before anything is sent.
+  assert.equal(souls(home, ['act', `fill:${chair}`, named['the chair in the square']]).code, 'act-arg-unnamed');
+});
+
+test('A1: pair <world url> prints the link and code and returns; once the owner approves, the Soul is ready to act', async () => {
+  const tokensFile = join(dir, 'pair-tokens.txt');
+  const { m } = await run(bin('directoryd'), ['--listen', '127.0.0.1:0', '--public-url', 'http://127.0.0.1:1',
+    '--store', join(dir, 'accounts.sqlite'), '--test-sign-in', '--pairing', join(dir, 'pairing.sqlite'),
+    '--gateway-tokens', tokensFile], /listening on (\S+)\n/);
+  const directory = `http://${m[1]}`;
+  const gwPort = await freePort();
+  const home = join(dir, 'paired', '.souls');
+  const asked = souls(home, ['pair', `${directory}/local?gateway=ws://127.0.0.1:${gwPort}/v2/ws`]);
+  assert.equal(asked.ok, true, JSON.stringify(asked));
+  assert.equal(asked.step, 'approve');
+  assert.match(asked.code, /^[B-DF-HJ-NP-TV-XZ]{4}-[B-DF-HJ-NP-TV-XZ]{4}$/);
+  assert.equal(asked.link, `http://127.0.0.1:1/pair?code=${asked.code}`);
+  assert.ok(!existsSync(join(home, 'credentials.json')), 'nothing paired before the approval');
+
+  // The owner approves once, signed in; the pairing left polling in the background keeps the token.
+  const approve = await fetch(new URL('/v1/pair/approve', directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: asked.code, confirm: true, test_person: 'owner' }) });
+  assert.equal(approve.status, 200);
+  const creds = await waitFor(() => { try { return JSON.parse(readFileSync(join(home, 'credentials.json'), 'utf8')); } catch { return null; } });
+  const [soul] = Object.keys(creds.souls);
+  assert.equal(statSync(join(home, 'credentials.json')).mode & 0o777, 0o600);
+
+  // Ready to act: the gateway knows the token, and an act sent through the thin command is answered.
+  await run(bin('gatewayd'), ['--listen', `127.0.0.1:${gwPort}`, '--world', world, '--tokens', tokensFile, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
+  const rt = runtimeOf(home, soul);
+  daemons.push(rt);
+  const act = souls(home, ['act', 'local:wave']);
+  assert.equal(act.ok, true, JSON.stringify(act));
+  const answered = await answerOf(rt, act.sequence);
+  assert.ok(answered.answer >= 1, JSON.stringify(answered));
+  const secret = creds.souls[soul].local.token.split('.')[1];
+  assert.ok(!readFileSync(join(home, 'pairing.log'), 'utf8').includes(secret), 'the token is not in the pairing\'s log');
+});

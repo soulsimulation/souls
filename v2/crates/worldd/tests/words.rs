@@ -1,5 +1,5 @@
 //! The words path (Engine v2 V1b, #3361): each `aN_` test is one acceptance box. A3 and the page's half of A4 are
-//! `v2/web/src/source/words.test.ts`, against `worldd gateway-link --www`.
+//! `v2/web/src/source/words.test.ts`, against `worldd gateway-link --www`. A turn into an activity is E26a's (#3504).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -14,10 +14,11 @@ use replica::effects::{Actor, Body, Change, Part, Refusal, read_id};
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Id, Minter, Scope, Version};
 use replica::intents::{Intent, Target};
+use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::speech::{SAID, Said};
 use replica::stream::StreamPart;
 use replica::views::{Key, Level, Redactions};
-use replica::world_model::Audience;
+use replica::world_model::{Audience, End, show};
 use sim::log::{Mem, recover};
 use sim::text::{Grade, Store};
 use worldd::answers::{self, Config};
@@ -27,34 +28,6 @@ use worldd::views::Tier;
 use worldd::words::{self, DESCRIPTION, NAME};
 
 const LINEAGE: Scope = Scope([0x3b; 16]);
-/// A fixed world time: every entry falls in one stretch, so the stream is written whole at the end.
-const AT: i64 = 1_000_000_000;
-
-/// World time from [`AT`], carried on by the monotonic clock, so the intents' expiries hold whenever the test runs.
-struct FromAt(std::time::Instant);
-
-impl FromAt {
-    // The test's pace reads the machine's monotonic clock, as worldd's own `Real` does.
-    #[allow(clippy::disallowed_methods)]
-    fn start() -> FromAt {
-        FromAt(std::time::Instant::now())
-    }
-}
-
-impl sim::clock::Clock for FromAt {
-    // The test paces real time from AT, as worldd's own `Real` paces it from the Unix epoch.
-    #[allow(clippy::disallowed_methods)]
-    fn now(&mut self) -> i64 {
-        AT + self.0.elapsed().as_micros() as i64
-    }
-
-    fn sleep_until(&mut self, t: i64) {
-        let wait = t - self.now();
-        if wait > 0 {
-            std::thread::sleep(Duration::from_micros(wait as u64));
-        }
-    }
-}
 
 fn n(s: &str) -> Name {
     Name::new(s).unwrap()
@@ -84,7 +57,7 @@ fn intent(
             sequence: 0,
         }
         .to_value(),
-        expiry: AT + 60_000_000,
+        expiry: answers::now() + 60_000_000,
         resources: Vec::new(),
         fallbacks: Vec::new(),
         replaces: None,
@@ -100,7 +73,7 @@ fn send(w: &answers::World, i: &Intent) -> Receiver<Vec<u8>> {
 
 /// The answer's kind: 1 a receipt, 2 a refusal (with its reason).
 fn kind(rx: &Receiver<Vec<u8>>) -> (u64, String) {
-    let f = rx.recv_timeout(Duration::from_secs(5)).expect("an answer");
+    let f = rx.recv_timeout(Duration::from_secs(30)).expect("an answer");
     let Value::Map(m) = decode(&f).unwrap().value else {
         panic!("a frame")
     };
@@ -137,8 +110,14 @@ fn dir(name: &str) -> PathBuf {
 
 /// A toggles world with a text store, followed by the view tier and a public stream writer with its text files.
 fn run(name: &str) -> Run {
+    run_with(name, |_| {})
+}
+
+/// [`run`], the world changed by `prep` before it starts.
+fn run_with(name: &str, prep: impl FnOnce(&mut toggles::World)) -> Run {
     let d = dir(name);
-    let built = toggles::World::build(1, 3, 0);
+    let mut built = toggles::World::build(1, 3, 0);
+    prep(&mut built);
     let pairs = built.pairs.clone();
     let header = built.replica.header().clone();
     let start = built.replica.tree().to_state();
@@ -156,7 +135,6 @@ fn run(name: &str) -> Run {
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.tick = Duration::from_millis(10);
     cfg.measures = false;
-    cfg.clock = Some(Box::new(FromAt::start()));
     cfg.text = Some(store.clone());
     let (s, wr, root, st) = (stop.clone(), writer.clone(), www.clone(), store.clone());
     cfg.follow = Some(Box::new(move |durable| {
@@ -169,7 +147,7 @@ fn run(name: &str) -> Run {
         .unwrap();
         let sub = tier.subscribe(vec![key], 1 << 16);
         let w = Writer::fork_with_text(&root, &header, &key, (0, 0), &start, Some(st)).unwrap();
-        *wr.lock().unwrap() = Some(follow(w, sub, s));
+        *wr.lock().unwrap() = Some(follow(w, sub, s, answers::now));
         Box::new(move |n, b| tier.offer(n, b))
     }));
     let log = Mem::default();
@@ -207,12 +185,11 @@ impl Run {
 /// Every utterance in the log, in order.
 fn said(log: &[u8]) -> Vec<Said> {
     let mut out = Vec::new();
-    for r in recover(log)
-        .unwrap()
-        .records
-        .into_iter()
-        .filter(|r| !sim::recorder::is_input(r))
-    {
+    // The recorder's input records (K12) are what the world was handed, not parts: passed by.
+    for r in recover(log).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
         for e in Part::read(&r).unwrap().effects {
             for ev in e
                 .events
@@ -313,12 +290,10 @@ fn a1_words_are_kept_and_only_their_reference_logged() {
     // The describe set the body's name and description as references; the toggle's words are its sender's.
     let mut fields = BTreeMap::new();
     let mut logged_refs = Vec::new();
-    for rec in recover(&log)
-        .unwrap()
-        .records
-        .into_iter()
-        .filter(|r| !sim::recorder::is_input(r))
-    {
+    for rec in recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
         let p = Part::read(&rec).unwrap();
         logged_refs.extend(references(&Value::Map(p.rest.clone())));
         for e in p.effects {
@@ -374,11 +349,24 @@ fn a2_a4_public_words_beside_each_part_and_no_whisper() {
     .enumerate()
     {
         assert_eq!(kind(&send(w, i)).0, 1, "intent {s} answered with a receipt");
+        // The hidden sentence is removed as soon as its say is answered (its record is on the disk by then), before
+        // the next intent: the writer cuts a stretch when a record of a later 500 ms period arrives, so a removal left
+        // until the end raced the describe's record, which could close the say's stretch first and write its text
+        // file before the removal (seen once under CI load, #3443). Removed here, every text file is written after
+        // it, and the writer reads the store when it writes the file.
+        if s == 2 {
+            let log = r.log.0.lock().unwrap().bytes.clone();
+            let said = said(&log);
+            assert_eq!(
+                said.len(),
+                3,
+                "the public say, the whisper and the hidden say"
+            );
+            r.store.remove(said[2].words, b1, 0, Grade::Hidden).unwrap();
+        }
     }
     let mut whisper_ref = None;
-    let (_, dir) = r.end(|store, said| {
-        // Removed before the part is written: the redaction list keeps it out of the file.
-        store.remove(said[2].words, b1, 0, Grade::Hidden).unwrap();
+    let (_, dir) = r.end(|_, said| {
         whisper_ref = Some(said[1].words);
     });
     let (text, parts, files) = stream_files(&dir);
@@ -401,4 +389,130 @@ fn a2_a4_public_words_beside_each_part_and_no_whisper() {
             assert!(!has(p, l), "no words in a part");
         }
     }
+}
+
+/// The ids a running world's text store holds words of, by reading its files: whether `words` is on its disk.
+fn in_store(dir: &Path, words: &str) -> bool {
+    std::fs::read_dir(dir.join("text"))
+        .unwrap()
+        .flatten()
+        .any(|e| has(&std::fs::read(e.path()).unwrap_or_default(), words))
+}
+
+/// E26a (#3504): a `say` into an activity (its target) is written in an entry of the activity's audience, heard by
+/// its members' bodies and its words kept for its members alone (A1); one by a Soul that is not a member is refused
+/// `not-a-member` and writes nothing, in the log or the store (A3); neither is in the public stream a viewer replays
+/// (A2).
+#[test]
+fn e26a_a_turn_into_an_activity_is_its_members_alone() {
+    let act = Id::new(Scope([0x5a; 16]), 1).unwrap();
+    let r = run_with("e26a", |built| {
+        let (b0, b1, lamp) = (built.pairs[0].0, built.pairs[1].0, built.pairs[0].1);
+        let tree = built.replica.tree();
+        let node = |id| tree.node(tree.handle(id).unwrap()).unwrap();
+        // A node standing for an activity (its kind is not read; the lamp's is in the header), and two members.
+        let (kind, room) = (node(lamp).kind().clone(), node(b0).parent().unwrap());
+        let create = Change::Create {
+            node: act,
+            kind,
+            pose: Pose {
+                frame: Frame {
+                    node: room,
+                    slot: None,
+                },
+                position: Vec3::new(0, 0, 0),
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: room,
+                    height: 0,
+                },
+            },
+            audience: Audience::Everyone,
+            fields: BTreeMap::new(),
+        };
+        let member = |k, body| Change::Link {
+            link: Id::new(Scope([0x5a; 16]), k).unwrap(),
+            ty: n("souls:member"),
+            ends: [body, act],
+            owner: End::Second,
+            audience: Audience::Everyone,
+        };
+        let part = built.part(vec![
+            (room, create),
+            (act, member(2, b0)),
+            (act, member(3, b1)),
+        ]);
+        built.replica.apply(&part).expect("the activity applies");
+    });
+    let (b0, b1, b2) = (r.pairs[0].0, r.pairs[1].0, r.pairs[2].0);
+    let (turn, refused, public) = (
+        "let us keep this between us",
+        "may I listen in",
+        "good morning all",
+    );
+    let w = &r.world;
+    let (k, a) = kind(&send(
+        w,
+        &intent(b0, "eden:say", Some(act), 1, &[(1, words(turn))]),
+    ));
+    assert_eq!(k, 1, "a member's turn: a receipt, not {a}");
+    let (k, a) = kind(&send(
+        w,
+        &intent(b2, "eden:say", Some(act), 1, &[(1, words(refused))]),
+    ));
+    assert_eq!(k, 2, "a non-member's turn is refused: {a}");
+    assert!(a.contains("not-a-member"), "by name: {a}");
+    let (k, a) = kind(&send(
+        w,
+        &intent(b0, "eden:say", None, 2, &[(1, words(public))]),
+    ));
+    assert_eq!(k, 1, "a public say: a receipt, not {a}");
+    let store_dir = std::env::temp_dir().join(format!("worldd-words-{}-e26a", std::process::id()));
+    let mut turn_ref = None;
+    let (log, www) = r.end(|store, said| {
+        println!(
+            "E26a: the log holds {} utterances; the turn's audience {}'s (the activity), heard by {} bodies (both \
+             members); the public say's {:?}",
+            said.len(),
+            show(act),
+            said[0].hearers.len(),
+            said[1].audience
+        );
+        assert_eq!(said.len(), 2, "the turn and the public say: the refused turn wrote nothing");
+        assert_eq!(said[0].audience, Audience::Of(act), "A1: the activity's audience");
+        assert_eq!(said[0].hearers, [b0, b1].into(), "A1: its members' bodies");
+        assert_eq!(said[1].audience, Audience::Everyone);
+        assert_eq!(store.read(said[0].words, &[]).unwrap_err().name, "not-entitled");
+        assert_eq!(store.read(said[0].words, &[b2]).unwrap_err().name, "not-entitled");
+        assert_eq!(store.read(said[0].words, &[act]).unwrap(), turn.as_bytes());
+        turn_ref = Some(said[0].words);
+    });
+    assert!(
+        in_store(&store_dir, turn),
+        "the store holds the member's turn"
+    );
+    assert!(
+        !in_store(&store_dir, refused),
+        "A3: no word of the refused turn is kept"
+    );
+    for l in [turn, refused] {
+        assert!(!has(&log, l), "{l:?} is not in the log");
+    }
+    // The public stream a viewer reads and replays: the public say, never the turn or its reference.
+    let (text, parts, _) = stream_files(&www);
+    let all: Vec<&str> = text.iter().map(|(_, w)| w.as_str()).collect();
+    assert!(all.contains(&public), "{all:?}");
+    assert!(!all.contains(&turn) && !all.contains(&refused), "{all:?}");
+    let tr = encode(&turn_ref.unwrap().to_value()).unwrap();
+    for p in &parts {
+        assert!(
+            !p.windows(tr.len()).any(|x| x == tr),
+            "the turn's reference is in no public part"
+        );
+        assert!(!has(p, turn) && !has(p, refused));
+    }
+    println!(
+        "E26a: the public stream ({} parts) holds {all:?}: neither the turn nor the refused one",
+        parts.len()
+    );
 }

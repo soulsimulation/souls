@@ -37,6 +37,7 @@ fn switch_on(id: u64, body: Id, toggles: &[Id]) -> Act {
             })
             .collect(),
         recheck: None,
+        spot: None,
     }
 }
 
@@ -65,7 +66,7 @@ fn a3_checks_run_off_the_clock_thread() {
     }
     assert!(pairs.iter().all(|(_, l)| lit(&w, *l) == 1));
     // A second round on the newer copy: switch_off is the candidate that holds now.
-    let copy = publisher.wait_for(w.replica.version(), std::time::Duration::from_secs(5));
+    let copy = publisher.wait_for(w.replica.version(), std::time::Duration::from_secs(30));
     assert_eq!(copy.version(), w.replica.version());
     for (i, (b, l)) in pairs.iter().enumerate() {
         acts.send(toggle(100 + i as u64, *b, *l))

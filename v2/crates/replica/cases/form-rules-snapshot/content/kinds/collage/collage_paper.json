@@ -1,0 +1,166 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:collage_paper",
+  "owner": "thing",
+  "state": {
+    "colour": {
+      "n": 1,
+      "type": "enum",
+      "values": [
+        "red",
+        "blue",
+        "gold"
+      ],
+      "default": "red",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "shape": {
+      "n": 2,
+      "type": "enum",
+      "values": [
+        "wide",
+        "tall"
+      ],
+      "default": "wide",
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        10,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      300,
+      50,
+      300
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
+    "mount": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "patch": {
+          "type": "slot",
+          "select": {
+            "of": "free_slots",
+            "kind": "eden:collage_board",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "slot_free",
+          "slot": {
+            "arg": "patch"
+          },
+          "says": "board_full"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "patch"
+          }
+        },
+        {
+          "step": "put",
+          "slot": {
+            "arg": "patch"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": {
+            "arg": "patch"
+          },
+          "event": "mounted"
+        }
+      ]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,5,0],"size":[300,10,180],"when":"@colour=red&@shape=wide","tint":"red"},{"kind":"box","at":[0,5,0],"size":[180,10,300],"when":"@colour=red&@shape=tall","tint":"red"},{"kind":"box","at":[0,5,0],"size":[300,10,180],"when":"@colour=blue&@shape=wide","tint":"blue"},{"kind":"box","at":[0,5,0],"size":[180,10,300],"when":"@colour=blue&@shape=tall","tint":"blue"},{"kind":"box","at":[0,5,0],"size":[300,10,180],"when":"@colour=gold&@shape=wide","tint":"gold"},{"kind":"box","at":[0,5,0],"size":[180,10,300],"when":"@colour=gold&@shape=tall","tint":"gold"}],"palette":{"red":"#d2644f","blue":"#5296ce","gold":"#e3bb4f"},"tags":["art","paper","item","object"]},
+    "model": "look:collage_paper"
+  },
+  "text": {
+    "card": "A piece of red, blue or gold collage paper: mount it on a collage board.",
+    "board_full": "Choose an empty patch on the board; take a piece off when all six are full.",
+    "art": "art",
+    "collage": "collage",
+    "paper": "paper",
+    "howto_collage": "Take a piece of collage paper and mount it on the board's nearest free patch; take it off again to recover it."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "collage",
+      "paper"
+    ]
+  },
+  "howtos": {
+    "collage": {
+      "text": "howto_collage",
+      "steps": [
+        {
+          "form": "take"
+        },
+        {
+          "form": "mount"
+        }
+      ]
+    }
+  }
+}

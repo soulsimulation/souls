@@ -51,6 +51,24 @@ pub fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
     })
 }
 
+/// The S3-compatible store named by `ARCHIVE_STORE_ENDPOINT`, `_BUCKET`, `_REGION` (default `auto`),
+/// `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY` and `_PREFIX`: a local stand-in or a scratch bucket, never production's.
+pub fn store() -> R<directoryd::directory::s3::S3> {
+    let var = |k: &str| std::env::var(format!("ARCHIVE_STORE_{k}")).unwrap_or_default();
+    if var("ENDPOINT").is_empty() {
+        return refuse("store-settings", "ARCHIVE_STORE_ENDPOINT is not set");
+    }
+    let region = Some(var("REGION")).filter(|r| !r.is_empty());
+    directoryd::directory::s3::S3::new(
+        &var("ENDPOINT"),
+        &var("BUCKET"),
+        region.as_deref().unwrap_or("auto"),
+        &var("ACCESS_KEY_ID"),
+        &var("SECRET_ACCESS_KEY"),
+        &var("PREFIX"),
+    )
+}
+
 fn enc(v: &Value) -> R<Vec<u8>> {
     encode(v).or_else(|e| refuse("encoding", e.to_string()))
 }
@@ -205,6 +223,10 @@ impl<S: Store> Store for Shared<S> {
 
     fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
         self.0.put(key, bytes, when)
+    }
+
+    fn list(&self, prefix: &str) -> R<Vec<String>> {
+        self.0.list(prefix)
     }
 }
 
@@ -728,6 +750,11 @@ impl<S: Store> Archiver<S> {
             self.shelf.put_view(&k, &v)?;
         }
         self.shelf.flush()
+    }
+
+    /// The open day's event index and counts as they stand, without closing them (a running world's, R16b).
+    pub fn open_views(&self) -> R<Vec<(String, Vec<u8>)>> {
+        self.indexer.clone().finish()
     }
 
     pub fn writes(&self) -> Writes {

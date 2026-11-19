@@ -15,10 +15,12 @@ use replica::effects::{
 use replica::encode::{Name, Value, decode};
 use replica::hash::state_hash;
 use replica::ids::{Hash, Id, Minter, Purpose, Scope};
+use replica::pose::{Frame, Pose};
 use replica::pose::{Quat, Support, Vec3};
 use replica::views::{Key, Level, Redactions};
 use replica::world_model::{Audience, Kind};
-use sim::edit::{Committed, commit};
+use sim::edit::safety::Who;
+use sim::edit::{Committed, Planned, commit, plan};
 use sim::log::{Log, Mem, recover};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -57,6 +59,8 @@ struct W {
     at: i64,
     /// Each committed edit's intent and the effects it wrote.
     committed: Vec<(Id, Vec<Effect>)>,
+    /// The Souls' bodies as they stand on each commit tick, for the safety rule (#3280).
+    bodies: Vec<Who>,
 }
 
 fn kind(header: &Header, plain: &str) -> Name {
@@ -139,6 +143,7 @@ impl W {
             start,
             at: 0,
             committed: Vec::new(),
+            bodies: Vec::new(),
         }
     }
 
@@ -161,12 +166,21 @@ impl W {
             &copy,
             &self.world,
         )?;
-        self.commit(&checked)
+        // The fixture's zone has no open ground: the safety rule judges what a body uses.
+        let planned = plan(checked, &copy, None)?;
+        self.commit(&planned)
     }
 
-    fn commit(&mut self, checked: &replica::edit::Checked) -> Result<Committed, Refused> {
+    fn commit(&mut self, planned: &Planned) -> Result<Committed, Refused> {
         self.at += 1_000;
-        let c = commit(&mut self.live, &mut self.minter, checked, self.at)?;
+        let checked = &planned.checked;
+        let c = commit(
+            &mut self.live,
+            &mut self.minter,
+            planned,
+            &self.bodies,
+            self.at,
+        )?;
         let bytes = c.part.stored().to_vec();
         let n = self.log.append(bytes.clone()).expect("appended");
         self.tier.offer(n, bytes.clone());
@@ -193,7 +207,7 @@ impl W {
         );
         let Some(Delivery::Frame {
             record: r, bytes, ..
-        }) = self.sub.recv_timeout(Duration::from_secs(10))
+        }) = self.sub.recv_timeout(Duration::from_secs(30))
         else {
             panic!("the tier sent no frame: {:?}", self.tier.stats().fault)
         };
@@ -536,6 +550,7 @@ fn a5_an_older_plan_commits_unless_a_node_it_touches_changed() {
             &copy,
             &w.world,
         )
+        .and_then(|c| plan(c, &copy, None))
         .expect("checked")
     };
     let untouched = checked(
@@ -577,5 +592,51 @@ fn a5_an_older_plan_commits_unless_a_node_it_touches_changed() {
         .edit(w.creator(), planned, vec![set(cr, 4)])
         .expect_err("refused");
     assert_eq!((r.op, r.name), (Some(0), "edit.stale"));
+    w.close();
+}
+
+// --- #3280: the safety rule through the edit path ------------------------------------------------------------------
+
+#[test]
+fn an_edit_unsafe_for_a_soul_on_its_commit_tick_is_refused_by_name_with_nothing_written() {
+    let mut w = W::new();
+    let (_, cr, _) = w.furnish();
+    let (log, state, version) = (
+        w.log_hash(),
+        state_hash(w.live.tree()).expect("a hash"),
+        w.live.version(),
+    );
+    // A Soul sits in the crate's slot 1 when the removal's tick comes: refused by name, nothing written.
+    let soul = Id::new(Scope([0x50; 16]), 1).expect("an id");
+    w.bodies = vec![Who {
+        soul,
+        body: Id::new(Scope([0x50; 16]), 2).expect("an id"),
+        pose: Pose {
+            frame: Frame {
+                node: cr,
+                slot: Some(1),
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: Support::Slot,
+        },
+        has: 0,
+        crossing: None,
+    }];
+    let remove = vec![Op::Remove {
+        node: Ref::Node(cr),
+    }];
+    let r = w
+        .edit(w.creator(), version, remove.clone())
+        .expect_err("refused");
+    println!("{}: {}", r.name, r.detail);
+    assert_eq!((r.op, r.name), (None, "edit.in-use"), "{r:?}");
+    assert!(r.detail.contains("Soul 50:1 is in"), "{}", r.detail);
+    assert_eq!(w.log_hash(), log);
+    assert_eq!(state_hash(w.live.tree()).expect("a hash"), state);
+    assert_eq!(w.live.version(), version);
+    // Once the Soul has got up, the same edit commits.
+    w.bodies.clear();
+    w.edit(w.creator(), version, remove).expect("committed");
     w.close();
 }

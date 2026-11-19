@@ -7,7 +7,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -15,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
 import { requestOf } from './souls.mjs';
+import { objects, serve } from '../history/day.mjs';
+import { DAY } from '../history/history.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -35,7 +37,14 @@ const procs = [];
 const seat = (counter) => ({ grant: `soul-${WORLD_SCOPE}-${counter}`, token: `soul-${WORLD_SCOPE}-${counter}.${randomBytes(32).toString('hex')}` });
 const a = seat(2), b = seat(4); // the world's two bodies
 const times = { status: [], look: [], find: [], act: [], wait: [] };
-let rtA, rtB;
+let rtA, rtB, served;
+// R16: a world day of history in V4's files: the other Soul switches its lamp each minute, and this Soul arrives in
+// the room each hour.
+const ROOM = `${WORLD_SCOPE}-1`, A_ID = `${WORLD_SCOPE}-2`, B_ID = `${WORLD_SCOPE}-4`;
+const dayActs = [
+  ...Array.from({ length: 1440 }, (_, m) => ({ at: DAY + m * 60e6 + 5e6, kind: 'r2:switched', node: LAMP_B, actor: B_ID })),
+  ...Array.from({ length: 24 }, (_, h) => ({ at: DAY + h * 3600e6 + 7e6, kind: 'souls:arrived', node: ROOM, actor: A_ID })),
+].sort((x, y) => x.at - y.at);
 
 function run(bin, args, ready) {
   const p = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -48,7 +57,7 @@ function run(bin, args, ready) {
   });
 }
 
-async function waitFor(f, ms = 10_000) {
+async function waitFor(f, ms = 30_000) {
   const until = Date.now() + ms;
   for (;;) {
     const v = await f();
@@ -75,7 +84,8 @@ before(async () => {
   await waitFor(() => { try { return statSync(world).isSocket(); } catch { return false; } });
   const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', world, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
   mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, 'config.json'), JSON.stringify({ worlds: { local: { url: 'http://127.0.0.1/', gateway: `ws://${addr}/v2/ws` } } }));
+  served = await serve(objects(dayActs));
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ worlds: { local: { url: 'http://127.0.0.1/', gateway: `ws://${addr}/v2/ws`, history: served.base } } }));
   writeFileSync(join(home, 'credentials.json'), JSON.stringify({ souls: { [A]: { local: { token: a.token } }, [B]: { local: { token: b.token } } } }), { mode: 0o600 });
   chmodSync(join(home, 'credentials.json'), 0o600);
   rtA = runtimeOf(home, A);
@@ -90,11 +100,12 @@ before(async () => {
 after(async () => {
   for (const rt of [rtA, rtB]) await request(rt.socket, { op: 'stop' }).catch(() => {});
   for (const p of procs) p.kill();
+  served?.stop();
   rmSync(dir, { recursive: true, force: true });
 });
 
 test('the arguments make the daemon request: act takes a ranked list, find its words, wait its seconds', () => {
-  assert.deepEqual(requestOf(['act', 'eden:sit', 'eden:lean', '--soul', 's_x']), { req: { op: 'act', verbs: ['eden:sit', 'eden:lean'] }, soul: 's_x' });
+  assert.deepEqual(requestOf(['act', 'eden:sit', 'eden:lean', '--soul', 's_x']), { req: { op: 'act', acts: ['eden:sit', 'eden:lean'] }, soul: 's_x' });
   assert.deepEqual(requestOf(['find', 'the', 'red', 'cup', '--limit', '3']).req, { op: 'find', words: 'the red cup', limit: 3 });
   assert.deepEqual(requestOf(['wait', '5']).req, { op: 'wait', seconds: 5 });
   assert.equal(requestOf(['dance']).refused, 'unknown-command');
@@ -163,9 +174,79 @@ test('A3: the command loads no WASM, and its median time is under 100 ms', async
   const report = Object.fromEntries(Object.entries(times).filter(([, xs]) => xs.length).map(([k, xs]) => [k, { n: xs.length, medianMs: Math.round(median(xs)) }]));
   if (process.env.R7_REPORT) console.log(JSON.stringify({ timings: report }));
   const all = Object.values(times).flat();
-  assert.ok(median(all) < 100, `median ${Math.round(median(all))} ms over ${all.length} commands: ${JSON.stringify(report)}`);
+  // A speed bar (real time): asserted only in the speed-bar step (ci.sh, V2_SPEED_BARS=1); R7_REPORT prints it.
+  if (process.env.V2_SPEED_BARS) assert.ok(median(all) < 100, `median ${Math.round(median(all))} ms over ${all.length} commands: ${JSON.stringify(report)}`);
 });
 
 test('the daemon\'s log and state hold no token', () => {
   for (const f of [rtA.log, rtA.state]) assert.ok(!readFileSync(f, 'utf8').includes(a.token.split('.')[1]));
+});
+
+test('C4: say, whisper and lie make their daemon requests', () => {
+  assert.deepEqual(requestOf(['say', 'the', 'bread', 'is', 'warm']).req, { op: 'say', words: 'the bread is warm' });
+  assert.deepEqual(requestOf(['whisper', LAMP_B, 'just', 'you']).req, { op: 'whisper', to: LAMP_B, words: 'just you' });
+  assert.deepEqual(requestOf(['lie', LAMP_B]).req, { op: 'lie', this: LAMP_B });
+});
+
+/** Every file under `d`, as one buffer. */
+const filesUnder = (d) => Buffer.concat(readdirSync(d, { recursive: true }).map((f) => join(d, f)).filter((f) => statSync(f).isFile()).map((f) => readFileSync(f)));
+
+test('C4 A1: say and whisper send T8 words through the daemon; the world keeps them and answers with a receipt', async () => {
+  const said = 'the bread is still warm', whispered = 'meet me by the lamp';
+  const say = souls(['say', said]);
+  const whisper = souls(['whisper', `${WORLD_SCOPE}-4`, whispered]); // the other Soul's body
+  for (const [what, r] of [['say', say], ['whisper', whisper]]) {
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.sent, true, `${what} sent at once`);
+    assert.equal(r.verb, `local:${what}`, 'a form verb in the world\'s namespace');
+  }
+  const got = [];
+  await waitFor(async () => {
+    got.push(...(await request(rtA.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer'));
+    return [say, whisper].every((r) => got.some((e) => e.sequence === r.sequence));
+  });
+  for (const r of [say, whisper]) assert.equal(got.find((e) => e.sequence === r.sequence).answer, 1, `a receipt: ${JSON.stringify(got)}`);
+  // The words are in the world's text store (K16), and no byte of them is in its log (T8 rule 6).
+  const store = filesUnder(join(dir, 'w.text')), log = readFileSync(join(dir, 'w.log'));
+  for (const w of [said, whispered]) {
+    assert.ok(store.includes(w), `"${w}" kept in the text store`);
+    assert.ok(!log.includes(w), `"${w}" not in the log`);
+  }
+  // Refused by name before anything is sent: no words, a whisper to no one, a lie on nothing.
+  const refused = (args) => {
+    const r = spawnSync(process.execPath, [CLI, ...args, '--soul', A], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8' });
+    return JSON.parse(r.stdout).code;
+  };
+  assert.equal(refused(['say']), 'words-empty-or-long');
+  assert.equal(refused(['whisper', 'bob', 'hi']), 'whisper-names-a-body');
+  assert.equal(refused(['lie']), 'lie-names-a-thing');
+});
+
+test('R16: history by thing, place and Soul through the daemon, each named from the copy, under 600 bytes', async () => {
+  // history's --soul is its question, so the asking Soul is --as.
+  assert.deepEqual(requestOf(['history', '--soul', 'Kofi', '--as', A, '--since', '5']), { req: { op: 'history', soul: 'Kofi', since: '5' }, soul: A });
+  assert.deepEqual(requestOf(['history', '--at', ROOM]).req, { op: 'history', at: ROOM });
+  // Run without blocking: the history files are served from this process.
+  const ask = (args, status = 0) => new Promise((ok) => {
+    const p = spawn(process.execPath, [CLI, 'history', ...args, '--as', A], { env: { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG } });
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('exit', (code) => {
+      assert.equal(code, status, out);
+      assert.ok(Buffer.byteLength(out) < 600, `${out.length} bytes`);
+      ok(JSON.parse(out));
+    });
+  });
+  const lamp = await ask(['--thing', LAMP_B_NAME]);
+  assert.equal(lamp.about, LAMP_B_NAME, 'a name is looked up in the copy');
+  assert.equal(lamp.found, 1440);
+  assert.deepEqual(lamp.span, { from: 'd1 00:00', to: 'd2 00:00' });
+  assert.equal(lamp.lines[0], 'd1 23:59 body 4 r2:switched');
+  assert.equal(lamp.more, 1435);
+  assert.equal(typeof lamp.at, 'number');
+  const room = await ask(['--at', ROOM]);
+  assert.equal(room.found, 1440 + 24, 'the room and what the copy holds in it');
+  const me = await ask(['--soul', 'me']);
+  assert.deepEqual([me.about, me.found, me.lines[0]], ['me', 24, 'd1 23:00 arrived room 1']);
+  assert.equal((await ask(['--soul', 'nobody'])).code, 'history-unknown');
 });

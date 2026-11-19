@@ -1,0 +1,1708 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "The camp conversions of SA-X4 (#2899): the camp chair kit (#1813), the practice mat (#1887) and the camp pillow with its repair kit (#1891). Each form has a case with every need met and one per unmet need; the refusal's own words are the need's `says`. Worked by hand from the entries and the originals' rules.",
+ "cases": [
+  {
+   "name": "assemble_chair_every_need_met",
+   "act": {
+    "this": "k1",
+    "form": "assemble"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "k1": {
+      "kind": "eden:camp_chair_kit",
+      "fields": {
+       "timber": 6,
+       "panels": 2,
+       "covering": 1,
+       "fasteners": 8
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "assemble_chair_short_of_timber",
+   "act": {
+    "this": "k1",
+    "form": "assemble"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "k1": {
+      "kind": "eden:camp_chair_kit",
+      "fields": {
+       "timber": 3,
+       "panels": 2,
+       "covering": 1,
+       "fasteners": 8
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "timber",
+     "found": 3,
+     "wanted": {
+      "at_least": 6
+     }
+    },
+    "fix": null,
+    "says": "used_or_incomplete"
+   }
+  },
+  {
+   "name": "assemble_chair_short_of_panels",
+   "act": {
+    "this": "k1",
+    "form": "assemble"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "k1": {
+      "kind": "eden:camp_chair_kit",
+      "fields": {
+       "timber": 6,
+       "panels": 1,
+       "covering": 1,
+       "fasteners": 8
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "panels",
+     "found": 1,
+     "wanted": {
+      "at_least": 2
+     }
+    },
+    "fix": null,
+    "says": "used_or_incomplete"
+   }
+  },
+  {
+   "name": "assemble_chair_without_covering",
+   "act": {
+    "this": "k1",
+    "form": "assemble"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "k1": {
+      "kind": "eden:camp_chair_kit",
+      "fields": {
+       "timber": 6,
+       "panels": 2,
+       "covering": 0,
+       "fasteners": 8
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 2,
+    "detail": {
+     "field": "covering",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": null,
+    "says": "used_or_incomplete"
+   }
+  },
+  {
+   "name": "assemble_chair_short_of_fasteners",
+   "act": {
+    "this": "k1",
+    "form": "assemble"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "k1": {
+      "kind": "eden:camp_chair_kit",
+      "fields": {
+       "timber": 6,
+       "panels": 2,
+       "covering": 1,
+       "fasteners": 4
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 3,
+    "detail": {
+     "field": "fasteners",
+     "found": 4,
+     "wanted": {
+      "at_least": 8
+     }
+    },
+    "fix": null,
+    "says": "used_or_incomplete"
+   }
+  },
+  {
+   "name": "assemble_chair_output_taken",
+   "act": {
+    "this": "k1",
+    "form": "assemble"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "k1": {
+      "kind": "eden:camp_chair_kit",
+      "fields": {
+       "timber": 6,
+       "panels": 2,
+       "covering": 1,
+       "fasteners": 8
+      },
+      "slots": {
+       "out": [
+        "ch9"
+       ]
+      }
+     },
+     "ch9": {
+      "kind": "eden:camp_chair"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 4,
+    "detail": {
+     "node": "k1",
+     "slot": "out"
+    },
+    "fix": null,
+    "says": "clear_output"
+   }
+  },
+  {
+   "name": "assemble_chair_holding_something",
+   "act": {
+    "this": "k1",
+    "form": "assemble"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "k1": {
+      "kind": "eden:camp_chair_kit",
+      "fields": {
+       "timber": 6,
+       "panels": 2,
+       "covering": 1,
+       "fasteners": 8
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 5,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "put_down_first"
+   }
+  },
+  {
+   "name": "unroll_every_need_met",
+   "act": {
+    "this": "m1",
+    "form": "unroll"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "m1": {
+      "kind": "eden:practice_mat",
+      "fields": {
+       "deployed": false
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "unroll_in_the_other_form",
+   "act": {
+    "this": "m1",
+    "form": "unroll"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "m1": {
+      "kind": "eden:practice_mat",
+      "fields": {
+       "deployed": true
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "deployed",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "roll_up"
+    },
+    "says": "unroll_the_roll"
+   }
+  },
+  {
+   "name": "unroll_footprint_occupied",
+   "act": {
+    "this": "m1",
+    "form": "unroll"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "m1": {
+      "kind": "eden:practice_mat",
+      "fields": {
+       "deployed": false
+      },
+      "slots": {
+       "on": [
+        "b2"
+       ]
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "m1",
+     "slot": "on"
+    },
+    "fix": null,
+    "says": "footprint_occupied"
+   }
+  },
+  {
+   "name": "unroll_holding_something",
+   "act": {
+    "this": "m1",
+    "form": "unroll"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "m1": {
+      "kind": "eden:practice_mat",
+      "fields": {
+       "deployed": false
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "put_down_first"
+   }
+  },
+  {
+   "name": "roll_up_every_need_met",
+   "act": {
+    "this": "m1",
+    "form": "roll_up"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "m1": {
+      "kind": "eden:practice_mat",
+      "fields": {
+       "deployed": true
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "roll_up_in_the_other_form",
+   "act": {
+    "this": "m1",
+    "form": "roll_up"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "m1": {
+      "kind": "eden:practice_mat",
+      "fields": {
+       "deployed": false
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "deployed",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "unroll"
+    },
+    "says": "roll_up_the_mat"
+   }
+  },
+  {
+   "name": "roll_up_footprint_occupied",
+   "act": {
+    "this": "m1",
+    "form": "roll_up"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "m1": {
+      "kind": "eden:practice_mat",
+      "fields": {
+       "deployed": true
+      },
+      "slots": {
+       "on": [
+        "b2"
+       ]
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "m1",
+     "slot": "on"
+    },
+    "fix": null,
+    "says": "footprint_occupied"
+   }
+  },
+  {
+   "name": "roll_up_holding_something",
+   "act": {
+    "this": "m1",
+    "form": "roll_up"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "m1": {
+      "kind": "eden:practice_mat",
+      "fields": {
+       "deployed": true
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "put_down_first"
+   }
+  },
+  {
+   "name": "stretch_every_need_met",
+   "act": {
+    "this": "m1",
+    "form": "stretch"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "m1": {
+      "kind": "eden:practice_mat",
+      "fields": {
+       "deployed": true
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "stretch_in_the_other_form",
+   "act": {
+    "this": "m1",
+    "form": "stretch"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "m1": {
+      "kind": "eden:practice_mat",
+      "fields": {
+       "deployed": false
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "deployed",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "unroll"
+    },
+    "says": "roll_up_the_mat"
+   }
+  },
+  {
+   "name": "stretch_footprint_occupied",
+   "act": {
+    "this": "m1",
+    "form": "stretch"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "m1": {
+      "kind": "eden:practice_mat",
+      "fields": {
+       "deployed": true
+      },
+      "slots": {
+       "on": [
+        "b2"
+       ]
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "m1",
+     "slot": "on"
+    },
+    "fix": null,
+    "says": "footprint_occupied"
+   }
+  },
+  {
+   "name": "stretch_holding_something",
+   "act": {
+    "this": "m1",
+    "form": "stretch"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "m1": {
+      "kind": "eden:practice_mat",
+      "fields": {
+       "deployed": true
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "put_down_first"
+   }
+  },
+  {
+   "name": "patch_every_need_met",
+   "act": {
+    "this": "p1",
+    "form": "patch",
+    "args": {
+     "kit": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "p1": {
+      "kind": "eden:camp_pillow",
+      "fields": {
+       "air": 0,
+       "patches": 0
+      }
+     },
+     "k1": {
+      "kind": "eden:pillow_repair_kit",
+      "fields": {
+       "air": 3,
+       "patches": 1
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "patch_already_patched",
+   "act": {
+    "this": "p1",
+    "form": "patch",
+    "args": {
+     "kit": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "p1": {
+      "kind": "eden:camp_pillow",
+      "fields": {
+       "air": 0,
+       "patches": 1
+      }
+     },
+     "k1": {
+      "kind": "eden:pillow_repair_kit",
+      "fields": {
+       "air": 3,
+       "patches": 1
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "patches",
+     "found": 1,
+     "wanted": {
+      "at_most": 0
+     }
+    },
+    "fix": null,
+    "says": "already_patched"
+   }
+  },
+  {
+   "name": "patch_from_a_kit_with_no_patch",
+   "act": {
+    "this": "p1",
+    "form": "patch",
+    "args": {
+     "kit": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "p1": {
+      "kind": "eden:camp_pillow",
+      "fields": {
+       "air": 0,
+       "patches": 0
+      }
+     },
+     "k1": {
+      "kind": "eden:pillow_repair_kit",
+      "fields": {
+       "air": 3,
+       "patches": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 1,
+    "detail": {
+     "node": "k1",
+     "field": "patches",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null,
+    "says": "no_patch"
+   }
+  },
+  {
+   "name": "patch_holding_something",
+   "act": {
+    "this": "p1",
+    "form": "patch",
+    "args": {
+     "kit": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "p1": {
+      "kind": "eden:camp_pillow",
+      "fields": {
+       "air": 0,
+       "patches": 0
+      }
+     },
+     "k1": {
+      "kind": "eden:pillow_repair_kit",
+      "fields": {
+       "air": 3,
+       "patches": 1
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 2,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "inflate_every_need_met",
+   "act": {
+    "this": "p1",
+    "form": "inflate",
+    "args": {
+     "kit": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "p1": {
+      "kind": "eden:camp_pillow",
+      "fields": {
+       "air": 0,
+       "patches": 1
+      }
+     },
+     "k1": {
+      "kind": "eden:pillow_repair_kit",
+      "fields": {
+       "air": 3,
+       "patches": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "inflate_unpatched",
+   "act": {
+    "this": "p1",
+    "form": "inflate",
+    "args": {
+     "kit": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "p1": {
+      "kind": "eden:camp_pillow",
+      "fields": {
+       "air": 0,
+       "patches": 0
+      }
+     },
+     "k1": {
+      "kind": "eden:pillow_repair_kit",
+      "fields": {
+       "air": 3,
+       "patches": 1
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "patches",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": {
+     "form": "patch"
+    },
+    "says": "patch_first"
+   }
+  },
+  {
+   "name": "inflate_from_a_kit_with_no_air",
+   "act": {
+    "this": "p1",
+    "form": "inflate",
+    "args": {
+     "kit": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "p1": {
+      "kind": "eden:camp_pillow",
+      "fields": {
+       "air": 0,
+       "patches": 1
+      }
+     },
+     "k1": {
+      "kind": "eden:pillow_repair_kit",
+      "fields": {
+       "air": 0,
+       "patches": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 1,
+    "detail": {
+     "node": "k1",
+     "field": "air",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null,
+    "says": "no_air"
+   }
+  },
+  {
+   "name": "inflate_when_full",
+   "act": {
+    "this": "p1",
+    "form": "inflate",
+    "args": {
+     "kit": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "p1": {
+      "kind": "eden:camp_pillow",
+      "fields": {
+       "air": 3,
+       "patches": 1
+      }
+     },
+     "k1": {
+      "kind": "eden:pillow_repair_kit",
+      "fields": {
+       "air": 3,
+       "patches": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 2,
+    "detail": {
+     "node": "p1",
+     "field": "air",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null,
+    "says": "fully_inflated"
+   }
+  },
+  {
+   "name": "inflate_holding_something",
+   "act": {
+    "this": "p1",
+    "form": "inflate",
+    "args": {
+     "kit": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "p1": {
+      "kind": "eden:camp_pillow",
+      "fields": {
+       "air": 0,
+       "patches": 1
+      }
+     },
+     "k1": {
+      "kind": "eden:pillow_repair_kit",
+      "fields": {
+       "air": 3,
+       "patches": 0
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 3,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  },
+  {
+   "name": "vent_every_need_met",
+   "act": {
+    "this": "p1",
+    "form": "vent"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "p1": {
+      "kind": "eden:camp_pillow",
+      "fields": {
+       "air": 2,
+       "patches": 1
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "vent_when_flat",
+   "act": {
+    "this": "p1",
+    "form": "vent"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "p1": {
+      "kind": "eden:camp_pillow",
+      "fields": {
+       "air": 0,
+       "patches": 1
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "air",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": {
+     "form": "inflate"
+    },
+    "says": "already_flat"
+   }
+  },
+  {
+   "name": "vent_holding_something",
+   "act": {
+    "this": "p1",
+    "form": "vent"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     },
+     "p1": {
+      "kind": "eden:camp_pillow",
+      "fields": {
+       "air": 2,
+       "patches": 1
+      }
+     },
+     "x1": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     },
+     "x2": {
+      "kind": "eden:creel",
+      "fields": {
+       "fish": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "hand_not_empty",
+    "need": 1,
+    "detail": {
+     "holding": 1
+    },
+    "fix": {
+     "step": "put"
+    },
+    "says": "empty_hands"
+   }
+  }
+ ]
+}

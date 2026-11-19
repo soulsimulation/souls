@@ -2,7 +2,8 @@
 //! and rise intents to the world's end of the gateway's socket (I1's framing), and reads each answer back. The body
 //! walks to a chair's stand point, sits in its slot and stands again, driven only by the walk skill behind the host
 //! and B3's seats, through the one controller. Each receipt names the log's entries its intent caused; a walk while
-//! seated is refused by name, and a walk replaced by another ends `claim-taken`.
+//! seated is refused by name, and a walk replaced by another ends `claim-taken`. C4 (#3368): a lie on a bed goes the
+//! same way, with B2's lie move, and gets the same receipts.
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -11,13 +12,17 @@ use std::sync::mpsc::channel;
 use std::time::Duration;
 
 use import_eden::Import;
+use replica::apply::Replica;
 use replica::bodies::{Class, Family, Resource};
 use replica::effects::{Actor, Cause, Header, Part, fixture_bytes, read_id, schema_hash};
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Purpose, Scope, Version};
-use replica::intents::{Intent, Target};
+use replica::intents::{Fallback, Intent, Target};
+use replica::move_check::move_check;
 use replica::moves::Place;
 use replica::pose::{Frame, Quat, Vec3};
+use replica::select::{Spot, resolve};
+use replica::tree::Tree;
 use sim::links::Doors;
 use sim::log::{Mem, recover};
 use sim::slots::PlaceAt;
@@ -112,15 +117,57 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
     Ok(b)
 }
 
+fn bed() -> Id {
+    Id::new(Scope([7; 16]), 9_003).unwrap()
+}
+
+/// A bed 4 m north of the chair: its slot 450 mm above the floor, its stand point 300 mm in front of it (in the lie
+/// move's 600 mm reach).
+const BED: &str = "{1: 1, 2: 450, 3: [0, 300]}";
+
+fn bed_at() -> Vec3 {
+    Vec3::new(-36_000_000, 450_000, 34_000_000)
+}
+
+fn bodies_and_bed() -> Result<Bodies, replica::effects::Refusal> {
+    let mut b = bodies()?;
+    let (_, ground) = town();
+    let place = Place::from_value(&decode(&fixture_bytes(BED)?).unwrap().value)?;
+    b.add_place(PlaceAt {
+        thing: bed(),
+        place,
+        point: bed_at(),
+        facing: Quat::IDENTITY,
+        floor: ground,
+    })?;
+    Ok(b)
+}
+
 /// A scripted client on the world's socket.
 struct Client(UnixStream);
 
 impl Client {
     fn send(&mut self, sequence: u64, verb: &str, target: Option<Id>) {
+        self.send_to(sequence, verb, target.map(Target::Node));
+    }
+
+    fn send_to(&mut self, sequence: u64, verb: &str, target: Option<Target>) {
+        self.send_as(body_id(), sequence, verb, target, &[]);
+    }
+
+    /// An intent by Soul `actor`, with ranked fallbacks of `verb` on each of `fallbacks` (C14).
+    fn send_as(
+        &mut self,
+        actor: Id,
+        sequence: u64,
+        verb: &str,
+        target: Option<Target>,
+        fallbacks: &[Id],
+    ) {
         let i = Intent {
-            actor: Actor::Soul(body_id()),
+            actor: Actor::Soul(actor),
             verb: name(verb),
-            target: target.map(Target::Node),
+            target,
             parameters: BTreeMap::new(),
             sequence,
             basis: Version {
@@ -132,7 +179,15 @@ impl Client {
             .to_value(),
             expiry: answers::now() + 60_000_000,
             resources: Vec::new(),
-            fallbacks: Vec::new(),
+            fallbacks: fallbacks
+                .iter()
+                .map(|&t| Fallback {
+                    verb: name(verb),
+                    target: Some(Target::Node(t)),
+                    parameters: BTreeMap::new(),
+                    resources: Vec::new(),
+                })
+                .collect(),
             replaces: None,
             body: None,
         };
@@ -242,7 +297,7 @@ fn a3_a_scripted_client_walks_sits_and_rises_over_the_socket() {
     });
     let stream = UnixStream::connect(&path).unwrap();
     stream
-        .set_read_timeout(Some(Duration::from_secs(20)))
+        .set_read_timeout(Some(Duration::from_secs(30)))
         .unwrap();
     accepted.recv().unwrap();
     let mut c = Client(stream);
@@ -306,4 +361,696 @@ fn a3_a_scripted_client_walks_sits_and_rises_over_the_socket() {
     let r = end(&rise.0);
     assert_eq!(r.3, ground, "standing on the ground again");
     assert!(near(r.4, stand, 1_000), "on the stand point: {:?}", r.4);
+}
+
+/// E2's follow-up (#2709): a walk aimed at a described spot (selector 2) goes through the world's answer path. A
+/// checker resolves it on its frozen copy with the shared library, giving the client's answer; the clock binds it
+/// once, at commit, and the body walks there. A spot with no answer is refused by the library's name.
+#[test]
+fn a_described_spot_is_resolved_by_a_checker_bound_at_commit_or_refused_by_name() {
+    let w = testworld::generate(1, 0).expect("the test world");
+    let im = import_eden::load(&w.text).expect("the test world loads");
+    let n = |k: &str| im.nodes[k];
+    // The world's copy is the test world's log, so the checker's frozen copy holds the nodes the spot names.
+    // Replica::start roots a zone at a `souls:place` kind; the import roots it at its world kind, so the header
+    // lists that kind once more under the place's name.
+    let Value::Map(mut h) = decode(&im.log.0).unwrap().value else {
+        panic!("a header")
+    };
+    let Some(Value::Array(kinds)) = h.get_mut(&6) else {
+        panic!("its kinds")
+    };
+    let world = kinds
+        .iter()
+        .find_map(|k| match k {
+            Value::Text(t) => t.as_str().strip_prefix("eden:world@").map(str::to_owned),
+            _ => None,
+        })
+        .expect("the world's kind");
+    kinds.push(Value::Text(name(&format!("souls:place@{world}"))));
+    let header = encode(&Value::Map(h)).unwrap();
+    let Value::Map(mut part) = decode(&im.log.1).unwrap().value else {
+        panic!("a part")
+    };
+    part.insert(
+        1,
+        Value::Bytes(Header::read(&header).unwrap().hash().to_bytes()),
+    );
+    let mut world_copy = Replica::start(&header).expect("the header");
+    world_copy
+        .apply_bytes(&encode(&Value::Map(part)).unwrap())
+        .expect("the log applies");
+    // The client's copy, built the same way by the tree's own apply, as a client's is.
+    let root = im.tree.node(im.tree.root()).unwrap();
+    let mut client = Tree::start(root.id(), root.kind().clone());
+    client
+        .apply(
+            &Header::read(&im.log.0).unwrap(),
+            &Part::read(&im.log.1).unwrap(),
+        )
+        .unwrap();
+    let free = |_: Id, _: u64| false;
+    // "Halfway between the building and the hall": a point on the open ground, 10 m east of the body.
+    let between = Spot::Between(n("building"), n("hall"));
+    let want = resolve(&client, &between, None, &free).expect("the client resolves it");
+    assert_eq!(
+        worldd::checkers::places::spot(world_copy.tree(), &between, body_id(), &free),
+        Ok(want.clone()),
+        "the checker gives the client's answer"
+    );
+    // "In front of the square": the square is the same turned a quarter, so it has no front.
+    let front = Spot::Front(n("square"));
+
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    let world =
+        answers::start(world_copy, toggles::rules(), store.clone(), cfg).expect("the world starts");
+    let path = std::env::temp_dir().join(format!("e2-spot-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    let (ready, accepted) = channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        ready.send(()).unwrap();
+        answers::serve(door, stream);
+    });
+    let stream = UnixStream::connect(&path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    accepted.recv().unwrap();
+    let mut c = Client(stream);
+
+    c.send_to(1, "eden:walk", Some(front.target()));
+    assert_eq!(c.answer(), Err("spot.no-front".into()), "refused by name");
+    c.send_to(2, "eden:walk", Some(between.target()));
+    let walk = c.answer().expect("the walk to the spot is done");
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+
+    let log = logged(&store.0.lock().unwrap().bytes);
+    let l = &log[&walk.0];
+    let seqs: Vec<u64> = l.iter().map(|e| e.0).collect();
+    assert_eq!(seqs, walk.1, "the receipt names the log's entries");
+    let end = l.last().cloned().unwrap();
+    println!(
+        "spot {:?} -> frame {} local {:?}; the walk ended {:?} on {} at {:?} um",
+        between.relation(),
+        replica::world_model::show(want.frame),
+        want.local,
+        end.2,
+        replica::world_model::show(end.3),
+        end.4
+    );
+    assert_eq!(end.3, want.frame, "standing in the spot's frame");
+    assert!(
+        near(end.4, want.local, 60_000),
+        "the body walked to the bound spot: {:?}",
+        end.4
+    );
+}
+
+/// C4 A2: a lie on a bed goes through the bodies as a sit does: walk to its stand point, lie in its slot (a receipt
+/// naming the log's entries, the move started and ended `done`), a walk refused while lying, and a rise.
+#[test]
+fn c4_a2_a_lie_on_a_bed_gets_receipts_like_a_sit() {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies_and_bed()));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    let path = std::env::temp_dir().join(format!("c4-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    let (ready, accepted) = channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        ready.send(()).unwrap();
+        answers::serve(door, stream);
+    });
+    let stream = UnixStream::connect(&path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    accepted.recv().unwrap();
+    let mut c = Client(stream);
+
+    c.send(1, "eden:walk", Some(bed()));
+    let walk = c.answer().expect("the walk is done");
+    c.send(2, "eden:lie", Some(bed()));
+    let lie = c.answer().expect("the lie is done");
+    c.send(3, "eden:walk", Some(thing()));
+    assert_eq!(
+        c.answer(),
+        Err("resource-held".into()),
+        "no walk while lying"
+    );
+    c.send(4, "eden:rise", None);
+    let rise = c.answer().expect("the rise is done");
+    c.send(5, "eden:lie", None);
+    assert_eq!(
+        c.answer(),
+        Err("move.no-target".into()),
+        "a lie names its bed"
+    );
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+
+    let log = logged(&store.0.lock().unwrap().bytes);
+    for (what, (id, entries)) in [("walk", &walk), ("lie", &lie), ("rise", &rise)] {
+        let l = &log[id];
+        let seqs: Vec<u64> = l.iter().map(|e| e.0).collect();
+        assert_eq!(
+            &seqs, entries,
+            "{what}: the receipt names the log's entries"
+        );
+        assert_eq!(l[0].1, MOVE_STARTED);
+        assert_eq!(
+            (l[1].1.as_str(), l[1].2.as_deref()),
+            (MOVE_ENDED, Some("done"))
+        );
+    }
+    let l = log[&lie.0].last().cloned().unwrap();
+    println!(
+        "lie: receipt entries {:?}, ends on {} at {:?} µm",
+        lie.1,
+        replica::world_model::show(l.3),
+        l.4
+    );
+    assert_eq!(l.3, bed(), "lying: in the bed's slot");
+    let stand = Vec3::new(bed_at().x, 0, bed_at().z + 300_000);
+    let r = log[&rise.0].last().cloned().unwrap();
+    assert!(
+        near(r.4, stand, 1_000),
+        "standing on the bed's stand point: {:?}",
+        r.4
+    );
+}
+
+fn soul(counter: u64) -> Id {
+    Id::new(Scope([7; 16]), counter).unwrap()
+}
+
+/// C14: N2's test world with its Soul (A, west of the square) and three chairs (`worldd::testbodies`), and three more
+/// Souls: E beside the chair at the square's west edge, C west of the west chair, D in the square.
+fn c14_bodies() -> Result<Bodies, replica::effects::Refusal> {
+    let mut b = worldd::testbodies::bodies()?;
+    let ground = b.pose(worldd::testbodies::body()).unwrap().0;
+    for (who, x, z) in [
+        (9_010, -26_000_000, 22_500_000),
+        (9_011, -40_000_000, 34_000_000),
+        (9_012, 5_000_000, 5_000_000),
+    ] {
+        let at = b.town.surfaces[&ground].place(
+            soul(who),
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            Vec3::new(x, 0, z),
+            Quat::IDENTITY,
+        )?;
+        b.add_body(humanoid(), at)?;
+    }
+    Ok(b)
+}
+
+/// The move a started entry says its intent took (C14): its rank and its target.
+fn took(log: &[u8], intent: Id) -> (u64, Option<Id>) {
+    for r in recover(log)
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|r| !sim::recorder::is_input(r))
+    {
+        for e in Part::read(&r).unwrap().effects {
+            if e.envelope.cause != Cause::Intent(intent) {
+                continue;
+            }
+            for ev in e.events.iter().flatten() {
+                if ev.name.as_str() == MOVE_STARTED {
+                    let Some(Value::Uint(rank)) = ev.fields.get(&5) else {
+                        panic!("a rank")
+                    };
+                    return (*rank, ev.fields.get(&6).map(|t| read_id(t).unwrap()));
+                }
+            }
+        }
+    }
+    panic!("no move started")
+}
+
+type Answered = Result<(Id, Vec<u64>), String>;
+
+/// C14 A1-A3: a walk to the square gets a receipt, ending on a standing spot in it; a sit whose first seat is taken
+/// takes its second, named in its started entry, and a list with none free is refused by name; and each local verdict
+/// a client gets from `replica::move_check` (on its copy, and what its own receipts say of its posture) is the
+/// world's answer.
+#[test]
+fn c14_a_walk_to_a_place_ranked_fallbacks_and_the_local_check() {
+    let w = testworld::generate(1, 0).expect("the test world");
+    let im = import_eden::load(&w.text).expect("the test world loads");
+    let square = im.nodes["square"];
+    // The client's copy, built by the tree's own apply, as a client's is: it holds the square, not the chairs.
+    let root = im.tree.node(im.tree.root()).unwrap();
+    let mut copy = Tree::start(root.id(), root.kind().clone());
+    copy.apply(
+        &Header::read(&im.log.0).unwrap(),
+        &Part::read(&im.log.1).unwrap(),
+    )
+    .unwrap();
+    let chairs: Vec<Id> = worldd::testbodies::chairs().iter().map(|c| c.1).collect();
+    let (west, edge, middle_chair) = (chairs[0], chairs[1], chairs[2]);
+    let (a, e, c, d) = (body_id(), soul(9_010), soul(9_011), soul(9_012));
+
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| c14_bodies()));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    let path = std::env::temp_dir().join(format!("c14-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    let (ready, accepted) = channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        ready.send(()).unwrap();
+        answers::serve(door, stream);
+    });
+    let stream = UnixStream::connect(&path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    accepted.recv().unwrap();
+    let mut cl = Client(stream);
+    let mut seq: BTreeMap<Id, u64> = BTreeMap::new();
+    let mut go = |who: Id, verb: &str, t: Option<Id>, fb: &[Id]| {
+        let s = seq.entry(who).or_default();
+        *s += 1;
+        cl.send_as(who, *s, verb, t.map(Target::Node), fb);
+        cl.answer()
+    };
+    // A3: the client's verdict, from its copy (`has`) and its own receipts (`seated`), against the world's answer.
+    let hex = |i: Id| format!("{}-{}", replica::encode::to_hex(&i.scope().0), i.counter());
+    let local = |verb: &str, t: Option<Id>, seated: bool| {
+        let this = t.map_or(String::new(), |t| format!(r#","this":"{}""#, hex(t)));
+        let has = t.is_some_and(|t| copy.handle(t).is_some());
+        move_check(&format!(
+            r#"{{"verb":"{verb}"{this},"has":{has},"seated":{seated}}}"#
+        ))
+    };
+    let mut agreed = Vec::new();
+    let mut agree = |what: &str, verdict: String, world: &Answered| {
+        let want = match world {
+            Ok(_) => r#"{"verdict":"yes"}"#.to_owned(),
+            Err(r) => format!(r#"{{"verdict":"no","reason":"{r}"}}"#),
+        };
+        assert_eq!(verdict, want, "{what}: the local verdict is the world's");
+        agreed.push(format!("{what}: {verdict}"));
+    };
+
+    let r = go(a, "eden:walk", None, &[]);
+    agree("walk, no target", local("eden:walk", None, false), &r);
+    let r = go(a, "eden:rise", None, &[]);
+    agree("rise, standing", local("eden:rise", None, false), &r);
+    // A1: a walk to the square, a place with no seat and no point.
+    let r = go(d, "eden:walk", Some(square), &[]);
+    agree(
+        "walk to the square",
+        local("eden:walk", Some(square), false),
+        &r,
+    );
+    let walk = r.expect("the walk to the square gets a receipt");
+    // A2: A takes the west chair; E, beside the edge chair, sits with the west chair first and the edge chair second.
+    go(a, "eden:walk", Some(west), &[]).expect("A walks to the west chair");
+    go(a, "eden:sit", Some(west), &[]).expect("A sits in the west chair");
+    go(e, "eden:walk", Some(edge), &[]).expect("E walks to the edge chair");
+    let sat = go(e, "eden:sit", Some(west), &[edge]).expect("E takes its second seat");
+    let none = go(c, "eden:sit", Some(west), &[edge]);
+    assert_eq!(
+        none,
+        Err("place-taken".into()),
+        "none free: refused by name"
+    );
+    // A3 again, A seated.
+    let r = go(a, "eden:walk", Some(square), &[]);
+    agree("walk, seated", local("eden:walk", Some(square), true), &r);
+    let r = go(a, "eden:sit", Some(middle_chair), &[]);
+    agree(
+        "sit, seated",
+        local("eden:sit", Some(middle_chair), true),
+        &r,
+    );
+    let r = go(a, "eden:rise", None, &[]);
+    agree("rise, seated", local("eden:rise", None, true), &r);
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+
+    let bytes = store.0.lock().unwrap().bytes.clone();
+    let log = logged(&bytes);
+    let end = log[&walk.0].last().cloned().unwrap();
+    println!(
+        "walk to the square: receipt {:?}, ended {:?} on {} at {:?} um",
+        walk.1,
+        end.2,
+        replica::world_model::show(end.3),
+        end.4
+    );
+    assert_eq!(end.2.as_deref(), Some("done"));
+    assert!(
+        end.4[0].abs() <= 30_000_000 && end.4[2].abs() <= 30_000_000,
+        "standing in the square: {:?}",
+        end.4
+    );
+    assert_eq!(took(&bytes, walk.0), (0, Some(square)));
+    assert_eq!(
+        took(&bytes, sat.0),
+        (1, Some(edge)),
+        "the sit names its second candidate"
+    );
+    assert_eq!(
+        log[&sat.0].last().unwrap().3,
+        edge,
+        "E sits in the edge chair"
+    );
+    for l in agreed {
+        println!("local = world: {l}");
+    }
+}
+
+/// The world on a socket, its acts ending `deadline` µs after receipt, and a client on it.
+fn served(deadline: i64, tag: &str) -> (answers::World, Client, Mem, std::path::PathBuf) {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.deadline = deadline;
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    let path = std::env::temp_dir().join(format!("{tag}-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    let (ready, accepted) = channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        ready.send(()).unwrap();
+        answers::serve(door, stream);
+    });
+    let stream = UnixStream::connect(&path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    accepted.recv().unwrap();
+    (world, Client(stream), store, path)
+}
+
+/// Each tick's record, in order: its move events (entry, intent, event, how) and the body rows it wrote (body,
+/// position).
+type Tick = (Vec<(u64, Id, String, Option<String>)>, Vec<(Id, Vec3)>);
+
+fn ticks(log: &[u8]) -> Vec<Tick> {
+    let mut out = Vec::new();
+    for r in recover(log)
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|r| !sim::recorder::is_input(r))
+    {
+        let part = Part::read(&r).unwrap();
+        let mut events = Vec::new();
+        for e in &part.effects {
+            let Cause::Intent(id) = e.envelope.cause else {
+                continue;
+            };
+            for ev in e.events.iter().flatten() {
+                let how = ev.fields.get(&2).map(|v| match v {
+                    Value::Bytes(b) => String::from_utf8(b.clone()).unwrap(),
+                    _ => panic!("a name"),
+                });
+                events.push((e.envelope.sequence, id, ev.name.as_str().to_owned(), how));
+            }
+        }
+        let rows = match part.rest.get(&answers::BODIES) {
+            Some(Value::Array(rows)) => rows
+                .iter()
+                .filter_map(worldd::bodies::read_row)
+                .map(|(b, p, _)| (b, p.position))
+                .collect(),
+            _ => Vec::new(),
+        };
+        out.push((events, rows));
+    }
+    out
+}
+
+/// The tick whose record holds `event` of intent `id`, with that event's entry and how it ended.
+fn tick_of(ticks: &[Tick], id: Id, event: &str) -> (usize, u64, Option<String>) {
+    for (k, (events, _)) in ticks.iter().enumerate() {
+        if let Some(e) = events.iter().find(|e| e.1 == id && e.2 == event) {
+            return (k, e.0, e.3.clone());
+        }
+    }
+    panic!("no {event} for {id:?}")
+}
+
+/// A walk whose act times out mid-move stops in the tick its deadline passes: its end is written in that tick by the
+/// deadline's name, `act.timed-out`, and the body is not moved after it.
+#[test]
+fn a_walk_whose_act_times_out_mid_move_stops_and_ends_by_name() {
+    // The walk to the chair's stand point is about 4 m, near 3 s; its act ends after 1 s.
+    let (world, mut c, store, path) = served(1_000_000, "timeout");
+    c.send(1, "eden:walk", Some(thing()));
+    assert_eq!(c.answer(), Err("act.timed-out".into()));
+    std::thread::sleep(Duration::from_millis(600));
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+
+    let bytes = store.0.lock().unwrap().bytes.clone();
+    let log = logged(&bytes);
+    assert_eq!(log.len(), 1, "one intent");
+    let (&id, l) = log.iter().next().unwrap();
+    let events: Vec<(&str, Option<&str>)> =
+        l.iter().map(|e| (e.1.as_str(), e.2.as_deref())).collect();
+    assert_eq!(
+        events,
+        [(MOVE_STARTED, None), (MOVE_ENDED, Some("act.timed-out"))],
+        "the move started and ended by the deadline's name"
+    );
+    let stopped = l[1].4;
+    let stand = Vec3::new(seat_at().x, 0, seat_at().z + 300_000);
+    assert!(
+        !near(stopped, start(), 300_000) && !near(stopped, stand, 300_000),
+        "stopped mid-way: {stopped:?}"
+    );
+    let ticks = ticks(&bytes);
+    let (k, _, _) = tick_of(&ticks, id, MOVE_ENDED);
+    for (n, (_, rows)) in ticks.iter().enumerate().skip(k) {
+        for &(_, p) in rows.iter().filter(|r| r.0 == body_id()) {
+            assert!(
+                n == k && [p.x, p.y, p.z] == stopped,
+                "the body moved after its act ended: tick +{} at {p:?}, stopped at {stopped:?}",
+                n - k
+            );
+        }
+    }
+    println!(
+        "timed out: stopped at {stopped:?} um; {} later records, none moving the body",
+        ticks.len() - k - 1
+    );
+}
+
+/// A walk ended mid-move by a new move of the same body (`claim-taken`) stops in the tick the new move starts: its end
+/// is written in that tick, before the new move's start.
+#[test]
+fn a_walk_cancelled_mid_move_by_a_new_move_ends_in_the_same_tick() {
+    let (world, mut c, store, path) = served(10_000_000, "replaced");
+    c.send(1, "eden:walk", Some(thing()));
+    std::thread::sleep(Duration::from_millis(800));
+    c.send(2, "eden:walk", Some(thing()));
+    assert_eq!(c.answer(), Err("claim-taken".into()), "the walk gave way");
+    let (second, _) = c.answer().expect("the second walk is done");
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+
+    let bytes = store.0.lock().unwrap().bytes.clone();
+    let log = logged(&bytes);
+    let first = *log.keys().find(|&&i| i != second).expect("the first walk");
+    let ticks = ticks(&bytes);
+    let (ended, entry, how) = tick_of(&ticks, first, MOVE_ENDED);
+    let (started, next, _) = tick_of(&ticks, second, MOVE_STARTED);
+    assert_eq!(how.as_deref(), Some("claim-taken"));
+    assert_eq!(
+        ended, started,
+        "the first walk's end is in the tick the second starts"
+    );
+    assert!(entry < next, "and written before it");
+}
+
+/// C19 beside C14: a partially occupied thing remains eligible, both bare and first in a ranked list.
+fn multi_slot_eligibility(ranked: bool) {
+    use worldd::bodies::{Ask, Asked};
+    type Admission = (Result<(), String>, Option<(usize, Option<Id>)>);
+
+    fn sit(b: &mut Bodies, body: Id, target: Id, fallbacks: &[Id], sequence: u64) -> Admission {
+        let intent = soul(20_000 + sequence);
+        let ask = Asked {
+            body,
+            actor: Actor::Soul(body),
+            ask: Ask::Sit { thing: target },
+            fallbacks: fallbacks.iter().map(|&thing| Ask::Sit { thing }).collect(),
+        };
+        let result = b
+            .start(vec![(intent, ask)])
+            .remove(0)
+            .1
+            .map_err(|r| r.name.to_owned());
+        (result, b.took(intent))
+    }
+
+    let (town, ground) = town();
+    let mut starts = Vec::new();
+    let people: Vec<Id> = (0..5).map(|n| soul(10_000 + n)).collect();
+    for (i, &person) in people.iter().enumerate() {
+        let (x, z) = if i < 4 {
+            (-37_000_000 + i as i64 * 1_000_000, 30_300_000)
+        } else {
+            (-34_000_000, 31_300_000)
+        };
+        let placed = town.surfaces[&ground]
+            .place(
+                person,
+                Frame {
+                    node: ground,
+                    slot: None,
+                },
+                Vec3::new(x, 0, z),
+                Quat::IDENTITY,
+            )
+            .unwrap();
+        starts.push(placed);
+    }
+    let mut b = Bodies::new(town, 50_000).unwrap();
+    for placed in starts {
+        b.add_body(humanoid(), placed).unwrap();
+    }
+    for slot in 1..=3 {
+        b.add_place(PlaceAt {
+            thing: thing(),
+            place: Place {
+                slot,
+                height: 450_000,
+                stand: [0, 300_000],
+            },
+            point: Vec3::new(-38_000_000 + slot as i64 * 1_000_000, 450_000, 30_000_000),
+            facing: Quat::IDENTITY,
+            floor: ground,
+        })
+        .unwrap();
+    }
+    b.add_place(PlaceAt {
+        thing: bed(),
+        place: Place {
+            slot: 1,
+            height: 450_000,
+            stand: [0, 300_000],
+        },
+        point: Vec3::new(-34_000_000, 450_000, 30_000_000),
+        facing: Quat::IDENTITY,
+        floor: ground,
+    })
+    .unwrap();
+    b.begin(0);
+    assert_eq!(
+        sit(&mut b, people[4], ground, &[], 1).0,
+        Err("place-unknown".into()),
+        "a known non-seat keeps its refusal"
+    );
+    assert_eq!(
+        sit(&mut b, people[4], soul(99_999), &[], 2).0,
+        Err("place-unknown".into()),
+        "an unknown seat keeps its refusal"
+    );
+    assert_eq!(sit(&mut b, people[0], thing(), &[], 3).0, Ok(()));
+    let fallback = [bed()];
+    let partial = sit(
+        &mut b,
+        people[1],
+        thing(),
+        if ranked { &fallback } else { &[] },
+        4,
+    );
+    assert_eq!(
+        partial.0,
+        Ok(()),
+        "one occupied slot leaves the other slots eligible"
+    );
+    assert_eq!(
+        partial.1,
+        Some((0, Some(thing()))),
+        "the partially occupied primary is selected"
+    );
+    assert_eq!(
+        sit(&mut b, people[2], thing(), &[], 5).0,
+        Ok(()),
+        "the third slot remains eligible"
+    );
+    let full = sit(&mut b, people[3], thing(), &fallback, 6);
+    assert_eq!(full.0, Ok(()), "a full primary selects its free fallback");
+    assert_eq!(full.1, Some((1, Some(bed()))));
+    assert_eq!(
+        sit(&mut b, people[4], thing(), &fallback, 7).0,
+        Err("place-taken".into()),
+        "a fully occupied list is refused"
+    );
+    assert!(
+        b.step(1_100_000).iter().all(|(_, r)| r.is_ok()),
+        "every admitted sit completes through the controller"
+    );
+    let placed = b.placed();
+    for (i, person) in people.iter().take(3).enumerate() {
+        assert_eq!(
+            (placed[person].0.frame.node, placed[person].0.frame.slot),
+            (thing(), Some(i as u64 + 1))
+        );
+    }
+    assert_eq!(
+        (
+            placed[&people[3]].0.frame.node,
+            placed[&people[3]].0.frame.slot
+        ),
+        (bed(), Some(1))
+    );
+}
+
+#[test]
+fn c19_a_partly_occupied_thing_accepts_a_bare_sit() {
+    multi_slot_eligibility(false);
+}
+
+#[test]
+fn c19_a_partly_occupied_primary_precedes_its_ranked_fallback() {
+    multi_slot_eligibility(true);
 }

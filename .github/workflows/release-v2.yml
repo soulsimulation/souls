@@ -1,0 +1,191 @@
+# One release of Engine v2 is one commit (Engine v2 O18, #2811): built once here, staged on the machine by hash, moved
+# by canary (O7's deploy, then every other world, then O16's gateway-upgrade, then the page), then the news entry, tag
+# and changelog, each once. A dry run (the default) builds and stages, and moves and publishes nothing. Docs:
+# v2/docs/release.md; the steps: v2/tools/ops/release/release.sh. Rollback: rollback-v2.yml.
+#   gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha>                  (the dry run, scratch)
+#   gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dry_run=false [-f target=production]
+name: release-v2
+run-name: release-v2 ${{ inputs.version }}${{ inputs.sha && format(' at {0}', inputs.sha) || '' }} on ${{ inputs.target }}${{ inputs.dry_run && ' (dry run)' || '' }}
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version for the changelog, tag and news entry (e.g. 0.140)
+        required: true
+      sha:
+        description: The release head, a full sha on main. Empty = main's HEAD, which must be RELEASE_FREEZE's when it is set
+        required: false
+      dry_run:
+        description: Build and stage only; no pin, gateway or page moves, nothing published. false releases
+        type: boolean
+        default: true
+      target:
+        description: The GitHub environment that names the machine (scratch, a throwaway one, or production)
+        type: choice
+        options: [scratch, production]
+        default: scratch
+      canary:
+        description: The canary world (default the first by name)
+        required: false
+      date:
+        description: Release date (YYYY-MM-DD, UTC) for the changelog and news entry; default today
+        required: false
+permissions:
+  contents: read
+# release.yml's and install-v2.yml's group: one release step on the machine at a time
+concurrency:
+  group: release
+  cancel-in-progress: false
+env:
+  SIM_ORIGIN: ${{ vars.SIM_ORIGIN || 'https://soul.game' }}
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      sha: ${{ steps.refs.outputs.sha }}
+      date: ${{ steps.refs.outputs.date }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0, persist-credentials: false }
+      - id: refs
+        name: The release head
+        env:
+          REF: ${{ github.ref }}
+          VERSION: ${{ inputs.version }}
+          PIN: ${{ inputs.sha }}
+          DATE: ${{ inputs.date }}
+          RELEASE_FREEZE: ${{ vars.RELEASE_FREEZE }}
+        run: |
+          [ "$REF" = refs/heads/main ] || { echo "::error::release-v2 runs from main only (got $REF)"; exit 1; }
+          [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || { echo "::error::version must look like 0.140 or 0.140.1"; exit 1; }
+          if [ -n "$PIN" ]; then
+            [[ "$PIN" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be the full 40-hex commit"; exit 1; }
+            git merge-base --is-ancestor "$PIN" origin/main || { echo "::error::$PIN is not on main"; exit 1; }
+            SHA=$PIN
+          else
+            SHA=$(git rev-parse HEAD)
+            FROZEN=$(echo "$RELEASE_FREEZE" | awk '{print $1}')
+            if [ -n "$FROZEN" ] && [ "$SHA" != "$(git rev-parse -q --verify "$FROZEN^{commit}" || echo "$FROZEN")" ]; then
+              echo "::error::release freeze: main's HEAD ${SHA:0:12} is not the pinned $FROZEN (RELEASE_FREEZE)"; exit 1
+            fi
+          fi
+          [ -n "$DATE" ] || DATE=$(date -u +%F)
+          [[ "$DATE" =~ ^20[0-9]{2}-[01][0-9]-[0-3][0-9]$ ]] || { echo "::error::date must be YYYY-MM-DD"; exit 1; }
+          { echo "sha=$SHA"; echo "date=$DATE"; } >> "$GITHUB_OUTPUT"
+          echo "release-v2 $VERSION at ${SHA:0:12}" >> "$GITHUB_STEP_SUMMARY"
+      - name: The checks a release head must pass (v2/docs/release.md)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.refs.outputs.sha }}
+        run: |
+          set +e
+          bash v2/tools/ops/release/release.sh checks "$SHA" | tee "$RUNNER_TEMP/checks.txt"
+          status=${PIPESTATUS[0]}
+          { echo '```'; cat "$RUNNER_TEMP/checks.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+  release:
+    needs: preflight
+    # an older system library than the newest runner's, so the binaries start on the machine (stage checks it)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    environment: ${{ inputs.target }}
+    permissions:
+      contents: write       # the tag and the changelog's branch
+      pull-requests: write  # the changelog's pull request
+    env:
+      SHA: ${{ needs.preflight.outputs.sha }}
+      VERSION: ${{ inputs.version }}
+      DATE: ${{ needs.preflight.outputs.date }}
+    steps:
+      - name: Inputs
+        env:
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          [ -n "$SIM_DEPLOY_HOST" ] && [ -n "$SIM_DEPLOY_USER" ] || { echo "::error::the environment names no machine (SIM_DEPLOY_HOST, SIM_DEPLOY_USER)"; exit 1; }
+          echo "::add-mask::$SIM_DEPLOY_HOST"
+          echo "::add-mask::$SIM_DEPLOY_USER"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: "${{ needs.preflight.outputs.sha }}", persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      - name: Build the world process, the gateway, the page's WASM and the tools, once
+        working-directory: v2
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --no-self-update --target wasm32-unknown-unknown
+          # --bin names targets in every -p package: the programs and the tools are two builds (O18b, #3498).
+          cargo build --release --locked -p worldd -p gatewayd
+          cargo build --release --locked -p ops --bin deploy --bin gateway-upgrade
+          bindgen_version=$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)
+          cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
+          cargo build -p replica --release --target wasm32-unknown-unknown --locked
+          target/tools/bin/wasm-bindgen --target web --out-dir target/wasm-load/pkg target/wasm32-unknown-unknown/release/replica.wasm
+      - name: Build the page
+        working-directory: v2/web
+        # O23: the changelog page shows the release it ships (its section compiled in, as release.yml does)
+        run: |
+          node ../../tools/changelog/compile.mjs --version "$VERSION" --date "$DATE" --out "$RUNNER_TEMP/CHANGELOG.md"
+          npm ci && V2_CHANGELOG_FILE="$RUNNER_TEMP/CHANGELOG.md" npm run build
+      - name: Bundle and its manifest
+        run: |
+          bash v2/tools/ops/release/release.sh bundle "$RUNNER_TEMP/bundle" "$SHA" "$VERSION" v2/target/release v2/web/dist v2/client | tee -a "$GITHUB_STEP_SUMMARY"
+          cp "$RUNNER_TEMP/bundle/manifest.json" "$RUNNER_TEMP/manifest.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-v2-${{ inputs.version }}-manifest
+          path: ${{ runner.temp }}/manifest.json
+      - name: SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SIM_DEPLOY_KNOWN_HOSTS: ${{ secrets.SIM_DEPLOY_KNOWN_HOSTS }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SIM_DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+          printf 'Host %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n' \
+            "$SIM_DEPLOY_HOST" "$SIM_DEPLOY_USER" > ~/.ssh/config && chmod 600 ~/.ssh/config
+      - name: Stage by hash
+        env:
+          RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+        run: bash v2/tools/ops/release/release.sh remote stage "$RUNNER_TEMP/bundle" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Move by canary, then the rest
+        if: ${{ !inputs.dry_run }}
+        env:
+          RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          CANARY: ${{ inputs.canary }}
+        run: |
+          set +e
+          bash v2/tools/ops/release/release.sh remote move "$SHA" $CANARY > "$RUNNER_TEMP/move.txt" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/move.txt"
+          { echo '```'; cat "$RUNNER_TEMP/move.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+      - name: News entry (only when every world runs it)
+        if: ${{ !inputs.dry_run }}
+        env:
+          RELEASE_TARGET: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+        run: bash v2/tools/ops/release/release.sh remote news "$SHA" "$VERSION" "$SIM_ORIGIN/changelog#v$VERSION" "$DATE" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ !inputs.dry_run }}
+        with: { ref: main, fetch-depth: 0, path: main }
+      - name: Tag, GitHub Release and changelog (each once)
+        if: ${{ !inputs.dry_run }}
+        working-directory: main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          bash v2/tools/ops/release/release.sh publish "$VERSION" "$SHA" "$DATE" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Remove deploy credentials
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

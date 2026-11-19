@@ -1,0 +1,184 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:cottage",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      8000,
+      4800,
+      6000
+    ]
+  },
+  "areas": {
+    "living": {
+      "at_mm": [
+        1175,
+        100,
+        0
+      ],
+      "radius_mm": 2605
+    },
+    "kitchen": {
+      "at_mm": [
+        -2665,
+        100,
+        1420
+      ],
+      "radius_mm": 1115
+    },
+    "bedroom": {
+      "at_mm": [
+        -2665,
+        100,
+        -1420
+      ],
+      "radius_mm": 1115
+    }
+  },
+  "forms": {
+    "go_to_room": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "room": {
+          "type": "part"
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "room"
+          }
+        }
+      ],
+      "effects": []
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:cottage",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1400,
+            0
+          ],
+          "size": [
+            8000,
+            2800,
+            6000
+          ],
+          "tint": "wall"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            3847,
+            1550
+          ],
+          "size": [
+            8300,
+            2093,
+            3200
+          ],
+          "tint": "roof"
+        },
+        {
+          "kind": "wedge",
+          "at": [
+            0,
+            3847,
+            -1550
+          ],
+          "size": [
+            8300,
+            2093,
+            3200
+          ],
+          "yaw": 180000,
+          "tint": "roof"
+        },
+        {
+          "kind": "box",
+          "at": [
+            1175,
+            1150,
+            3020
+          ],
+          "size": [
+            1200,
+            2100,
+            60
+          ],
+          "tint": "doorway"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -2400,
+            1550,
+            3015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            2900,
+            1550,
+            3015
+          ],
+          "size": [
+            900,
+            1100,
+            50
+          ],
+          "tint": "glass"
+        }
+      ],
+      "round": 20,
+      "palette": {
+        "wall": "#f1e7d2",
+        "trim": "#6b4a2b",
+        "roof": "#8a3b2a",
+        "doorway": "#2b2622",
+        "glass": "#9fb8c4"
+      },
+      "tags": [
+        "structure",
+        "building",
+        "cottage"
+      ]
+    }
+  },
+  "text": {
+    "card": "A cottage with a living room, a kitchen and a bedroom.",
+    "building": "building",
+    "house": "house",
+    "home": "home"
+  },
+  "card": {
+    "text": "card",
+    "category": "building",
+    "synonyms": [
+      "house",
+      "home"
+    ]
+  }
+}

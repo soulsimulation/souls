@@ -29,13 +29,20 @@ pub struct Config {
     pub store: PathBuf,
     pub provider: Option<Provider>,
     pub test_sign_in: bool,
+    /// The key shared with the gateways for view tokens (V13b), a file of 64 hex digits; no exchange without it.
+    pub view_key: Option<PathBuf>,
+    /// For local and test worlds: a test person and what they own, `(name, grant, body followed)`.
+    pub test_own: Vec<(String, String, Option<String>)>,
+    /// The file holding the key the gateway reads and closes the mailbox with (R13); without it those requests are off.
+    pub mailbox_key: Option<PathBuf>,
     /// Pairing's store (W2), and the gateway's tokens file it writes; pairing is off without the store.
     pub pairing: Option<PathBuf>,
     pub gateway_tokens: Option<PathBuf>,
 }
 
 pub const USAGE: &str = "directoryd --listen <addr:port> --public-url <origin> --store <absolute path> \
-(--issuer <https origin> --parties <origin,origin> | --test-sign-in) [--pairing <path> [--gateway-tokens <path>]]";
+(--issuer <https origin> --parties <origin,origin> | --test-sign-in [--test-own <name>=<grant>[@<body>]]...) \
+[--view-key <file>] [--pairing <path> [--gateway-tokens <path>]] [--mailbox-key <file>]";
 
 /// Reads the arguments (without the program's name) and refuses what must not run. A refusal starts with
 /// "refusing to start".
@@ -46,6 +53,9 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
     let mut issuer = None;
     let mut parties = None;
     let mut test_sign_in = false;
+    let mut view_key = None;
+    let mut test_own = Vec::new();
+    let mut mailbox_key = None;
     let (mut pairing, mut gateway_tokens) = (None, None);
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -61,6 +71,22 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
             "--issuer" => issuer = Some(value()?),
             "--parties" => parties = Some(value()?),
             "--test-sign-in" => test_sign_in = true,
+            "--view-key" => view_key = Some(PathBuf::from(value()?)),
+            "--test-own" => {
+                let v = value()?;
+                let own = v.split_once('=').and_then(|(name, rest)| {
+                    let (grant, follow) = match rest.split_once('@') {
+                        Some((g, f)) => (g, Some(f.to_string())),
+                        None => (rest, None),
+                    };
+                    super::view::is_grant(grant)
+                        .then(|| (name.to_string(), grant.to_string(), follow))
+                });
+                test_own.push(own.ok_or_else(|| {
+                    format!("refusing to start: --test-own is <name>=<grant>[@<body>]; {USAGE}")
+                })?);
+            }
+            "--mailbox-key" => mailbox_key = Some(PathBuf::from(value()?)),
             "--pairing" => pairing = Some(PathBuf::from(value()?)),
             "--gateway-tokens" => gateway_tokens = Some(PathBuf::from(value()?)),
             _ => return Err(format!("refusing to start: unknown argument {a}; {USAGE}")),
@@ -114,6 +140,8 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
         if !listen.ip().is_loopback() {
             return refuse("--test-sign-in listening on an address that is not loopback");
         }
+    } else if !test_own.is_empty() {
+        return refuse("--test-own without --test-sign-in");
     } else if provider.is_none() {
         return refuse("no sign-in: give --issuer and --parties, or --test-sign-in on loopback");
     }
@@ -123,6 +151,9 @@ pub fn parse(args: &[String]) -> Result<Config, String> {
         store,
         provider,
         test_sign_in,
+        view_key,
+        test_own,
+        mailbox_key,
         pairing,
         gateway_tokens,
     })
