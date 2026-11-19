@@ -102,7 +102,8 @@ fn read(stream: &TcpStream) -> Option<Request> {
     let method = words.next()?.to_string();
     let path = words.next()?.split('?').next()?.to_string();
     let (mut bearer, mut soul, mut length) = (None, None, 0usize);
-    let most = if path == "/v1/account/souls/picture" {
+    // A picture rides in a Soul's picture and in a world's settings (its list picture, G10).
+    let most = if path == "/v1/account/souls/picture" || path == "/v1/worlds/settings" {
         PICTURE_BODY_MOST
     } else if path == "/v1/mailbox/pray" || path == "/v1/mailbox/answer" {
         PRAYER_BODY_MOST

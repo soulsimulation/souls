@@ -52,7 +52,7 @@ test('accept, decline and leave name the conversation; a turn is public unless p
 });
 
 test('an invitation reaches the body asked; a decline or a lapse is named to the opener', () => {
-  const ev = (name) => ({ name, fields: { 1: conv, 2: other, 3: 'cbor' } });
+  const ev = (name) => ({ name, fields: name === 'souls:offer' ? { 1: conv, 2: KIND, 3: [me], 4: 60_000_000, 5: other } : { 1: conv, 2: other, 3: [me] } });
   assert.deepEqual(offerNote(ev('souls:offer'), me), { kind: 'conversation', what: 'invited', conversation: conv, from: other });
   assert.equal(offerNote(ev('souls:offer'), other), null, 'its own offer is no invitation');
   assert.deepEqual(offerNote(ev('souls:offer-declined'), other), { kind: 'conversation', what: 'declined', conversation: conv });
@@ -61,7 +61,7 @@ test('an invitation reaches the body asked; a decline or a lapse is named to the
   assert.equal(offerNote({ name: 'souls:said', fields: {} }, me), null);
 });
 
-test('the offer\'s parameters on the wire: the kind and role as names, the bodies asked as ids', async () => {
+test('the offer\'s bounded kind pin on the wire, the role as a name and bodies as ids', async () => {
   const pkg = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
   const wire = await import(pathToFileURL(join(pkg, 'replica.js')).href);
   wire.initSync({ module: readFileSync(join(pkg, 'replica_bg.wasm')) });
@@ -70,10 +70,47 @@ test('the offer\'s parameters on the wire: the kind and role as names, the bodie
     undefined, undefined, params);
   const bytes = Buffer.from(send(JSON.stringify(offer.params)));
   const plain = Buffer.from(send(undefined));
-  // The parameters as the world reads them (`worldd::engine`): 1 and 2 names, 3 a list of ids.
-  const p = Buffer.from(wire.encode_diagnostic(`{1: "${KIND}", 2: "${OPENER}", 3: [[h'${S}', 3]]}`));
+  // The kind splits its plain name and binary hash; every text stays at most 64 bytes.
+  const p = Buffer.from(wire.encode_diagnostic(`{1: ["${KIND.split('@')[0]}", h'${KIND.split('@')[1]}'], 2: "${OPENER}", 3: [[h'${S}', 3]]}`));
   assert.ok(bytes.includes(p.subarray(1)), 'the parameters map, encoded as the world reads it');
   assert.ok(bytes.length > plain.length && !plain.includes(Buffer.from(KIND)));
+  for (const kind of [KIND.slice(0, -1), KIND.replace('@1220', '@1320'), KIND.replace('@1220', '@1220A')]) {
+    assert.throws(() => send(JSON.stringify({ ...offer.params, 1: kind })), /activity-kind-bad-pin/);
+  }
+  assert.throws(() => send(JSON.stringify({ ...offer.params, 2: 'x'.repeat(65) })), /intent.text-too-long/);
+  assert.throws(() => wire.wireIntent(Buffer.from(S, 'hex'), 2n, 'eden:use', 1n, new Uint8Array(), 9n,
+    offer.target, undefined, undefined, JSON.stringify(offer.params)), /intent.text-too-long/);
   assert.throws(() => send('{"one": 1}'), /params-not-numbered/);
   assert.throws(() => send('{"1": {"a": 1}}'), /param-unsupported/);
+});
+
+test('addressed activity frames reach offerNote while speech stays with wireHeard', async () => {
+  const pkg = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
+  const wire = await import(pathToFileURL(join(pkg, 'replica.js')).href);
+  wire.initSync({ module: readFileSync(join(pkg, 'replica_bg.wasm')) });
+  const encode = (diag) => Buffer.from(wire.encode_diagnostic(diag));
+  const id = (n) => `[h'${S}', ${n}]`;
+  const effect = (name, fields) => `{1: 41, 2: 9000, 3: {1: 3}, 4: {1: 1, 2: ${id(3)}},
+    5: {1: 1}, 6: ${id(1)}, 7: [], 8: [{1: "${name}", 2: ${fields}}]}`;
+  const frame = (item) => encode(`{31: h'${encode(item).toString('hex')}'}`);
+  const addressed = (entry, words = '') => frame(`{1: 9, 2: h'${encode(entry).toString('hex')}'${words}}`);
+  const offer = effect('souls:offer', `{1: ${id(9)}, 2: "${KIND}", 3: [${id(2)}], 4: 60000000, 5: ${id(3)}}`);
+  const read = JSON.parse(wire.wireEntry(addressed(offer)));
+  assert.equal(read.sequence, 41);
+  assert.equal(read.actor, other);
+  assert.deepEqual(offerNote(read.events[0], me), { kind: 'conversation', what: 'invited', conversation: conv, from: other });
+  assert.equal(offerNote(read.events[0], other), null, 'the opener gets no invitation to itself');
+  assert.deepEqual(JSON.parse(wire.wireEntry(frame(`{1: 1, 2: ${offer}}`))), read, 'ordinary entry decoding is preserved');
+  for (const what of ['declined', 'lapsed']) {
+    const answer = effect(`souls:offer-${what}`, `{1: ${id(9)}, 2: ${id(3)}, 3: [${id(2)}]}`);
+    const decoded = JSON.parse(wire.wireEntry(addressed(answer)));
+    assert.deepEqual(offerNote(decoded.events[0], other), { kind: 'conversation', what, conversation: conv });
+    assert.equal(offerNote(decoded.events[0], me), null, 'the answer concerns the opener alone');
+  }
+  const said = effect('souls:said', `{1: {21: ${id(8)}}, 2: 3000, 3: [${id(2)}], 4: 1000000}`);
+  const speech = addressed(said, ", 3: h'6869'");
+  assert.equal(wire.wireEntry(speech), '', 'onItem must continue to wireHeard for speech');
+  assert.equal(wire.wireHeard(speech), `heard 41 9000 ${place} - 6869`);
+  assert.equal(wire.wireEntry(addressed(effect('souls:unrelated', '{1: 0}'))), '', 'unrelated addressed events stay out');
+  assert.equal(wire.wireEntry(frame(`{1: 6, 2: ${id(1)}}`)), '', 'other view items stay out');
 });

@@ -405,8 +405,17 @@ struct Run {
 }
 
 fn serve(tag: &str) -> (Run, Client, Client) {
-    let store = Mem::with(Vec::new());
+    serve_on(tag, Mem::with(Vec::new()), None)
+}
+
+/// The world served over `store` (a restart when it holds a log), its words kept in `text` when given.
+fn serve_on(
+    tag: &str,
+    store: Mem,
+    text: Option<std::sync::Arc<sim::text::Store>>,
+) -> (Run, Client, Client) {
     let mut cfg = Config::new(LINEAGE, 1);
+    cfg.text = text;
     cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
     cfg.engine = Some((tree_rules(), vec![pair_kind()]));
     cfg.join = Some(Join {
@@ -677,6 +686,189 @@ fn a2_a_leave_frees_the_seat_the_links_and_the_timers() {
     run.stop();
 }
 
+// Engine v2 W11b (#3511): the directory's word reaches the world. An owner's retire ends the Soul's body by K10's
+// path; a name or description saved on the page becomes the body's own describe; a world down at the retire gets it
+// at its next start. The directory's file is handed in as `worldd serve` hands it (`worldd::directory::watch`).
+
+/// A Soul's grant, as the directory's file names it.
+fn grant(soul: Id) -> String {
+    format!(
+        "soul-{}-{}",
+        replica::encode::to_hex(&soul.scope().0),
+        soul.counter()
+    )
+}
+
+/// Hands the world the directory's file `text`; the answers to what it causes come back on the receiver.
+fn tell(run: &Run, text: &str) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let d = worldd::directory::Directory::read(text);
+    run.world
+        .events
+        .send(answers::Event::Directory(Box::new((d, tx))))
+        .unwrap();
+    rx
+}
+
+fn told(rx: &std::sync::mpsc::Receiver<Vec<u8>>) -> String {
+    let frame = rx
+        .recv_timeout(Duration::from_secs(20))
+        .expect("the world answers the directory's intent");
+    worldd::directory::show(&frame)
+}
+
+/// The effects whose sequence a receipt lists.
+fn entries_of(run: &Run, receipt: &str) -> Vec<Effect> {
+    let listed: Vec<u64> = receipt
+        .trim_start_matches("receipt [")
+        .trim_end_matches(']')
+        .split(", ")
+        .filter_map(|n| n.parse().ok())
+        .collect();
+    run.log()
+        .iter()
+        .flat_map(|p| p.effects.clone())
+        .filter(|e| listed.contains(&e.envelope.sequence))
+        .collect()
+}
+
+#[test]
+fn w11b_a1_an_owners_retire_ends_the_body_by_k10_and_it_never_comes_back() {
+    let (run, mut a, _) = serve("w11b-a1");
+    a.act(JOIN, None, p(&[(1, words("Ada"))]))
+        .expect("Ada joins");
+    let body = run.body_of(ada()).expect("born");
+    let rx = tell(
+        &run,
+        &format!("# the directory's file\nretired {}\n", grant(ada())),
+    );
+    let receipt = told(&rx);
+    println!("W11b A1 the retire: {receipt}");
+    assert!(receipt.starts_with("receipt"), "{receipt}");
+    let effects = entries_of(&run, &receipt);
+    println!("W11b A1 its entries: {effects:?}");
+    assert_eq!(effects.len(), 1, "one effect: the body's retire");
+    assert_eq!(
+        effects[0].envelope.actor,
+        Actor::Soul(ada()),
+        "the Soul's own"
+    );
+    let r = run.replay();
+    assert!(r.tree().handle(body).is_none(), "the node is gone");
+    assert!(run.body_of(ada()).is_none(), "no link to its Soul");
+    // The Soul's agent is never given a body again.
+    assert_eq!(
+        a.act(JOIN, None, p(&[(1, words("Ada"))])),
+        Err("soul-retired".to_owned())
+    );
+    assert!(run.body_of(ada()).is_none());
+    // The same file again changes nothing.
+    let again = tell(&run, &format!("retired {}\n", grant(ada())));
+    assert!(again.recv_timeout(Duration::from_millis(500)).is_err());
+    run.stop();
+}
+
+#[test]
+fn w11b_a2_saved_words_reach_the_body_as_its_own_describe() {
+    let text = std::sync::Arc::new(
+        sim::text::Store::open_mem(
+            Mem::default(),
+            Mem::default(),
+            replica::ids::Minter::new(worldd::words::scope(LINEAGE)),
+        )
+        .expect("a text store"),
+    );
+    let (run, mut a, _) = serve_on("w11b-a2", Mem::with(Vec::new()), Some(text.clone()));
+    a.act(JOIN, None, p(&[(1, words("Ada"))]))
+        .expect("Ada joins");
+    let body = run.body_of(ada()).expect("born");
+    let hex = |w: &str| replica::encode::to_hex(w.as_bytes());
+    let file = format!(
+        "words {} {} {}\n",
+        grant(ada()),
+        hex("Ada Quill"),
+        hex("keeps the west rack tidy")
+    );
+    let receipt = told(&tell(&run, &file));
+    println!("W11b A2 the describe: {receipt}");
+    assert!(receipt.starts_with("receipt"), "{receipt}");
+    let effects = entries_of(&run, &receipt);
+    assert_eq!(effects.len(), 1);
+    assert_eq!(
+        effects[0].envelope.actor,
+        Actor::Soul(ada()),
+        "the Soul's own"
+    );
+    assert_eq!(effects[0].envelope.node, body, "written on its body");
+    assert_eq!(effects[0].envelope.audience, Audience::Everyone, "public");
+    // A viewer reads the new words: the references on the body, the words in the store for everyone.
+    let r = run.replay();
+    let t = r.tree();
+    let n = t.node(t.handle(body).unwrap()).unwrap();
+    let read = |field| {
+        let Some(Value::Map(m)) = n.fields().get(&field) else {
+            panic!("field {field} is a reference")
+        };
+        let id = replica::effects::read_id(&m[&REFERENCE]).unwrap();
+        String::from_utf8(text.read(id, &[]).expect("public words")).unwrap()
+    };
+    println!(
+        "W11b A2 the body reads {:?}, {:?}",
+        read(NAME),
+        read(DESCRIPTION)
+    );
+    assert_eq!(read(NAME), "Ada Quill");
+    assert_eq!(read(DESCRIPTION), "keeps the west rack tidy");
+    let log = run.bytes();
+    assert!(
+        !log.windows(9).any(|x| x == b"Ada Quill"),
+        "no words in the log"
+    );
+    // Words the body already has are not written again.
+    let again = tell(&run, &file);
+    assert!(again.recv_timeout(Duration::from_millis(500)).is_err());
+    // A Soul with no body here is left alone: no birth.
+    let none = tell(&run, &format!("words {} {} -\n", grant(bo()), hex("Bo")));
+    assert!(none.recv_timeout(Duration::from_millis(500)).is_err());
+    assert!(
+        run.body_of(bo()).is_none(),
+        "the directory never births a body"
+    );
+    run.stop();
+}
+
+#[test]
+fn w11b_a3_a_world_down_at_the_retire_gets_it_at_its_next_start() {
+    let store = Mem::with(Vec::new());
+    let (run, mut a, _) = serve_on("w11b-a3-1", store.clone(), None);
+    a.act(JOIN, None, p(&[(1, words("Ada"))]))
+        .expect("Ada joins");
+    let body = run.body_of(ada()).expect("born");
+    run.stop();
+    // The owner retires Ada while the world is down; at its start the world reads the directory's file first.
+    let (run, mut a, _) = serve_on("w11b-a3-2", store.clone(), None);
+    assert_eq!(run.body_of(ada()), Some(body), "the log still has the body");
+    let rx = tell(&run, &format!("retired {}\n", grant(ada())));
+    let receipt = told(&rx);
+    println!("W11b A3 the retire at the next start: {receipt}");
+    assert!(receipt.starts_with("receipt"), "{receipt}");
+    assert!(
+        run.replay().tree().handle(body).is_none(),
+        "the node is gone"
+    );
+    a.2 = 100;
+    assert_eq!(
+        a.act(JOIN, None, p(&[(1, words("Ada"))])),
+        Err("soul-retired".to_owned())
+    );
+    run.stop();
+    // And it stays gone across a further restart.
+    let (run, _, _) = serve_on("w11b-a3-3", store, None);
+    assert!(run.body_of(ada()).is_none(), "never stood again");
+    assert!(run.replay().tree().handle(body).is_none());
+    run.stop();
+}
+
 /// A3 (C12, #3427): a form's `walk_to` walks a born body from where it stands to the step's point on the open ground,
 /// then its bare take (as Eden's entries write one) lands; a point no body can stand on is refused by name.
 #[test]
@@ -694,5 +886,67 @@ fn a3_a_walk_to_reaches_its_point_or_is_refused_by_name() {
     let strayed = b.act("test:stray", Some(rack()), BTreeMap::new());
     println!("A3 stray: {strayed:?}");
     assert_eq!(strayed, Err("souls:no-way".to_owned()));
+    run.stop();
+}
+
+/// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
+#[test]
+fn r21_joined_principal_private_turn_uses_body_and_rejects_nonmember() {
+    let (run, mut member, mut outsider) = serve("r21-private");
+    member
+        .act(JOIN, None, BTreeMap::new())
+        .expect("member joins world");
+    outsider
+        .act(JOIN, None, BTreeMap::new())
+        .expect("outsider joins world");
+    assert_ne!(
+        run.body_of(ada()).unwrap(),
+        ada(),
+        "body and principal differ"
+    );
+    let entries = member
+        .act(
+            "activity:propose",
+            Some(ground()),
+            p(&[(1, Value::Text(name(&fullname(PAIR))))]),
+        )
+        .expect("proposed");
+    let activity = run
+        .log()
+        .iter()
+        .flat_map(|p| p.effects.clone())
+        .filter(|e| entries.contains(&e.envelope.sequence))
+        .find_map(|e| match e.body {
+            Body::Changes(cs) => cs.into_iter().find_map(|c| match c.change {
+                Change::Create { node, .. } => Some(node),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .expect("activity");
+    member
+        .act(
+            "activity:join",
+            Some(activity),
+            p(&[(1, Value::Text(name("test:first")))]),
+        )
+        .expect("member joins activity");
+    let private = "member-only fixture";
+    member
+        .act("test:say", Some(activity), p(&[(1, words(private))]))
+        .expect("joined principal's body is a member");
+    let denied = "outsider fixture";
+    assert_eq!(
+        outsider.act("test:say", Some(activity), p(&[(1, words(denied))])),
+        Err("not-a-member".to_owned()),
+        "a joined nonmember is still refused"
+    );
+    let log = run.bytes();
+    for text in [private, denied] {
+        assert!(
+            !log.windows(text.len()).any(|w| w == text.as_bytes()),
+            "no private words in the log"
+        );
+    }
     run.stop();
 }
