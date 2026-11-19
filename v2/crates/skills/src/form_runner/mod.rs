@@ -125,9 +125,14 @@ fn a_name(t: &str) -> Result<Name, Refusal> {
     })
 }
 
-/// A point of the kind, `points.<name>.at_mm`, as µm.
+/// A point of the kind, `points.<name>.at_mm`, as µm; or, with no point of that name, a placed area's `at_mm`
+/// (`areas.<name>`, C27 #3509): entry format section 16 names a placed area by a `walk_to` step like a point.
 fn point(entry: &Value, p: &str) -> Result<Vec3, Refusal> {
-    at_um(entry.get("points").and_then(|ps| ps.get(p)), p)
+    let def = entry
+        .get("points")
+        .and_then(|ps| ps.get(p))
+        .or_else(|| entry.get("areas").and_then(|a| a.get(p)));
+    at_um(def, p)
 }
 
 /// The `at_mm` of a point or a slot, as µm.
