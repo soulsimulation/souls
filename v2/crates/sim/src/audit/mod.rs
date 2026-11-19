@@ -1,6 +1,7 @@
 //! The auditor (Engine v2 K11, #2674): a checker that sweeps a zone's tree in slices, a few nodes a tick, and names
 //! every broken rule of the tree's structure it finds, by name and node. It reads through [`Source`] and holds no
-//! way to write: it repairs nothing (N10 does) and never stops the clock (a slice returns what it found).
+//! way to write: it repairs nothing (N10 does) and never stops the clock (a slice returns what it found, and
+//! [`Auditor::slice_within`] stops a slice at the caller's time budget).
 //!
 //! The rules it checks, each fault named:
 //!
@@ -120,12 +121,27 @@ impl Auditor {
 
     /// Checks up to `budget` nodes or timers, carrying on where the last slice stopped.
     pub fn slice(&mut self, src: &dyn Source, budget: usize) -> Slice {
+        self.slice_within(src, budget, &mut || false)
+    }
+
+    /// [`Auditor::slice`], bounded by time as well (K21, #3422): `spent` is asked after each node and each batch of
+    /// timers, and the slice stops once it says the time is spent, carrying on next slice. The auditor reads no clock
+    /// itself; the caller's `spent` does. A slice checks at least one node or timer whatever `spent` says, so a pass
+    /// over a zone of N nodes and T pending timers ends within N + T + 1 slices, and within ⌈(N + T) / budget⌉ + 1
+    /// when no slice runs out of time. One node's checks are not cut: they cost in proportion to its children and
+    /// links.
+    pub fn slice_within(
+        &mut self,
+        src: &dyn Source,
+        budget: usize,
+        spent: &mut dyn FnMut() -> bool,
+    ) -> Slice {
         let mut out = Slice::default();
         if !self.started {
             self.stack.push(src.root());
             self.started = true;
         }
-        while out.checked < budget {
+        while out.checked < budget && (out.checked == 0 || !spent()) {
             if let Some(after) = self.timers_after {
                 let want = budget - out.checked;
                 let batch = src.timers(after, want);

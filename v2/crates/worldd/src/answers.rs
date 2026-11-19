@@ -74,13 +74,16 @@
 //! 6. the frozen copy is published (K8);
 //! 7. the answers thread appends and syncs the records, then hands the synced tick to the view tier (R3) and sends
 //!    the answers;
-//! 8. the auditor checks a slice of the tree (K11).
+//! 8. the auditor checks a slice of the tree (K11), at most [`AUDIT_TIME`] of it (K21); its faults are printed on
+//!    its own thread.
 //!
 //! A checkpoint is taken by K5's rule (amount of log), between ticks: at the start of a tick, once every record
-//! handed to the log is on the disk, so it never holds a change the log lacks. **Lockstep** ([`Config::lockstep`]) runs the
-//! same loop on a clock the caller moves ([`Event::RunTo`]) and waits for every check, and for the checkers' copy
-//! to stand at the live version, before a tick, so a run fed
-//! the same inputs at the same ticks writes the same log: how K12's replay is checked on the real loop.
+//! handed to the log is on the disk, so it never holds a change the log lacks. A tree holding changes no checkpoint
+//! has (a first start from the log, or the log after the newest checkpoint) is checkpointed in [`start`], before the
+//! clock and its watchdog start, so each later checkpoint and each tick's state hash hash only what changed (K20).
+//! **Lockstep** ([`Config::lockstep`]) runs the same loop on a clock the caller moves ([`Event::RunTo`]) and waits for
+//! every check, and for the checkers' copy to stand at the live version, before a tick, so a run fed the same inputs
+//! at the same ticks writes the same log: how K12's replay is checked on the real loop.
 //!
 //! **Measures** (O4, #2694, `crate::measures`): each act carries its stamps from the socket to its answer, each
 //! tick times the loop's own phases above ([`measures::PHASES`]), and every queue its oldest item; the answers thread
@@ -124,7 +127,7 @@ use replica::sync::Records;
 use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use replica::views::Redactions;
 use replica::world_model::Audience;
-use sim::audit::Auditor;
+use sim::audit::{Auditor, Fault};
 use sim::checkpoint::{self, Blobs, Checkpoints};
 use sim::clock::{Clock as Pace, Heartbeat, Ticker};
 use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
@@ -168,6 +171,9 @@ pub type MakeBodies = Box<dyn FnOnce(&Placed) -> R<Bodies> + Send>;
 
 /// Where an answer frame goes: the connection the intent came on.
 pub type Reply = Sender<Vec<u8>>;
+
+/// The most the auditor's slice takes of a tick (K21, #3422): it stops there and carries on next tick.
+pub const AUDIT_TIME: Duration = Duration::from_millis(2);
 
 /// The field of a tick's part that lists the intents answered in it: `[{1: actor, 2: sequence, 3: intent id, 4:
 /// answer frame, 5: intent}]`, 3 left out for an intent refused before it got an id, 5 for one whose intent holds
@@ -282,6 +288,18 @@ struct Carry {
 }
 
 impl Carry {
+    fn of(sequences: &Sequences, next_intent: u64, placed: Placed, tick: i64) -> Carry {
+        Carry {
+            sequences: sequences
+                .kept()
+                .map(|(a, last, kept)| (a.to_vec(), last, kept.cloned().collect()))
+                .collect(),
+            next_intent,
+            placed,
+            tick,
+        }
+    }
+
     fn to_bytes(&self) -> Vec<u8> {
         let sequences = self
             .sequences
@@ -574,17 +592,21 @@ impl Pace for Stepped {
     fn sleep_until(&mut self, _: Micros) {}
 }
 
-/// The zone's state hash (K18): `souls/fixture/1` over `[tree state hash, [[body, pose], ...]]`, the bodies the
-/// controller holds included, since the tree does not hold them yet.
-pub fn state_hash(replica: &Replica, bodies: &[(Id, Pose)]) -> [u8; 32] {
-    let tree = replica
-        .tree()
-        .to_state()
-        .hash()
-        .map(|h| h.to_bytes())
-        .unwrap_or_default();
+/// The zone's state hash (K18; K20, #3395): `souls/fixture/1` over `[[[audience, state hash], ...], [[body, pose],
+/// ...]]`: each audience's state hash as K5's seal gives it (`replica::tree::Tree::state_hashes`, the public one
+/// first), worked out each tick from the nodes the tick changed, then the bodies the controller holds, since the tree
+/// does not hold them yet.
+pub fn state_hash(tree: &[(Audience, Hash)], bodies: &[(Id, Pose)]) -> [u8; 32] {
+    let audience = |a: &Audience| match a {
+        Audience::Everyone => Value::Map(BTreeMap::from([(1, Value::Uint(1))])),
+        Audience::Of(id) => Value::Map(BTreeMap::from([(1, Value::Uint(2)), (2, id.to_value())])),
+    };
     let v = Value::Array(vec![
-        Value::Bytes(tree),
+        Value::Array(
+            tree.iter()
+                .map(|(a, h)| Value::Array(vec![audience(a), Value::Bytes(h.to_bytes())]))
+                .collect(),
+        ),
         Value::Array(
             bodies
                 .iter()
@@ -682,6 +704,8 @@ struct Clock {
     outstanding: usize,
     auditor: Auditor,
     audit: usize,
+    /// The auditor's faults, to the thread that prints them (K21).
+    audit_faults: Sender<Vec<Fault>>,
     faults: u64,
     checkpoints: Option<Checkpoints>,
     /// Log records written, the input records included.
@@ -2095,10 +2119,15 @@ impl Clock {
         }
     }
 
-    /// The zone's state hash now ([`state_hash`]).
-    fn state(&self) -> [u8; 32] {
+    /// The zone's state hash now ([`state_hash`]): the tree's nodes changed since the last are hashed again.
+    fn state(&mut self) -> [u8; 32] {
         let poses = self.bodies.as_ref().map(Bodies::poses).unwrap_or_default();
-        state_hash(&self.replica, &poses)
+        let tree = self
+            .replica
+            .tree_for_seal()
+            .state_hashes()
+            .unwrap_or_default();
+        state_hash(&tree, &poses)
     }
 
     /// A check came back (O4: its stamp and queues); kept for the next tick.
@@ -2303,12 +2332,19 @@ impl Clock {
         self.records += written;
         self.since += bytes as u64;
         at[7] = mark();
-        // 8. A slice of the auditor: faults named, nothing repaired, the clock never stopped.
-        let slice = self.auditor.slice(self.replica.tree(), self.audit);
-        for f in &slice.faults {
-            eprintln!("worldd: audit: {f:?}");
-        }
+        // 8. A slice of the auditor: faults named, nothing repaired, the clock never stopped. The slice stops at
+        // AUDIT_TIME (K21, #3422), and its faults are printed on the auditor's own thread: a write to stderr can block
+        // for hundreds of ms on a loaded machine, and printing them here once stalled the clock.
+        let until = Instant::now() + AUDIT_TIME;
+        let slice = self
+            .auditor
+            .slice_within(self.replica.tree(), self.audit, &mut || {
+                Instant::now() >= until
+            });
         self.faults += slice.faults.len() as u64;
+        if !slice.faults.is_empty() {
+            let _ = self.audit_faults.send(slice.faults);
+        }
         at[8] = mark();
         if let Some(m) = &self.measures {
             let mut phases = [0; measures::NPHASES];
@@ -2332,16 +2368,12 @@ impl Clock {
         if !c.due() || at.record < self.records {
             return;
         }
-        let carry = Carry {
-            sequences: self
-                .sequences
-                .kept()
-                .map(|(a, last, kept)| (a.to_vec(), last, kept.cloned().collect()))
-                .collect(),
-            next_intent: self.next_intent,
-            placed: self.bodies.as_ref().map(Bodies::placed).unwrap_or_default(),
-            tick: self.tick,
-        };
+        let carry = Carry::of(
+            &self.sequences,
+            self.next_intent,
+            self.bodies.as_ref().map(Bodies::placed).unwrap_or_default(),
+            self.tick,
+        );
         let version = Version {
             lineage: self.lineage,
             zone: self.zone,
@@ -2371,7 +2403,7 @@ impl Clock {
         }
     }
 
-    fn ran(&self) -> Ran {
+    fn ran(&mut self) -> Ran {
         let panicked = self
             .bodies
             .as_ref()
@@ -2614,6 +2646,36 @@ pub fn start<S: Storage + 'static>(
         name: "id-counter",
         detail: "the zone".into(),
     })?;
+    let records = found.first + found.records.len() as u64;
+    let mut checkpoints = match &cfg.checkpoints {
+        Some((dir, every)) => Some(Checkpoints::open(dir, *every, blobs)?),
+        None => None,
+    };
+    // K20 (#3395): a tree holding changes no checkpoint has (a first start from the log, or the log after the newest
+    // checkpoint) is sealed and checkpointed here, before the clock and its watchdog start: hashing the whole tree is
+    // never a tick's work, and from here each tick's state hash and each checkpoint hash only what changed.
+    if let Some(c) = checkpoints.as_mut()
+        && !world.tree().sealed()
+    {
+        let at = log.durable_mark().at();
+        if at.record >= records {
+            let carry = Carry::of(&sequences, next_intent, placed.clone(), last.unwrap_or(-1));
+            let version = Version {
+                lineage: cfg.lineage,
+                zone,
+                epoch: cfg.epoch,
+                sequence: world.version(),
+            };
+            let minter = Minter::at(cfg.lineage, next_intent);
+            c.take_at(
+                world.tree_for_seal(),
+                version,
+                records,
+                Some((at, &minter)),
+                &carry.to_bytes(),
+            )?;
+        }
+    }
     let mut cfg = cfg;
     let make = cfg.bodies.take();
     let tick_us = i64::try_from(cfg.tick.as_micros()).unwrap_or(50_000).max(1);
@@ -2654,10 +2716,6 @@ pub fn start<S: Storage + 'static>(
             log.durable_mark(),
         )?)),
         false => None,
-    };
-    let checkpoints = match &cfg.checkpoints {
-        Some((dir, every)) => Some(Checkpoints::open(dir, *every, blobs)?),
-        None => None,
     };
     let loose = Ends::start(
         world.tree(),
@@ -2768,7 +2826,15 @@ pub fn start<S: Storage + 'static>(
             )
         })
         .map_err(io)?;
-    let records = found.first + found.records.len() as u64;
+    let (audit_faults, faults_in) = channel::<Vec<Fault>>();
+    thread::Builder::new()
+        .name("audit".into())
+        .spawn(move || {
+            for f in faults_in.iter().flatten() {
+                eprintln!("worldd: audit: {f:?}");
+            }
+        })
+        .map_err(io)?;
     let sky = Heavens::of(&world, cfg.sky.take());
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
@@ -2814,6 +2880,7 @@ pub fn start<S: Storage + 'static>(
         outstanding: 0,
         auditor: Auditor::new(),
         audit: cfg.audit,
+        audit_faults,
         faults: 0,
         checkpoints,
         records,
@@ -2868,10 +2935,11 @@ pub fn start<S: Storage + 'static>(
                 }
             }
             // The state this start resumes from, bodies included: after a kill it equals the last logged tick's (C1).
+            let state = c.state();
             eprintln!(
                 "worldd: started at tick {} state {}",
                 c.tick,
-                replica::encode::to_hex(&c.state())
+                replica::encode::to_hex(&state)
             );
             // Takes one event; false once the world is to stop.
             let take = |c: &mut Clock, e: Event| -> Option<Sender<Ran>> {
