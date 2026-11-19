@@ -242,6 +242,8 @@ pub(super) struct Cx<'a> {
     pub limits: &'a Limits,
     pub header: Option<&'a Header>,
     pub body: Id,
+    /// The actor's Soul (the body, when the actor is not a Soul): a link `from: soul` ends at it (F15).
+    pub soul: Id,
     pub hands: &'a [u64],
     pub node: Id,
     /// The things other runs reserve: none is removed, nor anything holding one.
@@ -347,7 +349,7 @@ impl Cx<'_> {
     /// that is gone (removed, or under a thing removed, this tick or before) is refused `thing-missing`.
     pub fn entries(&self, m: &mut Minter, e: &Bound) -> R<Vec<Entry>> {
         let named = match e {
-            Bound::Set { .. } => Vec::new(),
+            Bound::Set { .. } | Bound::Link { .. } | Bound::Unlink { .. } => Vec::new(),
             Bound::Transfer { from, into, .. } => vec![self.of(*from), self.of(*into)],
             Bound::Make { .. } => vec![self.node],
             Bound::Remove { what } | Bound::Take { what } => vec![self.of(*what)],
@@ -485,6 +487,8 @@ impl Cx<'_> {
                 let to = self.free_slot(*slot)?;
                 self.transfer(m, thing, to)
             }
+            Bound::Link { ty, soul } => super::links::link(self, m, ty, *soul),
+            Bound::Unlink { ty, soul, all } => super::links::unlink(self, ty, *soul, *all),
         }
     }
 }
