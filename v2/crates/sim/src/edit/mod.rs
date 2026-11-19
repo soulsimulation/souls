@@ -240,7 +240,7 @@ fn effects(
             };
             rows_list.push(Value::Array(vec![
                 link.to_value(),
-                Value::Text(Name::new("door").unwrap()),
+                Value::Text(Name::new("eden:door").unwrap()),
                 int(*x),
                 int(*z),
                 int(*yaw),
@@ -437,4 +437,122 @@ fn field(tree: &Tree, staged: &BTreeMap<(Id, u64), Value>, node: Id, key: u64) -
 
 fn int(n: i64) -> Value {
     u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
+}
+
+#[cfg(test)]
+mod doorway_lowering_tests {
+    use super::*;
+    use crate::ground::scene::{F_DOORWAYS, F_OPEN_DOOR_LINK, F_SOLIDS};
+    use replica::edit::{DOOR_GEOMETRY, DoorGeometry, Edit};
+    use replica::effects::Actor;
+
+    #[test]
+    fn g1f_lowered_doorway_part_uses_the_importers_qualified_row_label() {
+        let im = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
+        let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
+        let door = im.nodes["door-building-to-b"];
+        let leaf = im.tree.node(im.tree.handle(door).unwrap()).unwrap();
+        let old_link = replica::effects::read_id(&leaf.fields()[&F_OPEN_DOOR_LINK]).unwrap();
+        let (_, [from, to], ..) = im.tree.link(old_link).unwrap();
+        let wall = im.nodes["building"];
+        let solids = im
+            .tree
+            .node(im.tree.handle(wall).unwrap())
+            .unwrap()
+            .fields()[&F_SOLIDS]
+            .clone();
+        let Value::Array(rows) = &solids else {
+            panic!("solid rows")
+        };
+        // Codec regression only: the served test separately proves authored geometry, admission and BUILDSAFE.
+        let checked = Checked {
+            edit: Edit {
+                intent: Id::new(Scope([0xec; 16]), 1).unwrap(),
+                actor: Actor::Creator(Id::new(Scope([0xed; 16]), 1).unwrap()),
+                planned: 0,
+                ops: vec![Op::Doorway {
+                    name: 1,
+                    door: Ref::Node(door),
+                    from: Ref::Node(from),
+                    to: Ref::Node(to),
+                    at: [1000, -550],
+                    yaw: 0,
+                    width: 1200,
+                    height: 2100,
+                    wall: Ref::Node(wall),
+                    closed: vec![rows[0].clone()],
+                    open: vec![rows[1].clone()],
+                }],
+            },
+            reads: Vec::new(),
+            parents: Vec::new(),
+            geometry: BTreeMap::from([(
+                0,
+                DoorGeometry {
+                    wall: Ref::Node(wall),
+                    solids: solids.clone(),
+                },
+            )]),
+        };
+        let link = Id::new(Scope([0xee; 16]), 1).unwrap();
+        let lowered = effects(&im.tree, 0, &checked, &BTreeMap::from([(1, link)]), 0);
+        let bytes = encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(header.hash().to_bytes())),
+            (
+                2,
+                Value::Array(lowered.iter().map(Effect::to_value).collect()),
+            ),
+        ])))
+        .unwrap();
+        let part = Part::read(&bytes)
+            .expect("the actual lowered doorway Part must pass its canonical reader");
+        let mut saw = (false, false, false, false);
+        for effect in &part.effects {
+            let Body::Changes(changes) = &effect.body else {
+                continue;
+            };
+            for change in changes {
+                match &change.change {
+                    Change::Link { link: id, ends, .. } => {
+                        assert_eq!((*id, *ends), (link, [from, to]));
+                        saw.0 = true;
+                    }
+                    Change::Set {
+                        node,
+                        field: F_DOORWAYS,
+                        to: Value::Array(rows),
+                        ..
+                    } if *node == from => {
+                        let Value::Array(row) = rows.last().unwrap() else {
+                            panic!("doorway row")
+                        };
+                        assert_eq!(row[0], link.to_value());
+                        assert_eq!(row[1], Value::Text(Name::new("eden:door").unwrap()));
+                        saw.1 = true;
+                    }
+                    Change::Set {
+                        node,
+                        field: F_OPEN_DOOR_LINK,
+                        to,
+                        ..
+                    } if *node == door => {
+                        assert_eq!(*to, link.to_value());
+                        saw.2 = true;
+                    }
+                    Change::Set {
+                        node,
+                        field: DOOR_GEOMETRY,
+                        ..
+                    } if *node == door => {
+                        saw.3 = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(saw, (true, true, true, true));
+        println!(
+            "G1f lowered Part canonical reader PASS; qualified eden:door row, exact link endpoints, leaf backlink and owned geometry present"
+        );
+    }
 }
