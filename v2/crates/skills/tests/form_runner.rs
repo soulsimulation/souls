@@ -436,3 +436,96 @@ fn c25_the_runner_runs_every_step_shape() {
     let (id, ..) = h.only();
     assert_eq!(ended(&r.wake(&mut h, Woke::Timer(id))), Some("done"));
 }
+
+/// C24 (#3495): every effect kind content uses binds: a link with its kind's most and an unlink of every end, a timer
+/// by its form, a set with a rate on a timed field (with and without its value), a reparent no step carries of a
+/// thing into the hand or a slot (by name or a slot argument) as a take or a put, and of the actor `here`; and each is
+/// refused by name where it cannot be.
+#[test]
+fn c24_link_timer_timed_set_and_reparent_bind_or_are_refused_by_name() {
+    use skills::form_runner::{Arg, Args, Effect, Of, bind_effects, bind_effects_args};
+    let entry = parse(
+        r#"{"format":"souls-entry/1","kind":"t:x",
+        "state":{"level":{"n":1,"type":"timed","unit":"g","default":{"value":40,"per_s":-5,"set_us":0},"min":0,"max":100},
+          "count":{"n":2,"type":"int","default":0,"min":0,"max":9}},
+        "links":{"user":{"n":1,"from":"soul","most":2,"audience":{"rule":"everyone"}},
+          "owner":{"n":2,"from":"soul","most":1,"audience":{"rule":"everyone"}}},
+        "slots":{"rest":{"admits":"thing"},"seat":{"admits":"body"}},
+        "forms":{
+          "a":{"steps":[{"step":"wait","us":1}],"effects":[
+            {"change":"link","link":"user","from":"actor"},{"change":"unlink","link":"owner","from":"all"},
+            {"change":"timer","form":"b","after_us":5},
+            {"change":"set","field":"level","to":100,"rate":-5},{"change":"set","field":"level","rate":2},
+            {"change":"reparent","what":"this","into":"actor_hand"},{"change":"reparent","what":"this","into":"rest"},
+            {"change":"reparent","what":"this","into":{"arg":"place"}},
+            {"change":"reparent","what":"actor","into":"here"}]},
+          "b":{"steps":[{"step":"wait","us":1}]},
+          "no_link":{"steps":[{"step":"wait","us":1}],"effects":[{"change":"link","link":"friend","from":"actor"}]},
+          "no_form":{"steps":[{"step":"wait","us":1}],"effects":[{"change":"timer","form":"zz","after_us":5}]},
+          "over":{"steps":[{"step":"wait","us":1}],"effects":[{"change":"set","field":"level","to":101,"rate":0}]},
+          "too_many":{"steps":[{"step":"wait","us":1}],"effects":[{"change":"set","field":"count","to":10}]},
+          "down":{"steps":[{"step":"wait","us":1}],"effects":[{"change":"reparent","what":"this","into":"here"}]},
+          "board":{"steps":[{"step":"wait","us":1}],"effects":[{"change":"reparent","what":"actor","into":"seat"}]}}}"#,
+    )
+    .expect("JSON");
+    let name = |t: &str| Name::new(t).unwrap();
+    let three = replica::timed::Timed {
+        value: 40,
+        per_s: -5,
+        set_us: 0,
+    };
+    let bounds = replica::timed::Bounds {
+        min: Some(0),
+        max: Some(100),
+    };
+    let args: Args = BTreeMap::from([("place".to_owned(), Arg::Name("rest".into()))]);
+    let put = Effect::Put {
+        what: Of::This,
+        slot: 1,
+    };
+    assert_eq!(
+        bind_effects_args(&entry, "a", &args).expect("binds"),
+        vec![
+            Effect::Link {
+                ty: name("t:user"),
+                soul: true,
+                most: Some(2)
+            },
+            Effect::Unlink {
+                ty: name("souls:owns"),
+                soul: true,
+                all: true
+            },
+            Effect::Timer {
+                form: name("t:b"),
+                after: 5
+            },
+            Effect::Timed {
+                field: 1,
+                to: Some(100),
+                per_s: -5,
+                default: three,
+                bounds
+            },
+            Effect::Timed {
+                field: 1,
+                to: None,
+                per_s: 2,
+                default: three,
+                bounds
+            },
+            Effect::Take { what: Of::This },
+            put.clone(),
+            put,
+            Effect::Here,
+        ]
+    );
+    let refused = |form: &str| bind_effects(&entry, form).unwrap_err().name;
+    assert_eq!(refused("a"), "arg-missing");
+    assert_eq!(refused("no_link"), "link-unknown");
+    assert_eq!(refused("no_form"), "form-unknown");
+    assert_eq!(refused("over"), "out-of-range");
+    assert_eq!(refused("too_many"), "out-of-range");
+    assert_eq!(refused("down"), "no-slot-here");
+    assert_eq!(refused("board"), "body-moves-by-step");
+}

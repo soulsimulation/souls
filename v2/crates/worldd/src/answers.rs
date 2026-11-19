@@ -92,6 +92,7 @@
 
 use crate::acts::{self, Acts};
 use crate::bodies::{self, Ask, Asked, Bodies, Placed};
+use crate::buildsafe;
 use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
 use crate::engine::{self, Engine};
 use crate::loose::Ends;
@@ -127,6 +128,7 @@ use sim::commit::spot::{self, Spot as Bound};
 use sim::commit::{Checks, Outcome, commit, mark_clock_thread};
 use sim::daylight::{self, Daylight, Write as Fire};
 use sim::edit::Planned;
+use sim::edit::safety::Who;
 use sim::frozen::Publisher;
 use sim::life::{Birth, Life, Ring};
 use sim::log::{Durable, Log, Storage};
@@ -196,8 +198,9 @@ pub enum Event {
         done: Sender<Ran>,
     },
     Checked(Box<(Act, Checks)>),
-    /// An edit checked off the clock thread on a frozen copy (G1b): to commit at the next tick, or its refusal.
-    Edited(Box<(Id, Result<Planned, Refused>)>),
+    /// An edit checked off the clock thread on a frozen copy (G1b): to commit at the next tick with the Souls' bodies
+    /// read from that copy (G1c), or its refusal.
+    Edited(Box<(Id, Result<Checked, Refused>)>),
     /// Holds the clock thread for this long: the stuck-thread run (O4 A4).
     Stall(Duration),
     Stop,
@@ -656,7 +659,9 @@ struct Clock {
     /// Where edits go to be checked off the clock thread, when the world takes edits (G1b).
     edits: Option<Sender<(Id, Edit)>>,
     /// Edits checked since the last tick, committed (or refused) at the next.
-    edited: Vec<(Id, Result<Planned, Refused>)>,
+    edited: Vec<(Id, Result<Checked, Refused>)>,
+    /// Where the edit checker reads the bodies the controller holds, handed off each tick (G1d).
+    walkers: Option<Arc<buildsafe::Moving>>,
     /// Soul Actions (C2, #3366): the forms in progress, and the form acts taken since the last tick, committed at
     /// the next through the form runner when the world has bodies.
     forms: Acts,
@@ -696,6 +701,9 @@ struct Clock {
     loose: Ends,
     unlinked: Vec<Id>,
 }
+
+/// An edit planned off the clock, and the Souls' bodies its commit is judged against (G2's rule, G1c).
+type Checked = (Planned, Vec<Who>);
 
 /// The world node's sky in the running tick (E6, #3369): its three timers on K9's due list, each fired at its due time
 /// by the tick that holds it, and each fire's entries written on the world node.
@@ -772,10 +780,24 @@ fn thing_args(intent: &Intent) -> acts::Args {
             && let [Value::Bytes(k), v] = kv.as_slice()
             && let Ok(k) = String::from_utf8(k.clone())
         {
-            if let Value::Uint(n) = v {
-                args.slots.insert(k, *n);
-            } else if let Ok(id) = replica::effects::read_id(v) {
-                args.things.insert(k, id);
+            use skills::form_runner::Arg;
+            match v {
+                Value::Uint(n) => drop(args.slots.insert(k, *n)),
+                // A value by name, and words by their reference (`{21: id}`, K16): a set's arguments (C24).
+                Value::Text(n) => drop(args.values.insert(k, Arg::Name(n.as_str().to_owned()))),
+                Value::Map(m) if m.len() == 1 => {
+                    if let Some(Ok(id)) = m
+                        .get(&replica::audience::REFERENCE)
+                        .map(replica::effects::read_id)
+                    {
+                        args.values.insert(k, Arg::Text(id));
+                    }
+                }
+                _ => {
+                    if let Ok(id) = replica::effects::read_id(v) {
+                        args.things.insert(k, id);
+                    }
+                }
             }
         }
     }
@@ -1310,9 +1332,9 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
                 continue;
             }
-            let committed = checked.and_then(|c| {
+            let committed = checked.and_then(|(c, souls)| {
                 let mut minter = Minter::at(self.lineage, self.next_intent);
-                let done = sim::edit::commit(&mut self.replica, &mut minter, &c, &[], now);
+                let done = sim::edit::commit(&mut self.replica, &mut minter, &c, &souls, now);
                 self.next_intent = minter.next();
                 done
             });
@@ -2291,6 +2313,11 @@ impl Clock {
         self.write_forms(now);
         // 4. What the tick's acts made loose or kept: its timers, in the same tick (F10b, #3476).
         self.set_loose(now);
+        // The bodies as they stand after the tick's steps and starts, for the edit checker (G1d): before the tick's
+        // frozen copy (6).
+        if let (Some(w), Some(b)) = (&self.walkers, &self.bodies) {
+            w.offer(buildsafe::moving(b));
+        }
         at[5] = mark();
         // 5. The tick's input record, then its part: effects, answers, the bodies that moved, the tick, the state.
         let inputs = match std::mem::take(&mut self.inputs) {
@@ -2773,10 +2800,15 @@ pub fn start<S: Storage + 'static>(
     });
     let engine_parts = cfg.engine.take();
     let (events, rx) = channel();
+    let walkers = cfg
+        .edits
+        .is_some()
+        .then(|| Arc::new(buildsafe::Moving::default()));
     let edits = cfg
         .edits
         .take()
-        .map(|w| edit_checker(w, Arc::clone(&publisher), events.clone()))
+        .zip(walkers.clone())
+        .map(|(w, m)| edit_checker(w, Arc::clone(&publisher), m, events.clone()))
         .transpose()?;
     let (acts, checked) = checkers::start(cfg.checkers, Arc::clone(&publisher), Arc::new(rules));
     let fwd = events.clone();
@@ -2866,6 +2898,7 @@ pub fn start<S: Storage + 'static>(
         moving: Vec::new(),
         edits,
         edited: Vec::new(),
+        walkers,
         forms: Acts::new(kinds, library, header, forms_scope),
         forming: Vec::new(),
         engine: engine_parts
@@ -3049,11 +3082,15 @@ pub fn start<S: Storage + 'static>(
 
 /// The edit checker's thread (G1b): each edit is checked (`replica::edit::check`) and planned (`sim::edit::plan`, G2's
 /// safety guard) on the newest frozen copy that stands at the version it was planned against, or after a second
-/// whatever it stands at, never on the live tree. The toggles world has no open ground (`None`); its commit is judged
-/// against no Soul's body yet (G1b leaves the bodies' list to a later task).
+/// whatever it stands at, never on the live tree. G2 is given that copy's open ground and its Souls' bodies
+/// ([`crate::buildsafe`], G1c), with the bodies the controller holds as the clock last handed them off, walkers and
+/// the next corner of each walker's line among them (G1d): the plan is cut on the ground, and the commit judges the
+/// bodies (lookups only), so an edit that would bury a Soul, cut it off or change what it uses is refused by name,
+/// naming the Soul.
 fn edit_checker(
     world: edit::World,
     publisher: Arc<Publisher>,
+    walkers: Arc<buildsafe::Moving>,
     events: Sender<Event>,
 ) -> R<Sender<(Id, Edit)>> {
     let (tx, rx) = channel::<(Id, Edit)>();
@@ -3062,8 +3099,13 @@ fn edit_checker(
         .spawn(move || {
             for (id, e) in rx {
                 let copy = publisher.wait_for(e.planned, Duration::from_secs(1));
-                let checked =
-                    edit::check(e, &copy, &world).and_then(|c| sim::edit::plan(c, &copy, None));
+                let ground = buildsafe::open_ground(&copy);
+                let checked = edit::check(e, &copy, &world)
+                    .and_then(|c| sim::edit::plan(c, &copy, ground))
+                    .map(|p| {
+                        let tree = buildsafe::souls(&copy, &world.kinds);
+                        (p, buildsafe::judged(tree, &walkers.latest()))
+                    });
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
                     break;
                 }
