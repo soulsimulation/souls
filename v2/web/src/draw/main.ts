@@ -17,6 +17,10 @@ import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
 import { arrive } from '../worlds/arrive.ts';
 import { WorldSky } from '../sky/sky.ts';
+import { tickWater } from '../water/water.ts';
+import { installNightLighting, nightPools, paintNightSources, setNightStrength } from './night.ts';
+
+installNightLighting(); // V19b: the lamps' night pools, before any lit material compiles
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
@@ -108,7 +112,7 @@ const clockText = (us: number) => {
   const s = Math.floor(us / 1e6);
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 };
-let last = performance.now(), fps = 60;
+let last = performance.now(), fps = 60, frames = 0;
 renderer.setAnimationLoop((now) => {
   // A hidden tab stops frames; on return the clock cuts (a jump of more than 20 s) rather than playing fast.
   const dt = now - last;
@@ -122,6 +126,10 @@ renderer.setAnimationLoop((now) => {
   const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : clock.step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
   director.update(Math.min(100, dt), t);
   sun.position.copy(sun.target.position).addScaledVector(sky.update(t ?? 0, cam.camera), 400);
+  tickWater((t ?? 0) / 1e6);
+  setNightStrength(sky.state.daylight);
+  const pools = frames++ % 60 === 0 && things.layer ? nightPools(world, things.layer.opts.index) : null; // the lamps, once a second
+  if (pools) paintNightSources(pools.sources, pools.bounds);
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
   let drawn = 0;
   if (t !== null) {
