@@ -23,7 +23,7 @@
 //!   own, and the world's answer back to that socket alone, under the client's number; it is not kept for a resume.
 //!   A client told `stream.cannot-resume` compares and descends this way, then carries on with the stream.
 //! - gateway → client and back, the owner's messages ([`mailbox`], R13, #2753): WebSocket text frames of JSON, not
-//!   CBOR, apart from the world's stream and never in its log: `{"mail": {"id", "text", "at"}}` out, once per
+//!   CBOR (and read by the gateway without parsing JSON), apart from the world's stream and never in its log: `{"mail": {"id", "text", "at"}}` out, once per
 //!   socket, and `{"close": {"id", "state", "outcome"}}` back when the act that served it ends.
 
 use std::collections::{HashMap, HashSet};

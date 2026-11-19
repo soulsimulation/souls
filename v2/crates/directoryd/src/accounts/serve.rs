@@ -6,8 +6,11 @@
 //!
 //! Each answers `{"account", "principal"}`. The mailbox's (R13, #2753; [`super::mailbox`]):
 //!
-//! - `GET /v1/mailbox/open` and `POST /v1/mailbox/close` `{"id", "soul", "state", "outcome"}`, the gateway's, with
-//!   `Authorization: Bearer <the --mailbox-key>`: every open message, and one closed with its act's outcome.
+//! - `GET /v1/mailbox/open` and `POST /v1/mailbox/close`, the gateway's, with `Authorization: Bearer <the
+//!   --mailbox-key>`. The first answers in plain text, a line per open message: `<soul> <id> <text frame>`, the
+//!   frame the gateway gives the Soul's socket as it is (`{"mail": {"id", "text", "at"}}`). The second's body is the
+//!   socket's own `{"close": {"id", "state", "outcome"}}`, with the socket's grant in a `souls-soul` header. So the
+//!   gateway reads no JSON.
 //! - `POST /v1/mailbox/put` `{"soul", "text"}` and `POST /v1/mailbox/read` `{"id"}`: the test call that stands in
 //!   for the page's box (W10) until it lands, with the sign-in for test worlds on only.
 //!
@@ -56,6 +59,8 @@ struct Request {
     method: String,
     path: String,
     bearer: Option<String>,
+    /// The gateway's `souls-soul` header on a mailbox close: the grant of the socket it came from.
+    soul: Option<String>,
     body: Vec<u8>,
 }
 
@@ -66,7 +71,7 @@ fn read(stream: &TcpStream) -> Option<Request> {
     let mut words = line.split_whitespace();
     let method = words.next()?.to_string();
     let path = words.next()?.split('?').next()?.to_string();
-    let (mut bearer, mut length) = (None, 0usize);
+    let (mut bearer, mut soul, mut length) = (None, None, 0usize);
     loop {
         let mut h = String::new();
         if r.read_line(&mut h).ok()? == 0 {
@@ -82,6 +87,8 @@ fn read(stream: &TcpStream) -> Option<Request> {
             length = value.parse().ok().filter(|n| *n <= BODY_MOST)?;
         } else if name.eq_ignore_ascii_case("authorization") {
             bearer = value.strip_prefix("Bearer ").map(str::to_string);
+        } else if name.eq_ignore_ascii_case("souls-soul") {
+            soul = Some(value.to_string());
         }
     }
     let mut body = vec![0; length];
@@ -90,6 +97,7 @@ fn read(stream: &TcpStream) -> Option<Request> {
         method,
         path,
         bearer,
+        soul,
         body,
     })
 }
@@ -130,16 +138,21 @@ fn mailbox(req: &Request, app: &App) -> Option<(u16, Value, String)> {
         |_: super::store::StoreError| (500, json!({"refused": "store"}), "store".to_string());
     match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/v1/mailbox/open") if gateway() => Some(match app.store.mail_open(now()) {
-            Ok(m) => (
-                200,
-                json!({"messages": m.iter().map(mail_json).collect::<Vec<_>>()}),
-                format!("{} open", m.len()),
-            ),
+            Ok(m) => {
+                let lines: String = m
+                    .iter()
+                    .map(|m| {
+                        let frame = json!({"mail": {"id": m.id, "text": m.text, "at": m.at}});
+                        format!("{} {} {frame}\n", m.soul, m.id)
+                    })
+                    .collect();
+                (200, Value::String(lines), format!("{} open", m.len()))
+            }
             Err(e) => store(e),
         }),
         ("POST", "/v1/mailbox/close") if gateway() => {
-            let b = body();
-            let (id, soul) = (text(&b, "id"), text(&b, "soul"));
+            let b = body().get("close").cloned().unwrap_or(Value::Null);
+            let (id, soul) = (text(&b, "id"), req.soul.clone().unwrap_or_default());
             Some(
                 match app.store.mail_close(
                     &id,
@@ -233,7 +246,11 @@ fn route(req: &Request, app: &App) -> (u16, Value, String) {
 }
 
 fn respond(stream: &mut TcpStream, status: u16, body: &Value) -> std::io::Result<()> {
-    let body = body.to_string();
+    // A text answer (the mailbox's open lines) is written as it is.
+    let (body, kind) = match body {
+        Value::String(s) => (s.clone(), "text/plain; charset=utf-8"),
+        v => (v.to_string(), "application/json"),
+    };
     let reason = match status {
         200 => "OK",
         400 => "Bad Request",
@@ -243,7 +260,7 @@ fn respond(stream: &mut TcpStream, status: u16, body: &Value) -> std::io::Result
     };
     write!(
         stream,
-        "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\
+        "HTTP/1.1 {status} {reason}\r\ncontent-type: {kind}\r\ncontent-length: {}\r\n\
          cache-control: no-store\r\nconnection: close\r\n\r\n{body}",
         body.len()
     )
