@@ -30,6 +30,7 @@ const UM = 1e-6;
 // The page's copy, from the stream: nodes by id.
 const nodes = new Map<string, NodeRec>();
 let session: CreatorSession | null = null;
+let activeSocket: WebSocket | null = null, openAttempt = 0;
 let prayers: Prayers | null = null;
 let placing = false;
 /** Things this panel placed, by id, until the stream shows them: the receipt's id at the spot sent. */
@@ -133,9 +134,11 @@ function answered(li: HTMLLIElement, what: string, f: Frame, at: At) {
 async function send(what: string, ops: Op[], at: At): Promise<Frame | null> {
   if (!session) return null;
   const li = list(`${what}: sent`);
-  const f = await session.edit(ops);
+  const signed = session;
+  const f = await signed.edit(ops);
+  if (session !== signed) return null;
   answered(li, what, f, at);
-  status.textContent = `signed in as the creator · edits sent ${session.sent}`;
+  status.textContent = `signed in as the creator · edits sent ${signed.sent}`;
   return f;
 }
 
@@ -147,9 +150,10 @@ const spot = (parent: string, at: At) => {
 const drag = new Drag((id, at) => {
   const parent = nodes.get(id)?.parent ?? room();
   if (!parent) return;
+  const attempt = openAttempt;
   sentTo.set(id, at);
   void send(`move ${short(nodes.get(id)?.kind ?? 'thing')}`, [{ op: 'move', node: id, at: spot(parent, at) }], at).then((f) => {
-    if (f?.t !== 'receipt') sentTo.delete(id);
+    if (attempt === openAttempt && f?.t !== 'receipt') sentTo.delete(id);
   });
 }, bodies);
 
@@ -173,7 +177,9 @@ canvas.addEventListener('pointerdown', (e) => {
     placing = false;
     $<HTMLButtonElement>('place').classList.remove('on');
     if (!parent || !kind) return;
+    const attempt = openAttempt;
     void send(`place ${short(kind)}`, [{ op: 'place', name: 1, kind, parent, at: spot(parent, at) }], at).then((f) => {
+      if (attempt !== openAttempt) return;
       const id = f?.t === 'receipt' ? f.names.get(1) : undefined;
       if (id) placed.set(id, at);
     });
@@ -233,7 +239,9 @@ function showPrayers() {
         e.preventDefault();
         sendIt.disabled = true;
         sendIt.textContent = 'Sending…';
-        void prayers!.answer(p.id, input.value).then((refused) => {
+        const currentPrayers = prayers;
+        void currentPrayers!.answer(p.id, input.value).then((refused) => {
+          if (prayers !== currentPrayers) return;
           if (refused) { error.textContent = prayerRefusal(refused); sendIt.disabled = false; sendIt.textContent = 'Answer'; return; }
           answering = null;
           list(`answered a prayer from ${prayerFrom(p)}`).classList.add('ok');
@@ -256,42 +264,58 @@ function showPrayers() {
 
 /** The session exchange, then the socket. */
 async function open(name: string) {
+  const attempt = ++openAttempt, previous = activeSocket;
+  activeSocket = null; session = null;
+  prayers?.stop(); prayers = null; answering = null; showPrayers();
+  placing = false; drag.cancel(); placed.clear(); sentTo.clear();
+  $<HTMLButtonElement>('place').classList.remove('on');
+  document.body.classList.remove('creator', 'refused');
+  previous?.close();
   status.textContent = 'asking the gateway for a creator token';
   const identity = await browserSession(name);
+  if (attempt !== openAttempt) return;
   if (!identity) { status.textContent = 'Finish signing in, then open the panel again.'; return; }
   const res = await fetch('/v2/creator-token', await sessionRequest(identity, 'world'));
   const body = (await res.json()) as { token?: string; grant?: string; refused?: string };
+  if (attempt !== openAttempt) return;
   if (!res.ok || !body.token || !body.grant) {
     status.textContent = `refused: ${body.refused ?? res.status}. The panel opens only for this world's creator.`;
     document.body.classList.add('refused');
     return;
   }
   await init();
+  if (attempt !== openAttempt) return;
   const ws = new WebSocket(new URL('/v2/ws', location.href.replace(/^http/, 'ws')));
+  activeSocket = ws;
+  const current = () => attempt === openAttempt && activeSocket === ws;
   ws.binaryType = 'arraybuffer';
   const waiting = new Prayers({ send: (t) => ws.send(t) });
   ws.onopen = () => {
-    session = new CreatorSession(ws, idOf(body.grant!.replace(/^creator-/, '')), wireHello(), wireSignIn(body.token!, new Uint8Array(0)), Date.now() * 1000);
-    prayers = waiting;
+    if (!current()) return;
+    const signed = new CreatorSession(ws, idOf(body.grant!.replace(/^creator-/, '')), wireHello(), wireSignIn(body.token!, new Uint8Array(0)), Date.now() * 1000);
+    session = signed; prayers = waiting;
     prayers.onChange = () => { if (!answering) showPrayers(); };
-    session.onOpen = () => {
+    signed.onOpen = () => {
+      if (!current() || session !== signed) return;
       waiting.start();
       status.textContent = 'signed in as the creator · edits sent 0';
       document.body.classList.replace('refused', 'creator') || document.body.classList.add('creator');
     };
   };
-  ws.onmessage = (e) => (typeof e.data === 'string' ? void waiting.text(e.data) : session?.frame(new Uint8Array(e.data as ArrayBuffer)));
+  ws.onmessage = (e) => current() && (typeof e.data === 'string' ? void waiting.text(e.data) : session?.frame(new Uint8Array(e.data as ArrayBuffer)));
   ws.onclose = () => {
     waiting.stop();
-    if (prayers === waiting) {
-      prayers = null;
-      status.textContent = `the socket closed${session?.outcome ? ` (${session.outcome})` : ''}`;
-    }
+    if (!current()) return;
+    const outcome = session?.outcome;
+    activeSocket = null; session = null; prayers = null;
+    document.body.classList.remove('creator'); showPrayers();
+    status.textContent = `the socket closed${outcome ? ` (${outcome})` : ''}`;
   };
 }
 $<HTMLFormElement>('signin').addEventListener('submit', (e) => {
   e.preventDefault();
-  void open($<HTMLInputElement>('who').value.trim()).catch((e) => { status.textContent = e.message; });
+  const opening = open($<HTMLInputElement>('who').value.trim()), attempt = openAttempt;
+  void opening.catch((e) => { if (attempt === openAttempt) status.textContent = e.message; });
 });
 
 $<HTMLInputElement>('who').parentElement!.hidden = !localTestSignIn(location.href);

@@ -103,7 +103,7 @@ export async function providerSession(cfg: SignInConfig, env: PageEnv): Promise<
   const sat = satelliteOptions(cfg, origin);
   await clerk.load(sat ?? {});
   const session = clerk.session;
-  if (session) return { bearer: async () => (await session.getToken()) ?? '' };
+  if (session) return { bearer: async () => (await clerk.session?.getToken()) ?? '' };
   // Signed out: the provider's sign-in, back to this page. A satellite leaves for the primary's, as today's site does.
   if (sat) env.navigate(clerk.buildSignInUrl({ signInForceRedirectUrl: env.href, signUpForceRedirectUrl: env.href }));
   else clerk.openSignIn({ afterSignInUrl: env.href, afterSignUpUrl: env.href });

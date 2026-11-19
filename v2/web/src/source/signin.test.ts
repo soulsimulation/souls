@@ -137,3 +137,21 @@ test('W18: missing provider refuses usefully on public pages; local-only test fa
   assert.equal(await browserSession('maker', env, configured), null);
   await assert.rejects(sessionRequest({ bearer: async () => '' }, 'account'), /Sign-in expired/);
 });
+
+
+test('W18: bearer follows the current provider account and refuses logout without reusing its old SDK session', async () => {
+  const { sessionRequest } = await import('./signin.ts');
+  let oldCalls = 0, newCalls = 0;
+  const provider: Provider = { load: async () => {}, session: { getToken: async () => { oldCalls++; return 'old-account'; } }, openSignIn() {}, buildSignInUrl: () => '' };
+  const { env } = page(provider);
+  const session = await providerSession(CFG, env);
+  assert.ok(session && 'bearer' in session);
+  assert.equal((await sessionRequest(session, 'account')).headers && oldCalls, 1);
+  provider.session = { getToken: async () => { newCalls++; return 'new-account'; } };
+  const switched = await sessionRequest(session, 'account');
+  assert.equal((switched.headers as Record<string, string>).authorization, 'Bearer new-account');
+  assert.equal(oldCalls, 1); assert.equal(newCalls, 1);
+  provider.session = null;
+  await assert.rejects(sessionRequest(session, 'account'), /Sign-in expired/);
+  assert.equal(oldCalls, 1); assert.equal(newCalls, 1);
+});
