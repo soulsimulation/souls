@@ -122,7 +122,8 @@ test('O19b: trusted world metadata exposes only public bootstrap, isolates world
     assert.equal((await fetch(`${at}/w/eden/v2/creator-token`, { method: 'POST' })).status, 404);
     assert.equal((await fetch(`${at}/preview/w/eden/v1/bootstrap`)).status, 200);
     worlds.eden.canonical = true;
-    for (const gateway of ['https://127.0.0.1', 'http://untrusted.example.test', 'http://owner@127.0.0.1', 'http://127.0.0.1/other', 'http://127.0.0.1?target=x', 'http://127.0.0.1#x']) {
+    const credentialTarget = new URL('http://127.0.0.1'); credentialTarget.username = 'fixture';
+    for (const gateway of ['https://127.0.0.1', 'http://untrusted.example.test', credentialTarget.href, 'http://127.0.0.1/other', 'http://127.0.0.1?target=x', 'http://127.0.0.1#x']) {
       worlds.eden.gateway = gateway; write();
       assert.throws(() => readWorldRoutes(file));
       assert.equal((await fetch(`${at}/w/eden/v1/bootstrap`)).status, 503);
@@ -196,4 +197,3 @@ test('O19b: home keeps today during preview and advertises only valid canonical 
   assert.deepEqual(listed.map(w => [w.slug, w.system]), [['new-town', 'v2'], ['eden', 'today']]);
   assert.equal(listed.some(w => w.slug === 'preview-only'), false);
 });
-
