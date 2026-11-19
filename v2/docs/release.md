@@ -47,8 +47,8 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    canary watch, a rollback by itself on a fault. Then every other world, one at a time; then the gateway by
    `gateway-upgrade` (never in the same step as a world's deploy: the step lock); then the page (`/usr/local/lib/souls/web`).
    A failed deploy stops the release: worlds before it keep the new build, worlds after it the old. Each world's probe
-   is `/etc/souls/probe/<world>` (T10's bytes of an act a healthy world gives a receipt), which `deploy` makes from
-   the world's folder the first time ([deploy-and-roll-back.md](runbook/deploy-and-roll-back.md)). Each step is done
+   is a sync ask that needs no body, so a release never drives anyone's Soul
+   ([deploy-and-roll-back.md](runbook/deploy-and-roll-back.md#what-a-deploy-does)). Each step is done
    once per release (`releases/<sha>/moved/`), so a second dispatch of the same commit moves nothing again.
 5. **Publish.** Only when every world runs the release: one news entry in `/var/lib/souls/news.jsonl`, keyed by its
    link (`<origin>/changelog#v<version>`); the tag `v<version>` at the sha and its GitHub Release; the changelog's
@@ -64,7 +64,7 @@ gh workflow run rollback-v2.yml --ref main -f to=<good build> -f from=<live buil
 
 Each world goes back by `deploy rollback`: its pin must be `from` (`rollback.wrong-from` otherwise, changing nothing),
 the old build must read every schema the new one writes (`rollback.schema-unread`), then the pin goes back, the world
-restarts and the probe must have its receipt. `from` must be a build some staged release brought
+restarts and the probe must be answered. `from` must be a build some staged release brought
 (`rollback.from-unknown`), and `to` must be on the machine. Code rolls back; data never does. The gateway goes back by
 running `gateway-upgrade` with its old build ([gateway-upgrade.md](runbook/gateway-upgrade.md)).
 
