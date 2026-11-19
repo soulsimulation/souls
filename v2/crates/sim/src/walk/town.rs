@@ -48,7 +48,7 @@ use replica::pose::{ControllerInput, Frame, Mode, Quat, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{plain, show};
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
@@ -346,10 +346,62 @@ fn dist2(a: Vec3, b: Vec3) -> i128 {
     d(a.x, b.x) + d(a.y, b.y) + d(a.z, b.z)
 }
 
+/// Each building's reach on the open ground for [`in_passage`] (C8, #3396): the box (x min, z min, x max, z max, µm)
+/// round every link end and placed line point it tests there, each widened by the most it is tested within; `None`
+/// when no link has an end on the ground. A point outside the box is in none of its passages, so skipping the building
+/// gives the same answer without placing its lines (a spot table on Eden tested 651 doors at each of its places).
+pub fn ground_boxes(buildings: &[Building], ground: Id) -> Vec<Option<[i64; 4]>> {
+    let grow = |bx: Option<[i64; 4]>, p: Vec3, m: i64| {
+        let r = [p.x - m, p.z - m, p.x + m, p.z + m];
+        Some(bx.map_or(r, |o| {
+            [
+                o[0].min(r[0]),
+                o[1].min(r[1]),
+                o[2].max(r[2]),
+                o[3].max(r[3]),
+            ]
+        }))
+    };
+    let boxes = buildings.iter().map(|b| {
+        let mut bx = None;
+        for l in &b.links {
+            let ends: Vec<_> = l
+                .ends
+                .iter()
+                .flatten()
+                .filter(|e| e.floor == ground)
+                .collect();
+            if ends.is_empty() {
+                continue;
+            }
+            let m = CLEAR.max(l.width / 2 + CLEAR / 2);
+            let line = l.line.iter().map(|s| b.place.point(*s).unwrap_or(*s));
+            for p in ends.iter().flat_map(|e| [e.a, e.b]).chain(line) {
+                bx = grow(bx, p, m);
+            }
+        }
+        bx
+    });
+    boxes.collect()
+}
+
 /// Whether `p` (µm, the frame of `node`) lies in a doorway or on a stair: within [`CLEAR`] of the end on `node` of a
-/// link, or within half the link's width and half [`CLEAR`] of its line.
-fn in_passage(buildings: &[Building], ground: Id, node: Id, p: Vec3) -> bool {
-    buildings.iter().any(|b| {
+/// link, or within half the link's width and half [`CLEAR`] of its line. On the open ground a building outside its
+/// box in `boxes` ([`ground_boxes`]) is skipped; with no boxes, every building is tested.
+pub fn in_passage(
+    buildings: &[Building],
+    boxes: &[Option<[i64; 4]>],
+    ground: Id,
+    node: Id,
+    p: Vec3,
+) -> bool {
+    buildings.iter().enumerate().any(|(i, b)| {
+        if node == ground
+            && let Some(bx) = boxes.get(i)
+            && bx.is_none_or(|r| p.x < r[0] || p.z < r[1] || p.x > r[2] || p.z > r[3])
+        {
+            return false;
+        }
         b.links.iter().any(|l| {
             let ends = l.ends.iter().flatten().filter(|e| e.floor == node);
             let mut on = false;
@@ -382,6 +434,8 @@ struct Grounds<'a> {
     surfaces: &'a BTreeMap<Id, Surface>,
     buildings: &'a [Building],
     ground: Id,
+    /// [`ground_boxes`], made at the first passage asked about.
+    boxes: OnceCell<Vec<Option<[i64; 4]>>>,
 }
 
 impl Ground for Grounds<'_> {
@@ -393,7 +447,10 @@ impl Ground for Grounds<'_> {
     }
 
     fn passage(&self, node: Id, p: Vec3) -> bool {
-        in_passage(self.buildings, self.ground, node, p)
+        let boxes = self
+            .boxes
+            .get_or_init(|| ground_boxes(self.buildings, self.ground));
+        in_passage(self.buildings, boxes, self.ground, node, p)
     }
 
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
@@ -451,6 +508,7 @@ impl World for Town {
             surfaces,
             buildings,
             ground: *ground,
+            boxes: OnceCell::new(),
         };
         spots.write(&mut g, &asks, at)
     }

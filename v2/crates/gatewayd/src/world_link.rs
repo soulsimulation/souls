@@ -8,12 +8,19 @@
 //! away is answered at once with [`RESTARTING`] and never sent. An answer for an intent no longer kept (the world
 //! answered a repeat) is dropped, so each intent is answered once. Keeping intents across a restart of the gateway
 //! itself, and the world's repeats across its own restart, are I4's durable half.
+//!
+//! **Never silence** (C8, #3396). Each kept intent has a deadline: its expiry, or [`DEADLINE`] after it was received,
+//! whichever is sooner (the world's own, `worldd::answers::Config::deadline`). Once it passes while the world is away,
+//! the gateway answers the intent itself, `intent.expired` when the expiry came first and `act.timed-out` otherwise,
+//! and drops it, so it is never sent again ([`deadlines`]). While the world is reachable it answers by its own
+//! deadline; the gateway steps in only [`WEDGED`] after it, for a world that takes intents and never answers.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use replica::effects::Actor;
 use replica::encode::{Value, decode, encode};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -32,6 +39,17 @@ const FRAME_MOST: usize = 1 << 20;
 /// How long the gateway waits between attempts to reach the world.
 const RETRY: Duration = Duration::from_millis(20);
 
+/// The longest an act stays open after it is received, µs: the world's deadline (`worldd::answers::Config`).
+pub const DEADLINE: u64 = 10_000_000;
+/// How long past an intent's deadline a reachable world has to answer it before the gateway does, µs.
+pub const WEDGED: u64 = 20_000_000;
+/// How often the gateway looks for intents past their deadline.
+const SWEEP: Duration = Duration::from_millis(50);
+/// The gateway's answer to an intent whose expiry passed unanswered.
+pub const EXPIRED: &str = "intent.expired";
+/// The gateway's answer to an intent whose deadline passed unanswered before its expiry.
+pub const TIMED_OUT: &str = "act.timed-out";
+
 /// What became of an intent handed to the link.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Sent {
@@ -46,13 +64,23 @@ pub struct Link {
     state: Mutex<State>,
 }
 
-type Pending = (Vec<u8>, u64, Vec<u8>, u64, u64);
+/// A kept intent: its actor's bytes, its bytes, when it was received and handed to the link (O4's gateway in, the
+/// steady clock), its actor and sequence, and its deadline on the steady clock with the answer given then (C8).
+struct Pending {
+    key: Vec<u8>,
+    bytes: Vec<u8>,
+    received: u64,
+    handed: u64,
+    actor: Actor,
+    sequence: u64,
+    due: u64,
+    reason: &'static str,
+}
 
 #[derive(Default)]
 struct State {
     next: u64,
-    /// Unanswered intents in the order they were first sent: (actor's bytes, sequence, the intent's bytes, when it
-    /// was received and handed to the link: O4's gateway in).
+    /// Unanswered intents in the order they were first sent.
     pending: BTreeMap<u64, Pending>,
     index: BTreeMap<(Vec<u8>, u64), u64>,
     out: Option<mpsc::UnboundedSender<Vec<u8>>>,
@@ -61,8 +89,17 @@ struct State {
 }
 
 impl Link {
-    /// Hands an intent to the world, keeping it until it is answered; `received` is when its socket read it.
-    pub fn submit(&self, key: Vec<u8>, sequence: u64, bytes: Vec<u8>, received: u64) -> Sent {
+    /// Hands an intent to the world, keeping it until it is answered; `received` is when its socket read it (the
+    /// steady clock, [`times::stamp`]) and `left` how long its expiry was off then, µs.
+    pub fn submit(
+        &self,
+        key: Vec<u8>,
+        actor: Actor,
+        sequence: u64,
+        bytes: Vec<u8>,
+        received: u64,
+        left: i64,
+    ) -> Sent {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let Some(out) = s.out.clone() else {
             return Sent::Restarting;
@@ -76,8 +113,25 @@ impl Link {
         s.index.insert((key.clone(), sequence), n);
         // A send to a writer that has just ended is not lost: the intent stays kept and goes again on reconnect.
         let _ = out.send(bytes.clone());
-        s.pending
-            .insert(n, (key, sequence, bytes, received, times::stamp()));
+        let left = u64::try_from(left).unwrap_or(0);
+        let (wait, reason) = if left <= DEADLINE {
+            (left, EXPIRED)
+        } else {
+            (DEADLINE, TIMED_OUT)
+        };
+        s.pending.insert(
+            n,
+            Pending {
+                key,
+                bytes,
+                received,
+                handed: times::stamp(),
+                actor,
+                sequence,
+                due: received.saturating_add(wait),
+                reason,
+            },
+        );
         Sent::Sent
     }
 
@@ -110,15 +164,36 @@ impl Link {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         s.now = Some(now.clone());
         let n = s.index.remove(&(key.to_vec(), sequence))?;
-        s.pending.remove(&n).map(|p| (p.3, p.4))
+        s.pending.remove(&n).map(|p| (p.received, p.handed))
+    }
+
+    /// Takes every kept intent past its deadline at `now` (the steady clock) while the world is away, or [`WEDGED`]
+    /// past it while it is reachable: its actor's bytes, actor, sequence and the answer's name. None is sent again.
+    pub fn overdue(&self, now: u64) -> Vec<(Vec<u8>, Actor, u64, &'static str)> {
+        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let slack = if s.out.is_some() { WEDGED } else { 0 };
+        let late: Vec<u64> = s
+            .pending
+            .iter()
+            .filter(|(_, p)| now >= p.due.saturating_add(slack))
+            .map(|(n, _)| *n)
+            .collect();
+        let mut out = Vec::new();
+        for n in late {
+            if let Some(p) = s.pending.remove(&n) {
+                s.index.remove(&(p.key.clone(), p.sequence));
+                out.push((p.key, p.actor, p.sequence, p.reason));
+            }
+        }
+        out
     }
 
     /// Connected: the writer's queue, with every unanswered intent already in it, in first-sent order.
     fn connected(&self) -> mpsc::UnboundedReceiver<Vec<u8>> {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        for (_, _, bytes, _, _) in s.pending.values() {
-            let _ = tx.send(bytes.clone());
+        for p in s.pending.values() {
+            let _ = tx.send(p.bytes.clone());
         }
         s.out = Some(tx);
         rx
@@ -131,6 +206,7 @@ impl Link {
 
 /// Holds the link to the world at `path` for as long as the gateway runs, reconnecting whenever it drops.
 pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
+    tokio::spawn(deadlines(gw.clone()));
     let mut was_up = false;
     loop {
         let Ok(stream) = UnixStream::connect(&path).await else {
@@ -183,6 +259,18 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
         }
         gw.link.disconnected();
         writer.abort();
+    }
+}
+
+/// Answers each kept intent past its deadline ([`Link::overdue`]) by name, as the gateway's own answer, for as long
+/// as the gateway runs (C8, #3396).
+pub async fn deadlines(gw: Arc<Gateway>) {
+    loop {
+        tokio::time::sleep(SWEEP).await;
+        for (key, actor, sequence, reason) in gw.link.overdue(times::stamp()) {
+            let frame = crate::socket::refused(actor, sequence, reason, gw.link.now());
+            gw.tell(&key, frame);
+        }
     }
 }
 
