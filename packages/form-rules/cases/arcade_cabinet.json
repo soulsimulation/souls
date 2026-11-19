@@ -1,0 +1,244 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:arcade_cabinet. Switched on as it comes, as today; anyone switches it off and on, and plays at the joystick while it is on with a hand free.",
+  "cases": [
+    {
+      "name": "switch_off",
+      "act": {
+        "this": "t1",
+        "form": "switch_off"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:arcade_cabinet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "switch_off_when_off_is_fixed_by_switch_on",
+      "act": {
+        "this": "t1",
+        "form": "switch_off"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:arcade_cabinet",
+            "fields": {
+              "on": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "switch_on"
+        }
+      }
+    },
+    {
+      "name": "switch_on",
+      "act": {
+        "this": "t1",
+        "form": "switch_on"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:arcade_cabinet",
+            "fields": {
+              "on": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "switch_on_when_on_is_fixed_by_switch_off",
+      "act": {
+        "this": "t1",
+        "form": "switch_on"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:arcade_cabinet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "switch_off"
+        }
+      }
+    },
+    {
+      "name": "play",
+      "act": {
+        "this": "t1",
+        "form": "play"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:arcade_cabinet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "play_when_off_is_fixed_by_switch_on",
+      "act": {
+        "this": "t1",
+        "form": "play"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:arcade_cabinet",
+            "fields": {
+              "on": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "switch_on"
+        }
+      }
+    },
+    {
+      "name": "play_with_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "play"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:arcade_cabinet"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:toy_blocks"
+          },
+          "x2": {
+            "kind": "eden:toy_blocks"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}

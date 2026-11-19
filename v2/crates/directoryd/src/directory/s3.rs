@@ -1,0 +1,236 @@
+//! An S3-compatible object store over HTTP(S) (R2 and S3 among them), with exactly the two conditional writes
+//! (`If-None-Match: *` and `If-Match`), path-style requests and AWS Signature Version 4. Its settings come from the
+//! process environment ([`S3::from_env`]); the endpoint is a machine's address and stays out of anything published
+//! (`docs/process/publication-privacy.md`).
+
+use std::time::Duration;
+
+use replica::encode::to_hex;
+use ring::{digest, hmac};
+
+use super::store::{Object, R, Store, When, refuse};
+
+/// How long one request may take before the store counts as out of reach. A world never waits on it: it is the
+/// directory's caller, not the tick, that makes these calls.
+const TIMEOUT: Duration = Duration::from_secs(5);
+
+/// One bucket of an S3-compatible store, and the prefix every key is put under.
+pub struct S3 {
+    agent: ureq::Agent,
+    /// `scheme://host[:port]`, with no path.
+    endpoint: String,
+    host: String,
+    bucket: String,
+    region: String,
+    access_key_id: String,
+    secret_access_key: String,
+    prefix: String,
+}
+
+/// The settings [`S3::from_env`] reads.
+pub const ENV: [&str; 6] = [
+    "DIRECTORY_STORE_ENDPOINT",
+    "DIRECTORY_STORE_BUCKET",
+    "DIRECTORY_STORE_REGION",
+    "DIRECTORY_STORE_ACCESS_KEY_ID",
+    "DIRECTORY_STORE_SECRET_ACCESS_KEY",
+    "DIRECTORY_STORE_PREFIX",
+];
+
+impl S3 {
+    /// A store at `endpoint` (`http://` or `https://`, host and optional port, no path).
+    pub fn new(
+        endpoint: &str,
+        bucket: &str,
+        region: &str,
+        access_key_id: &str,
+        secret_access_key: &str,
+        prefix: &str,
+    ) -> R<S3> {
+        let endpoint = endpoint.trim_end_matches('/');
+        let Some(host) = endpoint
+            .strip_prefix("https://")
+            .or_else(|| endpoint.strip_prefix("http://"))
+        else {
+            return refuse("store-settings", "the endpoint is http:// or https://");
+        };
+        if host.is_empty() || host.contains('/') || bucket.is_empty() {
+            return refuse("store-settings", "an endpoint is a host, with a bucket");
+        }
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(TIMEOUT))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        Ok(S3 {
+            agent,
+            endpoint: endpoint.to_owned(),
+            host: host.to_owned(),
+            bucket: bucket.to_owned(),
+            region: region.to_owned(),
+            access_key_id: access_key_id.to_owned(),
+            secret_access_key: secret_access_key.to_owned(),
+            prefix: prefix.to_owned(),
+        })
+    }
+
+    /// The store the environment names ([`ENV`]; the region defaults to `auto`, R2's, and the prefix to none), or
+    /// `None` when `DIRECTORY_STORE_ENDPOINT` is not set.
+    pub fn from_env() -> Option<R<S3>> {
+        let var = |k: &str| std::env::var(k).unwrap_or_default();
+        let endpoint = std::env::var(ENV[0]).ok()?;
+        let region = Some(var(ENV[2])).filter(|r| !r.is_empty());
+        Some(S3::new(
+            &endpoint,
+            &var(ENV[1]),
+            region.as_deref().unwrap_or("auto"),
+            &var(ENV[3]),
+            &var(ENV[4]),
+            &var(ENV[5]),
+        ))
+    }
+
+    /// The request path: `/<bucket>/<prefix><key>`, each segment percent-encoded.
+    fn path(&self, key: &str) -> String {
+        let full = format!("{}/{}{}", self.bucket, self.prefix, key);
+        full.split('/').map(|s| format!("/{}", encode(s))).collect()
+    }
+
+    /// The headers that sign one request (SigV4): `x-amz-date`, `x-amz-content-sha256` and `authorization`.
+    fn sign(&self, method: &str, path: &str, payload: &[u8]) -> [(&'static str, String); 3] {
+        let (date, stamp) = now();
+        let body = to_hex(digest::digest(&digest::SHA256, payload).as_ref());
+        let signed = "host;x-amz-content-sha256;x-amz-date";
+        let canonical = format!(
+            "{method}\n{path}\n\nhost:{}\nx-amz-content-sha256:{body}\nx-amz-date:{stamp}\n\n{signed}\n{body}",
+            self.host
+        );
+        let scope = format!("{date}/{}/s3/aws4_request", self.region);
+        let to_sign = format!(
+            "AWS4-HMAC-SHA256\n{stamp}\n{scope}\n{}",
+            to_hex(digest::digest(&digest::SHA256, canonical.as_bytes()).as_ref())
+        );
+        let mac = |key: &[u8], data: &str| {
+            hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, key), data.as_bytes())
+                .as_ref()
+                .to_vec()
+        };
+        let mut k = mac(format!("AWS4{}", self.secret_access_key).as_bytes(), &date);
+        for part in [self.region.as_str(), "s3", "aws4_request"] {
+            k = mac(&k, part);
+        }
+        let signature = to_hex(&mac(&k, &to_sign));
+        [
+            ("x-amz-date", stamp),
+            ("x-amz-content-sha256", body),
+            (
+                "authorization",
+                format!(
+                    "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed}, Signature={signature}",
+                    self.access_key_id
+                ),
+            ),
+        ]
+    }
+}
+
+/// Percent-encodes one path segment: all but `A-Z a-z 0-9 - . _ ~`.
+fn encode(segment: &str) -> String {
+    segment
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// The UTC date (`YYYYMMDD`) and time stamp (`YYYYMMDDTHHMMSSZ`) a signature carries.
+#[allow(clippy::disallowed_methods)] // A request signature carries the wall-clock time; no world reads it (K7).
+fn now() -> (String, String) {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let (days, rest) = (secs / 86_400, secs % 86_400);
+    // Days since 1970-01-01 to a civil date (H. Hinnant's algorithm), for dates after 1970.
+    let z = days + 719_468;
+    let era = z / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + u64::from(month <= 2);
+    let date = format!("{year:04}{month:02}{day:02}");
+    let stamp = format!(
+        "{date}T{:02}{:02}{:02}Z",
+        rest / 3_600,
+        rest / 60 % 60,
+        rest % 60
+    );
+    (date, stamp)
+}
+
+/// Sorts an answer's status into the store's refusals.
+fn status(code: u16, what: &str) -> R<()> {
+    match code {
+        200..=299 => Ok(()),
+        // 412: the condition failed; 409: another conditional write to the key is in flight (S3 asks for a retry);
+        // 404 on a write: `If-Match` named a key that is gone.
+        404 | 409 | 412 => refuse("precondition-failed", format!("{what}: HTTP {code}")),
+        500..=599 => refuse("store-unreachable", format!("{what}: HTTP {code}")),
+        _ => refuse("store-error", format!("{what}: HTTP {code}")),
+    }
+}
+
+fn unreachable(what: &str, e: ureq::Error) -> R<ureq::http::Response<ureq::Body>> {
+    refuse("store-unreachable", format!("{what}: {e}"))
+}
+
+impl Store for S3 {
+    fn get(&self, key: &str) -> R<Option<Object>> {
+        let path = self.path(key);
+        let mut req = self.agent.get(format!("{}{path}", self.endpoint));
+        for (k, v) in self.sign("GET", &path, b"") {
+            req = req.header(k, v);
+        }
+        let mut res = req.call().or_else(|e| unreachable(key, e))?;
+        let code = res.status().as_u16();
+        if code == 404 {
+            return Ok(None);
+        }
+        status(code, key)?;
+        let etag = etag(&res, key)?;
+        let bytes = res
+            .body_mut()
+            .read_to_vec()
+            .or_else(|e| refuse("store-unreachable", format!("{key}: {e}")))?;
+        Ok(Some(Object { etag, bytes }))
+    }
+
+    fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+        let path = self.path(key);
+        let mut req = self.agent.put(format!("{}{path}", self.endpoint));
+        for (k, v) in self.sign("PUT", &path, bytes) {
+            req = req.header(k, v);
+        }
+        req = match when {
+            When::Absent => req.header("if-none-match", "*"),
+            When::Is(e) => req.header("if-match", format!("\"{e}\"")),
+        };
+        let res = req.send(bytes).or_else(|e| unreachable(key, e))?;
+        status(res.status().as_u16(), key)?;
+        etag(&res, key)
+    }
+}
+
+/// An answer's ETag, without its quotes.
+fn etag(res: &ureq::http::Response<ureq::Body>, key: &str) -> R<String> {
+    match res.headers().get("etag").and_then(|v| v.to_str().ok()) {
+        Some(e) => Ok(e.trim_matches('"').to_owned()),
+        None => refuse("store-error", format!("{key}: the answer has no ETag")),
+    }
+}

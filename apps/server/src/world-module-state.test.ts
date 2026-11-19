@@ -56,6 +56,7 @@ const ALLOWED: Record<string, [number, string]> = {
   'apps/server/src/human-capabilities.ts': [1, KEYED],
   'apps/server/src/human-sleep-transition.ts': [1, KEYED],
   'apps/server/src/load/boot-progress.ts': [2, DEFAULT],
+  'apps/server/src/load/disk-headroom.ts': [1, 'lowNow (#2538): the host disk\'s state, not one world\'s: the worlds of one program share its disk, so a low disk pauses every one of their uploads'],
   'apps/server/src/load/watchdog-worker.ts': [2, THREAD],
   'apps/server/src/load/watchdog.ts': [1, `programWatchdog (#2444): ${PROGRAM}, the shard's one watchdog thread`],
   'apps/server/src/moderation/classifier.ts': [1, LATER],

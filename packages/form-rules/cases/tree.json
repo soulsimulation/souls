@@ -1,0 +1,64 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:tree (SA-X29, #2919): an oak. go_to_shade needs nothing: anyone may do it at any time, and it changes no state (the walk is the body's, Engine v2).",
+  "cases": [
+    {
+      "name": "go_to_shade_every_need_met",
+      "act": {
+        "this": "t1",
+        "form": "go_to_shade"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tree"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "tree_go_to_shade",
+      "act": {
+        "this": "t1",
+        "form": "go_to_shade"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tree"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    }
+  ]
+}
