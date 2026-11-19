@@ -512,10 +512,168 @@
           "event": "waited_by"
         }
       ]
+    },
+    "pick_up": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "moves",
+          "thing": {
+            "arg": "thing"
+          },
+          "by": "carry"
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "thing"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "thing"
+          }
+        },
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "actor_hand",
+          "event": "picked_up"
+        }
+      ]
+    },
+    "put": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        },
+        "at": {
+          "type": "placement"
+        },
+        "anchor": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "held_by_actor",
+          "thing": {
+            "arg": "thing"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "put",
+          "place": {
+            "at": {
+              "arg": "at"
+            },
+            "anchor": {
+              "arg": "anchor"
+            }
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "here",
+          "event": "put_down"
+        }
+      ]
+    },
+    "push": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "moves",
+          "thing": {
+            "arg": "thing"
+          },
+          "by": "push"
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "thing"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "thing"
+          }
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": {
+            "arg": "thing"
+          }
+        },
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "actor_hand",
+          "event": "took_hold_to_push"
+        }
+      ]
     }
   },
   "text": {
-    "card": "A body on its own: gestures, postures on any ground, and going to things."
+    "card": "A body on its own: gestures, postures, going to things, carrying, pushing."
   },
   "card": {
     "text": "card"

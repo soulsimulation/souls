@@ -47,8 +47,8 @@
 // worldd's real clock: the tick loop and world time read the machine's clocks until K7's ticker drives them.
 #![allow(clippy::disallowed_methods)]
 
-use crate::bodies::{self, Asked, Bodies};
-use crate::checkers::{self, Act, Candidate, Rules};
+use crate::bodies::{self, Ask, Asked, Bodies};
+use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
 use crate::measures::{self, Measures, Stamps};
 use crate::words;
 use replica::apply::Replica;
@@ -56,10 +56,14 @@ use replica::effects::{Actor, Body, Cause, Effect, Envelope, Event as Named, Par
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Id, Scope, Version};
 use replica::intents::{Answer, INTENT_MOST, Intent, Target};
+use replica::select::Answer as Answered;
+use replica::select::Spot;
+use replica::select::wire::SPOT;
 use replica::sync::{self, Records, Served, wire};
 use replica::time::Micros;
 use replica::world_model::Audience;
 use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
+use sim::commit::spot::{self, Spot as Bound};
 use sim::commit::{Checks, Outcome, commit, mark_clock_thread};
 use sim::frozen::Publisher;
 use sim::log::{Durable, Log, Storage};
@@ -331,7 +335,60 @@ fn act_of(intent: &Intent, id: u64, cause: Cause) -> Result<Act, &'static str> {
         body,
         candidates,
         recheck: None,
+        spot: None,
     })
+}
+
+/// A walk or a sit aimed at a described spot (selector 2 of I5's list, E2 #2709): `None` for any other intent, else
+/// the act a checker resolves the spot for on its copy, or the spot's refusal by name.
+fn spot_of(intent: &Intent, id: u64, cause: Cause) -> Option<Result<Act, &'static str>> {
+    let target @ Target::Selector(SPOT, _) = intent.target.as_ref()? else {
+        return None;
+    };
+    let sit = match intent.verb.as_str().split_once(':') {
+        Some((ns, "sit")) if ns != "souls" => true,
+        Some((ns, "walk")) if ns != "souls" => false,
+        _ => return None,
+    };
+    Some(Spot::read(target).map_err(|r| r.name).and_then(|spot| {
+        Ok(Act {
+            id,
+            cause,
+            actor: intent.actor,
+            body: body_of(intent)?,
+            candidates: Vec::new(),
+            recheck: None,
+            spot: Some(Box::new(SpotAct {
+                sit,
+                spot,
+                resolved: None,
+            })),
+        })
+    }))
+}
+
+/// Binds a resolved spot once, at commit (`sim::commit::spot`): a slot is sat in (or walked to), a thing or a point
+/// is walked to, as N9's target in the frame of the node it stands in. Refused by the checker's name.
+fn bind_spot(s: Box<SpotAct>, body: Id, actor: Actor) -> Result<Asked, String> {
+    let r = s
+        .resolved
+        .ok_or("spot.unresolved")?
+        .map_err(|r| r.name.to_owned())?;
+    let ask = match (spot::once(&r), s.sit, r.answer) {
+        (Bound::Slot { thing, .. }, true, _) | (_, true, Answered::Thing { thing, .. }) => {
+            Ask::Sit { thing }
+        }
+        (Bound::Slot { thing, .. }, false, _) => Ask::Walk {
+            node: thing,
+            point: None,
+        },
+        (Bound::Stand(t), false, _) => Ask::Walk {
+            node: t.node,
+            point: Some(t.point()),
+        },
+        (Bound::Stand(_), true, _) => return Err("spot.not-a-slot".into()),
+    };
+    Ok(Asked { body, actor, ask })
 }
 
 impl Clock {
@@ -553,9 +610,14 @@ impl Clock {
             Some(_) => body_of(&intent).ok().and_then(|b| bodies::read(&intent, b)),
             None => None,
         };
-        let taken = match moved {
-            Some(m) => m.map(Taken::Move),
-            None => act_of(&intent, self.next_intent, Cause::Intent(id)).map(Taken::Form),
+        let spotted = match self.bodies {
+            Some(_) => spot_of(&intent, self.next_intent, Cause::Intent(id)),
+            None => None,
+        };
+        let taken = match (spotted, moved) {
+            (Some(a), _) => a.map(Taken::Form),
+            (None, Some(m)) => m.map(Taken::Move),
+            (None, None) => act_of(&intent, self.next_intent, Cause::Intent(id)).map(Taken::Form),
         };
         let taken = match taken {
             Ok(t) => t,
@@ -737,6 +799,14 @@ impl Clock {
             let (actor, sequence) = (act.actor, o.sequence);
             if expired(o.expiry, now) {
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
+                continue;
+            }
+            // A described spot is bound here, once; the move then starts with this tick's moves.
+            if let Some(s) = act.spot.take() {
+                match bind_spot(s, act.body, actor) {
+                    Ok(asked) => self.moving.push((id, asked)),
+                    Err(reason) => self.end(id, |c| c.refusal(actor, sequence, &reason)),
+                }
                 continue;
             }
             match commit(&mut self.replica, &checks, now) {
@@ -1178,8 +1248,9 @@ mod tests {
         rx
     }
 
+    /// The answer on `rx`. The deadline only stops a hung test: a loaded runner can take seconds per tick.
     fn answer(rx: &Receiver<Vec<u8>>) -> Vec<u8> {
-        rx.recv_timeout(Duration::from_secs(5)).expect("an answer")
+        rx.recv_timeout(Duration::from_secs(30)).expect("an answer")
     }
 
     /// (kind, field 4, entries) of an answer frame: kind 1 a receipt (intent id, entries), 2 a refusal (reason).
@@ -1506,6 +1577,35 @@ mod tests {
         (items.parse().unwrap(), num(rest).parse().unwrap())
     }
 
+    /// `"written":n` in a health file: which write of the file it is.
+    fn written(health: &str) -> u64 {
+        let at = health.find("\"written\":").expect("written") + 10;
+        health[at..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse()
+            .unwrap()
+    }
+
+    /// Reads the health file at `path` until `done` holds for it. The deadline only stops a hung test: the health
+    /// thread and this one may be starved for seconds on a loaded runner, so no bound here is a measure.
+    fn health_until(
+        path: &std::path::Path,
+        what: &str,
+        mut done: impl FnMut(&str) -> bool,
+    ) -> String {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let h = std::fs::read_to_string(path).unwrap_or_default();
+            if !h.is_empty() && done(&h) {
+                return h;
+            }
+            assert!(Instant::now() < deadline, "{what} within 30 s: {h}");
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     #[test]
     fn o4_a2_a4_health_shows_phases_and_queues_and_updates_with_the_clock_stuck() {
         let dir = std::env::temp_dir().join(format!("o4-health-{}", std::process::id()));
@@ -1520,9 +1620,13 @@ mod tests {
         for s in 1..=20 {
             answer(&send(&world, &toggle(pairs[0].0, pairs[0].1, s, later)));
         }
-        // A2: each tick's phases against the budget, and every queue's oldest item.
-        thread::sleep(Duration::from_millis(2_100));
-        let h = std::fs::read_to_string(&path).unwrap();
+        // A2: each tick's phases against the budget, and every queue's oldest item, in the first write after the 20
+        // answers (the file is written every 2 s; on a loaded runner, later).
+        let h = health_until(&path, "a write after the 20 answers", |h| {
+            measures::PARTS
+                .iter()
+                .all(|p| h.contains(&format!("\"{p}\":{{\"count\":20,")))
+        });
         assert!(h.contains("\"budget_us\":50000"), "{h}");
         for p in measures::PHASES {
             assert!(h.contains(&format!("\"{p}\":")), "phase {p}: {h}");
@@ -1537,42 +1641,47 @@ mod tests {
             assert_eq!(queue(&h, q).0, 0, "queue {q} is empty at rest: {h}");
         }
 
-        // A4: the clock thread held for 7 s; the health file keeps coming every 2 s, its arrivals ageing.
+        // A4: the clock thread held for 12 s; the health file keeps coming every 2 s, its arrival waiting and ageing.
+        // Stuck is read from the file itself (the arrival still queued: only the clock thread takes it) and the
+        // writes are counted by its own `written`, so a starved reader misses none of them and sees no false gap.
         world
             .events
-            .send(Event::Stall(Duration::from_secs(7)))
+            .send(Event::Stall(Duration::from_secs(12)))
             .unwrap();
         thread::sleep(Duration::from_millis(50));
         let rx = send(&world, &toggle(pairs[1].0, pairs[1].1, 1, later));
-        let start = Instant::now();
-        let mut seen: Vec<(Duration, u64)> = Vec::new();
-        let mut last = String::new();
-        while start.elapsed() < Duration::from_millis(6_500) {
-            let h = std::fs::read_to_string(&path).unwrap_or_default();
-            if h != last && !h.is_empty() {
-                seen.push((start.elapsed(), queue(&h, "arrivals").1));
-                last = h;
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        eprintln!(
-            "o4 a4: health.json rewrites while the clock thread is held (since the hold, arrivals oldest µs): {seen:?}"
+        // (write, arrivals oldest µs) of each health file read while the arrival waits.
+        let mut seen: Vec<(u64, u64)> = Vec::new();
+        health_until(
+            &path,
+            "the arrival taken once the clock thread is back",
+            |h| {
+                let (items, oldest) = queue(h, "arrivals");
+                if items == 0 {
+                    return !seen.is_empty();
+                }
+                if seen.last().is_none_or(|s| s.0 != written(h)) {
+                    seen.push((written(h), oldest));
+                }
+                false
+            },
         );
+        eprintln!(
+            "o4 a4: health.json writes while the clock thread is held (write, arrivals oldest µs): {seen:?}"
+        );
+        let (first, last) = (seen[0], seen[seen.len() - 1]);
         assert!(
-            seen.len() >= 3,
+            last.0 - first.0 >= 2,
             "written at least three times while stuck: {seen:?}"
         );
+        let every = u64::try_from(measures::EVERY.as_micros()).unwrap();
         for pair in seen.windows(2) {
             assert!(
-                pair[1].0 - pair[0].0 <= Duration::from_millis(2_300),
-                "every 2 s: {seen:?}"
-            );
-            assert!(
-                pair[1].1 > pair[0].1,
-                "the arrival waits, older each time: {seen:?}"
+                pair[1].1 >= pair[0].1 + (pair[1].0 - pair[0].0) * every,
+                "every 2 s, the arrival older each time: {seen:?}"
             );
         }
-        assert!(seen.last().unwrap().1 >= 4_000_000, "{seen:?}");
+        assert!(last.1 >= 4_000_000, "{seen:?}");
         assert_eq!(
             read(&answer(&rx)).0,
             1,

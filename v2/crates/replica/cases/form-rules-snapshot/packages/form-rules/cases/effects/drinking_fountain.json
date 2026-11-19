@@ -1,0 +1,146 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:drinking_fountain (core/drinking-fountain@1, 1 placed): today's play and stop, as turn on and turn off; with the water flowing, a Soul drinks from the spout, using water from the supply.",
+ "cases": [
+  {
+   "name": "drinking_fountain_on_drink_off",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:drinking_fountain",
+      "fields": {}
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       1100,
+       150
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    },
+    "now_us": 0
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "drink"
+     },
+     "now_us": 0,
+     "receipt": "rdrink0",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "turn_on"
+     },
+     "now_us": 1000000,
+     "receipt": "rturn_on1000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "flowing",
+        "n": 2,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:water_arcs",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "drink"
+     },
+     "now_us": 2000000,
+     "receipt": "rdrink2000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "water",
+        "n": 1,
+        "to": 999999800
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:drank",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "turn_off"
+     },
+     "now_us": 6000000,
+     "receipt": "rturn_off6000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "flowing",
+        "n": 2,
+        "to": 0
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

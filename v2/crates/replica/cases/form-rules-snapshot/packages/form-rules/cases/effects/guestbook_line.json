@@ -1,0 +1,227 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "A guestbook line (from #1029): Ana signs \"Lovely garden\"; Ben cannot sign over her line; it stays.",
+ "cases": [
+  {
+   "name": "signed_and_kept",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "b2",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "sign",
+      "args": {
+       "words": "w_garden"
+      }
+     },
+     "receipt": "r1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "t1",
+        "link": "signer",
+        "n": 1,
+        "end": "b1"
+       },
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "words",
+        "n": 1,
+        "to": {
+         "text": "w_garden"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:signed",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:words_written",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "sign",
+      "args": {
+       "words": "w_garden"
+      }
+     },
+     "actor": "b2",
+     "receipt": "r2",
+     "expect": {
+      "verdict": "no",
+      "reason": "already_linked",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:guestbook_line",
+     "links": {
+      "signer": [
+       "b1"
+      ]
+     },
+     "fields": {
+      "words": {
+       "text": "w_garden"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "one_signature_per_book",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "g1",
+       "b1"
+      ]
+     },
+     "g1": {
+      "kind": "eden:guestbook",
+      "children": [
+       "t1",
+       "t2"
+      ]
+     },
+     "t1": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": []
+      }
+     },
+     "t2": {
+      "kind": "eden:guestbook_line",
+      "links": {
+       "signer": []
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       4,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "sign",
+      "args": {
+       "words": "w_garden"
+      }
+     },
+     "receipt": "gb1",
+     "expect": {
+      "verdict": "yes"
+     }
+    },
+    {
+     "act": {
+      "this": "t2",
+      "form": "sign",
+      "args": {
+       "words": "w_again"
+      }
+     },
+     "receipt": "gb2",
+     "expect": {
+      "verdict": "no",
+      "reason": "already_linked",
+      "need": 2,
+      "detail": {
+       "link": "signer",
+       "most_per": 1,
+       "on": [
+        "t1"
+       ]
+      },
+      "says": "already_signed"
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -27,3 +27,9 @@ export function worldTimeText(iso:string|null|undefined):string{
  const h=d.getUTCHours(),m=d.getUTCMinutes();
  return `${DAYS[d.getUTCDay()]} · ${h%12||12}:${String(m).padStart(2,'0')} ${h<12?'am':'pm'}`;
 }
+
+/** #3377: minutes after midnight on the world clock, to the time slider's 15-minute step (0–1425); null with no clock. */
+export function worldMinutes(iso:string|null|undefined):number|null{
+ if(!iso)return null;const d=new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso)?iso:iso+'Z');if(Number.isNaN(d.getTime()))return null;
+ return Math.min(1425,Math.round((d.getUTCHours()*60+d.getUTCMinutes())/15)*15);
+}
