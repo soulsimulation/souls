@@ -36,6 +36,8 @@ step origin-headers node --test tools/origin/origin.test.mjs
 step install-apart bash tools/ops/install.sh check
 # What a world costs (O11, #2721): the scripted hour, the sum check, a stopped world, the not-metered rule, the page.
 step cost node --test tools/ops/cost/cost.test.mjs
+# The cut-over's count of what a rollback leaves in the new system (X7, #2836).
+step cutover-count node --test tools/ops/cutover/count.test.mjs
 # The site owner's health page, usage table and history (O21, #3325); A2 runs the supervisor the tests above built.
 step ops-health bash -c 'cargo build -p supervisor --locked --quiet && node --test tools/ops/health/health.test.mjs'
 # Imported Souls approved again per day (X15, #3322): counts only, no Soul or account id.
