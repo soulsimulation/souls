@@ -29,6 +29,7 @@ pub mod refusals;
 pub mod rules;
 pub mod select;
 pub mod selector;
+pub mod sky;
 pub mod speech;
 pub mod stream;
 pub mod sync;
