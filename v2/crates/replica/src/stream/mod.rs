@@ -11,14 +11,15 @@
 //!    part (numbers 9, 19, …) carries the state hash (`hash.rs`) of the view's copy after it, so a reader checks it
 //!    holds the same state. A part never changes once written; a reader may cache it for a year.
 //!    `{1: number, 2: from µs, 3: to µs, 4: first sequence, 5: entries, 6: packed T6 part, 7: state hash, 8: [[first,
-//!    count], ...]}`, 7 when carried, 8 when the view skipped entries (rule 6).
+//!    count], ...], 9: [carried record, ...]}`, 7 when carried, 8 when the view skipped entries (rule 6), 9 when a
+//!    subtree came in (rule 7).
 //! 3. **The pointer** ([`Pointer`]) is the one file that changes: the newest part, the period, the header's hash, the
 //!    newest part's end in world time, world time against wall time, and "quiet until" for a still world.
 //!    `{1: newest, 2: period µs, 3: header hash, 4: newest's end µs, 5: anchor world µs, 6: anchor wall ms, 7: quiet
 //!    until µs}`, 1 and 4 once a part is written, 7 when quiet.
 //! 4. **Words never travel in parts.** A part is T6 bytes, whose text items are names only (T6 rule 10); free text is
 //!    a reference (T8, `{21: id}`). A public stream's words travel beside it, one text file per part
-//!    (`worldd::view_out` rule 9); the reader's event query ([`Player::events`]) gives the part's events, whose
+//!    (`worldd::view_out` rule 10); the reader's event query ([`Player::events`]) gives the part's events, whose
 //!    references a page looks up in that file (V1b, #3361).
 //! 5. **The reader** ([`Player`]) applies parts in number order to R1's replica, refuses a part out of order by name,
 //!    and checks each carried hash. It keeps the part's motion samples, every one in entry order ([`Player::samples`]),
@@ -27,6 +28,11 @@
 //!    outside its node; T7 rule 4), so its sequences jump. A part lists each jump before its entries as `[first,
 //!    count]`, and the reader's replica accepts exactly those (`Replica::apply_gaps`); a jump a part does not declare
 //!    is still refused as `sequence-gap`, so a lost part is never skipped. A stream with no gaps has no field 8.
+//! 7. **A subtree carried in lands with its arrive.** When an arrival lands in a view that did not hold its leave, the
+//!    view writes the subtree as it was in flight, and where it lands, before the arrive (T7 rule 4, views revision 2).
+//!    The part that holds the arrive holds that record, as the view wrote it, in field 9; the reader puts the subtree
+//!    in flight just before the arrive of its sequence, which lands it (`Replica::apply_view`). A carried record that
+//!    names no destination (revision 1) is refused as `carried-no-destination`.
 
 pub mod lz;
 #[cfg(all(target_arch = "wasm32", not(feature = "checker")))]
@@ -35,12 +41,12 @@ mod wasm;
 use std::collections::BTreeMap;
 
 use crate::apply::Replica;
-use crate::effects::{Body, Change, Header, Part, Refusal};
+use crate::effects::{Body, Change, Flight, Header, Part, Refusal};
 use crate::encode::{Value, decode, encode, to_hex};
 use crate::ids::Id;
 use crate::pose::HandOff;
 use crate::time::Micros;
-use crate::views::Key;
+use crate::views::{Carried, Key};
 use crate::world_model::Audience;
 
 type R<T> = Result<T, Refusal>;
@@ -167,6 +173,8 @@ pub struct StreamPart {
     pub hash: Option<Vec<u8>>,
     /// The sequences the view skipped before this part's entries, `(first, count)` in order (rule 6).
     pub gaps: Vec<(u64, u64)>,
+    /// The subtrees carried in, each the view's carried record, landed by the arrive of its sequence (rule 7).
+    pub carried: Vec<Value>,
 }
 
 impl StreamPart {
@@ -190,6 +198,9 @@ impl StreamPart {
                 .map(|(f, c)| Value::Array(vec![Value::Uint(*f), Value::Uint(*c)]));
             m.insert(8, Value::Array(pairs.collect()));
         }
+        if !self.carried.is_empty() {
+            m.insert(9, Value::Array(self.carried.clone()));
+        }
         bytes_of(Value::Map(m))
     }
 
@@ -208,7 +219,25 @@ impl StreamPart {
                 .map(|v| read_bytes(Some(v), "a part's hash"))
                 .transpose()?,
             gaps: read_gaps(m.get(&8))?,
+            carried: match m.get(&9) {
+                None => Vec::new(),
+                Some(Value::Array(a)) => a.clone(),
+                Some(_) => {
+                    return refuse("stream-record", "a part's carried subtrees are not a list");
+                }
+            },
         })
+    }
+
+    /// Its carried subtrees as flights landing in `header`'s zone, each with the sequence of the arrive that lands it.
+    pub fn flights(&self, header: &Header) -> R<Vec<(u64, Flight)>> {
+        self.carried
+            .iter()
+            .map(|r| match Carried::read(r)? {
+                Some(c) => Ok((c.sequence, c.flight(header)?)),
+                None => refuse("stream-record", "a carried subtree is not a carried record"),
+            })
+            .collect()
     }
 }
 
@@ -353,7 +382,8 @@ impl Player {
         if part.header != self.replica.header().hash().to_bytes() {
             return refuse("header-mismatch", "the part names another header");
         }
-        self.replica.apply_gaps(&part, &sp.gaps)?;
+        let flights = sp.flights(self.replica.header())?;
+        self.replica.apply_view(&part, &sp.gaps, &flights)?;
         self.next += 1;
         self.samples = part
             .effects

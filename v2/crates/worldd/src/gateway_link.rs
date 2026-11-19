@@ -6,10 +6,11 @@
 //! answered after that tick's sync. A repeat gets the answer it had, across restarts too, since the world rebuilds
 //! its sequences from the log. The world here is I3's toggles world (`checkers::toggles`), `--rooms` rooms of `--bodies`
 //! bodies, each with a toggle, and `--items` items in each room; its log is `--log` (default: the socket's path and
-//! `.log`).
+//! `.log`). With `--testworld` it also has bodies that move (I4b): N2's test world with one Soul and three chairs
+//! (`worldd::testbodies`, B10 #2688).
 //!
 //! `worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] [--bodies <n>]
-//! [--items <n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
+//! [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
 //! --stall-for <s>]`. With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it takes, in the order
 //! taken, so a bench can check each actor's order across restarts. With `--roots`, it appends `<version> <place hash
 //! hex>` after each tick that changed the world, so a test can check a client's copy against the place. Measures
@@ -19,7 +20,7 @@
 //!
 //! An intent's words are kept in K16's text store in the folder `<log>.text` (V1b, #3361). With `--www <dir>`, the
 //! world is followed by R3's view tier and V1's stream writer, which writes the public view of the place under
-//! `<dir>` with a text file beside each part (`worldd::view_out` rule 9), for a page to play: it prints `stream
+//! `<dir>` with a text file beside each part (`worldd::view_out` rule 10), for a page to play: it prints `stream
 //! <path under dir>` and `body <scope hex>-<counter>` for each body, and needs a log with no records.
 //!
 //! The same socket carries R5's sync requests (R5b, #3164; `replica::sync::wire`), which the world answers for every
@@ -106,7 +107,7 @@ pub fn run(args: &[String]) -> i32 {
     let usage = || {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
-             [--bodies <n>] [--items <n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
+             [--bodies <n>] [--items <n>] [--testworld] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
              [--stall-after <s> --stall-for <s>] [--www <dir>]"
         );
         2
@@ -124,6 +125,9 @@ pub fn run(args: &[String]) -> i32 {
     };
     let log = arg("--log").map_or_else(|| path.with_extension("log"), PathBuf::from);
     let mut cfg = Config::new(Scope(lineage), epoch);
+    if args.iter().any(|a| a == "--testworld") {
+        cfg.bodies = Some(Box::new(worldd::testbodies::bodies));
+    }
     cfg.measures = !args.iter().any(|a| a == "--no-measures");
     cfg.health =
         Some(arg("--health").map_or_else(|| log.with_extension("health.json"), PathBuf::from));

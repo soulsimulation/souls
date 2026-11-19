@@ -6,8 +6,8 @@ use replica::effects::{FIXTURE_HEADER, FIXTURES, Header, Part, State, fixture_by
 use replica::encode::{Value, encode};
 use replica::ids::{Hash, Id, Purpose, Scope as IdScope};
 use replica::views::{
-    COUNTS_RECORD_MOST, Key, Level, MIN_BUDGET, ORDER, Output, Redactions, Scope, Subscription,
-    View, build, entry_part, grant, least, peak,
+    COUNTS_RECORD_MOST, Carried, Key, Level, MIN_BUDGET, ORDER, Output, Redactions, Scope,
+    Subscription, View, build, entry_part, grant, least, peak,
 };
 use replica::world_model::Audience;
 
@@ -208,6 +208,34 @@ fn a1_one_pass_equals_effect_by_effect_at_every_level_for_two_audiences() {
         public,
         vec![vec![id(0xee, 6).to_value()], vec![id(0xee, 12).to_value()]]
     );
+    // Revision 2 (#3248): each names where it lands, the flight's pose on the crate; a record without it (revision 1)
+    // still reads, naming no destination.
+    for (_, r) in &full.records {
+        let Some(c) = Carried::read(r).expect("reads") else {
+            continue;
+        };
+        let pose = c.pose.expect("a destination");
+        assert_eq!(pose.frame.node, id(0xee, 7));
+        let flight = c.flight(&header).expect("a flight");
+        println!(
+            "carried in at entry {}: root {:?}, landing at {:?}",
+            c.sequence, flight.root, pose
+        );
+        let Value::Map(mut m) = r.clone() else {
+            panic!("a map")
+        };
+        if let Some(Value::Map(inner)) = m.get_mut(&0) {
+            inner.remove(&4);
+        }
+        let old = Carried::read(&Value::Map(m))
+            .expect("revision 1 reads")
+            .expect("carried");
+        assert_eq!(old.pose, None);
+        assert_eq!(
+            (old.sequence, &old.nodes, &old.links),
+            (c.sequence, &c.nodes, &c.links)
+        );
+    }
     // The note for aa:1 in the cushion is in aa:1's view of the crate, and never in the public one.
     let private_full = &one_pass[keys
         .iter()
