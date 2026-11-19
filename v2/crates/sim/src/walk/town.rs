@@ -58,7 +58,7 @@ use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{plain, show};
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
@@ -156,7 +156,7 @@ pub struct Basis {
 }
 
 struct OpenCut {
-    squares: HashMap<(i32, i32), Vec<Piece>>,
+    squares: BTreeMap<(i32, i32), Vec<Piece>>,
     meets: Vec<SquareMeet>,
     doors: BTreeMap<Id, Id>,
     terrain: Option<Terrain>,
@@ -269,6 +269,27 @@ impl Town {
             planned: BTreeMap::new(),
             stale: BTreeMap::new(),
         })
+    }
+
+    /// The tree and the ground as N9's spot tables read it, for a reader that is not a walker (E4's set-down, #2772).
+    pub fn with_ground<T>(&mut self, f: impl FnOnce(&Tree, &mut dyn Ground) -> T) -> T {
+        let Town {
+            map,
+            tree,
+            buildings,
+            ground,
+            surfaces,
+            ..
+        } = self;
+        let tree: &Tree = tree;
+        let mut g = Grounds {
+            tree,
+            map,
+            surfaces,
+            buildings,
+            ground: *ground,
+        };
+        f(tree, &mut g)
     }
 
     /// What [`Town::rebuild`] reads besides the tree, as the ground stands now.
@@ -459,7 +480,7 @@ impl Town {
         let mut surfaces = BTreeMap::new();
         let open = OpenGround::of(tree, ground, HUMAN_RADIUS)?;
         let terrain = open.terrain().cloned();
-        let (mut pieces, mut meets, mut squares) = (Vec::new(), Vec::new(), HashMap::new());
+        let (mut pieces, mut meets, mut squares) = (Vec::new(), Vec::new(), BTreeMap::new());
         for (i, j) in open.squares() {
             let p = open.cut_square(i, j);
             squares.insert((i, j), p.pieces.clone());

@@ -27,8 +27,6 @@ use worldd::views::Tier;
 use worldd::words::{self, DESCRIPTION, NAME};
 
 const LINEAGE: Scope = Scope([0x3b; 16]);
-/// A fixed world time: every entry falls in one stretch, so the stream is written whole at the end.
-const AT: i64 = 1_000_000_000;
 
 fn n(s: &str) -> Name {
     Name::new(s).unwrap()
@@ -58,7 +56,7 @@ fn intent(
             sequence: 0,
         }
         .to_value(),
-        expiry: AT + 60_000_000,
+        expiry: answers::now() + 60_000_000,
         resources: Vec::new(),
         fallbacks: Vec::new(),
         replaces: None,
@@ -130,7 +128,6 @@ fn run(name: &str) -> Run {
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.tick = Duration::from_millis(10);
     cfg.measures = false;
-    cfg.now = || AT;
     cfg.text = Some(store.clone());
     let (s, wr, root, st) = (stop.clone(), writer.clone(), www.clone(), store.clone());
     cfg.follow = Some(Box::new(move |durable| {
@@ -181,7 +178,11 @@ impl Run {
 /// Every utterance in the log, in order.
 fn said(log: &[u8]) -> Vec<Said> {
     let mut out = Vec::new();
+    // The recorder's input records (K12) are what the world was handed, not parts: passed by.
     for r in recover(log).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
         for e in Part::read(&r).unwrap().effects {
             for ev in e
                 .events
@@ -283,6 +284,9 @@ fn a1_words_are_kept_and_only_their_reference_logged() {
     let mut fields = BTreeMap::new();
     let mut logged_refs = Vec::new();
     for rec in recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
         let p = Part::read(&rec).unwrap();
         logged_refs.extend(references(&Value::Map(p.rest.clone())));
         for e in p.effects {

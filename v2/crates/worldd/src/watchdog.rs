@@ -21,7 +21,7 @@ use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use sim::clock::{Clock, Heartbeat, Ticker};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 /// The exit code of a process the watchdog ended: a tick stalled.
 pub const EXIT_TICK_STALLED: i32 = 86;
@@ -29,39 +29,9 @@ pub const EXIT_TICK_STALLED: i32 = 86;
 pub const LIMIT_MS: i64 = 500;
 /// Ticks a second.
 const RATE: i64 = 20;
-
-/// The wall clock read once at start, carried on by the monotonic clock: µs from the Unix epoch.
-#[derive(Clone, Copy, Debug)]
-pub struct Real {
-    wall0: Micros,
-    mono0: Instant,
-}
-
-impl Real {
-    /// Reads the wall clock, once.
-    pub fn start() -> Real {
-        let wall0 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_micros() as Micros);
-        Real {
-            wall0,
-            mono0: Instant::now(),
-        }
-    }
-}
-
-impl Clock for Real {
-    fn now(&mut self) -> Micros {
-        self.wall0 + self.mono0.elapsed().as_micros() as Micros
-    }
-
-    fn sleep_until(&mut self, t: Micros) {
-        let wait = t - self.now();
-        if wait > 0 {
-            std::thread::sleep(Duration::from_micros(wait as u64));
-        }
-    }
-}
+/// The wall clock read once at start, carried on by the monotonic clock: µs from the Unix epoch. The world's loop
+/// paces itself by the same clock (`worldd::answers`, K18).
+pub use worldd::answers::Real;
 
 /// Watches the heartbeat on its own thread: no tick ended for [`LIMIT_MS`] ends the process by name.
 pub fn watch(beat: Arc<Heartbeat>, mut real: Real, limit_ms: i64) {

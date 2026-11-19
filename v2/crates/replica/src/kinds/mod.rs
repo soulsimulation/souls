@@ -7,8 +7,11 @@
 //!
 //! - **2, owner:** `thing`, `family` (a body's family) or `place`. Kinds are not only for things.
 //! - **3, state:** fields by stable number, each `{1: name, 2: type, 3: default, 4: audience}`, and for an `enum`
-//!   `5: [values]`. An amount (an `int`) may give `6: its unit`, `7: its min` and `8: its max`, its capacity (F4). Types are `bool` (0 or 1), `int`, `duration` (whole microseconds), `enum` and `text`. Numbers are
-//!   whole: the encoding has no floats, so a client and the world never disagree over rounding.
+//!   `5: [values]`. Types are `bool` (0 or 1), `int`, `duration` (whole microseconds), `enum`, `text` and `list`.
+//!   An amount (an `int`) may give `6: its unit`, `7: its min` and `8: its max`, its capacity (F4). Numbers are whole:
+//!   the encoding has no floats, so a client and the world never disagree over rounding. A `text` field holds a
+//!   reference to its words (T8), its words capped at `9: most bytes`; a `list` holds at most `9: most` records whose
+//!   fields are `10: {n: {1: name, 2: type, 5: values}}`, set whole (F11, #2774; [`Field::check`]).
 //! - **4, links:** the link types it takes part in, `{1: name, 2: from (a category or a kind), 3: most, 4: most_per}`
 //!   (B17, #3338). [`Kinds::check_link`] reads them: a link's type against the kinds at its ends.
 //! - **5, points:** named places in the thing's frame, `{1: name, 2: [x, y, z] in mm, 3: role, 4: yaw in mdeg}`, the
@@ -20,6 +23,9 @@
 //! A `souls-entry/1` file (`content/kinds`) is turned into this numbered form by [`entry::entry_to_kind`].
 //! - **8, forms:** what can be done with it, `{1: name, 2: steps}`, each step a move by name and then its arguments.
 //!
+//! - **7, geometry:** `{1: bounds_mm [width, height, depth], 2: front}`, read by [`place::Geometry`]: a thing's two
+//!   outlines and whether it has a front (E4, #2772).
+//!
 //! A family's size class, height and hover height are fields of its state, read by [`sizes::Build::of`] (B12). An
 //! authored body's resources, declared actions and models are section 13, read by [`body::Decl`] (B13).
 //!
@@ -29,12 +35,13 @@
 
 pub mod body;
 pub mod entry;
+pub mod place;
 pub mod sizes;
 
 use crate::encode::{Name, Value, encode};
 use crate::ids::{Hash, KindRefusal, KindSource, name_kinds};
 use crate::world_model::Kind as Admits;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 pub const SECTION_OWNER: u64 = 2;
@@ -55,8 +62,22 @@ pub enum Type {
     Int,
     Duration,
     Enum(Vec<Name>),
-    Text,
+    /// Words kept apart by reference (T8): a written value is `{21: id}` or `{}` (none), never the words. `most` caps
+    /// the words' length in bytes (F11, #2774), checked when they are kept ([`Field::keep`]).
+    Text {
+        most: Option<u64>,
+    },
+    /// A short bounded list of small records (F11, #2774): at most `most` (1 to 100) records, each a map numbered 1, 2,
+    /// ... in the order of `of`, whose fields are `bool`, `int`, `duration` or `enum` (never text, an id or a list). It
+    /// is set whole by a generic set; [`Field::add`] makes the next whole list or refuses `list-full`.
+    List {
+        most: u64,
+        of: Vec<(Name, Type)>,
+    },
 }
+
+/// The most records a list field may declare: lists stay in tens, since each change sends the whole list again.
+pub const LIST_MOST: u64 = 100;
 
 /// A state field: its name, type, default and audience (a rule, read by T8).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,6 +90,117 @@ pub struct Field {
     pub unit: Option<Name>,
     pub min: Option<i64>,
     pub max: Option<i64>,
+}
+
+type Checked<T> = Result<T, crate::effects::Refusal>;
+
+fn no<T>(name: &'static str, detail: String) -> Checked<T> {
+    Err(crate::effects::Refusal { name, detail })
+}
+
+/// Whether `v` is a value of a plain type (`bool`, `int`, `duration`, `enum`).
+fn plain_fits(ty: &Type, v: &Value) -> bool {
+    match (ty, v) {
+        (Type::Bool, Value::Uint(b)) => *b <= 1,
+        (Type::Int, Value::Uint(_) | Value::Nint(_)) | (Type::Duration, Value::Uint(_)) => true,
+        (Type::Enum(values), Value::Text(t)) => values.contains(t),
+        _ => false,
+    }
+}
+
+impl Field {
+    /// Whether `v` may be written to this field by a set (F11): a value of its type; for a list, an array of at most
+    /// `most` well-formed records (`list-full` past it, `list-record-malformed`); for text, a reference `{21: id}` or
+    /// `{}`, never the words (`text-inline`, T8 rule 6). Anything else is `value-type`. A text field's default may be
+    /// the kind's own words, which are part of the kind, not the log.
+    pub fn check(&self, v: &Value) -> Checked<()> {
+        let name = self.name.as_str();
+        match (&self.ty, v) {
+            (Type::List { most, of }, Value::Array(items)) => {
+                if items.len() as u64 > *most {
+                    return no(
+                        "list-full",
+                        format!("{name} holds at most {most}; {} given", items.len()),
+                    );
+                }
+                for (i, item) in items.iter().enumerate() {
+                    let ok = match item {
+                        Value::Map(m) => {
+                            m.len() == of.len()
+                                && (1u64..).zip(of).all(|(k, (_, ty))| {
+                                    m.get(&k).is_some_and(|x| plain_fits(ty, x))
+                                })
+                        }
+                        _ => false,
+                    };
+                    if !ok {
+                        return no("list-record-malformed", format!("{name}: record {i}"));
+                    }
+                }
+                Ok(())
+            }
+            (Type::Text { .. }, Value::Map(m)) if m.is_empty() => Ok(()),
+            (Type::Text { .. }, _) if crate::audience::reference(v).is_some() => Ok(()),
+            (Type::Text { .. }, Value::Text(_) | Value::Bytes(_)) => no(
+                "text-inline",
+                format!("{name} holds a reference to its words, never the words"),
+            ),
+            (ty, v) if plain_fits(ty, v) => Ok(()),
+            _ => no("value-type", format!("{name}: not a value of its type")),
+        }
+    }
+
+    /// The whole list after `record` is added at its end, to be written by one set: refused `list-full` when the list
+    /// already holds `most` records, and as [`Field::check`] refuses a malformed record; `field-not-a-list` for any
+    /// other field.
+    pub fn add(&self, list: &Value, record: Value) -> Checked<Value> {
+        let (Type::List { most, .. }, Value::Array(items)) = (&self.ty, list) else {
+            return no("field-not-a-list", self.name.as_str().to_owned());
+        };
+        if items.len() as u64 >= *most {
+            return no(
+                "list-full",
+                format!("{} holds at most {most}", self.name.as_str()),
+            );
+        }
+        let mut next = items.clone();
+        next.push(record);
+        let next = Value::Array(next);
+        self.check(&next)?;
+        Ok(next)
+    }
+
+    /// Keeps `words` in `store` under `reference` (a minted id, never a hash of the words) for `audience`, and returns
+    /// the value a set writes: `{21: reference}` (T8 rule 6). Refused `text-too-long` past the field's `most` bytes,
+    /// and `field-not-text` for any other field; a refused text is not kept.
+    pub fn keep(
+        &self,
+        store: &mut crate::audience::TextStore,
+        reference: crate::ids::Id,
+        audience: crate::world_model::Audience,
+        words: &str,
+    ) -> Checked<Value> {
+        let Type::Text { most } = self.ty else {
+            return no("field-not-text", self.name.as_str().to_owned());
+        };
+        if let Some(most) = most
+            && words.len() as u64 > most
+        {
+            return no(
+                "text-too-long",
+                format!(
+                    "{} holds at most {most} bytes; {} given",
+                    self.name.as_str(),
+                    words.len()
+                ),
+            );
+        }
+        store.keep(reference, audience, words);
+        Ok(Value::Map(BTreeMap::from([(
+            crate::audience::REFERENCE,
+            reference.to_value(),
+        )])))
+    }
 }
 
 /// What a point is for.
@@ -150,6 +282,8 @@ pub struct KindDef {
     /// Section 11's bound: how many children of each admitted kind (plain `namespace:name`) it holds at most. A kind
     /// read from a list of names alone (a fixture's, no bound) has none here.
     pub most: BTreeMap<String, u64>,
+    /// Section 7, its size and front (E4), for a kind that declares one.
+    pub geometry: Option<place::Geometry>,
 }
 
 impl KindDef {
@@ -202,7 +336,7 @@ impl std::error::Error for KindError {}
 #[derive(Clone, Debug, Default)]
 pub struct Kinds {
     by_hash: BTreeMap<Hash, KindDef>,
-    by_name: HashMap<String, Hash>,
+    by_name: BTreeMap<String, Hash>,
     refused: Vec<KindError>,
 }
 
@@ -245,6 +379,7 @@ impl Kinds {
                             slots,
                             links,
                             most,
+                            geometry,
                         } = d;
                         let def = KindDef {
                             name,
@@ -257,6 +392,7 @@ impl Kinds {
                             slots,
                             links,
                             most,
+                            geometry,
                         };
                         self.by_hash.insert(k.hash, def);
                     }
@@ -423,6 +559,7 @@ struct Sections {
     slots: BTreeMap<u64, Slot>,
     links: BTreeMap<u64, LinkType>,
     most: BTreeMap<String, u64>,
+    geometry: Option<place::Geometry>,
 }
 
 /// Reads and checks the sections this module knows.
@@ -485,38 +622,53 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         let name = text(e.get(&1)).ok_or_else(|| why("1, the name, is text".into()))?;
         let word = text(e.get(&2));
         let ty = match word.as_ref().map(Name::as_str) {
-            Some("bool") => Type::Bool,
-            Some("int") => Type::Int,
-            Some("duration") => Type::Duration,
-            Some("text") => Type::Text,
-            Some("enum") => Type::Enum(
-                texts(e.get(&5))
-                    .filter(|v| !v.is_empty())
-                    .ok_or_else(|| why("an enum lists its values in 5".into()))?,
-            ),
-            _ => {
-                return Err(why(
-                    "2, the type, is bool, int, duration, enum or text".into()
-                ));
+            Some("text") => Type::Text {
+                most: match e.get(&9) {
+                    None => None,
+                    Some(Value::Uint(m)) if *m > 0 => Some(*m),
+                    Some(_) => return Err(why("9, the most bytes, is a whole number".into())),
+                },
+            },
+            Some("list") => {
+                let most = match e.get(&9) {
+                    Some(Value::Uint(m)) if (1..=LIST_MOST).contains(m) => *m,
+                    _ => return Err(why(format!("9, the most records, is 1 to {LIST_MOST}"))),
+                };
+                let of = match e.get(&10) {
+                    Some(Value::Map(of)) if (1..=8).contains(&of.len()) => of,
+                    _ => {
+                        return Err(why(
+                            "10, the record's fields, is a map of one to eight".into()
+                        ));
+                    }
+                };
+                let of = of
+                    .values()
+                    .map(|r| {
+                        let Value::Map(r) = r else {
+                            return Err(why("a record field is a map".into()));
+                        };
+                        let name = text(r.get(&1))
+                            .ok_or_else(|| why("a record field's 1, its name, is text".into()))?;
+                        let ty = plain_type(text(r.get(&2)), r.get(&5)).ok_or_else(|| {
+                            why("a record field is bool, int, duration or enum".into())
+                        })?;
+                        Ok((name, ty))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Type::List { most, of }
             }
+            _ => plain_type(word.clone(), e.get(&5)).ok_or_else(|| {
+                why(
+                    "2, the type, is bool, int, duration, enum (its values in 5), text or list"
+                        .into(),
+                )
+            })?,
         };
         let default = e
             .get(&3)
             .cloned()
             .ok_or_else(|| why("3, the default, is missing".into()))?;
-        let fits = match (&ty, &default) {
-            (Type::Bool, Value::Uint(b)) => *b <= 1,
-            (Type::Int, Value::Uint(_) | Value::Nint(_)) | (Type::Duration, Value::Uint(_)) => true,
-            (Type::Enum(values), Value::Text(t)) => values.contains(t),
-            (Type::Text, Value::Text(_)) => true,
-            _ => false,
-        };
-        if !fits {
-            let word = word.as_ref().map_or("", Name::as_str);
-            return Err(why(format!(
-                "3, the default, is not a value of type {word}"
-            )));
-        }
         let audience = text(e.get(&4)).ok_or_else(|| why("4, the audience, is text".into()))?;
         let unit = e
             .get(&6)
@@ -526,18 +678,27 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
                 .map(|v| int(v).ok_or_else(|| why(format!("{k}, the {what}, is a whole number"))))
                 .transpose()
         };
-        state.insert(
-            n,
-            Field {
-                name,
-                ty,
-                default,
-                audience,
-                unit: unit.transpose()?,
-                min: bound(7, "min")?,
-                max: bound(8, "max")?,
-            },
-        );
+        let field = Field {
+            name,
+            ty,
+            default,
+            audience,
+            unit: unit.transpose()?,
+            min: bound(7, "min")?,
+            max: bound(8, "max")?,
+        };
+        // A text field's default may be the kind's own words (T8 rule 6); every other default is a value it may hold.
+        let fits = match (&field.ty, &field.default) {
+            (Type::Text { .. }, Value::Text(_)) => true,
+            (_, d) => field.check(d).is_ok(),
+        };
+        if !fits {
+            let word = word.as_ref().map_or("", Name::as_str);
+            return Err(why(format!(
+                "3, the default, is not a value of type {word}"
+            )));
+        }
+        state.insert(n, field);
     }
 
     let mut points = BTreeMap::new();
@@ -728,8 +889,14 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         }
     };
 
+    // Section 7 is in the hash whatever it holds; one not in E4's shape is not read, as an unread section is not.
+    let geometry = s
+        .get(&place::SECTION_GEOMETRY)
+        .and_then(|v| place::Geometry::read(v).ok());
+
     Ok(Sections {
         body,
+        geometry,
         state,
         points,
         forms,
@@ -743,6 +910,17 @@ fn read_sections(src: &KindSource) -> Result<Sections, KindError> {
         links,
         most,
     })
+}
+
+/// A plain type from its word and, for an enum, its values.
+fn plain_type(word: Option<Name>, values: Option<&Value>) -> Option<Type> {
+    match word.as_ref().map(Name::as_str) {
+        Some("bool") => Some(Type::Bool),
+        Some("int") => Some(Type::Int),
+        Some("duration") => Some(Type::Duration),
+        Some("enum") => texts(values).filter(|v| !v.is_empty()).map(Type::Enum),
+        _ => None,
+    }
 }
 
 fn text(v: Option<&Value>) -> Option<Name> {
