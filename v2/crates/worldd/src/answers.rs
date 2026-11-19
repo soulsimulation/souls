@@ -93,9 +93,15 @@
 //! never holds it. `health.json` is written by its own thread. [`Config::measures`] off takes no stamps and adds no
 //! block. Intents enter through a [`Door`], which stamps them as they are read.
 //!
-//! Not here (K18's known limits): a route search and a move's checks still run on the clock thread (`sim::host`'s
-//! runner plans a walk's route when its spot is granted; B3 checks a seat at commit); a walk or a sit in progress at
-//! a kill is not resumed (its intent is taken again when sent again); one zone a process.
+//! **Off the clock** (K18b, #3175). The clock runs no rule check, no route search and no reach check: the checkers
+//! run the rules (I3), and the bodies' planner thread (`sim::planner`) writes the spot tables, plans a walk's legs,
+//! finds each walker's line and measures each reach, from the bodies as a tick left them, for the next tick. A
+//! lockstep tick waits for the planner's answers to the last one as it waits for every check, so a run fed the same
+//! inputs repeats; a free-running one waits at most a tenth of a tick for each batch and reads a late one at a later
+//! tick, so the clock never stops for the planner.
+//!
+//! Not here (K18's known limits): a walk or a sit in progress at a kill is not resumed (its intent is taken again
+//! when sent again); one zone a process.
 // worldd's real clock (`Real`): the one place the process reads time.
 #![allow(clippy::disallowed_methods)]
 
@@ -261,6 +267,8 @@ pub struct Ran {
     pub panicked: u64,
     /// The bodies in a seat: (body, the seat's thing), in body order.
     pub seated: Vec<(Id, Id)>,
+    /// Route searches the bodies' planner ran, off the clock (K18b).
+    pub searched: u64,
 }
 
 /// How a start found the world (K18c, #3176): from the newest checkpoint and the log after it, or the whole log.
@@ -430,6 +438,10 @@ pub struct Config {
     /// Each log record once it is on the disk, input records included, in order (C1, #3365): `worldd serve`'s own
     /// view tier and shipper read them here, off the clock thread.
     pub synced: Option<Sender<Synced>>,
+    /// How long a free-running tick waits for each of the bodies' planner batches (K18b); `None` is a tenth of a tick.
+    pub planner_wait: Option<Duration>,
+    /// A replay's planner batches (K18b): the recorder's `Planned` inputs, body time µs and batches taken there.
+    pub planned: BTreeMap<u64, u64>,
     /// The world's rules and its activity kinds, for the engine's own acts (C2: activities, offers, carrying);
     /// without them those acts are refused `engine-acts-off`.
     pub engine: Option<(replica::tree::Rules, Vec<replica::activity::ActivityKind>)>,
@@ -504,6 +516,8 @@ impl Config {
             edits: None,
             creator: None,
             synced: None,
+            planner_wait: None,
+            planned: BTreeMap::new(),
             sky: None,
             served: None,
             text: None,
@@ -2011,6 +2025,13 @@ impl Clock {
                 ended.push((*id, Err(acts::BLOCKED.to_owned())));
             }
         }
+        // Where the planner's answers came back late (K18b), for the recorder: a replay takes them at the same tick.
+        for (at, taken) in b.late() {
+            self.inputs.push(Input::Planned {
+                at: u64::try_from(at).unwrap_or(0),
+                taken,
+            });
+        }
         let heard = std::mem::take(&mut b.heard);
         for (speaker, said, at) in heard {
             let e = speech::entry(Clock::own(speaker, at), speaker, &said);
@@ -2575,6 +2596,7 @@ impl Clock {
             faults: self.faults,
             panicked,
             seated,
+            searched: self.bodies.as_ref().map_or(0, Bodies::searched),
         }
     }
 }
@@ -2838,6 +2860,12 @@ pub fn start<S: Storage + 'static>(
     }
     let mut cfg = cfg;
     let make = cfg.bodies.take();
+    let tick = cfg.tick;
+    let planner_wait = cfg.planner_wait;
+    let planned_at: BTreeMap<Micros, u64> = std::mem::take(&mut cfg.planned)
+        .into_iter()
+        .map(|(at, n)| (i64::try_from(at).unwrap_or(i64::MAX), n))
+        .collect();
     let tick_us = i64::try_from(cfg.tick.as_micros()).unwrap_or(50_000).max(1);
     if 1_000_000 % tick_us != 0 {
         return Err(Refusal {
@@ -3068,6 +3096,12 @@ pub fn start<S: Storage + 'static>(
                     Ok(mut b) => {
                         let at = ticker.due().unwrap_or(0);
                         b.begin(at);
+                        // A free-running clock waits at most a tenth of a tick for each planner batch (K18b); a
+                        // replay takes the batches where the recorder says the live run took them.
+                        if !lockstep {
+                            b.wait = Some(planner_wait.unwrap_or(tick / 10));
+                        }
+                        b.schedule = planned_at;
                         // Those the log last had in a seat sit in it again, the seat held (K18c).
                         for (body, why) in b.seat_placed(&placed, at) {
                             eprintln!(
