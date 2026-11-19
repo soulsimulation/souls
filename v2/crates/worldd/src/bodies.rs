@@ -757,20 +757,34 @@ impl Bodies {
         out
     }
 
-    /// Intent `id` timed out: its walk stops where the body is. A sit or a rise is short and runs to its end, so a
-    /// seat is never left half taken.
-    pub fn cancel(&mut self, id: Id) {
+    /// The moves that ended between steps (a walk replaced by a new move, `claim-taken`), taken now, so the world
+    /// writes each ending in the tick its walk stopped.
+    pub fn replaced(&mut self) -> Vec<(Id, Result<(), String>)> {
+        std::mem::take(&mut self.ended)
+    }
+
+    /// Intent `id` ended (its deadline passed): its walk stops where the body is, now ([`Cut::Stopped`]). A sit, a lie
+    /// or a rise is short and runs to its end, so a seat is never left half taken ([`Cut::Finishing`]): the world
+    /// ends the act when its move ends. `None`: no move is going for it.
+    pub fn cancel(&mut self, id: Id) -> Option<Cut> {
         self.waiting.retain(|w| w.id != id);
-        let Some((&body, _)) = self
-            .live
-            .iter()
-            .find(|(_, (i, l))| *i == id && matches!(l, Live::Walk))
-        else {
-            return;
-        };
+        let (&body, &(_, live)) = self.live.iter().find(|(_, (i, _))| *i == id)?;
+        if !matches!(live, Live::Walk) {
+            return Some(Cut::Finishing);
+        }
         self.runner.end_order(body);
         self.live.remove(&body);
+        Some(Cut::Stopped)
     }
+}
+
+/// What ending an intent did to its move ([`Bodies::cancel`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cut {
+    /// Its walk stopped where the body stands.
+    Stopped,
+    /// Its sit, lie or rise runs to its end, a few seconds at most.
+    Finishing,
 }
 
 fn refusal(name: &'static str, node: Id) -> Refusal {

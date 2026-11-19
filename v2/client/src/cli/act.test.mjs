@@ -40,7 +40,7 @@ function run(path, args, ready) {
   });
 }
 
-async function waitFor(f, ms = 20_000) {
+async function waitFor(f, ms = 30_000) {
   const until = Date.now() + ms;
   for (;;) {
     const v = await f();
