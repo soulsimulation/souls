@@ -6,11 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p . && vite build",
-    "test": "node --test src/clock/*.test.ts src/source/*.test.ts src/things/*.test.ts src/crowd/*.test.ts src/draw/*.test.ts src/pose/*.test.ts src/history/*.test.ts src/sound/*.test.ts"
+    "test": "node --test src/clock/*.test.ts src/source/*.test.ts src/things/*.test.ts src/crowd/*.test.ts src/draw/*.test.ts src/pose/*.test.ts src/history/*.test.ts src/sound/*.test.ts src/music/*.test.ts"
   },
   "dependencies": {
     "cborg": "6.2.1",
-    "three": "0.187.0"
+    "three": "0.187.0",
+    "tone": "15.1.22"
   },
   "devDependencies": {
     "@types/node": "22.19.19",
