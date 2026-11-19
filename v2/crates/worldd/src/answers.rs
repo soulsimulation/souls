@@ -414,6 +414,16 @@ pub struct Config {
     /// Joins and leaves (C3, #3367): a Soul's first intent births its body here; none, the Souls' bodies are the
     /// ones [`Config::bodies`] makes.
     pub join: Option<Join>,
+    /// Bodies chosen (B15a, #2750): the presets the world admits and each Soul's body at birth; none, a wear is
+    /// refused `wear.off`. Needs [`Config::join`].
+    pub wear: Option<Wearing>,
+}
+
+/// Bodies chosen (B15a, #2750): the world's catalogue, and the body a Soul is born wearing (`world.json`'s).
+pub struct Wearing {
+    pub catalogue: skills::wear::Catalogue,
+    /// The body each Soul is born wearing, by Soul; a Soul not listed is born in the default body.
+    pub born: BTreeMap<Id, [u8; 32]>,
 }
 
 /// Where and how Souls' bodies are born (C3, #3367).
@@ -487,6 +497,7 @@ impl Config {
             follow: None,
             engine: None,
             join: None,
+            wear: None,
         }
     }
 }
@@ -699,6 +710,8 @@ struct Clock {
     tick_us: Micros,
     /// Joins and leaves (C3), when the world births its Souls' bodies.
     life: Option<Lives>,
+    /// Bodies chosen (B15a), when the world admits presets.
+    wear: Option<Wearing>,
     /// Loose things' ends (F10b, #3476), and the ends of owner's links the tick's acts ended.
     loose: Ends,
     unlinked: Vec<Id>,
@@ -1073,6 +1086,10 @@ impl Clock {
             let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
             let _ = f.write_all(format!("{hex} {sequence}\n").as_bytes());
         }
+        // A wear (B15a) names its body in words' shape: resolved to the hash before anything is logged.
+        if intent.verb.as_str() == skills::wear::VERB {
+            return self.wear(&intent, key, (reply, stamps), now);
+        }
         let mut value = intent.to_value();
         let form = words::form(&intent);
         // A turn into an activity is its members' alone: refused before its words are kept when the speaker is not one.
@@ -1315,6 +1332,98 @@ impl Clock {
         }
     }
 
+    /// A wear (B15a, #2750): the body the intent names (a preset's name or hash, in the world's catalogue), checked to
+    /// fit where the Soul's body stands (B12's `change_size`, against the body's build as its node records it) and
+    /// written as one set of its hash on the body node, answered with that entry. Refused by name with the old body
+    /// kept: `wear.off`, `body-unknown`, `intent.expired`, `intent.no-body`, `size-would-not-fit`, `size-no-way-out`,
+    /// `size-not-checked`. The intent is logged with the hash in place of the words that named it.
+    fn wear(
+        &mut self,
+        intent: &Intent,
+        key: Vec<u8>,
+        (reply, stamps): (Reply, Stamps),
+        now: Micros,
+    ) {
+        let (actor, sequence) = (intent.actor, intent.sequence);
+        let preset = match (&self.wear, skills::wear::asked(&intent.parameters)) {
+            (None, _) => Err("wear.off"),
+            (Some(w), Some(a)) => w.catalogue.find(&a).cloned().ok_or("body-unknown"),
+            (Some(_), None) => Err("body-unknown"),
+        };
+        let mut logged = intent.clone();
+        match &preset {
+            Ok(p) => logged.parameters.insert(1, Value::Bytes(p.hash.to_vec())),
+            Err(_) => logged.parameters.remove(&1),
+        };
+        let value = logged.to_value();
+        let checked = preset.and_then(|p| {
+            if expired(intent.expiry, now) {
+                return Err("intent.expired");
+            }
+            let body = self.body_of(intent)?;
+            let tree = self.replica.tree();
+            let node = tree
+                .handle(body)
+                .and_then(|h| tree.node(h))
+                .ok_or("intent.no-body")?;
+            let (Some(w), Some((on, at)), Some(l)) = (
+                &self.wear,
+                self.bodies.as_ref().and_then(|b| b.pose(body)),
+                &self.life,
+            ) else {
+                return Err("intent.no-body");
+            };
+            let mut build = w.catalogue.build_of(node.fields().get(&skills::wear::BODY));
+            if build.size != p.build.size {
+                sim::ground::sizes::change_size(
+                    tree,
+                    l.entry,
+                    on,
+                    body,
+                    at,
+                    &mut build,
+                    p.build.size,
+                )
+                .map_err(|r| {
+                    eprintln!("worldd: a wear refused: {}: {}", r.name, r.detail);
+                    r.name
+                })?;
+            }
+            Ok((body, p))
+        });
+        let Some(id) = Id::new(self.lineage, self.next_intent) else {
+            let a = self.refusal(actor, sequence, "intent.ids-exhausted");
+            return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
+        };
+        let written = checked.and_then(|(body, p)| {
+            let effect = Effect {
+                envelope: words::envelope(self.replica.version(), now, id, actor, body),
+                body: Body::Changes(vec![ChangeRec {
+                    change: skills::wear::change(body, &p.hash),
+                    rest: Rest::new(),
+                }]),
+                events: None,
+                rest: Rest::new(),
+            };
+            self.write(effect).map_err(|r| r.name)
+        });
+        let a = match written {
+            Ok(()) => {
+                self.next_intent += 1;
+                Answer::Receipt {
+                    actor,
+                    sequence,
+                    intent: id,
+                    entries: self.receipts.entries(id).to_vec(),
+                    names: BTreeMap::new(),
+                }
+            }
+            Err(r) => self.refusal(actor, sequence, r),
+        };
+        let id = matches!(a, Answer::Receipt { .. }).then_some(id);
+        self.answered(key, sequence, id, Some(value), &a, (vec![reply], stamps));
+    }
+
     /// The body an intent drives: with joins (C3), a Soul's born body, else as [`body_of`] says.
     fn body_of(&self, intent: &Intent) -> Result<Id, &'static str> {
         match (intent.actor, &self.life) {
@@ -1365,9 +1474,17 @@ impl Clock {
         let mut taken = Vec::new();
         for x in &mut born {
             // The world's body kind, as its header pins it (K10 writes the plain name).
+            // Born wearing the body `world.json` names for its Soul, if any (B15a).
+            let worn = self.wear.as_ref().and_then(|w| w.born.get(&x.soul));
             for c in &mut x.changes {
-                if let Change::Create { kind, .. } = c {
+                if let Change::Create {
+                    kind, node, fields, ..
+                } = c
+                {
                     *kind = l.kind.clone();
+                    if let (Some(h), true) = (worn, *node == x.body) {
+                        fields.insert(skills::wear::BODY, Value::Bytes(h.to_vec()));
+                    }
                 }
             }
             let (mine, rest) = std::mem::take(&mut l.unborn)
@@ -2825,6 +2942,7 @@ pub fn start<S: Storage + 'static>(
         tick_us,
         text,
         life,
+        wear: cfg.wear.take(),
         loose,
         unlinked: Vec::new(),
     };

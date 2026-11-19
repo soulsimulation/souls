@@ -275,7 +275,7 @@ export class WorldView {
       const n = this.nodes.get(id);
       if (!p || !n) continue;
       v.set(p[0] * UM, p[1] * UM, p[2] * UM).applyMatrix4(this.frame(n.parent));
-      if (crowd) (crowd.place(id, v.x, v.y, v.z), k++);
+      if (crowd) (crowd.place(id, v.x, v.y, v.z, n.body), k++);
       else this.bodies.setMatrixAt(k++, m.makeTranslation(v.x, v.y, v.z));
     }
     if (crowd) {

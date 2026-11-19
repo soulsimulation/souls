@@ -63,3 +63,33 @@ test('bodies enter the crowd when placed and leave it when a frame no longer pla
   assert.ok(Math.abs(crowd.yaw[iq]) < 1e-6, 'q faces +z, the way it moved');
   assert.ok(crowd.stats.draws >= 1 && crowd.stats.draws <= 2 * 3, 'at most one draw per model per level');
 });
+
+test('a body wearing a hash is drawn as its model once loaded, and as the default for a hash the page has none for (B15b)', async () => {
+  const crowd = new Crowd([model('a'), model('b')], 4);
+  crowd.worn = async (h) => (h === 'aa' ? model('worn') : null);
+  const bodies = new CrowdBodies(crowd);
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+  camera.position.set(0, 10, 30);
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld();
+  const frame = (t: number, body?: string) => {
+    bodies.begin(t);
+    bodies.place('p', 0, 0, 0, body);
+    bodies.end(camera);
+  };
+  frame(0);
+  const before = crowd.model[0];
+  assert.ok(before < 2, 'a default model');
+  frame(1, 'aa');
+  await new Promise((r) => setTimeout(r, 0));
+  frame(2, 'aa');
+  assert.equal(crowd.models[crowd.model[0]].name, 'worn', 'drawn as the body it wears');
+  frame(3, 'bb');
+  await new Promise((r) => setTimeout(r, 0));
+  frame(4, 'bb');
+  assert.equal(crowd.model[0], before, 'a hash the page has no model for draws the default');
+  frame(5, 'aa');
+  assert.equal(crowd.models[crowd.model[0]].name, 'worn', 'worn again at once: its model is kept');
+  frame(6);
+  assert.equal(crowd.model[0], before, 'and no hash draws the default: a replay before the wear');
+});

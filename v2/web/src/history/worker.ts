@@ -62,6 +62,7 @@ export function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(23)) rec.scale = num(f.get(23));
   if (f.has(24)) rec.tileSize = num(f.get(24));
   if (f.has(25)) rec.tiles = (f.get(25) as unknown[][]).map((t) => [num(t[0]), num(t[1]), t[2] as Uint8Array, t[3] as Uint8Array]);
+  if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array); // the body worn (B15a), as of this moment
   const sky = skyFields(f); // V19: the world node's day, night and weather
   if (sky) rec.sky = sky;
   return rec;

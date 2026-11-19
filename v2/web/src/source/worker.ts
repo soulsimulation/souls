@@ -36,6 +36,7 @@ const refOf = (v: unknown): string | null => {
 const SAID = 'souls:said';
 const NAME = 30;
 const DESCRIPTION = 31;
+const BODY = 32; // the body worn, its content hash (B15a)
 
 function nodeRec(v: Map<number, unknown>): NodeRec {
   const pose = v.get(7) as Map<number, unknown> | undefined;
@@ -61,6 +62,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(25)) rec.tiles = (f.get(25) as unknown[][]).map((t) => [num(t[0]), num(t[1]), t[2] as Uint8Array, t[3] as Uint8Array]);
   if (f.has(NAME)) rec.name = refOf(f.get(NAME));
   if (f.has(DESCRIPTION)) rec.description = refOf(f.get(DESCRIPTION));
+  if (f.has(BODY)) rec.body = hex(f.get(BODY) as Uint8Array);
   const sky = skyFields(f); // V19: the world node's day, night and weather
   if (sky) rec.sky = sky;
   return rec;

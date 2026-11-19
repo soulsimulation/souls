@@ -22,6 +22,7 @@
 //     {"op":"say","words":".."}           words out loud, T8's `{23: words}` in parameter 1 (V1b, #3361)
 //     {"op":"whisper","to":"<id>","words":".."}  words to one listener's body alone
 //     {"op":"lie","this":"<id>"}          lie down on a bed (worldd's bodies, as a sit)
+//     {"op":"wear","body":"<preset>"}     change this Soul's body to a preset the world admits (B15b, `life:wear`)
 //   and C6's (#3390): once current on each socket it subscribes, over the gateway's view subscription (#3292), to its
 //   own body followed, and the world addresses to it each utterance that body hears, with the words it may read. Each
 //   is an event `{"kind":"heard","from":"<body id>","name":..,"words":..,"whisper":bool}`: it wakes a `wait`, is in
@@ -489,7 +490,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'stop']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'stop']);
 const nothingYet = () => !events.some((e) => e.kind !== 'synced');
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
@@ -498,6 +499,7 @@ const nothingYet = () => !events.some((e) => e.kind !== 'synced');
 const NS_MOST = 32;
 const NS = /^[A-Za-z0-9_.\-/@]+$/.test(seat.world) && seat.world.length <= NS_MOST && seat.world !== 'souls' ? seat.world : 'world';
 const WORDS_MOST = 1000; // characters a say or a whisper carries
+const WEAR = 'life:wear'; // a Soul's body chosen (B15a, `skills::wear::VERB`)
 const ID = /^[0-9a-f]{32}-\d+$/;
 
 /** The intent a say, a whisper or a lie makes: its verb, target and words, or a refusal by name. */
@@ -638,6 +640,14 @@ async function answer(req) {
       const basis = shownVersion ?? state.cursor;
       const { sequence, sent } = sendIntent([f.verb], { target: f.target, words: f.words, basis });
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis) }, null, { now: true });
+    }
+    case 'wear': {
+      // B15: the body by its preset's name or hash, in parameter 1; the world resolves it and logs only the hash.
+      const body = String(req.body ?? '');
+      if (!/^[A-Za-z0-9_.:@-]{1,80}$/.test(body)) return { ok: false, code: 'wear-names-a-body', detail: 'wear <preset>' };
+      const basis = shownVersion ?? state.cursor;
+      const { sequence, sent } = sendIntent([WEAR], { words: body, basis });
+      return closing({ ok: true, sequence, sent, verb: WEAR, basis: sequenceOf(basis) }, null, { now: true });
     }
     case 'history': return historyAnswer(req);
     case 'read': return { ok: true, events: events.splice(0) };

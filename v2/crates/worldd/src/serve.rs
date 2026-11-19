@@ -8,6 +8,8 @@
 //!   (`worldd@<name>`); the entry is where Souls' bodies are born (C3), `seed`'s `--at`.
 //! - `facts.json`: the facts file N1's exporter wrote (`v2/tools/import-eden`, or X6's `v2/tools/import-world` for a
 //!   live world). The world as built is read from it at each start: its header and the walkers' town.
+//! - `bodies.json`, when there: the presets the world admits (B15a, `skills::wear`, from `seed --bodies`); a `souls`
+//!   row may carry a fourth item, the preset its Soul is born wearing (`seed --body`).
 //! - `entries/`: the Soul Actions entries (`souls-entry/1`), one file each, read into the checkers' rules by kind.
 //!   `moves.json`, when there, is each move's reach (`{<move>: {reach_mm}}`).
 //! - `log`: K4's log. Its first record is the import's part, every node and link the loader committed, so the log
@@ -266,7 +268,8 @@ fn humanoid() -> R<Family> {
     })
 }
 
-/// `worldd seed --facts <facts.json> --dir <new folder> [--entries <dir>] [--souls <n>] [--at <x m>,<z m>]`: a world
+/// `worldd seed --facts <facts.json> --dir <new folder> [--entries <dir>] [--souls <n>] [--at <x m>,<z m>]
+/// [--bodies <bodies.json>] [--body <preset>]`: a world
 /// folder from a loader's facts file, with `n` Souls (default 1) on the open ground from (x, z) (default 0,0).
 pub fn seed(args: &[String]) -> i32 {
     match seed_in(args) {
@@ -284,7 +287,7 @@ pub fn seed(args: &[String]) -> i32 {
 fn seed_in(args: &[String]) -> R<String> {
     let (Some(facts), Some(dir)) = (arg(args, "--facts"), arg(args, "--dir")) else {
         return Err("usage: worldd seed --facts <facts.json> --dir <new folder> [--entries <dir>] [--souls <n>] \
-                    [--at <x m>,<z m>]"
+                    [--at <x m>,<z m>] [--bodies <bodies.json>] [--body <preset>]"
             .into());
     };
     let dir = PathBuf::from(dir);
@@ -292,6 +295,26 @@ fn seed_in(args: &[String]) -> R<String> {
         return Err(format!("world-exists: {} has a log", dir.display()));
     }
     let souls: u64 = arg(args, "--souls").map_or(Ok(1), |n| n.parse().map_err(|_| "--souls"))?;
+    // Bodies chosen (B15a): the presets the world admits, and the one its Souls are born wearing.
+    let catalogue = match arg(args, "--bodies") {
+        Some(b) => {
+            let text = std::fs::read_to_string(b).map_err(io(Path::new(b)))?;
+            let c = skills::wear::Catalogue::read(&text)?;
+            std::fs::create_dir_all(&dir).map_err(io(&dir))?;
+            std::fs::write(dir.join("bodies.json"), &text).map_err(io(&dir))?;
+            c
+        }
+        None => Default::default(),
+    };
+    let body = match arg(args, "--body") {
+        Some(p) => {
+            let found = catalogue
+                .find(p)
+                .ok_or(format!("--body {p}: not in --bodies"))?;
+            format!(", \"{}\"", skills::wear::hex(&found.hash))
+        }
+        None => String::new(),
+    };
     let (x, z) = match arg(args, "--at") {
         Some(at) => at
             .split_once(',')
@@ -326,7 +349,7 @@ fn seed_in(args: &[String]) -> R<String> {
             (x * 1000.0) as i64 + k as i64 * APART_MM,
             (z * 1000.0) as i64,
         );
-        rows.push(format!("[{counter}, {xm}, {zm}]"));
+        rows.push(format!("[{counter}, {xm}, {zm}{body}]"));
         let mut secret = [0u8; 32];
         std::io::Read::read_exact(&mut urandom, &mut secret).map_err(|e| e.to_string())?;
         let grant = format!("soul-{}-{counter}", to_hex(&scope));
@@ -389,6 +412,26 @@ fn souls(meta: &Json) -> R<Vec<(Id, i64, i64)>> {
             }
         })
         .collect()
+}
+
+/// The body each Soul is born wearing: a row's fourth item, a preset's name or hash in `bodies.json` (B15a).
+fn born(
+    meta: &Json,
+    catalogue: &skills::wear::Catalogue,
+) -> R<std::collections::BTreeMap<Id, [u8; 32]>> {
+    let ids = souls(meta)?;
+    let rows = meta.get("souls").and_then(Json::arr).unwrap_or(&[]);
+    let mut out = std::collections::BTreeMap::new();
+    for ((id, _, _), row) in ids.iter().zip(rows) {
+        if let Some(b) = row.arr().and_then(|r| r.get(3)) {
+            let asked = b.str().unwrap_or_default();
+            let p = catalogue
+                .find(asked)
+                .ok_or(format!("world.json: body {asked:?} is not in bodies.json"))?;
+            out.insert(*id, p.hash);
+        }
+    }
+    Ok(out)
 }
 
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
@@ -624,6 +667,12 @@ fn serve(args: &[String]) -> R<()> {
         return Err("world.json is not souls/world/1".into());
     }
     let souls = souls(&meta)?;
+    // Bodies chosen (B15a): `bodies.json`, the presets the world admits; a Soul's row may name its body at birth.
+    let catalogue = match std::fs::read_to_string(dir.join("bodies.json")) {
+        Ok(t) => skills::wear::Catalogue::read(&t)?,
+        Err(_) => skills::wear::Catalogue::default(),
+    };
+    let born = born(&meta, &catalogue)?;
     let facts = dir.join("facts.json");
     let built = build(&std::fs::read_to_string(&facts).map_err(io(&facts))?)?;
     let name = instance(built.root);
@@ -712,6 +761,7 @@ fn serve(args: &[String]) -> R<()> {
     }
     .or_else(|| souls.first().map(|(_, x, z)| (*x, *z)))
     .map_or(Vec3::ZERO, |(x, z)| Vec3::new(x * 1000, 0, z * 1000));
+    cfg.wear = Some(answers::Wearing { catalogue, born });
     cfg.join = Some(Join {
         entry: (ground, entry),
         family: humanoid()?,

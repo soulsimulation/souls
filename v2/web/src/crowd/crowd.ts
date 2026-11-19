@@ -32,6 +32,8 @@ export class Crowd {
   private frustum = new THREE.Frustum();
   private pv = new THREE.Matrix4();
   private sphere = new THREE.Sphere();
+  /** Loads the model of a body worn by its content hash (B15b), or null when the page has none for it. */
+  worn: ((hash: string) => Promise<BakedModel | null>) | null = null;
   /** What the last `draw` did. */
   stats = { bodies: 0, visible: 0, byLevel: [0, 0, 0], draws: 0 };
 
@@ -76,6 +78,13 @@ export class Crowd {
       this.group.add(mesh);
       return { mesh, anim, mix };
     });
+  }
+
+  /** Adds a model once the crowd is made (B15b: a body worn later) and returns its index. */
+  addModel(m: BakedModel): number {
+    this.models.push(m);
+    this.draws.push(this.makeDraws(m, this.cap));
+    return this.models.length - 1;
   }
 
   /** Adds a body of `model` and returns its index; indices stay put until `remove` moves the last body into a hole. */
