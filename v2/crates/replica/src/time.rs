@@ -20,6 +20,14 @@ pub type Micros = i64;
 /// Microseconds in a second.
 pub const MICROS_PER_SECOND: i64 = 1_000_000;
 
+/// The mapping in force, on the zone root (Engine v2 E7b, #3516): its world anchor (µs), its real anchor (µs on the
+/// world's real line, the Unix epoch's for `worldd`) and its rate `[num, den]`. The clock thread writes them with the
+/// mapping's time effect, in one part, whenever a mapping applies, so any copy that holds the root computes world now
+/// as `world + (real now − real) · num / den`, rounded down. Beside the root's sky fields (`crate::sky`, 60 to 79).
+pub const F_CLOCK_WORLD: u64 = 66;
+pub const F_CLOCK_REAL: u64 = 67;
+pub const F_CLOCK_RATE: u64 = 68;
+
 /// Why a time effect or a query was refused. Each has a name (`v2/docs/time.md`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TimeRefusal {
@@ -200,6 +208,32 @@ impl Mapping {
     /// World microseconds per real microsecond.
     pub fn rate(self) -> Fraction {
         self.rate
+    }
+
+    /// The world time at real time `real_us` on this mapping's line (rounded down, rule 4).
+    pub fn world_at(self, real_us: Micros) -> Result<Micros, TimeRefusal> {
+        self.line().y_at(real_us)
+    }
+
+    /// The mapping as the zone root's fields ([`F_CLOCK_WORLD`], [`F_CLOCK_REAL`], [`F_CLOCK_RATE`]).
+    pub fn fields(self) -> Vec<(u64, Value)> {
+        vec![
+            (F_CLOCK_WORLD, int(self.world_us)),
+            (F_CLOCK_REAL, int(self.real_us)),
+            (F_CLOCK_RATE, self.rate.to_value()),
+        ]
+    }
+
+    /// The mapping a node's fields hold, if they hold one.
+    pub fn from_fields(fields: &std::collections::BTreeMap<u64, Value>) -> Option<Mapping> {
+        let (num, den) = read_pair(fields.get(&F_CLOCK_RATE)).ok()?;
+        Mapping::new(
+            read_int(fields.get(&F_CLOCK_WORLD)).ok()?,
+            read_int(fields.get(&F_CLOCK_REAL)).ok()?,
+            num,
+            den,
+        )
+        .ok()
     }
 
     fn line(self) -> Line {

@@ -881,7 +881,9 @@ fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
 }
 
 /// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] [--machine
-/// <name>]`: runs the world until killed. A checkpoint is taken each `--checkpoint-every` bytes of log (default 8 MiB).
+/// <name>] [--rate <num>/<den>]`: runs the world until killed. A checkpoint is taken each `--checkpoint-every` bytes
+/// of log (default 8 MiB). The clock's rate is world µs per real µs (default 1/1); a start whose rate differs from the
+/// last logged applies a new mapping, and the mapping in force is on the zone root for every copy (E7b, #3516).
 pub fn run(args: &[String]) -> i32 {
     match serve(args) {
         Ok(()) => 0,
@@ -895,7 +897,7 @@ pub fn run(args: &[String]) -> i32 {
 fn serve(args: &[String]) -> R<()> {
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
         "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] \
-         [--machine <name>] [--directory <file>]",
+         [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
     )?);
     let socket = arg(args, "--socket")
         .map(PathBuf::from)
@@ -983,6 +985,13 @@ fn serve(args: &[String]) -> R<()> {
     })?;
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
     cfg.health = Some(dir.join("health.json"));
+    cfg.rate = Some(match arg(args, "--rate") {
+        Some(r) => r
+            .split_once('/')
+            .and_then(|(n, d)| Some((n.trim().parse().ok()?, d.trim().parse().ok()?)))
+            .ok_or("--rate <num>/<den>")?,
+        None => (1, 1),
+    });
     // K16's text store on the disk, `<dir>/log.text` beside the log as `gateway-link` keeps it (O20b, #3523): a
     // world's words outlive a restart, and O20's shipper has them to ship.
     let text = sim::text::Store::open_dir(
