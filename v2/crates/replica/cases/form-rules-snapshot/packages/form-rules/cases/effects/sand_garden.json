@@ -1,0 +1,405 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Sand garden (from #1678): a Soul with empty hands brushes each of the four cells along and then across (eight brushings, each changing only its cell); brushing a cell the way it already lies is refused; then it smooths all four, and smoothing the sand again is refused: it is already smooth. The pattern after each brushing is the cells' own state.",
+  "cases": [
+    {
+      "name": "brush_every_cell_both_ways_then_smooth",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "sg1"
+            ]
+          },
+          "sg1": {
+            "kind": "eden:sand_garden"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "sg1",
+            "form": "brush",
+            "args": {
+              "cell": "back_left",
+              "pattern": "along"
+            }
+          },
+          "receipt": "rg1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sg1",
+                "field": "back_left",
+                "n": 1,
+                "to": "along"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:brushed",
+                "node": "sg1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sg1",
+            "form": "brush",
+            "args": {
+              "cell": "back_left",
+              "pattern": "along"
+            }
+          },
+          "receipt": "rg1b",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "sg1",
+            "form": "brush",
+            "args": {
+              "cell": "back_left",
+              "pattern": "across"
+            }
+          },
+          "receipt": "rg2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sg1",
+                "field": "back_left",
+                "n": 1,
+                "to": "across"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:brushed",
+                "node": "sg1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sg1",
+            "form": "brush",
+            "args": {
+              "cell": "back_right",
+              "pattern": "along"
+            }
+          },
+          "receipt": "rg3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sg1",
+                "field": "back_right",
+                "n": 2,
+                "to": "along"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:brushed",
+                "node": "sg1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sg1",
+            "form": "brush",
+            "args": {
+              "cell": "back_right",
+              "pattern": "across"
+            }
+          },
+          "receipt": "rg4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sg1",
+                "field": "back_right",
+                "n": 2,
+                "to": "across"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:brushed",
+                "node": "sg1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sg1",
+            "form": "brush",
+            "args": {
+              "cell": "front_left",
+              "pattern": "along"
+            }
+          },
+          "receipt": "rg5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sg1",
+                "field": "front_left",
+                "n": 3,
+                "to": "along"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:brushed",
+                "node": "sg1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sg1",
+            "form": "brush",
+            "args": {
+              "cell": "front_left",
+              "pattern": "across"
+            }
+          },
+          "receipt": "rg6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sg1",
+                "field": "front_left",
+                "n": 3,
+                "to": "across"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:brushed",
+                "node": "sg1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sg1",
+            "form": "brush",
+            "args": {
+              "cell": "front_right",
+              "pattern": "along"
+            }
+          },
+          "receipt": "rg7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sg1",
+                "field": "front_right",
+                "n": 4,
+                "to": "along"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:brushed",
+                "node": "sg1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sg1",
+            "form": "brush",
+            "args": {
+              "cell": "front_right",
+              "pattern": "across"
+            }
+          },
+          "receipt": "rg8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sg1",
+                "field": "front_right",
+                "n": 4,
+                "to": "across"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:brushed",
+                "node": "sg1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sg1",
+            "form": "smooth"
+          },
+          "receipt": "rg9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sg1",
+                "field": "back_left",
+                "n": 1,
+                "to": "smooth"
+              },
+              {
+                "change": "set",
+                "node": "sg1",
+                "field": "back_right",
+                "n": 2,
+                "to": "smooth"
+              },
+              {
+                "change": "set",
+                "node": "sg1",
+                "field": "front_left",
+                "n": 3,
+                "to": "smooth"
+              },
+              {
+                "change": "set",
+                "node": "sg1",
+                "field": "front_right",
+                "n": 4,
+                "to": "smooth"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:smoothed",
+                "node": "sg1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:smoothed",
+                "node": "sg1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:smoothed",
+                "node": "sg1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:smoothed",
+                "node": "sg1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sg1",
+            "form": "smooth"
+          },
+          "receipt": "rg10",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        }
+      ],
+      "after": {
+        "sg1": {
+          "kind": "eden:sand_garden",
+          "fields": {
+            "back_left": "smooth",
+            "back_right": "smooth",
+            "front_left": "smooth",
+            "front_right": "smooth"
+          }
+        }
+      }
+    }
+  ]
+}

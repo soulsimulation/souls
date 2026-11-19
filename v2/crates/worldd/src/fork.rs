@@ -2,7 +2,8 @@
 //! starts the newest good checkpoint in `--from` as a new world in `--to` (`sim::checkpoint::fork`). The process
 //! gives it what the engine may not make itself: a fresh lineage and minting scope and a seed from the operating
 //! system's random source (T3 rule 1: never the world's random numbers, which a fork replays), and the real time of
-//! the request, read once (T5 rule 10). A principal is written `<32 hex digits>:<counter>`.
+//! the request, read once (T5 rule 10). A principal is written `<32 hex digits>:<counter>`. `--scope <32 hex digits>`
+//! gives the lineage instead, when the directory has already named the world under it (W3).
 
 use crate::watchdog::Real;
 use replica::encode::{from_hex, to_hex};
@@ -45,7 +46,8 @@ pub fn run(args: &[String]) -> i32 {
         );
         return 2;
     };
-    let (scope, seed) = match (random(16), random(32)) {
+    let given = arg("--scope").map(|s| from_hex(s).map_err(std::io::Error::other));
+    let (scope, seed) = match (given.unwrap_or_else(|| random(16)), random(32)) {
         (Ok(s), Ok(seed)) => (Scope(s.try_into().unwrap_or([0; 16])), seed),
         (Err(e), _) | (_, Err(e)) => {
             eprintln!("worldd: fork: the random source: {e}");

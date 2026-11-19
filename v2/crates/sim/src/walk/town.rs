@@ -7,9 +7,10 @@
 //!   between a building and the open ground has one end on each).
 //! - **The next corner** (#3167: a fixed cost a tick). Each walker keeps a line of corners toward its leg's end: the
 //!   leg's end when a straight walk on the body's surface reaches it (N6's walk, on a copy of the body), else the
-//!   first line of the route from where it stands (on the open ground, on to the next portal the route crosses). It
-//!   moves on as each corner is reached ([`AT_CORNER`]), and a new line is searched for ([`View::search`], counted in
-//!   [`Spent`]) only for a new leg's end or node, when the walker is pushed more than [`OFF_LINE`] off it, at the end
+//!   first line of the route from where it stands (on the open ground, on to the next portal the route crosses), each
+//!   corner between its ends aimed at [`ROUND`] out from its turn (#3473). It moves on as each corner is reached
+//!   ([`AT_CORNER`]), and a new line is searched for ([`View::search`], counted in [`Spent`]) only for a new leg's
+//!   end or node, when the walker is pushed more than [`OFF_LINE`] off it, at the end
 //!   of a line that stops short of the leg's end, or when a straight walk to the next corner, checked once in
 //!   [`CHECK`] calls, is refused.
 //! - **A crossing.** At the near end: a shut door is asked to open and the opening written at the end of that tick
@@ -22,8 +23,13 @@
 //! - **Changed ground** (G3, #2760). [`Town::rebuild`] runs off the clock thread on a copy of the tree: it applies a
 //!   part as it will commit, finds the nodes whose ground it changes (`crate::ground::touched`) and bumps their
 //!   versions. When the open ground is untouched it reads again only the buildings whose floors the part touches, on
-//!   the open ground as last cut ([`Basis`], #3276); otherwise it builds the ground, the links and the route map whole
-//!   from the tree as the part leaves it. [`Town::install`] runs on the tick the part commits: it commits the part
+//!   the open ground as last cut ([`Basis`], #3276). When the open ground alone is touched it cuts again only the
+//!   squares the change meets (G3b, #3449, `crate::ground::open`), which the install puts on the route map and the
+//!   ground's surface in place of the old ones (`Map::replace_squares`, `Surface::replace`). Otherwise (a water, ground
+//!   cover, a square by water, a doorway's meets changed: [`Rebuilt::why`]) it builds the ground, the links and the
+//!   route map whole from the tree as the part leaves it. It reads what the part changes in the tree it is given
+//!   before applying the part to it, so it makes no second copy of the tree, and it panics on the clock thread in a
+//!   debug build (`crate::commit::off_clock`). [`Town::install`] runs on the tick the part commits: it commits the part
 //!   through the zone's one write and, in the same call, swaps the ground in or replaces the buildings read again on
 //!   the route map ([`Map::replace`]), so no tick sees new geometry over old ground. Each plan records the ground it
 //!   crossed, each node with its version ([`Town::planned_on`]); the install lists the walks planned on the changed
@@ -41,13 +47,16 @@
 
 use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
+use crate::ground::open::Index;
 use crate::ground::scene::{FLOOR, xform_to};
-use crate::ground::{HUMAN_RADIUS, OpenGround, Piece, Terrain, Versions, exits, touched};
+use crate::ground::{
+    HUMAN_RADIUS, Meet, OpenGround, Piece, Terrain, Versions, changed, exits, grounds,
+};
 use crate::host::Links;
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, SquareMeet, back, floor_joins, ground_doors};
 use crate::mover::{Body, Surface};
-use crate::routes::{HANDS, Hop, Map, on_pieces};
+use crate::routes::{HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
 use crate::spots::{Ask, CLEAR, Ground, Spots, Target, flat, to_segment};
 use replica::effects::{Actor, Cause, Header, Part, Refusal};
 use replica::encode::{Value, encode};
@@ -109,6 +118,22 @@ pub struct Spent {
     pub lines_blocked: u64,
 }
 
+impl Spent {
+    /// Adds what `o` counted: a thread's costs joined to the town's (N17b). Times are summed across threads.
+    pub fn add(&mut self, o: &Spent) {
+        self.corners += o.corners;
+        self.corner_ns += o.corner_ns;
+        self.clears += o.clears;
+        self.clear_ns += o.clear_ns;
+        self.searches += o.searches;
+        self.search_ns += o.search_ns;
+        self.lines_new += o.lines_new;
+        self.lines_off += o.lines_off;
+        self.lines_end += o.lines_end;
+        self.lines_blocked += o.lines_blocked;
+    }
+}
+
 /// The engine as the walk skill reads it.
 pub struct Town {
     pub tree: Tree,
@@ -127,7 +152,9 @@ pub struct Town {
     /// What the next corners cost so far.
     pub spent: Cell<Spent>,
     /// Each walker's line of corners (#3167), kept from the search that found it.
-    lines: BTreeMap<Id, Line>,
+    lines: Vec<(Id, Line)>,
+    /// One route search scratch per thread asking (N17b, #3255): the first is [`Town::view`]'s.
+    scratches: Vec<Scratch>,
     crossings: BTreeMap<Id, Crossing>,
     /// Where each link is in `buildings` (building, link), the first that holds it: read every tick by each walker
     /// with a link ahead, so not searched for (#3213).
@@ -136,8 +163,13 @@ pub struct Town {
     pub versions: Versions,
     /// What a building read again off the clock thread needs of the open ground ([`Town::basis`]).
     basis: Basis,
+    /// Each square's pieces of the open ground's surface, by number (G3b).
+    square_pieces: BTreeMap<(i32, i32), Vec<u32>>,
     /// The ground each body's last plan crossed, in order: each node with its version then (G3).
     planned: BTreeMap<Id, Vec<(Id, u64)>>,
+    /// The open ground's squares each body's last plan crossed, in order (G3b): a change that cuts squares again
+    /// leaves the walks that cross none of them as they are, and ranks the others by how soon they reach one.
+    planned_squares: BTreeMap<Id, Vec<(i32, i32)>>,
     /// The walks planned on ground the last installs changed, not yet planned again: each body with how soon its
     /// route reaches the change (its index in the ground the plan crossed; 0 for the node it stood on).
     pub stale: BTreeMap<Id, usize>,
@@ -148,6 +180,8 @@ pub struct Town {
 #[derive(Clone)]
 pub struct Basis {
     open: Arc<OpenCut>,
+    /// The open ground's scene by child, to cut again only the squares a change touches (G3b, #3449).
+    index: Index,
     known: Arc<BTreeMap<Id, BTreeSet<Id>>>,
     /// Where each building reaches on the open ground ([`reach`]).
     reach: Arc<BTreeMap<Id, [i64; 4]>>,
@@ -155,11 +189,19 @@ pub struct Basis {
     joined: Arc<BTreeSet<Id>>,
 }
 
+#[derive(Clone)]
 struct OpenCut {
-    squares: BTreeMap<(i32, i32), Vec<Piece>>,
+    squares: BTreeMap<(i32, i32), Arc<Vec<Piece>>>,
     meets: Vec<SquareMeet>,
     doors: BTreeMap<Id, Id>,
-    terrain: Option<Terrain>,
+    terrain: Option<Arc<Terrain>>,
+}
+
+impl Basis {
+    /// The open ground's square `sq` as last cut: its dry pieces.
+    pub fn square(&self, sq: (i32, i32)) -> Option<&[Piece]> {
+        self.open.squares.get(&sq).map(|p| p.as_slice())
+    }
 }
 
 /// How far past its floors and steps a building's reach is taken, µm: more than a step carried across an edge onto
@@ -203,7 +245,9 @@ pub struct Rebuilt {
     /// The nodes whose ground the part changes.
     pub touched: BTreeSet<Id>,
     pub versions: Versions,
-    fresh: Fresh,
+    pub fresh: Fresh,
+    /// Why the whole ground was built for a change on the open ground, when it was (G3b).
+    pub why: Option<&'static str>,
 }
 
 impl Rebuilt {
@@ -212,16 +256,47 @@ impl Rebuilt {
     pub fn whole(&self) -> bool {
         matches!(self.fresh, Fresh::Whole(..))
     }
+
+    /// The open ground's squares cut again alone (G3b), none when the whole was built.
+    pub fn cut_squares(&self) -> Vec<(i32, i32)> {
+        match &self.fresh {
+            Fresh::Squares(sq, ..) => sq.iter().map(|(k, ..)| *k).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// How many of the open ground's squares were cut again alone (G3b): 0 when none, or when the whole was built.
+    pub fn squares(&self) -> usize {
+        match &self.fresh {
+            Fresh::Squares(sq, ..) => sq.len(),
+            _ => 0,
+        }
+    }
 }
 
-enum Fresh {
+/// A square of the open ground cut again: where it is, its dry pieces and, per piece and triangle, whether it lies
+/// on the terrain.
+pub type Square = ((i32, i32), Vec<Piece>, Vec<Vec<bool>>);
+
+/// The ground a rebuild built: the whole, or what it cut again (read by G2's guard, G2b #3488).
+pub enum Fresh {
     Whole(Box<Assembled>),
+    /// The open ground's squares cut again (G3b, #3449): each with its dry pieces and, per piece and triangle,
+    /// whether it lies on the terrain; and the basis as they leave it.
+    Squares(Vec<Square>, Basis, Vec<(Building, BTreeMap<Id, Surface>)>),
     /// Each touched building read again, with its floors' surfaces.
     Buildings(Vec<(Building, BTreeMap<Id, Surface>)>),
 }
 
-/// The route map, each node's surface, the buildings and the basis for a rebuild.
-type Assembled = (Map, BTreeMap<Id, Surface>, Vec<Building>, Basis);
+/// The route map, each node's surface, the buildings, the basis for a rebuild, and each square's pieces of the open
+/// ground's surface.
+pub type Assembled = (
+    Map,
+    BTreeMap<Id, Surface>,
+    Vec<Building>,
+    Basis,
+    BTreeMap<(i32, i32), Vec<u32>>,
+);
 
 /// Where each link is in `buildings`: the first building, and its first link, with that id.
 fn link_index(buildings: &[Building]) -> BTreeMap<Id, (usize, usize)> {
@@ -248,7 +323,8 @@ impl Town {
     /// Everything on the open ground `ground`; openings are written by `doors`.
     pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
         let versions = Versions::default();
-        let (map, surfaces, buildings, basis) = Town::assemble(&tree, ground, &versions)?;
+        let (map, surfaces, buildings, basis, square_pieces) =
+            Town::assemble(&tree, ground, &versions)?;
         let link_at = link_index(&buildings);
         Ok(Town {
             tree,
@@ -262,13 +338,38 @@ impl Town {
             spots: Spots::new(),
             meter: None,
             spent: Cell::new(Spent::default()),
-            lines: BTreeMap::new(),
+            lines: Vec::new(),
+            scratches: vec![Scratch::default()],
             crossings: BTreeMap::new(),
             versions,
             basis,
+            square_pieces,
             planned: BTreeMap::new(),
+            planned_squares: BTreeMap::new(),
             stale: BTreeMap::new(),
         })
+    }
+
+    /// The tree and the ground as N9's spot tables read it, for a reader that is not a walker (E4's set-down, #2772).
+    pub fn with_ground<T>(&mut self, f: impl FnOnce(&Tree, &mut dyn Ground) -> T) -> T {
+        let Town {
+            map,
+            tree,
+            buildings,
+            ground,
+            surfaces,
+            ..
+        } = self;
+        let tree: &Tree = tree;
+        let mut g = Grounds {
+            tree,
+            map: MapRef::Own(map),
+            surfaces,
+            buildings,
+            ground: *ground,
+            boxes: OnceCell::new(),
+        };
+        f(tree, &mut g)
     }
 
     /// What [`Town::rebuild`] reads besides the tree, as the ground stands now.
@@ -293,21 +394,144 @@ impl Town {
         basis: &Basis,
         part: &Part,
     ) -> Result<Rebuilt, String> {
-        let before = base.frozen();
+        Town::rebuild_on(&mut base, header, ground, versions, basis, part)
+    }
+
+    /// [`Town::rebuild`] on a copy the caller keeps: `base` is left as the part leaves it (G3b, #3449). Dropping a
+    /// whole copy of Eden's tree costs tens of milliseconds, so a caller that reuses its copies (K8's spares) or drops
+    /// them elsewhere does not pay it here.
+    pub fn rebuild_on(
+        base: &mut Tree,
+        header: &Header,
+        ground: Id,
+        versions: &Versions,
+        basis: &Basis,
+        part: &Part,
+    ) -> Result<Rebuilt, String> {
+        crate::commit::off_clock();
+        // What the part changes is read in the tree before it is applied to it in place: no second copy (G3b).
+        let ids = changed(base, part);
+        let mut touched = BTreeSet::new();
+        grounds(base, &ids, &mut touched);
+        let kids = basis.index.children(base, &ids);
+        let parent = |t: &Tree, n: Id| t.handle(n).and_then(|h| t.node(h)).and_then(|n| n.parent());
+        let parents: BTreeMap<Id, Id> = touched
+            .iter()
+            .filter_map(|&f| Some((f, parent(base, f)?)))
+            .collect();
         base.apply(header, part)
             .map_err(|e| format!("{}: {}", e.name, e.detail))?;
-        let touched = touched(&before, &base, part);
+        grounds(base, &ids, &mut touched);
         let mut versions = versions.clone();
         versions.bump(&touched);
-        let fresh = match Town::reread(&before, &base, ground, &touched, basis) {
-            Some(bs) => Fresh::Buildings(bs),
-            None => Fresh::Whole(Box::new(Town::assemble(&base, ground, &versions)?)),
+        let mut why = None;
+        let fresh = if touched.contains(&ground) {
+            let r = if touched.len() == 1 {
+                Town::recut(&kids, base, &ids, basis)
+            } else {
+                Err("the open ground and a building")
+            };
+            match r {
+                Ok(f) => f,
+                Err(w) => {
+                    why = Some(w);
+                    Fresh::Whole(Box::new(Town::assemble(base, ground, &versions)?))
+                }
+            }
+        } else {
+            match Town::reread(&parents, base, ground, &touched, basis) {
+                Some(bs) => Fresh::Buildings(bs),
+                None => Fresh::Whole(Box::new(Town::assemble(base, ground, &versions)?)),
+            }
         };
         Ok(Rebuilt {
             touched,
             versions,
             fresh,
+            why,
         })
+    }
+
+    /// The open ground's squares `part` changes, cut again alone from `after` (G3b, #3449, `crate::ground::open`),
+    /// with the basis as they leave it; refused with why when the whole ground must be built (a change the index
+    /// cannot cut alone).
+    fn recut(
+        before: &BTreeSet<Id>,
+        after: &Tree,
+        ids: &[Id],
+        basis: &Basis,
+    ) -> Result<Fresh, &'static str> {
+        let open = &basis.open;
+        let cut = |sq: (i32, i32)| {
+            if !open.squares.contains_key(&sq) {
+                return None;
+            }
+            Some(
+                open.meets
+                    .iter()
+                    .filter(|(s, _)| *s == sq)
+                    .map(|(_, m)| m.clone())
+                    .collect(),
+            )
+        };
+        let r = basis.index.recut(before, after, ids, HUMAN_RADIUS, &cut)?;
+        let mut cut_open = (**open).clone();
+        let mut squares = Vec::new();
+        // The links whose meets on a square cut again changed: their buildings are read again on the new meets.
+        let mut moved = BTreeSet::new();
+        for (sq, pieces, meets, on) in r.squares {
+            let old: Vec<Meet> = cut(sq).unwrap_or_default();
+            if old != meets {
+                let links = old.iter().chain(&meets).map(|m| m.link);
+                for l in links.collect::<BTreeSet<_>>() {
+                    let of = |v: &[Meet]| {
+                        v.iter()
+                            .filter(|m| m.link == l)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    };
+                    if of(&old) != of(&meets) {
+                        moved.insert(l);
+                    }
+                }
+                cut_open.meets.retain(|(s, _)| *s != sq);
+                cut_open.meets.extend(meets.into_iter().map(|m| (sq, m)));
+            }
+            cut_open.squares.insert(sq, Arc::new(pieces.clone()));
+            squares.push((sq, pieces, on));
+        }
+        // In the order a whole cut lists them: by square, z then x, and in each square as cut.
+        cut_open.meets.sort_by_key(|(s, _)| (s.1, s.0));
+        let basis = Basis {
+            open: Arc::new(cut_open),
+            index: r.index,
+            ..basis.clone()
+        };
+        let ground = basis.index.ground();
+        let (mut things, mut gates) = (BTreeSet::new(), false);
+        for l in moved {
+            // A link no building holds is the open ground's own: a gate.
+            match basis
+                .known
+                .iter()
+                .find(|(t, ls)| **t != ground && ls.contains(&l))
+            {
+                Some((t, _)) => {
+                    things.insert(*t);
+                }
+                None => gates = true,
+            }
+        }
+        let mut buildings = if things.is_empty() {
+            Vec::new()
+        } else {
+            Town::read_again(after, ground, &things, &basis)
+                .ok_or("a building on changed meets that cannot be read alone")?
+        };
+        if gates {
+            buildings.push(Town::gates(after, ground, &basis).ok_or("the gates cannot be read")?);
+        }
+        Ok(Fresh::Squares(squares, basis, buildings))
     }
 
     /// Each building whose floors are in `touched`, read again from `after` on the open ground of `basis`, with its
@@ -315,7 +539,7 @@ impl Town {
     /// gone or cannot be read, shares a step with another building's floor before the edit or after, or a link of the open ground's meets
     /// joins or leaves a building (the gates change).
     fn reread(
-        before: &Tree,
+        before: &BTreeMap<Id, Id>,
         after: &Tree,
         ground: Id,
         touched: &BTreeSet<Id>,
@@ -327,8 +551,41 @@ impl Town {
         let parent = |t: &Tree, n: Id| t.handle(n).and_then(|h| t.node(h)).and_then(|n| n.parent());
         let mut things = BTreeSet::new();
         for &f in touched {
-            things.insert(parent(after, f).or_else(|| parent(before, f))?);
+            things.insert(parent(after, f).or_else(|| before.get(&f).copied())?);
         }
+        Town::read_again(after, ground, &things, basis)
+    }
+
+    /// The open ground's own links (its gates) read again from `after` on the open ground of `basis` (G3b).
+    fn gates(after: &Tree, ground: Id, basis: &Basis) -> Option<(Building, BTreeMap<Id, Surface>)> {
+        let open = &basis.open;
+        let on =
+            |sq: (i32, i32), p: [i64; 2]| open.squares.get(&sq).is_some_and(|ps| on_pieces(ps, p));
+        let o = Open {
+            ground,
+            place: crate::ground::scene::Xform::IDENTITY,
+            meets: &open.meets,
+            on: &on,
+            doors: &open.doors,
+            terrain: open.terrain.as_deref(),
+        };
+        let all: BTreeSet<Id> = basis
+            .known
+            .iter()
+            .filter(|(t, _)| **t != ground)
+            .flat_map(|(_, ls)| ls.iter().copied())
+            .collect();
+        Some((Building::of_ground(after, o, &all).ok()?, BTreeMap::new()))
+    }
+
+    /// Each building of `things` read again from `after` on the open ground of `basis`, with its floors' surfaces;
+    /// `None` as [`Town::reread`] says.
+    fn read_again(
+        after: &Tree,
+        ground: Id,
+        things: &BTreeSet<Id>,
+        basis: &Basis,
+    ) -> Option<Vec<(Building, BTreeMap<Id, Surface>)>> {
         let gh = after.handle(ground)?;
         let open = &basis.open;
         let on =
@@ -340,12 +597,12 @@ impl Town {
                 meets: &open.meets,
                 on: &on,
                 doors: &open.doors,
-                terrain: open.terrain.as_ref(),
+                terrain: open.terrain.as_deref(),
             };
             Building::read_on(after, thing, Some(o)).ok()
         };
         let mut out = Vec::new();
-        for thing in things {
+        for &thing in things {
             let old = basis.known.get(&thing)?;
             // A building that shared a step with another's floor (#3227) before the edit: the whole.
             if basis.joined.contains(&thing) {
@@ -396,6 +653,17 @@ impl Town {
     /// changed ground are listed in [`Town::stale`], and the lines of corners on it are dropped. A refused part
     /// installs nothing.
     pub fn install(&mut self, r: Rebuilt, part: &Part) -> Result<(), Refusal> {
+        // What the threads' route searches found joins the map before it changes (N17b): no scratch outlives its map.
+        for s in &mut self.scratches {
+            self.map.keep(s);
+        }
+        let link_of = |id: Id| find_link(&self.link_at, &self.buildings, id).cloned();
+        if let Fresh::Squares(sq, ..) = &r.fresh {
+            let keys: Vec<(i32, i32)> = sq.iter().map(|(k, ..)| *k).collect();
+            self.map
+                .check_squares(self.ground, &keys, &link_of)
+                .map_err(|e| refusal("ground-changed", e))?;
+        }
         let mut p = part.clone();
         for (k, e) in p.effects.iter_mut().enumerate() {
             e.envelope.sequence = self.doors.next + k as u64;
@@ -405,52 +673,148 @@ impl Town {
             .commit(&self.doors.header, &Part::read(&bytes)?, &self.doors.rules)?;
         self.doors.next += part.effects.len() as u64;
         let Rebuilt {
-            touched,
+            mut touched,
             versions,
             fresh,
+            ..
         } = r;
+        // A change that cuts squares again changes the open ground there only (and the buildings read again).
+        let cut: Option<BTreeSet<(i32, i32)>> = match &fresh {
+            Fresh::Squares(sq, _, bs) => {
+                touched.extend(bs.iter().flat_map(|(b, _)| b.floors.keys().copied()));
+                Some(sq.iter().map(|(k, ..)| *k).collect())
+            }
+            _ => None,
+        };
         match fresh {
             Fresh::Whole(g) => {
-                let (map, surfaces, buildings, basis) = *g;
+                let (map, surfaces, buildings, basis, square_pieces) = *g;
                 self.map = map;
                 self.surfaces = surfaces;
                 self.buildings = buildings;
                 self.basis = basis;
+                self.square_pieces = square_pieces;
             }
-            Fresh::Buildings(bs) => {
-                let known = Arc::make_mut(&mut self.basis.known);
-                let reaches = Arc::make_mut(&mut self.basis.reach);
-                for (b, surfaces) in bs {
-                    self.map.replace(&b, &|n| versions.of(n));
-                    known.insert(b.thing, b.links.iter().map(|l| l.id).collect());
-                    if let Some(r) = reach(&b) {
-                        reaches.insert(b.thing, r);
-                    }
-                    self.surfaces.extend(surfaces);
-                    match self.buildings.iter().position(|o| o.thing == b.thing) {
-                        Some(i) => {
-                            let old = std::mem::replace(&mut self.buildings[i], b);
-                            for f in old.floors.keys() {
-                                if !self.buildings[i].floors.contains_key(f) {
-                                    self.surfaces.remove(f);
-                                }
-                            }
-                        }
-                        None => self.buildings.push(b),
+            Fresh::Squares(squares, basis, bs) => {
+                let ground = self.ground;
+                let link_of = |id: Id| find_link(&self.link_at, &self.buildings, id).cloned();
+                let cut = squares
+                    .iter()
+                    .map(|(sq, pieces, _)| (*sq, pieces.clone()))
+                    .collect();
+                self.map
+                    .replace_squares(ground, versions.of(ground), cut, &link_of)
+                    .map_err(|e| refusal("ground-changed", e))?;
+                let (mut drop, mut add, mut on) = (Vec::new(), Vec::new(), Vec::new());
+                for (sq, pieces, flags) in &squares {
+                    drop.extend(self.square_pieces.get(sq).into_iter().flatten().copied());
+                    add.extend(pieces.iter().cloned());
+                    on.extend(flags.iter().cloned());
+                }
+                if let Some(s) = self.surfaces.get_mut(&ground) {
+                    let mut next = s.replace(&drop, add, on);
+                    for (sq, pieces, _) in &squares {
+                        let n = pieces.len() as u32;
+                        self.square_pieces.insert(*sq, (next..next + n).collect());
+                        next += n;
                     }
                 }
+                self.basis = basis;
+                self.put_buildings(bs, &versions);
             }
+            Fresh::Buildings(bs) => self.put_buildings(bs, &versions),
         }
         self.link_at = link_index(&self.buildings);
         self.versions = versions;
-        self.lines.retain(|_, l| !touched.contains(&l.node));
-        for (&who, ground) in &self.planned {
-            if let Some(rank) = ground.iter().position(|(n, _)| touched.contains(n)) {
-                let r = self.stale.entry(who).or_insert(rank);
-                *r = (*r).min(rank);
+        let ground = self.ground;
+        // How far along its squares a walk first reaches a square cut again (0: where it starts), if it does.
+        let reaches = |who: &Id| match &cut {
+            None => Some(0),
+            Some(cut) => self
+                .planned_squares
+                .get(who)
+                .and_then(|s| s.iter().position(|q| cut.contains(q))),
+        };
+        let changed = |n: &Id| touched.contains(n) && (*n != ground || cut.is_none());
+        let mut stale = Vec::new();
+        for (&who, planned) in &self.planned {
+            let mut rank = None;
+            for (k, (n, _)) in planned.iter().enumerate() {
+                if changed(n) {
+                    rank = Some(k);
+                    break;
+                }
+                if *n == ground
+                    && touched.contains(n)
+                    && let Some(r) = reaches(&who)
+                {
+                    rank = Some(k + r);
+                    break;
+                }
+            }
+            if let Some(rank) = rank {
+                stale.push((who, rank));
             }
         }
+        for (who, rank) in stale {
+            let r = self.stale.entry(who).or_insert(rank);
+            *r = (*r).min(rank);
+        }
+        // A line of corners on the open ground is dropped when it runs within a metre of a square cut again.
+        let sq = crate::ground::SQUARE * 1000;
+        let near: Vec<[i64; 4]> = cut
+            .iter()
+            .flatten()
+            .map(|&(i, j)| {
+                let (x, z) = (i64::from(i) * sq, i64::from(j) * sq);
+                [
+                    x - 1_000_000,
+                    z - 1_000_000,
+                    x + sq + 1_000_000,
+                    z + sq + 1_000_000,
+                ]
+            })
+            .collect();
+        let crosses = |l: &Line| {
+            l.points.windows(2).any(|w| {
+                let b = [
+                    w[0][0].min(w[1][0]),
+                    w[0][1].min(w[1][1]),
+                    w[0][0].max(w[1][0]),
+                    w[0][1].max(w[1][1]),
+                ];
+                near.iter().any(|n| overlap(*n, b))
+            })
+        };
+        self.lines.retain(|(_, l)| {
+            !(changed(&l.node) || (l.node == ground && touched.contains(&ground) && crosses(l)))
+        });
         Ok(())
+    }
+
+    /// Each building read again replaced on the route map, its floors' surfaces with it.
+    fn put_buildings(&mut self, bs: Vec<(Building, BTreeMap<Id, Surface>)>, versions: &Versions) {
+        let known = Arc::make_mut(&mut self.basis.known);
+        let reaches = Arc::make_mut(&mut self.basis.reach);
+        for (b, surfaces) in bs {
+            self.map.replace(&b, &|n| versions.of(n));
+            known.insert(b.thing, b.links.iter().map(|l| l.id).collect());
+            if let Some(r) = reach(&b) {
+                reaches.insert(b.thing, r);
+            }
+            self.surfaces.extend(surfaces);
+            match self.buildings.iter().position(|o| o.thing == b.thing) {
+                Some(i) => {
+                    let old = std::mem::replace(&mut self.buildings[i], b);
+                    for f in old.floors.keys() {
+                        if !self.buildings[i].floors.contains_key(f) {
+                            self.surfaces.remove(f);
+                        }
+                    }
+                }
+                None => self.buildings.push(b),
+            }
+        }
     }
 
     /// The route map, each node's surface, the buildings and the basis for a rebuild, read from `tree` at `versions`.
@@ -458,11 +822,14 @@ impl Town {
         let map = Map::build(tree, ground, &|n| versions.of(n))?;
         let mut surfaces = BTreeMap::new();
         let open = OpenGround::of(tree, ground, HUMAN_RADIUS)?;
-        let terrain = open.terrain().cloned();
+        let terrain = open.terrain().cloned().map(Arc::new);
         let (mut pieces, mut meets, mut squares) = (Vec::new(), Vec::new(), BTreeMap::new());
+        let mut square_pieces = BTreeMap::new();
         for (i, j) in open.squares() {
             let p = open.cut_square(i, j);
-            squares.insert((i, j), p.pieces.clone());
+            let first = pieces.len() as u32;
+            square_pieces.insert((i, j), (first..first + p.pieces.len() as u32).collect());
+            squares.insert((i, j), Arc::new(p.pieces.clone()));
             pieces.extend(p.pieces);
             meets.extend(p.meets.into_iter().map(|m| ((i, j), m)));
         }
@@ -539,11 +906,12 @@ impl Town {
                 doors: gdoors,
                 terrain,
             }),
+            index: Index::of(tree, ground)?,
             known: Arc::new(known),
             reach: Arc::new(reach),
             joined: Arc::new(joined),
         };
-        Ok((map, surfaces, buildings, basis))
+        Ok((map, surfaces, buildings, basis, square_pieces))
     }
 
     /// `body` found again on its node's ground as it is now (its piece and triangle), where it stands, its velocity
@@ -580,40 +948,154 @@ impl Town {
             .map(|b| b.place)
     }
 
-    /// The town as the host's questions read it in a tick: the map behind a cell (a route is cached as it is
-    /// found), the rest shared.
+    /// The town as the host's questions read it in a tick: the map shared, a route search's scratch behind a cell
+    /// (what it finds is cached), the rest shared.
     pub fn view(&mut self) -> View<'_> {
-        View {
-            tree: &self.tree,
-            map: RefCell::new(&mut self.map),
-            surfaces: &self.surfaces,
-            buildings: &self.buildings,
-            link_at: &self.link_at,
-            turns: self.turns.as_ref(),
-            meter: self.meter,
+        let split = self.split(1);
+        split.shared.view(
+            &mut split.scratches[0],
+            Lines::All(split.lines),
+            split.spent,
+        )
+    }
+
+    /// The town split for `workers` threads asking its questions side by side (N17b, #3255): the parts every thread
+    /// reads, one route search scratch each, and the walkers' lines and the costs, which the caller hands out. What
+    /// the scratches found since the last split joins the map's caches first.
+    pub fn split(&mut self, workers: usize) -> Split<'_> {
+        for s in &mut self.scratches {
+            self.map.keep(s);
+        }
+        let workers = workers.max(1);
+        if self.scratches.len() < workers {
+            self.scratches.resize_with(workers, Scratch::default);
+        }
+        Split {
+            shared: Shared {
+                tree: &self.tree,
+                map: &self.map,
+                surfaces: &self.surfaces,
+                buildings: &self.buildings,
+                link_at: &self.link_at,
+                turns: self.turns.as_ref(),
+                meter: self.meter,
+                ground: self.ground,
+            },
+            scratches: &mut self.scratches[..workers],
+            lines: &mut self.lines,
             spent: &self.spent,
-            lines: RefCell::new(&mut self.lines),
+        }
+    }
+}
+
+/// The town split for threads ([`Town::split`]).
+pub struct Split<'a> {
+    pub shared: Shared<'a>,
+    pub scratches: &'a mut [Scratch],
+    /// Each walker's line of corners, by walker: a thread's view needs those of the walkers it steps.
+    pub lines: &'a mut Vec<(Id, Line)>,
+    pub spent: &'a Cell<Spent>,
+}
+
+/// The parts of the town every thread reads in a tick, never writes.
+#[derive(Clone, Copy)]
+pub struct Shared<'a> {
+    pub tree: &'a Tree,
+    map: &'a Map,
+    surfaces: &'a BTreeMap<Id, Surface>,
+    buildings: &'a [Building],
+    link_at: &'a BTreeMap<Id, (usize, usize)>,
+    turns: Option<&'a Turns>,
+    meter: Option<fn() -> u64>,
+    ground: Id,
+}
+
+impl<'a> Shared<'a> {
+    /// The town as one thread's questions read it: its own scratch, the lines of the walkers it steps, and the costs
+    /// it counts.
+    pub fn view<'b>(
+        &self,
+        scratch: &'b mut Scratch,
+        lines: Lines<'b>,
+        spent: &'b Cell<Spent>,
+    ) -> View<'b>
+    where
+        'a: 'b,
+    {
+        View {
+            tree: self.tree,
+            map: self.map,
+            scratch: RefCell::new(scratch),
+            surfaces: self.surfaces,
+            buildings: self.buildings,
+            link_at: self.link_at,
+            turns: self.turns,
+            meter: self.meter,
+            spent,
+            lines: RefCell::new(lines),
             ground: self.ground,
         }
     }
 }
 
-/// The town as the walk skill's questions read it ([`Town::view`]).
+/// Walkers' lines of corners as one view holds them, in walker order (N17b): all of them, or a thread's run of them
+/// and the lines it found for walkers that had none (joined to the rest after the tick's skills).
+pub enum Lines<'a> {
+    All(&'a mut Vec<(Id, Line)>),
+    Part(&'a mut [(Id, Line)], &'a mut Vec<(Id, Line)>),
+}
+
+impl Lines<'_> {
+    fn get_mut(&mut self, id: Id) -> Option<&mut Line> {
+        match self {
+            Lines::All(v) => match v.binary_search_by_key(&id, |e| e.0) {
+                Ok(i) => Some(&mut v[i].1),
+                Err(_) => None,
+            },
+            Lines::Part(kept, new) => match kept.binary_search_by_key(&id, |e| e.0) {
+                Ok(i) => Some(&mut kept[i].1),
+                Err(_) => new.iter_mut().find(|e| e.0 == id).map(|e| &mut e.1),
+            },
+        }
+    }
+
+    fn insert(&mut self, id: Id, l: Line) {
+        match self {
+            Lines::All(v) => match v.binary_search_by_key(&id, |e| e.0) {
+                Ok(i) => v[i].1 = l,
+                Err(i) => v.insert(i, (id, l)),
+            },
+            Lines::Part(kept, new) => match kept.binary_search_by_key(&id, |e| e.0) {
+                Ok(i) => kept[i].1 = l,
+                Err(_) => match new.iter_mut().find(|e| e.0 == id) {
+                    Some(e) => e.1 = l,
+                    None => new.push((id, l)),
+                },
+            },
+        }
+    }
+}
+
+/// The town as the walk skill's questions read it ([`Town::view`], [`Shared::view`]).
 pub struct View<'a> {
     pub tree: &'a Tree,
-    map: RefCell<&'a mut Map>,
+    map: &'a Map,
+    scratch: RefCell<&'a mut Scratch>,
     surfaces: &'a BTreeMap<Id, Surface>,
     buildings: &'a [Building],
     link_at: &'a BTreeMap<Id, (usize, usize)>,
     turns: Option<&'a Turns>,
     meter: Option<fn() -> u64>,
     spent: &'a Cell<Spent>,
-    lines: RefCell<&'a mut BTreeMap<Id, Line>>,
+    lines: RefCell<Lines<'a>>,
     ground: Id,
 }
 
 /// A corner is reached within this, µm.
 pub const AT_CORNER: i64 = 100_000;
+/// A line's corner is aimed at this far out from its turn, µm (#3473): twice [`AT_CORNER`], so the walker, turning
+/// within [`AT_CORNER`] of it for the next corner, is on the outer side of the edge it went round.
+pub const ROUND: i64 = 2 * AT_CORNER;
 /// A walker pushed further than this off the stretch of its line it walks is searched for again, µm.
 pub const OFF_LINE: i64 = 1_000_000;
 /// A straight walk to the next corner is checked once in this many of a walker's corner calls (a second at 20 ticks
@@ -662,6 +1144,27 @@ enum Why {
     Off,
     End,
     Blocked,
+}
+
+/// A unit length for directions (x and z), in millionths.
+const UNIT: i128 = 1_000_000;
+
+/// The way out from the turn at `c` on the line `a`-`c`-`n` (x and z, [`UNIT`] long): away from the inside of the
+/// turn, where the edge it goes round lies. `None` where the line goes on straight or doubles back.
+fn outward(a: [i64; 2], c: [i64; 2], n: [i64; 2]) -> Option<[i128; 2]> {
+    let unit = |v: [i128; 2]| {
+        let l = (v[0] * v[0] + v[1] * v[1]).isqrt();
+        (l > 0).then(|| [v[0] * UNIT / l, v[1] * UNIT / l])
+    };
+    let i = unit([i128::from(c[0] - a[0]), i128::from(c[1] - a[1])])?;
+    let o = unit([i128::from(n[0] - c[0]), i128::from(n[1] - c[1])])?;
+    let v = [i[0] - o[0], i[1] - o[1]];
+    // Under a thousandth of a radian of turn, or a full turn back: no side to move out to.
+    let (l2, tiny) = (v[0] * v[0] + v[1] * v[1], (UNIT / 1_000).pow(2));
+    if l2 < tiny || l2 > 4 * UNIT * UNIT - tiny {
+        return None;
+    }
+    unit(v)
 }
 
 fn sq(v: i64) -> i128 {
@@ -779,7 +1282,7 @@ pub fn in_passage(
 /// walk, N4's links for doorways and stairs.
 struct Grounds<'a> {
     tree: &'a Tree,
-    map: &'a mut Map,
+    map: MapRef<'a>,
     surfaces: &'a BTreeMap<Id, Surface>,
     buildings: &'a [Building],
     ground: Id,
@@ -787,10 +1290,33 @@ struct Grounds<'a> {
     boxes: OnceCell<Vec<Option<[i64; 4]>>>,
 }
 
+/// N5's map as the spot tables search it: the town's own (its searches keep their caches), or a view's shared map
+/// searched with the view's own scratch (N17b, #3255; C15's [`View::stand_near`]).
+enum MapRef<'a> {
+    Own(&'a mut Map),
+    Shared(&'a Map, &'a mut Scratch),
+}
+
+impl MapRef<'_> {
+    fn get(&self) -> &Map {
+        match self {
+            MapRef::Own(m) => m,
+            MapRef::Shared(m, _) => m,
+        }
+    }
+
+    fn route(&mut self, tree: &Tree, from: Spot, to: Spot, has: Mask) -> Result<Route, Refusal> {
+        match self {
+            MapRef::Own(m) => m.route(tree, from, to, has),
+            MapRef::Shared(m, sc) => m.route_in(sc, tree, from, to, has),
+        }
+    }
+}
+
 impl Ground for Grounds<'_> {
     fn stand(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
-        let s = self.map.spot(node, p)?;
-        let w = self.map.world(s.piece, s.at);
+        let s = self.map.get().spot(node, p)?;
+        let w = self.map.get().world(s.piece, s.at);
         let um = |v: [i64; 3]| Vec3::new(v[0] * 1000, v[1] * 1000, v[2] * 1000);
         Some((um(s.at), um(w)))
     }
@@ -821,8 +1347,8 @@ impl Ground for Grounds<'_> {
         {
             return Some(flat(a, b));
         }
-        let from = self.map.spot_near(an, a, AT_EDGE)?;
-        let to = self.map.spot_near(bn, b, AT_EDGE)?;
+        let from = self.map.get().spot_near(an, a, AT_EDGE)?;
+        let to = self.map.get().spot_near(bn, b, AT_EDGE)?;
         let r = self.map.route(self.tree, from, to, HANDS).ok()?;
         Some(r.length as i64 * 1000)
     }
@@ -853,7 +1379,7 @@ impl World for Town {
         } = self;
         let mut g = Grounds {
             tree,
-            map,
+            map: MapRef::Own(map),
             surfaces,
             buildings,
             ground: *ground,
@@ -936,46 +1462,61 @@ impl World for Town {
     }
 
     fn plan(&mut self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
-        let (legs, ground) = plan_on(
-            &mut self.map,
+        let (legs, ground, squares) = plan_on(
+            &mut MapRef::Own(&mut self.map),
             &self.tree,
             &self.link_at,
             &self.buildings,
+            self.ground,
             body,
             node,
             goal,
         )?;
         self.planned.insert(body.id, ground);
+        self.planned_squares.insert(body.id, squares);
         Ok(legs)
     }
 }
 
 /// The ground a route crosses, each node with its version then (G3).
 type Crossed = Vec<(Id, u64)>;
+/// The open ground's squares a route crosses, in order (N17b).
+type Squares = Vec<(i32, i32)>;
 
-/// The legs from where `body` stands to `goal` (µm, `node`'s frame) over `map`, and the ground the route crosses with
-/// its versions: [`Town::plan`]'s, shared with [`View::plan`].
+/// The legs from where `body` stands to `goal` (µm, `node`'s frame) over `map`, the ground the route crosses with its
+/// versions, and the open ground's squares it crosses (N17b): [`Town::plan`]'s, shared with [`View::plan`].
+#[allow(clippy::too_many_arguments)]
 fn plan_on(
-    map: &mut Map,
+    map: &mut MapRef,
     tree: &Tree,
     link_at: &BTreeMap<Id, (usize, usize)>,
     buildings: &[Building],
+    open: Id,
     body: &Body,
     node: Id,
     goal: Vec3,
-) -> Result<(Vec<Leg>, Crossed), Refusal> {
+) -> Result<(Vec<Leg>, Crossed, Squares), Refusal> {
     let here = node_of(body);
     let from = map
+        .get()
         .spot_near(here, body.pose.position, AT_EDGE)
         .ok_or_else(|| refusal("off-ground", show(here)))?;
     let to = map
+        .get()
         .spot(node, goal)
         .ok_or_else(|| refusal("destination-gone", show(node)))?;
     let route = map.route(tree, from, to, HANDS)?;
     let mut ground: Vec<(Id, u64)> = Vec::new();
+    let mut squares: Vec<(i32, i32)> = Vec::new();
     for p in route.patches() {
         if ground.last().map(|l| l.0) != Some(p.node) {
             ground.push((p.node, p.version));
+        }
+        if p.node == open
+            && let Some(sq) = p.square
+            && squares.last() != Some(&sq)
+        {
+            squares.push(sq);
         }
     }
     let (mut legs, mut on, mut at) = (Vec::new(), here, body.pose.position);
@@ -1001,7 +1542,7 @@ fn plan_on(
         to: goal,
         link: None,
     });
-    Ok((legs, ground))
+    Ok((legs, ground, squares))
 }
 
 impl<'a> View<'a> {
@@ -1061,7 +1602,7 @@ impl<'a> View<'a> {
         let node = node_of(body);
         let p = [body.pose.position.x, body.pose.position.z];
         let mut lines = self.lines.borrow_mut();
-        let why = match lines.get_mut(&body.id) {
+        let why = match lines.get_mut(body.id) {
             Some(l) if l.node == node && l.to == to => match l.follow(p) {
                 Some(why) => why,
                 None => {
@@ -1095,15 +1636,13 @@ impl<'a> View<'a> {
     /// Where a body may stand within `reach` of `at` (µm, `node`'s frame) to act there, for `from` (C15, #3447):
     /// [`crate::spots::within`] over this town's ground.
     pub fn stand_near(&self, node: Id, at: Vec3, reach: i64, from: Option<&Body>) -> Option<Vec3> {
-        let (map, from) = (
-            &mut **self.map.borrow_mut(),
-            from.map(|b| (node_of(b), b.pose.position)),
-        );
+        let from = from.map(|b| (node_of(b), b.pose.position));
+        let mut scratch = self.scratch.borrow_mut();
         let (tree, surfaces, buildings, ground) =
             (self.tree, self.surfaces, self.buildings, self.ground);
         let mut g = Grounds {
             tree,
-            map,
+            map: MapRef::Shared(self.map, &mut scratch),
             surfaces,
             buildings,
             ground,
@@ -1116,17 +1655,18 @@ impl<'a> View<'a> {
     /// way (C17, #3453): [`Town::plan`]'s route, the ground it crosses not recorded (a form's walk is not planned again
     /// by the ladder).
     pub fn plan(&self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
-        let map = &mut **self.map.borrow_mut();
+        let mut scratch = self.scratch.borrow_mut();
         plan_on(
-            map,
+            &mut MapRef::Shared(self.map, &mut scratch),
             self.tree,
             self.link_at,
             self.buildings,
+            self.ground,
             body,
             node,
             goal,
         )
-        .map(|(legs, _)| legs)
+        .map(|(legs, _, _)| legs)
     }
 
     /// Each node's surface a body stands on.
@@ -1174,7 +1714,7 @@ impl<'a> View<'a> {
         if self.clear(body, [to.x, to.z], 0)? {
             return Ok(line(vec![p, [to.x, to.z]], true));
         }
-        let mut map = self.map.borrow_mut();
+        let map = self.map;
         let (Some(from), Some(goal)) = (
             map.spot_near(node, body.pose.position, AT_EDGE),
             // A link's near end lies on its piece's edge, within the grid's rounding.
@@ -1183,7 +1723,7 @@ impl<'a> View<'a> {
             return Err(refusal("off-ground", show(node)));
         };
         let t0 = self.now();
-        let r = map.route(self.tree, from, goal, HANDS);
+        let r = map.route_in(&mut self.scratch.borrow_mut(), self.tree, from, goal, HANDS);
         let t1 = self.now();
         self.spend(|s| {
             s.searches += 1;
@@ -1218,7 +1758,38 @@ impl<'a> View<'a> {
         }
         let mut points = vec![p];
         points.extend(corners.iter().map(|c| [c[0] * 1000, c[1] * 1000]));
+        self.round(node, &mut points);
         Ok(line(points, whole))
+    }
+
+    /// Each corner between a line's first and last point, moved [`ROUND`] out from its turn (or [`AT_CORNER`], where
+    /// that is off the surface), so a walker that reaches it and turns for the next is clear of the edge it went round
+    /// (#3473). Otherwise a square corner (N11a's steep cells, cut whole) stops a walker: it comes within
+    /// [`AT_CORNER`] of the corner, turns for the next, walks into the face beside it, and slides ever less along it.
+    fn round(&self, node: Id, points: &mut [[i64; 2]]) {
+        let Some(s) = self.surfaces.get(&node) else {
+            return;
+        };
+        let line = points.to_vec();
+        for k in 1..line.len().saturating_sub(1) {
+            let Some(u) = outward(line[k - 1], line[k], line[k + 1]) else {
+                continue;
+            };
+            let c = line[k];
+            for r in [ROUND, AT_CORNER] {
+                let o = [
+                    c[0] + (u[0] * i128::from(r) / UNIT) as i64,
+                    c[1] + (u[1] * i128::from(r) / UNIT) as i64,
+                ];
+                let frame = Frame { node, slot: None };
+                if s.place(node, frame, Vec3::new(o[0], 0, o[1]), Quat::IDENTITY)
+                    .is_ok()
+                {
+                    points[k] = o;
+                    break;
+                }
+            }
+        }
     }
 
     /// A link taken in turns as the walk reads it ([`Town::read_link`]).
@@ -1246,10 +1817,12 @@ impl Town {
             return Err(refusal("way-empty", "a walk with no point and no goal"));
         }
         let (mut legs, mut at, mut ground) = (Vec::new(), *body, Vec::new());
+        let mut squares = Vec::new();
         for (node, p) in stops {
             legs.extend(self.plan(&at, node, p)?);
             // The ground the whole walk crosses (G3): each route's, in order.
             ground.extend(self.planned.remove(&body.id).unwrap_or_default());
+            squares.extend(self.planned_squares.remove(&body.id).unwrap_or_default());
             at = self
                 .surfaces
                 .get(&node)
@@ -1257,6 +1830,7 @@ impl Town {
                 .place(body.id, Frame { node, slot: None }, p, Quat::IDENTITY)?;
         }
         self.planned.insert(body.id, ground);
+        self.planned_squares.insert(body.id, squares);
         Ok((legs, pts))
     }
 

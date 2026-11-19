@@ -6,6 +6,8 @@
 import init, { StreamPlayer, readPointer } from 'replica';
 import { decode, encode } from 'cborg';
 import type { NodeRec, PartRec, Pointer, SaidRec } from './source.ts';
+import { happenedInPart } from '../sound/record.ts';
+import { skyFields } from '../sky/record.ts';
 
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string };
 const post = (m: Msg, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
@@ -23,7 +25,7 @@ async function get(url: URL): Promise<Uint8Array | null> {
 
 function readPtr(bytes: Uint8Array): Pointer & { header: string } {
   const p = JSON.parse(readPointer(bytes));
-  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, header: p.header };
+  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header };
 }
 
 /** The reference in a `{21: id}` value, as the page keys it, or null. */
@@ -59,6 +61,8 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(25)) rec.tiles = (f.get(25) as unknown[][]).map((t) => [num(t[0]), num(t[1]), t[2] as Uint8Array, t[3] as Uint8Array]);
   if (f.has(NAME)) rec.name = refOf(f.get(NAME));
   if (f.has(DESCRIPTION)) rec.description = refOf(f.get(DESCRIPTION));
+  const sky = skyFields(f); // V19: the world node's day, night and weather
+  if (sky) rec.sky = sky;
   return rec;
 }
 
@@ -79,13 +83,21 @@ async function run(stream: URL) {
     if (!b) return;
     for (const [id, w] of decode(b, { useMaps: true }) as [IdValue, Uint8Array][]) words.set(key(id), text.decode(w));
   };
+  // A still world's "quiet until" (V5b) holds once every part before it is played, and goes on holding when a part
+  // is written after it (the writer then drops it from the pointer): the page's caught-up time never steps back.
+  let quiet: number | null = null;
+  const tell = () => {
+    const q = ptr.quietUntil;
+    if (q !== null && (ptr.newest === null || Number(player.next()) > ptr.newest)) quiet = Math.max(quiet ?? q, q);
+    post({ t: 'pointer', p: { ...ptr, quietUntil: quiet } });
+  };
   const poll = async () => {
     if (busy) return;
     busy = true;
     try {
       const b = await get(new URL('pointer', stream));
       if (b) ptr = readPtr(b);
-      post({ t: 'pointer', p: ptr });
+      tell();
       while (ptr.newest !== null && Number(player.next()) <= ptr.newest) {
         const n = Number(player.next());
         const bytes = await get(new URL(String(n), stream));
@@ -106,6 +118,8 @@ async function run(stream: URL) {
           }
         }
         const samples = JSON.parse(player.samples());
+        let happened: PartRec['happened'] = [];
+        try { happened = happenedInPart(bytes); } catch { /* sounds only: the part played */ }
         const events = decode(player.events(), { useMaps: true }) as Map<number, unknown>[];
         const said: SaidRec[] = [];
         for (const e of events) {
@@ -123,7 +137,8 @@ async function run(stream: URL) {
           if (r.name) r.name = words.get(r.name) ?? null;
           if (r.description) r.description = words.get(r.description) ?? null;
         }
-        post({ t: 'part', p: { number: played.number, from: played.from, to: played.to, nodes, removed, samples, hash: played.hash, said } }, transfer);
+        post({ t: 'part', p: { number: played.number, from: played.from, to: played.to, nodes, removed, samples, hash: played.hash, said, happened } }, transfer);
+        if (Number(player.next()) > (ptr.newest ?? -1)) tell();
       }
     } catch (e) {
       post({ t: 'error', message: String((e as Error)?.message ?? e) });

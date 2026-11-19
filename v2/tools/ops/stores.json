@@ -1,7 +1,14 @@
 {
-  "about": "Engine v2 O20 (#2812): every store that is not in a world's log, its path under the machine's folder, its kind and how it is copied. A task that adds a store adds a line.",
+  "about": "Engine v2 O20 (#2812): every store that is not in a world's log, its path under the machine's data folder (<world> for each world's folder), its kind, how it is copied and at most how often it ships when it changed (ship_s, at most 300). A task that adds a store adds a line; v2/tools/ops/backup/tests/stores.rs fails on a file no line covers. Runbook: v2/docs/runbook/restore-stores.md.",
   "stores": [
-    { "name": "usage", "task": "O21 (#3325)", "path": "ops/usage.sqlite", "kind": "sqlite", "copy": "sqlite-backup", "about": "per Soul and day: acts, refusals, latest client; the owning account id (operator's store only)" },
-    { "name": "health-history", "task": "O21 (#3325)", "path": "ops/health-history/", "kind": "folder", "copy": "files", "about": "bounded history of the health page's numbers, at most 64 MiB" }
+    { "name": "accounts", "task": "W1 (#2704); R13's mailbox (#2753) is a table in it", "owner": "directoryd", "path": "directory/accounts.sqlite", "kind": "sqlite", "copy": "owner-backup", "ship_s": 270, "about": "each sign-in's account and principal; the owner's mailbox (R13's mailbox_v1 table). The owner holds the file exclusively, so it hands the copy over (Store::backup)" },
+    { "name": "pairing", "task": "W2 (#2705)", "owner": "directoryd", "path": "directory/pairing.sqlite", "kind": "sqlite", "copy": "sqlite-backup", "ship_s": 270, "about": "pairing requests and each paired Soul's token hash, never a token" },
+    { "name": "gateway-tokens", "task": "W2 (#2705)", "owner": "directoryd", "path": "directory/gateway-tokens", "kind": "file", "copy": "file", "ship_s": 270, "about": "the gateway's <grant> <sha-256> lines, written whole from the pairing store and renamed into place" },
+    { "name": "text", "task": "K16 (#2677), V1b (#3361)", "owner": "worldd", "path": "worlds/<world>/log.text/", "kind": "text-store", "copy": "text-store", "ship_s": 270, "about": "every word of free text and every upload (uploads/<reference>, its record in text), with the removal list" },
+    { "name": "removals", "task": "K16 (#2677)", "owner": "worldd", "path": "worlds/<world>/log.text/removed", "kind": "file", "copy": "append", "ship_s": 1, "about": "the text store's removal list, append-only and never words: shipped within a second of a change, so a removal is not lost with the words' five minutes" },
+    { "name": "log", "task": "K4 (#2668), O3 (#2732)", "owner": "worldd", "path": "worlds/<world>/log", "kind": "log", "copy": "o3", "about": "the world's log: O3 ships it as pieces, not this list" },
+    { "name": "checkpoints", "task": "K5, O3 (#2732)", "owner": "worldd", "path": "worlds/<world>/ckpt/", "kind": "log", "copy": "o3", "about": "the log's checkpoints: O3 ships them" },
+    { "name": "usage", "task": "O21 (#3325)", "owner": "ops", "path": "ops/usage.sqlite", "kind": "sqlite", "copy": "sqlite-backup", "ship_s": 270, "about": "per Soul and day: acts, refusals, latest client; the owning account id (operator's store only)" },
+    { "name": "health-history", "task": "O21 (#3325)", "owner": "ops", "path": "ops/health-history/", "kind": "folder", "copy": "files", "ship_s": 270, "about": "bounded history of the health page's numbers, at most 64 MiB" }
   ]
 }

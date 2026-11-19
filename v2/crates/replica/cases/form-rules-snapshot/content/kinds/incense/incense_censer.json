@@ -1,0 +1,59 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:incense_censer",
+  "owner": "thing",
+  "state": {
+    "lit": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 550], "yaw_mdeg": 180000 },
+    "tip": { "role": "contact", "at_mm": [0, 330, 0] }
+  },
+  "geometry": { "bounds_mm": [220, 340, 220] },
+  "forms": {
+    "light": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "lit", "is": false },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": "tip" }
+      ],
+      "steps": [{ "step": "move", "move": "touch", "at": "tip" }],
+      "effects": [{ "change": "set", "field": "lit", "to": true, "event": "lit" }]
+    },
+    "put_out": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "lit", "is": true },
+        { "need": "hand", "free": true },
+        { "need": "within_reach", "point": "tip" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "tip" }],
+      "effects": [{ "change": "set", "field": "lit", "to": false, "event": "put_out" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:incense_censer",
+    "table": [
+      { "part": "light", "field": "lit", "do": "tint", "at": { "true": "#ff8a3d", "false": "#5a4636" } },
+      { "part": "light", "field": "lit", "do": "glow", "at": { "true": 600, "false": 0 } },
+      { "part": "light", "field": "lit", "do": "steam", "at": { "true": 300, "false": 0 } }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"cyl","at":[0,20,0],"r":100,"h":40,"segments":16,"tint":"brass"},{"kind":"cyl","at":[0,90,0],"r":70,"h":100,"segments":16,"tint":"brass"},{"kind":"cyl","at":[0,150,0],"r":80,"h":20,"segments":16,"tint":"ash"},{"kind":"cyl","at":[0,210,0],"r":6,"h":120,"segments":6,"tint":"stick"},{"kind":"cyl","at":[0,290,0],"r":18,"h":50,"segments":8,"tint":"ember","role":"light"}],"palette":{"brass":"#a8823a","ash":"#bdb6a8","stick":"#6b3e26","ember":"#5a4636"},"tags":["incense","ritual","object"]}
+  },
+  "text": {
+    "card": "An incense censer: light it by hand; it smoulders until put out.",
+    "ritual": "ritual",
+    "incense": "incense",
+    "censer": "censer",
+    "howto_burn": "With a hand free, light the tip; it smoulders until it is put out."
+  },
+  "card": { "text": "card", "category": "ritual", "synonyms": ["incense", "censer"] },
+  "howtos": {
+    "burn": { "text": "howto_burn", "steps": [{ "form": "light" }] }
+  }
+}

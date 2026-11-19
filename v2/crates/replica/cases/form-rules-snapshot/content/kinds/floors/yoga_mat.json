@@ -1,0 +1,44 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:yoga_mat",
+  "owner": "thing",
+  "links": {"yogi":{"n":1,"from":"soul","most":1,"audience":{"rule":"everyone"}}},
+  "points": {"middle":{"role":"stand","at_mm":[0,0,0]}},
+  "geometry": {"bounds_mm":[700,50,1800]},
+  "forms": {
+    "yoga": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"unlinked","link":"yogi"},{"need":"hand","free":true}],
+      "steps": [{"step":"walk_to","point":"middle"},{"step":"move","move":"stretch"}],
+      "effects": [{"change":"link","link":"yogi","from":"actor","event":"began_yoga"}]
+    },
+    "finish": {
+      "who": {"link":"yogi"},
+      "starts": "act",
+      "needs": [],
+      "steps": [{"step":"move","move":"stretch"}],
+      "effects": [{"change":"unlink","link":"yogi","from":"actor","event":"finished_yoga"}]
+    }
+  },
+  "areas": {"top":{"allows":{"sit":"on","lie":"on","stand":"on"}}},
+  "motion": {"how":"one_hand"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:yoga_mat",
+    "shape": {
+      "round": 0,
+      "shapes": [{"kind":"box","at":[0,25,0],"size":[650,50,1800],"color":"#6a8f6a"}],
+      "tags": ["gym","sport","yoga-mat"]
+    }
+  },
+  "text": {
+    "card": "An exercise mat rolled out on the lawn: do yoga on it, one Soul at a time.",
+    "sport": "sport",
+    "exercise": "exercise",
+    "mat": "mat",
+    "howto_yoga": "Do yoga on it, then finish."
+  },
+  "card": {"text":"card","category":"sport","synonyms":["exercise","mat"]},
+  "howtos": {"yoga":{"text":"howto_yoga","steps":[{"form":"yoga"},{"form":"finish"}]}}
+}
