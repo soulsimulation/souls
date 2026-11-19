@@ -241,6 +241,12 @@ impl Bodies {
             name: "planner-town",
             detail: e,
         })?;
+        Bodies::with_planner(town, copy, tick)
+    }
+
+    /// No bodies yet, over `town`, with `copy` (built by [`Town::copy`]) the planner's town (K18b): a world builds the
+    /// copy with its town, before its clock and watchdog start, as a large town takes a while to build.
+    pub fn with_planner(town: Town, copy: Town, tick: Micros) -> R<Bodies> {
         let planner = Thread::spawn(Planner::new(copy)).map_err(|e| Refusal {
             name: "planner-thread",
             detail: e.to_string(),

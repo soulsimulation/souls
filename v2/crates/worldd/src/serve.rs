@@ -91,6 +91,8 @@ struct Built {
     header: replica::effects::Header,
     part: Vec<u8>,
     town: Town,
+    /// The planner's copy of the town (K18b), built with it before the clock and its watchdog start.
+    planner: Town,
     ground: Id,
     root: Id,
 }
@@ -126,10 +128,14 @@ fn build(facts: &str) -> R<Built> {
     let next = im.tree.to_state().next;
     let doors = Doors::new(header.clone(), im.rules, next);
     let town = Town::new(im.tree, ground, doors).map_err(|e| format!("the town: {e:?}"))?;
+    let planner = town
+        .copy()
+        .map_err(|e| format!("the planner's town: {e:?}"))?;
     Ok(Built {
         header,
         part,
         town,
+        planner,
         ground,
         root,
     })
@@ -305,6 +311,7 @@ fn souls(meta: &Json) -> R<Vec<(Id, i64, i64)>> {
 /// The world's bodies: each Soul on the open ground, where the log last had it on a restart.
 fn bodies(
     town: Town,
+    planner: Town,
     ground: Id,
     souls: &[(Id, i64, i64)],
     placed: &Placed,
@@ -326,7 +333,7 @@ fn bodies(
             Quat::IDENTITY,
         )?);
     }
-    let mut b = Bodies::new(town, 50_000)?;
+    let mut b = Bodies::with_planner(town, planner, 50_000)?;
     for a in at {
         b.add_body_at(family.clone(), a, placed)?;
     }
@@ -392,9 +399,9 @@ fn serve(args: &[String]) -> R<()> {
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
     cfg.health = Some(dir.join("health.json"));
     cfg.synced = Some(tx);
-    let (town, ground) = (built.town, built.ground);
+    let (town, planner, ground) = (built.town, built.planner, built.ground);
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
-        bodies(town, ground, &souls, placed)
+        bodies(town, planner, ground, &souls, placed)
     }));
     let empty = Replica::start(built.header.stored()).map_err(refusal)?;
     let world = answers::start(empty.frozen(), rules, store, cfg).map_err(refusal)?;
