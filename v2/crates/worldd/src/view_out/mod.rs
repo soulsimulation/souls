@@ -30,11 +30,13 @@
 //!    audience, as a snapshot holds them (R3 rule 6), so the key must be the zone's root (`stream-start-node`); a node
 //!    in motion is refused as `stream-start-moving` (a fork has removed its bodies), and a link whose owning end is
 //!    not in the view is left out.
+//! 9. **A subtree carried in goes with its arrive.** A view that did not hold an arrival's leave writes the subtree as
+//!    it was in flight, and where it lands, just before the arrive (T7 rule 4). The writer puts that record in the
+//!    part that holds the arrive (`replica::stream` rule 7), and its copy lands it as a reader does. A carried record
+//!    that names no destination (views revision 1), or one with no arrive after it (a view of another audience than
+//!    the arrival's), is refused as `stream-carried`.
 //!
-//! Not here: serving (V2), history (V3), snapshot chunks for a reader that joins late, the words path (W4), and a
-//! subtree carried in on an arrival whose leave the view did not hold (T7 rule 4): its record holds the subtree as it
-//! was in flight but not where it lands, so no reader could land it, and the writer refuses it as `stream-carried`.
-//! A view of a zone's root that starts with the zone holds every leave, so it never writes one.
+//! Not here: serving (V2), history (V3), snapshot chunks for a reader that joins late, and the words path (W4).
 
 #[cfg(test)]
 mod tests;
@@ -57,7 +59,7 @@ use replica::ids::Id;
 use replica::pose::Pose;
 use replica::stream::{self, HASH_EVERY, POINTER, Pointer, StreamPart};
 use replica::time::{Micros, TimeEffect};
-use replica::views::Key;
+use replica::views::{Carried, Key};
 use replica::world_model::{Audience, End};
 
 use crate::views::{Delivery, Subscriber};
@@ -107,6 +109,9 @@ pub struct Writer {
     /// The open stretch's declared gaps (rule 7), and the sequence the view's next record would have with none.
     gaps: Vec<(u64, u64)>,
     expect: u64,
+    /// A carried record waiting for its arrive, and the open stretch's carried records (rule 9).
+    lead: Option<(u64, Value)>,
+    carried: Vec<Value>,
     last_to: Option<Micros>,
     written: Written,
 }
@@ -136,6 +141,8 @@ impl Writer {
             pending: Vec::new(),
             gaps: Vec::new(),
             expect: 0,
+            lead: None,
+            carried: Vec::new(),
             last_to: None,
             written: Written::default(),
         };
@@ -300,7 +307,13 @@ impl Writer {
         } else {
             Vec::new()
         };
-        w.write(at.div_euclid(stream::PERIOD_US), records, gaps, true)?;
+        w.write(
+            at.div_euclid(stream::PERIOD_US),
+            records,
+            gaps,
+            Vec::new(),
+            true,
+        )?;
         w.expect = state.next;
         Ok(w)
     }
@@ -329,11 +342,21 @@ impl Writer {
             let Value::Map(rm) = &r else {
                 return Err(fault("stream-frame", "a record is a map"));
             };
-            if rm.contains_key(&0) {
-                return Err(fault(
-                    "stream-carried",
-                    "a carried subtree (an arrival) does not name where it lands (T7's record has no destination)",
-                ));
+            if let Some(c) = Carried::read(&r)? {
+                if c.pose.is_none() {
+                    return Err(fault(
+                        "stream-carried",
+                        "a carried subtree (an arrival) does not name where it lands (a views revision 1 record)",
+                    ));
+                }
+                if self.lead.is_some() {
+                    return Err(fault(
+                        "stream-carried",
+                        "a carried subtree lands only with its arrive",
+                    ));
+                }
+                self.lead = Some((c.sequence, r));
+                continue;
             }
             let at = match rm.get(&2) {
                 Some(Value::Uint(u)) => i64::try_from(*u).unwrap_or(i64::MAX),
@@ -360,6 +383,18 @@ impl Writer {
                 self.gaps.push((self.expect, seq - self.expect));
             }
             self.expect = seq + 1;
+            if let Some((s, c)) = self.lead.take() {
+                if s != seq {
+                    return Err(fault(
+                        "stream-carried",
+                        format!(
+                            "the subtree carried in at {s} has no arrive (record {seq} came next)"
+                        ),
+                    ));
+                }
+                // Into the part that holds its arrive (rule 9).
+                self.carried.push(c);
+            }
             self.pending.push(r);
         }
         Ok(())
@@ -367,6 +402,12 @@ impl Writer {
 
     /// Writes the open stretch, if any.
     pub fn flush(&mut self) -> R<()> {
+        if let Some((s, _)) = self.lead {
+            return Err(fault(
+                "stream-carried",
+                format!("the subtree carried in at {s} has no arrive"),
+            ));
+        }
         self.cut()
     }
 
@@ -395,14 +436,23 @@ impl Writer {
         };
         let records = std::mem::take(&mut self.pending);
         let gaps = std::mem::take(&mut self.gaps);
+        let carried = std::mem::take(&mut self.carried);
         if records.is_empty() {
             return Ok(());
         }
-        self.write(w, records, gaps, false)
+        self.write(w, records, gaps, carried, false)
     }
 
-    /// Writes one part of `records` in world-time window `w`, carrying the state hash when due or when `hashed`.
-    fn write(&mut self, w: i64, records: Vec<Value>, gaps: Vec<(u64, u64)>, hashed: bool) -> R<()> {
+    /// Writes one part of `records` in world-time window `w`, with the carried records its arrives land (rule 9),
+    /// carrying the state hash when due or when `hashed`.
+    fn write(
+        &mut self,
+        w: i64,
+        records: Vec<Value>,
+        gaps: Vec<(u64, u64)>,
+        carried: Vec<Value>,
+        hashed: bool,
+    ) -> R<()> {
         let first = match records.first() {
             Some(Value::Map(m)) => match m.get(&1) {
                 Some(Value::Uint(s)) => *s,
@@ -419,26 +469,26 @@ impl Writer {
             .into(),
         ))
         .map_err(|e| fault("encoding", e.to_string()))?;
-        // Decoded once, and applied to the view's copy, before it is published (rule 2).
-        let part = Part::read(&raw)?;
-        self.copy.apply_gaps(&part, &gaps)?;
-        let number = self.written.parts;
-        let hash = if hashed || (number + 1).is_multiple_of(HASH_EVERY) {
-            Some(replica::hash::state_hash(self.copy.tree())?.to_bytes())
-        } else {
-            None
-        };
         let (from, to) = (w * stream::PERIOD_US, (w + 1) * stream::PERIOD_US);
-        let sp = StreamPart {
-            number,
+        let mut sp = StreamPart {
+            number: self.written.parts,
             from,
             to,
             first,
             entries,
             part: raw,
-            hash,
+            hash: None,
             gaps,
+            carried,
         };
+        // Decoded once, and applied to the view's copy, before it is published (rule 2).
+        let part = Part::read(&sp.part)?;
+        self.copy
+            .apply_view(&part, &sp.gaps, &sp.flights(&self.header)?)?;
+        let number = sp.number;
+        if hashed || (number + 1).is_multiple_of(HASH_EVERY) {
+            sp.hash = Some(replica::hash::state_hash(self.copy.tree())?.to_bytes());
+        }
         let bytes = sp.to_bytes()?;
         write_whole(&self.dir.join(number.to_string()), &bytes)?;
         self.written.parts += 1;

@@ -15,7 +15,7 @@
 //! µs, 5: leave within µs}`, a want as in a move (`replica::moves`): `{1: 1 every | 2 one | 3 named, 2: class number
 //! or resource name}`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::bodies::{Class, SkillShape, Want};
 use crate::effects::{Refusal, read_id};
@@ -298,6 +298,33 @@ impl Node {
     }
 }
 
+// --- Offers (Engine v2 E8, #2779) ------------------------------------------------------------------------------------
+
+/// An offer: a proposal of a two-role kind with the asker already in its role, asked of other bodies until it
+/// expires. `souls:offer {1: activity, 2: kind, 3: [body asked, ...], 4: expires µs, 5: the asker's body}`, one
+/// effect however many it asks. The bodies asked are resolved when it is written (T8): one who comes in later was not.
+pub const OFFER: &str = "souls:offer";
+/// An answer of no: `souls:offer-declined {1: offer, 2: the asker's body, 3: [the body that declined]}`.
+pub const OFFER_DECLINED: &str = "souls:offer-declined";
+/// No answer in time: `souls:offer-lapsed {1: offer, 2: the asker's body, 3: [body, ...]}`, the bodies that did not
+/// answer the offer, or the one whose accepted pair waited past its own expiry (then 4 is that pair's activity).
+pub const OFFER_LAPSED: &str = "souls:offer-lapsed";
+
+/// The bodies an offer's event is addressed to, for the queue of events addressed to a Soul (R4): an offer goes to
+/// each body asked, and a refusal or a lapse to the asker. `None` for any other event.
+pub fn addressed(name: &str, fields: &BTreeMap<u64, Value>) -> Option<BTreeSet<Id>> {
+    match (name, fields.get(&3), fields.get(&2)) {
+        (OFFER, Some(Value::Array(a)), _) => {
+            Some(a.iter().filter_map(|x| read_id(x).ok()).collect())
+        }
+        (OFFER_DECLINED | OFFER_LAPSED, _, Some(asker)) => {
+            Some(read_id(asker).into_iter().collect())
+        }
+        (OFFER | OFFER_DECLINED | OFFER_LAPSED, _, _) => Some(BTreeSet::new()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,6 +373,25 @@ mod tests {
             name(kind(&["a", "b"], 10_000_001)),
             "activity-leave-out-of-range"
         );
+    }
+
+    #[test]
+    fn an_offer_goes_to_those_asked_and_its_outcome_to_the_asker() {
+        let mut mint = Minter::new(Scope([0xe8; 16]));
+        let mut id = || mint.mint().expect("an id");
+        let (asker, a, b) = (id(), id(), id());
+        let offer = BTreeMap::from([
+            (1, id().to_value()),
+            (3, Value::Array(vec![a.to_value(), b.to_value()])),
+            (5, asker.to_value()),
+        ]);
+        assert_eq!(addressed(OFFER, &offer), Some(BTreeSet::from([a, b])));
+        let lapsed = BTreeMap::from([(2, asker.to_value()), (3, Value::Array(vec![a.to_value()]))]);
+        assert_eq!(
+            addressed(OFFER_LAPSED, &lapsed),
+            Some(BTreeSet::from([asker]))
+        );
+        assert_eq!(addressed("souls:said", &lapsed), None);
     }
 
     #[test]
