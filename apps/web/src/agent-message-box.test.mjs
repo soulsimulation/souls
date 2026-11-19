@@ -174,3 +174,23 @@ test('#1313: a Soul card says Thinking… while picked up and unanswered, then t
   assert.doesNotMatch(at({...base, latest: acked, doing: {phase: 'running', text: 'x', step: {n: 4, of: 3}}}), /step 4/, 'a step outside its plan is dropped');
   assert.doesNotMatch(at({...base, latest: null, doing: {phase: 'running', text: 'x'}}), /agent-message-act/, 'no message, no act line');
 });
+
+test('#3378 a message unanswered past 10 s suggests "check your messages", never while the agent is seen on it', () => {
+  const at = 1_000_000, sent = (extra = {}, latest = {}) => ({connected: false, lastSeenAt: null, latest: {id: 'm', text: 'come home', state: 'sent', sentAt: at, ...latest}, ...extra});
+  const hint = (inbox, now) => render(h(AgentMessageBoxView, {...props, kind: 'soul', name: 'Oriel', inbox, now})).includes('data-check-messages');
+  const line = render(h(AgentMessageBoxView, {...props, kind: 'soul', name: 'Oriel', inbox: sent(), now: at + 10_001}));
+  assert.match(line, /If this is taking long, try telling Oriel&#x27;s agent &quot;check your messages&quot;\./);
+  // The threshold: not at 10 s, yes just past it.
+  assert.equal(hint(sent(), at + 10_000), false);
+  assert.equal(hint(sent(), at + 10_001), true);
+  // Each state that hides it: presence listening or working; picked up, thinking, acknowledged or under way.
+  assert.equal(hint(sent({presence: 'listening'}), at + 60_000), false);
+  assert.equal(hint(sent({presence: 'working'}), at + 60_000), false);
+  assert.equal(hint(sent({}, {state: 'delivered'}), at + 60_000), false);
+  assert.equal(hint(sent({doing: {phase: 'thinking'}}, {state: 'delivered'}), at + 60_000), false);
+  assert.equal(hint(sent({}, {state: 'acknowledged'}), at + 60_000), false);
+  assert.equal(hint(sent({doing: {phase: 'running', text: 'walking home'}}), at + 60_000), false);
+  assert.equal(hint(sent({}, {state: 'acknowledged', progress: 'walking'}), at + 60_000), false);
+  // A god overlay is not a Soul's box.
+  assert.equal(render(h(AgentMessageBoxView, {...props, kind: 'god', inbox: sent(), now: at + 60_000})).includes('data-check-messages'), false);
+});
