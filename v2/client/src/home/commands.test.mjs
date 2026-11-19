@@ -175,6 +175,54 @@ test('A2 an active daemon is stopped and its final cursor/sequence bytes move, w
   assert.deepEqual(read(join(to, 'souls', A, 'runtime', 'daemon.json')), final);
 });
 
+test('A2 concurrent exports at the stale-lock boundary move once and put the token in exactly one transit folder', async (t) => {
+  const { dir, home } = fixture(t, [A]), first = join(dir, 'first'), second = join(dir, 'second');
+  const preload = join(dir, 'boundary.mjs');
+  writeFileSync(preload, `import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const read = fs.readFileSync, write = fs.writeFileSync;
+const stage = process.env.MOVE_STAGE, release = process.env.MOVE_RELEASE;
+const pause = () => { write(stage, 'ready'); const until = Date.now() + 10000; while (!fs.existsSync(release)) { if (Date.now() > until) throw Error('boundary timeout'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10); } };
+let reads = 0, copied = false;
+fs.readFileSync = (file, ...args) => {
+  let bytes, error; try { bytes = read(file, ...args); } catch (e) { error = e; }
+  if (process.env.MOVE_ROLE === 'contender' && String(file).endsWith('/daemon.lock') && ++reads === 2) pause();
+  if (error) throw error; return bytes;
+};
+fs.writeFileSync = (file, ...args) => {
+  const result = write(file, ...args);
+  if (process.env.MOVE_ROLE === 'winner' && !copied && String(file).startsWith(process.env.MOVE_OUT + '/credentials.json.')) { copied = true; pause(); }
+  return result;
+};
+syncBuiltinESMExports();\n`);
+  const launch = (role, out) => {
+    const stage = join(dir, `${role}.stage`), release = join(dir, `${role}.release`);
+    const child = spawn(process.execPath, ['--import', preload, CLI, 'export', A, '--out', out], { env: { PATH: process.env.PATH, BRAIN_MODE: 'fake', SOULS_HOME: home, MOVE_ROLE: role, MOVE_OUT: out, MOVE_STAGE: stage, MOVE_RELEASE: release } });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; }); child.stderr.on('data', (d) => { stderr += d; });
+    const job = { stage, release, child, ended: false };
+    job.done = new Promise((ok) => child.on('close', (code) => { job.ended = true; ok({ code, stdout, stderr }); }));
+    t.after(() => { if (!job.ended) { if (existsSync(dir)) writeFileSync(release, 'release'); child.kill(); } });
+    return job;
+  };
+  const until = async (ready) => { const end = Date.now() + 5000; while (!ready()) { assert.ok(Date.now() < end, 'lock-boundary synchronization timed out'); await new Promise((r) => setTimeout(r, 10)); } };
+  const contender = launch('contender', second);
+  await until(() => existsSync(contender.stage) || contender.ended);
+  assert.ok(existsSync(contender.stage), 'contender read the stale/absent daemon lock');
+  const winner = launch('winner', first);
+  await until(() => existsSync(winner.stage) || winner.ended);
+  writeFileSync(contender.release, 'release');
+  const c = await contender.done;
+  writeFileSync(winner.release, 'release');
+  const w = await winner.done;
+  const copies = [first, second].filter((out) => existsSync(join(out, 'credentials.json')) && read(join(out, 'credentials.json')).souls[A]?.eden.token === token(A));
+  assert.equal(copies.length, 1, 'only one transit folder receives the private token');
+  assert.equal([c, w].filter((r) => r.code === 0).length, 1, 'one export succeeds');
+  assert.equal(existsSync(join(home, 'souls', A)), false);
+  assert.equal(read(join(home, 'credentials.json')).souls[A], undefined);
+  for (const r of [c, w]) assert.ok(!r.stdout.includes(token(A).split('.')[1]), 'no token in either output');
+});
+
 test('A3 carried adopt: W2 asks for an owned grant, never new; connected refusal and force preserve local cursor and print no token', async (t) => {
   const dir = folder(t), home = join(dir, '.souls'), requests = [];
   let connected = false;

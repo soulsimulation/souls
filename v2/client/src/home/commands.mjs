@@ -83,11 +83,24 @@ async function stopForMove(home, soul) {
   }
 }
 
+// The whole move is exclusive before its first await. This lock is never reclaimed by another mover: an
+// interrupted move needs inspection rather than risking a second copy of its private token.
+function guardMove(folder) {
+  mkdirSync(folder, { recursive: true, mode: 0o700 });
+  const lock = join(folder, '.move.lock');
+  try { writeFileSync(lock, JSON.stringify({ pid: process.pid }), { flag: 'wx', mode: 0o600 }); }
+  catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+    throw new Refused('home-busy', 'another move holds this folder; an interrupted move needs inspection');
+  }
+  return () => { if (read(lock).pid === process.pid) rmSync(lock, { force: true }); };
+}
+
 // Keep another command from starting the daemon between its stop and the completed move.
 function holdMove(home, soul) {
   const rt = runtimeOf(home, soul);
   if (alive(read(rt.lock).pid)) throw new Refused('daemon-not-stopped', 'a daemon started before the move');
-  rmSync(rt.lock, { force: true });
+  // Never unlink a stale observation: a daemon may have acquired that path since we read it.
   try { writeFileSync(rt.lock, JSON.stringify({ pid: process.pid, soul }), { flag: 'wx', mode: 0o600 }); }
   catch { throw new Refused('home-busy', 'the Soul is already being started or moved'); }
   return () => { if (read(rt.lock).pid === process.pid) rmSync(rt.lock, { force: true }); };
@@ -132,70 +145,80 @@ export async function exportSoul(home, named, out) {
   const soul = chooseSoul(home, named), to = resolve(out);
   separate(home, to);
   if (existsSync(to)) throw new Refused('destination-exists', 'choose a new transit folder');
-  await stopForMove(home, soul);
-  const release = holdMove(home, soul);
+  const releaseMove = guardMove(home);
   try {
-    const creds = credsOf(home), entry = creds.souls[soul], config = configOf(home);
-    const row = listSouls(home).find((s) => s.id === soul), world = row.world;
-    if (!entry || !Object.values(entry).some((e) => typeof e?.token === 'string')) throw new Refused('no-token', 'this Soul has no token to move');
-    if ((statSync(join(home, CREDENTIALS)).mode & 0o777) !== 0o600) throw new Refused('credentials-too-open', 'run doctor before moving this Soul');
-    const { url, gateway, history } = config.worlds?.[world] ?? {};
-    if (typeof url !== 'string' || typeof gateway !== 'string') throw new Refused('no-gateway', 'the Soul has no configured world');
-    const files = filesIn(soulDir(home, soul));
-    mkdirSync(to, { recursive: true, mode: 0o700 });
-    copyFiles(files, soulDir(to, soul));
-    const transit = { souls: { [soul]: entry } };
-    put(join(to, CREDENTIALS), transit);
-    const meta = { id: soul, world, url, gateway, ...(typeof history === 'string' ? { history } : {}), name: row.name };
-    put(join(to, 'soul.json'), meta);
-    verifyFiles(files, soulDir(to, soul));
-    verifyFiles(files, soulDir(home, soul));
-    verifyCredentials(to, transit);
-    if (!equal(read(join(to, 'soul.json')), meta)) throw new Refused('copy-not-verified', 'the source is kept; metadata differs');
-    const current = credsOf(home);
-    if (!equal(current.souls[soul], entry)) throw new Refused('source-changed', 'the source is kept; credentials changed during the move');
-    delete current.souls[soul];
-    put(join(home, CREDENTIALS), current);
-    const latest = configOf(home), aliases = aliasesOf(home);
-    if (canonical(latest.default, aliases) === soul) delete latest.default;
-    for (const id of Object.keys(latest.souls ?? {})) if (canonical(id, aliases) === soul) delete latest.souls[id];
-    put(join(home, 'config.json'), latest);
-    rmSync(soulDir(home, soul), { recursive: true, force: true });
-    return { ok: true, exported: true, soul };
-  } finally { release(); }
+    await stopForMove(home, soul);
+    const release = holdMove(home, soul);
+    try {
+      const creds = credsOf(home), entry = creds.souls[soul], config = configOf(home);
+      const row = listSouls(home).find((s) => s.id === soul), world = row.world;
+      if (!entry || !Object.values(entry).some((e) => typeof e?.token === 'string')) throw new Refused('no-token', 'this Soul has no token to move');
+      if ((statSync(join(home, CREDENTIALS)).mode & 0o777) !== 0o600) throw new Refused('credentials-too-open', 'run doctor before moving this Soul');
+      const { url, gateway, history } = config.worlds?.[world] ?? {};
+      if (typeof url !== 'string' || typeof gateway !== 'string') throw new Refused('no-gateway', 'the Soul has no configured world');
+      const files = filesIn(soulDir(home, soul));
+      mkdirSync(to, { recursive: true, mode: 0o700 });
+      copyFiles(files, soulDir(to, soul));
+      const transit = { souls: { [soul]: entry } };
+      put(join(to, CREDENTIALS), transit);
+      const meta = { id: soul, world, url, gateway, ...(typeof history === 'string' ? { history } : {}), name: row.name };
+      put(join(to, 'soul.json'), meta);
+      verifyFiles(files, soulDir(to, soul));
+      verifyFiles(files, soulDir(home, soul));
+      verifyCredentials(to, transit);
+      if (!equal(read(join(to, 'soul.json')), meta)) throw new Refused('copy-not-verified', 'the source is kept; metadata differs');
+      const current = credsOf(home);
+      if (!equal(current.souls[soul], entry)) throw new Refused('source-changed', 'the source is kept; credentials changed during the move');
+      delete current.souls[soul];
+      put(join(home, CREDENTIALS), current);
+      const latest = configOf(home), aliases = aliasesOf(home);
+      if (canonical(latest.default, aliases) === soul) delete latest.default;
+      for (const id of Object.keys(latest.souls ?? {})) if (canonical(id, aliases) === soul) delete latest.souls[id];
+      put(join(home, 'config.json'), latest);
+      rmSync(soulDir(home, soul), { recursive: true, force: true });
+      return { ok: true, exported: true, soul };
+    } finally { release(); }
+  } finally { releaseMove(); }
 }
 
 export function importSoul(home, folder) {
   if (!folder) throw new Refused('usage', 'import <transit folder>');
   const from = resolve(folder);
   separate(home, from);
-  const meta = read(join(from, 'soul.json')), soul = meta.id;
-  if (!ID.test(soul ?? '') || typeof meta.world !== 'string' || typeof meta.url !== 'string' || typeof meta.gateway !== 'string') throw new Refused('not-a-soul-export', 'the transit metadata is incomplete');
-  const transit = credsOf(from), entry = transit.souls[soul];
-  if (!entry || Object.keys(transit.souls).length !== 1 || typeof entry[meta.world]?.token !== 'string') throw new Refused('not-a-soul-export', 'the transit folder must hold exactly this Soul');
-  verifyCredentials(from, { souls: { [soul]: entry } });
-  const creds = credsOf(home), config = configOf(home);
-  if (creds.souls[soul] || existsSync(soulDir(home, soul))) throw new Refused('already-here', 'the Soul already lives here');
-  const world = { url: meta.url, gateway: meta.gateway, ...(typeof meta.history === 'string' ? { history: meta.history } : {}) };
-  const old = config.worlds?.[meta.world];
-  if (old && (old.url !== world.url || old.gateway !== world.gateway)) throw new Refused('world-conflict', 'this world key already names another address; the transit folder is kept');
-  const files = filesIn(soulDir(from, soul));
-  copyFiles(files, soulDir(home, soul));
-  const release = holdMove(home, soul);
+  if (!existsSync(from) || !lstatSync(from).isDirectory()) throw new Refused('not-a-soul-export', 'name an existing transit folder');
+  const releaseSource = guardMove(from);
   try {
-    config.worlds = { ...config.worlds, [meta.world]: { ...old, ...world } };
-    config.souls = { ...config.souls, [soul]: { name: typeof meta.name === 'string' ? meta.name : null, world: meta.world } };
-    put(join(home, 'config.json'), config);
-    creds.souls[soul] = entry;
-    put(join(home, CREDENTIALS), creds);
-    verifyFiles(files, soulDir(home, soul));
-    verifyFiles(files, soulDir(from, soul));
-    verifyCredentials(home, creds);
-    verifyCredentials(from, transit);
-    if (!equal(read(join(from, 'soul.json')), meta)) throw new Refused('source-changed', 'the transit folder is kept; metadata changed during the move');
-    rmSync(from, { recursive: true });
-    return { ok: true, imported: true, soul };
-  } finally { release(); }
+    const meta = read(join(from, 'soul.json')), soul = meta.id;
+    if (!ID.test(soul ?? '') || typeof meta.world !== 'string' || typeof meta.url !== 'string' || typeof meta.gateway !== 'string') throw new Refused('not-a-soul-export', 'the transit metadata is incomplete');
+    const transit = credsOf(from), entry = transit.souls[soul];
+    if (!entry || Object.keys(transit.souls).length !== 1 || typeof entry[meta.world]?.token !== 'string') throw new Refused('not-a-soul-export', 'the transit folder must hold exactly this Soul');
+    verifyCredentials(from, { souls: { [soul]: entry } });
+    const releaseHome = guardMove(home);
+    try {
+      const creds = credsOf(home), config = configOf(home);
+      if (creds.souls[soul] || existsSync(soulDir(home, soul))) throw new Refused('already-here', 'the Soul already lives here');
+      const world = { url: meta.url, gateway: meta.gateway, ...(typeof meta.history === 'string' ? { history: meta.history } : {}) };
+      const old = config.worlds?.[meta.world];
+      if (old && (old.url !== world.url || old.gateway !== world.gateway)) throw new Refused('world-conflict', 'this world key already names another address; the transit folder is kept');
+      const files = filesIn(soulDir(from, soul));
+      copyFiles(files, soulDir(home, soul));
+      const release = holdMove(home, soul);
+      try {
+        config.worlds = { ...config.worlds, [meta.world]: { ...old, ...world } };
+        config.souls = { ...config.souls, [soul]: { name: typeof meta.name === 'string' ? meta.name : null, world: meta.world } };
+        put(join(home, 'config.json'), config);
+        creds.souls[soul] = entry;
+        put(join(home, CREDENTIALS), creds);
+        verifyFiles(files, soulDir(home, soul));
+        verifyFiles(files, soulDir(from, soul));
+        verifyCredentials(home, creds);
+        verifyCredentials(from, transit);
+        if (!equal(read(join(from, 'soul.json')), meta)) throw new Refused('source-changed', 'the transit folder is kept; metadata changed during the move');
+        rmSync(from, { recursive: true });
+        return { ok: true, imported: true, soul };
+      } finally { release(); }
+    } finally { releaseHome(); }
+  } finally { releaseSource(); }
 }
 
 export async function adoptSoul(home, named, url, { force = false, onAsk } = {}) {
