@@ -9,8 +9,8 @@
 #
 # - A slug routes by a map made from the directory: routes.mjs (beside this file, run each minute by
 #   souls-routes.timer) keeps one empty file per world the directory lists in /var/lib/souls-routes/slugs. A listed
-#   slug's page and its files come from the new system; every other address under /w/<slug>/ (today's API, the agent
-#   and god routes, sockets) still reaches today's launcher, which gives old clients its own answers (R18), never a
+#   slug's page, served client and its config come from the new system; every other address under /w/<slug>/ (today's
+#   API, the agent and god routes, sockets) still reaches today's launcher, which gives old clients its own answers (R18), never a
 #   redirect that would drop their token. Any slug not listed is today's launcher's, as before.
 # - Old page addresses (an alias, the /worlds prefix) are today's launcher's same-origin 308 to /w/<slug>/, keeping the
 #   query; the browser keeps the fragment. A redirected alias of a listed slug lands on the new system.
@@ -52,6 +52,13 @@ https://soul.game {
 			rewrite * {re.files.1}
 			root * /usr/local/lib/souls/web
 			file_server
+		}
+		@client path_regexp ^/w/[^/]+/(eden\.mjs|skill\.md|creator\.md|instructions\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1/config)$
+		handle @client {
+			header X-Souls-System v2
+			reverse_proxy localhost:7320 {
+				header_up X-Forwarded-For {client_ip}
+			}
 		}
 		handle {
 			header X-Souls-System today

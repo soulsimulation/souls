@@ -11,13 +11,19 @@
 //                                 one `{kind:"release", version, commit, date, link}` line per release (release.sh news);
 //                                 a line already in today's item shape is served as it is.
 //   GET /ops                      the read-only owner overview (ops.mjs)
+//   GET /w/<slug>/<client file>    R17's installed client files and v1/config (serve.mjs); the front door selects v2 slugs
 //
 // Files are read when asked (no-cache: a release's new page shows at once); the feed re-reads news.jsonl when it
 // changed. Nothing here writes, and nothing here makes a request of its own. `web` defaults to the install's
-// /usr/local/lib/souls/web and `data` to /var/lib/souls (SOULS_WEB, SOULS_DATA).
-import { readFileSync, statSync } from 'node:fs';
+// /usr/local/lib/souls/web, `data` to /var/lib/souls and `client` to /usr/local/lib/souls/client
+// (SOULS_WEB, SOULS_DATA, SOULS_CLIENT).
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { serveOps } from './ops.mjs';
+
+// install.sh puts the served-client adapter beside this file; the checkout keeps it with the client.
+const { answer } = await import(existsSync(new URL('./serve.mjs', import.meta.url)) ? './serve.mjs' : '../../client/served/serve.mjs');
+const CLIENT_PATH = /^\/w\/[a-z0-9][a-z0-9-]*\/(eden\.mjs|skill\.md|creator\.md|instructions\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1\/config)$/;
 
 export const SITE_PATHS = Object.freeze(['/changelog', '/changelog/', '/changelog.md', '/v1/feed', '/ops']);
 export const FEED_LIMITS = Object.freeze({ pageDefault: 20, pageMax: 100 });
@@ -78,7 +84,7 @@ export function wantsMarkdown(accept = '') {
 }
 
 /** The site's routes: `handle(req, res)` answers and returns true for a site path, false for anything else. */
-export function siteRoutes({ web = process.env.SOULS_WEB || '/usr/local/lib/souls/web', data = process.env.SOULS_DATA || '/var/lib/souls' } = {}) {
+export function siteRoutes({ web = process.env.SOULS_WEB || '/usr/local/lib/souls/web', data = process.env.SOULS_DATA || '/var/lib/souls', client = process.env.SOULS_CLIENT || '/usr/local/lib/souls/client' } = {}) {
   const feed = newsFeed(data);
   const file = (req, res, name, type) => {
     let body; try { body = readFileSync(join(web, name)); } catch { json(res, 404, { ok: false, code: 'not-found' }); return; }
@@ -86,9 +92,16 @@ export function siteRoutes({ web = process.env.SOULS_WEB || '/usr/local/lib/soul
   };
   const handle = (req, res) => {
     const url = new URL(req.url, 'http://origin'), path = url.pathname;
-    if (!SITE_PATHS.includes(path)) return false;
+    const isClient = CLIENT_PATH.test(path);
+    if (!SITE_PATHS.includes(path) && !isClient) return false;
     if (path === '/ops') { serveOps(req, res, url); return true; }
     if (req.method !== 'GET' && req.method !== 'HEAD') { json(res, 405, { ok: false, code: 'read-only' }, { allow: 'GET, HEAD' }); return true; }
+    if (isClient) {
+      const a = answer(client, path);
+      if (!a) json(res, 404, { ok: false, code: 'not-found' });
+      else res.writeHead(a.status, { 'content-type': a.type, 'content-length': a.body.length, 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : a.body);
+      return true;
+    }
     if (path === '/v1/feed') feed.serve(req, res, url);
     else if (path === '/changelog.md' || wantsMarkdown(req.headers.accept)) file(req, res, 'changelog.md', 'text/markdown; charset=utf-8');
     else file(req, res, 'changelog.html', 'text/html; charset=utf-8');

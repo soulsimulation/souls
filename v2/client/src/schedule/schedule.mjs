@@ -8,8 +8,8 @@
 //   - <id> · <when> · <do> [· until <real time>] [· missed drop|tell|late <n>s|m|h]
 //
 //   <when>  a real time, ISO with its zone (`2026-11-19T20:00:00Z`); a change, R9's pattern as JSON
-//           (`{"event":"eden:light-changed","fields":{"70":"dusk"}}`); or a world time (`world 20:00`), which waits
-//           for the copy's world clock (R15b, #3517) and fires nothing until then
+//           (`{"event":"eden:light-changed","fields":{"70":"dusk"}}`); or a world time (`world 20:00`, local on
+//           the published calendar, or `world <µs>us` from E7's published hours). No mapping means no firing.
 //   <do>    `act <act> [<act> ...]`, a ranked list as `souls.mjs act` takes it, sent with no model turn and checked
 //           at send (R8); or `wake <why>`, a wake through R13's budget, which costs a turn
 //
@@ -35,6 +35,7 @@ const SEP = ' · ';
 const ID = /^s\d{1,6}$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
 const WORLD = /^world (\d{2}):(\d{2})$/;
+const WORLD_US = /^world (-?\d+)us$/;
 const DURATION = /^(\d{1,6})(s|m|h)$/;
 const UNIT = { s: 1000, m: 60_000, h: 3_600_000 };
 const HEADER = '# Schedule\n\nEach entry: `- <id> · <when> · <do> [· until <time>] [· missed drop|tell|late <n>m]`. '
@@ -58,6 +59,8 @@ export function parseTrigger(text) {
     if (Number(w[1]) > 23 || Number(w[2]) > 59) throw new Refused('when-not-a-time', t);
     return { world: `${w[1]}:${w[2]}` };
   }
+  const at = WORLD_US.exec(t);
+  if (at && Number.isSafeInteger(Number(at[1]))) return { worldUs: Number(at[1]) };
   return { real: realTime(t, 'when-not-a-time') };
 }
 
@@ -118,7 +121,8 @@ const writeAtomic = (file, text) => {
 
 /**
  * `schedule add`: one entry appended. `when` is a real time, `in <n>s|m|h`, a world time (`world 20:00`, or
- * `at 20:00`, `20:00`), or a pattern as JSON; `does` the words after it. A real time already passed is refused.
+ * `at 20:00`, `20:00`, or `world <µs>us` from published hours), or a pattern as JSON; `does` the words after it.
+ * A real time already passed is refused.
  */
 export function addEntry(file, { when, does, until, missed }, now) {
   let w = String(when ?? '').trim();
@@ -152,7 +156,8 @@ export function removeEntry(file, id) {
 /** An entry as an answer shows it. */
 export const shown = (e) => ({
   id: e.id, ...(e.real !== undefined ? { at: new Date(e.real).toISOString() } : {}), ...(e.change ? { when: e.change } : {}),
-  ...(e.world ? { world: e.world } : {}), ...(e.acts ? { acts: e.acts } : { wake: e.wake }),
+  ...(e.world ? { world: e.world } : {}), ...(e.worldUs !== undefined ? { worldUs: e.worldUs } : {}),
+  ...(e.acts ? { acts: e.acts } : { wake: e.wake }),
   ...(e.until !== null ? { until: new Date(e.until).toISOString() } : {}), missed: e.missed.rule,
 });
 
@@ -161,8 +166,7 @@ export function listed({ entries, bad }, marks = {}, now) {
   return {
     entries: entries.map((e) => {
       const m = marks[e.key];
-      const status = m ? (m.missed ? 'missed' : 'sent') : e.until !== null && now > e.until ? 'ended'
-        : e.world ? 'waits-for-world-clock' : 'waiting';
+      const status = m ? (m.missed ? 'missed' : 'sent') : e.until !== null && now > e.until ? 'ended' : 'waiting';
       return { ...shown(e), status, ...(m?.sequence ? { sequence: m.sequence } : {}), ...(m?.at ? { firedAt: new Date(m.at).toISOString() } : {}) };
     }),
     ...(bad.length ? { bad } : {}),

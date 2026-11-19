@@ -92,6 +92,14 @@ pub enum Progress {
     Failed(Name),
 }
 
+/// A walk's geometry answer. Pending is distinct from an unsupported geometry interface or no legal route.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WalkPlan {
+    Pending,
+    Unplanned,
+    Legs(Vec<(Vec3, Option<Id>)>),
+}
+
 /// The one interface a skill touches the world through (rule 7). The world implements it; a test implements a fake.
 /// It offers no clock but world time, no randomness but the world's draw, and no write but the skill's own body's.
 pub trait Host {
@@ -121,6 +129,11 @@ pub trait Host {
     /// the link it then crosses, the last none. Empty when there is no way there; `None` when the world does not say.
     fn legs(&self, _node: Id, _at: Vec3, _reach: i64) -> Option<Vec<(Vec3, Option<Id>)>> {
         None
+    }
+    /// Plans one form step; a deferred world retries Pending without restarting its deadline.
+    fn plan_walk(&self, _step: usize, node: Id, at: Vec3, reach: i64) -> WalkPlan {
+        self.legs(node, at, reach)
+            .map_or(WalkPlan::Unplanned, WalkPlan::Legs)
     }
     /// A timer on the body, due `after` microseconds of world time from now, named for what it is for (T6 rule 15).
     fn set_timer(&mut self, after: Micros, name: Name) -> Id;

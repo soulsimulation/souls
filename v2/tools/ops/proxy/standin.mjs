@@ -19,6 +19,7 @@ import { migrateRegistry } from '../../../../tools/world-launcher/reslug.mjs';
 import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../../../../apps/server/test/clerk-fixture.ts';
 import { testPort } from '../../../../apps/server/test/test-port.ts';
 import { createOrigin } from '../../origin/origin.mjs';
+import { build } from '../../../client/served/build.mjs';
 import { frontCheck, POINTS } from '../front-check.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url)), repo = resolve(here, '../../../..');
@@ -72,7 +73,9 @@ writeFileSync(join(streams, 'pointer'), 'standin');
 const news = join(dir, 'news');
 mkdirSync(news);
 writeFileSync(join(news, 'news.jsonl'), `${JSON.stringify({ kind: 'release', version: '0.0-standin', commit: '0'.repeat(40), date: '2026-11-19', link: `${PUBLIC}/changelog#v0.0-standin` })}\n`);
-const origin = createOrigin(streams, { web, data: news }).server.listen(port.origin, '127.0.0.1');
+const client = join(dir, 'client');
+build({ out: client, version: '0.0.0' });
+const origin = createOrigin(streams, { web, data: news, client }).server.listen(port.origin, '127.0.0.1');
 stops.push(() => directory.close(), () => origin.close());
 
 // the scratch host: /etc, the live release and the map under the scratch folder
@@ -134,7 +137,7 @@ try {
   const up = await run('switched, everything up', { points: POINTS });
   await L.close();
   L = null;
-  const down = await run("switched, today's launcher stopped", { points: ['poster', 'site'], stopped: `/w/${slugs[1]}/` });
+  const down = await run("switched, today's launcher stopped", { points: ['poster', 'site', 'client'], today: undefined, stopped: `/w/${slugs[1]}/` });
   L = await openLauncher(launcherCfg);
   await script('BACK');
   const back = await run('switched back (must fail as before the switch)', { points: ['worlds', 'list'] }, true);
