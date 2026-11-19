@@ -1,0 +1,97 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:ash_hearth",
+  "owner": "thing",
+  "state": {
+    "lit": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "ash": { "n": 2, "type": "int", "unit": "count", "default": 4, "min": 0, "max": 4, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grate": { "role": "contact", "at_mm": [-150, 700, 0] },
+    "stand": { "role": "stand", "at_mm": [0, 0, 900], "yaw_mdeg": 180000 }
+  },
+  "slots": {
+    "bucket": { "admits": "thing", "kinds": ["eden:ash_bucket"], "most": 1, "at_mm": [350, 630, 0], "fits_mm": [400, 450, 400] }
+  },
+  "geometry": { "bounds_mm": [1100, 1100, 800] },
+  "forms": {
+    "clear_ash": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "bucket": { "type": "thing", "select": { "of": "things", "kind": "eden:ash_bucket", "in": "this", "anchor": "this", "order": "nearest", "rank": 1 } },
+        "amount": { "type": "count" }
+      },
+      "needs": [
+        { "need": "state", "field": "lit", "is": false, "says": "put_out_first" },
+        { "need": "state", "field": "ash", "at_least": 1, "says": "no_ash" },
+        { "need": "hand", "empty": true, "says": "put_down_first" },
+        { "need": "enough", "says": "no_ash" },
+        { "need": "room", "says": "bucket_full" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "wait", "us": 4000000 }
+      ],
+      "effects": [
+        { "change": "transfer", "field": "ash", "from": "this", "into": { "arg": "bucket" }, "amount": { "arg": "amount" }, "event": "ash_cleared" }
+      ]
+    },
+    "light": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "lit", "is": false, "says": "already_lit" },
+        { "need": "state", "field": "ash", "at_most": 0, "says": "clear_first" },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "press", "at": "grate" }
+      ],
+      "effects": [{ "change": "set", "field": "lit", "to": true, "event": "lit" }]
+    },
+    "put_out": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "lit", "is": true, "says": "already_out" },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "press", "at": "grate" }
+      ],
+      "effects": [{ "change": "set", "field": "lit", "to": false, "event": "put_out" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:ash_hearth",
+    "table": [
+      { "part": "fill", "field": "ash", "do": "scale", "axis": "y", "range": [0, 4], "to": [0, 1000] },
+      { "part": "flame", "field": "lit", "do": "show", "at": { "true": 1, "false": 0 } },
+      { "part": "flame", "field": "lit", "do": "flame", "at": { "true": 1000, "false": 0 } }
+    ],
+    "shape": {"round":4,"shapes":[{"kind":"box","at":[0,300,0],"size":[1100,600,800],"tint":"stone"},{"kind":"box","at":[-150,640,0],"size":[700,80,700],"tint":"iron"},{"kind":"box","at":[-150,700,0],"size":[600,40,600],"tint":"ash","role":"fill","pivot":[-150,680,0]},{"kind":"cone","at":[-150,860,0],"r":160,"h":320,"segments":7,"tint":"flame","role":"flame","pivot":[-150,700,0]},{"kind":"box","at":[350,615,0],"size":[380,30,380],"tint":"rim"}],"palette":{"stone":"#706758","iron":"#514e48","ash":"#aaa79c","flame":"#ffae42","rim":"#453627"},"tags":["camping","fire","hearth","object"]}
+  },
+  "text": {
+    "card": "A raised camp hearth with spent ash: clear it into a bucket, then light it.",
+    "put_out_first": "Put out the hearth before clearing its ash.",
+    "no_ash": "The hearth has no supported ash to clear.",
+    "put_down_first": "Put down what you hold before clearing ash.",
+    "bucket_full": "The ash bucket is full or has unsupported contents.",
+    "already_lit": "The hearth is already lit; put it out before cleaning.",
+    "clear_first": "Clear the hearth ash into a supported bucket before lighting it.",
+    "already_out": "The hearth is already out; clear ash before lighting it.",
+    "camp": "camp",
+    "fireplace": "fireplace",
+    "grate": "grate",
+    "howto_clear": "Set an ash bucket on the hearth, clear the ash into it with empty hands, then light the hearth."
+  },
+  "card": { "text": "card", "category": "camp", "synonyms": ["fireplace", "grate"] },
+  "howtos": {
+    "clear": { "text": "howto_clear", "steps": [{ "form": "clear_ash" }, { "form": "light" }] }
+  }
+}

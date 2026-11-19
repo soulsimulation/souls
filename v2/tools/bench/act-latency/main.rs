@@ -16,7 +16,7 @@
 // A bench times a run by the wall clock (the wall-clock rule, K7, is the engine's: v2/clippy.toml).
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -204,7 +204,7 @@ fn latency_run(
     let _ = std::fs::remove_file(dir.join("world.log"));
     let (mut child, mut s) = world(dir);
     let answers = reader(s.try_clone().expect("a socket"));
-    let mut sent: HashMap<(Id, u64), Instant> = HashMap::new();
+    let mut sent: BTreeMap<(Id, u64), Instant> = BTreeMap::new();
     let mut seq = vec![0u64; pairs.len()];
     let total = seconds as usize * 100;
     let start = Instant::now();
@@ -278,11 +278,11 @@ fn kills(dir: &Path, acts: u64, kills: u64, seed: u64) {
     let mut at: Vec<u64> = (0..kills).map(|_| 1 + rng.below(acts - 1)).collect();
     at.sort_unstable();
     let mut pending: BTreeMap<(u64, usize), Pending> = BTreeMap::new();
-    let mut answered: HashMap<(Id, u64), Answered> = HashMap::new();
+    let mut answered: BTreeMap<(Id, u64), Answered> = BTreeMap::new();
     let mut open_late = 0u64;
     let mut longest_open = Duration::ZERO;
     let mut seq = vec![0u64; pairs.len()];
-    let index: HashMap<Id, usize> = pairs.iter().enumerate().map(|(i, p)| (p.0, i)).collect();
+    let index: BTreeMap<Id, usize> = pairs.iter().enumerate().map(|(i, p)| (p.0, i)).collect();
     let mut made = 0u64;
     let started = Instant::now();
     let mut take = |answers: &Receiver<Answered>,
@@ -342,9 +342,9 @@ fn kills(dir: &Path, acts: u64, kills: u64, seed: u64) {
     }
     let log = std::fs::read(dir.join("world.log")).unwrap_or_else(|e| fail(e));
     let found = recover(&log).unwrap_or_else(|e| fail(e));
-    let mut by_intent: HashMap<Id, Vec<u64>> = HashMap::new();
-    let mut intents_of: HashMap<(Vec<u8>, u64), Vec<Id>> = HashMap::new();
-    for r in &found.records {
+    let mut by_intent: BTreeMap<Id, Vec<u64>> = BTreeMap::new();
+    let mut intents_of: BTreeMap<(Vec<u8>, u64), Vec<Id>> = BTreeMap::new();
+    for r in found.records.iter().filter(|r| !sim::recorder::is_input(r)) {
         let part = Part::read(r).unwrap_or_else(|e| fail(e));
         for e in &part.effects {
             if let Cause::Intent(id) = e.envelope.cause {

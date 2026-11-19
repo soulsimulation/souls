@@ -1,0 +1,36 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:firewood_log",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      200,
+      200,
+      620
+    ]
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:firewood_log",
+    "shape": {"round":10,"shapes":[{"kind":"cyl","at":[0,90,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000},{"kind":"cyl","at":[0,90,300],"r":85,"h":10,"segments":6,"tint":"cut","pitch":90000}],"palette":{"log":"#8c6a48","cut":"#c9a77a"},"tags":["firewood","wood","log","object"]}
+  },
+  "text": {
+    "card": "A split log of firewood, 60 cm long: carry it to a fire.",
+    "garden": "garden",
+    "split_log": "split log",
+    "firewood": "firewood"
+  },
+  "card": {
+    "text": "card",
+    "category": "garden",
+    "synonyms": [
+      "split_log",
+      "firewood"
+    ]
+  }
+}

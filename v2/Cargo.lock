@@ -16,6 +16,7 @@ dependencies = [
  "miniz_oxide",
  "replica",
  "sim",
+ "worldd",
 ]
 
 [[package]]
@@ -652,6 +653,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
+name = "ops"
+version = "0.0.0"
+dependencies = [
+ "archive",
+ "directoryd",
+ "futures-util",
+ "gatewayd",
+ "replica",
+ "sim",
+ "supervisor",
+ "tokio",
+ "tokio-tungstenite",
+ "worldd",
+]
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -729,6 +746,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
+]
+
+[[package]]
+name = "replay-compare"
+version = "0.0.0"
+dependencies = [
+ "replica",
+ "sim",
 ]
 
 [[package]]
@@ -956,6 +981,7 @@ version = "0.0.0"
 dependencies = [
  "directoryd",
  "replica",
+ "sim",
 ]
 
 [[package]]
@@ -1343,6 +1369,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "worldd"
 version = "0.0.0"
 dependencies = [
+ "directoryd",
  "import-eden",
  "replica",
  "rustix",

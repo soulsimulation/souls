@@ -1,0 +1,1209 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:drilling_panel",
+  "owner": "thing",
+  "state": {
+    "cutter_uses": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "cell_1": {
+      "n": 2,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "cell_2": {
+      "n": 3,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "cell_3": {
+      "n": 4,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "cell_4": {
+      "n": 5,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "cell_5": {
+      "n": 6,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "cell_6": {
+      "n": 7,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "cell_7": {
+      "n": 8,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "cell_8": {
+      "n": 9,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "cell_9": {
+      "n": 10,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        -200,
+        12,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      640,
+      70,
+      460
+    ]
+  },
+  "forms": {
+    "bore_cell_1": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "press": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:camp_drill_press",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "cell_1",
+          "is": false
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "press"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "press"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cell_1",
+          "to": true,
+          "event": "cell_bored"
+        },
+        {
+          "change": "transfer",
+          "field": "cutter_uses",
+          "from": {
+            "arg": "press"
+          },
+          "into": "this",
+          "amount": 1,
+          "event": "cutter_use_spent"
+        }
+      ]
+    },
+    "bore_cell_2": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "press": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:camp_drill_press",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "cell_2",
+          "is": false
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "press"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "press"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cell_2",
+          "to": true,
+          "event": "cell_bored"
+        },
+        {
+          "change": "transfer",
+          "field": "cutter_uses",
+          "from": {
+            "arg": "press"
+          },
+          "into": "this",
+          "amount": 1,
+          "event": "cutter_use_spent"
+        }
+      ]
+    },
+    "bore_cell_3": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "press": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:camp_drill_press",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "cell_3",
+          "is": false
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "press"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "press"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cell_3",
+          "to": true,
+          "event": "cell_bored"
+        },
+        {
+          "change": "transfer",
+          "field": "cutter_uses",
+          "from": {
+            "arg": "press"
+          },
+          "into": "this",
+          "amount": 1,
+          "event": "cutter_use_spent"
+        }
+      ]
+    },
+    "bore_cell_4": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "press": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:camp_drill_press",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "cell_4",
+          "is": false
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "press"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "press"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cell_4",
+          "to": true,
+          "event": "cell_bored"
+        },
+        {
+          "change": "transfer",
+          "field": "cutter_uses",
+          "from": {
+            "arg": "press"
+          },
+          "into": "this",
+          "amount": 1,
+          "event": "cutter_use_spent"
+        }
+      ]
+    },
+    "bore_cell_5": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "press": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:camp_drill_press",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "cell_5",
+          "is": false
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "press"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "press"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cell_5",
+          "to": true,
+          "event": "cell_bored"
+        },
+        {
+          "change": "transfer",
+          "field": "cutter_uses",
+          "from": {
+            "arg": "press"
+          },
+          "into": "this",
+          "amount": 1,
+          "event": "cutter_use_spent"
+        }
+      ]
+    },
+    "bore_cell_6": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "press": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:camp_drill_press",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "cell_6",
+          "is": false
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "press"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "press"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cell_6",
+          "to": true,
+          "event": "cell_bored"
+        },
+        {
+          "change": "transfer",
+          "field": "cutter_uses",
+          "from": {
+            "arg": "press"
+          },
+          "into": "this",
+          "amount": 1,
+          "event": "cutter_use_spent"
+        }
+      ]
+    },
+    "bore_cell_7": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "press": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:camp_drill_press",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "cell_7",
+          "is": false
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "press"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "press"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cell_7",
+          "to": true,
+          "event": "cell_bored"
+        },
+        {
+          "change": "transfer",
+          "field": "cutter_uses",
+          "from": {
+            "arg": "press"
+          },
+          "into": "this",
+          "amount": 1,
+          "event": "cutter_use_spent"
+        }
+      ]
+    },
+    "bore_cell_8": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "press": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:camp_drill_press",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "cell_8",
+          "is": false
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "press"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "press"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cell_8",
+          "to": true,
+          "event": "cell_bored"
+        },
+        {
+          "change": "transfer",
+          "field": "cutter_uses",
+          "from": {
+            "arg": "press"
+          },
+          "into": "this",
+          "amount": 1,
+          "event": "cutter_use_spent"
+        }
+      ]
+    },
+    "bore_cell_9": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "press": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:camp_drill_press",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "cell_9",
+          "is": false
+        },
+        {
+          "need": "enough"
+        },
+        {
+          "need": "room"
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": {
+            "arg": "press"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {
+            "arg": "press"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cell_9",
+          "to": true,
+          "event": "cell_bored"
+        },
+        {
+          "change": "transfer",
+          "field": "cutter_uses",
+          "from": {
+            "arg": "press"
+          },
+          "into": "this",
+          "amount": 1,
+          "event": "cutter_use_spent"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:drilling_panel",
+    "table": [
+      {
+        "part": "eye.l",
+        "field": "cell_1",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      },
+      {
+        "part": "eye.r",
+        "field": "cell_2",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      },
+      {
+        "part": "ear.l",
+        "field": "cell_3",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      },
+      {
+        "part": "ear.r",
+        "field": "cell_4",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      },
+      {
+        "part": "leg.fl",
+        "field": "cell_5",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      },
+      {
+        "part": "leg.fr",
+        "field": "cell_6",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      },
+      {
+        "part": "leg.bl",
+        "field": "cell_7",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      },
+      {
+        "part": "leg.br",
+        "field": "cell_8",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      },
+      {
+        "part": "fin",
+        "field": "cell_9",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      },
+      {
+        "part": "fill",
+        "field": "cutter_uses",
+        "do": "scale",
+        "axis": "z",
+        "range": [
+          0,
+          4
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            12,
+            0
+          ],
+          "size": [
+            420,
+            24,
+            420
+          ],
+          "tint": "wood",
+          "role": "body"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            10,
+            0
+          ],
+          "size": [
+            90,
+            20,
+            380
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            310,
+            25,
+            0
+          ],
+          "size": [
+            15,
+            50,
+            400
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            210,
+            25,
+            0
+          ],
+          "size": [
+            15,
+            50,
+            400
+          ],
+          "tint": "rail"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            30,
+            0
+          ],
+          "size": [
+            60,
+            30,
+            360
+          ],
+          "tint": "core",
+          "role": "fill",
+          "pivot": [
+            260,
+            30,
+            -180
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -140,
+            25,
+            -140
+          ],
+          "size": [
+            10,
+            2,
+            10
+          ],
+          "tint": "mark"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -140,
+            13,
+            -140
+          ],
+          "r": 40,
+          "h": 28,
+          "segments": 12,
+          "tint": "hole",
+          "role": "eye.l"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            25,
+            -140
+          ],
+          "size": [
+            10,
+            2,
+            10
+          ],
+          "tint": "mark"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            13,
+            -140
+          ],
+          "r": 40,
+          "h": 28,
+          "segments": 12,
+          "tint": "hole",
+          "role": "eye.r"
+        },
+        {
+          "kind": "box",
+          "at": [
+            140,
+            25,
+            -140
+          ],
+          "size": [
+            10,
+            2,
+            10
+          ],
+          "tint": "mark"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            140,
+            13,
+            -140
+          ],
+          "r": 40,
+          "h": 28,
+          "segments": 12,
+          "tint": "hole",
+          "role": "ear.l"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -140,
+            25,
+            0
+          ],
+          "size": [
+            10,
+            2,
+            10
+          ],
+          "tint": "mark"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -140,
+            13,
+            0
+          ],
+          "r": 40,
+          "h": 28,
+          "segments": 12,
+          "tint": "hole",
+          "role": "ear.r"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            25,
+            0
+          ],
+          "size": [
+            10,
+            2,
+            10
+          ],
+          "tint": "mark"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            13,
+            0
+          ],
+          "r": 40,
+          "h": 28,
+          "segments": 12,
+          "tint": "hole",
+          "role": "leg.fl"
+        },
+        {
+          "kind": "box",
+          "at": [
+            140,
+            25,
+            0
+          ],
+          "size": [
+            10,
+            2,
+            10
+          ],
+          "tint": "mark"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            140,
+            13,
+            0
+          ],
+          "r": 40,
+          "h": 28,
+          "segments": 12,
+          "tint": "hole",
+          "role": "leg.fr"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -140,
+            25,
+            140
+          ],
+          "size": [
+            10,
+            2,
+            10
+          ],
+          "tint": "mark"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -140,
+            13,
+            140
+          ],
+          "r": 40,
+          "h": 28,
+          "segments": 12,
+          "tint": "hole",
+          "role": "leg.bl"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            25,
+            140
+          ],
+          "size": [
+            10,
+            2,
+            10
+          ],
+          "tint": "mark"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            13,
+            140
+          ],
+          "r": 40,
+          "h": 28,
+          "segments": 12,
+          "tint": "hole",
+          "role": "leg.br"
+        },
+        {
+          "kind": "box",
+          "at": [
+            140,
+            25,
+            140
+          ],
+          "size": [
+            10,
+            2,
+            10
+          ],
+          "tint": "mark"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            140,
+            13,
+            140
+          ],
+          "r": 40,
+          "h": 28,
+          "segments": 12,
+          "tint": "hole",
+          "role": "fin"
+        }
+      ],
+      "palette": {
+        "wood": "#bb8c54",
+        "rail": "#765a3e",
+        "core": "#d5ab70",
+        "hole": "#1f1a15",
+        "mark": "#8a6438"
+      },
+      "tags": [
+        "camping",
+        "tool",
+        "item",
+        "panel",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A wooden panel with nine marked cells: bore up to four holes on a drill press.",
+    "panel": "panel",
+    "drill": "drill",
+    "board": "board",
+    "howto_bore": "Set the panel on a camp drill press and bore a cell, 1 at the back left to 9 at the front right: four seconds spend one cutter use and leave a hole, its wooden core kept in the rail. Four holes at most."
+  },
+  "card": {
+    "text": "card",
+    "category": "panel",
+    "synonyms": [
+      "drill",
+      "board"
+    ]
+  },
+  "howtos": {
+    "bore": {
+      "text": "howto_bore",
+      "steps": [
+        {
+          "form": "bore_cell_5"
+        }
+      ]
+    }
+  }
+}

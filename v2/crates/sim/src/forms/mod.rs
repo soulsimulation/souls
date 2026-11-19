@@ -47,14 +47,24 @@
 //!   in the links' audience.
 //!   Ownership changing mid-form changes nothing: it is checked once, at commit.
 //!
-//! Not here: amounts, making and removing (F4), a walk across a link (the walk's crossings are not
-//! carried here yet), accepting the intent (I4), queueing for a reserved thing (B7), things for several users.
+//! - **Amounts, take and put, make and remove** (F4, #2769, [`amounts`]). At the effect's instant each effect is
+//!   worked out against the tree and the entries already written this tick: an amount moved between two things as the
+//!   source's and the target's sets, a take or a put as B4's transfer, a thing made into a hand or a slot, a thing the
+//!   node contains or the body holds removed. One effect's entries are one part, the first carrying its key; what
+//!   [`Forms::out`] holds at the tick's end is appended as one part. A refused effect writes nothing (none of the run's
+//!   effects) and ends the run with the refusal's name. The amount fields come from the kinds ([`Forms::kinds`]) and
+//!   the transfer's zone from its header ([`Forms::zone`]).
+//!
+//! Not here: a walk across a link (the walk's crossings are not carried here yet), accepting the intent (I4),
+//! queueing for a reserved thing (B7), things for several users, a thing made or set down where there is no slot (E4).
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+pub mod amounts;
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use replica::audience;
 use replica::effects::{
-    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Refusal, Rest, read_id,
+    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Header, Refusal, Rest, read_id,
 };
 use replica::encode::{Name, Value};
 use replica::host::Progress;
@@ -69,6 +79,7 @@ use skills::form_runner::{self, Limits, Next, Runner, Step, Woke};
 use crate::controller::{Controller, Driver};
 use crate::host::{Geometry, Run, Staged, hand_on, lend, step};
 use crate::moves::{Fired, Instance, Moves, Reach};
+use crate::slots::hands;
 use crate::timers::{DueList, Timer};
 
 /// What a form's run reaches in the world: the tree as of the tick's start, the geometry's answers, the controller,
@@ -202,7 +213,7 @@ struct Open {
 pub struct Forms {
     runs: BTreeMap<RunId, FormRun>,
     by_body: BTreeMap<Id, RunId>,
-    by_timer: HashMap<Id, RunId>,
+    by_timer: BTreeMap<Id, RunId>,
     by_intent: BTreeMap<Id, RunId>,
     walks: Vec<Run>,
     last: RunId,
@@ -220,6 +231,10 @@ pub struct Forms {
     reserved: BTreeMap<Id, RunId>,
     /// Nodes a form reserves nothing at: kinds of ground (E21).
     shared: BTreeSet<Id>,
+    /// The kinds' amount fields (F4).
+    limits: amounts::Limits,
+    /// The zone's header, for B4's transfer.
+    header: Option<Header>,
 }
 
 fn name(t: &str) -> Name {
@@ -355,17 +370,26 @@ impl Forms {
             self.reserved.get(&node).map(|r| (*r, "thing-gone")),
         ];
         for (run, how) in runs.into_iter().flatten() {
-            if let Some(fr) = self.runs.get_mut(&run)
-                && let Some((thing, _)) = fr.held.take()
-            {
-                self.reserved.remove(&thing);
+            if let Some(fr) = self.runs.get_mut(&run) {
+                // The thing is gone, so the body writes the ending.
+                if how == "thing-gone" {
+                    fr.node = fr.body;
+                }
+                if let Some((thing, _)) = fr.held.take() {
+                    self.reserved.remove(&thing);
+                }
             }
             self.finish(w, run, name(how), now);
         }
     }
 
-    /// Writes the entry that ends run `o`: its reservation removed (when its link still stands) and its ending named.
+    /// Writes the entry that ends run `o`: its reservation removed (when its link still stands) and its ending named,
+    /// in the `souls` namespace when it has none (an entry's text is a namespaced name, or the entry is not read).
     fn write_end(&mut self, o: &Open, at: Micros, how: Name) {
+        let how = match how.as_str().contains(':') {
+            true => how,
+            false => name(&format!("souls:{}", how.as_str())),
+        };
         let changes = o
             .link
             .map(|link| ChangeRec {
@@ -555,52 +579,102 @@ impl Forms {
         self.start(w, body, node, intent, steps, effects, limits, now)
     }
 
-    /// Writes run `run`'s effects at `at`, each one entry, but no key already written or waiting to be.
-    fn emit(&mut self, run: RunId, at: Micros) {
+    /// The amount fields of `kinds` (K3's, with their least and capacity), which F4's transfers read. Called after
+    /// [`Forms::new`] or [`Forms::recover`], and again when kinds load.
+    pub fn kinds(&mut self, kinds: &replica::kinds::Kinds) {
+        self.limits = amounts::limits(kinds);
+    }
+
+    /// The zone's header, which B4's transfer (a take or a put) writes under.
+    pub fn zone(&mut self, header: Header) {
+        self.header = Some(header);
+    }
+
+    /// Writes run `run`'s effects at `at`, but no key already written or waiting to be. Each effect's entries, worked
+    /// out against the tree and what is already in [`Forms::out`], go in order, the first carrying its key; they are
+    /// one part. All of the run's effects or none: a refusal takes back what this call wrote and is returned.
+    fn emit(
+        &mut self,
+        tree: &Tree,
+        controller: &Controller,
+        mint: &mut Minter,
+        run: RunId,
+        at: Micros,
+    ) -> Result<(), Refusal> {
         let Some(fr) = self.runs.get(&run) else {
-            return;
+            return Ok(());
         };
         let id = fr.intent.id;
+        let hands: Vec<u64> = controller
+            .claims(fr.body)
+            .map(|b| hands(b.family()).iter().map(|h| h.slot).collect())
+            .unwrap_or_default();
+        let reserved: Vec<Id> = self
+            .reserved
+            .iter()
+            .filter(|(_, r)| **r != run)
+            .map(|(t, _)| *t)
+            .collect();
+        let (len, mut keys) = (self.out.len(), Vec::new());
         for (n, e) in (0u64..).zip(&fr.effects) {
             let done = self
                 .applied
                 .get(&id)
                 .is_some_and(|k| k.entries.contains_key(&n));
-            if done || !self.pending.insert((id, n)) {
+            if done || self.pending.contains(&(id, n)) {
                 continue;
             }
-            let key = Event {
-                name: name(KEY),
-                fields: BTreeMap::from([
-                    (1, Value::Uint(n)),
-                    (2, int(fr.intent.expiry)),
-                    (3, Value::Bytes(fr.intent.digest.to_vec())),
-                ]),
-                changes: vec![0],
-                rest: Rest::new(),
-            };
-            self.out.push(Effect {
-                envelope: Envelope {
-                    sequence: 0,
-                    at,
-                    cause: Cause::Intent(id),
-                    actor: fr.intent.actor,
-                    audience: Audience::Everyone,
-                    node: fr.node,
+            let cx = amounts::Cx {
+                view: amounts::View {
+                    tree,
+                    out: &self.out,
                 },
-                body: Body::Changes(vec![ChangeRec {
-                    change: Change::Set {
-                        node: fr.node,
-                        field: e.field,
-                        to: e.to.clone(),
-                        by: None,
+                limits: &self.limits,
+                header: self.header.as_ref(),
+                body: fr.body,
+                hands: &hands,
+                node: fr.node,
+                reserved: &reserved,
+            };
+            let entries = match cx.entries(mint, e) {
+                Ok(x) => x,
+                Err(r) => {
+                    self.out.truncate(len);
+                    return Err(r);
+                }
+            };
+            keys.push((id, n));
+            for (i, (node, audience, body)) in entries.into_iter().enumerate() {
+                let key = (i == 0).then(|| Event {
+                    name: name(KEY),
+                    fields: BTreeMap::from([
+                        (1, Value::Uint(n)),
+                        (2, int(fr.intent.expiry)),
+                        (3, Value::Bytes(fr.intent.digest.to_vec())),
+                    ]),
+                    changes: match &body {
+                        Body::Changes(c) => (0..c.len() as u64).collect(),
+                        _ => Vec::new(),
                     },
                     rest: Rest::new(),
-                }]),
-                events: Some(vec![key]),
-                rest: Rest::new(),
-            });
+                });
+                self.out.push(Effect {
+                    envelope: Envelope {
+                        sequence: 0,
+                        at,
+                        cause: Cause::Intent(id),
+                        actor: fr.intent.actor,
+                        audience,
+                        node,
+                    },
+                    body,
+                    events: key.map(|k| vec![k]),
+                    rest: Rest::new(),
+                });
+            }
         }
+        self.pending.extend(keys);
+        Ok(())
     }
 
     fn wake<G: Geometry, R: Reach>(
@@ -625,9 +699,10 @@ impl Forms {
             &mut staged,
             |h| fr.runner.wake(h, why),
         );
-        if fr.runner.take_effect() {
-            self.emit(run, now);
-        }
+        let effect = match fr.runner.take_effect() {
+            true => self.emit(w.tree, w.controller, w.mint, run, now),
+            false => Ok(()),
+        };
         for t in &staged.timers {
             self.by_timer.insert(t.id, run);
         }
@@ -636,6 +711,9 @@ impl Forms {
         }
         if !w.due.apply(&staged).is_empty() {
             return self.finish(w, run, name("timer-refused"), now);
+        }
+        if let Err(r) = effect {
+            return self.finish(w, run, name(r.name), now);
         }
         self.handle(w, run, next, now);
     }
@@ -722,13 +800,20 @@ impl Forms {
         if let Some((thing, _)) = fr.held {
             self.reserved.remove(&thing);
         }
+        // A removal this tick (a run's own effect, F4) took the thing and its link: the ending has no unlink, and the
+        // body writes it.
+        let removed = amounts::View {
+            tree: w.tree,
+            out: &self.out,
+        }
+        .removed(fr.node);
         let o = Open {
             run,
             body: fr.body,
-            node: fr.node,
+            node: if removed { fr.body } else { fr.node },
             intent: fr.intent.id,
             actor: fr.intent.actor,
-            link: fr.held.map(|(_, l)| l),
+            link: fr.held.filter(|_| !removed).map(|(_, l)| l),
         };
         self.write_end(&o, now, how.clone());
         self.ended.push(Ended {
@@ -970,6 +1055,8 @@ pub fn holders<'a>(
     out
 }
 
+#[cfg(test)]
+mod amounts_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

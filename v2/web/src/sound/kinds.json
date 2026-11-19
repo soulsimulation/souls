@@ -1,0 +1,19 @@
+{"about":"V21 (#2765): the sounds of the kinds in imported Eden, from today's defs (apps/web/src/gen-mesh/sound-plan.ts specsOf and impliedSpecs), by import-eden's kind name. A state condition is read at its default, since the import carries no such field; day and night stay conditions.",
+"kinds":{
+ "core:birch":[{"kind":"leaves","radius":14,"volume":0.16,"variant":0}],
+ "core:campfire":[{"kind":"fire","radius":12,"volume":0.55},{"kind":"crickets","radius":14,"volume":0.1,"when":"night"}],
+ "core:duck":[{"kind":"waterfowl","radius":16,"volume":0.2,"when":"day","variant":1}],
+ "core:flower_garden":[{"kind":"bees","radius":8,"volume":0.1,"when":"day"}],
+ "core:fountain":[{"kind":"water","radius":14,"volume":0.5},{"kind":"water","radius":6,"volume":0.22,"variant":2},{"kind":"birds","radius":14,"volume":0.12,"when":"day","variant":1}],
+ "core:fridge":[{"kind":"hum","radius":4,"volume":0.06}],
+ "core:locomotive":[{"kind":"engine","radius":40,"volume":0.5}],
+ "core:motorboat":[{"kind":"waves","radius":12,"volume":0.2,"variant":1}],
+ "core:orchard":[{"kind":"leaves","radius":14,"volume":0.16,"variant":0}],
+ "core:pine":[{"kind":"leaves","radius":14,"volume":0.16,"variant":1}],
+ "core:reedbed":[{"kind":"frogs","radius":16,"volume":0.18,"when":"night"},{"kind":"leaves","radius":8,"volume":0.08,"variant":1}],
+ "core:tree":[{"kind":"leaves","radius":14,"volume":0.16,"variant":0}],
+ "core:wildflowers":[{"kind":"bees","radius":8,"volume":0.1,"when":"day"}],
+ "core:windmill":[{"kind":"creak","radius":22,"volume":0.5},{"kind":"wind","radius":20,"volume":0.14,"variant":1}],
+ "core:woodland":[{"kind":"leaves","radius":14,"volume":0.16,"variant":0}],
+ "eden:eden_golf_flag":[{"kind":"flag","radius":10,"volume":0.14}]
+}}

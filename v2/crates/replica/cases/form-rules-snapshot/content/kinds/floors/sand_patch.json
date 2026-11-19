@@ -1,0 +1,9 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sand_patch",
+  "owner": "place",
+  "geometry": {"bounds_mm":[20000,100,20000]},
+  "looks": {"model":"look:sand_patch"},
+  "text": {"card":"A patch of pale sand on the ground.","ground":"ground","sand":"sand"},
+  "card": {"text":"card","category":"ground","synonyms":["sand"]}
+}

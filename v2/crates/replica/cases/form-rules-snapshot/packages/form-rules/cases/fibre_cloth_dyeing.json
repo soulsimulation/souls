@@ -1,0 +1,132 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:dyeable_cloth (from #1695), dyed at the nearest eden:cloth_dye_bench with one indigo charge, one rust charge and two of water. Ten seconds with empty hands: a charge of the chosen pigment and one of water move from the bench into the cloth (transfers, so a charge is never used twice), and the cloth's dye and finish (solid or banded) are set; the other pigment can dye it again. Refused with the original's words: a hand holding something ('Put down what you are holding before dyeing.') and the pigment or water used up ('This bench needs an unused indigo charge and water.', and the same for rust). The cloth is taken with a free hand.",
+  "cases": [
+    {
+      "name": "dyeable_cloth_take_every_need_met",
+      "act": {"this":"d1","form":"take"},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "dyeable_cloth_take_hands_full",
+      "act": {"this":"d1","form":"take"},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"b1":{"hands":{"left":"x1","right":"x2"}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"no_free_hand","need":0,"detail":{},"fix":{"step":"put"}}
+    },
+    {
+      "name": "cloth_dye_indigo_solid_every_need_met",
+      "act": {"this":"d1","form":"dye_indigo_solid","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "cloth_dye_indigo_solid_holding_something",
+      "act": {"this":"d1","form":"dye_indigo_solid","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "cloth_dye_indigo_solid_pigment_used",
+      "act": {"this":"d1","form":"dye_indigo_solid","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench","fields":{"indigo":0,"water":1}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"db1","field":"indigo","has":0,"amount":1},"fix":null,"says":"needs_indigo"}
+    },
+    {
+      "name": "cloth_dye_indigo_solid_no_water",
+      "act": {"this":"d1","form":"dye_indigo_solid","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench","fields":{"water":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"db1","field":"water","has":0,"amount":1},"fix":null,"says":"needs_indigo"}
+    },
+    {
+      "name": "cloth_dye_indigo_banded_every_need_met",
+      "act": {"this":"d1","form":"dye_indigo_banded","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "cloth_dye_indigo_banded_holding_something",
+      "act": {"this":"d1","form":"dye_indigo_banded","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "cloth_dye_indigo_banded_pigment_used",
+      "act": {"this":"d1","form":"dye_indigo_banded","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench","fields":{"indigo":0,"water":1}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"db1","field":"indigo","has":0,"amount":1},"fix":null,"says":"needs_indigo"}
+    },
+    {
+      "name": "cloth_dye_indigo_banded_no_water",
+      "act": {"this":"d1","form":"dye_indigo_banded","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench","fields":{"water":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"db1","field":"water","has":0,"amount":1},"fix":null,"says":"needs_indigo"}
+    },
+    {
+      "name": "cloth_dye_rust_solid_every_need_met",
+      "act": {"this":"d1","form":"dye_rust_solid","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "cloth_dye_rust_solid_holding_something",
+      "act": {"this":"d1","form":"dye_rust_solid","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "cloth_dye_rust_solid_pigment_used",
+      "act": {"this":"d1","form":"dye_rust_solid","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench","fields":{"rust":0,"water":1}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"db1","field":"rust","has":0,"amount":1},"fix":null,"says":"needs_rust"}
+    },
+    {
+      "name": "cloth_dye_rust_solid_no_water",
+      "act": {"this":"d1","form":"dye_rust_solid","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench","fields":{"water":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"db1","field":"water","has":0,"amount":1},"fix":null,"says":"needs_rust"}
+    },
+    {
+      "name": "cloth_dye_rust_banded_every_need_met",
+      "act": {"this":"d1","form":"dye_rust_banded","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench"},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"yes"}
+    },
+    {
+      "name": "cloth_dye_rust_banded_holding_something",
+      "act": {"this":"d1","form":"dye_rust_banded","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench"},"b1":{"hands":{"left":"x1","right":null}},"x1":{"kind":"eden:striped_cloth"},"x2":{"kind":"eden:checked_cloth"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"hand_not_empty","need":0,"detail":{"holding":1},"fix":{"step":"put"},"says":"put_down_first"}
+    },
+    {
+      "name": "cloth_dye_rust_banded_pigment_used",
+      "act": {"this":"d1","form":"dye_rust_banded","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench","fields":{"rust":0,"water":1}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"db1","field":"rust","has":0,"amount":1},"fix":null,"says":"needs_rust"}
+    },
+    {
+      "name": "cloth_dye_rust_banded_no_water",
+      "act": {"this":"d1","form":"dye_rust_banded","args":{"bench":"db1"}},
+      "state": {"actor":"b1","nodes":{"d1":{"kind":"eden:dyeable_cloth"},"db1":{"kind":"eden:cloth_dye_bench","fields":{"water":0}},"b1":{"hands":{"left":null,"right":null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict":"no","reason":"not_enough","need":1,"detail":{"node":"db1","field":"water","has":0,"amount":1},"fix":null,"says":"needs_rust"}
+    }
+  ]
+}
