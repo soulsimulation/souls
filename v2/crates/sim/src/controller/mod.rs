@@ -92,12 +92,13 @@ impl Gaze {
 }
 
 /// One utterance for a voice to carry: the reference its words are kept under, how long it lasts (from its words,
-/// `replica::speech::length_of`), and whether it replaces the one under way or waits behind it.
+/// `replica::speech::length_of`), whether it replaces the one under way or waits behind it, and its reach (E13).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {
     pub words: Id,
     pub length: Micros,
     pub replace: bool,
+    pub reach: replica::speech::Reach,
 }
 
 /// A body's voice: the utterance under way, until when, and those waiting, in order.
@@ -777,6 +778,11 @@ impl Controller {
     /// The bodies as the mover last left them, in id order.
     pub fn bodies(&self) -> impl Iterator<Item = &Moved> {
         self.bodies.values().map(|s| &s.moved)
+    }
+
+    /// Every body the controller holds, each once: those it steps and those resting in a slot (seated, lying, rising).
+    pub fn ids(&self) -> impl Iterator<Item = Id> + '_ {
+        self.bodies.keys().chain(self.rested.keys()).copied()
     }
 
     /// Sets one part of `body`'s input, if `driver` holds its resources (`resource-not-held`, `resource-missing`).

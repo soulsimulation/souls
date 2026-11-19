@@ -1,0 +1,398 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:postbox (SA-X34, #2924): post a held letter through its slot; unlock it and collect the post one letter at a time; lock it again.",
+  "cases": [
+    {
+      "name": "postbox_post_held_letter",
+      "act": {
+        "this": "t1",
+        "form": "post",
+        "args": {
+          "letter": "l1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "l1",
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:postbox"
+          },
+          "l1": {
+            "kind": "eden:letter"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "postbox_post_letter_not_held",
+      "act": {
+        "this": "t1",
+        "form": "post",
+        "args": {
+          "letter": "l1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:postbox"
+          },
+          "l1": {
+            "kind": "eden:letter"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0
+      }
+    },
+    {
+      "name": "postbox_post_when_full",
+      "act": {
+        "this": "t1",
+        "form": "post",
+        "args": {
+          "letter": "l1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "l1",
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:postbox",
+            "fields": {
+              "letters": 200
+            }
+          },
+          "l1": {
+            "kind": "eden:letter"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "postbox_unlock_locked",
+      "act": {
+        "this": "t1",
+        "form": "unlock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:postbox"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "postbox_unlock_unlocked",
+      "act": {
+        "this": "t1",
+        "form": "unlock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:postbox",
+            "fields": {
+              "locked": false
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "lock"
+        }
+      }
+    },
+    {
+      "name": "postbox_lock_unlocked",
+      "act": {
+        "this": "t1",
+        "form": "lock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:postbox",
+            "fields": {
+              "locked": false
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "postbox_lock_locked",
+      "act": {
+        "this": "t1",
+        "form": "lock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:postbox"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "unlock"
+        }
+      }
+    },
+    {
+      "name": "postbox_collect_open_with_post",
+      "act": {
+        "this": "t1",
+        "form": "collect"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:postbox",
+            "fields": {
+              "locked": false,
+              "letters": 3
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "postbox_collect_empty",
+      "act": {
+        "this": "t1",
+        "form": "collect"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:postbox",
+            "fields": {
+              "locked": false
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "post"
+        }
+      }
+    },
+    {
+      "name": "postbox_collect_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "collect"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "t1": {
+            "kind": "eden:postbox",
+            "fields": {
+              "locked": false,
+              "letters": 3
+            }
+          },
+          "x1": {
+            "kind": "eden:letter"
+          },
+          "x2": {
+            "kind": "eden:letter"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "postbox_collect_locked",
+      "act": {
+        "this": "t1",
+        "form": "collect"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:postbox",
+            "fields": {
+              "letters": 3
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "fix": {
+          "form": "unlock"
+        }
+      }
+    }
+  ]
+}

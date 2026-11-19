@@ -16,8 +16,11 @@
 //! - `tokens`: the gateway's tokens file, `<grant> <sha-256 hex>` per Soul, never a token. `souls.tokens` (mode 0600)
 //!   holds the Souls' tokens themselves, for a local client; it is never copied off the machine.
 //! - `views/`: V1's stream of the zone's root (full, everyone), written by a view tier of the process's own, and
-//!   `views/world.json`, `{"stream": <its folder>, "history": "../history/"}`, which the page reads for `?world=`.
-//! - `gateway.sock` (or `--socket`): the gateway's local socket (I1's framing, `answers::serve`). `health.json`: O4's.
+//!   `views/world.json`, `{"stream": "views/<its folder>/", "history": "history/"}`, both relative to the world's
+//!   folder (history is V3's, not written here yet), which the page reads for `?world=`.
+//! - `gateway.sock`: the gateway's local socket (I1's framing, `answers::serve`), unless `--socket` or
+//!   `$WORLDD_SOCKET` names another (a placed world's: a socket's path is at most 108 bytes, and a world folder's
+//!   name is 67). `health.json`: O4's.
 //!
 //! **A start** reads the log through once (its records feed the stream from record 0), then hands it to K18's loop
 //! (`answers::start`), which restores the newest checkpoint and replays the records after it. It prints `worldd:
@@ -74,6 +77,36 @@ const EPOCH: u64 = 1;
 const EVERY: u64 = 8 << 20;
 /// The stream writer's queue in the tier: deliveries it may fall behind by before it is handed a snapshot.
 const BOUND: usize = 1 << 16;
+/// Eden's zone, America/New_York (today's default, `apps/server/src/god/real-clock.ts`): standard time is UTC−5, and
+/// from 2 AM on March's second Sunday to 2 AM on November's first it is UTC−4. Offsets are written to 2100.
+const EST_US: i64 = -5 * HOUR_US;
+const HOUR_US: i64 = 3_600_000_000;
+const SKY_UNTIL_YEAR: i64 = 2100;
+
+/// Today's sky on Eden's calendar: world time is the machine's clock (µs from the Unix epoch, [`answers::now`]), so the
+/// civil origin is 0 and a day is 86,400 s; the weather is seeded from the world's lineage.
+fn eden_sky(lineage: Scope) -> sim::daylight::Config {
+    use replica::sky::{Calendar, DAY_US, days_from_civil};
+    // The day number of the `n`th Sunday on or after day `d` (1970-01-01, day 0, was a Thursday).
+    let sunday = |d: i64, n: i64| d + (7 - (d + 4).rem_euclid(7)) % 7 + 7 * (n - 1);
+    let mut offsets = vec![(0, EST_US)];
+    for y in 1970..=SKY_UNTIL_YEAR {
+        let spring = sunday(days_from_civil(y, 3, 1), 2) * DAY_US + 2 * HOUR_US - EST_US;
+        let autumn =
+            sunday(days_from_civil(y, 11, 1), 1) * DAY_US + 2 * HOUR_US - (EST_US + HOUR_US);
+        offsets.push((spring, EST_US + HOUR_US));
+        offsets.push((autumn, EST_US));
+    }
+    let cal = Calendar {
+        day_s: 86_400,
+        origin: 0,
+        offsets,
+    };
+    let mut seed = [0; 8];
+    seed.copy_from_slice(&lineage.0[..8]);
+    sim::daylight::Config::today(cal, u64::from_le_bytes(seed))
+}
+
 /// Souls stand this far apart along x on a first start, mm.
 const APART_MM: i64 = 2_000;
 
@@ -366,7 +399,8 @@ fn bodies(town: Town, ground: Id, placed: &Placed) -> Result<Bodies, Refusal> {
     Ok(b)
 }
 
-/// `worldd serve --dir <world folder> [--socket <path>]`: runs the world until killed.
+/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>]`: runs the world until killed. A
+/// checkpoint is taken each `--checkpoint-every` bytes of log (default 8 MiB).
 pub fn run(args: &[String]) -> i32 {
     match serve(args) {
         Ok(()) => 0,
@@ -378,10 +412,13 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn serve(args: &[String]) -> R<()> {
-    let dir = PathBuf::from(
-        arg(args, "--dir").ok_or("usage: worldd serve --dir <world folder> [--socket <path>]")?,
-    );
-    let socket = arg(args, "--socket").map_or_else(|| dir.join("gateway.sock"), PathBuf::from);
+    let dir = PathBuf::from(arg(args, "--dir").ok_or(
+        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>]",
+    )?);
+    let socket = arg(args, "--socket")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("WORLDD_SOCKET").map(PathBuf::from))
+        .unwrap_or_else(|| dir.join("gateway.sock"));
     let meta_path = dir.join("world.json");
     let meta = json::parse(&std::fs::read_to_string(&meta_path).map_err(io(&meta_path))?)?;
     if meta.get("format").and_then(Json::str) != Some("souls/world/1") {
@@ -415,9 +452,14 @@ fn serve(args: &[String]) -> R<()> {
     let store = log.close();
     let (tx, synced) = channel();
     let mut cfg = Config::new(built.root.scope(), EPOCH);
-    cfg.checkpoints = Some((dir.join("checkpoints"), EVERY));
+    let every = arg(args, "--checkpoint-every").map_or(Ok(EVERY), |n| {
+        n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
+    })?;
+    cfg.checkpoints = Some((dir.join("checkpoints"), every));
     cfg.health = Some(dir.join("health.json"));
     cfg.synced = Some(tx);
+    // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
+    cfg.sky = Some(eden_sky(built.root.scope()));
     // The engine's own acts (C2): the world's rules; no activity kinds are loaded from a world folder yet.
     cfg.engine = Some((built.rules.clone(), Vec::new()));
     let (town, ground) = (built.town, built.ground);
@@ -475,11 +517,11 @@ fn serve(args: &[String]) -> R<()> {
     let writer =
         Writer::create(&views, &built.header, &key, (now, (now / 1000) as u64)).map_err(refusal)?;
     let pointer = format!(
-        "{{\"stream\": \"{}\", \"history\": \"../history/\"}}\n",
+        "{{\"stream\": \"views/{}/\", \"history\": \"history/\"}}\n",
         stream::dir(&built.header, &key)
     );
     view_out::write_whole(&views.join("world.json"), pointer.as_bytes()).map_err(refusal)?;
-    let writing = view_out::follow(writer, sub, Arc::new(AtomicBool::new(false)));
+    let writing = view_out::follow(writer, sub, Arc::new(AtomicBool::new(false)), answers::now);
     for (k, bytes) in found.records.into_iter().enumerate() {
         if !recorder::is_input(&bytes) {
             tier.offer(found.first + k as u64, bytes);

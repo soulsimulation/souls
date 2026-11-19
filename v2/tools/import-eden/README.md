@@ -41,5 +41,10 @@ a log's only text is `namespace:name`. Kinds are named as the world's Soul Actio
 (C12, `kind_name`): the facts' `core:<name>` and `eden:eden_<name>` load as `eden:<name>`, so each thing finds its
 entry.
 
+One thing per slot (C9, #3397): today a slot may hold several things (a desk's top, a hall's planter spots), the tree
+one. The first thing in the facts keeps the slot; each later one stays a plain child of the same parent at its own
+place, standing on it, and the load prints it under "left out of a full slot" with what holds the slot (29 in Eden
+2026), so K11's auditor finds no `slot-over-full`.
+
 Tests: `cargo test -p import-eden` runs a small world written in the test. The Eden 2026 test needs the exported file:
 `cargo test -p import-eden --release -- --ignored --nocapture`.

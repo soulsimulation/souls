@@ -1,0 +1,140 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:toilet",
+  "owner": "thing",
+  "state": {
+    "cistern": {
+      "n": 1,
+      "type": "int",
+      "unit": "g",
+      "default": 6000,
+      "min": 0,
+      "max": 6000,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "handle": {
+      "role": "contact",
+      "at_mm": [
+        140,
+        860,
+        -250
+      ]
+    },
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        500
+      ]
+    }
+  },
+  "slots": {
+    "seat": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [
+        0,
+        440,
+        80
+      ],
+      "stand": "front"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      440,
+      875,
+      610
+    ]
+  },
+  "forms": {
+    "flush": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "cistern",
+          "at_least": 6000
+        },
+        {
+          "need": "within_reach",
+          "point": "handle"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "handle"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cistern",
+          "to": 0,
+          "event": "flushed"
+        },
+        {
+          "change": "timer",
+          "form": "refill",
+          "after_us": 30000000,
+          "event": "cistern_filling"
+        }
+      ]
+    },
+    "refill": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [
+        {
+          "need": "state",
+          "field": "cistern",
+          "at_most": 0
+        }
+      ],
+      "steps": [],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cistern",
+          "to": 6000,
+          "event": "cistern_full"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:toilet",
+    "shape": {"round":0,"shapes":[{"kind":"cyl","at":[0,200,50],"r":150,"h":400,"segments":10,"r2":190,"tint":"porcelain"},{"kind":"cyl","at":[0,420,60],"r":200,"h":40,"segments":10,"tint":"seat"},{"kind":"extrude","at":[0,450,-250],"polygon":[[-180,-60],[180,-60],[180,60],[-180,60]],"h":340,"tint":"porcelain"},{"kind":"box","at":[0,830,-250],"size":[440,40,200],"round":0,"tint":"porcelain"},{"kind":"cyl","at":[140,860,-250],"r":20,"h":30,"segments":5,"tint":"chrome","role":"knob"}],"palette":{"porcelain":"#eef0ee","seat":"#e8e6e0","chrome":"#c9ccd0"},"tags":["bath","toilet","object"]}
+  },
+  "text": {
+    "card": "A porcelain toilet: sit on it, and flush it once its cistern has filled.",
+    "loo": "loo",
+    "wc": "wc",
+    "lavatory": "lavatory",
+    "bath": "bath"
+  },
+  "card": {
+    "text": "card",
+    "category": "bath",
+    "synonyms": [
+      "loo",
+      "wc",
+      "lavatory"
+    ]
+  }
+}

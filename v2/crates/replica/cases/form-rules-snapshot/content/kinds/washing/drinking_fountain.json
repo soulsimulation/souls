@@ -1,0 +1,196 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:drinking_fountain",
+  "owner": "thing",
+  "state": {
+    "water": {
+      "n": 1,
+      "type": "int",
+      "unit": "g",
+      "default": 1000000000,
+      "min": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "flowing": {
+      "n": 2,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "button": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1060,
+        -120
+      ]
+    },
+    "spout": {
+      "role": "outlet",
+      "at_mm": [
+        0,
+        1100,
+        -50
+      ]
+    },
+    "drink": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        550
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      540,
+      1142,
+      540
+    ]
+  },
+  "forms": {
+    "turn_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "flowing",
+          "is": false
+        },
+        {
+          "need": "within_reach",
+          "point": "button"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "button"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "flowing",
+          "to": true,
+          "event": "water_arcs"
+        }
+      ]
+    },
+    "turn_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "flowing",
+          "is": true
+        },
+        {
+          "need": "within_reach",
+          "point": "button"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "button"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "flowing",
+          "to": false,
+          "event": "water_stops"
+        }
+      ]
+    },
+    "drink": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "flowing",
+          "is": true
+        },
+        {
+          "need": "within_reach",
+          "point": "spout"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "drink"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "spout"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "water",
+          "by": -200,
+          "event": "drank"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:drinking_fountain",
+    "table": [
+      {
+        "part": "fill",
+        "field": "flowing",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[220,0],[220,80],[140,130],[120,800],[160,860],[0,870]],"segments":8,"tint":"stone"},{"kind":"lathe","at":[0,850,0],"profile":[[0,0],[200,20],[270,140],[250,150],[180,100],[0,90]],"segments":10,"tint":"bowl"},{"kind":"cyl","at":[0,990,-150],"r":20,"h":152,"segments":6,"tint":"brass","pitch":23205},{"kind":"sphere","at":[0,1060,-120],"r":30,"segments":5,"tint":"brass"},{"kind":"cyl","at":[0,1100,-50],"r":14,"h":117,"segments":5,"tint":"water","pitch":59015,"glow":300,"role":"fill"},{"kind":"cyl","at":[0,1045,40],"r":14,"h":188,"segments":5,"tint":"water","pitch":154813,"glow":300,"role":"fill"},{"kind":"cyl","at":[0,950,0],"r":180,"h":10,"segments":10,"tint":"water","role":"fill"}],"palette":{"stone":"#b9b3a6","bowl":"#a39d90","brass":"#b8913f","water":"#9fd0e0"},"tags":["street","fountain","object"]}
+  },
+  "text": {
+    "card": "A stone drinking fountain: press its brass button and drink from the arc.",
+    "water_fountain": "water fountain",
+    "bubbler": "bubbler",
+    "drinking_tap": "drinking tap",
+    "water": "water"
+  },
+  "card": {
+    "text": "card",
+    "category": "water",
+    "synonyms": [
+      "water_fountain",
+      "bubbler",
+      "drinking_tap"
+    ]
+  }
+}

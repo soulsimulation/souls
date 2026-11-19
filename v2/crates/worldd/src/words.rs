@@ -6,12 +6,15 @@
 //!   `{21: id}` before the intent is logged or acted on: no byte of the words reaches the log.
 //! - **Who may read them**, by the intent's form (its verb's name after the namespace; `souls:` verbs are the
 //!   engine's own, T10 rule 4): `say` and `describe` are public; `whisper` is its listener's alone (an audience of
-//!   one, never in a public view or a public text file); words in any other intent are their sender's alone until a
-//!   form says otherwise.
+//!   one, never in a public view or a public text file); a `say` into an activity (target: the activity) is its
+//!   members' alone, the activity's audience (E26a, #3504); words in any other intent are their sender's alone until
+//!   a form says otherwise.
 //! - **What the world writes** (in [`crate::answers`], at the intent's arrival, answered with a receipt after its
 //!   tick's sync): a `say` is a `souls:said` entry of the public audience, written by the speaker's body
 //!   (`replica::speech`); a `whisper` (target: the listener's body) is the same event in an entry of the listener's
-//!   audience, its one hearer the listener; a `describe` sets the body's public name ([`NAME`], parameter 1) and
+//!   audience, its one hearer the listener; a `say` into an activity is that event in an entry of the activity's
+//!   audience, its hearers the members' bodies, and is refused `not-a-member` before its words are kept when the
+//!   speaker's body is not one ([`members`]); a `describe` sets the body's public name ([`NAME`], parameter 1) and
 //!   one-line description ([`DESCRIPTION`], parameter 2) as references on its node, as a Soul does when it joins.
 //!
 //! Not here: who else hears ordinary talk (the bodies' interest sets, `sim::speech`, need the controller's index, so a
@@ -19,6 +22,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use replica::activity::MEMBER;
 use replica::audience::REFERENCE;
 use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Refusal, Rest};
 use replica::encode::Value;
@@ -26,6 +30,7 @@ use replica::ids::{Id, Minter, Scope, sha256};
 use replica::intents::{Intent, Target};
 use replica::speech::{RATE, SHORTEST, Said};
 use replica::time::Micros;
+use replica::tree::Tree;
 use replica::world_model::Audience;
 use sim::log::Mem;
 use sim::text::Store;
@@ -63,6 +68,8 @@ pub fn in_memory(lineage: Scope) -> R<Store> {
 pub enum Form {
     Say,
     Whisper(Id),
+    /// A turn into an activity, its members' alone.
+    Members(Id),
     Describe,
     Other,
 }
@@ -74,6 +81,7 @@ pub fn form(intent: &Intent) -> Form {
         _ => return Form::Other,
     };
     match (form, &intent.target) {
+        ("say", Some(Target::Node(activity))) => Form::Members(*activity),
         ("say", _) => Form::Say,
         ("whisper", Some(Target::Node(to))) => Form::Whisper(*to),
         ("describe", _) => Form::Describe,
@@ -87,7 +95,7 @@ pub fn form(intent: &Intent) -> Form {
 pub fn audience(form: Form, body: Id) -> Audience {
     match form {
         Form::Say | Form::Describe => Audience::Everyone,
-        Form::Whisper(to) => Audience::Of(to),
+        Form::Whisper(to) | Form::Members(to) => Audience::Of(to),
         Form::Other => Audience::Of(body),
     }
 }
@@ -129,6 +137,24 @@ pub fn keep(
     })
 }
 
+/// The bodies that are members of `activity` now (its `souls:member` links, B5), if `body` is one of them; refused
+/// `not-a-member` when it is not (or `activity` is no activity).
+pub fn members(tree: &Tree, activity: Id, body: Id) -> Result<BTreeSet<Id>, &'static str> {
+    let bodies: BTreeSet<Id> = tree
+        .links_at(activity)
+        .iter()
+        .filter(|e| tree.ty(e).as_str() == MEMBER)
+        .filter_map(|e| tree.link(e.link))
+        .filter(|(_, ends, _, _)| ends[1] == activity)
+        .map(|(_, ends, _, _)| ends[0])
+        .collect();
+    if bodies.contains(&body) {
+        Ok(bodies)
+    } else {
+        Err("not-a-member")
+    }
+}
+
 /// The reference in parameter `n` of a logged intent's value (`{4: {n: {21: id}}}`), if any.
 fn parameter(value: &Value, n: u64) -> Option<Id> {
     let Value::Map(m) = value else { return None };
@@ -157,12 +183,14 @@ pub fn naming(value: &Value) -> BTreeMap<u64, Value> {
 }
 
 /// The entry an intent of `form` writes, its words already kept (`value` is the intent as logged, `kept` its
-/// references with their lengths), or none when the form writes none. Refused by name when it is malformed.
+/// references with their lengths; `members` a turn's hearers, [`members`]), or none when the form writes none.
+/// Refused by name when it is malformed.
 pub fn entry(
     form: Form,
     value: &Value,
     kept: &[(Id, usize)],
     body: Id,
+    members: BTreeSet<Id>,
     envelope: Envelope,
 ) -> Option<Result<Effect, &'static str>> {
     let said = |audience, reach_mm, hearers: BTreeSet<Id>| match kept.first() {
@@ -183,6 +211,7 @@ pub fn entry(
     Some(match form {
         Form::Say => said(Audience::Everyone, SAY_REACH_MM, BTreeSet::new()),
         Form::Whisper(to) => said(Audience::Of(to), WHISPER_REACH_MM, BTreeSet::from([to])),
+        Form::Members(activity) => said(Audience::Of(activity), SAY_REACH_MM, members),
         Form::Describe => {
             let set = |field, r: Id| ChangeRec {
                 change: Change::Set {

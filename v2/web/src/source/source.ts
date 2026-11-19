@@ -2,6 +2,8 @@
 // (a snapshot) and what changed (parts). V1's stream of numbered files is the first; V9 (history) and V13 add theirs
 // by implementing `Source`. Times are world microseconds; positions micrometres in the node's parent frame (T4).
 
+import type { Happened } from '../sound/record.ts';
+
 /** One node as the page needs it, read from R1's replica after a part. */
 export type NodeRec = {
   id: string;
@@ -36,8 +38,10 @@ export type NodeRec = {
   description?: string | null;
 };
 
-/** Where the world is: its newest part's end, and world time against wall time. */
-export type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number };
+/** Where the world is: its newest part's end, world time against wall time, and the world time up to which a still
+ * world wrote nothing (V5b, #3460); the worker gives the latest `quietUntil` it found with every part before it
+ * played, and keeps it after (it never steps back). */
+export type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null };
 
 /** One motion sample, as the part carried it: node, frame (parent node and slot), world time µs, position µm (V6). */
 export type SampleRec = [string, string, number | null, number, number, number, number];
@@ -48,7 +52,7 @@ export type SaidRec = { speaker: string; at: number; length: number; reach: numb
 
 /** What one part changed, in the order played; `samples` is every motion sample in it, in entry order; `said` every
  * utterance in it (V1b). */
-export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[] };
+export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[]; happened?: Happened[] };
 
 export type SourceEvents = {
   pointer(p: Pointer): void;
