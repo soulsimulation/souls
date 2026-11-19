@@ -281,6 +281,12 @@ impl Town {
         self.planned.get(&body).map_or(&[], Vec::as_slice)
     }
 
+    /// The corner `body`'s line aims at next: the node it was searched on and x and z there, µm (read only).
+    pub fn next_corner(&self, body: Id) -> Option<(Id, [i64; 2])> {
+        let l = self.lines.get(&body)?;
+        Some((l.node, *l.points.get(l.next)?))
+    }
+
     /// Off the clock thread: the ground as `part` leaves the tree `base` (a copy of this town's, as it stands when
     /// the part is checked; `header` is the zone's), with the versions of the nodes it touches bumped from `versions`.
     /// When the open ground is not touched, only the buildings whose floors are touched are read again, on the open
