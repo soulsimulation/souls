@@ -215,7 +215,8 @@ fn a_step_kind_not_built_is_refused_by_name_and_so_is_an_unknown_point() {
         parse(&text).expect("JSON")
     };
     for (steps, want) in [
-        ("{\"step\":\"sit\",\"slot\":\"x\"}", "step-not-built"),
+        ("{\"step\":\"rise\"}", "step-not-built"),
+        ("{\"step\":\"sit\",\"slot\":\"x\"}", "slot-unknown"),
         ("{\"step\":\"use_held\"}", "step-not-built"),
         ("{\"step\":\"fly\"}", "step-unknown"),
         (
@@ -232,4 +233,62 @@ fn a_step_kind_not_built_is_refused_by_name_and_so_is_an_unknown_point() {
         bind(&entry, "no-such-form").expect_err("refused").name,
         "form-unknown"
     );
+}
+
+/// C17 (#3453): a `sit` step binds to its slot (by name or by argument), lying where the slot's posture is `lie` or
+/// the step is a `lie`; the form's `reparent` of the actor into that slot is the sit's own hand-off, not an effect;
+/// and the runner asks the world to take the seat, waking at its contact (the effect's instant) and ending done.
+#[test]
+fn c17_a_sit_step_binds_its_slot_and_posture_and_runs_through_the_seat() {
+    let entry = parse(
+        r#"{"format":"souls-entry/1","kind":"t:x","points":{"p":{"role":"stand","at_mm":[0,0,500]}},
+        "slots":{"a":{"admits":"body","posture":"sit","at_mm":[0,450,0],"stand":"p"},
+                 "b":{"admits":"body","posture":"lie","at_mm":[0,500,0],"stand":"p"}},
+        "forms":{
+          "s":{"takes":{"seat":{"type":"slot"}},
+               "steps":[{"step":"walk_to","point":{"arg":"seat"}},{"step":"sit","slot":{"arg":"seat"}}],
+               "effects":[{"change":"reparent","what":"actor","into":{"arg":"seat"}}]},
+          "n":{"steps":[{"step":"sit","slot":"a"}]},
+          "l":{"steps":[{"step":"lie","slot":"a"}]}}}"#,
+    )
+    .expect("JSON");
+    let slots = |n: u64| BTreeMap::from([("seat".to_owned(), n)]);
+    let bound = skills::form_runner::bind_in(&entry, "s", &slots(2)).expect("binds");
+    assert_eq!(bound[1], Step::Sit { slot: 2, lie: true });
+    assert_eq!(
+        skills::form_runner::bind_in(&entry, "s", &slots(1)).unwrap()[1],
+        Step::Sit {
+            slot: 1,
+            lie: false
+        }
+    );
+    assert_eq!(
+        bind(&entry, "n").unwrap(),
+        vec![Step::Sit {
+            slot: 1,
+            lie: false
+        }]
+    );
+    assert_eq!(
+        bind(&entry, "l").unwrap(),
+        vec![Step::Sit { slot: 1, lie: true }]
+    );
+    let effects = skills::form_runner::bind_effects_in(&entry, "s", &BTreeMap::new(), &slots(1))
+        .expect("binds");
+    assert!(effects.is_empty(), "the reparent is the sit's: {effects:?}");
+    // The run: the seat asked for, the effect at contact, done when the sit ends done.
+    let mut h = Fake::default();
+    let mut r = Runner::new(bind(&entry, "n").unwrap(), node(), Limits::default());
+    assert!(matches!(
+        r.wake(&mut h, Woke::Start),
+        Next::Sit {
+            slot: 1,
+            lie: false,
+            ..
+        }
+    ));
+    r.wake(&mut h, Woke::Contact);
+    assert!(r.take_effect(), "the effect's instant is the sit's contact");
+    let end = r.wake(&mut h, Woke::Moved(Name::new("done").unwrap()));
+    assert_eq!(ended(&end), Some("done"));
 }

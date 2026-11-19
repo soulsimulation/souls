@@ -878,52 +878,75 @@ impl World for Town {
     }
 
     fn plan(&mut self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
-        let here = node_of(body);
-        let from = self
-            .map
-            .spot_near(here, body.pose.position, AT_EDGE)
-            .ok_or_else(|| refusal("off-ground", show(here)))?;
-        let to = self
-            .map
-            .spot(node, goal)
-            .ok_or_else(|| refusal("destination-gone", show(node)))?;
-        let route = self.map.route(&self.tree, from, to, HANDS)?;
-        let mut ground: Vec<(Id, u64)> = Vec::new();
-        for p in route.patches() {
-            if ground.last().map(|l| l.0) != Some(p.node) {
-                ground.push((p.node, p.version));
-            }
-        }
+        let (legs, ground) = plan_on(
+            &mut self.map,
+            &self.tree,
+            &self.link_at,
+            &self.buildings,
+            body,
+            node,
+            goal,
+        )?;
         self.planned.insert(body.id, ground);
-        let (mut legs, mut on, mut at) = (Vec::new(), here, body.pose.position);
-        for h in &route.hops {
-            let Hop::Link { id, .. } = h else { continue };
-            let l = self
-                .link(*id)
-                .ok_or_else(|| refusal("link-not-walked", show(*id)))?;
-            let near = (0..2)
-                .filter(|&k| l.ends[k].is_some_and(|e| e.floor == on))
-                .min_by_key(|&k| l.ends[k].map_or(i128::MAX, |e| dist2(at, e.middle())))
-                .ok_or_else(|| refusal("link-not-walked", show(*id)))?;
-            let (a, b) = (l.ends[near], l.ends[1 - near]);
-            let (Some(a), Some(b)) = (a, b) else {
-                return Err(refusal("link-not-walked", show(*id)));
-            };
-            legs.push(Leg {
-                to: a.middle(),
-                link: Some(*id),
-            });
-            (on, at) = (b.floor, b.middle());
-        }
-        legs.push(Leg {
-            to: goal,
-            link: None,
-        });
         Ok(legs)
     }
 }
 
-impl View<'_> {
+/// The ground a route crosses, each node with its version then (G3).
+type Crossed = Vec<(Id, u64)>;
+
+/// The legs from where `body` stands to `goal` (µm, `node`'s frame) over `map`, and the ground the route crosses with
+/// its versions: [`Town::plan`]'s, shared with [`View::plan`].
+fn plan_on(
+    map: &mut Map,
+    tree: &Tree,
+    link_at: &BTreeMap<Id, (usize, usize)>,
+    buildings: &[Building],
+    body: &Body,
+    node: Id,
+    goal: Vec3,
+) -> Result<(Vec<Leg>, Crossed), Refusal> {
+    let here = node_of(body);
+    let from = map
+        .spot_near(here, body.pose.position, AT_EDGE)
+        .ok_or_else(|| refusal("off-ground", show(here)))?;
+    let to = map
+        .spot(node, goal)
+        .ok_or_else(|| refusal("destination-gone", show(node)))?;
+    let route = map.route(tree, from, to, HANDS)?;
+    let mut ground: Vec<(Id, u64)> = Vec::new();
+    for p in route.patches() {
+        if ground.last().map(|l| l.0) != Some(p.node) {
+            ground.push((p.node, p.version));
+        }
+    }
+    let (mut legs, mut on, mut at) = (Vec::new(), here, body.pose.position);
+    for h in &route.hops {
+        let Hop::Link { id, .. } = h else { continue };
+        let l = find_link(link_at, buildings, *id)
+            .ok_or_else(|| refusal("link-not-walked", show(*id)))?;
+        let near = (0..2)
+            .filter(|&k| l.ends[k].is_some_and(|e| e.floor == on))
+            .min_by_key(|&k| l.ends[k].map_or(i128::MAX, |e| dist2(at, e.middle())))
+            .ok_or_else(|| refusal("link-not-walked", show(*id)))?;
+        let (a, b) = (l.ends[near], l.ends[1 - near]);
+        let (Some(a), Some(b)) = (a, b) else {
+            return Err(refusal("link-not-walked", show(*id)));
+        };
+        legs.push(Leg {
+            to: a.middle(),
+            link: Some(*id),
+        });
+        (on, at) = (b.floor, b.middle());
+    }
+    legs.push(Leg {
+        to: goal,
+        link: None,
+    });
+    Ok((legs, ground))
+}
+
+impl<'a> View<'a> {
     fn now(&self) -> u64 {
         self.meter.map_or(0, |m| m())
     }
@@ -1028,6 +1051,49 @@ impl View<'_> {
             ground,
         };
         crate::spots::within(&mut g, Target::new(node, at), reach, from)
+    }
+
+    /// The legs a form's walk takes from where `body` stands to `goal` (µm, `node`'s frame), across the links on the
+    /// way (C17, #3453): [`Town::plan`]'s route, the ground it crosses not recorded (a form's walk is not planned again
+    /// by the ladder).
+    pub fn plan(&self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
+        let map = &mut **self.map.borrow_mut();
+        plan_on(
+            map,
+            self.tree,
+            self.link_at,
+            self.buildings,
+            body,
+            node,
+            goal,
+        )
+        .map(|(legs, _)| legs)
+    }
+
+    /// Each node's surface a body stands on.
+    pub fn surfaces(&self) -> &'a BTreeMap<Id, Surface> {
+        self.surfaces
+    }
+
+    /// Point `at` of node `node`'s frame (µm) carried up the tree to the first node a body stands on (the open ground,
+    /// or a building's floor), with the turn from `node`'s axes to that node's (C17, #3453). `None` when no node above
+    /// holds a surface.
+    pub fn on_floor(&self, node: Id, at: Vec3) -> Option<(Id, Vec3, Quat)> {
+        let (mut on, mut at, mut turn) = (node, at, Quat::IDENTITY);
+        for _ in 0..64 {
+            if self.surfaces.contains_key(&on) {
+                return Some((on, at, turn));
+            }
+            let n = self.tree.node(self.tree.handle(on)?)?;
+            let (place, parent) = (n.place()?, n.parent()?);
+            at = place
+                .position
+                .plus(place.orientation.rotate(at).ok()?)
+                .ok()?;
+            turn = place.orientation.then(turn).ok()?;
+            on = parent;
+        }
+        None
     }
 
     /// The planning call (#3167): the line from where `body` stands toward `to` on its node, `[here, to]` when a

@@ -114,6 +114,12 @@ pub trait Host {
     fn stand_near(&self, _at: Vec3, _reach: i64) -> Option<Vec3> {
         None
     }
+    /// The legs of a walk to point `at` of node `node`'s frame (µm), or to the nearest place within `reach` of it
+    /// where a body may stand (C17, #3453): each leg a point (µm, the frame of the ground the body stands on then) and
+    /// the link it then crosses, the last none. Empty when there is no way there; `None` when the world does not say.
+    fn legs(&self, _node: Id, _at: Vec3, _reach: i64) -> Option<Vec<(Vec3, Option<Id>)>> {
+        None
+    }
     /// A timer on the body, due `after` microseconds of world time from now, named for what it is for (T6 rule 15).
     fn set_timer(&mut self, after: Micros, name: Name) -> Id;
     /// Clears a timer the skill set (fired or cancelled).

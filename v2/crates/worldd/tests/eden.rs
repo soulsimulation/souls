@@ -112,6 +112,17 @@ fn facts_path() -> String {
 /// `worldd seed` from `facts` (a path) with Eden's entries and births from `at` (`x,z` m), then `worldd serve`, and a
 /// Soul joined on the world's socket: the server, the Soul and the world's folder.
 fn serve(facts: &str, at: &str, tag: &str, lineage: Scope) -> (Served, Client, PathBuf) {
+    let (served, soul, dir, _) = serve_lines(facts, at, tag, lineage);
+    (served, soul, dir)
+}
+
+/// [`serve`], with the lines `worldd serve` printed before it listened.
+fn serve_lines(
+    facts: &str,
+    at: &str,
+    tag: &str,
+    lineage: Scope,
+) -> (Served, Client, PathBuf, Vec<String>) {
     let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
     let dir = std::env::temp_dir().join(format!("eden-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -143,9 +154,9 @@ fn serve(facts: &str, at: &str, tag: &str, lineage: Scope) -> (Served, Client, P
         .unwrap();
     let mut out = BufReader::new(child.stdout.take().unwrap());
     let served = Served(child);
-    let mut line = String::new();
+    let (mut line, mut lines) = (String::new(), Vec::new());
     while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
-        line.clear();
+        lines.push(std::mem::take(&mut line));
     }
     print!("serve: {line}");
     let s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
@@ -154,7 +165,7 @@ fn serve(facts: &str, at: &str, tag: &str, lineage: Scope) -> (Served, Client, P
     let joined = soul.act(JOIN, None, BTreeMap::new());
     println!("join: {joined:?}");
     joined.expect("born by the entry");
-    (served, soul, dir)
+    (served, soul, dir, lines)
 }
 
 /// Each frame `bike` was moved to, in order (B4's transfers' leaves), from the world's log.
@@ -324,6 +335,166 @@ fn c15_a_point_with_no_room_is_acted_at_from_the_nearest_place_within_reach() {
     let _ = std::fs::remove_dir_all(&dir);
     knocked.expect("acted from the nearest place within reach");
     assert_eq!(apple, Err("souls:no-way".to_owned()));
+}
+
+/// Today's Eden's seats: each thing's slots of kind `seat` or `bed` in the facts file (the bake today's engine sits
+/// on), counted by thing def: (slots, things).
+fn todays_seats(text: &str) -> BTreeMap<String, (usize, usize)> {
+    let facts = replica::rules::json::parse(text).expect("the facts parse");
+    let mut out: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+    for t in facts.get("things").and_then(|t| t.arr()).unwrap_or(&[]) {
+        let n = t
+            .get("slots")
+            .and_then(|s| s.arr())
+            .unwrap_or(&[])
+            .iter()
+            .filter(|s| matches!(s.get("kind").and_then(|k| k.str()), Some("seat" | "bed")))
+            .count();
+        if n > 0 {
+            let def = t.get("def").and_then(|d| d.str()).unwrap_or("?");
+            let e = out.entry(def.to_owned()).or_default();
+            (e.0, e.1) = (e.0 + n, e.1 + 1);
+        }
+    }
+    out
+}
+
+/// C17 (#3453) A1: a seeded Eden registers the seats its entries declare, one per thing (B3 holds one seat per thing;
+/// C19 registers the rest), printed against today's Eden; and the gateway's walk, sit and rise work on one: a Soul
+/// born outside the library walks in to the sage armchair's stand point, sits in it and rises.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
+    let facts = facts_path();
+    let text = std::fs::read_to_string(&facts).unwrap();
+    let im = import_eden::load(&text).expect("Eden loads");
+    let today = todays_seats(&text);
+    let (slots, things) = today.values().fold((0, 0), |(s, t), (a, b)| (s + a, t + b));
+    println!("today's Eden: {slots} seats (seat and bed slots) on {things} things");
+    // The sage armchair in the library's reading room (cd:…, today's e_1f3666fe).
+    let armchair = im.nodes["e_1f3666fe"];
+    let (served, mut soul, dir, lines) =
+        serve_lines(&facts, "74.0,-1.0", "c17a1", im.nodes["world"].scope());
+    let seats = lines
+        .iter()
+        .find(|l| l.starts_with("places to sit or lie: "))
+        .expect("the places line")
+        .trim()
+        .to_owned();
+    println!("{seats}");
+    let walked = soul.act("eden:walk", Some(armchair), BTreeMap::new());
+    println!("walk to the armchair: {walked:?}");
+    let sat = soul.act("eden:sit", Some(armchair), BTreeMap::new());
+    println!("sit in it: {sat:?}");
+    let rose = soul.act("eden:rise", None, BTreeMap::new());
+    println!("rise: {rose:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    // `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor; <moved> stand
+    // points moved to clear ground`
+    let n: Vec<usize> = seats
+        .split(|c: char| !c.is_ascii_digit())
+        .filter_map(|w| w.parse().ok())
+        .collect();
+    let [registered, on, declared, left, moved] = n[..] else {
+        panic!("{seats}")
+    };
+    println!(
+        "registered {registered} of today's {slots} seats ({declared} declared by the entries); things \
+         {on} of today's {things}; {moved} stand points moved to clear ground"
+    );
+    // By today's thing def: today's seats and seated things, against the things the entries give a seat.
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let mut found = Vec::new();
+    entries(Path::new(&format!("{root}/content/kinds")), &mut found);
+    let (mine, _) = import_eden::body_slots(&im.tree, &found);
+    let def_of: BTreeMap<Id, String> = replica::rules::json::parse(&text)
+        .unwrap()
+        .get("things")
+        .and_then(|t| t.arr())
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|t| {
+            let id = im.nodes.get(t.get("id")?.str()?)?;
+            Some((*id, t.get("def")?.str()?.to_owned()))
+        })
+        .collect();
+    let mut by_def: BTreeMap<String, usize> = BTreeMap::new();
+    for s in &mine {
+        *by_def
+            .entry(def_of.get(&s.thing).cloned().unwrap_or_default())
+            .or_default() += 1;
+    }
+    for (def, (s, t)) in &today {
+        let r = by_def.get(def).copied().unwrap_or(0);
+        if r != *t {
+            println!("  {def}: today {s} seats on {t} things; registered on {r}");
+        }
+    }
+    for (def, r) in &by_def {
+        if !today.contains_key(def) {
+            println!("  {def}: no seat today; registered on {r}");
+        }
+    }
+    assert_eq!(
+        mine.len(),
+        registered,
+        "the world registers what the entries declare"
+    );
+    assert_eq!(left, 0, "every seat placed on a floor");
+    assert_eq!(registered, on, "one seat per thing");
+    assert!(registered * 2 > things, "most of today's seated things");
+    walked.expect("walked in to the armchair's stand point");
+    sat.expect("sat in the armchair");
+    rose.expect("rose from it");
+}
+
+/// C17 (#3453) A2: a Soul born outside the lake cabin sits at the cabin's chair that stands under its table (its
+/// `front`, where a body stands to take the seat, lies under the table top) through the chair's own `sit` form: it
+/// walks in through the cabin's door to the nearest clear ground within reach of the seat's stand point (C15) and
+/// takes the seat by the form's `sit` step (B2's sit move into B3's seat, the gateway's own). It rises by the
+/// gateway's rise. The library's reading chairs stand under their tables too, but their nearest clear ground within
+/// 0.3 m is a pocket between the chair and the table no walk reaches (0.6 m off is the nearest a walk reaches): the sit
+/// there answers `souls:no-way`, by name.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c17_a2_a_soul_sits_at_a_chair_under_its_table_by_its_own_form() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    // The lake cabin's first chair (today's e_0fc49dc9, at (-120.03, -57.34) m turned 65 degrees; its front lies
+    // under the cabin's table at (-119.26, -57.04) m), and the library's west reading chair (e_5a2ad7fc).
+    let (chair, reading) = (im.nodes["e_0fc49dc9"], im.nodes["e_5a2ad7fc"]);
+    // Births stand 1 m east of the entry: 1.2 m outside the cabin's front door at (-121.0, -55.8) m.
+    let (served, mut soul, dir) = serve(&facts, "-122.5,-54.6", "c17a2", im.nodes["world"].scope());
+    let sat = soul.act("eden:sit", Some(chair), args(&[("seat", Value::Uint(1))]));
+    println!("from outside, sit at the cabin's chair under its table, by its own form: {sat:?}");
+    let rose = soul.act("eden:rise", None, BTreeMap::new());
+    println!("rise: {rose:?}");
+    let pocket = soul.act("eden:sit", Some(reading), args(&[("seat", Value::Uint(1))]));
+    println!("sit at the library's west reading chair: {pocket:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    sat.expect("sat by the chair's own form");
+    rose.expect("rose");
+    assert_eq!(pocket, Err("souls:no-way".to_owned()));
+}
+
+/// C17 (#3453) A3: a Soul born outside the library walks in through its door (a form's walk across the doorway's
+/// link) and unrolls the west rug through the rug's own entry (`unroll`: a walk to its end, a 3 s pause).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c17_a3_a_soul_walks_into_the_library_and_uses_a_thing_there_by_its_own_entry() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    // The library's west rug (today's e_7cefb7c4, at (71.5, -6.3) m); the library's door at (74.0, -2.91) m.
+    let rug = im.nodes["e_7cefb7c4"];
+    let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "c17a3", im.nodes["world"].scope());
+    // `unroll`, within a form act's 10 s (`roll_up`'s 5 s pause after the 5.5 s walk in runs past it).
+    let unrolled = soul.act("eden:unroll", Some(rug), BTreeMap::new());
+    println!("from outside, unroll the library's west rug: {unrolled:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    unrolled.expect("walked indoors and used the rug through its own entry");
 }
 
 /// Every `souls-entry/1` file under `dir`, `(kind, entry)`, as `worldd seed` reads them.

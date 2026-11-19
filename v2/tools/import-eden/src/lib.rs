@@ -1194,3 +1194,75 @@ pub fn clear_stand_points(
     }
     report
 }
+
+/// A seat an entry declares on one thing (C17, #3453): a slot that admits a body, in the thing's own axes, µm.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BodySlot {
+    pub thing: Id,
+    /// The slot's number, 1, 2, ... in the entry's order (as the form runner numbers slots).
+    pub slot: u64,
+    /// Whether the slot's posture is `lie` (a bed's), else a sit.
+    pub lie: bool,
+    /// The slot's point; its height above the thing's floor is `at.y`.
+    pub at: Vec3,
+    /// The slot's stand point (the point its `stand` names), where a body stands to take it and is set back.
+    pub stand: Vec3,
+}
+
+/// Every thing of `tree` whose kind's entry (`entries`, `(kind, souls-entry/1 entry)` as `worldd seed` reads them)
+/// has a slot that admits a body, with the first such slot ([`BodySlot`]), in id order; and the count of every such slot
+/// on those things. A slot with no stand point, or a point not in whole millimetres, is left out.
+pub fn body_slots(
+    tree: &Tree,
+    entries: &[(String, replica::rules::json::Value)],
+) -> (Vec<BodySlot>, usize) {
+    use replica::rules::json::Value as J;
+    let um = |v: Option<&J>| -> Option<Vec3> {
+        match v.and_then(J::arr)? {
+            [J::Int(x), J::Int(y), J::Int(z)] => Some(Vec3::new(
+                i64::try_from(*x).ok()? * 1000,
+                i64::try_from(*y).ok()? * 1000,
+                i64::try_from(*z).ok()? * 1000,
+            )),
+            _ => None,
+        }
+    };
+    // Each kind's body slots, in the entry's order: (number, lie, at, stand).
+    let mut by_kind: BTreeMap<&str, Vec<(u64, bool, Vec3, Vec3)>> = BTreeMap::new();
+    for (kind, e) in entries {
+        let slots = e.get("slots").and_then(J::obj).unwrap_or(&[]);
+        let found: Vec<_> = (1u64..)
+            .zip(slots)
+            .filter(|(_, (_, d))| d.get("admits").and_then(J::str) == Some("body"))
+            .filter_map(|(n, (_, d))| {
+                let stand = d.get("stand").and_then(J::str)?;
+                let stand = um(e.get("points")?.get(stand)?.get("at_mm"))?;
+                let lie = d.get("posture").and_then(J::str) == Some("lie");
+                Some((n, lie, um(d.get("at_mm"))?, stand))
+            })
+            .collect();
+        if !found.is_empty() {
+            by_kind.insert(plain(kind), found);
+        }
+    }
+    let (mut out, mut all) = (Vec::new(), 0);
+    let mut next = vec![tree.root()];
+    while let Some(h) = next.pop() {
+        next.extend(tree.children(h).unwrap_or(&[]).iter().copied());
+        let Some(n) = tree.node(h) else { continue };
+        let Some(found) = by_kind.get(plain(n.kind().as_str())) else {
+            continue;
+        };
+        all += found.len();
+        let (slot, lie, at, stand) = found[0];
+        out.push(BodySlot {
+            thing: n.id(),
+            slot,
+            lie,
+            at,
+            stand,
+        });
+    }
+    out.sort_by_key(|s| s.thing);
+    (out, all)
+}

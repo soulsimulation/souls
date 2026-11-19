@@ -85,6 +85,16 @@ fn int(v: &Value) -> Option<i64> {
     }
 }
 
+/// Whether `v` is a form's arguments: a list of `[name, value]` pairs, a name as bytes.
+fn form_args(v: Option<&Value>) -> bool {
+    match v {
+        Some(Value::Array(a)) => a.first().is_some_and(
+            |p| matches!(p, Value::Array(kv) if matches!(kv.first(), Some(Value::Bytes(_)))),
+        ),
+        _ => false,
+    }
+}
+
 /// Reads a move intent: `None` when its verb is not a move, else the ask or the reason it is not one. A walk's point
 /// is parameter 1, `[x, y, z]` µm in its target's frame.
 pub fn read(intent: &Intent, body: Id) -> Option<Result<Asked, &'static str>> {
@@ -109,6 +119,9 @@ pub fn read(intent: &Intent, body: Id) -> Option<Result<Asked, &'static str>> {
             };
             Ok(Ask::Walk { node, point })
         }),
+        // A sit naming a form's arguments (`[[name, value], ...]`, its seat) is the entry's own form, run by the
+        // form runner with its walk (C17, #3453); a bare sit is the move.
+        "sit" if form_args(intent.parameters.get(&1)) => return None,
         "sit" => node.ok_or("move.no-target").map(|thing| Ask::Sit { thing }),
         "rise" => Ok(Ask::Rise),
         _ => return None,
@@ -126,7 +139,10 @@ enum Live {
     Place(Instance),
 }
 
-/// Each body's point (its feet, or its seat's point while it is in one) and each seat's seat and stand point, µm.
+/// Each body's point (its feet, or its seat's stand point while it is in one) and each seat's seat and stand point,
+/// µm. A seat is taken from its stand point and left there (B3): its contacts (`souls:slot` for a sit or a lie,
+/// `souls:stand` for a rise) are reached at the stand point, across x and z, so the seat's own offset from it (the
+/// kind's model geometry, SEATDEF) is never counted against the body's reach (C17, #3453).
 struct Geo(BTreeMap<Id, Vec3>, BTreeMap<Id, [Vec3; 2]>);
 
 impl Reach for Geo {
@@ -139,14 +155,13 @@ impl Reach for Geo {
         point: &Name,
     ) -> Option<i64> {
         let a = self.0.get(&body)?;
-        let [place, stand] = self.1.get(&target)?;
+        let [_, stand] = self.1.get(&target)?;
         let b = match point.as_str() {
-            "souls:slot" => place,
-            "souls:stand" => stand,
+            "souls:slot" | "souls:stand" => stand,
             _ => return None,
         };
         let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
-        i64::try_from((d(a.x, b.x) + d(a.y, b.y) + d(a.z, b.z)).isqrt()).ok()
+        i64::try_from((d(a.x, b.x) + d(a.z, b.z)).isqrt()).ok()
     }
 }
 
@@ -350,7 +365,7 @@ impl Bodies {
             .filter_map(|&b| {
                 let p = c.body(b)?.pose;
                 let at = match (p.support, self.slots.held_by(b)) {
-                    (Support::Slot, Some(t)) => self.slots.place(t)?.point,
+                    (Support::Slot, Some(t)) => self.slots.place(t)?.stand().ok()?,
                     _ => p.position,
                 };
                 Some((b, at))

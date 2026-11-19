@@ -202,6 +202,7 @@ impl Stage {
                 mint: &mut self.mint,
                 moves: &mut self.moves,
                 library: &self.library,
+                places: None,
                 seed: 1,
             },
             &mut self.forms,
@@ -482,6 +483,7 @@ pub fn points() -> Vec<(String, u64)> {
         Step::Move { .. } => "move",
         Step::Wait(_) => "pause",
         Step::Hand => "hand",
+        Step::Sit { .. } => "sit",
     };
     spans
         .iter()

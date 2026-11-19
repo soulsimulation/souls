@@ -308,6 +308,7 @@ impl Bench {
                 mint: &mut self.mint,
                 moves: &mut self.p.moves,
                 library: &self.library,
+                places: None,
                 seed: 1,
             },
             &mut self.p.forms,

@@ -48,6 +48,12 @@
 //!   body may stand, as the world chooses it (`Host::stand_near`, N9's spot tables); with none, the walk to the point
 //!   itself ends `souls:no-way`.
 //!
+//! - **Seats and indoors** (C17, #3453). A `sit` step (or a `lie`, or a `sit` into a slot whose posture is `lie`)
+//!   asks the world to take the node's seat by B2's sit or lie move ([`Next::Sit`]), the gateway's own path; its
+//!   contact is the effect's instant, and the form's `reparent` of the actor into that slot is the step's hand-off.
+//!   A `walk_to` asks the world for its legs ([`Host::legs`]): the point carried onto the floor a body stands on and
+//!   the route there across doors and stairs; before a sit, to a place within [`SIT_REACH`] of the stand point.
+//!
 //! Not here: who may (F6), stages of long forms (F11), a thing made or set down where there is no slot (E4).
 
 use std::collections::BTreeMap;
@@ -77,14 +83,22 @@ pub enum Step {
     /// A `take` or `put` with no move of its own (C12): its transfer alone, at once, where the steps before it left
     /// the body. When it is the form's first hand step, its transfer is the effect's instant.
     Hand,
+    /// Sit, or lie, in slot `slot` of the node (C17): B3's seat taken by B2's sit or lie move, as the gateway's sit
+    /// takes it. It lies when the slot's posture is `lie` or the step is a `lie`.
+    Sit { slot: u64, lie: bool },
 }
 
 /// How far from a point a walk to it may end, µm, when a body cannot stand on the point itself (C15, #3447): an arm
 /// (the longest reach a move may state) and a body, as today's engine counts a stand point's reach.
 pub const REACH: i64 = replica::moves::REACH_MOST + 600_000;
 
+/// How far from a seat's stand point the place a walk before a `sit` or `lie` step goes to may be (C17, #3453), µm:
+/// the sit's and the lie's own reach (B2's data, a body's 0.6 m) less how near the walk comes to its end
+/// ([`crate::route::AT_GOAL`]), so the seat is in reach where the walk stops.
+pub const SIT_REACH: i64 = 600_000 - crate::route::AT_GOAL;
+
 /// The step kinds of SA-F1's closed list that later tasks build. A form that has one is refused `step-not-built`.
-pub const NOT_BUILT: [&str; 4] = ["sit", "rise", "use_held", "settle"];
+pub const NOT_BUILT: [&str; 3] = ["rise", "use_held", "settle"];
 
 fn name(t: &str) -> Name {
     Name::new(t).unwrap_or_else(|| unreachable!("a fixed name"))
@@ -233,6 +247,26 @@ pub fn bind_in(
                     })
                 }
                 "take" | "put" if s.get("move").is_none() => Ok(Step::Hand),
+                "sit" | "lie" => {
+                    let at = s.get("slot").ok_or_else(|| Refusal {
+                        name: "step-malformed",
+                        detail: format!("{kind}.slot: a slot or {{\"arg\": name}}"),
+                    })?;
+                    let slot = match at.get("arg").and_then(Value::str) {
+                        Some(a) => *slots.get(a).ok_or_else(|| Refusal {
+                            name: "arg-missing",
+                            detail: a.to_owned(),
+                        })?,
+                        None => slot_n(entry, text(Some(at), "sit.slot")?)?,
+                    };
+                    let posture = slot_def(entry, slot)
+                        .and_then(|(_, d)| d.get("posture"))
+                        .and_then(Value::str);
+                    Ok(Step::Sit {
+                        slot,
+                        lie: kind == "lie" || posture == Some("lie"),
+                    })
+                }
                 "move" | "take" | "put" => {
                     let at = text(s.get("at"), "move.at")?;
                     point(entry, at)?;
@@ -398,7 +432,15 @@ pub fn bind_effects_in(
             e.get("change").and_then(Value::str) == Some("reparent") && e.get("into") == Some(into)
         })
     };
-    let mut carried = Vec::new();
+    // The body handed into the seat is a sit's own hand-off (C17): the form's `reparent` of the actor into that
+    // slot is carried by the step, not written as an effect.
+    let steps = f.get("steps").and_then(Value::arr).unwrap_or(&[]);
+    let mut carried: Vec<usize> = steps
+        .iter()
+        .filter(|s| matches!(s.get("step").and_then(Value::str), Some("sit" | "lie")))
+        .filter_map(|s| s.get("slot").and_then(&reparent))
+        .filter(|&i| effects[i].get("what").and_then(Value::str) == Some("actor"))
+        .collect();
     let mut what = |s: &Value, into: &Value| match (s.get("what"), reparent(into)) {
         (Some(w), _) => of(Some(w), args),
         (None, Some(i)) => {
@@ -535,6 +577,9 @@ pub enum Next {
     Walk(Box<dyn Skill>),
     /// Start move `name` toward point `at` of `node` (B2), then wake the runner with [`Woke::Moved`].
     Move { name: Name, node: Id, at: Name },
+    /// Take the seat in slot `slot` of `node` by B2's sit (or lie) move through B3's seats, as the gateway's sit
+    /// does (C17), then wake the runner with [`Woke::Contact`] at the hand-off and [`Woke::Moved`] at its end.
+    Sit { node: Id, slot: u64, lie: bool },
     /// Nothing until the next wake.
     Sleep,
     /// The run is over, with its name. Whatever the run started and has not ended (a walk, a move, a timer) the world
@@ -565,7 +610,7 @@ impl Runner {
     pub fn new(steps: Vec<Step>, node: Id, limits: Limits) -> Runner {
         let hand = steps
             .iter()
-            .position(|s| matches!(s, Step::Move { .. } | Step::Hand));
+            .position(|s| matches!(s, Step::Move { .. } | Step::Hand | Step::Sit { .. }));
         Runner {
             steps,
             node,
@@ -635,12 +680,24 @@ impl Runner {
                     node.position.y.saturating_add(at.y),
                     node.position.z.saturating_add(at.z),
                 );
-                // From the nearest place within reach where a body may stand (C15); unanswered, to the point itself.
-                let to = host.stand_near(to, REACH).unwrap_or(to);
+                // The world's legs to the point, or to the nearest place within reach where a body may stand, across
+                // the links on the way (C17), the point in its node's parent's frame. A world that does not say: from
+                // the nearest place within reach (C15), else to the point itself, on the ground the body stands on.
+                let reach = match self.steps.get(self.at + 1) {
+                    Some(Step::Sit { .. }) => SIT_REACH,
+                    _ => REACH,
+                };
+                let legs = match node.parent.and_then(|p| host.legs(p, to, reach)) {
+                    Some(l) if l.is_empty() => return self.end(host, name("souls:no-way")),
+                    Some(l) => l.into_iter().map(|(to, link)| Leg { to, link }).collect(),
+                    None => vec![Leg {
+                        to: host.stand_near(to, reach).unwrap_or(to),
+                        link: None,
+                    }],
+                };
                 self.timer = Some(host.set_timer(self.limits.walk, name("souls:form-deadline")));
-                let leg = Leg { to, link: None };
                 Next::Walk(Box::new(Route::new(
-                    vec![leg],
+                    legs,
                     self.limits.speed,
                     self.limits.tick,
                 )))
@@ -652,6 +709,15 @@ impl Runner {
                     name: mv,
                     node: self.node,
                     at,
+                }
+            }
+            Step::Sit { slot, lie } => {
+                self.timer =
+                    Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
+                Next::Sit {
+                    node: self.node,
+                    slot,
+                    lie,
                 }
             }
             Step::Wait(us) => {
@@ -681,7 +747,7 @@ impl Runner {
         let step = self.steps.get(self.at).cloned();
         // A move is left at its next phase boundary; anything else at once. A run left has no effect from then on.
         if why == Woke::Leave {
-            if matches!(step, Some(Step::Move { .. })) {
+            if matches!(step, Some(Step::Move { .. } | Step::Sit { .. })) {
                 self.leaving = true;
                 return Next::Sleep;
             }
@@ -711,11 +777,13 @@ impl Runner {
                 Progress::Failed(n) => self.end(host, n),
                 Progress::Going => Next::Sleep,
             },
-            (Woke::Contact, Some(Step::Move { .. })) if self.hand == Some(self.at) => {
+            (Woke::Contact, Some(Step::Move { .. } | Step::Sit { .. }))
+                if self.hand == Some(self.at) =>
+            {
                 self.effect_now();
                 Next::Sleep
             }
-            (Woke::Moved(how), Some(Step::Move { .. })) => {
+            (Woke::Moved(how), Some(Step::Move { .. } | Step::Sit { .. })) => {
                 if how.as_str() == "done" {
                     self.advance(host)
                 } else {

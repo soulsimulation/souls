@@ -55,7 +55,13 @@
 //!   effects) and ends the run with the refusal's name. The amount fields come from the kinds ([`Forms::kinds`]) and
 //!   the transfer's zone from its header ([`Forms::zone`]).
 //!
-//! Not here: a walk across a link (the walk's crossings are not carried here yet), accepting the intent (I4),
+//! - **Places and links** (C17, #3453). A `sit` (or `lie`) step takes the world's seat by B3's [`Slots`] and B2's sit
+//!   or lie move, the gateway's own path: [`World::places`] lends the places table and the floors, a seat's timers fire
+//!   through [`Slots::fire`] so its contact hands the body into the slot, and the move's end wakes the run. A walk's
+//!   crossings are kept for the caller to carry ([`Forms::crossings`], `crate::host::carry`), so a form walks
+//!   indoors across doors and stairs.
+//!
+//! Not here: accepting the intent (I4),
 //! queueing for a reserved thing (B7), things for several users, a thing made or set down where there is no slot (E4).
 
 pub mod amounts;
@@ -70,6 +76,7 @@ use replica::encode::{Name, Value};
 use replica::host::Progress;
 use replica::ids::{Id, Minter};
 use replica::moves::Move;
+use replica::pose::Vec3;
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::who_may::{self, Answer, Who};
@@ -78,8 +85,9 @@ use skills::form_runner::{self, Limits, Next, Runner, Step, Woke};
 
 use crate::controller::{Controller, Driver};
 use crate::host::{Geometry, Run, Staged, hand_on, lend, step};
+use crate::mover::Surface;
 use crate::moves::{Fired, Instance, Moves, Reach};
-use crate::slots::hands;
+use crate::slots::{PlaceAt, Request, Slots, hands};
 use crate::timers::{DueList, Timer};
 
 /// What a form's run reaches in the world: the tree as of the tick's start, the geometry's answers, the controller,
@@ -94,6 +102,74 @@ pub struct World<'a, G, R> {
     pub moves: &'a mut Moves,
     pub library: &'a [Move],
     pub seed: u64,
+    /// The world's places and floors, for a `sit` step (C17); `None` where the world has none.
+    pub places: Option<Places<'a>>,
+}
+
+/// The places a form's sit takes (B3's table, the gateway's own) and the floors a body is set back on.
+pub struct Places<'a> {
+    pub slots: &'a mut Slots,
+    pub floors: &'a BTreeMap<Id, Surface>,
+}
+
+/// A seat's reach for one body, as the gateway's sit measures it (`worldd`'s bodies): a seat is taken from its stand
+/// point and left there (B3), so its contacts are at the stand point ([`PlaceAt::stand`]), measured across x and z
+/// from where the body stands (its seat's stand point while it is in one); any other target as `inner`.
+struct SeatReach<'b, R> {
+    inner: &'b R,
+    body: Id,
+    from: Vec3,
+    place: Option<(Id, Vec3)>,
+}
+
+impl<R: Reach> Reach for SeatReach<'_, R> {
+    fn distance(
+        &self,
+        body: Id,
+        effector: &replica::moves::Effector,
+        limb: Option<&Name>,
+        target: Id,
+        point: &Name,
+    ) -> Option<i64> {
+        let Some((_, to)) = self.place.filter(|p| p.0 == target && body == self.body) else {
+            return self.inner.distance(body, effector, limb, target, point);
+        };
+        if !matches!(point.as_str(), "souls:slot" | "souls:stand") {
+            return self.inner.distance(body, effector, limb, target, point);
+        }
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        i64::try_from((d(self.from.x, to.x) + d(self.from.z, to.z)).isqrt()).ok()
+    }
+
+    fn tip(&self, body: Id, limb: &Name) -> Option<Name> {
+        self.inner.tip(body, limb)
+    }
+}
+
+/// [`SeatReach`] for `body` and the seat of `thing` in `slots`, over `inner`.
+fn seat_reach<'b, R: Reach>(
+    inner: &'b R,
+    c: &Controller,
+    slots: &Slots,
+    body: Id,
+    thing: Id,
+) -> SeatReach<'b, R> {
+    let at = |p: &PlaceAt| p.stand().ok();
+    let from = c.body(body).map_or(Vec3::ZERO, |b| {
+        match (
+            b.pose.support,
+            slots.held_by(body).and_then(|t| slots.place(t)),
+        ) {
+            (replica::pose::Support::Slot, Some(p)) => at(p).unwrap_or(b.pose.position),
+            _ => b.pose.position,
+        }
+    });
+    SeatReach {
+        inner,
+        body,
+        from,
+        place: slots.place(thing).and_then(|p| Some((thing, at(p)?))),
+    }
 }
 
 /// A run's number, unique in [`Forms`].
@@ -235,6 +311,9 @@ pub struct Forms {
     limits: amounts::Limits,
     /// The zone's header, for B4's transfer.
     header: Option<Header>,
+    /// The crossings the walks asked for this tick (C17): the caller carries them (`crate::host::carry`) and clears
+    /// the list.
+    pub crossings: Vec<(Id, Driver, Id, i64)>,
 }
 
 fn name(t: &str) -> Name {
@@ -751,6 +830,40 @@ impl Forms {
                 }
                 Err(r) => self.wake(w, run, Woke::Walked(Progress::Failed(name(r.name))), now),
             },
+            Next::Sit { node, slot, lie } => {
+                let mv = name(if lie { "souls:lie" } else { "souls:sit" });
+                let (Some(found), Some(places)) =
+                    (w.library.iter().find(|m| m.name == mv), w.places.as_mut())
+                else {
+                    return self.wake(w, run, Woke::Moved(name("place-unknown")), now);
+                };
+                if places.slots.place(node).map(|p| p.place.slot) != Some(slot) {
+                    return self.wake(w, run, Woke::Moved(name("place-unknown")), now);
+                }
+                let geo = seat_reach(w.reach, w.controller, places.slots, body, node);
+                let request = Request {
+                    body,
+                    thing: node,
+                    mv: found,
+                    stance: if lie {
+                        crate::controller::Stance::Lie
+                    } else {
+                        crate::controller::Stance::Sit
+                    },
+                };
+                let taken = places
+                    .slots
+                    .commit(w.controller, w.due, w.mint, w.moves, &geo, &[request], now)
+                    .pop()
+                    .map_or_else(
+                        || Err(name("place-unknown")),
+                        |(_, r)| r.map_err(|e| name(e.name)),
+                    );
+                match taken {
+                    Ok(n) => fr.mv = Some(n),
+                    Err(how) => self.wake(w, run, Woke::Moved(how), now),
+                }
+            }
             Next::Move { name: mv, node, at } => {
                 let Some(found) = w.library.iter().find(|m| m.name == mv) else {
                     return self.wake(w, run, Woke::Moved(name("move-unknown")), now);
@@ -841,6 +954,7 @@ impl Forms {
         }
         let staged = step(w.tree, w.geometry, now, w.seed, w.mint, &mut self.walks);
         let _ = hand_on(&staged, w.controller);
+        self.crossings.extend(staged.crossings.iter().copied());
         let _ = w.due.apply(&staged);
         for (body, p) in staged.ended {
             let Some(&run) = self.by_body.get(&body) else {
@@ -858,7 +972,18 @@ impl Forms {
     /// Runs a timer the due list handed back, at its due time: a move's phase timer (B2's [`Moves::fire`]; a move's
     /// end wakes its run) or a run's own timer. Returns whether it was either; any other timer is the caller's.
     pub fn fire<G: Geometry, R: Reach>(&mut self, w: &mut World<'_, G, R>, t: &Timer) -> bool {
-        if let Some(f) = w.moves.fire(w.controller, w.due, w.mint, w.reach, t) {
+        // A seat's move fires through the places (C17): its contact hands the body into the slot, a rise's out.
+        let fired = match w.places.as_mut() {
+            Some(s) if s.slots.held_by(t.node).is_some() => {
+                let thing = s.slots.held_by(t.node).unwrap_or(t.node);
+                let geo = seat_reach(w.reach, w.controller, s.slots, t.node, thing);
+                s.slots
+                    .fire(w.controller, w.due, w.mint, w.moves, &geo, s.floors, t)
+                    .map(|(f, _)| f)
+            }
+            _ => w.moves.fire(w.controller, w.due, w.mint, w.reach, t),
+        };
+        if let Some(f) = fired {
             match f {
                 Fired::Done(rec) | Fired::Cancelled(rec) => {
                     if let Some(&run) = self.by_body.get(&rec.body)

@@ -15,6 +15,11 @@
 //!   describes it). A run's end is its intent's answer: `done` a receipt naming every entry the intent caused, else
 //!   the run's ending by name.
 //!
+//! - **Places and indoors** (C17, #3453). A form's `sit` takes the bodies' own places ([`Bodies::slots`], the
+//!   gateway's sit's table), and a form's walk is planned by the town across doors and stairs to its point carried
+//!   up the tree onto the floor a body stands on ([`View::on_floor`], [`View::plan`]); its crossings are carried by
+//!   the town's links after the forms' tick (`sim::host::carry`), and the walk sees itself carried ([`F_CROSSING`]).
+//!
 //! Not here: R2's needs checked again at commit (the checkers read bodies from the tree, which does not hold them
 //! yet); a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
 //! nodes); resuming a run after a restart.
@@ -23,7 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use replica::effects::{Actor, Effect, Refusal, fixture_bytes};
 use replica::encode::{Name, decode};
-use replica::host::{Answer, Ask, Seen};
+use replica::host::{Answer, Ask, F_CROSSING, Seen};
 use replica::ids::{Id, Minter, Scope};
 use replica::moves::{Effector, Move};
 use replica::pose::Vec3;
@@ -31,11 +36,12 @@ use replica::rules::json::Value as Json;
 use replica::time::Micros;
 use replica::tree::Tree;
 use sim::controller::Controller;
-use sim::forms::{Asked, Forms, Intent, RunId, World};
-use sim::host::Geometry;
+use sim::forms::{Asked, Forms, Intent, Places, RunId, World};
+use sim::host::{Geometry, Staged};
 use sim::mover::Body as Moved;
 use sim::moves::{Moves, Reach};
 use sim::timers::DueList;
+use sim::walk::Leg;
 use sim::walk::town::View;
 use skills::form_runner::Limits;
 
@@ -61,6 +67,8 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
 /// What the runner sees: the bodies as the controller had them at the call, the town's corners and the tree.
 struct Sight<'a> {
     bodies: BTreeMap<Id, Moved>,
+    /// The bodies carried across a link now.
+    carrying: BTreeSet<Id>,
     view: Option<View<'a>>,
     tree: &'a Tree,
     kind: Name,
@@ -113,14 +121,38 @@ impl Geometry for Sight<'_> {
             .stand_near(sim::walk::node_of(me), at, reach, Some(me))
     }
 
+    /// The point carried onto the floor a body stands on, the nearest place within reach of it (or the point), and
+    /// the town's route there from where the body stands, across links; no legs when there is no way.
+    fn legs(&self, body: Id, node: Id, at: Vec3, reach: i64) -> Option<Vec<Leg>> {
+        let (me, view) = (self.bodies.get(&body)?, self.view.as_ref()?);
+        let (floor, at, _) = view.on_floor(node, at)?;
+        let here = sim::walk::node_of(me);
+        let to = view.stand_near(floor, at, reach, Some(me));
+        // On the body's own ground the walk goes to the point itself when there is no place: it ends there by name.
+        if floor == here {
+            return Some(vec![Leg {
+                to: to.unwrap_or(at),
+                link: None,
+            }]);
+        }
+        let Some(to) = to else {
+            return Some(Vec::new());
+        };
+        Some(view.plan(me, floor, to).unwrap_or_default())
+    }
+
     fn read(&self, node: Id) -> Option<Seen> {
         let b = self.bodies.get(&node)?;
+        let mut fields = BTreeMap::new();
+        if self.carrying.contains(&node) {
+            fields.insert(F_CROSSING, replica::encode::Value::Uint(1));
+        }
         Some(Seen {
             id: node,
             kind: self.kind.clone(),
             parent: Some(sim::index::place_of(b).0),
             position: b.pose.position,
-            fields: BTreeMap::new(),
+            fields,
         })
     }
 }
@@ -227,12 +259,28 @@ impl Acts {
         seed: u64,
         f: impl FnOnce(&mut Forms, &mut World<'_, Sight<'_>, Sight<'_>>) -> T,
     ) -> T {
-        let (controller, view) = match bodies {
-            Some(b) => (&mut b.runner.controller, Some(b.town.view())),
-            None => (&mut self.own, None),
+        let (controller, view, slots) = match bodies {
+            Some(b) => (
+                &mut b.runner.controller,
+                Some(b.town.view()),
+                Some(&mut b.slots),
+            ),
+            None => (&mut self.own, None, None),
+        };
+        let places = match (slots, view.as_ref()) {
+            (Some(slots), Some(v)) => Some(Places {
+                slots,
+                floors: v.surfaces(),
+            }),
+            _ => None,
         };
         let sight = Sight {
             bodies: controller.bodies().map(|b| (b.id, *b)).collect(),
+            carrying: controller
+                .bodies()
+                .filter(|b| controller.carrying(b.id).is_some())
+                .map(|b| b.id)
+                .collect(),
             view,
             tree,
             kind: Name::new("souls:body").unwrap_or_else(|| unreachable!("a literal name")),
@@ -247,6 +295,7 @@ impl Acts {
             moves: &mut self.moves,
             library: &self.library,
             seed,
+            places,
         };
         f(&mut self.forms, &mut w)
     }
@@ -339,12 +388,21 @@ impl Acts {
 
     /// The forms' part of a tick at world time `now`: their walks, then every timer of theirs due by `now`.
     pub fn tick(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, tick: u64, now: Micros) {
-        self.with(tree, bodies, tick, |forms, w| {
+        let mut bodies = bodies;
+        self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
             forms.tick(w, now);
             while let Some(t) = w.due.fire(now) {
                 forms.fire(w, &t);
             }
         });
+        // The walks' crossings, carried by the town's links as the bodies' own walks are (C17).
+        let mut staged = Staged::default();
+        staged.crossings.append(&mut self.forms.crossings);
+        if let Some(b) = bodies
+            && !staged.crossings.is_empty()
+        {
+            let _ = sim::host::carry(&staged, &mut b.runner.controller, &mut b.town, now);
+        }
     }
 
     /// What the forms wrote, to be numbered and applied.
