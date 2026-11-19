@@ -786,7 +786,7 @@ pub fn load(text: &str) -> R<Import> {
                 let w = pose4(need(t, "pose")?)?;
                 let mut found = None;
                 for h in &hosts {
-                    let local = into(pose4(need(h, "world")?)?, w)?;
+                    let local = into(pose4(need(h, "pose")?)?, w)?;
                     if let Some(f) = on_floor(h, local)? {
                         found = Some((s(h, "id")?, f));
                         break;
