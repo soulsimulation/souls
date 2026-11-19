@@ -20,6 +20,9 @@
 //! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
 //! how) and is answered: a receipt naming both entries when done, else a refusal naming how it ended
 //! (`claim-taken`, `resource-held`, `out-of-reach`, ...). One answer, at its end: I7's accept-then-resolve is not here.
+//! No move outlives its act: a walk still going at its act's deadline stops in that tick and ends `act.timed-out`; a
+//! sit, a lie or a rise runs to its end (a seat is never left half taken) and ends so then; a walk a new move
+//! replaces ends `claim-taken` in the tick the new move starts.
 //!
 //! **A restart** starts from the newest checkpoint that verifies, when the world takes them (K5, K18c #3176): its
 //! tree, and its carry (each actor's last sequence and kept answers, the next intent id, every body's pose and seat,
@@ -66,7 +69,8 @@
 //!
 //! A checkpoint is taken by K5's rule (amount of log), between ticks: at the start of a tick, once every record
 //! handed to the log is on the disk, so it never holds a change the log lacks. **Lockstep** ([`Config::lockstep`]) runs the
-//! same loop on a clock the caller moves ([`Event::RunTo`]) and waits for every check before a tick, so a run fed
+//! same loop on a clock the caller moves ([`Event::RunTo`]) and waits for every check, and for the checkers' copy
+//! to stand at the live version, before a tick, so a run fed
 //! the same inputs at the same ticks writes the same log: how K12's replay is checked on the real loop.
 //!
 //! **Measures** (O4, #2694, `crate::measures`): each act carries its stamps from the socket to its answer, each
@@ -81,9 +85,11 @@
 // worldd's real clock (`Real`): the one place the process reads time.
 #![allow(clippy::disallowed_methods)]
 
-use crate::bodies::{self, Ask, Asked, Bodies, Placed};
+use crate::acts::{self, Acts};
+use crate::bodies::{self, Ask, Asked, Bodies, Cut, Placed};
 use crate::buildsafe;
 use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
+use crate::engine::{self, Engine};
 use crate::loose::Ends;
 use crate::measures::{self, Measures, Stamps};
 use crate::syncs::{self, ToSync};
@@ -221,6 +227,10 @@ impl Door {
             .is_ok()
     }
 }
+
+/// How long a lockstep tick waits for the checkers' copy to stand at the live version: only a bound on a publisher
+/// that refused a part; a loaded machine catches up well within it.
+const PUBLISHED_WAIT: Duration = Duration::from_secs(60);
 
 /// Where a lockstep run stands after [`Event::RunTo`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -386,6 +396,9 @@ pub struct Config {
     /// Each log record once it is on the disk, input records included, in order (C1, #3365): `worldd serve`'s own
     /// view tier and shipper read them here, off the clock thread.
     pub synced: Option<Sender<Synced>>,
+    /// The world's rules and its activity kinds, for the engine's own acts (C2: activities, offers, carrying);
+    /// without them those acts are refused `engine-acts-off`.
+    pub engine: Option<(replica::tree::Rules, Vec<replica::activity::ActivityKind>)>,
 }
 
 /// A record on the disk ([`Config::synced`]): its number in the log, its bytes, and whether it is the recorder's input
@@ -425,6 +438,7 @@ impl Config {
             served: None,
             text: None,
             follow: None,
+            engine: None,
         }
     }
 }
@@ -593,12 +607,24 @@ struct Clock {
     bodies: Option<Bodies>,
     /// Move intents taken since the last tick, committed at the next (I4b).
     moving: Vec<(Id, Asked)>,
+    /// Acts whose deadline passed while their sit, lie or rise was going: each ends `act.timed-out` when its move
+    /// ends, so no move outlives its act.
+    overdue: BTreeSet<Id>,
     /// Where edits go to be checked off the clock thread, when the world takes edits (G1b).
     edits: Option<Sender<(Id, Edit)>>,
     /// Edits checked since the last tick, committed (or refused) at the next.
     edited: Vec<(Id, Result<Checked, Refused>)>,
     /// Where the edit checker reads the bodies the controller holds, handed off each tick (G1d).
     walkers: Option<Arc<buildsafe::Moving>>,
+    /// Soul Actions (C2, #3366): the forms in progress, and the form acts taken since the last tick, committed at
+    /// the next through the form runner when the world has bodies.
+    forms: Acts,
+    forming: Vec<(Id, Act, sim::forms::Intent, BTreeMap<String, Id>)>,
+    /// The engine's own acts (C2): joint activities, offers, carrying; and those taken since the last tick.
+    engine: Option<Engine>,
+    engine_acts: Vec<engine::Act>,
+    /// Engine acts written this tick, answered with a receipt once their entries are applied.
+    engine_done: Vec<Id>,
     /// Intents arrived since the last tick, taken at the start of the next; and those a script set for a tick.
     pending: Vec<(Vec<u8>, Reply, Stamps)>,
     scheduled: BTreeMap<i64, Vec<(Vec<u8>, Reply)>>,
@@ -691,11 +717,37 @@ enum Taken {
     Form(Act),
     Move(Asked),
     Edit(Edit),
+    Engine(engine::Act),
 }
+
+/// A form's thing arguments (F4) from an intent's parameter 1: `[[name as bytes, id], ...]`.
+fn thing_args(intent: &Intent) -> BTreeMap<String, Id> {
+    let Some(Value::Array(pairs)) = intent.parameters.get(&1) else {
+        return BTreeMap::new();
+    };
+    pairs
+        .iter()
+        .filter_map(|p| match p {
+            Value::Array(kv) => match kv.as_slice() {
+                [Value::Bytes(k), v] => Some((
+                    String::from_utf8(k.clone()).ok()?,
+                    replica::effects::read_id(v).ok()?,
+                )),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name.
+pub const FORM_ENDED: &str = "souls:act-ended";
 
 /// The event of the entry a move writes when it starts, and when it ends (field 2: how, by name).
 pub const MOVE_STARTED: &str = "souls:move-started";
 pub const MOVE_ENDED: &str = "souls:move-ended";
+/// How an act still going at its deadline ends (C8), and the move it drove with it.
+pub const TIMED_OUT: &str = "act.timed-out";
 
 fn name(s: &str) -> Name {
     Name::new(s).unwrap_or_else(|| Name::new("act.refused").expect("a name"))
@@ -1028,16 +1080,33 @@ impl Clock {
             Some(_) => spot_of(&intent, self.next_intent, Cause::Intent(id)),
             None => None,
         };
-        let taken = match (spotted, moved, intent.kind()) {
-            (Some(a), _, _) => a.map(Taken::Form),
-            (None, Some(m), _) => m.map(Taken::Move),
+        let verb = engine::Verb::of(intent.verb.as_str());
+        let taken = match (spotted, moved, verb, intent.kind()) {
+            (Some(a), _, _, _) => a.map(Taken::Form),
+            (None, Some(m), _, _) => m.map(Taken::Move),
+            // The engine's own acts (C2): activities, offers and carrying, by verb.
+            (None, None, Some(v), _) => body_of(&intent).map(|body| {
+                Taken::Engine(engine::Act {
+                    id,
+                    soul: body,
+                    body,
+                    verb: v,
+                    target: match &intent.target {
+                        Some(Target::Node(n)) => Some(*n),
+                        _ => None,
+                    },
+                    params: intent.parameters.clone(),
+                })
+            }),
             // An edit (G1b): checked off the clock thread, committed at a tick through `sim::edit`.
-            (None, None, Ok(Kind::Edit)) => match (&self.edits, edit::wire::edit_of(&intent, id)) {
-                (Some(_), Some(e)) => Ok(Taken::Edit(e)),
-                (None, _) => Err("edit.not-the-creator"),
-                (_, None) => Err("intent.not-an-edit"),
-            },
-            (None, None, _) => {
+            (None, None, None, Ok(Kind::Edit)) => {
+                match (&self.edits, edit::wire::edit_of(&intent, id)) {
+                    (Some(_), Some(e)) => Ok(Taken::Edit(e)),
+                    (None, _) => Err("edit.not-the-creator"),
+                    (_, None) => Err("intent.not-an-edit"),
+                }
+            }
+            (None, None, None, _) => {
                 act_of(&intent, self.next_intent, Cause::Intent(id)).map(Taken::Form)
             }
         };
@@ -1056,6 +1125,7 @@ impl Clock {
                 Actor::Soul(a) | Actor::Creator(a) => a,
                 Actor::World => self.zone,
             },
+            Taken::Engine(a) => a.body,
         };
         self.next_intent += 1;
         // The recorder's input (K12): the intent by id and verb; its words, were there any, by reference only.
@@ -1085,7 +1155,8 @@ impl Clock {
             },
         );
         match taken {
-            Taken::Form(act) => {
+            // A move aimed at a described spot (E2) is resolved by a checker even with bodies, and bound at commit.
+            Taken::Form(act) if self.bodies.is_none() || act.spot.is_some() => {
                 self.outstanding += 1;
                 if let Some(m) = &self.measures {
                     m.to_check(id.counter(), stamps.0[1]);
@@ -1093,6 +1164,12 @@ impl Clock {
                 let _ = self.acts.send(act);
             }
             Taken::Move(m) => self.moving.push((id, m)),
+            // With bodies, a form's act goes to the form runner at the next tick (C2), not to the checkers.
+            Taken::Form(act) => {
+                let i = acts::intent(id, intent.expiry, actor, bytes);
+                self.forming.push((id, act, i, thing_args(&intent)));
+            }
+            Taken::Engine(a) => self.engine_acts.push(a),
             Taken::Edit(e) => {
                 if let Some(tx) = &self.edits
                     && tx.send((id, e)).is_ok()
@@ -1389,6 +1466,130 @@ impl Clock {
         for (id, how) in ended {
             self.settle(id, how, now);
         }
+        let tick = u64::try_from(self.tick).unwrap_or(0);
+        self.forms
+            .tick(self.replica.tree(), self.bodies.as_mut(), tick, now);
+        if let (Some(e), Some(b)) = (self.engine.as_mut(), self.bodies.as_mut()) {
+            e.tick(self.replica.tree(), &mut b.runner.controller, now);
+        }
+    }
+
+    /// Hands the form acts taken since the last tick to the form runner (C2): each starts its run, joins the one
+    /// going for its intent, gets its first receipt again, or is refused by name.
+    fn start_forms(&mut self, now: Micros) {
+        let tick = u64::try_from(self.tick).unwrap_or(0);
+        for (id, act, intent, args) in std::mem::take(&mut self.forming) {
+            let Some(o) = self.open.get(&id) else {
+                continue;
+            };
+            let (actor, sequence) = (o.actor, o.sequence);
+            if expired(o.expiry, now) {
+                self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
+                continue;
+            }
+            let candidates: Vec<(Id, String)> = act
+                .candidates
+                .iter()
+                .map(|c| (c.this, c.form.clone()))
+                .collect();
+            let r = self.forms.start(
+                self.replica.tree(),
+                self.bodies.as_mut(),
+                act.body,
+                &candidates,
+                &args,
+                intent,
+                tick,
+                now,
+            );
+            match r {
+                Ok(sim::forms::Asked::Applied(_)) => self.form_ended(id, "done".into(), now),
+                Ok(_) => {}
+                Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
+            }
+        }
+        for a in std::mem::take(&mut self.engine_acts) {
+            let Some(o) = self.open.get(&a.id) else {
+                continue;
+            };
+            let (actor, sequence) = (o.actor, o.sequence);
+            let r = match (self.engine.as_mut(), self.bodies.as_mut()) {
+                (Some(e), Some(b)) => e.act(self.replica.tree(), &mut b.runner.controller, &a, now),
+                _ => Err(Refusal {
+                    name: "engine-acts-off",
+                    detail: "the world has no rules or no bodies for them".into(),
+                }),
+            };
+            match r {
+                Ok(()) => self.engine_done.push(a.id),
+                Err(r) => self.end(a.id, |c| c.refusal(actor, sequence, r.name)),
+            }
+        }
+    }
+
+    /// Numbers and applies what the forms wrote (F2's log hook: each entry handed back as logged), then answers the
+    /// intents whose runs ended.
+    fn write_forms(&mut self, now: Micros) {
+        let mut effects = self.forms.out();
+        if let Some(e) = self.engine.as_mut() {
+            effects.extend(e.out());
+        }
+        if !effects.is_empty() {
+            for (k, e) in effects.iter_mut().enumerate() {
+                e.envelope.sequence = self.replica.version() + k as u64;
+            }
+            match sim::commit::write(&mut self.replica, &effects) {
+                Ok(part) => {
+                    self.unsealed = true;
+                    for e in &part.effects {
+                        self.forms.forms.logged(e);
+                    }
+                    self.receipts.index(&part.effects);
+                    self.effects.extend(part.effects.iter().cloned());
+                    self.parts.push(part);
+                }
+                Err(r) => eprintln!("worldd: a form's entries were not written: {r}"),
+            }
+        }
+        for id in std::mem::take(&mut self.engine_done) {
+            let Some(o) = self.open.get(&id) else {
+                continue;
+            };
+            let (actor, sequence) = (o.actor, o.sequence);
+            let entries = self.receipts.entries(id).to_vec();
+            if entries.is_empty() {
+                self.end(id, |c| c.refusal(actor, sequence, "act.not-written"));
+            } else {
+                self.end(id, |_| Answer::Receipt {
+                    actor,
+                    sequence,
+                    intent: id,
+                    entries,
+                    names: BTreeMap::new(),
+                });
+            }
+        }
+        for (id, how) in self.forms.ended() {
+            self.form_ended(id, how, now);
+        }
+    }
+
+    /// A form's run ended: an entry naming how, then its intent's answer, a receipt when `done`.
+    fn form_ended(&mut self, id: Id, how: String, now: Micros) {
+        let Some(o) = self.open.get(&id) else { return };
+        let (actor, sequence) = (o.actor, o.sequence);
+        self.note(id, FORM_ENDED, Some(&how), now);
+        if how == "done" {
+            self.end(id, |c| Answer::Receipt {
+                actor,
+                sequence,
+                intent: id,
+                entries: c.receipts.entries(id).to_vec(),
+                names: BTreeMap::new(),
+            });
+        } else {
+            self.end(id, |c| c.refusal(actor, sequence, &how));
+        }
     }
 
     /// Step 4 for moves (I4b): those taken since the last tick start, each refused by name or begun.
@@ -1409,7 +1610,12 @@ impl Clock {
             }
         }
         let started = b.start(asks);
+        // A walk a new move replaced stopped in this tick: its end is written now, before the new move's start.
+        let replaced = b.replaced();
         self.bodies = Some(b);
+        for (id, how) in replaced {
+            self.settle(id, how, now);
+        }
         for (id, r) in started {
             match r {
                 Ok(()) => self.note(id, MOVE_STARTED, None, now),
@@ -1423,9 +1629,14 @@ impl Clock {
         }
     }
 
-    /// Ends open move `id` as it ended: its entry, then its answer.
+    /// Ends open move `id` as it ended: its entry, then its answer. A move whose act's deadline passed while it
+    /// went ends `act.timed-out`, however it ended.
     fn settle(&mut self, id: Id, how: Result<(), String>, now: Micros) {
         let Some(o) = self.open.get(&id) else { return };
+        let how = match self.overdue.remove(&id) {
+            true => Err(TIMED_OUT.to_owned()),
+            false => how,
+        };
         let (actor, sequence) = (o.actor, o.sequence);
         match how {
             Ok(()) => {
@@ -1483,15 +1694,26 @@ impl Clock {
             }
         }
         at[2] = mark();
-        // 1. Due timers: acts whose deadline passed.
+        // 1. Due timers: acts whose deadline passed. A walk going for one stops in this tick and its end is written
+        // by the deadline's name; a sit, a lie or a rise runs to its end, and the act ends with it.
         while let Some(id) = self.deadlines.due(now) {
-            if let Some(b) = self.bodies.as_mut() {
-                b.cancel(id);
+            let Some(o) = self.open.get(&id) else {
+                continue;
+            };
+            let (actor, sequence, body) = (o.actor, o.sequence, o.body);
+            let cut = self.bodies.as_mut().and_then(|b| b.cancel(id));
+            // A form's run whose act timed out is left: it ends at its next stable moment (F3).
+            self.forms
+                .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+            match cut {
+                Some(Cut::Stopped) => self.note(id, MOVE_ENDED, Some(TIMED_OUT), now),
+                Some(Cut::Finishing) => {
+                    self.overdue.insert(id);
+                    continue;
+                }
+                None => {}
             }
-            if let Some(o) = self.open.get(&id) {
-                let (actor, sequence) = (o.actor, o.sequence);
-                self.end(id, |c| c.refusal(actor, sequence, "act.timed-out"));
-            }
+            self.end(id, |c| c.refusal(actor, sequence, TIMED_OUT));
         }
         // 1. The world node's sky: its timers due in this tick, each at its due time (E6, #3369).
         self.fire_sky(now);
@@ -1558,7 +1780,9 @@ impl Clock {
         }
         // 4b. Checked edits (G1b): committed through `sim::edit`, or refused whole.
         self.edits(now);
+        self.start_forms(now);
         self.start_moves(now);
+        self.write_forms(now);
         // 4. What the tick's acts made loose or kept: its timers, in the same tick (F10b, #3476).
         self.set_loose(now);
         // The bodies as they stand after the tick's steps and starts, for the edit checker (G1d): before the tick's
@@ -2001,6 +2225,25 @@ pub fn start<S: Storage + 'static>(
         world.version(),
     )?;
     let publisher = Arc::new(Publisher::new(&world));
+    let (kinds, library) = (rules.kinds.clone(), acts::library()?);
+    let (header, engine_header) = (world.header().clone(), world.header().clone());
+    // The ids the forms and the engine mint (links, transfers, things made): a scope of their own for each start,
+    // from the zone and the version the world starts at, so ids minted before a restart are never minted again.
+    let scope = |purpose: &str| {
+        let h = replica::ids::sha256(
+            format!(
+                "souls/worldd/{purpose}/{}/{}",
+                replica::world_model::show(world.header().zone),
+                world.version()
+            )
+            .as_bytes(),
+        );
+        let mut s = [0u8; 16];
+        s.copy_from_slice(&h[..16]);
+        Scope(s)
+    };
+    let (forms_scope, engine_scope) = (scope("forms"), scope("engine"));
+    let engine_parts = cfg.engine.take();
     let (events, rx) = channel();
     let walkers = cfg
         .edits
@@ -2097,9 +2340,16 @@ pub fn start<S: Storage + 'static>(
         parts: Vec::new(),
         bodies: None,
         moving: Vec::new(),
+        overdue: BTreeSet::new(),
         edits,
         edited: Vec::new(),
         walkers,
+        forms: Acts::new(kinds, library, header, forms_scope),
+        forming: Vec::new(),
+        engine: engine_parts
+            .map(|(rules, kinds)| Engine::new(engine_header, rules, kinds, engine_scope)),
+        engine_acts: Vec::new(),
+        engine_done: Vec::new(),
         pending: Vec::new(),
         scheduled: BTreeMap::new(),
         inputs: Vec::new(),
@@ -2215,6 +2465,11 @@ pub fn start<S: Storage + 'static>(
                                 }
                             }
                         }
+                        // And the checkers' copy caught up with the live tree: it is published on its own thread, and
+                        // an act checked on a copy behind it is rechecked a tick later, so the commit tick (and the
+                        // log) would depend on that thread's speed.
+                        let live = c.replica.version();
+                        c.publisher.wait_for(live, PUBLISHED_WAIT);
                         let Ok(due) = ticker.due() else { break };
                         *shared.lock().unwrap_or_else(|p| p.into_inner()) = due;
                         if let Err(e) = ticker.run_due(&mut *pace, &beat, &mut |n, s| c.tick(n, s))

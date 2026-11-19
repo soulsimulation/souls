@@ -55,8 +55,9 @@ export async function pair({ home, directory, world, gateway, device, label, sou
   const secret = randomBytes(32).toString('hex');
   const asked = await post('/v1/pair/request', {
     secret_hash: createHash('sha256').update(secret).digest('hex'),
-    // A creator (G7) names the world's creator grant its account holds; the directory never makes one.
-    device, label, force, ...(creator ? { scope: 'creator', soul: creator } : { scope: 'soul', ...(soul ? { soul } : { new: true }) }),
+    // A creator (G7) names the world's creator grant its account holds; the directory never makes one. A Soul's
+    // request names the world it is paired for (W11).
+    device, label, force, ...(creator ? { scope: 'creator', soul: creator } : { scope: 'soul', world, ...(soul ? { soul } : { new: true }) }),
   });
   if (asked.refused) throw new Refused(asked.refused, 'the directory refused the request');
   onAsk?.({ link: asked.link, code: asked.code });

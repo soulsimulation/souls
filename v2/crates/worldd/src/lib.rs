@@ -3,10 +3,12 @@
 //! machine (O3, #2732), and the thread that answers sync requests (C16, #3450). The binary is `main.rs`.
 #![forbid(unsafe_code)]
 
+pub mod acts;
 pub mod answers;
 pub mod bodies;
 pub mod buildsafe;
 pub mod checkers;
+pub mod engine;
 pub mod loose;
 pub mod measures;
 pub mod shipping;

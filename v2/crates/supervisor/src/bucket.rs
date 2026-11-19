@@ -2,71 +2,14 @@
 //! bucket, or a folder standing in for it on one machine. The setting has the offsite bucket's form, the same as
 //! O20b's `SOULS_BACKUP_URL` (#3523): `s3:https://<host>/<bucket>[/<prefix>]` (or the same without `s3:`), its keys in
 //! `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` and its region in `AWS_DEFAULT_REGION`
-//! ([`directoryd::directory::s3::S3::from_url`]); or `folder:<path>`, or a bare path, for O9's folder store. Neither
-//! the URL nor a key is ever printed: [`Bucket::what`] names the kind of store only.
+//! ([`directoryd::directory::s3::S3::from_url`], through [`Bucket::parse`]); or `folder:<path>`, or a bare path, for
+//! O9's folder store. Neither the URL nor a key is ever printed: [`Bucket::what`] names the kind of store only. The
+//! type is [`directoryd::backup::Bucket`], shared with O20b's shipper.
 
-use std::path::PathBuf;
-
-use directoryd::directory::s3::S3;
 use directoryd::directory::store::{Object, R, Store, When};
 
-use crate::folder::Folder;
-
-/// The offsite bucket, or a folder standing in for it.
-pub enum Bucket {
-    S3(S3),
-    Folder(Folder),
-}
-
-impl Bucket {
-    /// The store `spec` names, its keys read through `var` (the process environment in [`Bucket::from_env`]).
-    pub fn parse(spec: &str, var: impl Fn(&str) -> String) -> R<Bucket> {
-        let spec = spec.trim();
-        if let Some(p) = spec.strip_prefix("folder:") {
-            return Ok(Bucket::Folder(Folder::new(PathBuf::from(p))));
-        }
-        if spec.starts_with("s3:") || spec.contains("://") {
-            return S3::from_url(spec, var).map(Bucket::S3);
-        }
-        Ok(Bucket::Folder(Folder::new(PathBuf::from(spec))))
-    }
-
-    /// [`Bucket::parse`] with the keys from the process environment.
-    pub fn from_env(spec: &str) -> R<Bucket> {
-        Bucket::parse(spec, |k| std::env::var(k).unwrap_or_default())
-    }
-
-    /// What kind of store this is, for a line a person reads; never its address or its keys.
-    pub fn what(&self) -> &'static str {
-        match self {
-            Bucket::S3(_) => "the offsite bucket",
-            Bucket::Folder(_) => "a folder standing in for the offsite bucket",
-        }
-    }
-}
-
-impl Store for Bucket {
-    fn get(&self, key: &str) -> R<Option<Object>> {
-        match self {
-            Bucket::S3(s) => s.get(key),
-            Bucket::Folder(f) => f.get(key),
-        }
-    }
-
-    fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
-        match self {
-            Bucket::S3(s) => s.put(key, bytes, when),
-            Bucket::Folder(f) => f.put(key, bytes, when),
-        }
-    }
-
-    fn list(&self, prefix: &str) -> R<Vec<String>> {
-        match self {
-            Bucket::S3(s) => s.list(prefix),
-            Bucket::Folder(f) => f.list(prefix),
-        }
-    }
-}
+/// The offsite bucket, or a folder standing in for it: O20b's type (#3523), one for both (O3c's `parse` and `list`).
+pub use directoryd::backup::Bucket;
 
 /// A store's keys under a prefix, as a store of their own (the history's folder, `h/<world>/<lineage>/`, whose day
 /// index names each bundle by its key there).

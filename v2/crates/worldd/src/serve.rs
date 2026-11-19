@@ -14,6 +14,7 @@
 //! - `checkpoints/`: K5's, taken by K18c's rule; a start resumes from the newest that verifies.
 //! - `tokens`: the gateway's tokens file, `<grant> <sha-256 hex>` per Soul, never a token. `souls.tokens` (mode 0600)
 //!   holds the Souls' tokens themselves, for a local client; it is never copied off the machine.
+//! - `log.text/`: K16's text store, every word said in the world (O20b, #3523).
 //! - `views/`: V1's stream of the zone's root (full, everyone), written by a view tier of the process's own, and
 //!   `views/world.json`, `{"stream": "views/<its folder>/", "history": "history/"}`, both relative to the world's
 //!   folder (history is V3's, not written here yet), which the page reads for `?world=`.
@@ -140,6 +141,8 @@ struct Built {
     town: Town,
     ground: Id,
     root: Id,
+    /// The world's rules (T2), for the engine's own acts (C2).
+    rules: replica::tree::Rules,
 }
 
 /// Loads a facts file (N1's or X6's) as the world as built.
@@ -171,6 +174,7 @@ fn build(facts: &str) -> R<Built> {
     ))
     .map_err(|e| e.to_string())?;
     let next = im.tree.to_state().next;
+    let rules = im.rules.clone();
     let doors = Doors::new(header.clone(), im.rules, next);
     let town = Town::new(im.tree, ground, doors).map_err(|e| format!("the town: {e:?}"))?;
     Ok(Built {
@@ -179,6 +183,7 @@ fn build(facts: &str) -> R<Built> {
         town,
         ground,
         root,
+        rules,
     })
 }
 
@@ -221,9 +226,22 @@ fn humanoid() -> R<Family> {
             slot: None,
         })
     };
+    // Two hands, each holding in its slot of the body (B4): a form's press, take or put claims one (C2).
+    let hand = |s: &str, slot: u64| -> R<Resource> {
+        Ok(Resource {
+            name: n(s)?,
+            class: Class::Manipulator,
+            slot: Some(slot),
+        })
+    };
     Ok(Family {
         name: n("souls:humanoid")?,
-        resources: vec![leg("souls:leg-left")?, leg("souls:leg-right")?],
+        resources: vec![
+            leg("souls:leg-left")?,
+            leg("souls:leg-right")?,
+            hand("souls:hand-left", 1)?,
+            hand("souls:hand-right", 2)?,
+        ],
     })
 }
 
@@ -478,7 +496,7 @@ fn off_machine(
     records: &[Vec<u8>],
 ) -> R<Off> {
     let store: Bucket = Shared(Arc::new(
-        supervisor::bucket::Bucket::from_env(spec).map_err(refusal)?,
+        supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?,
     ));
     println!("store: {}", store.0.what());
     let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
@@ -643,9 +661,27 @@ fn serve(args: &[String]) -> R<()> {
     })?;
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
     cfg.health = Some(dir.join("health.json"));
+    // K16's text store on the disk, `<dir>/log.text` beside the log as `gateway-link` keeps it (O20b, #3523): a
+    // world's words outlive a restart, and O20's shipper has them to ship.
+    let text = sim::text::Store::open_dir(
+        &dir.join("log.text"),
+        replica::ids::Minter::new(worldd::words::scope(built.root.scope())),
+    )
+    .map_err(|e| format!("the text store: {}", refusal(e)))?;
+    cfg.text = Some(Arc::new(text));
+    // O20's shipper for the world's own stores (its words, uploads and removal list), keyed by its lineage as O12's
+    // restore reads them back (O20b, #3523); with no bucket set it says so once and ships nothing.
+    let lineage = to_hex(&built.root.scope().0);
+    let stores = directoryd::backup::owned_by("worldd", &[&lineage]).map_err(refusal)?;
+    let strip = format!("worlds/{lineage}/");
+    let backup = directoryd::backup::run("worldd", dir.clone(), stores, Default::default(), &strip)
+        .map_err(|e| format!("refusing to start: {}", refusal(e)))?;
+    println!("{backup}");
     cfg.synced = Some(tx);
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.root.scope()));
+    // The engine's own acts (C2): the world's rules; no activity kinds are loaded from a world folder yet.
+    cfg.engine = Some((built.rules.clone(), Vec::new()));
     let (town, ground) = (built.town, built.ground);
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
         bodies(town, ground, &souls, placed)
