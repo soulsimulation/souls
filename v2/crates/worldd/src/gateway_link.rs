@@ -24,7 +24,7 @@
 //! <path under dir>` and `body <scope hex>-<counter>` for each body, and needs a log with no records.
 //!
 //! The same socket carries R5's sync requests (R5b, #3164; `replica::sync::wire`), which the world answers for every
-//! actor over the place (`worldd::answers`).
+//! actor over the place, on the sync thread, never the clock thread (`worldd::answers`; C16, #3450).
 
 use std::fs::OpenOptions;
 use std::os::unix::net::UnixListener;
@@ -190,7 +190,8 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     // K7's watchdog on the world's own loop (K18): no tick for the limit ends the process by name.
-    // `--watchdog-ms` widens it for a debug build's big world (C11's Eden-sized sync test), as `worldd --dir` takes.
+    // `--watchdog-ms` widens it for a test that needs it, as `worldd --dir` takes. A sync never does: it is answered on
+    // the sync thread (C16, #3450), not the clock's.
     let limit = arg("--watchdog-ms")
         .and_then(|m| m.parse().ok())
         .unwrap_or(crate::watchdog::LIMIT_MS);

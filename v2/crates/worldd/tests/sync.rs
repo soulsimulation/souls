@@ -175,6 +175,38 @@ fn c16_a2_a_30000_record_sync_never_delays_a_tick() {
     assert_eq!(sim::commit::checks_on_clock(), 0, "no answer on the clock");
 }
 
+/// A1: the clock thread answers no sync. Held on purpose (O4's stuck-thread event), it ends no tick while a whole
+/// sync, a change's included, is answered; on the clock thread the answers would wait for it.
+#[test]
+fn c16_a1_a_sync_is_answered_while_the_clock_thread_is_held() {
+    let built = toggles::World::build(1, 4, 0);
+    let (body, thing) = built.pairs[0];
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(10);
+    let w = answers::start(built.replica, toggles::rules(), Mem::default(), cfg)
+        .expect("the world starts");
+    let door = w.door();
+    let mut ask = |m: BTreeMap<u64, Value>| {
+        let (reply, rx) = channel();
+        assert!(door.arrive(encode(&Value::Map(m)).unwrap(), reply));
+        map(&rx.recv_timeout(Duration::from_secs(60)).expect("an answer"))
+    };
+    let mut copy = Copy::default();
+    sync_by(&mut ask, &mut copy);
+    let (reply, rx) = channel();
+    assert!(w.door().arrive(toggle(body, thing), reply));
+    rx.recv_timeout(Duration::from_secs(60)).expect("a receipt");
+    w.events
+        .send(answers::Event::Stall(Duration::from_secs(3)))
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    let held = w.beat.read().0;
+    let s = sync_by(&mut ask, &mut copy);
+    assert_eq!((s.changed, s.fetched), (1, 3), "the change, synced");
+    assert_eq!(w.beat.read().0, held, "the clock was held throughout");
+    w.stop();
+}
+
 /// I1's framing: a 4-byte big-endian length, then the bytes.
 fn frame(s: &mut UnixStream, m: BTreeMap<u64, Value>) -> BTreeMap<u64, Value> {
     let bytes = encode(&Value::Map(m)).unwrap();
