@@ -90,6 +90,7 @@ pub fn limits() -> Limits {
 /// unrelated ticks do no route search. Waiting for a link or being carried is not a stalled walking tick.
 pub(crate) struct Walk {
     body: Id,
+    order: Id,
     started: Micros,
     planned: bool,
     watch: Watch,
@@ -111,9 +112,10 @@ fn walk_span(length_mm: u64, links: usize) -> Micros {
 }
 
 impl Walk {
-    pub(crate) fn new(body: Id, started: Micros) -> Self {
+    pub(crate) fn new(body: Id, order: Id, started: Micros) -> Self {
         Self {
             body,
+            order,
             started,
             planned: false,
             watch: Watch::new(),
@@ -130,24 +132,12 @@ impl Walk {
         }
         let mut due = None;
         if !self.planned
-            && let (Some((target, _)), Some(to)) = (
-                b.runner.asks.get(&self.body),
-                b.runner.granted.get(&self.body),
-            )
-            && let (Some(from), Some(to)) = (
-                b.town
-                    .map
-                    .spot_near(sim::walk::node_of(&me), me.pose.position, 500_000),
-                b.town.map.spot(target.node, *to),
-            )
-            && let Ok(route) = b.town.map.route(&b.town.tree, from, to, sim::routes::HANDS)
+            && let Some(metrics) = b.runner.route_metrics(self.body, self.order)
         {
-            let links = route
-                .hops
-                .iter()
-                .filter(|h| matches!(h, sim::routes::Hop::Link { .. }))
-                .count();
-            due = Some(self.started.saturating_add(walk_span(route.length, links)));
+            due = Some(
+                self.started
+                    .saturating_add(walk_span(metrics.length_mm, metrics.links)),
+            );
             self.planned = true;
         }
         let fields = b.runner.fields.get(&self.body);

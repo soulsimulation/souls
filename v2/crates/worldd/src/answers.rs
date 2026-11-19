@@ -2238,7 +2238,7 @@ impl Clock {
         let started = b.start(asks);
         for (&body, &(_, id)) in &b.runner.asks {
             if started.iter().any(|(i, r)| *i == id && r.is_ok()) {
-                self.walks.insert(id, acts::Walk::new(body, now));
+                self.walks.insert(id, acts::Walk::new(body, id, now));
             }
         }
         // A walk a new move replaced stopped in this tick: its end is written now, before the new move's start.
