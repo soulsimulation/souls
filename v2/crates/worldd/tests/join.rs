@@ -229,16 +229,21 @@ fn pair_kind() -> ActivityKind {
 fn entries() -> Json {
     let vessel = parse(
         r#"{ "format": "souls-entry/1", "kind": "test:vessel", "owner": "thing",
-      "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] } },
-      "forms": { "take": { "who": "anyone", "steps": [{ "step": "take", "move": "press", "at": "grip" }] } } }"#,
+      "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] },
+        "far": { "role": "stand", "at_mm": [3000, 0, 0] } },
+      "forms": { "take": { "who": "anyone", "steps": [{ "step": "take", "move": "press", "at": "grip" }] },
+        "fetch": { "who": "anyone", "steps": [{ "step": "walk_to", "point": "far" }, { "step": "take" }],
+          "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand" }] } } }"#,
     )
     .unwrap();
     let rack = parse(
         r#"{ "format": "souls-entry/1", "kind": "test:rack", "owner": "thing",
-      "points": { "edge": { "role": "rest", "at_mm": [0, 400, 0] } },
+      "points": { "edge": { "role": "rest", "at_mm": [0, 400, 0] },
+        "off": { "role": "stand", "at_mm": [0, 0, 5000000] } },
       "slots": { "rest": { "admits": "thing" } },
       "forms": { "put": { "who": "anyone",
-        "steps": [{ "step": "put", "move": "press", "at": "edge", "what": { "arg": "item" }, "slot": "rest" }] } } }"#,
+        "steps": [{ "step": "put", "move": "press", "at": "edge", "what": { "arg": "item" }, "slot": "rest" }] },
+        "stray": { "who": "anyone", "steps": [{ "step": "walk_to", "point": "off" }] } } }"#,
     )
     .unwrap();
     Json::Obj(vec![(VESSEL.into(), vessel), (RACK.into(), rack)])
@@ -669,5 +674,25 @@ fn a2_a_leave_frees_the_seat_the_links_and_the_timers() {
         a.act(LEAVE, None, BTreeMap::new()),
         Err("soul-not-embodied".to_owned())
     );
+    run.stop();
+}
+
+/// A3 (C12, #3427): a form's `walk_to` walks a born body from where it stands to the step's point on the open ground,
+/// then its bare take (as Eden's entries write one) lands; a point no body can stand on is refused by name.
+#[test]
+fn a3_a_walk_to_reaches_its_point_or_is_refused_by_name() {
+    let (run, mut a, mut b) = serve("a3");
+    a.act(JOIN, None, BTreeMap::new()).expect("Ada joins");
+    let body = run.body_of(ada()).expect("born");
+    // The point is 3 m east of the vessel, which stands 300 mm from the birth: a walk of about 3.3 m first.
+    let fetched = a.act("test:fetch", Some(vessel()), BTreeMap::new());
+    println!("A3 fetch: {fetched:?}");
+    fetched.expect("walked to the point, then took the vessel");
+    assert_eq!(parent(&run.replay(), vessel()).0, Some(body), "in its hand");
+    // 5 km past the rack, off the ground: there is no way there.
+    b.act(JOIN, None, BTreeMap::new()).expect("Bo joins");
+    let strayed = b.act("test:stray", Some(rack()), BTreeMap::new());
+    println!("A3 stray: {strayed:?}");
+    assert_eq!(strayed, Err("souls:no-way".to_owned()));
     run.stop();
 }

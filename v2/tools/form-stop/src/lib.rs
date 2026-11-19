@@ -481,6 +481,7 @@ pub fn points() -> Vec<(String, u64)> {
         Step::WalkTo { .. } => "walk",
         Step::Move { .. } => "move",
         Step::Wait(_) => "pause",
+        Step::Hand => "hand",
     };
     spans
         .iter()

@@ -8,7 +8,8 @@
 //!   it), each with its signed `by`, as two entries of one part: the tree's balance check sums them to zero. Nothing
 //!   to move is refused `nothing-to-move`.
 //! - **Take and put** are B4's transfer ([`crate::slots::transfer`], called, not edited): T1's leave and arrive under
-//!   one transfer id, into a free hand of the body or a slot of the node.
+//!   one transfer id, into a free hand of the body or a slot of the node. A put moves a thing the body holds, or one
+//!   standing loose on what the body stands on (wheeled or pushed in, C12).
 //! - **Make** creates a thing of a kind into a free hand of the body or a slot of the node, written by its parent's
 //!   entry; a place that is not free is refused (`hands-full`, `slot-occupied`). It writes nothing about how long the
 //!   thing lasts: that is its kind's data (F10).
@@ -470,7 +471,16 @@ impl Cx<'_> {
             }
             Bound::Put { what, slot } => {
                 let thing = self.of(*what);
-                if self.view.at(thing).is_none_or(|f| f.node != self.body) {
+                // Held by the body, or standing loose beside it, on what the body stands on (a thing wheeled or
+                // pushed into the slot, C12).
+                let beside = |f: Frame| {
+                    f.slot.is_none() && self.view.at(self.body).is_some_and(|b| b.node == f.node)
+                };
+                if self
+                    .view
+                    .at(thing)
+                    .is_none_or(|f| f.node != self.body && !beside(f))
+                {
                     return refuse(
                         "not-held",
                         format!("{} holds no {}", show(self.body), show(thing)),

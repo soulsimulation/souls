@@ -37,7 +37,9 @@ is a link from the room it opens from to the room, the floor (a balcony) or the 
 keeps the link's id; a stair is a link between two floors; each named place that is not a room is a node under the
 open ground, holding nobody; the open ground holds the terrain, every 64 m tile's 1 m heights and class bytes as
 exported (N1b, #3197). Today's ids, refs and hashes are stored as bytes, and names by reference (SHA-256), since
-a log's only text is `namespace:name`.
+a log's only text is `namespace:name`. Kinds are named as the world's Soul Actions entries (`content/kinds`) name them
+(C12, `kind_name`): the facts' `core:<name>` and `eden:eden_<name>` load as `eden:<name>`, so each thing finds its
+entry.
 
 Tests: `cargo test -p import-eden` runs a small world written in the test. The Eden 2026 test needs the exported file:
 `cargo test -p import-eden --release -- --ignored --nocapture`.

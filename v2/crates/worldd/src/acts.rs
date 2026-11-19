@@ -137,6 +137,13 @@ impl Reach for Sight<'_> {
     }
 }
 
+/// A form's arguments, from its intent: things by id (F4), slots of the node by number (C12).
+#[derive(Clone, Debug, Default)]
+pub struct Args {
+    pub things: BTreeMap<String, Id>,
+    pub slots: BTreeMap<String, u64>,
+}
+
 /// The forms in progress, and what they reach that the bodies do not hold.
 pub struct Acts {
     pub forms: Forms,
@@ -246,7 +253,7 @@ impl Acts {
         bodies: Option<&mut Bodies>,
         body: Id,
         candidates: &[(Id, String)],
-        args: &BTreeMap<String, Id>,
+        args: &Args,
         intent: Intent,
         tick: u64,
         now: Micros,
@@ -273,7 +280,7 @@ impl Acts {
             }
             let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
             let r = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
-                if args.is_empty() {
+                if args.things.is_empty() && args.slots.is_empty() {
                     return forms.commit(
                         w,
                         &audiences,
@@ -287,9 +294,10 @@ impl Acts {
                         now,
                     );
                 }
-                // Thing arguments (F4): bound here, as `Forms::commit` binds none yet.
-                let steps = skills::form_runner::bind(&entry, form)?;
-                let effects = skills::form_runner::bind_effects_with(&entry, form, args)?;
+                // Thing and slot arguments (F4, C12): bound here, as `Forms::commit` binds none yet.
+                let steps = skills::form_runner::bind_in(&entry, form, &args.slots)?;
+                let effects =
+                    skills::form_runner::bind_effects_in(&entry, form, &args.things, &args.slots)?;
                 sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
                 forms.start(
                     w,

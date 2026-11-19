@@ -18,7 +18,8 @@
 //!
 //! Positions are micrometres (the facts are whole millimetres, times 1,000); yaws become orientations only through
 //! `Quat::from_yaw_mdeg`. Human words (names) are stored by reference: the field holds the text's SHA-256, and
-//! [`Import::texts`] maps it back. Kinds are T3's `namespace:name@hash`, each named on its own by T3's reader.
+//! [`Import::texts`] maps it back. Kinds are T3's `namespace:name@hash`, each named on its own by T3's reader, in the
+//! namespace the world's Soul Actions entries use ([`kind_name`]: Eden's `core:` and `eden:eden_` defs are `eden:`).
 
 // The repeat rule's map ban (K12, v2/clippy.toml) is `sim`'s; this importer's map is a lookup.
 #![allow(clippy::disallowed_types)]
@@ -131,6 +132,17 @@ fn ints(j: &Json) -> R<Value> {
 fn points(j: &Json) -> R<Value> {
     j.arr().iter().map(ints).collect::<R<_>>().map(Value::Array)
 }
+/// A library kind's name as the world's Soul Actions entries (`content/kinds`, `souls-entry/1`) name it (C12, #3427):
+/// the exporter names today's built-in def `core-<name>` as `core:<name>` and an authored `eden-<name>` as
+/// `eden:eden_<name>`, while the entries name both `eden:<name>`, Eden's own namespace. Any other name is kept.
+pub fn kind_name(t: &str) -> String {
+    match t.split_once(':') {
+        Some(("core", n)) => format!("eden:{n}"),
+        Some(("eden", n)) if n.len() > 5 && n.starts_with("eden_") => format!("eden:{}", &n[5..]),
+        _ => t.to_owned(),
+    }
+}
+
 /// `eden:<word>` for a label of lower-case letters, digits, `-` and `_` that starts with a letter.
 fn label(t: &str) -> Option<Name> {
     let ok = t.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
@@ -303,9 +315,10 @@ pub fn load(text: &str) -> R<Import> {
             "[\"thing\"]".to_owned()
         };
         // Section 19 holds today's def hash, so the kind's hash covers today's meaning until K3 loads real entries.
+        // Named as the entries name it ([`kind_name`]), so a thing's kind finds its entry.
         let line = format!(
             "{{1: \"{}\", 2: \"thing\", 6: {{{slots}}}, 11: {children}, 19: \"{}\"}}",
-            s(k, "name")?,
+            kind_name(s(k, "name")?),
             s(k, "hash")?
         );
         let (fname, kind) = name_kind(&line)?;

@@ -594,7 +594,7 @@ struct Clock {
     /// Soul Actions (C2, #3366): the forms in progress, and the form acts taken since the last tick, committed at
     /// the next through the form runner when the world has bodies.
     forms: Acts,
-    forming: Vec<(Id, Act, sim::forms::Intent, BTreeMap<String, Id>)>,
+    forming: Vec<(Id, Act, sim::forms::Intent, acts::Args)>,
     /// The engine's own acts (C2): joint activities, offers, carrying; and those taken since the last tick.
     engine: Option<Engine>,
     engine_acts: Vec<engine::Act>,
@@ -631,24 +631,26 @@ enum Taken {
     Engine(engine::Act),
 }
 
-/// A form's thing arguments (F4) from an intent's parameter 1: `[[name as bytes, id], ...]`.
-fn thing_args(intent: &Intent) -> BTreeMap<String, Id> {
+/// A form's arguments from an intent's parameter 1: `[[name as bytes, id or slot number], ...]`, a thing by its id
+/// (F4) and a slot of the node by its number, 1, 2, ... in its entry's order (C12).
+fn thing_args(intent: &Intent) -> acts::Args {
+    let mut args = acts::Args::default();
     let Some(Value::Array(pairs)) = intent.parameters.get(&1) else {
-        return BTreeMap::new();
+        return args;
     };
-    pairs
-        .iter()
-        .filter_map(|p| match p {
-            Value::Array(kv) => match kv.as_slice() {
-                [Value::Bytes(k), v] => Some((
-                    String::from_utf8(k.clone()).ok()?,
-                    replica::effects::read_id(v).ok()?,
-                )),
-                _ => None,
-            },
-            _ => None,
-        })
-        .collect()
+    for p in pairs {
+        if let Value::Array(kv) = p
+            && let [Value::Bytes(k), v] = kv.as_slice()
+            && let Ok(k) = String::from_utf8(k.clone())
+        {
+            if let Value::Uint(n) = v {
+                args.slots.insert(k, *n);
+            } else if let Ok(id) = replica::effects::read_id(v) {
+                args.things.insert(k, id);
+            }
+        }
+    }
+    args
 }
 
 /// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name.

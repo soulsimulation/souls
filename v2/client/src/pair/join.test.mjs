@@ -65,15 +65,18 @@ async function testWorld() {
   assert.ok(box, 'a box on the open ground');
   const entries = join(dir, 'entries');
   mkdirSync(entries);
+  // As Eden's own entries write a take (C12): walk to the box's side, then take it. The side is 800 mm from the box's
+  // middle, where a body stands clear of its solid; 500 mm is within a body's radius of it, off the ground a body
+  // stands on, and the walk is refused `souls:no-way` (C3's failure).
   writeFileSync(join(entries, 'box.json'), JSON.stringify({
     format: 'souls-entry/1', kind: 'testworld:box', owner: 'thing',
-    points: { grip: { role: 'grip', at_mm: [0, 100, 0] } },
-    forms: { take: { who: 'anyone', steps: [{ step: 'take', move: 'press', at: 'grip' }] } },
+    points: { side: { role: 'stand', at_mm: [-800, 0, 0] } },
+    forms: { take: { who: 'anyone', steps: [{ step: 'walk_to', point: 'side' }, { step: 'take' }],
+      effects: [{ change: 'reparent', what: 'this', into: 'actor_hand' }] } },
   }));
-  // The first birth stands 1 m east of the entry (K10's ring): 580 mm west of the box, clear of its solid and within
-  // a press's reach (600 mm).
+  // The first birth stands 1 m east of the entry (K10's ring): 3 m west of the box, out of any reach (A3).
   const [x, , z] = box.pose;
-  return { facts, entries, at: `${(x - 1580) / 1000},${z / 1000}`, find: 'box', verbs: ['testworld:take'] };
+  return { facts, entries, at: `${(x - 4000) / 1000},${z / 1000}`, find: 'box', verbs: ['testworld:take'] };
 }
 
 const receipts = (d) => readdirSync(d).flatMap((f) => readFileSync(join(d, f), 'utf8').trim().split('\n')).filter(Boolean).map((l) => JSON.parse(l));
