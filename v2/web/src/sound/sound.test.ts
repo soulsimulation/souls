@@ -106,4 +106,7 @@ test('the sounds are the same samples every time, and loops have no seam', () =>
 test('A1\'s measure: a sound\'s lag from the frame its moment was drawn in', () => {
   const frames: [number, number][] = [[1000, 900_000], [1016, 916_000], [1032, 932_000]];
   assert.deepEqual(lags([{ sound: 'step', at: 920_000, offset: 0, heardMs: 1030 }], frames), [{ sound: 'step', lagMs: 10 }]);
+  // Started 0.2 s in by a slow frame, its lost start is lag; started part-way by a seek, it is left out.
+  assert.deepEqual(lags([{ sound: 'step', at: 920_000, offset: 0.2, heardMs: 1030 }], frames), [{ sound: 'step', lagMs: 210 }]);
+  assert.deepEqual(lags([{ sound: 'step', at: 920_000, offset: 0.2, heardMs: 1030, fresh: true }], frames), []);
 });

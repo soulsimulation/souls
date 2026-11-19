@@ -29,9 +29,10 @@ export type Placing = {
 };
 type Voice = { src: AudioBufferSourceNode; gain: GainNode; pan: PannerNode; loop: boolean; ends: number };
 
-/** A one-shot is scheduled at most AHEAD µs of world time before its moment, and no earlier than two and a half
- *  frames before it, so a change in the clock's rate moves it little; a jump of the clock beyond these is a seek. */
-const AHEAD = 200_000, BACK_JUMP = 100_000, FORWARD_JUMP = 2_000_000;
+/** A one-shot is scheduled at most AHEAD µs of world time before its moment (a slow frame, under software GL, can
+ *  be a few hundred ms), and no earlier than two and a half frames before it, so a change in the clock's rate moves it
+ *  little; a jump of the clock beyond these is a seek. */
+const AHEAD = 600_000, BACK_JUMP = 100_000, FORWARD_JUMP = 2_000_000;
 const store = () => { try { return localStorage; } catch { return null; } };
 
 export class WorldSound {
@@ -50,7 +51,9 @@ export class WorldSound {
   private place: Placing;
   private button: HTMLButtonElement;
   private focus = audioFocus();
-  private shotLog: { key: string; sound: string; at: number; offset: number; heardMs: number }[] = [];
+  private shotLog: { key: string; sound: string; at: number; offset: number; heardMs: number; fresh: boolean }[] = [];
+  /** True until the first frame heard after a start, an unmute or a jump: what it starts part-way, it starts on purpose. */
+  private fresh = true;
   private frameLog: [number, number][] = [];
   private recorder: { rec: MediaRecorder; parts: Blob[] } | null = null;
 
@@ -93,7 +96,7 @@ export class WorldSound {
     const step = this.lastT === null ? 0 : t - this.lastT;
     if (this.lastT !== null) {
       if (t < this.lastT - BACK_JUMP || t > this.lastT + FORWARD_JUMP) this.cut();
-      else if (wall > this.lastWall) this.rate = this.rate * 0.9 + 0.1 * Math.min(8, Math.max(0, (t - this.lastT) / ((wall - this.lastWall) * 1000)));
+      else if (wall > this.lastWall) this.rate = this.rate * 0.5 + 0.5 * Math.min(8, Math.max(0, (t - this.lastT) / ((wall - this.lastWall) * 1000)));
     }
     this.lastT = t;
     this.lastWall = wall;
@@ -123,16 +126,19 @@ export class WorldSound {
       if (v) this.move(v, h);
       else if (h.loop) this.play(h, ctx.currentTime, h.offset);
       else if (!this.started.has(h.key)) {
-        const when = ctx.currentTime + Math.max(0, (h.at - t) / 1e6 / Math.max(0.05, this.rate));
+        // Started early by the output's own latency, so it is heard, not just sent, at its moment.
+        const latency = (ctx.baseLatency ?? 0) + (ctx.outputLatency ?? 0);
+        const when = ctx.currentTime + Math.max(0, (h.at - t) / 1e6 / Math.max(0.05, this.rate) - latency);
         this.play(h, when, h.offset);
         this.started.set(h.key, h.at);
         const ts = ctx.getOutputTimestamp();
         const heardMs = (ts.performanceTime ?? wall) + (when - (ts.contextTime ?? ctx.currentTime)) * 1000 - h.offset * 1000;
-        this.shotLog.push({ key: h.key, sound: h.sound, at: h.at, offset: h.offset, heardMs });
+        this.shotLog.push({ key: h.key, sound: h.sound, at: h.at, offset: h.offset, heardMs, fresh: this.fresh });
         if (this.shotLog.length > 4000) this.shotLog.splice(0, 1000);
       }
     }
     for (const [k, v] of this.voices) if (v.loop && !now.has(k)) this.end(k, v, ctx.currentTime);
+    this.fresh = false;
   }
 
   private start(): void {
@@ -202,6 +208,7 @@ export class WorldSound {
   }
 
   private silence(): void {
+    this.fresh = true;
     const at = this.ctx?.currentTime ?? 0;
     for (const [k, v] of this.voices) this.end(k, v, at);
   }
@@ -237,17 +244,19 @@ export class WorldSound {
   }
 }
 
-/** For each one-shot heard from its start, the ms between when it was heard and when its moment was drawn (the
- *  performance time at which the time drawn passed its world time, between the two frames around it). */
-export function lags(shots: readonly { sound: string; at: number; offset: number; heardMs: number }[], frames: readonly [number, number][]): { sound: string; lagMs: number }[] {
+/** For each one-shot, the ms between when it began to be heard and when its moment was drawn (the performance time
+ *  at which the time drawn passed its world time, between the two frames around it). One started part-way by a seek,
+ *  a start or an unmute (`fresh`) is left out: it is meant to start late; one started part-way otherwise counts its
+ *  lost start as lag. */
+export function lags(shots: readonly { sound: string; at: number; offset: number; heardMs: number; fresh?: boolean }[], frames: readonly [number, number][]): { sound: string; lagMs: number }[] {
   const out: { sound: string; lagMs: number }[] = [];
   for (const s of shots) {
-    if (s.offset > 0) continue;
+    if (s.offset > 0 && s.fresh) continue;
     const i = frames.findIndex(([, t], k) => k > 0 && frames[k - 1][1] <= s.at && t >= s.at);
     if (i < 1) continue;
     const [w0, t0] = frames[i - 1], [w1, t1] = frames[i];
     const drawn = t1 > t0 ? w0 + ((s.at - t0) / (t1 - t0)) * (w1 - w0) : w1;
-    out.push({ sound: s.sound, lagMs: s.heardMs - drawn });
+    out.push({ sound: s.sound, lagMs: s.heardMs + s.offset * 1000 - drawn });
   }
   return out;
 }
