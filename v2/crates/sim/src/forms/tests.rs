@@ -9,7 +9,7 @@ use replica::bodies::{Class, Family};
 use replica::effects::fixture_bytes;
 use replica::effects::{Actor, Body, Cause, Change, Effect};
 use replica::encode::{Name, Value, decode};
-use replica::host::{Answer, Ask, Seen};
+use replica::host::{Answer, Ask, Seen, Skill};
 use replica::ids::{Id, Minter, Scope};
 use replica::moves::{Effector, Move};
 use replica::pose::{Frame, Quat, Vec3, fixture};
