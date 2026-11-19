@@ -32,8 +32,10 @@ use crate::times;
 /// The answer to an intent sent while the world restarts.
 pub const RESTARTING: &str = "world.restarting";
 
-/// The longest frame read from the world.
-pub const FRAME_MOST: usize = 1 << 20;
+/// The longest frame read from the world. A sync answer carries whole records, and one record can be large: Eden's open
+/// ground holds every terrain tile's heights and classes, 5.4 MB, and a room's record lists each child's hash (36 bytes
+/// each). At 1 MiB neither could be sent, and the link was dropped at every try (#3424).
+pub const FRAME_MOST: usize = 16 << 20;
 
 /// How long the gateway waits between attempts to reach the world.
 const RETRY: Duration = Duration::from_millis(20);

@@ -1,7 +1,8 @@
-// An Eden-sized copy (Engine v2 C11, #3424): the daemon's first sync of a scope of 20,000 records through the real
-// gateway (`gatewayd`) from `worldd gateway-link`, then a restart that signs in again from its cursor. Before C11 the
-// gateway could not send a sync answer over 64 KiB (one room's record lists each child's hash, 36 bytes each), so the
-// socket closed with 1006 mid-sync at about 1,800 children. Run from v2/ after
+// An Eden-sized copy (Engine v2 C11, #3424): the daemon's first sync of a scope of 30,000 records through the real
+// gateway (`gatewayd`) from `worldd gateway-link`, then a restart that signs in again from its cursor. One room holds
+// them all, so its record (each child's hash, 36 bytes each) is 1.08 MB: over both limits C11 lifted, the gateway's
+// 64 KiB to its sockets (1006 mid-sync at about 1,800 children) and the world link's 1 MiB ("a frame from the world
+// was too long", which Eden's 5.4 MB open ground also met). Run from v2/ after
 //   cargo build -p gatewayd -p worldd --locked, and replica's wasm-bindgen package in target/wasm-load/pkg.
 // C11_REPORT=1 prints the sync's time and the daemon's memory, for the PR.
 
@@ -21,7 +22,7 @@ const GATEWAYD = process.env.GATEWAYD ?? join(v2, 'target/debug/gatewayd');
 const WORLDD = process.env.WORLDD ?? join(v2, 'target/debug/worldd');
 const PKG = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
 const SOUL = 's_c11test';
-const ITEMS = 20_000;
+const ITEMS = 30_000;
 const SCOPE = '2b'.repeat(16);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -61,7 +62,7 @@ after(async () => {
   rmSync(dir, { recursive: true, force: true, maxRetries: 10 }); // the stopped daemon may still be closing its files
 });
 
-test('C11 A2, A3: a first sync of 20,000 records completes; it emits synced, which wakes no wait; a restart resumes', async () => {
+test('C11 A2, A3: a first sync of 30,000 records completes; it emits synced, which wakes no wait; a restart resumes', async () => {
   const world = join(dir, 'w.sock'), tokens = join(dir, 'tokens.txt');
   writeFileSync(tokens, `soul-${SCOPE}-2 ${createHash('sha256').update(token).digest('hex')}\n`);
   procs.push(spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1',
