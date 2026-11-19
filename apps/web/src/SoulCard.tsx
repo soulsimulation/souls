@@ -155,8 +155,9 @@ function PromptCopy({prompt}:{prompt:string}){
 }
 /** #3375: Retire asks once, in the card (the same question the Advanced tools ask), then retires for good. */
 function RetireRow({name,retire}:{name:string;retire():Promise<boolean>}){
- const [asking,setAsking]=useState(false),[busy,setBusy]=useState(false),[note,setNote]=useState('');
- const go=async()=>{if(busy)return;setBusy(true);setNote('');try{if(await retire()){setNote('Retired.');setAsking(false);}else setNote('Not retired. Try again in a moment.');}catch{setNote('Not retired. Try again in a moment.');}finally{setBusy(false);}};
+ const [asking,setAsking]=useState(false),[busy,setBusy]=useState(false),[note,setNote]=useState(''),[gone,setGone]=useState(false);
+ const go=async()=>{if(busy)return;setBusy(true);setNote('');try{if(await retire()){setGone(true);setAsking(false);}else setNote('Not retired. Try again in a moment.');}catch{setNote('Not retired. Try again in a moment.');}finally{setBusy(false);}};
+ if(gone)return <div className="soul-retire" data-retire="done"><span className="soul-dim" role="status">{name} is retired and has left for good.</span></div>;
  return <div className="soul-retire" data-retire={asking?'asking':undefined}>
   {asking?<><p className="soul-box-text" role="alert">{retireQuestion(name)}</p>
    <div className="soul-box-actions"><button type="button" className="soul-pill fill" disabled={busy} onClick={()=>void go()}>Retire for good</button><button type="button" className="soul-pill quiet" disabled={busy} onClick={()=>setAsking(false)}>Keep {name}</button></div></>
