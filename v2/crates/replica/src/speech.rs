@@ -13,6 +13,11 @@
 //!   this list; nothing works hearers out again when read.
 //! - **Its length in time** comes from its words at [`RATE`] characters a second, at least [`SHORTEST`]: one timer.
 //!
+//! - **Its reach, from a closed list** (E13, #2784): [`Reach`] is what the speaker asks for, a whisper to one named
+//!   Soul, talk, a raised voice, the members of an activity it is in (a call), or through a thing ([`Device`]). Field 2
+//!   is how far the voice carries in the air; a call's or a device's hearers beyond it are in field 3. How far each
+//!   carries is data on the world ([`Radii`]).
+//!
 //! Not here: who hears (the world's `sim::speech`), the voice resource (`sim::controller`), refusing oversized text
 //! (the gateway, I2).
 
@@ -41,12 +46,69 @@ pub fn length_of(words: &str) -> Micros {
     Micros::try_from(us).unwrap_or(Micros::MAX).max(SHORTEST)
 }
 
+/// An utterance's reach (E13): who it is for, from a closed list. The world works out its hearers when it writes it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Reach {
+    /// To one named Soul within arm's length ([`Radii::whisper`]): its body hears it and its Soul alone may read it
+    /// (an audience of one, never the public).
+    Whisper { body: Id, soul: Id },
+    /// Ordinary talk: the Souls whose interest set holds the speaker (B11). Public.
+    #[default]
+    Talk,
+    /// A raised voice: every Soul within [`Radii::loud`] of the speaker, on its node. Public.
+    Loud,
+    /// To the members of an activity the speaker is in, at any distance (a call is an activity both joined, E8), and
+    /// to talk's hearers. Public.
+    Members(Id),
+    /// Through a thing: to the Souls near each receiver of the device link it sends on that is on ([`Device`]), and
+    /// to talk's hearers. Public.
+    Through(Id),
+}
+
+/// How far a voice carries, µm: data on the world, so a shipped world keeps its own. The defaults start from today's
+/// (the server's earshot is 12 m); talk's reach is the interest set's (R4, `sim::speech::LEAVE`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Radii {
+    /// A whisper's, arm's length.
+    pub whisper: i64,
+    /// A raised voice's, farther than talk's.
+    pub loud: i64,
+}
+
+impl Default for Radii {
+    fn default() -> Radii {
+        Radii {
+            whisper: 1_000_000,
+            loud: 12_000_000,
+        }
+    }
+}
+
+/// One receiver of a device link: the thing, the node it is in and where on it (µm), whether it is on, and how far
+/// it is heard from, µm (its volume).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Receiver {
+    pub thing: Id,
+    pub node: Id,
+    pub at: [i64; 2],
+    pub on: bool,
+    pub radius: i64,
+}
+
+/// A device link (E13): from a sender thing to its receivers. A voice through the sender is heard by the Souls within
+/// the radius of each receiver that is on, in that receiver's node, wherever the sender is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Device {
+    pub sender: Id,
+    pub receivers: Vec<Receiver>,
+}
+
 /// One utterance, as written.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Said {
     /// The reference its words are kept under.
     pub words: Id,
-    /// How far the voice carries, mm: the farthest a hearer can be.
+    /// How far the voice carries in the air, mm: the farthest a hearer can be but through an activity or a device.
     pub reach_mm: u64,
     /// Who may read it: the entry's audience (T8), not a field of the event.
     pub audience: Audience,

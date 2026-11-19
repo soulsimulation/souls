@@ -1,8 +1,11 @@
 // The stream's worker (V5, #2714): fetches V1's pointer and parts, plays each part on R1's replica (WASM) in number
 // order, and reads back the nodes the part changed, so the page's thread only draws. Started by `StreamSource`.
+// The words path (V1b, #3361): it hands on each part's `souls:said` events (replica's event query) and a body's name
+// and description (fields 30, 31), each with its words from the part's text file `<n>.text` (`[[reference, words],
+// ...]`, the public audience's, written by V1's writer beside the part), kept by reference across parts.
 import init, { StreamPlayer, readPointer } from 'replica';
 import { decode, encode } from 'cborg';
-import type { NodeRec, PartRec, Pointer } from './source.ts';
+import type { NodeRec, PartRec, Pointer, SaidRec } from './source.ts';
 
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string };
 const post = (m: Msg, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
@@ -22,6 +25,15 @@ function readPtr(bytes: Uint8Array): Pointer & { header: string } {
   const p = JSON.parse(readPointer(bytes));
   return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, header: p.header };
 }
+
+/** The reference in a `{21: id}` value, as the page keys it, or null. */
+const refOf = (v: unknown): string | null => {
+  const id = v instanceof Map ? (v.get(21) as IdValue | undefined) : undefined;
+  return id ? key(id) : null;
+};
+const SAID = 'souls:said';
+const NAME = 30;
+const DESCRIPTION = 31;
 
 function nodeRec(v: Map<number, unknown>): NodeRec {
   const pose = v.get(7) as Map<number, unknown> | undefined;
@@ -45,6 +57,8 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(23)) rec.scale = num(f.get(23));
   if (f.has(24)) rec.tileSize = num(f.get(24));
   if (f.has(25)) rec.tiles = (f.get(25) as unknown[][]).map((t) => [num(t[0]), num(t[1]), t[2] as Uint8Array, t[3] as Uint8Array]);
+  if (f.has(NAME)) rec.name = refOf(f.get(NAME));
+  if (f.has(DESCRIPTION)) rec.description = refOf(f.get(DESCRIPTION));
   return rec;
 }
 
@@ -57,6 +71,14 @@ async function run(stream: URL) {
   const query = (q: Map<number, unknown>) => decode(player.query(encode(q)), { useMaps: true });
   let version = 0;
   let busy = false;
+  // Words by reference, from every text file read so far.
+  const words = new Map<string, string>();
+  const text = new TextDecoder();
+  const readText = async (n: number) => {
+    const b = await get(new URL(`${n}.text`, stream));
+    if (!b) return;
+    for (const [id, w] of decode(b, { useMaps: true }) as [IdValue, Uint8Array][]) words.set(key(id), text.decode(w));
+  };
   const poll = async () => {
     if (busy) return;
     busy = true;
@@ -84,7 +106,24 @@ async function run(stream: URL) {
           }
         }
         const samples = JSON.parse(player.samples());
-        post({ t: 'part', p: { number: played.number, from: played.from, to: played.to, nodes, removed, samples, hash: played.hash } }, transfer);
+        const events = decode(player.events(), { useMaps: true }) as Map<number, unknown>[];
+        const said: SaidRec[] = [];
+        for (const e of events) {
+          if (e.get(1) !== SAID) continue;
+          const f = e.get(2) as Map<number, unknown>;
+          const ref = refOf(f.get(1));
+          if (!ref) continue;
+          said.push({ speaker: key(e.get(3) as IdValue), at: num(e.get(4)), length: num(f.get(4)), reach: num(f.get(2)), ref, words: null });
+        }
+        // Names and descriptions are references until their words are known.
+        const refs = [...said.map((x) => x.ref), ...nodes.flatMap((r) => [r.name, r.description])].filter((r): r is string => !!r);
+        if (refs.some((r) => !words.has(r))) await readText(n);
+        for (const x of said) x.words = words.get(x.ref) ?? null;
+        for (const r of nodes) {
+          if (r.name) r.name = words.get(r.name) ?? null;
+          if (r.description) r.description = words.get(r.description) ?? null;
+        }
+        post({ t: 'part', p: { number: played.number, from: played.from, to: played.to, nodes, removed, samples, hash: played.hash, said } }, transfer);
       }
     } catch (e) {
       post({ t: 'error', message: String((e as Error)?.message ?? e) });

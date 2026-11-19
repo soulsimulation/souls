@@ -77,6 +77,13 @@ impl WasmPlayer {
         format!("[{}]", rows.join(","))
     }
 
+    /// The event query (V1b, #3361): the named events of the part played last, as `[{1: name, 2: fields, 3: node, 4:
+    /// at, 5: sequence}, ...]` in T0's profile ([`Player::events`]).
+    pub fn events(&self) -> Result<Vec<u8>, JsError> {
+        crate::encode::encode(&crate::encode::Value::Array(self.0.events().to_vec()))
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
     /// Answers one query on the copy it has played (R1's `query.rs`, Engine v2 V5 #2714).
     pub fn query(&self, query: &[u8]) -> Result<Vec<u8>, JsError> {
         self.0.replica().query(query).map_err(js)

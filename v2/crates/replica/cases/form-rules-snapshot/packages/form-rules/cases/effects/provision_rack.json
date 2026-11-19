@@ -1,0 +1,148 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The provision rack (from #1498): two saucers stowed in bays (small provisions); taking one back out is the body's pick_up, and the bay is free again.",
+ "cases": [
+  {
+   "name": "stow_three_take_one_back",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "r1"
+      ]
+     },
+     "r1": {
+      "kind": "eden:provision_rack"
+     },
+     "c1": {
+      "kind": "eden:saucer"
+     },
+     "c2": {
+      "kind": "eden:saucer"
+     },
+     "c3": {
+      "kind": "eden:saucer"
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": "c1",
+       "right": "c2"
+      },
+      "holds": {}
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "r1",
+      "form": "stow",
+      "args": {
+       "thing": "c1",
+       "bay": "bay_left"
+      }
+     },
+     "receipt": "rr1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "c1",
+        "to": {
+         "node": "r1",
+         "slot": "bay_left"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:stowed",
+        "node": "r1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "r1",
+      "form": "stow",
+      "args": {
+       "thing": "c2",
+       "bay": "bay_middle"
+      }
+     },
+     "receipt": "rr2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "c2",
+        "to": {
+         "node": "r1",
+         "slot": "bay_middle"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "b1",
+      "form": "pick_up",
+      "args": {
+       "thing": "c1"
+      }
+     },
+     "receipt": "rr3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "c1",
+        "to": {
+         "node": "b1",
+         "hand": "left"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "r1",
+      "form": "stow",
+      "args": {
+       "thing": "c1",
+       "bay": "bay_right"
+      }
+     },
+     "receipt": "rr4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "c1",
+        "to": {
+         "node": "r1",
+         "slot": "bay_right"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

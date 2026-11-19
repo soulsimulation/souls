@@ -1,0 +1,137 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:crate",
+  "owner": "thing",
+  "state": {
+    "apples": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 6,
+      "default": 6,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        685
+      ],
+      "yaw_mdeg": 180000
+    },
+    "top": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        500,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      570,
+      570,
+      470
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "apples",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "top"
+        }
+      ],
+      "effects": [
+        {
+          "change": "create",
+          "kind": "eden:apple",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "stock": {
+    "apples": {
+      "kind": "eden:apple",
+      "count": "apples",
+      "take": "take"
+    }
+  },
+  "motion": {
+    "how": "two_hands"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:crate",
+    "table": [
+      {
+        "part": "fill",
+        "field": "apples",
+        "do": "show",
+        "range": [
+          0,
+          1
+        ],
+        "to": [
+          0,
+          1
+        ]
+      }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"box","at":[0,225,0],"size":[520,420,420],"round":0,"tint":"wood"},{"kind":"box","at":[0,80,0],"size":[570,60,470],"round":0,"tint":"band"},{"kind":"box","at":[0,370,0],"size":[570,60,470],"round":0,"tint":"band"},{"kind":"sphere","at":[-120,460,50],"r":100,"segments":6,"tint":"fruit","role":"fill"},{"kind":"sphere","at":[80,470,-60],"r":100,"segments":6,"tint":"fruit2","role":"fill"},{"kind":"sphere","at":[130,460,100],"r":100,"segments":6,"tint":"fruit","role":"fill"}],"palette":{"wood":"#a47a4c","band":"#7f5a36","fruit":"#d24a3a","fruit2":"#e88a3a"},"tags":["prop","street","crate","container","market","item"]}
+  },
+  "text": {
+    "card": "A wooden crate of apples: take an apple, or carry the crate in both hands.",
+    "storage": "storage",
+    "box": "box",
+    "apples": "apples",
+    "howto_apple": "With a hand free, take an apple from the crate."
+  },
+  "card": {
+    "text": "card",
+    "category": "storage",
+    "synonyms": [
+      "box",
+      "apples"
+    ]
+  },
+  "howtos": {
+    "apple": {
+      "text": "howto_apple",
+      "steps": [
+        {
+          "form": "take"
+        }
+      ]
+    }
+  }
+}

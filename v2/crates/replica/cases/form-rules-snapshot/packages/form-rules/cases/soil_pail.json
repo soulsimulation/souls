@@ -1,0 +1,76 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:soil_pail (from #1834): a pail holding one soil portion at most. Anyone with a free hand takes it.",
+  "cases": [
+    {
+      "name": "take_every_need_met",
+      "act": {
+        "this": "p1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {
+            "kind": "eden:soil_pail"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "take_no_free_hand",
+      "act": {
+        "this": "p1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {
+            "kind": "eden:soil_pail"
+          },
+          "x1": {
+            "kind": "eden:kindling_bundle"
+          },
+          "x2": {
+            "kind": "eden:kindling_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}
