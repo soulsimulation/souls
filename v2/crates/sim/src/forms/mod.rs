@@ -55,6 +55,14 @@
 //!   effects) and ends the run with the refusal's name. The amount fields come from the kinds ([`Forms::kinds`]) and
 //!   the transfer's zone from its header ([`Forms::zone`]).
 //!
+//! - **A long form commits in stages** (F11, #2774). A form with `stages` (each its own `steps` and `effects`) names
+//!   an `int` field of its kind as its stage field (`stage`), the number of stages done. When a stage's steps end, one
+//!   entry writes that stage's effects and the stage field together, under one key (intent, stage number; F2), so
+//!   every committed state is a legal place to stop: a stage ends only when its steps have (a move at its end, never
+//!   half done). The last stage sets the field back to 0. A run is never resumed (F3): stopped any way, it keeps the
+//!   stages it committed and holds nothing, and the next run, by anyone, starts at the stage the thing's own field
+//!   names ([`Forms::start_stages`]).
+//!
 //! Not here: a walk across a link (the walk's crossings are not carried here yet), accepting the intent (I4),
 //! queueing for a reserved thing (B7), things for several users, a thing made or set down where there is no slot (E4).
 
@@ -195,6 +203,99 @@ struct FormRun {
     mv: Option<Instance>,
     /// The thing it reserves and the link's id, while the link stands.
     held: Option<(Id, Id)>,
+    /// A long form's stages, and the one in progress (F11).
+    long: Option<Long>,
+}
+
+/// One stage of a long form, bound (F11): its steps, and the effects written with its end.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stage {
+    pub steps: Vec<Step>,
+    pub effects: Vec<form_runner::Effect>,
+}
+
+/// A long form, bound (F11): its stage field (its number in the kind's `state`) and its stages, in order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stages {
+    pub field: u64,
+    pub list: Vec<Stage>,
+}
+
+/// A long form's run: its stages, the one in progress, and the deadlines each stage's runner gets.
+struct Long {
+    stages: Stages,
+    at: usize,
+    limits: Limits,
+}
+
+/// Binds form `form` of `entry` as a long form (F11): `None` when it has no `stages`. Each stage binds as a form of its
+/// own would ([`form_runner::bind`], [`form_runner::bind_effects`]), all or none. Refused: `form-unknown`,
+/// `form-has-no-stages`, `stage-field-unknown` (the form's `stage` names no `int` field of the kind),
+/// `effect-not-built` (a stage's effect that is not a set: F4's are not carried in stages), and the binders' refusals.
+pub fn bind_stages(
+    entry: &replica::rules::json::Value,
+    form: &str,
+) -> Result<Option<Stages>, Refusal> {
+    use replica::rules::json::Value as J;
+    let refuse = |name, detail: &str| {
+        Err(Refusal {
+            name,
+            detail: detail.to_owned(),
+        })
+    };
+    let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
+        return refuse("form-unknown", form);
+    };
+    let Some(list) = f.get("stages").and_then(J::arr) else {
+        return Ok(None);
+    };
+    if list.is_empty() {
+        return refuse("form-has-no-stages", form);
+    }
+    let named = f.get("stage").and_then(J::str).unwrap_or_default();
+    let def = entry.get("state").and_then(|s| s.get(named));
+    let field = match (
+        def.and_then(|d| d.get("n")),
+        def.and_then(|d| d.get("type")).and_then(J::str),
+    ) {
+        (Some(J::Int(n)), Some("int")) => u64::try_from(*n).ok(),
+        _ => None,
+    };
+    let Some(field) = field else {
+        return refuse("stage-field-unknown", named);
+    };
+    let part = |k: &str| entry.get(k).cloned().unwrap_or(J::Obj(Vec::new()));
+    let list = list
+        .iter()
+        .map(|stage| {
+            // The stage as a form of its own, with the kind's points and state.
+            let one = J::Obj(vec![
+                ("points".into(), part("points")),
+                ("state".into(), part("state")),
+                (
+                    "forms".into(),
+                    J::Obj(vec![(form.to_owned(), stage.clone())]),
+                ),
+            ]);
+            let effects = form_runner::bind_effects(&one, form)?;
+            // A stage commits its sets with the stage field in one entry; F4's amounts, takes and puts are not
+            // carried in stages.
+            if let Some(e) = effects
+                .iter()
+                .find(|e| !matches!(e, form_runner::Effect::Set { .. }))
+            {
+                return Err(Refusal {
+                    name: "effect-not-built",
+                    detail: format!("a stage's effects are sets: {e:?}"),
+                });
+            }
+            Ok(Stage {
+                steps: form_runner::bind(&one, form)?,
+                effects,
+            })
+        })
+        .collect::<Result<Vec<_>, Refusal>>()?;
+    Ok(Some(Stages { field, list }))
 }
 
 /// A run as its entries name it: started, and (once it ends) ended.
@@ -479,6 +580,100 @@ impl Forms {
                 _ => refuse("intent-key-reused"),
             };
         }
+        self.open(w, body, node, intent, steps, effects, None, limits, now)
+    }
+
+    /// Hands a long form ([`bind_stages`]) to a runner on `body` done at `node` for `intent`, from the stage the
+    /// thing's stage field names on the tree (0 when unset or past the last), and wakes it (F11). A resend joins the
+    /// run in progress, or gets the first receipt once the last stage is in the log; after a run that stopped, it
+    /// starts again from the thing. Refused as [`Forms::start`] is.
+    #[allow(clippy::too_many_arguments)]
+    pub fn start_stages<G: Geometry, R: Reach>(
+        &mut self,
+        w: &mut World<'_, G, R>,
+        body: Id,
+        node: Id,
+        intent: Intent,
+        stages: Stages,
+        limits: Limits,
+        now: Micros,
+    ) -> Result<Asked, Refusal> {
+        let refuse = |name| {
+            Err(Refusal {
+                name,
+                detail: show(intent.id),
+            })
+        };
+        if now > intent.expiry {
+            return refuse("intent-expired");
+        }
+        if let Some(&run) = self.by_intent.get(&intent.id) {
+            return match self.runs.get(&run) {
+                Some(fr) if fr.intent.digest == intent.digest => Ok(Asked::Running(run)),
+                _ => refuse("intent-key-reused"),
+            };
+        }
+        if let Some(k) = self.applied.get(&intent.id) {
+            if k.digest != intent.digest {
+                return refuse("intent-key-reused");
+            }
+            if k.entries.contains_key(&(stages.list.len() as u64 - 1)) {
+                return Ok(Asked::Applied(Receipt {
+                    intent: intent.id,
+                    entries: k.entries.values().copied().collect(),
+                }));
+            }
+        }
+        let done = w
+            .tree
+            .handle(node)
+            .and_then(|h| w.tree.node(h))
+            .and_then(|n| match n.fields().get(&stages.field) {
+                Some(Value::Uint(d)) => usize::try_from(*d).ok(),
+                _ => None,
+            })
+            .filter(|d| *d < stages.list.len())
+            .unwrap_or(0);
+        let steps = stages.list[done].steps.clone();
+        let long = Long {
+            stages,
+            at: done,
+            limits,
+        };
+        self.open(
+            w,
+            body,
+            node,
+            intent,
+            steps,
+            Vec::new(),
+            Some(long),
+            limits,
+            now,
+        )
+    }
+
+    /// The number of the stage in progress of `body`'s run, when it is a long form's.
+    pub fn stage(&self, body: Id) -> Option<usize> {
+        let run = self.by_body.get(&body)?;
+        self.runs.get(run)?.long.as_ref().map(|l| l.at)
+    }
+
+    /// Opens a run once its intent is known to be new: refused `form-running` or `thing-reserved`, else reserved,
+    /// started and woken.
+    #[allow(clippy::too_many_arguments)]
+    fn open<G: Geometry, R: Reach>(
+        &mut self,
+        w: &mut World<'_, G, R>,
+        body: Id,
+        node: Id,
+        intent: Intent,
+        steps: Vec<Step>,
+        effects: Vec<form_runner::Effect>,
+        long: Option<Long>,
+        limits: Limits,
+        now: Micros,
+    ) -> Result<Asked, Refusal> {
         if self.by_body.contains_key(&body) {
             return Err(replica::effects::Refusal {
                 name: "form-running",
@@ -543,6 +738,7 @@ impl Forms {
                 walk: None,
                 mv: None,
                 held: link.map(|l| (node, l)),
+                long,
             },
         );
         self.by_body.insert(body, run);
@@ -569,14 +765,23 @@ impl Forms {
         limits: Limits,
         now: Micros,
     ) -> Result<Asked, Refusal> {
-        let steps = form_runner::bind(entry, form)?;
-        let effects = form_runner::bind_effects(entry, form)?;
+        // A long form (F11) binds as its stages; any other as its steps and effects.
+        let bound = match bind_stages(entry, form)? {
+            Some(stages) => Err(stages),
+            None => Ok((
+                form_runner::bind(entry, form)?,
+                form_runner::bind_effects(entry, form)?,
+            )),
+        };
         let known =
             self.by_intent.contains_key(&intent.id) || self.applied.contains_key(&intent.id);
         if !known {
             may(w.tree, audiences, names, body, node, entry, form)?;
         }
-        self.start(w, body, node, intent, steps, effects, limits, now)
+        match bound {
+            Ok((steps, effects)) => self.start(w, body, node, intent, steps, effects, limits, now),
+            Err(stages) => self.start_stages(w, body, node, intent, stages, limits, now),
+        }
     }
 
     /// The amount fields of `kinds` (K3's, with their least and capacity), which F4's transfers read. Called after
@@ -729,8 +934,10 @@ impl Forms {
             return;
         };
         let body = fr.body;
+        let long = fr.long.is_some();
         match next {
             Next::Sleep => {}
+            Next::End(how) if long && how.as_str() == "done" => self.stage_done(w, run, now),
             Next::End(how) => self.finish(w, run, how, now),
             Next::Walk(skill) => match w.controller.claim(body, &skill.shape()) {
                 Ok(driver) => {
@@ -764,6 +971,73 @@ impl Forms {
                 }
             }
         }
+    }
+
+    /// A long form's stage ended (F11): one entry writes its effects and the stage field, keyed (intent, stage number),
+    /// unless that key is written or waiting to be; then the next stage's runner starts, or after the last the run
+    /// ends `done`.
+    fn stage_done<G: Geometry, R: Reach>(
+        &mut self,
+        w: &mut World<'_, G, R>,
+        run: RunId,
+        now: Micros,
+    ) {
+        let Some(fr) = self.runs.get_mut(&run) else {
+            return;
+        };
+        let Some(long) = fr.long.as_mut() else {
+            return;
+        };
+        let at = long.at;
+        let last = at + 1 == long.stages.list.len();
+        let key = (fr.intent.id, at as u64);
+        let written = self
+            .applied
+            .get(&key.0)
+            .is_some_and(|k| k.entries.contains_key(&key.1));
+        if !written && self.pending.insert(key) {
+            let stage = &long.stages.list[at];
+            let next = if last { 0 } else { at as u64 + 1 };
+            let sets = stage
+                .effects
+                .iter()
+                .filter_map(|e| match e {
+                    form_runner::Effect::Set { field, to } => Some((*field, to.clone())),
+                    _ => None,
+                })
+                .chain([(long.stages.field, Value::Uint(next))]);
+            let changes: Vec<ChangeRec> = sets
+                .map(|(field, to)| ChangeRec {
+                    change: Change::Set {
+                        node: fr.node,
+                        field,
+                        to,
+                        by: None,
+                    },
+                    rest: Rest::new(),
+                })
+                .collect();
+            let fields = BTreeMap::from([
+                (1, Value::Uint(key.1)),
+                (2, int(fr.intent.expiry)),
+                (3, Value::Bytes(fr.intent.digest.to_vec())),
+            ]);
+            let open = Open {
+                run,
+                body: fr.body,
+                node: fr.node,
+                intent: fr.intent.id,
+                actor: fr.intent.actor,
+                link: None,
+            };
+            self.out.push(entry(&open, now, changes, name(KEY), fields));
+        }
+        if last {
+            return self.finish(w, run, name("done"), now);
+        }
+        long.at += 1;
+        fr.runner = Runner::new(long.stages.list[at + 1].steps.clone(), fr.node, long.limits);
+        self.wake(w, run, Woke::Start, now);
     }
 
     /// Ends run `run` as `how`: its walk stopped and its driver released, its move cancelled, its timers cleared.
