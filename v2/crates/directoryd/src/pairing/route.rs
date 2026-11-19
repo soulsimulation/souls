@@ -7,7 +7,8 @@
 //!   `{refused, device?}` or, once, `{token, grant}`.
 //! - `GET /pair` → the approval card. It shows and changes nothing until the signed-in owner acts in it.
 //! - `POST /v1/pair/show` and `POST /v1/pair/approve` `{code, confirm: true}`, signed in: W1's session token as
-//!   `Authorization: Bearer`, or on a test world W1's test person as `test_person`.
+//!   `Authorization: Bearer`, or on a test world W1's test person as `test_person`. An approval records the Soul, and
+//!   its own body for the page to follow, under the approving account (V13c), for the session exchange.
 //! - `POST /v1/account/souls` → `{souls: [{soul, device}]}` and `POST /v1/account/souls/revoke` `{soul}` →
 //!   `{ok: true, soul}`, signed in the same way (the account page, W9 #2827).
 //! - My Souls (W11, #2749): a new Soul's request may name its `world`. Each listed Soul also carries `world`, `name`,
@@ -22,6 +23,7 @@ use super::souls::{Mine, Profile};
 use super::{Ask, Poll, is_name};
 use crate::accounts::serve::{App, now};
 use crate::accounts::start::TEST_ISSUER;
+use crate::accounts::view::follow_of;
 use crate::accounts::{b64url, correlate, from_b64url};
 use replica::encode::from_hex;
 use serde_json::{Value, json};
@@ -180,7 +182,14 @@ pub fn route(
                 refuse(400, "confirm")
             } else {
                 match p.approve(&account, &code, now()) {
-                    Ok(grant) => json(200, json!({"approved": true, "soul": grant}), note),
+                    // V13c: the approving account owns the Soul, and its page follows the Soul's own body.
+                    Ok(grant) => match app
+                        .store
+                        .own(&account, &grant, follow_of(&grant).as_deref())
+                    {
+                        Ok(()) => json(200, json!({"approved": true, "soul": grant}), note),
+                        Err(_) => refuse(500, "store"),
+                    },
                     Err(("code-guesses", _)) => refuse(429, "code-guesses"),
                     Err((e @ "unknown-code", _)) => refuse(404, e),
                     Err((e, device)) => json(409, json!({"refused": e, "device": device}), e),
