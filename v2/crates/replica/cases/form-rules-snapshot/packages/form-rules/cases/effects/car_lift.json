@@ -1,0 +1,125 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:car_lift (core/car-lift@1, 1 placed): its arms are raised and lowered at the control within touch.",
+ "cases": [
+  {
+   "name": "car_lift_raise_then_lower",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "t1": {
+      "kind": "eden:car_lift",
+      "fields": {
+       "raised": false
+      }
+     },
+     "b1": {
+      "kind": "eden:humanoid",
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       1600,
+       900,
+       350
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "steer": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "lower"
+     },
+     "receipt": "rcar_lift_rai0",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "raise"
+     },
+     "receipt": "rcar_lift_rai1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "raised",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:raised",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "lower"
+     },
+     "receipt": "rcar_lift_rai2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "raised",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:lowered",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "t1": {
+     "kind": "eden:car_lift",
+     "fields": {
+      "raised": 0
+     }
+    }
+   }
+  }
+ ]
+}

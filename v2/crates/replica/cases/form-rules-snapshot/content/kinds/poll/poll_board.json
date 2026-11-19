@@ -1,0 +1,27 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:poll_board",
+  "owner": "thing",
+  "state": {
+    "question": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 650], "yaw_mdeg": 180000 }
+  },
+  "geometry": { "bounds_mm": [1100, 1600, 300] },
+  "children": {
+    "option": { "kind": "eden:poll_option", "most": 4 }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:poll_board",
+    "shape": {"round":10,"shapes":[{"kind":"box","at":[-520,830,0],"size":[50,1660,50],"tint":"frame"},{"kind":"box","at":[520,830,0],"size":[50,1660,50],"tint":"frame"},{"kind":"box","at":[-520,20,0],"size":[60,40,300],"tint":"frame"},{"kind":"box","at":[520,20,0],"size":[60,40,300],"tint":"frame"},{"kind":"box","at":[0,1220,0],"size":[1000,700,40],"tint":"frame"},{"kind":"box","at":[0,1220,21],"size":[940,640,6],"tint":"board"}],"palette":{"frame":"#b9bec4","board":"#f6f7f4"},"tags":["board","signage","object"]}
+  },
+  "text": {
+    "card": "A poll board: a question and up to four choices; vote with a tally mark.",
+    "poll": "poll",
+    "vote": "vote"
+  },
+  "card": { "text": "card", "category": "poll", "synonyms": ["vote"] }
+}

@@ -1,0 +1,268 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:lockers",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "locked": {
+      "n": 2,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        606
+      ],
+      "yaw_mdeg": 180000
+    },
+    "door": {
+      "role": "grip",
+      "at_mm": [
+        -210,
+        950,
+        250
+      ]
+    },
+    "lock": {
+      "role": "contact",
+      "at_mm": [
+        -210,
+        1000,
+        250
+      ]
+    }
+  },
+  "slots": {
+    "inside": {
+      "admits": "thing",
+      "most": 12,
+      "at_mm": [
+        -310,
+        300,
+        0
+      ],
+      "fits_mm": [
+        280,
+        1500,
+        380
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      910,
+      1770,
+      452
+    ]
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "locked",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "door"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "opened"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "door"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "shut"
+        }
+      ]
+    },
+    "lock": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "locked",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "lock"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "locked",
+          "to": true,
+          "event": "locked"
+        }
+      ]
+    },
+    "unlock": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "locked",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "lock"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "locked",
+          "to": false,
+          "event": "unlocked"
+        }
+      ]
+    }
+  },
+  "closed": {
+    "audience": {
+      "rule": "owner"
+    },
+    "fields": []
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:lockers",
+    "table": [
+      {
+        "part": "door",
+        "field": "open",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "true": -100000,
+          "false": 0
+        },
+        "over_us": 500000
+      }
+    ],
+    "shape": {"shapes":[{"kind":"box","at":[0,900,0],"size":[890,1740,390],"round":0,"tint":"paint"},{"kind":"box","at":[0,900,226],"size":[290,1700,10],"round":0,"tint":"door"},{"kind":"box","at":[0,1500,232],"size":[180,15,5],"round":0,"tint":"iron"},{"kind":"box","at":[0,1550,232],"size":[180,15,5],"round":0,"tint":"iron"},{"kind":"box","at":[0,1600,232],"size":[180,15,5],"round":0,"tint":"iron"},{"kind":"box","at":[100,950,235],"size":[20,100,20],"round":0,"tint":"chrome"},{"kind":"box","at":[310,900,226],"size":[290,1700,10],"round":0,"tint":"door"},{"kind":"box","at":[310,1500,232],"size":[180,15,5],"round":0,"tint":"iron"},{"kind":"box","at":[310,1550,232],"size":[180,15,5],"round":0,"tint":"iron"},{"kind":"box","at":[310,1600,232],"size":[180,15,5],"round":0,"tint":"iron"},{"kind":"box","at":[410,950,235],"size":[20,100,20],"round":0,"tint":"chrome"},{"kind":"box","at":[-310,900,236],"size":[290,1700,12],"round":0,"tint":"door","role":"door","pivot":[-455,0,230]},{"kind":"box","at":[-310,1500,244],"size":[180,15,5],"round":0,"tint":"iron","role":"door","pivot":[-455,0,230]},{"kind":"box","at":[-310,1550,244],"size":[180,15,5],"round":0,"tint":"iron","role":"door","pivot":[-455,0,230]},{"kind":"box","at":[-310,1600,244],"size":[180,15,5],"round":0,"tint":"iron","role":"door","pivot":[-455,0,230]},{"kind":"box","at":[-210,950,247],"size":[20,100,20],"round":0,"tint":"chrome","role":"door","pivot":[-455,0,230]}],"palette":{"paint":"#3f6b8a","door":"#4a7a9a","iron":"#2a3a46","chrome":"#c9ccd0"},"tags":["furniture","storage"]}
+  },
+  "text": {
+    "card": "A bank of three steel lockers; the first opens, holds your things and locks.",
+    "storage": "storage",
+    "locker": "locker",
+    "cubby": "cubby",
+    "howto_store": "Unlock the first locker if it is locked, open it, put things inside, close and lock it."
+  },
+  "card": {
+    "text": "card",
+    "category": "storage",
+    "synonyms": [
+      "locker",
+      "cubby"
+    ]
+  },
+  "howtos": {
+    "store": {
+      "text": "howto_store",
+      "steps": [
+        {
+          "form": "unlock"
+        },
+        {
+          "form": "open"
+        },
+        {
+          "form": "close"
+        },
+        {
+          "form": "lock"
+        }
+      ]
+    }
+  }
+}

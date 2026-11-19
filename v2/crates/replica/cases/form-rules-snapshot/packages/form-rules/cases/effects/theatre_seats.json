@@ -1,0 +1,41 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:theatre_seats: two Souls sit in the placed theatre seats; the second, refused the taken seat, is pointed to another free one (the rules give back_1).",
+  "cases": [
+    {
+      "name": "theatre_seats_two_souls_sit",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "t1"] },
+          "t1": { "kind": "eden:theatre_seats" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "front_1" } },
+          "receipt": "rs1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "front_1" } }],
+            "events": [{ "event": "eden:sat_down", "node": "t1", "changes": [0] }]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "t1", "form": "sit", "args": { "seat": "front_1" } },
+          "receipt": "rs2",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken",
+            "need": 0,
+            "fix": { "form": "sit", "args": { "seat": "back_1" } }
+          }
+        }
+      ],
+      "after": { "t1": { "kind": "eden:theatre_seats", "slots": { "front_1": ["b1"] } } }
+    }
+  ]
+}

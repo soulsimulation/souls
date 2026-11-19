@@ -71,6 +71,9 @@ step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit
 # The page's pose (V7, #2716): a body's bones as a function of its record and time, the same at 30 and 144 frames a
 # second, in any order and in a fresh process, with the hand on its contact point (web/src/pose/pose.test.ts).
 step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test web/src/pose/*.test.ts'
+# The words path (V1b, #3361): a local world's said sentence, and a body's name and description, through the page's
+# worker within the stream's lag; a whisper in no public file (web/src/source/words.test.ts).
+step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts'
 
 # The ids goldens (T3, #2640): the same WASM build in Node gives fixtures/ids/goldens.txt exactly, as the native build
 # does in `cargo test` (crates/replica/tests/ids.rs).
