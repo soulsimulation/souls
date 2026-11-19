@@ -545,7 +545,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'lie', 'converse', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'stop', 'pray', 'prayers', 'answer']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'stop', 'pray', 'prayers', 'answer']);
 const nothingYet = () => !events.some((e) => e.kind !== 'synced');
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
