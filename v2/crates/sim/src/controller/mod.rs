@@ -409,6 +409,13 @@ pub struct BuildBasis {
     track: Option<Track>,
 }
 
+/// A captured admission basis and one opaque off-clock target-triangle certificate.
+#[derive(Clone, Debug)]
+pub struct PreparedRebind {
+    pub before: BuildBasis,
+    pub triangle: crate::mover::RebindTriangle,
+}
+
 /// Every body's claims, input and mover state; the only way any of them is moved or posed.
 #[derive(Default)]
 pub struct Controller {
@@ -723,6 +730,38 @@ impl Controller {
     }
 
     /// Validates every precomputed topology rebind without searching or mutating the live actor.
+    /// Validates unchanged admission state, then certifies the current point without moving it.
+    pub fn certify_rebinds(&self, prepared: &[PreparedRebind]) -> R<Vec<(BuildBasis, Moved)>> {
+        let mut out = Vec::with_capacity(prepared.len());
+        for target in prepared {
+            let before = &target.before;
+            let Some(current) = self.build_basis(before.moved.id) else {
+                return refuse("edit.body-stale", "prepared body missing");
+            };
+            if current.build != before.build
+                || current.claims != before.claims
+                || current.input != before.input
+                || current.track != before.track
+                || current.track.is_some()
+                || current.moved.pose.frame != before.moved.pose.frame
+                || current.moved.pose.support != before.moved.pose.support
+                || !self.bodies.contains_key(&before.moved.id)
+            {
+                return refuse("edit.body-stale", "prepared body changed");
+            }
+            let after = target
+                .triangle
+                .rebind(&current.moved)
+                .ok_or_else(|| Refusal {
+                    name: "edit.body-stale",
+                    detail: "prepared triangle differs".into(),
+                })?;
+            out.push((current, after));
+        }
+        self.check_rebinds(&out)?;
+        Ok(out)
+    }
+
     pub fn check_rebinds(&self, prepared: &[(BuildBasis, Moved)]) -> R<()> {
         let mut seen = BTreeSet::new();
         for (before, after) in prepared {
@@ -1354,6 +1393,132 @@ mod class_tests {
             assert_eq!(c.body(id).unwrap().pose.support, build.support(id));
         }
     }
+    #[test]
+    fn current_point_certificate_keeps_motion_and_refuses_changed_admission_atomically() {
+        let (id, family, surface) = fixture();
+        let pc = surface.pieces()[0].clone();
+        let mut far = pc.clone();
+        for v in &mut far.vertices {
+            v[0] -= 100_000;
+        }
+        for ring in &mut far.outline {
+            for v in ring {
+                v[0] -= 100_000;
+            }
+        }
+        let old = Surface::new(id, vec![far, pc]);
+        let moved = old
+            .place(
+                id,
+                Frame {
+                    node: id,
+                    slot: None,
+                },
+                Vec3::new(1_000_000, 0, -1_000_000),
+                Quat::IDENTITY,
+            )
+            .unwrap();
+        assert_eq!(moved.piece, 1);
+        let mut c = Controller::new();
+        c.add(family, moved).unwrap();
+        let shape = SkillShape {
+            name: Name::new("souls:walk").unwrap(),
+            claims: vec![Want::All(Class::Locomotion)],
+            blocks: vec![],
+            cancelled_by: vec![],
+        };
+        let driver = c.claim(id, &shape).unwrap();
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(1_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let target = PreparedRebind {
+            before: c.build_basis(id).unwrap(),
+            triangle: surface.rebind_triangle(0, moved.tri, 0).unwrap(),
+        };
+        let out = c.step(&BTreeMap::from([(id, old)]), 50_000, 50_000);
+        assert!(out.refused.is_empty());
+        let current = c.build_basis(id).unwrap();
+        assert_ne!(
+            current.moved.pose.position,
+            target.before.moved.pose.position
+        );
+        let certified = c.certify_rebinds(std::slice::from_ref(&target)).unwrap();
+        assert_eq!(certified[0].0, current);
+        assert_eq!(certified[0].1.pose, current.moved.pose);
+        assert_eq!(certified[0].1.linear, current.moved.linear);
+        assert_eq!(
+            c.commit_rebinds(&certified, || Err::<(), _>(Refusal {
+                name: "paired-refusal",
+                detail: String::new()
+            }))
+            .unwrap_err()
+            .name,
+            "paired-refusal"
+        );
+        assert_eq!(c.build_basis(id).unwrap(), current);
+        c.commit_rebinds(&certified, || Ok(())).unwrap();
+        let mut rebound = current.clone();
+        rebound.moved.piece = 0;
+        assert_eq!(c.build_basis(id).unwrap(), rebound);
+        assert_eq!(current.moved.piece, 1);
+        assert_eq!(certified[0].1.piece, 0);
+        for change in 0..8 {
+            let slot = c.bodies.get_mut(&id).unwrap();
+            match change {
+                0 => slot.moved.pose.position.x = 100_000_000,
+                1 => slot.moved.pose.position.y += 1,
+                2 => slot.build.size = replica::kinds::sizes::Size::Large,
+                3 => slot.moved.pose.frame.slot = Some(1),
+                4 => slot.moved.pose.support = Support::Slot,
+                5 => slot.input.velocity.x += 1,
+                6 => {
+                    slot.track = Some(Track {
+                        link: None,
+                        line: vec![],
+                        speed: 1,
+                        to: id,
+                        arrive: None,
+                    })
+                }
+                _ => slot.moved.pose.frame.node = Id::new(Scope([0x66; 16]), 2).unwrap(),
+            }
+            let changed = c.build_basis(id).unwrap();
+            assert_eq!(
+                c.certify_rebinds(std::slice::from_ref(&target))
+                    .unwrap_err()
+                    .name,
+                "edit.body-stale",
+                "case {change}"
+            );
+            assert_eq!(c.build_basis(id).unwrap(), changed);
+            let slot = c.bodies.get_mut(&id).unwrap();
+            slot.moved = current.moved;
+            slot.build = current.build;
+            slot.input = current.input.clone();
+            slot.track = current.track.clone();
+        }
+        c.claim(
+            id,
+            &SkillShape {
+                name: Name::new("souls:observe").unwrap(),
+                claims: vec![],
+                blocks: vec![],
+                cancelled_by: vec![],
+            },
+        )
+        .unwrap();
+        let changed = c.build_basis(id).unwrap();
+        assert_ne!(changed.claims, current.claims);
+        assert_eq!(
+            c.certify_rebinds(&[target]).unwrap_err().name,
+            "edit.body-stale"
+        );
+        assert_eq!(c.build_basis(id).unwrap(), changed);
+    }
+
     #[test]
     fn prepared_topology_rebind_preserves_active_state_and_moves_on_the_next_tick() {
         let (id, family, surface) = fixture();

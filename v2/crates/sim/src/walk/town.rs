@@ -261,7 +261,7 @@ impl Basis {
         }
         let mut surface = Surface::new(ground, pieces);
         if let Some(t) = &basis.open.terrain {
-            surface = surface.on_terrain(t.as_ref().clone(), flags);
+            surface = surface.on_terrain_shared(Arc::clone(t), flags);
         }
         Ok(surface)
     }
@@ -364,7 +364,7 @@ impl Rebuilt {
         &self,
         bases: &[crate::controller::BuildBasis],
         ground: Id,
-    ) -> Result<Vec<(crate::controller::BuildBasis, Body)>, Refusal> {
+    ) -> Result<Vec<crate::controller::PreparedRebind>, Refusal> {
         crate::commit::off_clock();
         let mut surfaces = BTreeMap::new();
         let mut out = Vec::new();
@@ -380,8 +380,8 @@ impl Rebuilt {
                                 .collect(),
                         );
                         if let Some(t) = &basis.open.terrain {
-                            surface = surface.on_terrain(
-                                t.as_ref().clone(),
+                            surface = surface.on_terrain_shared(
+                                Arc::clone(t),
                                 sq.iter()
                                     .flat_map(|(_, _, on)| on.iter().cloned())
                                     .collect(),
@@ -405,17 +405,17 @@ impl Rebuilt {
                 before.build,
             )?;
             moved.linear = before.moved.linear;
-            moved.piece = moved
-                .piece
-                .checked_add(*offset)
-                .ok_or_else(|| refusal("out-of-range", "piece index"))?;
+            let triangle = surface.rebind_triangle(moved.piece, moved.tri, *offset)?;
             if moved.pose != before.moved.pose {
                 return Err(refusal(
                     "edit.body-support-changed",
                     "prepared support differs",
                 ));
             }
-            out.push((before.clone(), moved));
+            out.push(crate::controller::PreparedRebind {
+                before: before.clone(),
+                triangle,
+            });
         }
         Ok(out)
     }

@@ -373,7 +373,11 @@ impl Bodies {
             .filter(|b| maps.live.affects(b, self.town.ground))
             .map(|b| b.moved.id)
             .collect();
-        let prepared: BTreeSet<_> = maps.rebinds.iter().map(|(b, _)| b.moved.id).collect();
+        let prepared: BTreeSet<_> = maps
+            .rebinds
+            .iter()
+            .map(|target| target.before.moved.id)
+            .collect();
         if current != prepared {
             return Err(replica::edit::Refused {
                 op: None,
@@ -383,7 +387,7 @@ impl Bodies {
         }
         self.runner
             .controller
-            .check_rebinds(&maps.rebinds)
+            .certify_rebinds(&maps.rebinds)
             .map_err(|r| replica::edit::Refused {
                 op: None,
                 name: r.name,
@@ -405,12 +409,21 @@ impl Bodies {
         commit: impl FnOnce() -> Result<sim::edit::Committed, replica::edit::Refused>,
     ) -> Result<sim::edit::Committed, replica::edit::Refused> {
         self.check_map(&maps)?;
+        let rebinds = self
+            .runner
+            .controller
+            .certify_rebinds(&maps.rebinds)
+            .map_err(|r| replica::edit::Refused {
+                op: None,
+                name: r.name,
+                detail: r.detail,
+            })?;
         let mut refused = None;
         let town = &mut self.town;
         let done = self
             .runner
             .controller
-            .commit_rebinds(&maps.rebinds, || {
+            .commit_rebinds(&rebinds, || {
                 town.install_then(maps.live, &maps.part, || {
                     commit().map_err(|r| {
                         let error = Refusal {
@@ -431,7 +444,7 @@ impl Bodies {
             })?;
         self.planner
             .install(maps.before, maps.worker, Arc::clone(&done.part));
-        self.runner.prepared_ground(&maps.rebinds, &self.town);
+        self.runner.prepared_ground(&rebinds, &self.town);
         self.form_map = maps.after;
         self.planned.keep_map(&self.form_map);
         self.reached.clear();
