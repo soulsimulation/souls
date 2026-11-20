@@ -19,6 +19,7 @@ import { createServer } from 'node:http';
 import { basename, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { siteRoutes } from './site.mjs';
+import { worldRoutes } from './world-routes.mjs';
 
 export const IMMUTABLE = 'public, max-age=31536000, immutable, no-transform';
 export const POINTER = 'public, max-age=1, no-transform';
@@ -34,7 +35,7 @@ export function kindOf(path) {
 
 /** An origin over `dir`, with the site's pages from `site` ({web, data}; site.mjs). `stats` counts what it served. */
 export function createOrigin(dir, site = {}) {
-  const root = resolve(dir), pages = siteRoutes(site);
+  const root = resolve(dir), pages = siteRoutes(site), worlds = worldRoutes(site.worldRoutes);
   const stats = { pointer: 0, immutable: 0, miss: 0, perPath: new Map(), bytes: {} }; // bytes: served, by first segment (O11)
   const etags = new Map();
   const server = createServer(async (req, res) => {
@@ -43,6 +44,7 @@ export function createOrigin(dir, site = {}) {
       res.writeHead(404, { 'cache-control': MISS, 'content-length': 0 }).end();
     };
     try {
+      if (worlds.handle(req, res)) return;
       if (pages.handle(req, res)) return;
     } catch {
       return miss();
@@ -81,6 +83,7 @@ export function createOrigin(dir, site = {}) {
     });
     res.end(req.method === 'HEAD' ? undefined : body);
   });
+  server.on('upgrade', worlds.upgrade);
   server.keepAliveTimeout = 60_000;
   return { server, stats };
 }

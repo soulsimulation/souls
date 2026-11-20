@@ -25,7 +25,7 @@
 // Exit 0 on PASS.
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { rows, signInHref } from '../../web/src/home/list.ts';
+import { canonicalRows, signInHref } from '../../web/src/home/list.ts';
 
 export const POINTS = ['worlds', 'client', 'aliases', 'domains', 'sign-in', 'headers', 'robots', 'list', 'address', 'site'];
 const UA = 'souls-front-check';
@@ -138,7 +138,7 @@ export async function frontCheck({ public: pub = 'https://soul.game', primary = 
       if (!/^Sitemap: \S+\/sitemap\.xml$/m.test(robots)) bad('robots', 'robots.txt names no sitemap');
       const map = await (await get(`${pub}/sitemap.xml`)).text();
       const listed = new Set([...map.matchAll(/<loc>[^<]*\/w\/([^/<]+)\/<\/loc>/g)].map((m) => m[1]));
-      const want = new Set(rows(await json(`${pub}/v1/worlds`), await json(`${pub}/__sim/worlds.json`)).map((w) => w.slug));
+      const want = new Set((await canonicalRows(await json(`${pub}/v1/worlds`), await json(`${pub}/__sim/worlds.json`), pub, get)).map((w) => w.slug));
       seen.push(`robots: the sitemap lists ${listed.size} worlds; the one list has ${want.size}`);
       for (const s of want) if (!listed.has(s)) bad('robots', `the sitemap leaves out the listed world ${s}`);
       for (const s of listed) if (!want.has(s)) bad('robots', `the sitemap lists ${s}, which the list does not`);
@@ -148,7 +148,7 @@ export async function frontCheck({ public: pub = 'https://soul.game', primary = 
       const home = await page('/'), html = await home.text();
       seen.push(`list: / -> ${home.status} ${system(home)}`);
       if (home.status !== 200 || system(home) !== 'v2' || !/id="list"/.test(html)) bad('list', `/ answered ${home.status} from ${system(home)}, want the one list (200 from v2)`);
-      const all = rows(await json(`${pub}/v1/worlds`), await json(`${pub}/__sim/worlds.json`));
+      const all = await canonicalRows(await json(`${pub}/v1/worlds`), await json(`${pub}/__sim/worlds.json`), pub, get);
       seen.push(`list: ${all.map((w) => `${w.slug} (${w.system})`).join(', ')}`);
       for (const [slug, want] of [[v2, 'v2'], [today, 'today']]) if (!all.some((w) => w.slug === slug && w.system === want)) bad('list', `the list does not show ${slug} as ${want}'s`);
       for (const w of all) {
