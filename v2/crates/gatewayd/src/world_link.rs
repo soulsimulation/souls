@@ -54,10 +54,36 @@ pub(crate) struct DeliveryTrace {
 impl DeliveryTrace {
     pub(crate) fn at(&self, stage: &str, outcome: &str) {
         eprintln!(
-            "gatewayd: join-delivery stage={stage} actor-hash={} sequence={} kind={} version={:?} outcome={outcome}",
-            self.actor, self.sequence, self.kind, self.version
+            "gatewayd: join-delivery stage={stage} actor-hash={} sequence={} kind={} version={:?} outcome={outcome} elapsed-us={}",
+            self.actor,
+            self.sequence,
+            self.kind,
+            self.version,
+            delivery_elapsed_us()
         );
     }
+
+    /// The application binary payload after its one existing timing-block finish, not a WebSocket header.
+    pub(crate) fn final_frame(&self, frame: &[u8]) {
+        eprintln!(
+            "gatewayd: join-delivery stage=socket-final-frame actor-hash={} sequence={} kind={} version={:?} bytes={} sha256={} elapsed-us={}",
+            self.actor,
+            self.sequence,
+            self.kind,
+            self.version,
+            frame.len(),
+            replica::encode::to_hex(&replica::ids::sha256(frame)),
+            delivery_elapsed_us()
+        );
+    }
+}
+
+// Called only through an enabled DeliveryTrace; the disabled fast path performs no clock read.
+fn delivery_elapsed_us() -> u64 {
+    static START: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    let now = crate::times::stamp();
+    let origin = START.get_or_init(|| now);
+    now.saturating_sub(*origin).min(120_000_000)
 }
 
 pub(crate) fn delivery_trace(frame: &[u8]) -> Option<DeliveryTrace> {
