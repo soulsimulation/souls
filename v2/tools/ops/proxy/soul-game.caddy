@@ -82,15 +82,22 @@ https://soul.game {
 		header X-Robots-Tag "noindex, nofollow"
 		import v2_world
 	}
-	@v2world {
-		path_regexp v2world ^/w/([a-z0-9][a-z0-9-]{0,62})(/|$)
-		file {
+	@v2world path_regexp v2world ^/w/([a-z0-9][a-z0-9-]{0,62})(/|$)
+	handle @v2world {
+		# The outer match sets the slug capture before the dependent activation-file lookup.
+		@active file {
 			root /var/lib/souls-routes/slugs
 			try_files /{re.v2world.1}
 		}
-	}
-	handle @v2world {
-		import v2_world
+		handle @active {
+			import v2_world
+		}
+		handle {
+			header X-Souls-System today
+			reverse_proxy localhost:@@PRODUCTION_PORT@@ {
+				header_up X-Forwarded-For {client_ip}
+			}
+		}
 	}
 
 	handle / {
