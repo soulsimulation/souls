@@ -12,6 +12,8 @@ import { mergeSoulGuide, SOUL_GUIDE_START, SOUL_GUIDE_END, guideHomeHead as home
 import { mergeSoulGuide as legacyMerge } from '../edge-skill/client-folder-guide.mjs';
 
 const cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
+// Every child the CLI starts stays attached to the fixture's pipes, so 'close' below waits for the whole tree.
+const OWN_CHILDREN = `--import=${JSON.stringify(new URL('./soul-guide-own-children.mjs', import.meta.url).href)}`;
 const tmp = (t) => { const d = realpathSync(mkdtempSync(join(tmpdir(), 'souls-guide-'))); t.after(() => rmSync(d, { recursive: true, force: true })); return d; };
 const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
 const block = (text) => `${SOUL_GUIDE_START}\n${text}\n${SOUL_GUIDE_END}`;
@@ -80,9 +82,9 @@ async function world(t) {
   return `http://127.0.0.1:${server.address().port}/w/a`;
 }
 const cliIn = (cwd) => (...args) => new Promise((resolve) => {
-  const child = spawn(process.execPath, [cli, ...args], { cwd, env: { ...process.env, HOME: cwd, SOULS_HOME: '', SOULS_PRINCIPAL: '', EDEN_TIME_SCALE: '0.01' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [cli, ...args], { cwd, env: { ...process.env, NODE_OPTIONS: [process.env.NODE_OPTIONS, OWN_CHILDREN].filter(Boolean).join(' '), HOME: cwd, SOULS_HOME: '', SOULS_PRINCIPAL: '', EDEN_TIME_SCALE: '0.01' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '', err = ''; child.stdout.on('data', (c) => { out += c; }); child.stderr.on('data', (c) => { err += c; });
-  child.on('exit', (code) => resolve({ code, out, err }));
+  child.on('close', (code) => resolve({ code, out, err }));   // after every descendant has let go of the pipes
 });
 const guideOf = (text) => text.slice(text.indexOf(SOUL_GUIDE_START), text.indexOf(SOUL_GUIDE_END) + SOUL_GUIDE_END.length);
 
