@@ -85,6 +85,14 @@ test('material batches retain UV seams and actual maps while capacity growth rem
   const root = new THREE.Group(), map = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
   const red = new THREE.MeshStandardMaterial({ color: 0xff0000, map }), blue = new THREE.MeshStandardMaterial({ color: 0x0000ff });
   root.add(new THREE.Mesh(new THREE.BoxGeometry(), [red, blue, red, blue, red, blue]));
+  const scalarBox = new THREE.BoxGeometry();
+  assert.ok(scalarBox.groups.some((group) => group.materialIndex! > 0));
+  const scalar = merge({ scene: new THREE.Group().add(new THREE.Mesh(scalarBox, red)) } as any);
+  assert.equal(scalar.mesh.index.length, scalarBox.index!.count);
+  assert.ok(scalar.mesh.material!.every((material) => material === 0));
+  assert.deepEqual(scalar.sourceMaterials, [red]);
+  const invalid = new THREE.Group().add(new THREE.Mesh(new THREE.BoxGeometry(), [red]));
+  assert.throws(() => merge({ scene: invalid } as any), /body.material-missing/);
   const merged = merge({ scene: root } as any);
   assert.equal(merged.sourceMaterials[0], red); assert.equal(merged.sourceMaterials[1], blue); assert.ok(merged.mesh.uv?.some((v) => v === 1));
   const geo = geometry(merged.mesh), m = model('textured'); m.lods = [geo, geo, geo]; m.sourceMaterials = merged.sourceMaterials;

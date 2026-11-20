@@ -118,7 +118,7 @@ export function merge(gltf: GLTF): { mesh: LodMesh; skeleton: THREE.Skeleton; ma
     const localMaterials = mats.map((m) => { let index = sourceMaterials.indexOf(m); if (index < 0) { index = sourceMaterials.length; sourceMaterials.push(m); } return index; });
     const P = g.getAttribute('position'), N = g.getAttribute('normal'), C = g.getAttribute('color'), U = g.getAttribute('uv'), I = g.getAttribute('skinIndex'), W = g.getAttribute('skinWeight');
     const remap = skin ? skin.skeleton.bones.map((b) => { const i = boneOf.get(b.name); if (i === undefined) throw new Error('body.unmatched-rig'); return i; }) : [skeleton.bones.indexOf(p as unknown as THREE.Bone)];
-    const groups = g.groups.length ? g.groups : [{ start: 0, count: g.index?.count ?? P.count, materialIndex: 0 }];
+    const groups = Array.isArray(p.material) && g.groups.length ? g.groups : [{ start: 0, count: g.index?.count ?? P.count, materialIndex: 0 }];
     const kept = new Map<string, number>();
     nm.getNormalMatrix(matrix);
     for (const group of groups) {
