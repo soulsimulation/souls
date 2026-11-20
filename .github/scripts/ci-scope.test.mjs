@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, ciRunsAt, greenAtHead, greenCommand, lightOnly, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
+import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, ciRunsAt, deferredOnly, deferredReceipt, greenAtHead, greenCommand, lightOnly, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
 import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 
 const names = files => jobsFor(files).include.map(j => j.name);
@@ -423,7 +423,7 @@ test('low-risk: a merge group of two allowlist PRs is scoped; one with a server 
 // A label run at a head whose newest ci run passed: only scope and ci-ok run (18 Nov). The green step used the gh CLI,
 // which the light self-hosted runners lack, so it always answered nothing and every label re-ran the light legs.
 test('green at head: read with fetch and GH_TOKEN, no gh CLI; a failed read is not green', async () => {
-  const runs = [{ id: 1, event: 'pull_request', status: 'completed', conclusion: 'success' }, { id: 2, event: 'pull_request', status: 'in_progress', conclusion: null }];
+  const runs = [{ id: 1, event: 'pull_request', status: 'completed', conclusion: 'success', head_sha: 'abc', path: '.github/workflows/ci.yml' }, { id: 2, event: 'pull_request', status: 'in_progress', conclusion: null }];
   let seen;
   const get = async (url, init) => { seen = { url, auth: init.headers.authorization }; return { ok: true, json: async () => ({ workflow_runs: runs }) }; };
   assert.deepEqual(await ciRunsAt('o/r', 'abc', { token: 't', api: 'https://api.example', fetch: get }), runs);
@@ -436,6 +436,87 @@ test('green at head: read with fetch and GH_TOKEN, no gh CLI; a failed read is n
     assert.equal(await greenCommand({ repo: 'o/r', sha: 'abc' }, { fetch: async () => { throw new Error('offline'); } }), 'false');
   } finally { console.error = warn; }
   assert.doesNotMatch(readFileSync(fileURLToPath(new URL('./ci-scope.mjs', import.meta.url)), 'utf8'), /execFileSync\('gh'/);
+});
+
+// Shape retained from the actual sibling draft failure: scope/repo passed, the matrix and smoke never ran,
+// and only the closed-window step failed. These are API metadata, not invented success statuses.
+const RECEIPT_SHA = 'a'.repeat(40);
+const receiptRun = (id, conclusion = 'failure') => ({ id, head_sha: RECEIPT_SHA, path: '.github/workflows/ci.yml', event: 'pull_request', status: 'completed', conclusion });
+const receiptStep = (name, conclusion = 'success') => ({ name, status: 'completed', conclusion });
+const aggregateName = 'Run echo "scope=$SCOPE repo=$REPO qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED green_at_head=$GREEN"';
+const receiptJob = (id, name, conclusion = 'success', steps = [receiptStep('Run assigned checks')]) => ({ run_id: id, head_sha: RECEIPT_SHA, name, status: 'completed', conclusion, steps });
+const deferredJobs = id => ({ total_count: 5, jobs: [receiptJob(id, 'scope'), receiptJob(id, 'repo'), receiptJob(id, 'matrix.name', 'skipped', []), receiptJob(id, 'smoke', 'skipped', []), receiptJob(id, 'ci-ok', 'failure', [receiptStep('Set up job'), receiptStep('Full CI deferred', 'failure'), receiptStep(aggregateName, 'skipped'), receiptStep('Complete job')])] });
+const qualifiedJobs = id => ({ total_count: 4, jobs: ['scope', 'repo', 'ci-ok', 'v2'].map(name => receiptJob(id, name)) });
+
+test('deferred receipt: only verified closed-window siblings can precede an actual exact-head qualification', () => {
+  const runs = [receiptRun(3), receiptRun(2), receiptRun(1, 'success')];
+  const evidence = new Map([[3, deferredJobs(3)], [2, deferredJobs(2)], [1, qualifiedJobs(1)]]);
+  assert.equal(deferredOnly(runs[0], evidence.get(3), RECEIPT_SHA), true);
+  assert.deepEqual(deferredReceipt(runs, evidence, { sha: RECEIPT_SHA }), { green: true, receipt: 1, deferred: [3, 2] });
+  assert.deepEqual(deferredReceipt(runs, new Map(), { sha: RECEIPT_SHA }), { inspect: 3 });
+  for (const change of [r => r.head_sha = 'b'.repeat(40), r => r.path = 'other.yml', r => r.status = 'queued', r => r.status = 'in_progress', r => r.conclusion = 'cancelled', r => r.conclusion = 'skipped']) {
+    const altered = structuredClone(runs); change(altered[0]);
+    assert.deepEqual(deferredReceipt(altered, evidence, { sha: RECEIPT_SHA }), { green: false });
+  }
+  const many = [...Array.from({ length: 8 }, (_, i) => receiptRun(i + 2)), receiptRun(1, 'success')];
+  const all = new Map(many.map(r => [r.id, r.conclusion === 'success' ? qualifiedJobs(r.id) : deferredJobs(r.id)]));
+  assert.deepEqual(deferredReceipt(many, all, { sha: RECEIPT_SHA }), { green: false }, 'eight inspected deferrals never reach a ninth run');
+});
+
+test('deferred receipt: missing, mixed, genuine failure or mismatched job evidence blocks every older pass', () => {
+  const variants = [
+    e => e.jobs[0].conclusion = 'failure',
+    e => e.jobs[1].steps.push(receiptStep('unexpected failure', 'failure')),
+    e => e.jobs[2] = receiptJob(2, 'v2', 'failure'),
+    e => e.jobs[3].steps.push(receiptStep('unexpected work')),
+    e => e.jobs[4].steps[1].name = 'actual qualification failed',
+    e => e.jobs[4].steps[2].conclusion = 'failure',
+    e => e.jobs[4].steps.pop(),
+    e => e.jobs[0].run_id = 99,
+    e => e.jobs[0].head_sha = 'b'.repeat(40),
+    e => e.jobs[0].status = 'in_progress',
+    e => e.jobs[0].steps = [],
+    e => delete e.jobs[0].steps,
+    e => e.jobs[0].name = 'repo',
+    e => e.total_count++,
+    e => e.jobs.pop(),
+    e => e.jobs[0].steps[0].conclusion = null,
+  ];
+  const runs = [receiptRun(2), receiptRun(1, 'success')];
+  for (const mutate of variants) {
+    const newer = deferredJobs(2); mutate(newer);
+    assert.deepEqual(deferredReceipt(runs, new Map([[2, newer], [1, qualifiedJobs(1)]]), { sha: RECEIPT_SHA }), { green: false }, String(mutate));
+  }
+  for (const mutate of [e => e.jobs.pop(), e => e.jobs[3].conclusion = 'failure', e => e.jobs[3].steps = [], e => e.jobs[3].head_sha = 'b'.repeat(40), e => e.jobs[0].run_id = 88]) {
+    const older = qualifiedJobs(1); mutate(older);
+    assert.deepEqual(deferredReceipt(runs, new Map([[2, deferredJobs(2)], [1, older]]), { sha: RECEIPT_SHA }), { green: false }, 'the older qualification itself needs complete proof');
+  }
+  const manual = { ...runs[0], event: 'workflow_dispatch' };
+  assert.equal(deferredOnly(manual, deferredJobs(2), RECEIPT_SHA), false, 'requested runs cannot have a closed PR window');
+  assert.deepEqual(deferredReceipt([runs[0], { ...runs[1], head_sha: 'b'.repeat(40) }], new Map([[2, deferredJobs(2)], [1, qualifiedJobs(1)]]), { sha: RECEIPT_SHA }), { green: false }, 'an older pass at another SHA is never reused');
+  assert.deepEqual(deferredReceipt([manual, runs[1]], new Map([[2, deferredJobs(2)], [1, qualifiedJobs(1)]]), { sha: RECEIPT_SHA, events: ['workflow_dispatch'] }), { green: false }, 'requested-event separation still blocks a failed request');
+});
+
+test('green command: bounded metadata lookup reuses the receipt, annotates it and never writes a status', async () => {
+  const calls = [], notices = [], original = console.error;
+  const runs = [receiptRun(2), receiptRun(1, 'success')];
+  const evidence = new Map([[2, deferredJobs(2)], [1, qualifiedJobs(1)]]);
+  const get = async (url, init) => {
+    calls.push({ url, method: init.method ?? 'GET' });
+    const id = /\/runs\/(\d+)\/jobs\?/.exec(url)?.[1];
+    return { ok: true, json: async () => id ? evidence.get(Number(id)) : { workflow_runs: runs } };
+  };
+  console.error = s => notices.push(s);
+  try {
+    assert.equal(await greenCommand({ repo: 'o/r', sha: RECEIPT_SHA, self: 3 }, { fetch: get }), 'true');
+    assert.equal(calls.length, 3);
+    assert.ok(calls.every(c => c.method === 'GET'));
+    assert.match(notices[0], /Reused ci receipt 1; verified deferred runs 2/);
+    assert.equal(await greenCommand({ repo: 'o/r', sha: 'b'.repeat(40), self: 3 }, { fetch: get }), 'false');
+    evidence.delete(2);
+    assert.equal(await greenCommand({ repo: 'o/r', sha: RECEIPT_SHA, self: 3 }, { fetch: get }), 'false');
+    assert.equal(await greenCommand({ repo: 'o/r', sha: RECEIPT_SHA }, { fetch: async () => ({ ok: false, status: 403 }) }), 'false');
+  } finally { console.error = original; }
 });
 
 test('green at head: a label run selects nothing and outputs green; a push, a closed window or a red head runs as today', () => {
