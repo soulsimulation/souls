@@ -435,6 +435,20 @@ fn public_boot(dir: &Path, header: &replica::effects::Header) -> R<Vec<u8>> {
     if dir.join("entry.json").exists() {
         values.insert(6, hash(&dir.join("entry.json"))?);
     }
+    let bodies = dir.join("bodies.json");
+    match std::fs::symlink_metadata(&bodies) {
+        Ok(metadata) => {
+            if !metadata.is_file() {
+                return Err("template-bodies-invalid: catalogue is a regular file".into());
+            }
+            let bytes = std::fs::read(&bodies).map_err(io(&bodies))?;
+            skills::wear::Catalogue::read(std::str::from_utf8(&bytes).map_err(|_| "template-bodies-invalid")?)
+                .map_err(|_| "template-bodies-invalid")?;
+            values.insert(7, Value::Bytes(sha256(&bytes).to_vec()));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
     encode(&Value::Map(values)).map_err(|e| e.to_string())
 }
 
@@ -1912,6 +1926,32 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_boot_carries_only_a_valid_regular_catalogue() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../.local").join(format!("b15-public-boot-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("facts.json"), b"{}").unwrap();
+        let header = archive::script::world(0, 0, None).header;
+        let legacy = public_boot(&dir, &header).unwrap();
+        let Value::Map(old) = replica::encode::decode(&legacy).unwrap().value else { panic!("map"); };
+        assert!(!old.contains_key(&7));
+        let catalogue = br#"{"format":"souls/bodies/1","bodies":[{"preset":"large","hash":"0000000000000000000000000000000000000000000000000000000000000000","size":"large","height":1800,"hover":0}]}"#;
+        std::fs::write(dir.join("bodies.json"), catalogue).unwrap();
+        let Value::Map(new) = replica::encode::decode(&public_boot(&dir, &header).unwrap()).unwrap().value else { panic!("map"); };
+        assert_eq!(new.get(&7), Some(&Value::Bytes(sha256(catalogue).to_vec())));
+        for (key, value) in old { assert_eq!(new.get(&key), Some(&value)); }
+        std::fs::write(dir.join("bodies.json"), b"{}").unwrap();
+        assert!(public_boot(&dir, &header).is_err());
+        std::fs::remove_file(dir.join("bodies.json")).unwrap();
+        assert_eq!(public_boot(&dir, &header).unwrap(), legacy);
+        #[cfg(unix)] {
+            std::os::unix::fs::symlink("facts.json", dir.join("bodies.json")).unwrap();
+            assert!(public_boot(&dir, &header).is_err());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn body_classes_restart_on_the_edited_canonical_geometry() {

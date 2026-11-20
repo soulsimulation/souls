@@ -198,3 +198,23 @@ on a free-looking seat stays `unknown`.
   would answer differently.
 - **A hatch named by a name rather than a hash.** A changed module would change history.
 - **A trusted value a skill can make up** (a claim, a grant). The host must make those; a skill only asks.
+
+
+## Released body choices
+
+`node v2/tools/import-body/presets.ts --out <prepared> --media <checkout>` prepares every released Little Martian,
+Pip, monster, ghost, centaur and procedural duck, snail and dog. Ordinary uploads keep their existing size, texture
+and validation limits. Released scans require their exact manifest pin; authored examples require their existing
+normalized revision pin. Procedural models sample the released source into shared model bakes, rather than creating
+a rig for each Soul. Meshes and sampled clips determine the admitted Small, Standard, Large or Giant class.
+
+A Soul uses `wear <preset-or-hash>`. Successful native admission records field32's content hash; refused fit keeps
+the previous body. Both live and history workers carry that field to the same crowd renderer. Only an absent hash
+selects the default person. A requested model is hidden while loading, then becomes ready or named unavailable;
+it never substitutes another preset. Materials, maps and UV seams remain model-specific instanced batches.
+
+The page build accepts the explicit prepared directory as `V2_BODY_ASSETS`. Its fixed manifest validates regular
+files, source pins and the complete catalogue/model/default/decoder closure before publishing `assets/bodies/`.
+Install and release callers prepare that input through the existing verified asset pull. No runtime model fetch
+comes from a recorded arbitrary URL. Optional public-boot field7 pins the regular `bodies.json`; template creation
+and fork carry only its validated bytes. Without field7 the legacy support encoding is unchanged.

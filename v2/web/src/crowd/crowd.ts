@@ -14,11 +14,14 @@ export const LIVE_ROWS = 32;
 /** A body's bounding sphere for culling: centre this high, this radius. */
 const BODY_MID = 0.9, BODY_RADIUS = 1.1;
 
-type Draw = { mesh: THREE.InstancedMesh; anim: THREE.InstancedBufferAttribute; mix: THREE.InstancedBufferAttribute };
+type Draw = { mesh: THREE.InstancedMesh; parts: THREE.InstancedMesh[]; anim: THREE.InstancedBufferAttribute; mix: THREE.InstancedBufferAttribute };
 
 export class Crowd {
   readonly group = new THREE.Group();
   readonly models: BakedModel[];
+  worn: ((hash: string) => Promise<BakedModel>) | null = null;
+  readonly bodyLoads = new Map<string, { state: 'loading' | 'ready' | 'unavailable'; model?: number; reason?: string }>();
+  ready: Uint8Array;
   /** The per-body bone texture V7 fills: a row per body, three texels per bone, as the bake's rows. */
   readonly live: THREE.DataTexture;
   count = 0;
@@ -26,7 +29,7 @@ export class Crowd {
   x: Float32Array; y: Float32Array; z: Float32Array; yaw: Float32Array;
   clipA: Uint8Array; phaseA: Float32Array; rateA: Float32Array;
   clipB: Uint8Array; phaseB: Float32Array; rateB: Float32Array;
-  blend: Float32Array; model: Uint8Array; lod: Uint8Array; liveRow: Int16Array;
+  blend: Float32Array; model: Uint32Array; lod: Uint8Array; liveRow: Int16Array;
   /** [model][level] */
   private draws: Draw[][];
   private frustum = new THREE.Frustum();
@@ -42,7 +45,8 @@ export class Crowd {
     this.yaw = new Float32Array(capacity);
     this.clipA = new Uint8Array(capacity); this.phaseA = new Float32Array(capacity); this.rateA = new Float32Array(capacity);
     this.clipB = new Uint8Array(capacity); this.phaseB = new Float32Array(capacity); this.rateB = new Float32Array(capacity);
-    this.blend = new Float32Array(capacity); this.model = new Uint8Array(capacity); this.lod = new Uint8Array(capacity);
+    this.ready = new Uint8Array(capacity).fill(1);
+    this.blend = new Float32Array(capacity); this.model = new Uint32Array(capacity); this.lod = new Uint8Array(capacity);
     this.liveRow = new Int16Array(capacity).fill(-1);
     const bones = Math.max(...models.map((m) => m.bones));
     this.live = new THREE.DataTexture(new Float32Array(bones * 3 * LIVE_ROWS * 4), bones * 3, LIVE_ROWS, THREE.RGBAFormat, THREE.FloatType);
@@ -58,31 +62,44 @@ export class Crowd {
       uBake: { value: m.bake }, uLive: { value: this.live },
       uClipStart: { value: pad(m.clips.map((c) => c.start)) }, uClipFrames: { value: pad(m.clips.map((c) => c.frames)) },
     };
-    const material = crowdMaterial(new THREE.MeshLambertMaterial({ vertexColors: true }), uniforms);
-    const depth = crowdMaterial(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }), uniforms, true);
     return m.lods.map((g, level) => {
-      const geo = g.clone();
       const anim = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(THREE.DynamicDrawUsage);
       const mix = new THREE.InstancedBufferAttribute(new Float32Array(cap * 2), 2).setUsage(THREE.DynamicDrawUsage);
-      geo.setAttribute('aAnim', anim);
-      geo.setAttribute('aMix', mix);
-      const mesh = new THREE.InstancedMesh(geo, material, cap);
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      mesh.count = 0;
-      mesh.frustumCulled = false; // culled per body in `draw`
-      mesh.castShadow = level === 0;
-      mesh.customDepthMaterial = depth;
-      mesh.name = `crowd ${m.name} level ${level}`;
-      this.group.add(mesh);
-      return { mesh, anim, mix };
+      const groups = g.groups.length ? g.groups : [{ start: 0, count: g.index?.count ?? g.getAttribute('position').count, materialIndex: 0 }];
+      const parts = groups.map((group) => {
+        const geo = g.clone(); geo.clearGroups(); geo.setDrawRange(group.start, group.count);
+        geo.setAttribute('aAnim', anim); geo.setAttribute('aMix', mix);
+        const source = m.sourceMaterials?.[group.materialIndex ?? 0];
+        const material = source?.clone() ?? new THREE.MeshLambertMaterial();
+        if ('vertexColors' in material) material.vertexColors = true;
+        const skin = source as THREE.MeshStandardMaterial | undefined;
+        const depth = crowdMaterial(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: skin?.map, alphaMap: skin?.alphaMap, alphaTest: source?.alphaTest ?? 0, side: source?.side ?? THREE.FrontSide }), uniforms, true);
+        const mesh = new THREE.InstancedMesh(geo, crowdMaterial(material, uniforms), cap);
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.count = 0; mesh.frustumCulled = false;
+        mesh.castShadow = level === 0; mesh.customDepthMaterial = depth; mesh.name = `crowd ${m.name} level ${level}`;
+        this.group.add(mesh); return mesh;
+      });
+      for (const mesh of parts.slice(1)) mesh.instanceMatrix = parts[0].instanceMatrix;
+      return { mesh: parts[0], parts, anim, mix };
     });
+  }
+
+  /** One model/material batch per level, retained by content hash. No body owns a scene hierarchy. */
+  addModel(m: BakedModel): number {
+    const width = m.bones * 3, old = this.live.image;
+    if (width > old.width) {
+      const data = new Float32Array(width * LIVE_ROWS * 4);
+      for (let row = 0; row < LIVE_ROWS; row++) data.set((old.data as Float32Array).subarray(row * old.width * 4, (row + 1) * old.width * 4), row * width * 4);
+      this.live.image = { data, width, height: LIVE_ROWS }; this.live.needsUpdate = true;
+    }
+    const index = this.models.length; this.models.push(m); this.draws.push(this.makeDraws(m, this.cap)); return index;
   }
 
   /** Adds a body of `model` and returns its index; indices stay put until `remove` moves the last body into a hole. */
   add(model: number): number {
     if (this.count === this.cap) this.grow();
     const i = this.count++;
-    this.model[i] = model;
+    this.model[i] = model; this.ready[i] = 1;
     this.clipA[i] = this.clipB[i] = 0;
     this.phaseA[i] = this.phaseB[i] = this.rateA[i] = this.rateB[i] = this.blend[i] = 0;
     this.liveRow[i] = -1;
@@ -93,7 +110,7 @@ export class Crowd {
   remove(i: number): number {
     const last = --this.count;
     if (i === last) return -1;
-    for (const a of [this.x, this.y, this.z, this.yaw, this.clipA, this.phaseA, this.rateA, this.clipB, this.phaseB, this.rateB, this.blend, this.model, this.lod, this.liveRow]) a[i] = a[last];
+    for (const a of [this.x, this.y, this.z, this.yaw, this.clipA, this.phaseA, this.rateA, this.clipB, this.phaseB, this.rateB, this.blend, this.model, this.lod, this.liveRow, this.ready]) a[i] = a[last];
     return last;
   }
 
@@ -104,7 +121,7 @@ export class Crowd {
 
   private grow(): void {
     const cap = this.cap * 2;
-    const g = <T extends Float32Array | Uint8Array | Int16Array>(a: T): T => {
+    const g = <T extends Float32Array | Uint8Array | Uint32Array | Int16Array>(a: T): T => {
       const b = new (a.constructor as new (n: number) => T)(cap);
       b.set(a);
       return b;
@@ -112,10 +129,13 @@ export class Crowd {
     this.x = g(this.x); this.y = g(this.y); this.z = g(this.z); this.yaw = g(this.yaw);
     this.clipA = g(this.clipA); this.phaseA = g(this.phaseA); this.rateA = g(this.rateA);
     this.clipB = g(this.clipB); this.phaseB = g(this.phaseB); this.rateB = g(this.rateB);
+    this.ready = g(this.ready);
     this.blend = g(this.blend); this.model = g(this.model); this.lod = g(this.lod); this.liveRow = g(this.liveRow);
     for (const d of this.draws.flat()) {
-      this.group.remove(d.mesh);
-      d.mesh.dispose();
+      for (const mesh of d.parts) {
+        this.group.remove(mesh); mesh.dispose(); mesh.geometry.dispose();
+        (mesh.material as THREE.Material).dispose(); mesh.customDepthMaterial?.dispose();
+      }
     }
     this.cap = cap;
     this.draws = this.models.map((m) => this.makeDraws(m, cap));
@@ -140,8 +160,11 @@ export class Crowd {
     const s = this.sphere;
     s.radius = BODY_RADIUS;
     for (let i = 0; i < this.count; i++) {
+      if (!this.ready[i]) continue;
       const x = this.x[i], y = this.y[i], z = this.z[i];
-      s.center.set(x, y + BODY_MID, z);
+      const model = this.models[this.model[i]];
+      s.center.set(x, y + (model.centerY ?? BODY_MID), z);
+      s.radius = model.radius === undefined ? BODY_RADIUS : Math.hypot(model.radius, model.height / 2);
       if (!this.frustum.intersectsSphere(s)) continue;
       const d2 = (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2;
       const level = d2 < n0 ? 0 : d2 < n1 ? 1 : 2;
@@ -163,10 +186,9 @@ export class Crowd {
     let draws = 0;
     this.draws.forEach((levels, m) => levels.forEach((d, level) => {
       const n = fill[m][level];
-      d.mesh.count = n;
-      d.mesh.visible = n > 0;
+      for (const mesh of d.parts) { mesh.count = n; mesh.visible = n > 0; }
       if (!n) return;
-      draws++;
+      draws += d.parts.length;
       d.mesh.instanceMatrix.clearUpdateRanges();
       d.mesh.instanceMatrix.addUpdateRange(0, n * 16);
       d.mesh.instanceMatrix.needsUpdate = true;

@@ -52,9 +52,20 @@ jobs:
           cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
           cargo build -p replica --release --target wasm32-unknown-unknown --locked
           target/tools/bin/wasm-bindgen --target web --out-dir target/wasm-load/pkg target/wasm32-unknown-unknown/release/replica.wasm
-      - name: Build the page
-        working-directory: v2/web
-        run: npm ci && npm run build
+      - name: Build the page and its pinned body assets
+        run: |
+          npm --prefix v2/web ci
+          node tools/assets/pull.mjs --only "worlds/littlemartians/characters/verdelis.glb,worlds/littlemartians/characters/kalama.glb,worlds/littlemartians/characters/kweku.glb,worlds/littlemartians/characters/mycos.glb,worlds/littlemartians/characters/ada.glb,worlds/littlemartians/characters/shuijing.glb,worlds/littlemartians/characters/nyx.glb,worlds/littlemartians/characters/kin/green-patterns-blue.glb,worlds/littlemartians/characters/kin/chebel.glb,worlds/littlemartians/characters/kin/colors-lemuet.glb,worlds/littlemartians/characters/kin/crystal-freeman.glb,worlds/littlemartians/characters/kin/dark-blue.glb,worlds/littlemartians/characters/kin/green-brains-out.glb,mars/viewer/public/modular/environment/animated-casual.glb,mars/viewer/public/modular/environment/animated-casual.mesh.glb,mars/viewer/public/modular/environment/animated-punk.mesh.glb,mars/viewer/public/modular/environment/animated-woman.mesh.glb,mars/viewer/public/modular/environment/clips-ual.glb,mars/viewer/public/modular/environment/clips-ual-woman.glb" --cache "$RUNNER_TEMP/body-input-cache" --concurrency 4
+          node --input-type=module - <<'NODE'
+          import { lstatSync, mkdirSync, readlinkSync, symlinkSync } from 'node:fs';
+          const parent = 'mars/viewer/node_modules', leaf = parent + '/three', target = '../../../v2/web/node_modules/three';
+          mkdirSync(parent, { recursive: true });
+          try { if (!lstatSync(leaf).isSymbolicLink() || readlinkSync(leaf) !== target) throw Error('body.three-link-conflict'); }
+          catch (error) { if (error.code !== 'ENOENT') throw error; symlinkSync(target, leaf); }
+          NODE
+          node v2/tools/import-body/presets.ts --out "$RUNNER_TEMP/body-assets" --media "$GITHUB_WORKSPACE"
+          test -s "$RUNNER_TEMP/body-assets/body-assets.json"
+          V2_BODY_ASSETS="$RUNNER_TEMP/body-assets" npm --prefix v2/web run build
       - name: Bundle
         run: bash v2/tools/ops/install.sh bundle "$RUNNER_TEMP/bundle" v2/target/release v2/web/dist
       - name: SSH

@@ -1092,6 +1092,7 @@ dependencies = [
  "import-eden",
  "replica",
  "sim",
+ "skills",
  "worldd",
 ]
 

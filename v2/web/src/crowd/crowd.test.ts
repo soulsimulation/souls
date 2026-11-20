@@ -63,3 +63,42 @@ test('bodies enter the crowd when placed and leave it when a frame no longer pla
   assert.ok(Math.abs(crowd.yaw[iq]) < 1e-6, 'q faces +z, the way it moved');
   assert.ok(crowd.stats.draws >= 1 && crowd.stats.draws <= 2 * 3, 'at most one draw per model per level');
 });
+
+test('body hash loading is single-flight, preserves model-specific clips and never substitutes for unknown hashes', async () => {
+  const crowd = new Crowd([model('default')], 1), bodies = new CrowdBodies(crowd);
+  let requests = 0;
+  crowd.worn = async (hash) => { requests++; if (hash === 'unknown') throw Error('body.unknown-hash'); const m = model(hash); m.clips.reverse(); m.clips[0].seconds = 4; return m; };
+  bodies.begin(0); bodies.place('one', 0, 0, 0, 'known'); bodies.place('two', 0, 0, 0, 'known');
+  assert.equal(crowd.ready[0], 0); assert.equal(requests, 1);
+  await Promise.resolve();
+  bodies.begin(1); bodies.place('one', 0, 0, 0, 'known'); bodies.place('two', 0, 0, 0, 'known');
+  assert.equal(crowd.ready[0], 1); assert.equal(crowd.models[crowd.model[0]].name, 'known');
+  assert.equal(crowd.clipA[0], 1); assert.equal(crowd.clipB[0], 0);
+  bodies.begin(2); bodies.place('one', 0, 0, 0, 'unknown'); await Promise.resolve();
+  assert.equal(crowd.ready[0], 0); assert.equal(crowd.bodyLoads.get('unknown')?.reason, 'body.unknown-hash');
+  bodies.place('one', 0, 0, 0); assert.equal(crowd.models[crowd.model[0]].name, 'default'); assert.equal(crowd.ready[0], 1);
+});
+
+test('material batches retain UV seams and actual maps while capacity growth removes every old batch', async () => {
+  const { merge, geometry } = await import('./bake.ts');
+  const root = new THREE.Group(), map = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+  const red = new THREE.MeshStandardMaterial({ color: 0xff0000, map }), blue = new THREE.MeshStandardMaterial({ color: 0x0000ff });
+  root.add(new THREE.Mesh(new THREE.BoxGeometry(), [red, blue, red, blue, red, blue]));
+  const merged = merge({ scene: root } as any);
+  assert.equal(merged.sourceMaterials[0], red); assert.equal(merged.sourceMaterials[1], blue); assert.ok(merged.mesh.uv?.some((v) => v === 1));
+  const geo = geometry(merged.mesh), m = model('textured'); m.lods = [geo, geo, geo]; m.sourceMaterials = merged.sourceMaterials;
+  const crowd = new Crowd([m], 1), count = crowd.group.children.length;
+  assert.ok(count > 3); crowd.add(0); crowd.add(0); assert.equal(crowd.group.children.length, count);
+  for (const child of crowd.group.children) assert.ok((child as THREE.InstancedMesh).material instanceof THREE.MeshStandardMaterial);
+  const materials = crowd.group.children.map((child) => (child as THREE.InstancedMesh).material as THREE.MeshStandardMaterial);
+  assert.ok(materials.some((material) => material.map === map)); assert.ok(materials.some((material) => material.color.getHex() === 0xff0000));
+});
+
+test('CMESH2 retains textured material seams and legacy CMESH1 remains byte-compatible', async () => {
+  const { encodeMesh, decodeMesh } = await import('./lod.ts');
+  const original = strip(4), legacy = encodeMesh(original); assert.equal(new TextDecoder().decode(legacy.slice(0, 6)), 'CMESH1');
+  assert.deepEqual(encodeMesh(decodeMesh(legacy)), legacy);
+  const textured = { ...original, uv: new Float32Array(original.position.length / 3 * 2).map((_, i) => i % 2), material: new Uint16Array(original.position.length / 3).fill(1) };
+  const encoded = encodeMesh(textured); assert.equal(new TextDecoder().decode(encoded.slice(0, 6)), 'CMESH2');
+  assert.deepEqual(decodeMesh(encoded), textured); assert.ok(cluster(textured, 0.015).uv); assert.ok(cluster(textured, 0.015).material?.every((m) => m === 1));
+});
