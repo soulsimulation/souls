@@ -61,28 +61,15 @@ fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
     })
 }
 
-/// Today's standing reach of the standard 1.75 m body (`BODY_MODEL.overheadMax`, 2.06 m), µm.
-pub const STANDARD_REACH: i64 = 2_060_000;
-
-/// A body's standing reach, µm (today's `seatReach`, #1083): [`STANDARD_REACH`] scaled by its height over the standard
-/// 1.75 m; a hovering body reaches the standard height, unscaled.
-pub fn standing_reach(build: Build) -> i64 {
-    if build.hover_mm > 0 {
-        return STANDARD_REACH;
-    }
-    let h = i128::from(build.height_mm.max(0));
-    i64::try_from(i128::from(STANDARD_REACH) * h / i128::from(Build::STANDARD.height_mm))
-        .unwrap_or(i64::MAX)
-}
-
 /// The step, µm, of the search out from a seat's stand point along its exit ([`rise_point`]).
 pub const RISE_STEP: i64 = 10_000;
 
 /// Where a body of `build` rising from the seat `at` stands on `floor` (#1960): the seat's stand point when the body
 /// stands there, else the first point out from it along the seat's exit (from the slot to the stand point), every
-/// [`RISE_STEP`], whose support and clearance hold, no farther from the slot than the body's standing reach. A chair
-/// whose stand point lies in its own collider's clearance (Eden's `e_3403bec8`, 19 mm in) is risen from just past it.
-/// Bounded (at most reach / step points), the same for the same inputs. `None`: nowhere within reach.
+/// [`RISE_STEP`], whose support and clearance hold, no farther from the stand point than the body's own clearance
+/// radius for its class ([`rise_bound`]: a rise is a step off the seat, never a move). A chair whose stand point lies
+/// in its own collider's clearance (Eden's `e_3403bec8`, 19 mm in) is risen from just past it. Bounded (at most
+/// radius / step + 1 points), the same for the same inputs. `None`: nowhere within that bound.
 pub fn rise_point(floor: &Surface, at: &PlaceAt, body: Id, build: Build) -> R<Option<Vec3>> {
     let frame = Frame {
         node: at.floor,
@@ -104,11 +91,10 @@ pub fn rise_point(floor: &Surface, at: &PlaceAt, body: Id, build: Build) -> R<Op
             })?;
         [f.x, f.z]
     };
-    let reach = standing_reach(build);
+    let bound = rise_bound(build);
     let mut k = 0;
     loop {
-        let out = len + k * RISE_STEP;
-        if out > reach && k > 0 {
+        if k * RISE_STEP > bound {
             return Ok(None);
         }
         let p = Vec3::new(
@@ -121,6 +107,11 @@ pub fn rise_point(floor: &Surface, at: &PlaceAt, body: Id, build: Build) -> R<Op
         }
         k += 1;
     }
+}
+
+/// How far from a seat's stand point a rising body may stand, µm: its own clearance radius for its admitted class.
+pub fn rise_bound(build: Build) -> i64 {
+    build.size.radius_mm() * 1000
 }
 
 /// A seat where it is: its thing, its kind's data, its slot's point and facing in the floor's frame (µm), and the
@@ -409,9 +400,9 @@ impl Slots {
             return refuse(
                 "place-no-stand-point",
                 format!(
-                    "{}: nowhere to stand on rising within reach {} µm",
+                    "{}: nowhere to stand on rising within {} µm of its stand point",
                     show(r.thing),
-                    standing_reach(build)
+                    rise_bound(build)
                 ),
             );
         }

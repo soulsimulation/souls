@@ -664,6 +664,11 @@ fn a_body_rises_from_a_chair_whose_stand_point_is_in_its_own_clearance() {
         (0, 529_000),
         "the first supported point out"
     );
+    let off = (p.position.z - stand.z).abs() + (p.position.x - stand.x).abs();
+    assert!(
+        off <= super::rise_bound(replica::kinds::sizes::Build::STANDARD),
+        "within the body's clearance radius of the stand point: {off} µm"
+    );
     assert_eq!(w.c.input(b).unwrap().stance, Stance::Stand);
     assert_eq!(w.slots.holder(w.chair), None, "the seat is free");
     run(&mut w, i64::MAX);
@@ -671,17 +676,17 @@ fn a_body_rises_from_a_chair_whose_stand_point_is_in_its_own_clearance() {
     walks_away(&mut w, b, d);
 }
 
-/// #1960: a seat with no supported point out of it within the body's standing reach (the floor starts 2.5 m out, past
-/// the standard body's 2.06 m) is refused up front by name, so no body sits where it cannot rise; nothing changes.
+/// #1960: a seat with no supported point within the body's clearance radius (280 mm, standard) of its stand point (the
+/// floor starts 311 mm out from it) is refused up front by name, so no body sits where it cannot rise; nothing changes.
 #[test]
 fn a_sit_with_nowhere_to_rise_within_reach_is_refused_up_front() {
     let sit = mv("souls:sit");
-    let mut w = clearance_chair(2_500, 2_600_000);
+    let mut w = clearance_chair(820, 900_000);
     let b = w.bodies[0];
     let before = w.c.body(b).unwrap().pose;
     let e = w.sit(&[0], &sit).remove(0).1.expect_err("refused");
     assert_eq!(e.name, "place-no-stand-point", "{e}");
-    assert!(e.detail.contains("2060000"), "{e}");
+    assert!(e.detail.contains("within 280000 µm"), "{e}");
     assert!(w.moves.is_empty() && w.slots.is_empty() && w.due.is_empty());
     assert_eq!(w.c.body(b).unwrap().pose, before);
 }
