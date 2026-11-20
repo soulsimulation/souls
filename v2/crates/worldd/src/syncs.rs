@@ -14,6 +14,7 @@
 //! Requests reach it from the [`crate::answers::Door`] directly, so they never wait in the clock thread's queue.
 
 use crate::answers::Reply;
+use crate::views::names::{self, PublicNames};
 use replica::apply::Replica;
 use replica::effects::Part;
 use replica::encode::{Value, decode, encode};
@@ -46,6 +47,7 @@ pub(crate) fn start(
     mut copy: Replica,
     mut kept: Records,
     (lineage, zone, epoch): (Scope, Id, u64),
+    public_names: Arc<PublicNames>,
 ) -> std::io::Result<Sender<ToSync>> {
     let (tx, rx) = channel();
     thread::Builder::new().name("sync".into()).spawn(move || {
@@ -89,6 +91,7 @@ pub(crate) fn start(
                     };
                     let mut a = sync::answer(&mut src, &[place], &ask, now);
                     a.insert(wire::ASK, n);
+                    names::attach(&mut a, &public_names);
                     if let Ok(frame) = encode(&Value::Map(a)) {
                         let _ = reply.send(frame);
                     }
