@@ -128,7 +128,7 @@ impl RebindTriangle {
     }
     /// Returns the unchanged current body with only the certified target indices substituted.
     pub fn rebind(&self, body: &Body) -> Option<Body> {
-        self.permits(body).then(|| Body {
+        self.permits(body).then_some(Body {
             piece: self.piece,
             tri: self.tri,
             ..*body
