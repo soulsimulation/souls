@@ -236,12 +236,9 @@ fn put<S: Store>(store: &S, key: &str, bytes: &[u8], etag: Option<&str>) -> R<St
     store.put(key, bytes, etag.map_or(When::Absent, When::Is))
 }
 
-/// The world time of a record: its last entry's.
-fn record_at(bytes: &[u8]) -> R<i64> {
-    Ok(Part::read(bytes)?
-        .effects
-        .last()
-        .map_or(0, |e| e.envelope.at))
+/// The last entry's world time, when the record has an entry. Empty parts carry no observation time.
+fn record_at(bytes: &[u8]) -> R<Option<i64>> {
+    Ok(Part::read(bytes)?.effects.last().map(|e| e.envelope.at))
 }
 
 /// One row of a day's manifest: an object's key, its epoch, first record, record count and SHA-256.
@@ -575,6 +572,7 @@ impl<S: Store> Packer<S> {
                 return refuse("archive-missing", newest);
             };
             let manifest = Manifest::read(&m.bytes)?;
+            p.open_day = manifest.day;
             if let Some(r) = manifest.rows.iter().rev().find(|r| r.epoch == epoch) {
                 p.next = r.first + r.count;
             }
@@ -664,17 +662,11 @@ impl<S: Store> Packer<S> {
         if n > self.next {
             return refuse("archive-gap", format!("record {n} after {}", self.next));
         }
-        let day = if self.base.is_some() {
-            if sim::recorder::is_input(&bytes) {
-                sim::recorder::read(&bytes)?;
-                self.open_day
-            } else if Part::read(&bytes)?.effects.is_empty() {
-                self.open_day
-            } else {
-                day_of(record_at(&bytes)?)
-            }
+        let day = if self.base.is_some() && sim::recorder::is_input(&bytes) {
+            sim::recorder::read(&bytes)?;
+            self.open_day
         } else {
-            day_of(record_at(&bytes)?)
+            record_at(&bytes)?.map_or(self.open_day, day_of)
         };
         if !self.open.is_empty() && day != self.open_day {
             self.close()?;
