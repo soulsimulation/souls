@@ -3378,6 +3378,8 @@ pub fn start<S: Storage + 'static>(
                 - 1,
         ),
     };
+    // Body time is the next world tick start, not the real-time deadline returned by Ticker::due.
+    let body_start = line.tick_start(last.map_or(0, |n| n + 1)).map_err(time)?;
     let mut ticker = Ticker::new(line, mapping, last, real0).map_err(time)?;
     let beat = Arc::new(Heartbeat::new(real0));
     let tier = match cfg.views {
@@ -3582,7 +3584,7 @@ pub fn start<S: Storage + 'static>(
             if let Some(make) = make {
                 match make(&placed) {
                     Ok(mut b) => {
-                        let at = ticker.due().unwrap_or(0);
+                        let at = body_start;
                         b.begin(at);
                         // A free-running clock waits at most a tenth of a tick for each planner batch (K18b); a
                         // replay takes the batches where the recorder says the live run took them.

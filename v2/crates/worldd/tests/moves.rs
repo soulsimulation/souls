@@ -1381,3 +1381,111 @@ fn c19_planner_changed_free_slot_cannot_reuse_another_slots_distance() {
 fn c19_planner_replaced_order_cannot_admit_from_its_old_reply() {
     exact_slot_reach(false, true);
 }
+
+/// A mapped world's bodies use world tick time; its socket and clock keep ordinary real pacing.
+#[test]
+fn a_mapped_world_steps_its_direct_ground_walk_in_world_time() {
+    use replica::effects::{Body, Effect, Envelope, Rest};
+    use replica::time::{Mapping, TimeEffect};
+    use replica::world_model::Audience;
+    let mut replica = toggles::World::build(0, 0, 0).replica;
+    let mapping = Mapping::new(0, answers::now() - 1_000_000, 1, 1).unwrap();
+    let effect = Effect {
+        envelope: Envelope {
+            sequence: replica.version(),
+            at: 0,
+            cause: Cause::World,
+            actor: Actor::World,
+            audience: Audience::Everyone,
+            node: replica.header().zone,
+        },
+        body: Body::Time(vec![TimeEffect::Mapping(mapping)]),
+        events: None,
+        rest: Rest::new(),
+    };
+    let part = Part::read(
+        &encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(replica.header().hash().to_bytes())),
+            (2, Value::Array(vec![effect.to_value()])),
+        ])))
+        .unwrap(),
+    )
+    .unwrap();
+    replica.apply(&part).unwrap();
+    let (_, ground) = town();
+    let target = Vec3::new(start().x + 1_000_000, start().y, start().z);
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.rate = Some((1, 1));
+    cfg.bodies = Some(Box::new(|_| bodies()));
+    let world = answers::start(replica, toggles::rules(), store.clone(), cfg).unwrap();
+    let (client, server) = UnixStream::pair().unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    let door = world.door();
+    let gateway = std::thread::spawn(move || answers::serve(door, server));
+    let int = |n: i64| {
+        if n >= 0 {
+            Value::Uint(n as u64)
+        } else {
+            Value::Nint(n.unsigned_abs() - 1)
+        }
+    };
+    let intent = Intent {
+        actor: Actor::Soul(body_id()),
+        verb: name("eden:walk"),
+        target: Some(Target::Node(ground)),
+        parameters: BTreeMap::from([(
+            1,
+            Value::Array(
+                [target.x, target.y, target.z]
+                    .into_iter()
+                    .map(int)
+                    .collect(),
+            ),
+        )]),
+        sequence: 1,
+        basis: Version {
+            lineage: LINEAGE,
+            zone: Id::new(LINEAGE, 0).unwrap(),
+            epoch: 1,
+            sequence: 0,
+        }
+        .to_value(),
+        expiry: i64::MAX,
+        resources: Vec::new(),
+        fallbacks: Vec::new(),
+        replaces: None,
+        body: None,
+    };
+    let bytes = encode(&intent.to_value()).unwrap();
+    let mut c = Client(client);
+    let before_walk = world.beat.read();
+    c.0.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+        .unwrap();
+    c.0.write_all(&bytes).unwrap();
+    let answered = c.answer();
+    let beat = world.beat.read();
+    drop(c);
+    world.stop();
+    gateway.join().unwrap();
+    let (id, entries) = answered.expect("a mapped world's ordinary walk completes");
+    let events = logged(&store.0.lock().unwrap().bytes);
+    let walk = &events[&id];
+    assert_eq!(entries, walk.iter().map(|e| e.0).collect::<Vec<_>>());
+    assert_eq!(walk.first().unwrap().1, MOVE_STARTED);
+    let end = walk.last().unwrap();
+    assert_eq!(end.1, MOVE_ENDED);
+    assert_eq!(end.2.as_deref(), Some("done"));
+    assert_eq!(end.3, ground);
+    assert!(
+        near(end.4, target, 50_000),
+        "the authoritative body reaches the supported point"
+    );
+    assert!(
+        beat.0 > before_walk.0,
+        "world ticks advance through the actual walk"
+    );
+    assert!(beat.1 > mapping.real_us, "heartbeat remains on real time");
+}
