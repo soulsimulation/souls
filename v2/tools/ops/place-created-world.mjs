@@ -7,7 +7,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { updateWorldRoute } from './proxy/route-config.mjs';
-import { makeRoutes } from './proxy/routes.mjs';
 
 const REQUEST = /^[a-f0-9]{64}$/, PIN = /^1220[a-f0-9]{64}$/;
 const SLUG = /^(?!-)[a-z0-9-]{1,40}(?<!-)$/, INSTANCE = /^[a-f0-9]{32}-[a-f0-9]{32}-[0-9]+$/;
@@ -89,11 +88,10 @@ function checkedConfig(config) {
   if (config.format !== 'souls/placement/1' || !PIN.test(config.build)
       || !['worldsRoot','templates','library','placement','backup','worldRoutes','routesOut'].every(key => typeof config[key] === 'string' && isAbsolute(config[key]))
       || !Number.isInteger(config.portFirst) || !Number.isInteger(config.portLast) || config.portFirst < 1 || config.portLast > 65535 || config.portLast < config.portFirst) fail('placement-config-invalid');
-  for (const key of ['directory','launcher','originUpstream']) {
+  for (const key of ['directory','originUpstream']) {
     const url = new URL(config[key]);
     if (url.protocol !== 'http:' || !['localhost','127.0.0.1','[::1]'].includes(url.hostname) || url.username || url.password || url.search || url.hash || url.pathname !== '/') fail('placement-service-invalid');
   }
-  if (new URL(config.origin).protocol !== 'https:') fail('placement-origin-invalid');
 }
 export async function ready(config, world, port) {
   const until = Date.now() + 60_000; let last;
@@ -140,13 +138,12 @@ export async function prepareData(config, phase, { run = command } = {}) {
   await run('/bin/bash', [join(config.library,'ops/place-world.sh'),staging,'--port',String(port),'--build',config.build,'--resume','--data-only']);
 }
 
-export async function publishData(config, phase, { refresh = makeRoutes } = {}) {
+export async function publishData(config, phase) {
   const world = await beneath(config.worldsRoot, join(config.worldsRoot,'worlds',phase.instance));
   const pointer = JSON.parse(await data(join(world,'views/world.json')));
   if (!streamPath(pointer.stream)) fail('placement-stream-invalid');
   await updateWorldRoute(config.worldRoutes, phase.name, { canonical:true,gateway:`http://127.0.0.1:${phase.port}`,
     stream:`/s/w/${phase.instance}/${pointer.stream}`,history:`/s/w/${phase.instance}/history/` });
-  await refresh({ directory:config.directory,launcher:config.launcher,origin:config.origin,out:config.routesOut,worldRoutes:config.worldRoutes });
   await atomic(join(config.backup,phase.request), { format:'souls/placement-backup/1',receipt:phase,
     authority:JSON.parse(await data(join(config.placement,'authority.json'))) });
 }
@@ -204,6 +201,14 @@ export async function placeRequest(config, request, { run = command, asSouls: un
   if (registry.worlds[row.name] && JSON.stringify(registry.worlds[row.name]) !== JSON.stringify(entry)) fail('placement-authority-conflict');
   registry.worlds[row.name] = entry; await atomic(authorityPath,registry);
   await underSouls('publish',request);
+  // The existing route unit is the sole map writer. Starting an already-running oneshot may coalesce with an
+  // earlier map snapshot, so require this request's actual activation marker before reporting ready.
+  await run('/usr/bin/systemctl',['start','souls-routes.service']);
+  const marker = join(config.routesOut,'slugs',row.name);
+  try {
+    await beneath(config.routesOut,marker);
+    if (!(await lstat(marker)).isFile()) fail('placement-route-pending');
+  } catch (error) { if (error.code === 'ENOENT') fail('placement-route-pending'); throw error; }
   phase.ready = true; await atomic(statusPath,phase); return phase;
 }
 
@@ -237,6 +242,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     const stat = await lstat(CONFIG);
     if (!stat.isFile() || stat.uid !== 0 || (stat.mode & 0o022)) fail('placement-config-untrusted');
     const config = JSON.parse(await data(CONFIG));
+    // The installed route unit binds this one source and owns this one output. Only the ignored namespace
+    // fixture translates these paths through the exported functions; no request can select a unit or mount.
+    if (config.worldRoutes !== '/var/lib/souls/routes/worlds.json' || config.routesOut !== '/var/lib/souls-routes') fail('placement-route-config-invalid');
     if (child) {
       const [mode, request] = process.argv.slice(3);
       const phase = JSON.parse(await data(await beneath(config.placement, join(config.placement, 'status', request))));

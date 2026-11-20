@@ -22,7 +22,7 @@ async function fixture() {
   const instance = `${lineage}-${parent}-0`;
   const config = {format:'souls/placement/1',build:`1220${'3'.repeat(64)}`,worldsRoot:join(dir,'worlds'),templates:join(dir,'templates'),library:join(dir,'library'),
     placement:join(dir,'protected'),backup:join(dir,'backup'),worldRoutes:join(dir,'routes/worlds.json'),routesOut:join(dir,'slugs'),portFirst:7500,portLast:7502,
-    directory:'http://localhost:7310',launcher:'http://localhost:7311',originUpstream:'http://localhost:7320',origin:'https://example.invalid'};
+    directory:'http://localhost:7310',originUpstream:'http://localhost:7320'};
   for (const path of [config.templates,config.library,config.backup,...['requests','status','attempts'].map(n=>join(config.placement,n))]) await mkdir(path,{recursive:true});
   const row = {name:'new-world',label:'Owner',template:'eden-2026',lineage,zone:`${parent}:0`,creator,ready:false};
   await json(join(config.worldsRoot,'directory/world-create',request),{request,row,ask:{name:row.name,label:row.label,template:row.template,creator}});
@@ -35,14 +35,30 @@ async function fixture() {
 }
 
 test('one request resumes after publish failure and restores only its validated identity from backup',async()=>{
-  const f=await fixture(); const calls=[]; let failPublish=true;
-  const options={run:async(_program,args)=>{assert.equal(args[1],'--configuration-only');assert.equal(args[3],f.instance);assert.equal(args[args.indexOf('--creator')+1],`${'2'.repeat(32)}-0`);calls.push('configuration');},
+  const f=await fixture(); const calls=[]; let failPublish=true,failRoutes=true,activate=false;
+  const marker=join(f.config.routesOut,'slugs',f.row.name);
+  const options={run:async(program,args)=>{
+    if(program==='/usr/bin/systemctl'){
+      assert.deepEqual(args,['start','souls-routes.service']);calls.push('routes');
+      if(failRoutes)throw Error('fixture-routes-offline');
+      await mkdir(resolve(marker,'..'),{recursive:true});if(activate)await writeFile(marker,'');return;
+    }
+    assert.equal(program,'/bin/bash');assert.equal(args[1],'--configuration-only');assert.equal(args[3],f.instance);assert.equal(args[args.indexOf('--creator')+1],`${'2'.repeat(32)}-0`);calls.push('configuration');},
     asSouls:async mode=>{calls.push(mode);if(mode==='publish'&&failPublish)throw Error('fixture-publication-offline');}};
   try {
     await assert.rejects(placeRequest(f.config,f.request,options),/fixture-publication-offline/);
     const statusPath=join(f.config.placement,'status',f.request);
     assert.equal(JSON.parse(await readFile(statusPath)).ready,false);
     failPublish=false;
+    await assert.rejects(placeRequest(f.config,f.request,options),/fixture-routes-offline/);
+    assert.equal(JSON.parse(await readFile(statusPath)).ready,false,'failed route service cannot report ready');
+    failRoutes=false;
+    await assert.rejects(placeRequest(f.config,f.request,options),/placement-route-pending/);
+    assert.equal(JSON.parse(await readFile(statusPath)).ready,false,'coalesced old map cannot report ready');
+    await symlink(join(f.dir,'untrusted-marker'),marker);
+    await assert.rejects(placeRequest(f.config,f.request,options),/placement-symlink/);
+    assert.equal(JSON.parse(await readFile(statusPath)).ready,false);
+    await rm(marker);activate=true;
     const ready=await placeRequest(f.config,f.request,options); assert.equal(ready.ready,true);assert.equal(ready.instance,f.instance);
     assert.deepEqual(calls.slice(0,4),['prepare','configuration','probe','publish']);
     const before=calls.length;assert.deepEqual(await placeRequest(f.config,f.request,options),ready);assert.equal(calls.length,before);
@@ -104,8 +120,9 @@ test('public routing and private backup carry the same placed identity while pre
     await json(join(f.config.worldsRoot,'worlds',f.instance,'views/world.json'),{stream:'views/public-stream/'});
     await json(f.config.worldRoutes,{schema:'souls/world-routes/1',worlds:{eden:{canonical:false,gateway:'http://localhost:7400',stream:'/s/eden/'}}});
     await json(join(f.config.placement,'authority.json'),{format:'souls/world-authority/1',worldsRoot:f.config.worldsRoot,worlds:{'new-world':{instance:f.instance,creator:f.row.creator}}});
-    let refresh=0;await publishData(f.config,phase,{refresh:async config=>{assert.equal(config.worldRoutes,f.config.worldRoutes);refresh++;}});
-    const routes=JSON.parse(await readFile(f.config.worldRoutes));assert.equal(routes.worlds.eden.canonical,false);assert.equal(routes.worlds['new-world'].stream,`/s/w/${f.instance}/views/public-stream/`);assert.equal(refresh,1);
+    await publishData(f.config,phase);
+    const routes=JSON.parse(await readFile(f.config.worldRoutes));assert.equal(routes.worlds.eden.canonical,false);assert.equal(routes.worlds['new-world'].stream,`/s/w/${f.instance}/views/public-stream/`);
+    await assert.rejects(readdir(f.config.routesOut),{code:'ENOENT'},'unprivileged publisher never writes the existing route service output');
     const backup=JSON.parse(await readFile(join(f.config.backup,f.request)));assert.equal(backup.receipt.instance,f.instance);assert.equal(backup.authority.worlds['new-world'].instance,f.instance);
   } finally {await rm(f.dir,{recursive:true,force:true});}
 });
