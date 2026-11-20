@@ -69,7 +69,7 @@ async function relay(port) {
       while (data.length >= 2) {
         let size = data[1] & 127, at = 2;
         if (size === 126) { if (data.length < 4) { mark('wait-header', { needBytes: 4 }); return; } size = data.readUInt16BE(2); at = 4; }
-        if (size === 127) { if (data.length < 10) { mark('wait-header', { needBytes: 10 }); return; } size = Number(data.readBigUInt64BE(2)); at = 10; }
+        else if (size === 127) { if (data.length < 10) { mark('wait-header', { needBytes: 10 }); return; } size = Number(data.readBigUInt64BE(2)); at = 10; }
         if (data.length < at + size) { mark('wait-payload', { needBytes: at + size, bufferedBytes: data.length }); return; }
         const frame = data.subarray(0, at + size), payload = frame.subarray(at);
         data = data.subarray(at + size);
@@ -119,6 +119,64 @@ async function relay(port) {
   r.close = () => { for (const s of sockets) s.destroy(); server.close(); };
   return r;
 }
+
+test('R21 relay: length tags, partial headers and payloads preserve exact frames', async () => {
+  let accept;
+  const accepted = new Promise((ok) => { accept = ok; });
+  const server = createServer((socket) => { accept(socket); });
+  await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+  let proxy, down, up;
+  try {
+    proxy = await relay(server.address().port);
+    down = createConnection(proxy.port, '127.0.0.1');
+    let received = Buffer.alloc(0);
+    down.on('data', (bytes) => { received = Buffer.concat([received, bytes]); });
+    await new Promise((ok) => down.once('connect', ok));
+    up = await accepted;
+    const upgrade = Buffer.from('HTTP/1.1 101 Switching Protocols\r\n\r\n');
+    up.write(upgrade);
+    await until(() => proxy.connections[0]?.upgraded && received.length === upgrade.length);
+    const forwarded = [];
+    for (const length of [125, 126, 127, 128, 65536]) {
+      // Valid CBOR byte strings exercise the real binary-frame decoder without inventing any join answer.
+      const prefix = length < 256 ? 2 : 5;
+      const payload = Buffer.alloc(length, 0x55);
+      payload[0] = prefix === 2 ? 0x58 : 0x5a;
+      if (prefix === 2) payload[1] = length - prefix;
+      else payload.writeUInt32BE(length - prefix, 1);
+      const header = Buffer.alloc(length < 126 ? 2 : length < 65536 ? 4 : 10);
+      header[0] = 0x82;
+      header[1] = header.length === 2 ? length : header.length === 4 ? 126 : 127;
+      if (header.length === 4) header.writeUInt16BE(length, 2);
+      if (header.length === 10) header.writeBigUInt64BE(BigInt(length), 2);
+      const frame = Buffer.concat([header, payload]);
+      const first = header.length - 1;
+      up.write(frame.subarray(0, first));
+      await until(() => proxy.connections[0].bufferedBytes === first);
+      if (header.length > 2) assert.equal(proxy.metadata.at(-1).kind, 'wait-header');
+      up.write(frame.subarray(first, frame.length - 1));
+      await until(() => proxy.connections[0].bufferedBytes === frame.length - 1);
+      assert.equal(proxy.metadata.at(-1).kind, 'wait-payload');
+      assert.equal(proxy.metadata.at(-1).needBytes, frame.length, `exact wait for payload ${length}`);
+      up.write(frame.subarray(frame.length - 1));
+      forwarded.push(frame);
+      await until(() => proxy.connections[0].frames === forwarded.length
+        && received.length === upgrade.length + forwarded.reduce((n, bytes) => n + bytes.length, 0));
+      assert.deepEqual(received.subarray(upgrade.length), Buffer.concat(forwarded));
+      assert.equal(proxy.connections[0].bufferedBytes, 0);
+    }
+    const ping = Buffer.from([0x89, 4, 1, 2, 3, 4]);
+    up.write(ping); forwarded.push(ping);
+    await until(() => proxy.connections[0].frames === forwarded.length
+      && received.length === upgrade.length + forwarded.reduce((n, bytes) => n + bytes.length, 0));
+    assert.deepEqual(received.subarray(upgrade.length), Buffer.concat(forwarded));
+    assert.equal(proxy.scopeAnswers, 0);
+    assert.deepEqual(proxy.observed, [], 'parser fixtures created no receipt or scope answer');
+  } finally {
+    down?.destroy(); up?.destroy(); proxy?.close();
+    await new Promise((ok) => server.close(ok));
+  }
+});
 
 test('R21: a held pre-birth sync cannot satisfy the successful join refresh; unrelated/failed answers do not trigger it', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'r21-'));
