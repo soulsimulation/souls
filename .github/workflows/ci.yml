@@ -325,6 +325,15 @@ jobs:
               ;;
             *) echo "unknown check kind: $CHECK_KIND"; exit 1 ;;
           esac
+      - name: Retain synthetic join failure diagnostics
+        if: failure() && matrix.kind == 'v2'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: r21-join-sync-${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index }}
+          path: .local/r21-join-sync-failure-*/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 1
       # Body-authoring renderer checks (#843): they import the Mars renderer, whose parameter properties need
       # --experimental-transform-types (Node 22 has it). One server leg runs them; it has the media they read.
       - name: Body-authoring renderer tests

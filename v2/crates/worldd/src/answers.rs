@@ -2886,6 +2886,35 @@ impl Clock {
     }
 }
 
+// Diagnostic only: enabled on the I/O threads, never by the deterministic clock. No payload or actor id leaves.
+fn delivery_trace(enabled: bool, stage: &str, frame: &[u8], outcome: &str) {
+    if !enabled {
+        return;
+    }
+    let Ok(d) = decode(frame) else { return };
+    let Value::Map(m) = d.value else { return };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return;
+    };
+    let (Some(actor), Some(Value::Uint(sequence)), Some(Value::Uint(kind))) =
+        (a.get(&1), a.get(&2), a.get(&3))
+    else {
+        return;
+    };
+    let Ok(actor) = encode(actor) else { return };
+    let actor = replica::encode::to_hex(&replica::ids::sha256(&actor));
+    let version = match m.get(&1) {
+        Some(Value::Array(v)) => v.last().and_then(|v| match v {
+            Value::Uint(n) => Some(*n),
+            _ => None,
+        }),
+        _ => None,
+    };
+    eprintln!(
+        "worldd: join-delivery stage={stage} actor-hash={actor} sequence={sequence} kind={kind} version={version:?} outcome={outcome}"
+    );
+}
+
 /// The answers thread: each tick's records appended and on the disk before its answers leave, then the part handed to
 /// the view tier. A log that fails stops it for good: nothing is answered that is not on the disk.
 // Each argument is one consumer of the durable tick (views, follower, served feed, sync thread); a struct would only
@@ -2901,6 +2930,7 @@ fn answer_loop<S: Storage + 'static>(
     mut follow: Option<Offer>,
     syncs: Sender<ToSync>,
 ) {
+    let trace = std::env::var_os("SOULS_JOIN_DELIVERY_TRACE").is_some_and(|v| v == "1");
     for (k, t) in ticks.into_iter().enumerate() {
         let k = k as u64;
         if let Some(m) = &measures {
@@ -2942,11 +2972,21 @@ fn answer_loop<S: Storage + 'static>(
                 }
             }
         }
+        if trace {
+            for (_, frame, _) in &t.replies {
+                delivery_trace(trace, "log-wait", frame, "appended");
+            }
+        }
         if let Some(n) = last
             && let Err(e) = log.wait_durable(n + 1)
         {
             eprintln!("worldd: the log failed, nothing more is answered: {e}");
             return;
+        }
+        if trace {
+            for (_, frame, _) in &t.replies {
+                delivery_trace(trace, "log-durable", frame, "ready");
+            }
         }
         if let Some(tx) = &synced {
             for s in appended {
@@ -2973,7 +3013,13 @@ fn answer_loop<S: Storage + 'static>(
                 None => frame,
             };
             for w in waiters {
-                let _ = w.send(frame.clone());
+                let sent = w.send(frame.clone());
+                delivery_trace(
+                    trace,
+                    "reply-channel",
+                    &frame,
+                    if sent.is_ok() { "queued" } else { "closed" },
+                );
             }
         }
         for (waiters, frame) in t.bare {
@@ -3710,16 +3756,20 @@ fn edit_checker(
 /// bytes): each intent read goes through `world`'s door (stamped there, O4), each answer goes back on the same
 /// connection, in the order sent.
 pub fn serve(world: Door, mut stream: UnixStream) {
+    let trace = std::env::var_os("SOULS_JOIN_DELIVERY_TRACE").is_some_and(|v| v == "1");
     let Ok(mut out) = stream.try_clone() else {
         return;
     };
     let (reply, answers) = channel::<Vec<u8>>();
     std::thread::spawn(move || {
         for frame in answers {
+            delivery_trace(trace, "native-write-start", &frame, "ready");
             let len = u32::try_from(frame.len()).unwrap_or(u32::MAX).to_be_bytes();
             if out.write_all(&len).is_err() || out.write_all(&frame).is_err() {
+                delivery_trace(trace, "native-write", &frame, "failed");
                 return;
             }
+            delivery_trace(trace, "native-write", &frame, "sent");
         }
     });
     loop {
