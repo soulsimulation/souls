@@ -102,7 +102,11 @@ pub struct Build {
 
 impl Build {
     /// The explicit existing default when no body hash was recorded.
-    pub const STANDARD: Build = Build { size: Size::Standard, height_mm: 1_750, hover_mm: 0 };
+    pub const STANDARD: Build = Build {
+        size: Size::Standard,
+        height_mm: 1_750,
+        hover_mm: 0,
+    };
 
     /// Reads a family kind's `size`, `height` and `hover` fields (their defaults). A field missing, of another type
     /// or out of range is refused as `family-size`.

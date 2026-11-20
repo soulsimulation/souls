@@ -44,11 +44,11 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::index::Index;
 use crate::mover::{Body as Moved, Surface};
-use replica::kinds::sizes::{Build, Size};
 use replica::bodies::{Body as Claims, Class, Family, SkillShape};
 use replica::effects::Refusal;
 use replica::encode::{Name, Value};
 use replica::ids::Id;
+use replica::kinds::sizes::{Build, Size};
 use replica::pose::{ControllerInput, Frame, HandOff, Mode, Owner, Pose, Quat, Support, Vec3};
 use replica::time::Micros;
 
@@ -368,11 +368,19 @@ impl Track {
             node: self.to,
             slot: None,
         };
-        *body = on.place(
+        let height = match body.pose.support {
+            Support::Surface { height, .. } => height,
+            Support::Slot | Support::Volume { .. } | Support::Track | Support::None => 0,
+        };
+        *body = on.place_built(
             body.id,
             frame,
             self.arrive.unwrap_or(p),
             body.pose.orientation,
+            Build {
+                hover_mm: height / 1000,
+                ..Build::STANDARD
+            },
         )?;
         body.linear = linear;
         Ok(true)
@@ -646,18 +654,29 @@ impl Controller {
     }
 
     /// The admitted build, retained separately from the mover's position.
-    pub fn build(&self, body: Id) -> Option<Build> { self.get(body).map(|s| s.build) }
+    pub fn build(&self, body: Id) -> Option<Build> {
+        self.get(body).map(|s| s.build)
+    }
 
     /// A bounded snapshot for an off-clock supported-size check.
     pub fn build_basis(&self, body: Id) -> Option<BuildBasis> {
         let s = self.get(body)?;
-        Some(BuildBasis { moved: s.moved, build: s.build, claims: s.claims.clone(), input: s.input.clone(), track: s.track.clone() })
+        Some(BuildBasis {
+            moved: s.moved,
+            build: s.build,
+            claims: s.claims.clone(),
+            input: s.input.clone(),
+            track: s.track.clone(),
+        })
     }
 
     /// Lookup-only validation; a refused or stale change has not touched any actor state.
     pub fn check_build(&self, basis: &BuildBasis) -> R<()> {
         if self.build_basis(basis.moved.id).as_ref() != Some(basis) {
-            return refuse("body-change-stale", "the body, claims, input or class changed");
+            return refuse(
+                "body-change-stale",
+                "the body, claims, input or class changed",
+            );
         }
         if basis.track.is_some() || basis.moved.pose.support == Support::Slot {
             return refuse("body-change-in-use", "the occupied support is in use");
@@ -666,14 +685,74 @@ impl Controller {
     }
 
     /// Pairs the existing recorded write with a checked surface rebind, never a movement path.
-    pub fn commit_build<T>(&mut self, basis: &BuildBasis, moved: Moved, build: Build, commit: impl FnOnce() -> R<T>) -> R<T> {
+    pub fn commit_build<T>(
+        &mut self,
+        basis: &BuildBasis,
+        moved: Moved,
+        build: Build,
+        commit: impl FnOnce() -> R<T>,
+    ) -> R<T> {
         self.check_build(basis)?;
-        if moved.id != basis.moved.id || moved.pose.frame != basis.moved.pose.frame || moved.pose.position != basis.moved.pose.position || moved.pose.orientation != basis.moved.pose.orientation || moved.linear != basis.moved.linear {
+        if moved.id != basis.moved.id
+            || moved.pose.frame != basis.moved.pose.frame
+            || moved.pose.position.x != basis.moved.pose.position.x
+            || moved.pose.position.z != basis.moved.pose.position.z
+            || moved
+                .pose
+                .position
+                .y
+                .checked_sub(basis.moved.pose.position.y)
+                != build
+                    .hover_mm
+                    .checked_sub(basis.build.hover_mm)
+                    .and_then(|h| h.checked_mul(1000))
+            || moved.pose.orientation != basis.moved.pose.orientation
+            || moved.linear != basis.moved.linear
+        {
             return refuse("body-change-moved", "a body change cannot move the actor");
         }
         let value = commit()?;
-        let s = self.bodies.get_mut(&moved.id).expect("validated surface-owned body");
-        s.moved = moved; s.build = build; s.touched = true;
+        let s = self
+            .bodies
+            .get_mut(&moved.id)
+            .expect("validated surface-owned body");
+        s.moved = moved;
+        s.build = build;
+        s.touched = true;
+        Ok(value)
+    }
+
+    /// Validates every precomputed topology rebind without searching or mutating the live actor.
+    pub fn check_rebinds(&self, prepared: &[(BuildBasis, Moved)]) -> R<()> {
+        let mut seen = BTreeSet::new();
+        for (before, after) in prepared {
+            if !seen.insert(before.moved.id)
+                || !self.bodies.contains_key(&before.moved.id)
+                || self.build_basis(before.moved.id).as_ref() != Some(before)
+                || after.id != before.moved.id
+                || after.pose != before.moved.pose
+                || after.linear != before.moved.linear
+            {
+                return refuse("edit.body-stale", "prepared body changed");
+            }
+        }
+        Ok(())
+    }
+    pub fn commit_rebinds<T>(
+        &mut self,
+        prepared: &[(BuildBasis, Moved)],
+        commit: impl FnOnce() -> R<T>,
+    ) -> R<T> {
+        self.check_rebinds(prepared)?;
+        let value = commit()?;
+        for (before, after) in prepared {
+            let slot = self
+                .bodies
+                .get_mut(&before.moved.id)
+                .expect("validated surface-owned actor");
+            slot.moved.piece = after.piece;
+            slot.moved.tri = after.tri;
+        }
         Ok(value)
     }
 
@@ -997,7 +1076,13 @@ impl Controller {
     }
 
     /// The same controller step, selecting each body's exact admitted-class surface bank.
-    pub fn step_on_selected<'a>(&mut self, surfaces: impl Fn(Id, Size) -> Option<&'a BTreeMap<Id, Surface>> + Sync, dt: Micros, at: Micros, threads: usize) -> Stepped {
+    pub fn step_on_selected<'a>(
+        &mut self,
+        surfaces: impl Fn(Id, Size) -> Option<&'a BTreeMap<Id, Surface>> + Sync,
+        dt: Micros,
+        at: Micros,
+        threads: usize,
+    ) -> Stepped {
         let mut out = Stepped::default();
         for id in std::mem::take(&mut self.woken) {
             if let Some(s) = self.rested.get_mut(&id) {
@@ -1015,8 +1100,20 @@ impl Controller {
             let mut o = Gave::default();
             for (id, s) in run.iter_mut() {
                 match surfaces(*id, s.build.size) {
-                    Some(on) => { let put = s.step_one(*id, on, dt, at, &mut o); o.put.push(put); }
-                    None => { o.refused.push((*id, Refusal { name: "body-class-unprepared", detail: "the admitted class has no prepared surfaces".into() })); o.put.push(false); },
+                    Some(on) => {
+                        let put = s.step_one(*id, on, dt, at, &mut o);
+                        o.put.push(put);
+                    }
+                    None => {
+                        o.refused.push((
+                            *id,
+                            Refusal {
+                                name: "body-class-unprepared",
+                                detail: "the admitted class has no prepared surfaces".into(),
+                            },
+                        ));
+                        o.put.push(false);
+                    }
                 }
             }
             o
@@ -1168,5 +1265,250 @@ mod tests {
                 assert_eq!(i.bytes(at, body), want, "{i:?} at {at}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod class_tests {
+    use super::*;
+    use crate::ground::Piece;
+    use replica::bodies::{Class, Resource, Want};
+    use replica::ids::Scope;
+    fn fixture() -> (Id, Family, Surface) {
+        let id = Id::new(Scope([0x65; 16]), 1).unwrap();
+        let family = Family {
+            name: Name::new("souls:humanoid").unwrap(),
+            resources: vec![Resource {
+                name: Name::new("souls:legs").unwrap(),
+                class: Class::Locomotion,
+                slot: None,
+            }],
+        };
+        let pc = Piece {
+            outline: vec![vec![
+                [-10000, 0, -10000],
+                [10000, 0, -10000],
+                [10000, 0, 10000],
+                [-10000, 0, 10000],
+            ]],
+            vertices: vec![
+                [-10000, 0, -10000],
+                [10000, 0, -10000],
+                [10000, 0, 10000],
+                [-10000, 0, 10000],
+            ],
+            triangles: vec![[0, 1, 2], [0, 2, 3]],
+            ground: crate::gaits::Ground::Dry,
+        };
+        (id, family, Surface::new(id, vec![pc]))
+    }
+    #[test]
+    fn admitted_hover_survives_the_first_and_following_controller_ticks() {
+        let (id, family, surface) = fixture();
+        let build = Build {
+            size: Size::Large,
+            hover_mm: 900,
+            ..Build::STANDARD
+        };
+        let body = surface
+            .place_built(
+                id,
+                Frame {
+                    node: id,
+                    slot: None,
+                },
+                Vec3::ZERO,
+                Quat::IDENTITY,
+                build,
+            )
+            .unwrap();
+        let mut c = Controller::new();
+        c.add_built(family, body, build).unwrap();
+        let shape = SkillShape {
+            name: Name::new("souls:walk").unwrap(),
+            claims: vec![Want::All(Class::Locomotion)],
+            blocks: Vec::new(),
+            cancelled_by: Vec::new(),
+        };
+        let driver = c.claim(id, &shape).unwrap();
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(1_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let floors = BTreeMap::from([(id, surface)]);
+        let mut previous_x = 0;
+        for at in [50_000, 100_000] {
+            let out = c.step_on_selected(
+                |_, size| (size == Size::Large).then_some(&floors),
+                50_000,
+                at,
+                1,
+            );
+            assert!(out.refused.is_empty());
+            assert!(!out.samples.is_empty());
+            assert!(c.body(id).unwrap().pose.position.x > previous_x);
+            previous_x = c.body(id).unwrap().pose.position.x;
+            assert_eq!(c.body(id).unwrap().pose.position.y, 900_000);
+            assert_eq!(c.body(id).unwrap().pose.support, build.support(id));
+        }
+    }
+    #[test]
+    fn prepared_topology_rebind_preserves_active_state_and_moves_on_the_next_tick() {
+        let (id, family, surface) = fixture();
+        let pc = surface.pieces()[0].clone();
+        let mut far = pc.clone();
+        for v in &mut far.vertices {
+            v[0] -= 100_000;
+        }
+        for ring in &mut far.outline {
+            for v in ring {
+                v[0] -= 100_000;
+            }
+        }
+        let old = Surface::new(id, vec![far, pc]);
+        let frame = Frame {
+            node: id,
+            slot: None,
+        };
+        let moved = old.place(id, frame, Vec3::ZERO, Quat::IDENTITY).unwrap();
+        assert_eq!(moved.piece, 1);
+        let mut c = Controller::new();
+        c.add(family, moved).unwrap();
+        let shape = SkillShape {
+            name: Name::new("souls:walk").unwrap(),
+            claims: vec![Want::All(Class::Locomotion)],
+            blocks: Vec::new(),
+            cancelled_by: Vec::new(),
+        };
+        let driver = c.claim(id, &shape).unwrap();
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(1_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let before = c.build_basis(id).unwrap();
+        let mut after = surface
+            .place(id, frame, Vec3::ZERO, Quat::IDENTITY)
+            .unwrap();
+        after.linear = moved.linear;
+        assert_eq!(after.piece, 0);
+        let prepared = vec![(before.clone(), after)];
+        assert_eq!(
+            c.commit_rebinds(&prepared, || Err::<(), _>(Refusal {
+                name: "paired-refusal",
+                detail: String::new()
+            }))
+            .unwrap_err()
+            .name,
+            "paired-refusal"
+        );
+        assert_eq!(c.build_basis(id).unwrap(), before);
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(2_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let changed = c.build_basis(id).unwrap();
+        assert_eq!(
+            c.commit_rebinds(&prepared, || Ok(())).unwrap_err().name,
+            "edit.body-stale"
+        );
+        assert_eq!(c.build_basis(id).unwrap(), changed);
+        let current = vec![(changed.clone(), after)];
+        c.commit_rebinds(&current, || Ok(())).unwrap();
+        let mut expected = changed;
+        expected.moved.piece = after.piece;
+        expected.moved.tri = after.tri;
+        assert_eq!(c.build_basis(id).unwrap(), expected);
+        let out = c.step(&BTreeMap::from([(id, surface)]), 50_000, 50_000);
+        assert!(out.refused.is_empty());
+        assert!(!out.samples.is_empty());
+        assert!(c.body(id).unwrap().pose.position.x > 0);
+        c.slot_in(
+            id,
+            driver,
+            Frame {
+                node: id,
+                slot: Some(1),
+            },
+            100_000,
+        )
+        .unwrap();
+        let slot = c.build_basis(id).unwrap();
+        let called = std::cell::Cell::new(false);
+        assert_eq!(
+            c.commit_rebinds(&[(slot.clone(), slot.moved)], || {
+                called.set(true);
+                Ok(())
+            })
+            .unwrap_err()
+            .name,
+            "edit.body-stale"
+        );
+        assert!(!called.get());
+        assert_eq!(c.build_basis(id).unwrap(), slot);
+    }
+
+    #[test]
+    fn refused_and_stale_build_commits_preserve_all_controller_state() {
+        let (id, family, surface) = fixture();
+        let moved = surface
+            .place(
+                id,
+                Frame {
+                    node: id,
+                    slot: None,
+                },
+                Vec3::ZERO,
+                Quat::IDENTITY,
+            )
+            .unwrap();
+        let mut c = Controller::new();
+        c.add(family, moved).unwrap();
+        let basis = c.build_basis(id).unwrap();
+        let small = Build {
+            size: Size::Small,
+            ..Build::STANDARD
+        };
+        let refusal = c
+            .commit_build(&basis, moved, small, || {
+                Err::<(), _>(Refusal {
+                    name: "paired-refusal",
+                    detail: String::new(),
+                })
+            })
+            .unwrap_err();
+        assert_eq!(refusal.name, "paired-refusal");
+        assert_eq!(c.build_basis(id).unwrap(), basis);
+        let shape = SkillShape {
+            name: Name::new("souls:walk").unwrap(),
+            claims: vec![Want::All(Class::Locomotion)],
+            blocks: Vec::new(),
+            cancelled_by: Vec::new(),
+        };
+        let driver = c.claim(id, &shape).unwrap();
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(1000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let current = c.build_basis(id).unwrap();
+        let called = std::cell::Cell::new(false);
+        assert_eq!(
+            c.commit_build(&basis, moved, small, || {
+                called.set(true);
+                Ok(())
+            })
+            .unwrap_err()
+            .name,
+            "body-change-stale"
+        );
+        assert!(!called.get());
+        assert_eq!(c.build_basis(id).unwrap(), current);
     }
 }

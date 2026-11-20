@@ -28,6 +28,7 @@ use replica::edit::{Checked, Op, Ref, Refused, confirm};
 use replica::effects::{Body, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest};
 use replica::encode::{Value, encode};
 use replica::ids::{Id, Minter, Scope};
+use replica::kinds::sizes::Size;
 use replica::pose::Frame;
 use replica::time::Micros;
 use replica::tree::Tree;
@@ -51,6 +52,7 @@ pub struct Committed {
 pub struct Planned {
     pub checked: Checked,
     guard: Guard,
+    classes: BTreeMap<Size, Guard>,
     terrain: Option<terrain::Guard>,
 }
 
@@ -78,6 +80,32 @@ pub fn plan_on(checked: Checked, copy: &Replica, known: &Known) -> Result<Planne
     })
 }
 
+/// The same guarded plan, preparing every active non-default footprint off-clock.
+pub fn plan_classes(
+    checked: Checked,
+    copy: &Replica,
+    ground: Option<Id>,
+    known: Option<&Known<'_>>,
+    sizes: impl IntoIterator<Item = Size>,
+) -> Result<Planned, Refused> {
+    let mut classes = BTreeMap::new();
+    let planned = plan_with(checked, copy, ground, |part| {
+        for size in sizes {
+            if size != Size::Standard && !classes.contains_key(&size) {
+                classes.insert(
+                    size,
+                    safety::guard_for(copy.tree(), copy.header(), ground, part, size)?,
+                );
+            }
+        }
+        match known {
+            Some(k) => guard_on(copy.tree(), copy.header(), part, k),
+            None => guard(copy.tree(), copy.header(), ground, part),
+        }
+    })?;
+    Ok(Planned { classes, ..planned })
+}
+
 fn plan_with(
     checked: Checked,
     copy: &Replica,
@@ -102,6 +130,7 @@ fn plan_with(
     Ok(Planned {
         checked,
         guard,
+        classes: BTreeMap::new(),
         terrain,
     })
 }
@@ -141,12 +170,69 @@ pub fn commit_guarded(
     at: Micros,
     structure: &Structure,
 ) -> Result<Committed, Refused> {
+    commit_guarded_classes(
+        live,
+        minter,
+        planned,
+        bodies,
+        at,
+        structure,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn commit_classes(
+    live: &mut Replica,
+    minter: &mut Minter,
+    planned: &Planned,
+    bodies: &[Who],
+    at: Micros,
+    classes: &BTreeMap<Id, Size>,
+) -> Result<Committed, Refused> {
+    commit_guarded_classes(
+        live,
+        minter,
+        planned,
+        bodies,
+        at,
+        &Structure::default(),
+        classes,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn commit_guarded_classes(
+    live: &mut Replica,
+    minter: &mut Minter,
+    planned: &Planned,
+    bodies: &[Who],
+    at: Micros,
+    structure: &Structure,
+    classes: &BTreeMap<Id, Size>,
+) -> Result<Committed, Refused> {
     let checked = &planned.checked;
     confirm(live, checked)?;
     if let Some(t) = &planned.terrain {
         t.judge(bodies)?;
     }
-    let unsafe_ = planned.guard.judge(bodies);
+    let mut unsafe_ = Vec::new();
+    for body in bodies {
+        let size = classes.get(&body.body).copied().unwrap_or(Size::Standard);
+        let guard = if size == Size::Standard {
+            &planned.guard
+        } else {
+            match planned.classes.get(&size) {
+                Some(guard) => guard,
+                None if unsafe_.is_empty() => {
+                    return Err(refused(
+                        "edit.class-unchecked",
+                        "the current body's footprint was not prepared",
+                    ));
+                }
+                None => break,
+            }
+        };
+        unsafe_.extend(guard.judge(std::slice::from_ref(body)));
+    }
     if let Some(first) = unsafe_.first() {
         let detail = unsafe_.iter().map(|u| u.text()).collect::<Vec<_>>();
         return Err(refused(first.name, detail.join("\n")));

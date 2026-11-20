@@ -215,7 +215,13 @@ pub fn guard(
 }
 
 /// The identical safety rule, with both geometry sides cut for the admitted class.
-pub fn guard_for(before: &Tree, header: &Header, ground: Option<Id>, part: &Part, size: Size) -> Result<Guard, String> {
+pub fn guard_for(
+    before: &Tree,
+    header: &Header,
+    ground: Option<Id>,
+    part: &Part,
+    size: Size,
+) -> Result<Guard, String> {
     // It cuts the ground on both sides of the change: never on the clock thread (G3b, #3449).
     crate::commit::off_clock();
     let mut after = before.frozen();

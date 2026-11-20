@@ -63,8 +63,11 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         forms: vec![walk.clone(), line],
         ..Default::default()
     });
-    let view = town.view();
-    let planned = view.plan(&body, ground, goal).expect("a way through");
+    let planned = town
+        .view()
+        .plan(&body, ground, goal)
+        .expect("a way through");
+    let split = town.split(1);
     assert_eq!(planned.iter().filter(|l| l.link.is_some()).count(), 2);
     let kinds = Json::Obj(Vec::new());
     let toward = BTreeMap::new();
@@ -72,8 +75,9 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
     let sight = Sight {
         bodies: BTreeMap::from([(id, body)]),
         carrying: BTreeSet::new(),
-        tree: view.tree,
-        view: Some(view),
+        tree: split.shared.tree,
+        split: Some(RefCell::new(split)),
+        builds: BTreeMap::from([(id, Build::STANDARD)]),
         kind: Name::new("souls:body").unwrap(),
         kinds: &kinds,
         toward: &toward,

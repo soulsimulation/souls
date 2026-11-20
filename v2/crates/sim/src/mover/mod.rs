@@ -167,6 +167,32 @@ impl Surface {
         }
     }
 
+    /// Placement by the same mover, retaining the admitted support offset above its surface.
+    pub fn place_built(
+        &self,
+        id: Id,
+        frame: Frame,
+        at: Vec3,
+        orientation: Quat,
+        build: replica::kinds::sizes::Build,
+    ) -> R<Body> {
+        let mut body = self.place(id, frame, at, orientation)?;
+        body.pose.position.y = body
+            .pose
+            .position
+            .y
+            .checked_add(build.hover_mm.checked_mul(1000).ok_or_else(|| Refusal {
+                name: "out-of-range",
+                detail: "support height".into(),
+            })?)
+            .ok_or_else(|| Refusal {
+                name: "out-of-range",
+                detail: "support height".into(),
+            })?;
+        body.pose.support = build.support(self.node);
+        Ok(body)
+    }
+
     /// Replaces the pieces `drop` with `add` (G3b, #3449: the open ground's squares cut again after a change): the
     /// dropped pieces are left empty, so no body stands on them and every other piece keeps its number; the new ones
     /// follow the last, each with whether each of its triangles lies on the terrain (`on`, when the surface has one).
@@ -448,7 +474,11 @@ impl Surface {
         } else {
             self.walk(body.piece, body.tri, p, [p[0] + want[0], p[1] + want[1]])
         };
-        let mut y = i128::from(self.height(q, t, e));
+        let offset = match body.pose.support {
+            Support::Surface { height, .. } => i128::from(height),
+            Support::Slot | Support::Volume { .. } | Support::Track | Support::None => 0,
+        };
+        let mut y = i128::from(self.height(q, t, e)) + offset;
         // Speed is along the surface (N11a, #2735): on a slope the move is walked again, shortened by the cosine of
         // the line just walked (its length on the plan over its length on the surface), once.
         let dy = y - i128::from(body.pose.position.y);
@@ -459,7 +489,7 @@ impl Surface {
             if h > 0 {
                 let w = [div_round(want[0] * h, l), div_round(want[1] * h, l)];
                 (q, t, e) = self.walk(body.piece, body.tri, p, [p[0] + w[0], p[1] + w[1]]);
-                y = i128::from(self.height(q, t, e));
+                y = i128::from(self.height(q, t, e)) + offset;
             }
         }
         let fit = |v: i128| i64::try_from(v).map_err(|_| ());
@@ -534,4 +564,20 @@ pub fn cross(
             },
         ],
     ))
+}
+
+/// Already-prepared support surfaces selected by the body's admitted build.
+pub trait Floors {
+    fn for_build(
+        &self,
+        build: replica::kinds::sizes::Build,
+    ) -> Option<&std::collections::BTreeMap<Id, Surface>>;
+}
+impl Floors for std::collections::BTreeMap<Id, Surface> {
+    fn for_build(
+        &self,
+        build: replica::kinds::sizes::Build,
+    ) -> Option<&std::collections::BTreeMap<Id, Surface>> {
+        (build.size == replica::kinds::sizes::Size::Standard).then_some(self)
+    }
 }

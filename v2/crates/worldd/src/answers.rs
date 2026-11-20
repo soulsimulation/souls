@@ -186,6 +186,8 @@ fn recs_of(changes: Vec<Change>) -> Vec<ChangeRec> {
 /// Makes the world's bodies on the thread that steps them (a skill is not sent between threads), each standing where
 /// the log last had it (`Placed`, empty on a first start; [`Bodies::add_body_at`]).
 pub type MakeBodies = Box<dyn FnOnce(&Placed) -> R<Bodies> + Send>;
+pub type MakeBuiltBodies =
+    Box<dyn FnOnce(&Placed, &BTreeMap<Id, replica::kinds::sizes::Build>) -> R<Bodies> + Send>;
 
 /// Where an answer frame goes: the connection the intent came on.
 pub type Reply = Sender<Vec<u8>>;
@@ -226,6 +228,7 @@ pub enum Event {
     /// An edit checked off the clock thread on a frozen copy (G1b): to commit at the next tick with the Souls' bodies
     /// read from that copy (G1c), or its refusal.
     Edited(Box<(Id, Result<Checked, Refused>)>),
+    Worn(Box<(WearRequest, R<sim::mover::Body>)>),
     /// The directory's Souls file as it now reads, and where the answers to the intents it causes go (W11b).
     Directory(Box<(Directory, Reply)>),
     /// Holds the clock thread for this long: the stuck-thread run (O4 A4).
@@ -456,6 +459,7 @@ pub struct Config {
     /// Makes the world's bodies, on the clock thread, for move intents (I4b, #3156); without them a move is refused
     /// `intent.not-a-form-on-a-node`.
     pub bodies: Option<MakeBodies>,
+    pub built_bodies: Option<MakeBuiltBodies>,
     /// The clock that paces the loop; `None` is the machine's ([`Real`]). Ignored in lockstep.
     pub clock: Option<Box<dyn Pace + Send>>,
     /// Lockstep: ticks run only when asked ([`Event::RunTo`]), each after every check is back (K18).
@@ -507,6 +511,14 @@ pub struct Config {
     /// Joins and leaves (C3, #3367): a Soul's first intent births its body here; none, the Souls' bodies are the
     /// ones [`Config::bodies`] makes.
     pub join: Option<Join>,
+    /// Existing B15 recorded body catalogue and birth choices.
+    pub wear: Option<Wearing>,
+}
+
+#[derive(Clone)]
+pub struct Wearing {
+    pub catalogue: skills::wear::Catalogue,
+    pub born: BTreeMap<Id, [u8; 32]>,
 }
 
 /// Where and how Souls' bodies are born (C3, #3367).
@@ -574,6 +586,7 @@ impl Config {
             checkers: 2,
             arrivals: None,
             bodies: None,
+            built_bodies: None,
             clock: None,
             lockstep: false,
             checkpoints: None,
@@ -594,6 +607,7 @@ impl Config {
             rate: None,
             engine: None,
             join: None,
+            wear: None,
         }
     }
 }
@@ -781,7 +795,7 @@ struct Clock {
     /// ends, so no move outlives its act.
     overdue: BTreeSet<Id>,
     /// Where edits go to be checked off the clock thread, when the world takes edits (G1b).
-    edits: Option<Sender<(Id, Edit)>>,
+    edits: Option<Sender<CheckJob>>,
     /// Edits checked since the last tick, committed (or refused) at the next.
     edited: Vec<(Id, Result<Checked, Refused>)>,
     /// Where the edit checker reads the bodies the controller holds, handed off each tick (G1d).
@@ -824,6 +838,9 @@ struct Clock {
     clock: Option<Publish>,
     /// Joins and leaves (C3), when the world births its Souls' bodies.
     life: Option<Lives>,
+    wear: Option<Wearing>,
+    birth_builds: BTreeMap<Id, replica::kinds::sizes::Build>,
+    worn: Vec<(WearRequest, R<sim::mover::Body>)>,
     /// The directory's word (W11b): its file as last read and where its answers go, and the Souls to bring in line
     /// with it at the next tick.
     directory: Option<(Directory, Reply)>,
@@ -833,8 +850,89 @@ struct Clock {
     unlinked: Vec<Id>,
 }
 
+enum CheckJob {
+    Edit(Id, Edit, Minter),
+    Wear(Box<WearRequest>),
+}
+
+#[derive(Clone, PartialEq)]
+struct WearRecord {
+    kind: Name,
+    parent: Option<Id>,
+    slot: Option<u64>,
+    audience: Audience,
+    fields: BTreeMap<u64, Value>,
+}
+fn wear_record(copy: &Replica, body: Id) -> Result<WearRecord, &'static str> {
+    let n = copy
+        .tree()
+        .handle(body)
+        .and_then(|h| copy.tree().node(h))
+        .ok_or("intent.no-body")?;
+    Ok(WearRecord {
+        kind: n.kind().clone(),
+        parent: n.parent(),
+        slot: n.slot(),
+        audience: n.audience(),
+        fields: n.fields().clone(),
+    })
+}
+pub struct WearRequest {
+    id: Id,
+    version: u64,
+    ground: Id,
+    map: Arc<sim::ground::Versions>,
+    surfaces: sim::walk::town::Basis,
+    basis: sim::controller::BuildBasis,
+    record: WearRecord,
+    preset: skills::wear::Preset,
+}
+impl WearRequest {
+    fn check(&self, copy: &Replica) -> R<sim::mover::Body> {
+        let error = |name| Refusal {
+            name,
+            detail: "body change basis".into(),
+        };
+        if copy.version() < self.version
+            || wear_record(copy, self.basis.moved.id).map_err(error)? != self.record
+        {
+            return Err(error("body-change-stale"));
+        }
+        let mut old = self.basis.build;
+        sim::ground::sizes::change_size(
+            copy.tree(),
+            self.ground,
+            self.basis.moved.pose.frame.node,
+            self.basis.moved.id,
+            self.basis.moved.pose.position,
+            &mut old,
+            self.preset.build.size,
+        )?;
+        let surface = self.surfaces.surface(
+            self.preset.build.size,
+            self.basis.moved.pose.frame.node,
+            self.ground,
+        )?;
+        let mut moved = surface.place_built(
+            self.basis.moved.id,
+            self.basis.moved.pose.frame,
+            self.basis.moved.pose.position,
+            self.basis.moved.pose.orientation,
+            self.preset.build,
+        )?;
+        moved.linear = self.basis.moved.linear;
+        Ok(moved)
+    }
+}
+
 /// An edit planned off the clock, and the Souls' bodies its commit is judged against (G2's rule, G1c).
-type Checked = (Planned, Vec<Who>);
+type Checked = (
+    Planned,
+    Vec<Who>,
+    BTreeMap<Id, replica::kinds::sizes::Size>,
+    Minter,
+    Option<buildsafe::PreparedMaps>,
+);
 
 /// The world node's sky in the running tick (E6, #3369): its three timers on K9's due list, each fired at its due time
 /// by the tick that holds it, and each fire's entries written on the world node.
@@ -889,6 +987,23 @@ impl Heavens {
             first,
         })
     }
+}
+
+/// Reserves only existing creator name counters at recorded intake; the live counter never rewinds.
+fn reserve_edit(edit: &Edit, lineage: Scope, next: &mut u64) -> Result<Minter, Refused> {
+    let reserved = Minter::at(lineage, *next);
+    let mut end = reserved.clone();
+    for op in &edit.ops {
+        if matches!(op, edit::Op::Place { .. }) {
+            end.mint().map_err(|e| Refused {
+                op: None,
+                name: "edit.ids-exhausted",
+                detail: e.to_string(),
+            })?;
+            *next = end.next();
+        }
+    }
+    Ok(reserved)
 }
 
 /// What an intent becomes: a form's act for the checkers, a move for the bodies, or an edit for the edit checker.
@@ -1318,6 +1433,9 @@ impl Clock {
             let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
             let _ = f.write_all(format!("{hex} {sequence}\n").as_bytes());
         }
+        if intent.verb.as_str() == skills::wear::VERB {
+            return self.wear(&intent, key, (reply, stamps), now);
+        }
         let mut value = intent.to_value();
         keep_arg_names(&mut value);
         let form = words::form(&intent);
@@ -1576,13 +1694,16 @@ impl Clock {
                 self.forming.push((id, act, i, form_args));
             }
             Taken::Engine(a) => self.engine_acts.push(a),
-            Taken::Edit(e) => {
-                if let Some(tx) = &self.edits
-                    && tx.send((id, e)).is_ok()
-                {
-                    self.outstanding += 1;
+            Taken::Edit(e) => match reserve_edit(&e, self.lineage, &mut self.next_intent) {
+                Ok(reserved) => {
+                    if let Some(tx) = &self.edits
+                        && tx.send(CheckJob::Edit(id, e, reserved)).is_ok()
+                    {
+                        self.outstanding += 1;
+                    }
                 }
-            }
+                Err(r) => self.end(id, |c| c.edit_refusal(actor, sequence, &r)),
+            },
         }
     }
 
@@ -1600,11 +1721,29 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
                 continue;
             }
-            let committed = checked.and_then(|(c, souls)| {
-                let mut minter = Minter::at(self.lineage, self.next_intent);
-                let done = sim::edit::commit(&mut self.replica, &mut minter, &c, &souls, now);
-                self.next_intent = minter.next();
-                done
+            let committed = checked.and_then(|(c, souls, classes, mut reserved, maps)| {
+                if let (Some(b), Some(maps)) = (&self.bodies, &maps) {
+                    b.check_map(maps)?;
+                }
+                let current = self
+                    .bodies
+                    .as_ref()
+                    .map(|b| buildsafe::judged(souls.clone(), &buildsafe::moving(b)));
+                let current_classes = self.bodies.as_ref().map(Bodies::classes);
+                let mut commit = || {
+                    sim::edit::commit_classes(
+                        &mut self.replica,
+                        &mut reserved,
+                        &c,
+                        current.as_deref().unwrap_or(&souls),
+                        now,
+                        current_classes.as_ref().unwrap_or(&classes),
+                    )
+                };
+                match (&mut self.bodies, maps) {
+                    (Some(b), Some(maps)) => b.commit_map(maps, commit),
+                    _ => commit(),
+                }
             });
             match committed {
                 Ok(c) => {
@@ -1625,6 +1764,175 @@ impl Clock {
                     });
                 }
                 Err(r) => self.end(id, |k| k.edit_refusal(actor, sequence, &r)),
+            }
+        }
+    }
+
+    /// B15's existing hash-only record, checked off-clock and committed without mutating refused actors.
+    fn wear(
+        &mut self,
+        intent: &Intent,
+        key: Vec<u8>,
+        (reply, stamps): (Reply, Stamps),
+        now: Micros,
+    ) {
+        let (actor, sequence) = (intent.actor, intent.sequence);
+        let preset = match (&self.wear, skills::wear::asked(&intent.parameters)) {
+            (None, _) => Err("wear.off"),
+            (Some(w), Some(name)) => w.catalogue.find(&name).cloned().ok_or("body-unknown"),
+            _ => Err("body-unknown"),
+        };
+        let mut logged = intent.clone();
+        logged.parameters.clear();
+        if let Ok(p) = &preset {
+            logged.parameters.insert(1, Value::Bytes(p.hash.to_vec()));
+        } else {
+            logged.parameters.remove(&1);
+        }
+        let value = logged.to_value();
+        let prepared = preset.and_then(|preset| {
+            if expired(intent.expiry, now) {
+                return Err("intent.expired");
+            }
+            let body = self.body_of(intent)?;
+            let record = wear_record(&self.replica, body)?;
+            let w = self.wear.as_ref().ok_or("wear.off")?;
+            let old = w
+                .catalogue
+                .build_of(record.fields.get(&skills::wear::BODY))?;
+            let b = self.bodies.as_ref().ok_or("intent.no-body")?;
+            let basis = b.wear_basis(body).map_err(|r| r.name)?;
+            if basis.build != old {
+                return Err("body-change-stale");
+            }
+            b.town
+                .surfaces_for(preset.build.size)
+                .ok_or("body-class-unprepared")?;
+            let id = Id::new(self.lineage, self.next_intent).ok_or("intent.ids-exhausted")?;
+            Ok(WearRequest {
+                id,
+                version: self.replica.version(),
+                ground: b.town.ground,
+                map: Arc::clone(&b.form_map),
+                surfaces: b.town.basis(),
+                basis,
+                record,
+                preset,
+            })
+        });
+        let request = match prepared {
+            Ok(r) => r,
+            Err(reason) => {
+                let answer = self.refusal(actor, sequence, reason);
+                return self.answered(
+                    key,
+                    sequence,
+                    None,
+                    Some(value),
+                    &answer,
+                    (vec![reply], stamps),
+                );
+            }
+        };
+        let id = request.id;
+        let body = request.basis.moved.id;
+        self.next_intent += 1;
+        let due = intent.expiry.min(now.saturating_add(self.deadline));
+        self.deadlines.open(body, id, due);
+        self.inputs.push(Input::Intent {
+            id,
+            soul: body,
+            verb: intent.verb.clone(),
+            words: None,
+        });
+        self.in_flight.insert((key.clone(), sequence), id);
+        self.open.insert(
+            id,
+            Open {
+                actor,
+                key,
+                sequence,
+                body,
+                expiry: intent.expiry,
+                due,
+                run_due: None,
+                intent: value,
+                waiters: vec![reply],
+                stamps,
+            },
+        );
+        if let Some(tx) = &self.edits
+            && tx.send(CheckJob::Wear(Box::new(request))).is_ok()
+        {
+            self.outstanding += 1;
+        } else {
+            self.end(id, |c| c.refusal(actor, sequence, "size-not-checked"));
+        }
+    }
+
+    fn wears(&mut self, now: Micros) {
+        for (request, checked) in std::mem::take(&mut self.worn) {
+            let id = request.id;
+            let Some(open) = self.open.get(&id) else {
+                continue;
+            };
+            let (actor, sequence) = (open.actor, open.sequence);
+            let result = checked.and_then(|moved| {
+                let error = |name| Refusal {
+                    name,
+                    detail: "body change basis".into(),
+                };
+                if expired(open.expiry, now) {
+                    return Err(error("intent.expired"));
+                }
+                if wear_record(&self.replica, request.basis.moved.id).map_err(error)?
+                    != request.record
+                {
+                    return Err(error("body-change-stale"));
+                }
+                let bodies = self
+                    .bodies
+                    .as_mut()
+                    .ok_or_else(|| error("intent.no-body"))?;
+                if !Arc::ptr_eq(&bodies.form_map, &request.map) {
+                    return Err(error("body-change-stale"));
+                }
+                bodies.wear_basis(request.basis.moved.id)?;
+                let effect = Effect {
+                    envelope: words::envelope(
+                        self.replica.version(),
+                        now,
+                        id,
+                        actor,
+                        request.basis.moved.id,
+                    ),
+                    body: Body::Changes(vec![ChangeRec {
+                        change: skills::wear::change(request.basis.moved.id, &request.preset.hash),
+                        rest: Rest::new(),
+                    }]),
+                    events: None,
+                    rest: Rest::new(),
+                };
+                let live = &mut self.replica;
+                bodies.commit_wear(&request.basis, request.preset.build, moved, || {
+                    sim::commit::write(live, &[effect])
+                })
+            });
+            match result {
+                Ok(part) => {
+                    self.unsealed = true;
+                    self.receipts.index(&part.effects);
+                    self.effects.extend(part.effects.iter().cloned());
+                    self.parts.push(part);
+                    self.end(id, |c| Answer::Receipt {
+                        actor,
+                        sequence,
+                        intent: id,
+                        entries: c.receipts.entries(id).to_vec(),
+                        names: BTreeMap::new(),
+                    });
+                }
+                Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
             }
         }
     }
@@ -1763,13 +2071,26 @@ impl Clock {
         if l.life.waiting() == 0 {
             return;
         }
-        let mut born = b.births(&mut l.life, now, &l.ring, &l.family);
+        let mut born = b.births_built(&mut l.life, now, &l.ring, &l.family, &|soul| {
+            self.birth_builds
+                .get(&soul)
+                .copied()
+                .unwrap_or(skills::wear::DEFAULT)
+        });
         let mut taken = Vec::new();
         for x in &mut born {
             // The world's body kind, as its header pins it (K10 writes the plain name).
             for c in &mut x.changes {
-                if let Change::Create { kind, .. } = c {
+                if let Change::Create {
+                    kind, node, fields, ..
+                } = c
+                {
                     *kind = l.kind.clone();
+                    if *node == x.body
+                        && let Some(hash) = self.wear.as_ref().and_then(|w| w.born.get(&x.soul))
+                    {
+                        fields.insert(skills::wear::BODY, Value::Bytes(hash.to_vec()));
+                    }
                 }
             }
             let (mine, rest) = std::mem::take(&mut l.unborn)
@@ -2763,6 +3084,7 @@ impl Clock {
         }
         // 4b. Checked edits (G1b): committed through `sim::edit`, or refused whole.
         self.edits(now);
+        self.wears(now);
         self.start_forms(now);
         self.start_moves(now);
         self.write_forms(now);
@@ -2771,7 +3093,7 @@ impl Clock {
         // The bodies as they stand after the tick's steps and starts, for the edit checker (G1d): before the tick's
         // frozen copy (6).
         if let (Some(w), Some(b)) = (&self.walkers, &self.bodies) {
-            w.offer(buildsafe::moving(b));
+            w.offer_map(b, self.replica.version());
         }
         at[5] = mark();
         remember_orders(&mut self.order_records, &self.effects);
@@ -3252,7 +3574,7 @@ pub fn start<S: Storage + 'static>(
         for e in &part.effects {
             if let Body::Changes(cs) = &e.body {
                 for c in cs {
-                    if let Change::Create { node, .. } = c.change
+                    if let Change::Create { node, .. } | Change::Link { link: node, .. } = c.change
                         && node.scope() == cfg.lineage
                     {
                         next_intent = next_intent.max(node.counter() + 1);
@@ -3336,6 +3658,39 @@ pub fn start<S: Storage + 'static>(
     }
     let mut cfg = cfg;
     let make = cfg.bodies.take();
+    let make_built = cfg.built_bodies.take();
+    let recorded_builds = placed
+        .keys()
+        .filter_map(|&body| world.tree().handle(body).map(|_| body))
+        .map(|body| {
+            let node = world
+                .tree()
+                .node(world.tree().handle(body).expect("existing body"));
+            let worn = node
+                .as_ref()
+                .and_then(|n| n.fields().get(&skills::wear::BODY));
+            let build = match &cfg.wear {
+                Some(w) => w.catalogue.build_of(worn),
+                None if worn.is_none() => Ok(skills::wear::DEFAULT),
+                None => Err("body-unknown"),
+            }
+            .map_err(|name| Refusal {
+                name,
+                detail: "recorded body catalogue".into(),
+            })?;
+            Ok((body, build))
+        })
+        .collect::<R<BTreeMap<_, _>>>()?;
+    if make_built.is_none()
+        && recorded_builds
+            .values()
+            .any(|build| *build != skills::wear::DEFAULT)
+    {
+        return Err(Refusal {
+            name: "body-class-unprepared",
+            detail: "recorded builds require the class-aware bodies caller".into(),
+        });
+    }
     let tick = cfg.tick;
     let planner_wait = cfg.planner_wait;
     let planned_at: BTreeMap<Micros, u64> = std::mem::take(&mut cfg.planned)
@@ -3433,18 +3788,47 @@ pub fn start<S: Storage + 'static>(
             unborn: Vec::new(),
         }
     });
+    let birth_builds = cfg
+        .wear
+        .as_ref()
+        .map(|w| {
+            w.born
+                .iter()
+                .map(|(&soul, hash)| {
+                    w.catalogue
+                        .get(hash)
+                        .map(|p| (soul, p.build))
+                        .ok_or_else(|| Refusal {
+                            name: "body-unknown",
+                            detail: "unknown recorded birth body".into(),
+                        })
+                })
+                .collect::<R<BTreeMap<_, _>>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
     let engine_parts = cfg.engine.take();
     let (events, rx) = channel();
-    let walkers = cfg
-        .edits
-        .is_some()
-        .then(|| Arc::new(buildsafe::Moving::default()));
+    let walkers =
+        (cfg.edits.is_some() || cfg.wear.is_some()).then(|| Arc::new(buildsafe::Moving::default()));
     let creator = cfg.creator.take();
-    let edits = cfg
+    let edit_kinds = cfg
         .edits
-        .take()
-        .zip(walkers.clone())
-        .map(|(w, m)| edit_checker(w, creator, Arc::clone(&publisher), m, events.clone()))
+        .as_ref()
+        .map(|w| w.kinds.clone())
+        .unwrap_or_default();
+    let edits = walkers
+        .clone()
+        .map(|m| {
+            edit_checker(
+                cfg.edits.take(),
+                creator,
+                Arc::clone(&publisher),
+                m,
+                events.clone(),
+                edit_kinds,
+            )
+        })
         .transpose()?;
     let (acts, checked) = checkers::start(cfg.checkers, Arc::clone(&publisher), Arc::new(rules));
     let fwd = events.clone();
@@ -3560,6 +3944,9 @@ pub fn start<S: Storage + 'static>(
         text,
         clock: publish,
         life,
+        wear: cfg.wear.take(),
+        birth_builds,
+        worn: Vec::new(),
         directory: None,
         told: BTreeSet::new(),
         loose,
@@ -3581,8 +3968,13 @@ pub fn start<S: Storage + 'static>(
                 let tree = c.replica.tree();
                 placed.retain(|id, _| tree.handle(*id).is_some());
             }
-            if let Some(make) = make {
-                match make(&placed) {
+            let made = match (make_built, make) {
+                (Some(make), _) => Some(make(&placed, &recorded_builds)),
+                (None, Some(make)) => Some(make(&placed)),
+                _ => None,
+            };
+            if let Some(made) = made {
+                match made {
                     Ok(mut b) => {
                         let at = body_start;
                         b.begin(at);
@@ -3601,6 +3993,9 @@ pub fn start<S: Storage + 'static>(
                         }
                         if let Err(r) = crate::orders::resume(&mut b, &order_parts, at) {
                             eprintln!("worldd: standing orders were not restored: {r}");
+                        }
+                        if let Some(w) = &c.walkers {
+                            w.offer_map(&b, c.replica.version());
                         }
                         c.bodies = Some(b);
                         // The activities the log holds, so their members speak in them and leave them again (E26).
@@ -3652,6 +4047,10 @@ pub fn start<S: Storage + 'static>(
                     Event::Edited(k) => {
                         c.outstanding = c.outstanding.saturating_sub(1);
                         c.edited.push(*k);
+                    }
+                    Event::Worn(k) => {
+                        c.outstanding = c.outstanding.saturating_sub(1);
+                        c.worn.push(*k);
                     }
                     Event::Directory(d) => {
                         let (d, reply) = *d;
@@ -3756,17 +4155,18 @@ pub fn start<S: Storage + 'static>(
 /// naming the Soul. While no edit waits, the town is built (again) ahead of the next. With `creator` (G1e), the
 /// creator is the one it names now.
 fn edit_checker(
-    mut world: edit::World,
+    mut world: Option<edit::World>,
     creator: Option<Arc<buildsafe::Creator>>,
     publisher: Arc<Publisher>,
     walkers: Arc<buildsafe::Moving>,
     events: Sender<Event>,
-) -> R<Sender<(Id, Edit)>> {
-    let (tx, rx) = channel::<(Id, Edit)>();
+    kinds: BTreeMap<String, replica::world_model::Kind>,
+) -> R<Sender<CheckJob>> {
+    let (tx, rx) = channel::<CheckJob>();
     thread::Builder::new()
         .name("edit-check".into())
         .spawn(move || {
-            let mut town = buildsafe::TownCopy::new(world.kinds.clone());
+            let mut town = buildsafe::TownCopy::new(kinds.clone());
             loop {
                 let next = rx.recv_timeout(EDIT_IDLE);
                 if let Err(RecvTimeoutError::Disconnected) = next {
@@ -3775,19 +4175,53 @@ fn edit_checker(
                 // Each edit committed since, on the town; a copy that holds them all, for a town built whole.
                 let committed = walkers.take();
                 let edited = walkers.edited();
-                let Ok((id, e)) = next else {
+                let job = match next {
+                    Ok(job) => job,
+                    Err(_) => {
+                        let copy = publisher.wait_for(edited, Duration::from_secs(1));
+                        town.on(&copy, buildsafe::open_ground(&copy), &committed);
+                        continue;
+                    }
+                };
+                let (id, e, reserved) = match job {
+                    CheckJob::Edit(id, e, reserved) => (id, e, reserved),
+                    CheckJob::Wear(request) => {
+                        let request = *request;
+                        let copy = publisher.wait_for(request.version, Duration::from_secs(1));
+                        let result = request.check(&copy);
+                        if events
+                            .send(Event::Worn(Box::new((request, result))))
+                            .is_err()
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+                };
+                let Some(world) = world.as_mut() else {
                     // No edit waits: the town is built, or kept, ahead of the next.
                     let copy = publisher.wait_for(edited, Duration::from_secs(1));
                     town.on(&copy, buildsafe::open_ground(&copy), &committed);
                     continue;
                 };
-                let copy = publisher.wait_for(e.planned.max(edited), Duration::from_secs(1));
+                let snapshot = walkers.current();
+                let source = snapshot.map.as_ref();
+                let needed = source
+                    .as_ref()
+                    .map_or(edited, |m| edited.max(m.version))
+                    .max(e.planned);
+                let copy = publisher.wait_for(needed, Duration::from_secs(1));
                 let ground = buildsafe::open_ground(&copy);
                 let who = creator.as_ref().map_or(Some(world.creator), |c| c.get());
                 let checked = match who {
+                    _ if copy.version() < needed => Err(Refused {
+                        op: None,
+                        name: "edit.stale",
+                        detail: "the published copy has not reached the map basis".into(),
+                    }),
                     Some(c) => {
                         world.creator = c;
-                        edit::check(e, &copy, &world)
+                        edit::check(e, &copy, world)
                     }
                     None => Err(Refused {
                         op: None,
@@ -3796,13 +4230,33 @@ fn edit_checker(
                     }),
                 };
                 let checked = checked
-                    .and_then(|c| match town.on(&copy, ground, &committed) {
-                        Some(t) => sim::edit::plan_on(c, &copy, &Known::of(t)),
-                        None => sim::edit::plan(c, &copy, ground),
+                    .and_then(|c| {
+                        let known = town.on(&copy, ground, &committed).map(Known::of);
+                        sim::edit::plan_classes(
+                            c,
+                            &copy,
+                            ground,
+                            known.as_ref(),
+                            snapshot.classes.values().copied(),
+                        )
                     })
-                    .map(|p| {
+                    .and_then(|p| {
                         let tree = buildsafe::souls(&copy, &world.kinds);
-                        (p, buildsafe::judged(tree, &walkers.latest()))
+                        let souls = buildsafe::judged(tree, &snapshot.bodies);
+                        let maps = source
+                            .map(|source| {
+                                buildsafe::PreparedMaps::prepare_classes(
+                                    &copy,
+                                    &p,
+                                    reserved.clone(),
+                                    &souls,
+                                    source,
+                                    &snapshot.classes,
+                                    &snapshot.movers,
+                                )
+                            })
+                            .transpose()?;
+                        Ok((p, souls, snapshot.classes.clone(), reserved, maps))
                     });
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
                     break;
@@ -4404,6 +4858,281 @@ mod tests {
             replica::ids::sha256(&b),
             "the same edits at the same ticks write the same log"
         );
+    }
+
+    /// K18d reservations are taken by recorded intake, independent of checker completion. Interleaved normal
+    /// intents and refused edits never reuse those counters; replay and restart preserve published names.
+    #[test]
+    fn k18d_reservations_interleave_record_replay_and_recover_without_aliasing() {
+        use replica::edit::wire::{VERB, parameters};
+        use replica::edit::{Op, Ref, Spot};
+        use replica::pose::{Quat, Support, Vec3};
+        let fixture = toggles::World::build(1, 1, 0);
+        let room = fixture
+            .replica
+            .tree()
+            .children(fixture.replica.tree().root())
+            .unwrap()[0];
+        let room = fixture.replica.tree().node(room).unwrap().id();
+        let kinds = toggles::kinds();
+        let item = Name::new(kinds.keys().find(|k| k.starts_with("souls:item@")).unwrap()).unwrap();
+        let creator = Id::new(Scope([0xc1; 16]), 1).unwrap();
+        let place = |actor, sequence| Intent {
+            actor,
+            verb: Name::new(VERB).unwrap(),
+            target: None,
+            parameters: parameters(&[Op::Place {
+                name: 1,
+                kind: item.clone(),
+                parent: Ref::Node(room),
+                at: Spot {
+                    slot: None,
+                    position: Vec3::new(sequence as i64 * 1_000_000, 0, 0),
+                    orientation: Quat::IDENTITY,
+                    support: Support::None,
+                },
+                audience: Audience::Everyone,
+                fields: BTreeMap::new(),
+            }]),
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: 0,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+        };
+        let cfg = || {
+            let mut cfg = Config::new(LINEAGE, 1);
+            cfg.lockstep = true;
+            cfg.measures = false;
+            cfg.edits = Some(edit::World {
+                creator,
+                kinds: kinds.clone(),
+            });
+            cfg
+        };
+        let scripted: Vec<(i64, Vec<u8>)> = vec![
+            (
+                1,
+                encode(&place(Actor::Creator(creator), 1).to_value()).unwrap(),
+            ),
+            (
+                1,
+                encode(&toggle(fixture.pairs[0].0, fixture.pairs[0].1, 1, i64::MAX).to_value())
+                    .unwrap(),
+            ),
+            (
+                1,
+                encode(
+                    &place(Actor::Creator(Id::new(Scope([0xc2; 16]), 1).unwrap()), 1).to_value(),
+                )
+                .unwrap(),
+            ),
+            (
+                3,
+                encode(&place(Actor::Creator(creator), 2).to_value()).unwrap(),
+            ),
+        ];
+        let execute = |script: &[(i64, Vec<u8>)]| {
+            let store = Held::new(Vec::new());
+            let world = start(
+                toggles::World::build(1, 1, 0).replica,
+                toggles::rules(),
+                store.clone(),
+                cfg(),
+            )
+            .unwrap();
+            let answers: Vec<_> = script
+                .iter()
+                .map(|(tick, bytes)| {
+                    let (reply, rx) = channel();
+                    world
+                        .events
+                        .send(Event::ArrivalAt {
+                            tick: *tick,
+                            bytes: bytes.clone(),
+                            reply,
+                        })
+                        .unwrap();
+                    rx
+                })
+                .collect();
+            let (done, ran) = channel();
+            world.events.send(Event::RunTo { tick: 5, done }).unwrap();
+            ran.recv_timeout(Duration::from_secs(30)).unwrap();
+            let frames: Vec<_> = answers.iter().map(answer).collect();
+            world.stop();
+            (store.bytes(), frames)
+        };
+        let (logged, frames) = execute(&scripted);
+        assert_eq!(
+            frames.iter().map(|f| read(f).0).collect::<Vec<_>>(),
+            [1, 1, 2, 1]
+        );
+        let answer_fields = |frame: &[u8]| {
+            let Value::Map(mut frame) = decode(frame).unwrap().value else {
+                panic!("frame")
+            };
+            let Value::Map(answer) = frame.remove(&2).unwrap() else {
+                panic!("answer")
+            };
+            answer
+        };
+        let placed = |frame: &[u8]| {
+            let fields = answer_fields(frame);
+            let Value::Map(names) = &fields[&6] else {
+                panic!("names")
+            };
+            replica::effects::read_id(&names[&1]).unwrap()
+        };
+        let first = placed(&frames[0]);
+        let second = placed(&frames[3]);
+        let normal = replica::effects::read_id(&answer_fields(&frames[1])[&4]).unwrap();
+        assert_ne!(
+            first, normal,
+            "a normal intent cannot consume the in-flight edit's name"
+        );
+        assert!(
+            second.counter() > normal.counter() + 2,
+            "the refused edit's intent and reserved name leave distinct counters"
+        );
+        let records = recover(&logged).unwrap().records;
+        let mut input_bytes = BTreeMap::new();
+        for record in records.iter().filter(|r| !recorder::is_input(r)) {
+            let part = Part::read(record).unwrap();
+            let Some(Value::Array(rows)) = part.rest.get(&ANSWERED) else {
+                continue;
+            };
+            for row in rows {
+                let Value::Map(fields) = row else { continue };
+                if let (Some(id), Some(input)) = (fields.get(&3), fields.get(&5)) {
+                    input_bytes.insert(
+                        replica::effects::read_id(id).unwrap(),
+                        encode(input).unwrap(),
+                    );
+                }
+            }
+        }
+        let replay: Vec<_> = recorder::inputs(&records)
+            .unwrap()
+            .into_iter()
+            .flat_map(|(tick, inputs)| {
+                inputs
+                    .into_iter()
+                    .filter_map(|input| match input {
+                        Input::Intent { id, .. } => Some((tick as i64, input_bytes[&id].clone())),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(replay, scripted);
+        let (again, replayed) = execute(&replay);
+        assert_eq!(
+            recorder::effect_hash(&records),
+            recorder::effect_hash(&recover(&again).unwrap().records)
+        );
+        assert_eq!(placed(&replayed[0]), first);
+        assert_eq!(placed(&replayed[3]), second);
+
+        let store = Held::new(logged);
+        let world = start(
+            toggles::World::build(1, 1, 0).replica,
+            toggles::rules(),
+            store,
+            cfg(),
+        )
+        .unwrap();
+        let received = send(&world, &place(Actor::Creator(creator), 3));
+        let (done, ran) = channel();
+        world.events.send(Event::RunTo { tick: 8, done }).unwrap();
+        ran.recv_timeout(Duration::from_secs(30)).unwrap();
+        let after = placed(&answer(&received));
+        assert!(
+            after.counter() > second.counter(),
+            "recovery does not reuse a published name"
+        );
+        world.stop();
+        // A doorway's published name is a link, and its retirement must not make that name reusable.
+        let fixture = toggles::World::build(1, 1, 0);
+        let root = fixture
+            .replica
+            .tree()
+            .node(fixture.replica.tree().root())
+            .unwrap()
+            .id();
+        let link = Id::new(LINEAGE, 9_000).unwrap();
+        let store = Held::new(Vec::new());
+        let (mut log, _) = sim::log::Log::open(store.clone(), 1).unwrap();
+        let mut admitted = fixture.replica.tree().frozen();
+        let admitted_rules = replica::tree::Rules {
+            kinds: toggles::kinds(),
+            ..Default::default()
+        };
+        for (k, change) in [
+            Change::Link {
+                link,
+                ty: Name::new("souls:tied-to").unwrap(),
+                ends: [root, room],
+                owner: replica::world_model::End::First,
+                audience: Audience::Everyone,
+            },
+            Change::Unlink { link },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let effect = Effect {
+                envelope: Envelope {
+                    sequence: fixture.replica.version() + k as u64,
+                    at: 0,
+                    cause: Cause::World,
+                    actor: Actor::World,
+                    audience: Audience::Everyone,
+                    node: root,
+                },
+                body: Body::Changes(vec![ChangeRec {
+                    change,
+                    rest: BTreeMap::new(),
+                }]),
+                events: None,
+                rest: BTreeMap::new(),
+            };
+            let bytes = encode(&Value::Map(BTreeMap::from([
+                (1, Value::Bytes(fixture.replica.header().hash().to_bytes())),
+                (2, Value::Array(vec![effect.to_value()])),
+            ])))
+            .unwrap();
+            // Same canonical T6 link type as the tree fixtures; real entry/kind/endpoint/ownership rules apply.
+            admitted
+                .commit(
+                    fixture.replica.header(),
+                    &Part::read(&bytes).unwrap(),
+                    &admitted_rules,
+                )
+                .unwrap();
+            let record = log.append(bytes).unwrap();
+            log.wait_durable(record).unwrap();
+        }
+        drop(log);
+        let world = start(fixture.replica, toggles::rules(), store, cfg()).unwrap();
+        let received = send(&world, &place(Actor::Creator(creator), 1));
+        let (done, ran) = channel();
+        world.events.send(Event::RunTo { tick: 2, done }).unwrap();
+        ran.recv_timeout(Duration::from_secs(30)).unwrap();
+        assert!(
+            placed(&answer(&received)).counter() > link.counter(),
+            "a retired published link name is never minted again after recovery"
+        );
+        world.stop();
+        println!("K18d: reserved place/normal/refusal/replay/restart IDs remain distinct");
     }
 
     /// `"<name>":{"items":n,"oldest_us":m}` in a health file: (n, m).

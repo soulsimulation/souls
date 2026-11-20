@@ -76,10 +76,17 @@ impl Catalogue {
                 height_mm: mm("height")?,
                 hover_mm: mm("hover")?,
             };
+            if build.height_mm <= 0 || build.hover_mm.checked_mul(1000).is_none() {
+                return Err(bad("body dimensions"));
+            }
             let name = text("preset")?.to_owned();
             by_hash.insert(hash, Preset { name, hash, build });
         }
         Ok(Catalogue { by_hash })
+    }
+
+    pub fn classes(&self) -> impl Iterator<Item = Size> + '_ {
+        self.by_hash.values().map(|p| p.build.size)
     }
 
     /// The preset of this hash.
@@ -175,7 +182,10 @@ mod tests {
         assert_eq!((node, field), (body, BODY));
         assert_eq!(c.build_of(Some(&to)), Ok(p.build));
         assert_eq!(c.build_of(None), Ok(DEFAULT));
-        assert_eq!(c.build_of(Some(&Value::Bytes(vec![0xff;32]))), Err("body-unknown"));
+        assert_eq!(
+            c.build_of(Some(&Value::Bytes(vec![0xff; 32]))),
+            Err("body-unknown")
+        );
         assert_eq!(c.build_of(Some(&Value::Uint(1))), Err("body-unknown"));
     }
 
