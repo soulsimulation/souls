@@ -799,7 +799,7 @@ fn bodies(
                 (surface, pose.position, pose.orientation)
             }
             replica::pose::Support::Slot => {
-                let seat = places
+                let site = places
                     .iter()
                     .find(|p| {
                         p.thing == pose.frame.node
@@ -809,7 +809,7 @@ fn bodies(
                         name: "place-unknown",
                         detail: "recorded support unavailable".into(),
                     })?;
-                (seat.floor, seat.stand()?, seat.facing)
+                (site.floor, site.stand()?, site.facing)
             }
             replica::pose::Support::Volume { .. }
             | replica::pose::Support::Track
