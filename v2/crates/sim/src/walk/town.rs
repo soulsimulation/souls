@@ -592,9 +592,9 @@ impl Town {
 
     /// Off-clock startup preparation, only for classes admitted by the configured catalogue.
     pub fn prepare_classes(&mut self, sizes: impl IntoIterator<Item = Size>) -> Result<(), String> {
-        crate::commit::off_clock();
         for size in sizes {
             if size != Size::Standard && !self.classes.contains_key(&size) {
+                crate::commit::off_clock();
                 let g = Self::assemble_for(&self.tree, self.ground, &self.versions, size)?;
                 self.classes.insert(size, Geometry::from(g));
             }
@@ -2716,6 +2716,82 @@ mod prepared_transport_tests {
     use crate::ground::scene::Xform;
     use crate::links::{Kind, Link};
     use replica::ids::Scope;
+
+    #[test]
+    fn class_preparation_noops_and_standard_copy_do_not_run_a_clock_checker() {
+        let make_town = || {
+            let facts = testworld::generate(1, 0).unwrap();
+            let imported = import_eden::load(&facts.text).unwrap();
+            let root = imported.nodes["world"];
+            let ground = imported.nodes["ground"];
+            let header = import_eden::header(root, &imported.rules).unwrap();
+            let next = imported.tree.to_state().next;
+            Town::new(
+                imported.tree,
+                ground,
+                Doors::new(header, imported.rules, next),
+            )
+            .unwrap()
+        };
+        let mut standard = make_town();
+        std::thread::spawn(move || {
+            crate::commit::mark_clock_thread();
+            standard.prepare_classes([]).unwrap();
+            standard.prepare_classes([Size::Standard]).unwrap();
+            let copy = standard.copy().unwrap();
+            assert_eq!(copy.ground, standard.ground);
+            assert_eq!(
+                copy.surfaces.keys().collect::<Vec<_>>(),
+                standard.surfaces.keys().collect::<Vec<_>>()
+            );
+            assert!(copy.classes.is_empty());
+        })
+        .join()
+        .unwrap();
+
+        let mut prepared = make_town();
+        prepared.prepare_classes([Size::Large]).unwrap();
+        std::thread::spawn(move || {
+            let identity = |town: &Town| {
+                let geometry = &town.classes[&Size::Large];
+                (
+                    Arc::as_ptr(&geometry.basis.layout),
+                    Arc::as_ptr(&geometry.basis.open),
+                    geometry
+                        .surfaces
+                        .iter()
+                        .map(|(&id, surface)| (id, surface as *const Surface))
+                        .collect::<Vec<_>>(),
+                )
+            };
+            let before = identity(&prepared);
+            crate::commit::mark_clock_thread();
+            prepared
+                .prepare_classes([Size::Standard, Size::Large, Size::Large])
+                .unwrap();
+            assert_eq!(identity(&prepared), before);
+            assert_eq!(prepared.classes.len(), 1);
+            #[cfg(debug_assertions)]
+            {
+                let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    prepared.prepare_classes([Size::Giant])
+                }))
+                .expect_err("a genuinely missing class remains guarded on the clock");
+                let message = panic
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic.downcast_ref::<String>().map(String::as_str));
+                assert_eq!(
+                    message,
+                    Some("a rule check or route search ran on the clock thread")
+                );
+                assert!(prepared.surfaces_for(Size::Giant).is_none());
+                assert_eq!(identity(&prepared), before);
+            }
+        })
+        .join()
+        .unwrap();
+    }
 
     #[test]
     fn prepared_installations_keep_geometry_and_versions_independent() {
