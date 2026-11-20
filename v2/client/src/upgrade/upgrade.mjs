@@ -59,7 +59,7 @@ const credentialsOf = (home) => ({ souls: {}, ...readJson(join(home, CREDENTIALS
 export async function endpointsOf(url, get = fetch) {
   let at;
   try { at = new URL(url); } catch { throw new Refused('pair-world-routing', 'the saved world address is invalid; the home is unchanged'); }
-  const loopback = at.protocol === 'http:' && (['localhost', '[::1]'].includes(at.hostname) || /^127\.(?:\d{1,3}\.){2}\d{1,3}$/.test(at.hostname));
+  const loopback = at.protocol === 'http:' && (['localhost', '[::1]'].includes(at.hostname) || at.hostname.endsWith('.localhost') || /^127\.(?:\d{1,3}\.){2}\d{1,3}$/.test(at.hostname));
   const installed = /^\/(preview\/)?w\/([a-z0-9][a-z0-9-]{0,62})(?:\/|$)/.test(at.pathname);
   if ((!installed && !loopback) || (at.protocol !== 'https:' && !loopback)) throw new Refused('pair-world-routing', 'save the canonical or preview world address before upgrading; the home is unchanged');
   return pairAddress(url, get);

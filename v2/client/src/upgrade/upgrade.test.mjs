@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { openSoulMemory as shippingMemory } from '../../../../tools/world-launcher/soul/memory.mjs';
 import { frozenWorld } from '../../test/compat/frozen-world.mjs';
 import { knownThrough, readAliases, soulDirOf } from '../memory/memory.mjs';
-import { formerSouls, rollbackHome, upgradeHome } from './upgrade.mjs';
+import { endpointsOf, formerSouls, rollbackHome, upgradeHome } from './upgrade.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const home = join(repo, '.local', `r18-${randomBytes(4).toString('hex')}`, '.souls');
@@ -153,5 +153,19 @@ test('R18d: invalid bootstrap cannot partially restore parked tokens or move any
     const before = snapshot(d);
     await assert.rejects(upgradeHome({ home: d, get: (at, opts) => new URL(at).hostname === 'valid.example.invalid' ? Promise.resolve(Response.json(good)) : get(at, opts) }), { code: name === 'credentials' ? 'pair-names-a-world' : 'pair-world-routing' }, name);
     assert.deepEqual(snapshot(d), before, name + ': no token, config, alias or memory mutation');
+  }
+});
+
+
+test('R18d: existing loopback aliases stay local; lookalikes and credential URLs refuse', async () => {
+  const noNetwork = () => { throw new Error('an uninstalled loopback path needs no bootstrap'); };
+  for (const host of ['localhost', 'fixture.localhost']) {
+    assert.deepEqual(await endpointsOf(`http://${host}/local`, noNetwork), {
+      directory: `http://${host}`, world: 'local', gateway: `ws://${host}/v2/ws`,
+    });
+    await assert.rejects(endpointsOf(`http://user:secret@${host}/local`, noNetwork), { code: 'pair-names-a-world' });
+  }
+  for (const host of ['localhost.example.invalid', 'fixture.localhost.example.invalid']) {
+    await assert.rejects(endpointsOf(`http://${host}/local`, noNetwork), { code: 'pair-world-routing' });
   }
 });
