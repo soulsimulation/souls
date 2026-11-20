@@ -60,13 +60,40 @@ export function endpointsOf(url) {
   return { directory: u.origin, gateway: `${u.protocol === 'https:' ? 'wss' : 'ws'}://${u.host}/v2/ws` };
 }
 
+/** The old database identity is not this home's nickname or its public URL slug. */
+function formerWorldOf(home, old, world) {
+  const valid = (id) => typeof id === 'string' && id.length > 0 && id.length <= 256
+    && id === id.trim() && !/[\u0000-\u001f\u007f]/.test(id);
+  const ids = [];
+  if (world.worldId !== undefined) {
+    if (!valid(world.worldId)) throw new Refused('former-world-invalid', 'the saved old world identity is invalid; the home is unchanged');
+    ids.push(world.worldId);
+  }
+  // Released homes keep their Soul's current world in this noncredential runtime state.
+  // A visit elsewhere cannot identify its home world: only the configured URL may supply a fallback.
+  const file = join(home, 'souls', old, 'runtime', 'state.json');
+  let state;
+  try { state = JSON.parse(readFileSync(file, 'utf8')); } catch (e) {
+    if (e.code !== 'ENOENT') throw new Refused('former-world-unreadable', 'the saved old world state cannot be read; the home is unchanged');
+  }
+  if (state?.world === world.url && state.worldId !== undefined) {
+    if (!valid(state.worldId)) throw new Refused('former-world-invalid', 'the saved old world identity is invalid; the home is unchanged');
+    ids.push(state.worldId);
+  }
+  if (!ids.length) throw new Refused('former-world-missing', 'the saved old world identity is missing; recover its world configuration before upgrading; the home is unchanged');
+  if (new Set(ids).size !== 1) throw new Refused('former-world-conflict', 'saved identities for the same old world disagree; the home is unchanged');
+  return ids[0];
+}
+
 /** Today's Souls in the home: active in config.json, with a token that is not a v2 token. */
 export function formerSouls(home) {
   const config = readJson(join(home, 'config.json')), creds = credentialsOf(home);
   return Object.entries(config.souls ?? {}).filter(([id, e]) => SOUL_ID.test(id) && e?.state === 'active').flatMap(([id, e]) => {
     const world = Object.keys(creds.souls[id] ?? {}).find((k) => typeof creds.souls[id][k]?.token === 'string' && !V2_TOKEN.test(creds.souls[id][k].token));
-    const url = world && config.worlds?.[world]?.url;
-    return url ? [{ old: id, name: e.name ?? id, world, url }] : [];
+    const saved = world && config.worlds?.[world], url = saved?.url;
+    if (!world) return [];
+    if (!url) throw new Refused('former-world-missing', 'the saved old world address is missing; the home is unchanged');
+    return [{ old: id, name: e.name ?? id, world, formerWorld: formerWorldOf(home, id, saved), url }];
   });
 }
 
@@ -166,7 +193,7 @@ export async function upgradeHome({ home, device = hostname().slice(0, 64), labe
   const paired = await Promise.all(left.map(async (s) => {
     const { directory, gateway } = endpointsOf(s.url);
     try {
-      const got = await pairFormer({ directory, world: s.world, former: s.old, device, label, sleep, onAsk: (a) => onAsk?.({ formerly: s.old, name: s.name, ...a }) });
+      const got = await pairFormer({ directory, world: s.formerWorld, former: s.old, device, label, sleep, onAsk: (a) => onAsk?.({ formerly: s.old, name: s.name, ...a }) });
       return { formerly: s.old, soul: keep(home, s, got, gateway) };
     } catch (e) {
       return { formerly: s.old, refused: e.code ?? 'failed' };

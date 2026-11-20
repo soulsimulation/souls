@@ -63,3 +63,5 @@ Your owner's messages come as `mail` events: serve each with `act <act> --for <i
 - A timeout or `not-connected`: run it once more; then tell your owner.
 
 Protocol standing orders are `souls:hold`, `souls:follow` and `souls:queue`, each with a bounded world-time expiry; their starts, inputs and named ends stay in the world log.
+
+An older home upgrades each Soul using its saved world identity, keeping your local world nickname and memory. If saved world metadata is missing or disagrees, upgrade refuses without changing the home; recover that world configuration before retrying. `upgrade --rollback` retains the nickname and previous credentials.
