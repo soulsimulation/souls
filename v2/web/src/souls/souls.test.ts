@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as THREE from 'three';
-import type { NodeRec, SaidRec } from '../source/source.ts';
+import { reconcileSnapshot, type NodeRec, type SaidRec } from '../source/source.ts';
 import { SoulsCopy, wrap } from './souls.ts';
 import { place } from './layer.ts';
 
@@ -34,6 +34,33 @@ test('names stay across parts that do not carry them; speech shows for its lengt
   assert.equal(p.recent[0].words, 'line 11', 'newest first');
   c.apply({ nodes: [], removed: ['a.1'], to: 22_000_000 });
   assert.equal(c.page('a.1', 30_000_000, none), null);
+});
+
+test('checkpoint snapshot reconciles nodes without pruning speech or advancing event time', () => {
+  const c = new SoulsCopy();
+  c.apply({ nodes: [body('a.1', { name: 'original' })], removed: [], said: [said('a.1', 10_000_000, 'still speaking')], to: 11_000_000 });
+  const before = c.page('a.1', 11_000_000, none)!.recent;
+  c.snapshot([body('a.1', { name: 'checkpoint name' }), body('b.2')], []);
+  assert.equal(c.souls.get('a.1')!.name, 'checkpoint name');
+  assert.equal(c.speaking(11_000_000).get('a.1')!.words, 'still speaking');
+  assert.deepEqual(c.page('a.1', 11_000_000, none)!.recent, before);
+  c.snapshot([], ['b.2']); assert.ok(!c.souls.has('b.2'));
+  assert.equal(c.speaking(11_000_000).size, 1, 'node reconciliation cannot expire an existing utterance');
+});
+
+test('a fresh worker full snapshot removes retained older nodes on history-to-live or source restart', () => {
+  const old = body('old.1'), kept = body('kept.2'), added = body('added.3');
+  const retained = new Map([[old.id, old], [kept.id, kept]]);
+  const c = new SoulsCopy(); c.snapshot([...retained.values()], []);
+  // A new worker has no previous copy, so its own removed list is empty. Actual caller state is authoritative.
+  const snapshot = reconcileSnapshot(retained.keys(), { nodes: [kept, added], removed: [] });
+  assert.deepEqual(snapshot.removed, [old.id]);
+  for (const id of snapshot.removed) retained.delete(id);
+  for (const node of snapshot.nodes) retained.set(node.id, node);
+  c.snapshot(snapshot.nodes, snapshot.removed);
+  assert.deepEqual([...retained.keys()], [kept.id, added.id]); assert.deepEqual([...c.souls.keys()], [kept.id, added.id]);
+  assert.deepEqual(reconcileSnapshot(retained.keys(), { nodes: [added], removed: ['explicit.4'] }).removed, ['explicit.4', kept.id]);
+  assert.deepEqual(reconcileSnapshot(retained.keys(), { nodes: [], removed: [] }).removed, [kept.id, added.id], 'a valid empty drawable snapshot replaces the older view');
 });
 
 test('labels give way far first, speech before chips, never overlapping', () => {

@@ -7,11 +7,11 @@
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { pairFormer, upgradeHome } from '../upgrade/upgrade.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -20,7 +20,7 @@ const scratch = join(v2,'..','.local','former-upgrade');mkdirSync(scratch,{recur
 const dir = mkdtempSync(join(scratch, 'souls-r18-dir-'));
 const store = join(dir, 'accounts.sqlite'), tokens = join(dir, 'gateway-tokens.txt');
 const procs = new Set();
-after(() => { for (const p of procs) p.kill(); rmSync(dir, { recursive: true, force: true }); });
+after(() => { for (const p of procs) p.kill(); if (!process.env.X11B_KEEP_FIXTURE) rmSync(dir, { recursive: true, force: true }); });
 
 /** directoryd on its own store, as the switch-over runs it: its origin and a stop that waits for its exit. */
 async function directoryd({storePath=store,tokensPath=tokens,pairingPath=join(dir,'pairing.sqlite')}={}) {
@@ -150,4 +150,155 @@ test('R18c: actual importer and directory preserve a former Soul across distinct
   assert.deepEqual((await post(d.origin,'/v1/account/souls',{test_person:'Someone else'})).body.souls,[]);
   await d.stop();d=null;
   const check=new DatabaseSync(join(out,'accounts.sqlite'));assert.equal(check.prepare('SELECT COUNT(*) AS n FROM souls_v1').get().n,before,'no replacement Soul minted');check.close();
+});
+
+// X11b exercises real importer -> served owner route -> ordinary C3 join -> canonical public view/text files.
+// The facts and native artifacts are the same synthetic C3 fixture closure; no legacy tokens/bodies are copied.
+test('X11b: imported profiles reach the owner route and a real C3 public body', { timeout: 110_000 }, async t => {
+  const base=join(dir,'x11b'), backup=join(base,'backup'), out=join(base,'import');mkdirSync(join(backup,'worlds'),{recursive:true});
+  const owner='acct_00000000-0000-4000-8000-00000000000a', other='acct_00000000-0000-4000-8000-00000000000b';
+  for(const [file,rows] of [['accounts.sqlite',[[owner,'Imported owner'],[other,'Other account']]],['forks-accounts.sqlite',[]]]){
+    const db=new DatabaseSync(join(backup,file));db.exec('CREATE TABLE provider_accounts_v1(account_id TEXT PRIMARY KEY,issuer TEXT,subject TEXT,created_at INTEGER)');
+    for(const [id,subject]of rows)db.prepare('INSERT INTO provider_accounts_v1 VALUES(?,?,?,0)').run(id,'test:local',subject);db.close();
+  }
+  writeFileSync(join(backup,'worlds.json'),JSON.stringify([{slug:'local',owner}]));
+  const old=new DatabaseSync(join(backup,'worlds/local.db'));
+  old.exec('CREATE TABLE worlds(id TEXT PRIMARY KEY); CREATE TABLE snapshots(world_id TEXT,tick INTEGER,snapshot TEXT); CREATE TABLE souls(id TEXT,world_id TEXT,owner TEXT,entity_id TEXT,name TEXT,description TEXT,retired_at INTEGER,created_at INTEGER)');
+  old.exec("INSERT INTO worlds VALUES('local')");
+  for(const [id,name,description,retired]of [['s_ada','Imported Ada','kept identity',null],['s_bea','Imported Bea','second identity',null],['s_gone','Retired source','not imported',1]])
+    old.prepare('INSERT INTO souls VALUES(?,?,?,?,?,?,?,0)').run(id,'local',owner,id,name,description,retired);
+  old.close();
+  const children=[],expectedStops=new Set(),unexpectedDeaths=[];
+  const healthy=()=>assert.deepEqual(unexpectedDeaths,[], 'no owned fixture child may die unexpectedly');
+  const run=(path,args,ready,options={})=>new Promise((ok,fail)=>{
+    const p=spawn(path,args,{cwd:base,stdio:['ignore','pipe','pipe'],...options,env:{...process.env,...options.env,BRAIN_MODE:'fake'}});
+    children.push(p);procs.add(p);let output='';
+    const take=b=>{output+=String(b);if(output.length>512*1024)output=output.slice(-512*1024);const m=ready instanceof RegExp?ready.exec(output):null;if(m)ok({p,m});};
+    p.stdout.on('data',take);p.stderr.on('data',take);
+    p.once('error',e=>{unexpectedDeaths.push({pid:p.pid,error:e.code??'spawn-error'});fail(Error('X11b owned child could not start'));});
+    p.once('exit',(code,signal)=>{
+      procs.delete(p);
+      if(!expectedStops.has(p)&&(ready||code!==0||signal))unexpectedDeaths.push({pid:p.pid,code,signal});
+      if(!ready&&code===0&&!signal)ok({p});else if(!expectedStops.has(p))fail(Error('X11b owned native child ended before readiness'));
+    });
+    if(ready===true)ok({p}); // its real command-socket readiness is checked separately below
+  });
+  const stop=async p=>{
+    if(!p||p.exitCode!==null||p.signalCode!==null)return;
+    expectedStops.add(p);
+    const ended=ms=>new Promise(ok=>{
+      let timer;const done=value=>{clearTimeout(timer);p.off('exit',exit);ok(value);},exit=()=>done(true);
+      p.once('exit',exit);timer=setTimeout(()=>done(false),ms);
+      if(p.exitCode!==null||p.signalCode!==null)done(true);
+    });
+    p.kill('SIGTERM');if(!await ended(3000)){p.kill('SIGKILL');assert.equal(await ended(2000),true,'owned child exits after bounded escalation');}
+    try{process.kill(p.pid,0);assert.fail('owned child remains after exit');}catch(e){if(e.code!=='ESRCH')throw e;}
+  };
+  let rt,daemon;
+  t.after(async()=>{
+    const cleanupFailures=[];
+    if(rt&&daemon?.exitCode===null&&daemon?.signalCode===null){
+      expectedStops.add(daemon);
+      try{await (await import('../daemon/client.mjs')).request(rt.socket,{op:'stop'},2000);}catch(e){cleanupFailures.push(e.code??'daemon-stop');}
+    }
+    const results=await Promise.allSettled(children.map(stop));
+    writeFileSync(join(base,'owned-processes.json'),JSON.stringify({children:children.map(p=>({pid:p.pid,exit:p.exitCode,signal:p.signalCode})),unexpectedDeaths,cleanupFailures},null,2));
+    assert.ok(results.every(r=>r.status==='fulfilled'),'every owned native child stopped');
+    assert.deepEqual(cleanupFailures,[],'bounded daemon stop completed');healthy();
+  });
+  const binaries=name=>process.env[name.toUpperCase().replaceAll('-','_')]??join(v2,'target/debug',name);
+  await run(binaries('import-accounts'),[backup,'--out',out,'--json']);
+  const imported=new DatabaseSync(join(out,'accounts.sqlite'));
+  const mapped=id=>imported.prepare('SELECT soul FROM imported_souls_v1 WHERE world=? AND old_soul=?').get('local',id)?.soul;
+  const ada=mapped('s_ada'),bea=mapped('s_bea');assert.ok(ada&&bea);assert.equal(mapped('s_gone'),undefined);imported.close();
+  const adaGrant='soul-'+ada.replace(':','-'),beaGrant='soul-'+bea.replace(':','-');
+  const facts=process.env.X11B_FACTS??join(base,'testworld-s1-t3.facts.json');
+  if(!process.env.X11B_FACTS)await run(binaries('testworld'),['--seed','1','--things','3','--out',base]);
+  const world=join(base,'world');
+  // The same C3 clear entry: 4 m west of a real open-ground box; first birth stands 1 m east of it.
+  const box=JSON.parse(readFileSync(facts,'utf8')).things.find(t=>t.id==='box-00003'&&!t.parent);assert.ok(box);
+  await run(binaries('worldd'),['seed','--facts',facts,'--dir','world','--souls','0','--at',`${(box.pose[0]-4000)/1000},${box.pose[2]/1000}`]);
+  assert.equal(readFileSync(join(world,'tokens'),'utf8'),'');
+  await run(binaries('worldd'),['serve','--dir','world'],/listening /);
+  const gatewayProcess=await run(binaries('gatewayd'),['--listen','127.0.0.1:0','--world','world/gateway.sock','--tokens','world/tokens','--build',`1220${'ab'.repeat(32)}`],/listening (\S+)\n/);
+  const gateway='ws://'+gatewayProcess.m[1]+'/v2/ws';
+  const directoryArgs=['--listen','127.0.0.1:0','--public-url','http://127.0.0.1:1','--store',join(out,'accounts.sqlite'),'--test-sign-in','--pairing',join(base,'pairing.sqlite'),'--gateway-tokens',join(world,'tokens')];
+  let directoryProcess=await run(bin,directoryArgs,/listening on (\S+)\n/),origin='http://'+directoryProcess.m[1];
+  const beforeListingTokens=readFileSync(join(world,'tokens'),'utf8');
+  const credentialRows=text=>text.split('\n').filter(line=>line.trim()&&!line.trim().startsWith('#'));
+  assert.equal(credentialRows(beforeListingTokens).length,0,'directory startup creates no credential');
+  const listed=async person=>(await post(origin,'/v1/account/souls',{test_person:person})).body.souls;
+  const before=await listed('Imported owner');
+  assert.deepEqual(before.map(s=>[s.soul,s.world,s.name,s.description]).sort(),[[adaGrant,'local','Imported Ada','kept identity'],[beaGrant,'local','Imported Bea','second identity']].sort());
+  assert.ok(before.every(s=>s.device===null));assert.deepEqual(await listed('Other account'),[]);
+  assert.deepEqual(await listed('Imported owner'),before);
+  const pairingRead=new DatabaseSync(join(base,'pairing.sqlite'),{readOnly:true});
+  assert.equal(pairingRead.prepare('SELECT COUNT(*) AS n FROM paired_souls_v1').get().n,0);pairingRead.close();
+  assert.equal(readFileSync(join(world,'tokens'),'utf8'),beforeListingTokens,'listing never changes the exact token file');
+  assert.equal(credentialRows(readFileSync(join(world,'tokens'),'utf8')).length,0,'listing creates no credential');
+  const ask=async body=>(await post(origin,'/v1/pair/request',{secret_hash:createHash('sha256').update(randomBytes(32)).digest('hex'),device:'fixture device',label:'X11b',scope:'soul',world:'local',...body})).body;
+  const wrong=await ask({former:'s_ada'});
+  assert.equal((await post(origin,'/v1/pair/approve',{code:wrong.code,confirm:true,test_person:'Other account'})).body.refused,'unknown-soul');
+  const direct=await ask({soul:beaGrant});
+  assert.equal((await post(origin,'/v1/pair/approve',{code:direct.code,confirm:true,test_person:'Imported owner'})).body.soul,beaGrant);
+  let approval;
+  const paired=await pairFormer({directory:origin,world:'local',former:'s_ada',device:'fixture device',label:'X11b',onAsk:a=>{approval=post(origin,'/v1/pair/approve',{code:a.code,confirm:true,test_person:'Imported owner'});},sleep:async ms=>{await approval;await new Promise(ok=>setTimeout(ok,ms));}});
+  assert.equal(paired.grant,adaGrant);
+  const home=join(base,'home');mkdirSync(home,{recursive:true});const soul='s_x11b';
+  writeFileSync(join(home,'config.json'),JSON.stringify({worlds:{local:{gateway,directory:origin}}}));
+  writeFileSync(join(home,'credentials.json'),JSON.stringify({souls:{[soul]:{local:{token:paired.token}}}}),{mode:0o600});
+  const {runtimeOf}=await import('../home/home.mjs'),{call,request,DEFAULT_PKG}=await import('../daemon/client.mjs');
+  rt=runtimeOf(home,soul);const pkg=process.env.SOULS_REPLICA_PKG??DEFAULT_PKG;
+  const until=async(f,ms=30_000)=>{const end=Date.now()+ms;for(;;){healthy();const value=await f();if(value)return value;if(Date.now()>end)throw Error('X11b bounded assertion timed out');await new Promise(ok=>setTimeout(ok,20));}};
+  daemon=(await run(process.execPath,[join(v2,'client/src/daemon/daemon.mjs'),'--home',home,'--soul',soul,'--pkg',pkg],true,{cwd:rt.dir,env:{PATH:process.env.PATH??''}})).p;
+  await until(async()=>{try{return (await request(rt.socket,{op:'status'})).connected;}catch{return false;}});
+  const joined=await call(home,soul,{op:'act',verb:'life:join'},{pkg});assert.equal(joined.ok,true);
+  const status=await until(async()=>{const s=await request(rt.socket,{op:'status'});assert.equal(s.pid,daemon.pid);return s.connected&&s.answered>=1&&!s.unanswered.length&&s;});
+  assert.equal(status.sent,1,'the ordinary C3 join was sent once');
+  const wire=await import(pathToFileURL(join(pkg,'replica.js')).href);wire.initSync({module:readFileSync(join(pkg,'replica_bg.wasm'))});
+  const {decode,idText}=await import('../brief/copy.mjs'),{encode}=await import('../history/day.mjs');
+  const pointers=folder=>readdirSync(folder,{withFileTypes:true}).flatMap(d=>d.isDirectory()?pointers(join(folder,d.name)):d.name==='pointer'&&folder.endsWith('/everyone')?[folder]:[]);
+  const soulId=[new Uint8Array(Buffer.from(ada.split(':')[0],'hex')),Number(ada.split(':')[1])];
+  const publicWords=()=>{
+    for(const stream of pointers(join(world,'views'))){
+      const pointer=decode(readFileSync(join(stream,'pointer')));if(!pointer.has(1))continue;
+      const header=readFileSync(resolve(stream,'../../../headers',Buffer.from(pointer.get(3)).toString('hex')));
+      const generation=pointer.get(8),words=new Map();
+      let player,parts=stream;
+      if(generation!==undefined){
+        assert.ok(generation instanceof Uint8Array&&generation.byteLength===32,'actual public generation is a SHA-256 digest');
+        const digest=Buffer.from(generation).toString('hex');parts=join(stream,'g',digest);
+        const baseline=readFileSync(join(parts,'baseline'));
+        assert.equal(createHash('sha256').update(baseline).digest('hex'),digest,'actual baseline matches the published generation');
+        player=wire.StreamPlayer.fromBaseline(header,baseline);
+        for(const [ref,text]of decode(readFileSync(join(parts,'baseline.text'))))words.set(idText(ref),Buffer.from(text).toString('utf8'));
+      }else player=new wire.StreamPlayer(header);
+      try{
+        for(let n=player.next();n<=pointer.get(1);n++){
+          player.play(readFileSync(join(parts,String(n))));
+          for(const [ref,text]of decode(readFileSync(join(parts,`${n}.text`))))words.set(idText(ref),Buffer.from(text).toString('utf8'));
+        }
+        const links=decode(player.query(encode(new Map([[1,3],[2,soulId]]))));
+        const of=links.find(l=>String(l[1]).split('@')[0]==='souls:body-of');
+        if(!of)continue;
+        const body=decode(player.query(encode(new Map([[1,1],[2,of[2][0]]]))));
+        assert.equal(String(body.get(2)).split('@')[0],'souls:body');
+        assert.deepEqual(of[2][1],soulId,'public body-of names this exact imported Soul');
+        const fields=body.get(6),name=fields.get(30)?.get(21),description=fields.get(31)?.get(21);
+        if(name&&description)return [words.get(idText(name)),words.get(idText(description))];
+      }finally{player.free();}
+    }
+    return null;
+  };
+  const words=await until(()=>{const w=publicWords();return w?.[0]==='Imported Ada'&&w[1]==='kept identity'&&w;});
+  assert.deepEqual(words,['Imported Ada','kept identity'],'actual canonical public body refs resolve via public-only text sidecars');
+  assert.equal((await post(origin,'/v1/account/souls/profile',{test_person:'Imported owner',soul:adaGrant,name:'Owner edited',description:''})).status,200);
+  const connected=await ask({soul:adaGrant});
+  assert.equal((await post(origin,'/v1/pair/approve',{code:connected.code,confirm:true,test_person:'Imported owner'})).body.refused,'soul-connected');
+  assert.equal((await post(origin,'/v1/account/souls/retire',{test_person:'Imported owner',soul:beaGrant,confirm:true})).status,200);
+  await stop(directoryProcess.p);directoryProcess=await run(bin,directoryArgs,/listening on (\S+)\n/);origin='http://'+directoryProcess.m[1];
+  const after=await listed('Imported owner');assert.equal(after.length,1);assert.equal(after[0].soul,adaGrant);assert.equal(after[0].name,'Owner edited');assert.equal(after[0].description,'');
+  assert.deepEqual(await listed('Imported owner'),after);assert.deepEqual(await listed('Other account'),[]);
+  healthy();
+  console.log('X11b aggregate: imported-live=2 source-retired-excluded=1 prepair-listed=2 isolated=1 same-grants-approved=2 c3-joined=1 public-profile-fields=2 edited-restart=1 retired-hidden=1');
 });

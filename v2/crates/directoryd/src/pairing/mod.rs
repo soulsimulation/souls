@@ -435,13 +435,14 @@ impl Pairing {
                 Err(_) => Err(("store", None)),
             }
         };
+        // Imported candidates remain read-only until every approval check passes.
+        let mut imported_candidate = false;
         // R18: a request naming a former Soul pairs the Soul X11 brought over for it, only for its own account.
         let soul = match (soul, self.former_of(&code).map_err(|e| (e, None))?) {
             (None, Some((world, former))) => {
                 match imported(&world, &former).map_err(|e| (e, None))? {
                     Some((grant, owner)) if owner == account && is_soul_grant(&grant) => {
-                        self.register(&grant, account)
-                            .map_err(|_| ("store", None))?;
+                        imported_candidate = self.soul_of(&grant).map_err(|e| (e, None))?.is_none();
                         Some(grant)
                     }
                     _ => return refuse("unknown-soul", None),
@@ -449,8 +450,24 @@ impl Pairing {
             }
             (soul, _) => soul,
         };
+        if let Some(g) = soul.as_deref().filter(|g| is_soul_grant(g))
+            && self.soul_of(g).map_err(|e| (e, None))?.is_none()
+            && !imported_candidate
+        {
+            let world = Self::request_world(&self.db.lock().expect("the store"), &code)
+                .map_err(|e| (e, None))?;
+            if let Some(world) = world {
+                imported_candidate = imported(&world, g)
+                    .map_err(|e| (e, None))?
+                    .is_some_and(|(found, owner)| found == g && owner == account);
+            }
+        }
         let grant = match soul {
-            Some(g) => match self.soul_for_request(&g, &code).map_err(|e| (e, None))? {
+            Some(g) => match self
+                .soul_for_request(&g, &code)
+                .map_err(|e| (e, None))?
+                .or_else(|| imported_candidate.then(|| (account.to_owned(), None)))
+            {
                 None if is_creator_grant(&g) => return refuse("not-the-creator", None),
                 None => return refuse("unknown-soul", None),
                 Some((owner, _)) if owner != account && is_creator_grant(&g) => {
@@ -472,19 +489,39 @@ impl Pairing {
             }
         };
         self.check_world(&code, &grant).map_err(|e| (e, None))?;
-        let changed = self
-            .db
-            .lock()
-            .expect("the store")
-            .execute(
-                "UPDATE pair_requests_v1 SET state = 'approved', account = ?2, grant_text = ?3
-                 WHERE code = ?1 AND state = 'pending'",
-                params![code, account, grant],
+        let mut db = self.db.lock().expect("the store");
+        let tx = db.transaction().map_err(|_| ("store", None))?;
+        if imported_candidate {
+            let owner: Option<String> = tx
+                .query_row(
+                    "SELECT account FROM paired_souls_v1 WHERE grant_text=?1",
+                    params![grant],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|_| ("store", None))?;
+            if owner.as_deref().is_some_and(|a| a != account) {
+                return Err(("not-yours", None));
+            }
+            let retired: bool = tx.query_row("SELECT COALESCE((SELECT retired_at IS NOT NULL FROM soul_profiles_v1 WHERE grant_text=?1),0)",params![grant],|r|r.get(0)).map_err(|_|("store",None))?;
+            if retired {
+                return Err(("soul-retired", None));
+            }
+            tx.execute(
+                "INSERT OR IGNORE INTO paired_souls_v1(grant_text,account) VALUES(?1,?2)",
+                params![grant, account],
             )
             .map_err(|_| ("store", None))?;
+        }
+        let changed = tx.execute(
+            "UPDATE pair_requests_v1 SET state = 'approved', account = ?2, grant_text = ?3 WHERE code = ?1 AND state = 'pending'",
+            params![code, account, grant],
+        ).map_err(|_|("store",None))?;
         if changed == 0 {
             return Err(("unknown-code", None));
         }
+        tx.commit().map_err(|_| ("store", None))?;
+        drop(db);
         self.note_world(&code, &grant).map_err(|e| (e, None))?;
         Ok(grant)
     }

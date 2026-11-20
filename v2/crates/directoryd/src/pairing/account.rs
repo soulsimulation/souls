@@ -231,8 +231,8 @@ impl Pairing {
         Ok(json!({"ok":true}))
     }
     fn account_souls(&self, store: &crate::accounts::store::Store, account: &str) -> Result<Value> {
-        let mut rows = self
-            .mine(account)?
+        let rows = self
+            .mine_with_imports(store, account)?
             .iter()
             .map(|m| {
                 let world = m
@@ -244,31 +244,21 @@ impl Pairing {
                 json!({"id":m.soul,"name":m.name,"world":world,"device":m.device})
             })
             .collect::<Vec<_>>();
-        for (grant, world, name, _) in store.imported_souls(account).map_err(|_| "store")? {
-            // Any paired row, including a retired one, owns the current lifecycle after import.
-            if self.soul_of(&grant)?.is_some() {
-                continue;
-            }
-            let world = self
-                .authority(Some(&world))?
-                .ok_or("world-authority-unavailable")?
-                .world;
-            rows.push(json!({"id":grant,"name":name,"world":world,"device":null}));
-        }
         Ok(Value::Array(rows))
     }
+    // An unpaired import is only a candidate: no database or lifecycle file changes before live-session checks.
     fn existing_import(
         &self,
         store: &crate::accounts::store::Store,
         login: &Login,
         b: &Value,
-    ) -> Result<()> {
+    ) -> Result<Option<(String, String, String)>> {
         if b["new"].as_bool() == Some(true) {
-            return Ok(());
+            return Ok(None);
         }
         let grant = text(b, "soul")?;
         if self.soul_of(grant)?.is_some() {
-            return Ok(());
+            return Ok(None);
         }
         let selected = self
             .authority(Some(text(b, "world")?))?
@@ -284,28 +274,14 @@ impl Pairing {
         {
             return Err("soul-in-another-world");
         }
-        let mut db = self.db.lock().expect("the store");
-        let tx = sql(db.transaction())?;
-        sql(tx.execute(
-            "INSERT OR IGNORE INTO paired_souls_v1(grant_text,account) VALUES(?1,?2)",
-            params![grant, login.account],
-        ))?;
-        let owner: String = sql(tx.query_row(
-            "SELECT account FROM paired_souls_v1 WHERE grant_text=?1",
-            params![grant],
-            |r| r.get(0),
-        ))?;
-        if owner != login.account {
-            return Err("not-yours");
-        }
-        sql(tx.execute("INSERT OR IGNORE INTO soul_profiles_v1(grant_text,world,name,description) VALUES(?1,?2,?3,?4)",params![grant,world,name,description]))?;
-        sql(tx.commit())
+        Ok(Some((world, name, description)))
     }
     fn account_pair(
         &self,
         login: &Login,
         b: &Value,
         credential: &str,
+        imported: Option<&(String, String, String)>,
     ) -> std::result::Result<(String, String), (&'static str, Option<String>)> {
         let err = |e| (e, None);
         let world = text(b, "world").map_err(err)?;
@@ -372,6 +348,7 @@ impl Pairing {
             }
             match self.soul_of(&grant)? {
                 Some((a, _)) if a == login.account => {}
+                None if imported.is_some() => {}
                 _ => return Err("not-yours"),
             }
             if self.retired(&grant)? {
@@ -385,7 +362,8 @@ impl Pairing {
                     |r| r.get(0),
                 )
                 .optional())?
-            .flatten();
+            .flatten()
+            .or_else(|| imported.map(|i| i.0.clone()));
             drop(db);
             if previous
                 .as_deref()
@@ -436,6 +414,33 @@ impl Pairing {
             ))
             .map_err(err)?;
         } else {
+            if let Some((world, name, description)) = imported {
+                let owner: Option<String> = sql(tx
+                    .query_row(
+                        "SELECT account FROM paired_souls_v1 WHERE grant_text=?1",
+                        params![grant],
+                        |r| r.get(0),
+                    )
+                    .optional())
+                .map_err(err)?;
+                if owner.as_deref().is_some_and(|a| a != login.account) {
+                    return Err(err("not-yours"));
+                }
+                let profile: Option<(Option<String>, bool)> = sql(tx.query_row("SELECT world,retired_at IS NOT NULL FROM soul_profiles_v1 WHERE grant_text=?1",params![grant],|r|Ok((r.get(0)?,r.get(1)?))).optional()).map_err(err)?;
+                if profile.as_ref().is_some_and(|p| p.1) {
+                    return Err(err("soul-retired"));
+                }
+                let current_world = profile.and_then(|p| p.0).unwrap_or_else(|| world.clone());
+                if Some(&current_world) != expected_world.as_ref() {
+                    return Err(err("soul-in-another-world"));
+                }
+                sql(tx.execute(
+                    "INSERT OR IGNORE INTO paired_souls_v1(grant_text,account) VALUES(?1,?2)",
+                    params![grant, login.account],
+                ))
+                .map_err(err)?;
+                Self::import_profile(&tx, &grant, world, name, description).map_err(err)?;
+            }
             let owned: bool = sql(tx.query_row("SELECT EXISTS(SELECT 1 FROM paired_souls_v1 s JOIN soul_profiles_v1 p USING(grant_text) WHERE s.grant_text=?1 AND s.account=?2 AND p.retired_at IS NULL AND p.world=?3)",params![grant,login.account,expected_world],|r|r.get(0))).map_err(err)?;
             if !owned {
                 return Err(err("not-yours"));
@@ -534,9 +539,22 @@ pub(super) fn route(
         }
     };
     let result = if method == "POST" && path == "/v1/agent/account/pair" {
-        match p.login(bearer,now()) {
-            Err(e)=>Err((e,None)),
-            Ok(login)=>p.existing_import(&app.store,&login,&b).map_err(|e|(e,None)).and_then(|()|p.account_pair(&login,&b,bearer.unwrap_or_default())).and_then(|(grant,token)|app.store.own(&login.account,&grant,follow_of(&grant).as_deref()).map(|()|json!({"ok":true,"grant":grant,"token":token,"memoryTransferred":false})).map_err(|_|("store",None))),
+        match p.login(bearer, now()) {
+            Err(e) => Err((e, None)),
+            Ok(login) => p
+                .existing_import(&app.store, &login, &b)
+                .map_err(|e| (e, None))
+                .and_then(|imported| {
+                    p.account_pair(&login, &b, bearer.unwrap_or_default(), imported.as_ref())
+                })
+                .and_then(|(grant, token)| {
+                    app.store
+                        .own(&login.account, &grant, follow_of(&grant).as_deref())
+                        .map_err(|_| ("store", None))?;
+                    p.initialize_imported_profile(&app.store, &login.account, &grant)
+                        .map_err(|e| (e, None))?;
+                    Ok(json!({"ok":true,"grant":grant,"token":token,"memoryTransferred":false}))
+                }),
         }
     } else {
         run().map_err(|e| (e, None))
@@ -606,7 +624,7 @@ mod tests {
         if b.get("idempotencyKey").is_none() {
             b["idempotencyKey"] = json!(id("pair_"));
         }
-        p.account_pair(login, &b, "synthetic-private-account-credential")
+        p.account_pair(login, &b, "synthetic-private-account-credential", None)
     }
     #[test]
     fn login_is_idempotent_nonexpiring_account_bound_and_revocable() {
@@ -748,8 +766,45 @@ mod tests {
         let imported_rows = p.account_souls(&store, "owner").unwrap();
         assert_eq!(imported_rows[0]["world"], "garden");
         assert_eq!(imported_rows[0]["name"], "Imported Soul");
-        p.existing_import(&store, &owner, &adopt).unwrap();
-        let result = pairing(&p, &owner, &adopt);
+        let candidate = p.existing_import(&store, &owner, &adopt).unwrap();
+        assert!(
+            p.soul_of(&imported_grant).unwrap().is_none(),
+            "candidate lookup does not pair"
+        );
+        let mut approval = adopt.clone();
+        approval["idempotencyKey"] = json!(id("import_"));
+        connected.store(true, Ordering::SeqCst);
+        assert_eq!(
+            p.account_pair(
+                &owner,
+                &approval,
+                "synthetic-private-account-credential",
+                candidate.as_ref()
+            ),
+            Err(("soul-connected", None))
+        );
+        assert!(
+            p.soul_of(&imported_grant).unwrap().is_none(),
+            "refused adoption never pairs an import"
+        );
+        assert_eq!(
+            p.db.lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM soul_profiles_v1 WHERE grant_text=?1",
+                    params![imported_grant],
+                    |r| r.get::<_, u64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        connected.store(false, Ordering::SeqCst);
+        let result = p.account_pair(
+            &owner,
+            &approval,
+            "synthetic-private-account-credential",
+            candidate.as_ref(),
+        );
         assert!(
             result.is_ok(),
             "imported adoption refusal: {:?}",

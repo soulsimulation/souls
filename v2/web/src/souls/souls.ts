@@ -28,8 +28,9 @@ export class SoulsCopy {
   /** Utterances that may still be on screen (their time not over at the newest part's end). */
   private live: SaidRec[] = [];
 
-  apply(p: Pick<PartRec, 'nodes' | 'removed' | 'said' | 'to'>): void {
-    for (const n of p.nodes) {
+  /** Reconcile authorized nodes without changing speech, event history or time. */
+  snapshot(nodes: NodeRec[], removed: string[]): void {
+    for (const n of nodes) {
       if (!isSoul(n)) continue;
       const had = this.souls.get(n.id);
       // A part that does not carry the name field leaves the name it had.
@@ -40,10 +41,14 @@ export class SoulsCopy {
         description: n.description !== undefined ? n.description : had?.description ?? null,
       });
     }
-    for (const id of p.removed) {
+    for (const id of removed) {
       this.souls.delete(id);
       this.recent.delete(id);
     }
+  }
+
+  apply(p: Pick<PartRec, 'nodes' | 'removed' | 'said' | 'to'>): void {
+    this.snapshot(p.nodes, p.removed);
     for (const s of p.said ?? []) {
       if (s.words === null) continue; // not in the public text file: not drawn
       const r = this.recent.get(s.speaker) ?? this.recent.set(s.speaker, []).get(s.speaker)!;
