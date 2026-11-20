@@ -70,7 +70,8 @@ export async function prepare({base,paths,recipe,signal,arm}){
   owned={base,paths,recipe,signal,commands:new Set(),sockets:new Set(),ordinal:0,observations:0,homes:{}};
   for(const name of ['desktop','laptop','other','phone']){const home=join(paths.data,'homes',name);mkdirSync(home,{recursive:true,mode:0o700});owned.homes[name]=home;}
   owned.cbor=await import(pathToFileURL(join(recipe.checkout,'v2/web/node_modules/cborg/cborg.js')).href);
-  owned.first=await ask(arm==='phone'?owned.homes.phone:owned.homes.desktop,arm==='phone'?'Proof phone':'Proof desktop');return {first:owned.first};
+  owned.first=await ask(arm==='phone'?owned.homes.phone:owned.homes.desktop,arm==='phone'?'Proof phone':'Proof desktop');
+  requireThat(owned.first.ok&&owned.first.step==='approve-account','approval-request-before-browser');return {first:owned.first};
 }
 export async function beforeNavigation(){
   return async()=>{

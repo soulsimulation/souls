@@ -1,7 +1,7 @@
 // Fixed native-v2 account proof recipe. Private artifact receipts are pinned by the attempt wrapper.
 import { createHash } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, openSync, closeSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, openSync, closeSync, lstatSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createConnection } from 'node:net';
@@ -62,11 +62,54 @@ export async function startV2AccountFixture({ checkout, data, log, port, artifac
   launch(process.execPath,[join(root,'tools/proof/v2-account-fixture.mjs'),'--origin',originConfig]);
   let caddy=readFileSync(join(root,'v2/tools/ops/proxy/soul-game.caddy'),'utf8');
   caddy=caddy.replace('https://soul.game',base).replaceAll('/usr/local/lib/souls/web',inside(root,manifest.web.path)).replaceAll('/var/lib/souls-routes/slugs',join(target,'slugs')).replaceAll('/var/lib/souls-routes',join(target,'routes-unused')).replaceAll('localhost:7310',`127.0.0.1:${directoryPort}`).replaceAll('localhost:7320',`127.0.0.1:${originPort}`).replaceAll('localhost:@@PRODUCTION_PORT@@',`127.0.0.1:${originPort}`);
-  const config=join(target,'Caddyfile');writeFileSync(config,'{\n admin off\n auto_https off\n}\n'+caddy,{mode:0o600});
-  launch(manifest.caddy.path,['run','--adapter','caddyfile','--config',config]);
+  // Do not let this synthetic proxy persist config/storage in any default or personal directory.
+  const caddyConfig=join(target,'caddy-config'),caddyData=join(target,'caddy-data'),storage=join(target,'caddy-storage');
+  for(const dir of [caddyConfig,caddyData,storage])mkdirSync(dir,{mode:0o700});
+  const diagnostic=`
+ log {
+  output stderr
+  format filter {
+   wrap json
+   fields {
+    request delete
+    resp_headers delete
+   }
+  }
+ }
+ map {http.request.uri.path} {proof_route} {
+  ~^/v1/agent/account(?:/|$) account-agent
+  ~^/v1/account/ account-browser
+  ~^/v1/pair/ pairing-api
+  /pair pairing-page
+  /v1/auth/config auth-config
+  ~^/src/account account-page
+  default other
+ }
+ log_append method {method}
+ log_append route {proof_route}
+`;
+  if(!caddy.includes(base+' {'))fail('proxy-site');
+  caddy=caddy.replace(base+' {',base+' {\n'+diagnostic);
+  const config=join(target,'Caddyfile');writeFileSync(config,'{\n admin off\n auto_https off\n persist_config off\n storage file_system '+JSON.stringify(storage)+'\n}\n'+caddy,{mode:0o600});
+  launch(manifest.caddy.path,['run','--adapter','caddyfile','--config',config],{XDG_CONFIG_HOME:caddyConfig,XDG_DATA_HOME:caddyData});
+  const probe=async address=>new Promise((ok,reject)=>{
+    const within=Math.min(250,remaining()),stream=createConnection(address);const abort=()=>stream.destroy(signal.reason);
+    signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();stream.setTimeout(within,()=>stream.destroy(Error('readiness-timeout')));
+    stream.once('connect',()=>{stream.destroy();ok();});stream.once('error',reject);stream.once('close',()=>signal?.removeEventListener('abort',abort));
+  });
+  const get=url=>fetch(url,{signal:AbortSignal.any([signal,AbortSignal.timeout(Math.min(500,remaining()))].filter(Boolean))});
   while(Date.now()<until){
     signal?.throwIfAborted();if(children.some(c=>c.exitCode!==null||c.signalCode!==null))fail('child-exited');
-    try{const answer=await fetch(base+'/preview/w/garden/v1/bootstrap',{signal:AbortSignal.any([signal,AbortSignal.timeout(Math.min(500,remaining()))].filter(Boolean))});if(answer.ok){const body=await answer.json();if(body.world==='garden'&&body.gateway==='/preview/w/garden/v2/ws')return {child:children[0],children,base,dataDir:target,recipe:{kind:'v2-account',checkout:root,worldURL:base+'/preview/w/garden/',gatewayURL:base.replace('http:','ws:')+'/preview/w/garden/v2/ws',control:socket}};}}catch(error){if(signal?.aborted)throw error;}
+    try{
+      for(const endpoint of [`http://127.0.0.1:${directoryPort}`,base]){
+        const response=await get(endpoint+'/v1/agent/account');
+        if(response.status!==405||(await response.json()).refused!=='method')throw Error('directory-not-ready');
+      }
+      await probe({host:'127.0.0.1',port:gatewayPort});
+      const control=lstatSync(join(target,socket));if(!control.isSocket()||(control.mode&0o777)!==0o600)throw Error('control-not-ready');
+      const answer=await get(base+'/preview/w/garden/v1/bootstrap');
+      if(answer.ok){const body=await answer.json();remaining();if(body.world==='garden'&&body.gateway==='/preview/w/garden/v2/ws'&&children.every(c=>c.exitCode===null&&c.signalCode===null))return {child:children[0],children,base,dataDir:target,recipe:{kind:'v2-account',checkout:root,worldURL:base+'/preview/w/garden/',gatewayURL:base.replace('http:','ws:')+'/preview/w/garden/v2/ws',control:socket}};}
+    }catch(error){if(signal?.aborted)throw error;}
     await new Promise(r=>setTimeout(r,Math.min(25,remaining())));
   }
   fail('readiness-timeout');
