@@ -108,7 +108,7 @@ export function decodeMesh(b: Uint8Array): LodMesh {
   const textured = magic === TEXTURED_MAGIC;
   const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
   const n = dv.getUint32(8, true), k = dv.getUint32(12, true);
-  const copy = b.slice(16).buffer; // aligned
+  const copy = new Uint8Array(b.subarray(16)).buffer; // exact aligned copy, including Buffer inputs
   if (copy.byteLength !== n * (12 * 3 + 8 + 16 + (textured ? 10 : 0)) + k * 4) throw new Error('crowd-mesh/1: wrong length');
   let at = 0;
   const take = <T>(C: new (buf: ArrayBuffer, off: number, len: number) => T, len: number, bytes: number): T => {

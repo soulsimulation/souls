@@ -65,11 +65,12 @@ export class Crowd {
     return m.lods.map((g, level) => {
       const anim = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(THREE.DynamicDrawUsage);
       const mix = new THREE.InstancedBufferAttribute(new Float32Array(cap * 2), 2).setUsage(THREE.DynamicDrawUsage);
-      const groups = g.groups.length ? g.groups : [{ start: 0, count: g.index?.count ?? g.getAttribute('position').count, materialIndex: 0 }];
+      const groups = m.sourceMaterials && g.groups.length ? g.groups : [{ start: 0, count: g.index?.count ?? g.getAttribute('position').count, materialIndex: 0 }];
       const parts = groups.map((group) => {
+        const source = m.sourceMaterials?.[group.materialIndex ?? 0];
+        if (m.sourceMaterials && !source) throw new Error('body.material-missing');
         const geo = g.clone(); geo.clearGroups(); geo.setDrawRange(group.start, group.count);
         geo.setAttribute('aAnim', anim); geo.setAttribute('aMix', mix);
-        const source = m.sourceMaterials?.[group.materialIndex ?? 0];
         const material = source?.clone() ?? new THREE.MeshLambertMaterial();
         if ('vertexColors' in material) material.vertexColors = true;
         const skin = source as THREE.MeshStandardMaterial | undefined;

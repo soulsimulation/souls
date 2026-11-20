@@ -96,6 +96,7 @@ test('material batches retain UV seams and actual maps while capacity growth rem
   const merged = merge({ scene: root } as any);
   assert.equal(merged.sourceMaterials[0], red); assert.equal(merged.sourceMaterials[1], blue); assert.ok(merged.mesh.uv?.some((v) => v === 1));
   const geo = geometry(merged.mesh), m = model('textured'); m.lods = [geo, geo, geo]; m.sourceMaterials = merged.sourceMaterials;
+  assert.throws(() => new Crowd([{ ...m, sourceMaterials: [red] }], 1), /body.material-missing/);
   const crowd = new Crowd([m], 1), count = crowd.group.children.length;
   assert.ok(count > 3); crowd.add(0); crowd.add(0); assert.equal(crowd.group.children.length, count);
   for (const child of crowd.group.children) assert.ok((child as THREE.InstancedMesh).material instanceof THREE.MeshStandardMaterial);
@@ -115,6 +116,13 @@ test('CMESH2 retains textured material seams and legacy CMESH1 remains byte-comp
   const textured = { ...original, uv: new Float32Array(original.position.length / 3 * 2).map((_, i) => i % 2), material: new Uint16Array(original.position.length / 3).fill(1) };
   const encoded = encodeMesh(textured); assert.equal(new TextDecoder().decode(encoded.slice(0, 6)), 'CMESH2');
   assert.deepEqual(decodeMesh(encoded), textured); assert.ok(cluster(textured, 0.015).uv); assert.ok(cluster(textured, 0.015).material?.every((m) => m === 1));
+  for (const bytes of [legacy, encoded]) {
+    assert.deepEqual(encodeMesh(decodeMesh(Buffer.from(bytes))), bytes);
+    const backing = Buffer.alloc(bytes.length + 14); backing.set(bytes, 7);
+    const offset = backing.subarray(7, 7 + bytes.length);
+    assert.deepEqual(encodeMesh(decodeMesh(offset)), bytes);
+    assert.deepEqual(encodeMesh(decodeMesh(new Uint8Array(backing.buffer, backing.byteOffset + 7, bytes.length))), bytes);
+  }
   const seam: LodMesh = {
     position: Float32Array.of(0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, -1, 0),
     normal: new Float32Array(18).fill(1), color: new Float32Array(18).fill(0.5),
