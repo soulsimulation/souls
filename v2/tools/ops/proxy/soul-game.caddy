@@ -7,8 +7,9 @@
 # today's file. The new system's loopback addresses are the install's (v2/docs/runbook/install.md): the directory on
 # 7310, the viewers' origin on 7320, the page's files in /usr/local/lib/souls/web.
 #
-# - A slug routes by a map made from the directory: routes.mjs (beside this file, run each minute by
-#   souls-routes.timer) keeps one empty file per world the directory lists in /var/lib/souls-routes/slugs. A listed
+# - A slug routes by a map made from the directory and trusted activation metadata: routes.mjs (beside this file,
+#   run each minute by souls-routes.timer) keeps one file per listed, mapped, explicitly canonical world in
+#   /var/lib/souls-routes/slugs. An active
 #   slug's page, served client and its config come from the new system; every other address under /w/<slug>/ (today's
 #   API, the agent and god routes, sockets) still reaches today's launcher, which gives old clients its own answers (R18), never a
 #   redirect that would drop their token. Any slug not listed is today's launcher's, as before.
@@ -23,42 +24,73 @@
 #   system's, answered by the viewers' origin (v2/tools/origin/site.mjs; O23, #3324).
 # - /sitemap.xml is routes.mjs's: today's sitemap plus the directory's worlds; robots.txt stays today's.
 # - When an origin cannot answer, a page a browser asked for gets today's poster ("back in a moment"), as before.
+# Canonical and preview pages use identical static assets, bootstrap and native gateway routing.
+(v2_world) {
+	@page path_regexp ^/(?:preview/)?w/[^/]+/(index\.html)?$
+	@files path_regexp files ^/(?:preview/)?w/[^/]+(/assets/.+)$
+	@panel path_regexp ^/(?:preview/)?w/[^/]+/src/panel/(index\.html)?$
+	@native path_regexp ^/(?:preview/)?w/[^/]+/(v1/bootstrap|views/world\.json|v2/ws|v2/creator-token)$
+	@client path_regexp client ^/(?:preview/)?w/([^/]+)/(eden\.mjs|skill\.md|creator\.md|instructions\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1/config)$
+	handle @page {
+		header X-Souls-System v2
+		rewrite * /index.html
+		root * /usr/local/lib/souls/web
+		file_server
+	}
+	handle @panel {
+		header X-Souls-System v2
+		rewrite * /src/panel/index.html
+		root * /usr/local/lib/souls/web
+		file_server
+	}
+	handle @files {
+		header X-Souls-System v2
+		rewrite * {re.files.1}
+		root * /usr/local/lib/souls/web
+		file_server
+	}
+	handle @native {
+		header X-Souls-System v2
+		reverse_proxy localhost:7320 {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+	handle @client {
+		header X-Souls-System v2
+		rewrite * /w/{re.client.1}/{re.client.2}
+		reverse_proxy localhost:7320 {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+	handle {
+		header X-Souls-System today
+		reverse_proxy localhost:@@PRODUCTION_PORT@@ {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+}
 https://soul.game {
 	header {
 		?X-Frame-Options SAMEORIGIN
 		?Content-Security-Policy "frame-ancestors 'self'"
 	}
-	@api path /__sim/* /v1/* /w/*/v1/* /s/*
+	@api path /__sim/* /v1/* /w/*/v1/* /w/*/v2/* /preview/w/*/v1/* /preview/w/*/v2/* /s/*
 	header @api ?X-Robots-Tag "noindex, nofollow"
 
-	@v2world {
-		path_regexp ^/w/[a-z0-9][a-z0-9-]*(/|$)
-		file {
-			root /var/lib/souls-routes/slugs
-			try_files /{http.request.uri.path.1}
-		}
+	@preview path_regexp ^/preview/w/[a-z0-9][a-z0-9-]{0,62}(/|$)
+	handle @preview {
+		header X-Robots-Tag "noindex, nofollow"
+		import v2_world
 	}
+	@v2world path_regexp v2world ^/w/([a-z0-9][a-z0-9-]{0,62})(/|$)
 	handle @v2world {
-		@page path_regexp ^/w/[^/]+/(index\.html)?$
-		@files path_regexp files ^/w/[^/]+(/assets/.+)$
-		handle @page {
-			header X-Souls-System v2
-			rewrite * /?world={http.request.uri.path.1}&{query}
-			root * /usr/local/lib/souls/web
-			file_server
+		# The outer match sets the slug capture before the dependent activation-file lookup.
+		@active file {
+			root /var/lib/souls-routes/slugs
+			try_files /{re.v2world.1}
 		}
-		handle @files {
-			header X-Souls-System v2
-			rewrite * {re.files.1}
-			root * /usr/local/lib/souls/web
-			file_server
-		}
-		@client path_regexp ^/w/[^/]+/(eden\.mjs|skill\.md|creator\.md|instructions\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1/config)$
-		handle @client {
-			header X-Souls-System v2
-			reverse_proxy localhost:7320 {
-				header_up X-Forwarded-For {client_ip}
-			}
+		handle @active {
+			import v2_world
 		}
 		handle {
 			header X-Souls-System today
@@ -71,6 +103,21 @@ https://soul.game {
 	handle / {
 		header X-Souls-System v2
 		rewrite * /src/home/
+		root * /usr/local/lib/souls/web
+		file_server
+	}
+	@pair path /pair /pair/
+	handle @pair {
+		header X-Souls-System v2
+		header X-Robots-Tag "noindex, nofollow"
+		rewrite * /src/pairing/card.html
+		root * /usr/local/lib/souls/web
+		file_server
+	}
+	@browser path /src/account /src/account/* /src/worlds /src/worlds/* /src/panel /src/panel/*
+	handle @browser {
+		header X-Souls-System v2
+		header X-Robots-Tag "noindex, nofollow"
 		root * /usr/local/lib/souls/web
 		file_server
 	}
@@ -95,14 +142,14 @@ https://soul.game {
 		root * /var/lib/souls-routes
 		file_server
 	}
-	@site path /changelog /changelog/ /changelog.md /v1/feed /ops
+	@site path /changelog /changelog/ /changelog.md /v1/feed /ops /v1/auth/config
 	handle @site {
 		header X-Souls-System v2
 		reverse_proxy localhost:7320 {
 			header_up X-Forwarded-For {client_ip}
 		}
 	}
-	@directory path /v1/worlds /v1/account/*
+	@directory path /v1/worlds /v1/account/* /v1/pair/*
 	handle @directory {
 		header X-Souls-System v2
 		reverse_proxy localhost:7310 {

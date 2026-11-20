@@ -1,8 +1,7 @@
 <!doctype html>
 <!-- The approval card (Engine v2 W2, #2705). Opening it changes nothing: it shows a pairing request only to the
      signed-in owner, through a POST, and approves only through another signed-in POST after the owner confirms the
-     code matches the one on their own screen (RFC 8628 §5.4). Signed in means W1's session token (kept by the web
-     app in sessionStorage as `souls.session`), or on a test world W1's test person typed here. -->
+     code matches the one on their own screen (RFC 8628 §5.4). Sign-in uses the existing provider session, or an explicit local test person on HTTP loopback only. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -37,6 +36,7 @@
   <h1>A device is asking to act as your Soul</h1>
   <p class="warn">Approve only if you started this yourself, on a machine you control, and the code below matches the
     code on your own screen. Anyone who sent you this link can be asking for your Soul.</p>
+  <button id="signin" type="button">Sign in</button>
   <form id="who" hidden>
     <label>Test person <input type="text" id="person" autocomplete="off" required></label>
     <button>Show the request</button>
@@ -55,43 +55,6 @@
   </section>
   <p id="said" role="status"></p>
 </main>
-<script>
-  const $ = (id) => document.getElementById(id);
-  const code = new URLSearchParams(location.search).get('code') ?? '';
-  let session = null;
-  try { session = sessionStorage.getItem('souls.session'); } catch { /* storage blocked */ }
-  const person = () => $('person').value.trim();
-  async function post(path, body) {
-    const headers = { 'content-type': 'application/json' };
-    if (session) headers.authorization = `Bearer ${session}`;
-    else body.test_person = person();
-    const r = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body), credentials: 'omit' });
-    return { status: r.status, body: await r.json() };
-  }
-  const age = (s) => s < 90 ? `${s} seconds ago` : s < 5400 ? `${Math.round(s / 60)} minutes ago` : s < 129600 ? `${Math.round(s / 3600)} hours ago` : `${Math.round(s / 86400)} days ago`;
-  async function show() {
-    const { status, body } = await post('/v1/pair/show', { code });
-    if (status !== 200) { $('said').textContent = `Nothing to approve: ${body.refused}`; return; }
-    $('code').textContent = body.code;
-    $('device').textContent = body.device;
-    $('label').textContent = body.label;
-    $('soul').textContent = body.soul ?? 'a new Soul';
-    $('age').textContent = age(body.age);
-    $('connected').textContent = body.connected
-      ? `${body.connected}${body.force ? ' (this request replaces it)' : ' (this request will be refused unless the agent forces it)'}`
-      : 'no device';
-    $('who').hidden = true;
-    $('card').hidden = false;
-  }
-  $('match').onchange = () => { $('approve').disabled = !$('match').checked; };
-  $('approve').onclick = async () => {
-    $('approve').disabled = true;
-    const { status, body } = await post('/v1/pair/approve', { code, confirm: true });
-    $('said').textContent = status === 200 ? 'Approved. The device now holds your Soul.'
-      : `Refused: ${body.refused}${body.device ? ` (connected to ${body.device})` : ''}`;
-  };
-  $('who').onsubmit = (e) => { e.preventDefault(); show(); };
-  if (session) show(); else $('who').hidden = false;
-</script>
+<script type="module" src="./card.ts"></script>
 </body>
 </html>
