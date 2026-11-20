@@ -9,4 +9,5 @@ Type=oneshot
 User=simworlds
 StateDirectory=souls-routes
 StateDirectoryMode=0755
+EnvironmentFile=-/etc/souls/origin.env
 ExecStart=/usr/bin/node --no-warnings /srv/sim-worlds/production/v2/tools/ops/proxy/routes.mjs --directory http://localhost:7310 --launcher http://localhost:@@PRODUCTION_PORT@@ --origin https://soul.game --out /var/lib/souls-routes

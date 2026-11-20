@@ -7,11 +7,13 @@
 //! deploy pinned <world>
 //! ```
 //!
-//! The probe is R5b's sync ask for the world's root hash (`supervisor::deploy::Probe::Ask`, O18c #3524): it needs no
-//! body, so a release never drives anyone's Soul, and it is never logged. The machine's folder is `$WORLDS_ROOT`; the
-//! directory is the object store the `DIRECTORY_STORE_*` variables name, or `$WORLDS_ROOT/directory`. Prints the timeline and how it ended; exits 0
-//! when the new build is kept or the rollback served, 1 otherwise. It holds the machine's step (`step.rs`) shared while
-//! it runs, and refuses `deploy.gateway-upgrading` while the gateway is upgraded (O16, #2809).
+//! The release probe has its own unpaired operator identity (O18d #3575). It joins through K10/C3, commits an
+//! ordinary description on its own body, and retires; it never drives a user's Soul. Its recovery receipt is
+//! `$WORLDS_ROOT/deploys/<world>.probe`, protected by a stable sibling lock for the whole deployment. The machine's
+//! folder is `$WORLDS_ROOT`; the directory is the object store the `DIRECTORY_STORE_*` variables name, or
+//! `$WORLDS_ROOT/directory`. Prints the timeline and how it ended; exits 0 when the new build is kept or the rollback
+//! served, 1 otherwise. It holds the machine's step (`step.rs`) shared while it runs, and refuses
+//! `deploy.gateway-upgrading` while the gateway is upgraded (O16, #2809).
 // Operations, not the engine: the rollback's timeline is wall-clock time (the wall-clock rule, K7).
 #![allow(clippy::disallowed_methods)]
 
@@ -70,13 +72,14 @@ fn main() {
     let build = from_hex(a.get(at + 1).unwrap_or_else(|| fail("no build named")))
         .unwrap_or_else(|e| fail(e));
     let num = |n: &str, d: u64| get(n).map_or(d, |v| v.parse().unwrap_or_else(|_| fail(n)));
-    // R5b's sync ask, which needs no body: a release never drives anyone's Soul (O18c, #3524).
-    let mut probe = Probe::Ask(0);
     // Never in the same step as the gateway's upgrade.
     let _step = step::deploying(&root).unwrap_or_else(|e| {
         println!("refused: {e}");
         std::process::exit(1)
     });
+    // O18d: no user pairing or profile. A stable per-world probe lock also serializes interrupted-watch recovery.
+    let mut probe = Probe::operator(&root.join("deploys").join(format!("{}.probe", world.name())))
+        .unwrap_or_else(|e| fail(e));
     let d = Deploy {
         store,
         root: &root,

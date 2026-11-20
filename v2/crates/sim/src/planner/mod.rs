@@ -40,6 +40,56 @@ pub fn reach(a: Vec3, b: Vec3) -> i64 {
     i64::try_from((d(a.x, b.x) + d(a.y, b.y) + d(a.z, b.z)).isqrt()).unwrap_or(i64::MAX)
 }
 
+/// Exact form order and cursor, separate from a gateway walk on the same body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FormKey {
+    pub body: replica::ids::Id,
+    pub intent: replica::ids::Id,
+    pub stage: usize,
+    pub step: usize,
+    pub kind: FormKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FormKind {
+    Walk,
+    Line,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FormQuery {
+    Walk {
+        node: replica::ids::Id,
+        at: Vec3,
+        reach: i64,
+    },
+    Line {
+        to: Vec3,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FormQuestion {
+    pub key: FormKey,
+    pub generation: u64,
+    pub body: crate::mover::Body,
+    pub query: FormQuery,
+}
+
+#[derive(Clone, Debug)]
+pub enum FormResult {
+    Walk(Vec<crate::walk::Leg>),
+    Line(Result<crate::walk::town::Line, replica::effects::Refusal>),
+}
+
+#[derive(Clone, Debug)]
+pub struct FormAnswer {
+    pub generation: u64,
+    /// The same immutable snapshot as the originating batch, checked by identity on the clock.
+    pub map: std::sync::Arc<crate::ground::Versions>,
+    pub result: FormResult,
+}
+
 /// The planner over its own town.
 pub struct Planner {
     pub town: Town,
@@ -82,6 +132,37 @@ impl Planner {
                 (q.body, q.thing, q.slot, q.order),
                 [reach(q.at, q.points[0]), reach(q.at, q.points[1])],
             );
+        }
+        if let Some(map) = &w.form_map
+            && **map == self.town.versions
+        {
+            for q in &w.forms {
+                out.searched += 1;
+                let result = match q.query {
+                    FormQuery::Walk { node, at, reach } => {
+                        let view = self.town.view();
+                        let legs = view
+                            .on_floor(node, at)
+                            .and_then(|(floor, at, _)| {
+                                let to = view.stand_near(floor, at, reach, Some(&q.body)).or_else(
+                                    || (floor == crate::walk::node_of(&q.body)).then_some(at),
+                                )?;
+                                view.plan(&q.body, floor, to).ok()
+                            })
+                            .unwrap_or_default();
+                        FormResult::Walk(legs)
+                    }
+                    FormQuery::Line { to } => FormResult::Line(self.town.line(&q.body, to)),
+                };
+                out.forms.insert(
+                    q.key,
+                    FormAnswer {
+                        generation: q.generation,
+                        map: std::sync::Arc::clone(map),
+                        result,
+                    },
+                );
+            }
         }
         out
     }

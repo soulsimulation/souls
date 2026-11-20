@@ -72,7 +72,7 @@ step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit
 
 # The page's pose (V7, #2716): a body's bones as a function of its record and time, the same at 30 and 144 frames a
 # second, in any order and in a fresh process, with the hand on its contact point (web/src/pose/pose.test.ts).
-step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test web/src/pose/*.test.ts'
+step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test web/src/pose/*.test.ts web/src/source/signin.test.ts'
 # The words path (V1b, #3361): a local world's said sentence, and a body's name and description, through the page's
 # worker within the stream's lag; a whisper in no public file (web/src/source/words.test.ts). A still world is drawn
 # at once and kept live (V5b, web/src/source/still.test.ts).
@@ -137,6 +137,8 @@ step checker-artifact bash -c 'CARGO_TARGET_DIR=target/checker cargo build -p re
 step client-sync node --test client/src/sync/*.test.mjs
 # The resident daemon (R6, #2700): ten forced drops against the real gateway and the world's end of it (I4); R5b's resync after a long cut.
 step client-daemon bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/daemon/*.test.mjs'
+# The world's clock on every copy (E7b, #3516): world now from the root's fields, against `worldd serve` across a rate change.
+step client-clock bash -c 'cargo build -p gatewayd -p worldd -p testworld --locked --quiet && node --test client/src/clock/*.test.mjs'
 # The thin command, the brief and find (R7, #2701): 100 scripted command sequences against the same gateway and world.
 step client-command bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet &&
   node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs client/src/shoot/*.test.mjs client/src/home/*.test.mjs'

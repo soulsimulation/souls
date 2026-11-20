@@ -7,7 +7,7 @@ each rule does is in the header of [`soul-game.caddy`](soul-game.caddy).
 |---|---|---|
 | `soul-game.caddy` | `/etc/caddy/sites/soul-game.caddy` | `soul.game` after the switch; replaces today's file of that name |
 | `souls-game.caddy` | `/etc/caddy/sites/souls-game.caddy` | `souls.game` redirects to `soul.game`, path and query kept |
-| `routes.mjs` | run by `souls-routes.timer` | the map from the directory: `/var/lib/souls-routes/slugs/<slug>` and `sitemap.xml` |
+| `routes.mjs` | run by `souls-routes.timer` | the active map from the directory and trusted placement metadata: `/var/lib/souls-routes/slugs/<slug>` and `sitemap.xml` |
 | `souls-routes.service`, `.timer` | `/etc/systemd/system/` | runs `routes.mjs` each minute as `simworlds` |
 | `standin.mjs` | not installed | the local stand-in that proves all of this (below) |
 
@@ -75,3 +75,48 @@ BACK
 ```
 
 The map in `/var/lib/souls-routes` is kept (it holds no data); today's file never reads it.
+
+## World gateway/bootstrap metadata (O19b)
+
+The origin reads `SOULS_WORLD_ROUTES`, default `/var/lib/souls/routes/worlds.json`. This is trusted writable
+placement metadata, owned and writable only by the placement/operator account. Published mode0644 permits both
+the origin and the existing route-generator account to read it; the update lock is mode0700. It contains no session
+or signing keys. Public requests cannot update it. Each entry in `schema: "souls/world-routes/1"`, `worlds` is:
+
+```json
+{"eden":{"gateway":"<native gateway HTTP loopback origin>","stream":"/s/<stream directory>/","history":"/s/<history directory>/","canonical":false}}
+```
+
+The file's `worlds` object supports any number of validated slugs. Gateway origins must be HTTP loopback origins,
+with no credentials, path, query or fragment. Stream/history are public `/s/` paths; bootstrap never exposes native
+addresses. Origin relays exactly the mapped WebSocket and creator-token exchange. It forwards the original bearer
+and browser Origin, never an identity header; foreign Origin and public-address test bearers are refused.
+
+`/preview/w/eden/` loads the built viewer and fetches its own `v1/bootstrap`, with no manual query. Its creator panel
+is `/preview/w/eden/src/panel/`. Canonical paths have the same shape without `/preview`. The built pairing card is
+`/pair?code=…`, and its module comes from the built assets; pairing API calls stay with the directory. Account and
+world-management pages remain under `/src/account/` and `/src/worlds/`.
+
+`canonical` defaults to **false**. Preview bootstrap/relay is available for mapped worlds; canonical bootstrap/relay
+also requires `canonical: true`. The slug generator additionally requires that the directory lists that world.
+Thus installing preview routes must not activate Eden's canonical page. Do not add canonical slug files by hand.
+
+Placement (W3b) and cutover (O19c) must both import `updateWorldRoute` from `route-config.mjs` and use this operation:
+
+```js
+await updateWorldRoute(file, world, { gateway, stream, history, canonical });
+```
+
+It obtains an exclusive per-file directory lock, reads the latest file, patches only the named world's supplied
+fields, validates the complete result, fsyncs and atomically renames it. Concurrent updates preserve unrelated
+worlds and fields. A busy/stale lock refuses by name after five seconds; never delete another live writer's lock.
+The origin never writes. A newly public world's placement publishes `canonical: true`; Eden's preview publishes
+`false`. A failed metadata validation leaves the prior file intact.
+
+**Cutover handoff to O19c:** update only Eden's activation using this writer, then synchronously run the same
+`routes.mjs` service to refresh canonical membership before confirming the switch. Its timer reads the same file,
+so it must preserve the chosen activation. Undo patches Eden back to its prior activation and synchronously refreshes
+the slug map, preserving worlds created meanwhile. Save the prior Eden entry/activation, not a whole-map snapshot
+that could erase post-switch worlds. Remove preview exposure only after the release owner completes its required
+walks. The existing SWITCH/BACK scripts above need O19c's activation integration before release use; O19b does not
+perform or modify the cutover.

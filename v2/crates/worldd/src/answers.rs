@@ -65,11 +65,13 @@
 //! before the change is on the disk, never waits for a tick, and never delays one.
 //!
 //! **The world's tick** (K18, #3160). One loop per zone, run by K7's ticker at the clock's rate (one tick each
-//! [`Config::tick`]; world time is real time in µs from the Unix epoch, rate one). Each tick, in the trunk's order
+//! [`Config::tick`]; world time starts as real time in µs from the Unix epoch, rate one, and [`Config::rate`] may
+//! apply another at a start, published on the zone root). Each tick, in the trunk's order
 //! (T1: everything reads the state as of the tick's start, and what a tick writes is seen from the next):
 //!
 //! 0. the intents that arrived since the last tick are taken (the recorder's inputs, K12);
-//! 1. due timers: acts whose deadline passed end `act.timed-out` (K9's due list); the world node's light, day and
+//! 1. due timers: acts whose deadline passed end `act.timed-out` (K9's due list); at a start's first tick, the
+//!    mapping it applies, as its time effect and the zone root's fields (E7b, #3516); the world node's light, day and
 //!    weather timers due before the next tick fire at their due times and write their entries (E6, #3369; a first
 //!    start writes [`Config::sky`] when the node holds no settings); loose things' ends due fire likewise (F10b,
 //!    [`crate::loose`]); a move's phase timers fire;
@@ -140,7 +142,7 @@ use replica::select::Spot;
 use replica::select::wire::SPOT;
 use replica::sky::{self, Sky};
 use replica::sync::Records;
-use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
+use replica::time::{Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline};
 use replica::views::Redactions;
 use replica::world_model::Audience;
 use sim::audit::Auditor;
@@ -490,6 +492,11 @@ pub struct Config {
     /// Each log record once it is on the disk, input records included, in order (C1, #3365): `worldd serve`'s own
     /// view tier and shipper read them here, off the clock thread.
     pub synced: Option<Sender<Synced>>,
+    /// The clock's rate, world µs per real µs as `(num, den)` (E7b, #3516). With one, the mapping in force is
+    /// published on the zone root ([`replica::time::F_CLOCK_WORLD`]) with its time effect, at the first tick of each
+    /// start that applies a mapping: a first start's (world time is real time), or a new one when the rate differs
+    /// from the last logged, continuous with it. `None`: world time is real time and nothing is published.
+    pub rate: Option<(i64, i64)>,
     /// How long a free-running tick waits for each of the bodies' planner batches (K18b); `None` is a tenth of a tick.
     pub planner_wait: Option<Duration>,
     /// A replay's planner batches (K18b): the recorder's `Planned` inputs, body time µs and batches taken there.
@@ -584,6 +591,7 @@ impl Config {
             served: None,
             text: None,
             follow: None,
+            rate: None,
             engine: None,
             join: None,
         }
@@ -812,6 +820,8 @@ struct Clock {
     sky: Option<Heavens>,
     /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
     tick_us: Micros,
+    /// The mappings this start applies and the one in force, written at its first tick (E7b, [`Config::rate`]).
+    clock: Option<Publish>,
     /// Joins and leaves (C3), when the world births its Souls' bodies.
     life: Option<Lives>,
     /// The directory's word (W11b): its file as last read and where its answers go, and the Souls to bring in line
@@ -2161,6 +2171,40 @@ impl Clock {
         self.write_own(vec![changes, timers], "the sky");
     }
 
+    /// The mapping this start applies, as its time effect and the zone root's fields in one part (E7b, #3516).
+    fn put_clock(&mut self, now: Micros) {
+        let Some((applied, latest)) = self.clock.take() else {
+            return;
+        };
+        let zone = self.replica.header().zone;
+        let mut effects = Vec::new();
+        if !applied.is_empty() {
+            effects.push(Effect {
+                envelope: Clock::own(zone, now),
+                body: Body::Time(applied.into_iter().map(TimeEffect::Mapping).collect()),
+                events: None,
+                rest: Rest::new(),
+            });
+        }
+        let sets = latest
+            .fields()
+            .into_iter()
+            .map(|(field, to)| Change::Set {
+                node: zone,
+                field,
+                to,
+                by: None,
+            })
+            .collect();
+        effects.push(Effect {
+            envelope: Clock::own(zone, now),
+            body: Body::Changes(recs_of(sets)),
+            events: None,
+            rest: Rest::new(),
+        });
+        self.write_own(effects, "the clock's mapping");
+    }
+
     /// Step 1 for the world node's sky (E6, #3369): a first start's settings and first light, date and weather at
     /// world time `now`; then each of its timers due before the next tick's start, fired at its due time against what
     /// the node announces then, in K9's order. Nothing runs between changes, so a world that catches up 48 hours
@@ -2594,7 +2638,9 @@ impl Clock {
             }
             self.end(id, |c| c.refusal(actor, sequence, TIMED_OUT));
         }
-        // 1. The world node's sky: its timers due in this tick, each at its due time (E6, #3369).
+        // 1. The clock's mapping, when this start applies one (E7b, #3516); then the world node's sky: its timers due
+        // in this tick, each at its due time (E6, #3369).
+        self.put_clock(now);
         self.fire_sky(now);
         // 1. Loose things' ends due in this tick, each at its due time (F10b, #3476).
         self.fire_loose(now);
@@ -2840,6 +2886,35 @@ impl Clock {
     }
 }
 
+// Diagnostic only: enabled on the I/O threads, never by the deterministic clock. No payload or actor id leaves.
+fn delivery_trace(enabled: bool, stage: &str, frame: &[u8], outcome: &str) {
+    if !enabled {
+        return;
+    }
+    let Ok(d) = decode(frame) else { return };
+    let Value::Map(m) = d.value else { return };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return;
+    };
+    let (Some(actor), Some(Value::Uint(sequence)), Some(Value::Uint(kind))) =
+        (a.get(&1), a.get(&2), a.get(&3))
+    else {
+        return;
+    };
+    let Ok(actor) = encode(actor) else { return };
+    let actor = replica::encode::to_hex(&replica::ids::sha256(&actor));
+    let version = match m.get(&1) {
+        Some(Value::Array(v)) => v.last().and_then(|v| match v {
+            Value::Uint(n) => Some(*n),
+            _ => None,
+        }),
+        _ => None,
+    };
+    eprintln!(
+        "worldd: join-delivery stage={stage} actor-hash={actor} sequence={sequence} kind={kind} version={version:?} outcome={outcome}"
+    );
+}
+
 /// The answers thread: each tick's records appended and on the disk before its answers leave, then the part handed to
 /// the view tier. A log that fails stops it for good: nothing is answered that is not on the disk.
 // Each argument is one consumer of the durable tick (views, follower, served feed, sync thread); a struct would only
@@ -2855,6 +2930,7 @@ fn answer_loop<S: Storage + 'static>(
     mut follow: Option<Offer>,
     syncs: Sender<ToSync>,
 ) {
+    let trace = std::env::var_os("SOULS_JOIN_DELIVERY_TRACE").is_some_and(|v| v == "1");
     for (k, t) in ticks.into_iter().enumerate() {
         let k = k as u64;
         if let Some(m) = &measures {
@@ -2896,11 +2972,21 @@ fn answer_loop<S: Storage + 'static>(
                 }
             }
         }
+        if trace {
+            for (_, frame, _) in &t.replies {
+                delivery_trace(trace, "log-wait", frame, "appended");
+            }
+        }
         if let Some(n) = last
             && let Err(e) = log.wait_durable(n + 1)
         {
             eprintln!("worldd: the log failed, nothing more is answered: {e}");
             return;
+        }
+        if trace {
+            for (_, frame, _) in &t.replies {
+                delivery_trace(trace, "log-durable", frame, "ready");
+            }
         }
         if let Some(tx) = &synced {
             for s in appended {
@@ -2927,7 +3013,13 @@ fn answer_loop<S: Storage + 'static>(
                 None => frame,
             };
             for w in waiters {
-                let _ = w.send(frame.clone());
+                let sent = w.send(frame.clone());
+                delivery_trace(
+                    trace,
+                    "reply-channel",
+                    &frame,
+                    if sent.is_ok() { "queued" } else { "closed" },
+                );
             }
         }
         for (waiters, frame) in t.bare {
@@ -2958,6 +3050,61 @@ fn time(e: replica::time::TimeRefusal) -> Refusal {
         name: "time",
         detail: e.name().to_string(),
     }
+}
+
+/// The mappings a start applies, and the one in force, for its first tick to write (E7b).
+type Publish = (Vec<Mapping>, Mapping);
+
+/// The world's time line at a start (E7b, #3516): the first mapping (world time is real time), then each the log
+/// holds; with a rate (`Config::rate`), a new mapping at real time `real0` when the last one's rate differs, on its
+/// line, so world time does not jump. Gives the line, the mapping in force, and what the first tick writes: the
+/// mappings this start applies, and the one in force, when either is new or the root's fields do not hold it.
+fn timeline(
+    world: &Replica,
+    rate: Option<(i64, i64)>,
+    real0: Micros,
+    tick_us: Micros,
+) -> R<(Timeline, Mapping, Option<Publish>)> {
+    let first = Mapping::new(0, 0, 1, 1).map_err(time)?;
+    let start = |m| -> R<Timeline> {
+        let ticks = TickRate::new(0, 0, 1_000_000 / tick_us).map_err(time)?;
+        Timeline::start(m, ticks, Tempo::per_minute(0, 0, 120).map_err(time)?).map_err(time)
+    };
+    let Some((num, den)) = rate else {
+        return Ok((start(first)?, first, None));
+    };
+    let tree = world.tree();
+    let logged: Vec<Mapping> = tree
+        .time()
+        .iter()
+        .filter_map(|t| match t {
+            TimeEffect::Mapping(m) => Some(*m),
+            _ => None,
+        })
+        .collect();
+    let mut line = start(logged.first().copied().unwrap_or(first))?;
+    for m in logged.iter().skip(1) {
+        line.apply(TimeEffect::Mapping(*m), m.world_us)
+            .map_err(time)?;
+    }
+    let mut last = logged.last().copied().unwrap_or(first);
+    let mut applied = if logged.is_empty() {
+        vec![first]
+    } else {
+        Vec::new()
+    };
+    if last.rate() != Mapping::new(0, 0, num, den).map_err(time)?.rate() {
+        let m = Mapping::new(last.world_at(real0).map_err(time)?, real0, num, den).map_err(time)?;
+        line.apply(TimeEffect::Mapping(m), m.world_us)
+            .map_err(time)?;
+        applied.push(m);
+        last = m;
+    }
+    let held = tree
+        .node(tree.root())
+        .and_then(|n| Mapping::from_fields(n.fields()));
+    let publish = (!applied.is_empty() || held != Some(last)).then_some((applied, last));
+    Ok((line, last, publish))
 }
 
 /// Opens the log in `storage`, replays it onto `world` (the world as built, before any record), and starts the
@@ -3147,14 +3294,6 @@ pub fn start<S: Storage + 'static>(
             detail: format!("a tick of {tick_us} µs is not a whole number of ticks a second"),
         });
     }
-    // World time is real time, µs from the Unix epoch (rate one); tick n starts at n ticks from it.
-    let mapping = Mapping::new(0, 0, 1, 1).map_err(time)?;
-    let line = Timeline::start(
-        mapping,
-        TickRate::new(0, 0, 1_000_000 / tick_us).map_err(time)?,
-        Tempo::per_minute(0, 0, 120).map_err(time)?,
-    )
-    .map_err(time)?;
     let shared = Arc::new(Mutex::new(0));
     let mut pace: Box<dyn Pace + Send> = match (cfg.lockstep, cfg.clock.take()) {
         (true, _) => Box::new(Stepped(Arc::clone(&shared))),
@@ -3162,6 +3301,18 @@ pub fn start<S: Storage + 'static>(
         (false, None) => Box::new(Real::start()),
     };
     let real0 = pace.now();
+    // World time starts as real time, µs from the Unix epoch (rate one); tick n starts at n ticks from it. The logged
+    // mappings follow, and the configured rate's (E7b).
+    let (line, mapping, publish) = timeline(&world, cfg.rate, real0, tick_us)?;
+    if cfg.rate.is_some() {
+        eprintln!(
+            "worldd: clock world {} real {} rate {}/{}",
+            mapping.world_us,
+            mapping.real_us,
+            mapping.rate().num(),
+            mapping.rate().den()
+        );
+    }
     // A first start begins at the tick due now, not at the epoch's.
     let last = match (last, cfg.lockstep) {
         (Some(n), _) => Some(n),
@@ -3346,6 +3497,7 @@ pub fn start<S: Storage + 'static>(
         sky,
         tick_us,
         text,
+        clock: publish,
         life,
         directory: None,
         told: BTreeSet::new(),
@@ -3604,16 +3756,20 @@ fn edit_checker(
 /// bytes): each intent read goes through `world`'s door (stamped there, O4), each answer goes back on the same
 /// connection, in the order sent.
 pub fn serve(world: Door, mut stream: UnixStream) {
+    let trace = std::env::var_os("SOULS_JOIN_DELIVERY_TRACE").is_some_and(|v| v == "1");
     let Ok(mut out) = stream.try_clone() else {
         return;
     };
     let (reply, answers) = channel::<Vec<u8>>();
     std::thread::spawn(move || {
         for frame in answers {
+            delivery_trace(trace, "native-write-start", &frame, "ready");
             let len = u32::try_from(frame.len()).unwrap_or(u32::MAX).to_be_bytes();
             if out.write_all(&len).is_err() || out.write_all(&frame).is_err() {
+                delivery_trace(trace, "native-write", &frame, "failed");
                 return;
             }
+            delivery_trace(trace, "native-write", &frame, "sent");
         }
     });
     loop {
@@ -4317,6 +4473,103 @@ mod tests {
         );
         world.stop();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- E7b (#3516): the clock's mapping on the zone root. ----------------------------------------------------
+
+    /// The mapping the root record of a copy holds.
+    fn root_mapping(copy: &sync::Copy, place: Id) -> Option<Mapping> {
+        let rec = copy.record(copy.roots().get(&place)?)?;
+        let Value::Map(m) = decode(rec).ok()?.value else {
+            return None;
+        };
+        let Some(Value::Map(f)) = m.get(&6) else {
+            return None;
+        };
+        Mapping::from_fields(f)
+    }
+
+    /// A lockstep lamps world at `rate`, run to tick `to`, then its root's mapping as a Soul's copy syncs it.
+    fn clock_run(store: Held, rate: (i64, i64), to: i64) -> Option<Mapping> {
+        let w = toggles::World::build(1, 4, 0);
+        let place = w.replica.header().zone;
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.lockstep = true;
+        cfg.measures = false;
+        cfg.rate = Some(rate);
+        let world = start(w.replica, toggles::rules(), store, cfg).expect("the world starts");
+        let (done, ran) = channel();
+        world.events.send(Event::RunTo { tick: to, done }).unwrap();
+        ran.recv().unwrap();
+        // A Soul's copy: the scope the world grants every actor is the place, the zone's root (`sync_by_frames`).
+        let mut copy = sync::Copy::default();
+        sync_by_frames(&world, &mut copy, place);
+        world.stop();
+        root_mapping(&copy, place)
+    }
+
+    #[test]
+    fn e7b_a1_a3_the_mapping_is_on_the_root_with_its_effect_and_a_replay_gives_the_same() {
+        let store = Held::new(Vec::new());
+        let first = clock_run(store.clone(), (1, 1), 3);
+        assert_eq!(first, Mapping::new(0, 0, 1, 1).ok(), "A1: a first start's");
+        // A restart at another rate applies a new mapping, continuous with the last; one at the same rate writes none.
+        let store = Held::new(store.bytes());
+        let second = clock_run(store.clone(), (2, 1), 6).expect("A1: the new mapping");
+        assert_eq!(second.rate(), Mapping::new(0, 0, 2, 1).unwrap().rate());
+        let store = Held::new(store.bytes());
+        assert_eq!(
+            clock_run(store.clone(), (2, 1), 9),
+            Some(second),
+            "A1: kept"
+        );
+        let log = store.bytes();
+        let parts: Vec<Part> = recover(&log)
+            .unwrap()
+            .records
+            .iter()
+            .filter(|r| !recorder::is_input(r))
+            .map(|r| Part::read(r).unwrap())
+            .collect();
+        // A1: each mapping's time effect and the root's fields are in one part.
+        let mut written = Vec::new();
+        for p in &parts {
+            let time: Vec<TimeEffect> = p
+                .effects
+                .iter()
+                .filter_map(|e| match &e.body {
+                    Body::Time(t) => Some(t.clone()),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+            if time.is_empty() {
+                continue;
+            }
+            let sets = p.effects.iter().any(|e| match &e.body {
+                Body::Changes(c) => c.iter().any(|c| {
+                    matches!(c.change, Change::Set { field, .. } if field == replica::time::F_CLOCK_WORLD)
+                }),
+                _ => false,
+            });
+            assert!(sets, "A1: the fields in the effect's part");
+            written.extend(time);
+        }
+        let want = [first.unwrap(), second].map(TimeEffect::Mapping);
+        println!("E7b A1: mappings written {written:?}");
+        assert_eq!(written, want, "A1: one effect for each mapping applied");
+        // A3: the log replayed onto the world as built gives the same root fields.
+        let mut replayed = toggles::World::build(1, 4, 0).replica;
+        for p in &parts {
+            replayed.apply(p).unwrap();
+        }
+        let tree = replayed.tree();
+        let root = tree.node(tree.root()).unwrap();
+        assert_eq!(
+            Mapping::from_fields(root.fields()),
+            Some(second),
+            "A3: the same on replay"
+        );
     }
 }
 

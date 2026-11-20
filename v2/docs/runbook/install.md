@@ -120,7 +120,9 @@ backup (the validator also accepts several facts files). The convenience `import
 
 ## After the install: the owner's steps
 
-1. Add the sign-in provider to `/etc/souls/directory.args` (`--issuer <https origin> --parties <origin,...>`). Only
+1. Configure the public browser fields in `/etc/souls/origin.env`: `AUTH_PROVIDER=clerk`, the matching `CLERK_PUBLISHABLE_KEY` and HTTPS `CLERK_ISSUER_URL`; optional `CLERK_SATELLITE_DOMAIN` and `CLERK_SIGN_IN_URL` keep the existing satellite sign-in. The origin unit reads this public-only file, never `secrets.env`. `/v1/auth/config` exposes only these allowlisted fields with no-store; missing or invalid fields refuse sign-in. Test keys and test-person forms remain restricted to HTTP loopback. No copied session token is needed.
+
+   Add the sign-in provider to `/etc/souls/directory.args` (`--issuer <https origin> --parties <origin,...>`). Only
    the configured origin mounts sign-in (`docs/operations/auth.md`), so the preview lives on the public name.
 2. Put any secrets in `/etc/souls/secrets.env`.
 3. Place the preview's proxy site file once, by hand; a release never writes the proxy's configuration. The shape,

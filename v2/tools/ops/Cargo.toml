@@ -54,3 +54,7 @@ archive = { path = "../archive" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+
+[dev-dependencies]
+testworld = { path = "../testworld" }
+import-eden = { path = "../import-eden" }
