@@ -4565,7 +4565,11 @@ mod tests {
         world.events.send(Event::RunTo { tick: to, done }).unwrap();
         ran.recv().unwrap();
         // A fresh durable receipt follows this start's Parts on the sync queue.
-        assert_eq!(read(&answer(&receipt)).0, 1, "the publication barrier's act");
+        assert_eq!(
+            read(&answer(&receipt)).0,
+            1,
+            "the publication barrier's act"
+        );
         // A Soul's copy: the scope the world grants every actor is the place, the zone's root (`sync_by_frames`).
         let mut copy = sync::Copy::default();
         sync_by_frames(&world, &mut copy, place);
