@@ -104,7 +104,7 @@ test('A1, A2, A3: from an empty folder the owner approves once, the daemon acts,
   const shown = await browser('/v1/pair/show', { code: asked.code, test_person: 'owner' });
   assert.equal(shown.status, 200);
   assert.deepEqual({ ...shown.body, age: typeof shown.body.age },
-    { device: 'test machine', label: 'test agent', soul: null, code: asked.code, age: 'number', scope: 'soul', force: false, connected: null });
+    { device: 'test machine', label: 'test agent', soul: null, former: null, code: asked.code, age: 'number', scope: 'soul', force: false, connected: null });
   await sleep(200);
   assert.equal(readdirSync(folder).includes('.souls'), false, 'nothing paired before the approval');
 

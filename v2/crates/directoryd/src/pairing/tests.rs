@@ -551,6 +551,61 @@ fn w11_a4_a_retire_takes_effect_only_after_the_owners_confirmed_post() {
 }
 
 #[test]
+fn r18_a_former_soul_pairs_only_as_the_soul_x11_brought_over_for_its_owner() {
+    let (p, _) = store();
+    let brought = format!("soul-{}-0", "ab".repeat(16));
+    let imported = |world: &str, former: &str| {
+        Ok((world == "eden" && former == "s_ada")
+            .then(|| (brought.clone(), "acct_owner".to_string())))
+    };
+    let former = |p: &Pairing, f: &str| {
+        let (secret, code) = ask(p, "studio laptop", None, false, T0);
+        p.ask_world(&code, "eden").expect("a world");
+        p.ask_former(&code, f).expect("a former id");
+        (secret, code)
+    };
+    // The owner's approval pairs the Soul brought over, and the poll can say the former id back.
+    let (secret, code) = former(&p, "s_ada");
+    let card = p.show("acct_owner", &code, T0).expect("a card");
+    assert_eq!(card.former.as_deref(), Some("s_ada"));
+    assert_eq!(
+        p.approve_with("acct_owner", &code, T0, &imported),
+        Ok(brought.clone())
+    );
+    let Poll::Token { grant, .. } = p.poll(&secret, T0 + INTERVAL) else {
+        panic!("a token")
+    };
+    assert_eq!(grant, brought);
+    assert_eq!(p.former_by_secret(&secret).as_deref(), Some("s_ada"));
+    assert_eq!(
+        p.souls("acct_owner"),
+        Ok(vec![(brought.clone(), Some("studio laptop".into()))])
+    );
+    // Another account, or a former id not brought over, is refused by name, and its daemon learns it.
+    let (secret, code) = former(&p, "s_ada");
+    assert_eq!(
+        p.approve_with("acct_other", &code, T0, &imported),
+        Err(("unknown-soul", None))
+    );
+    assert_eq!(
+        p.poll(&secret, T0 + INTERVAL),
+        Poll::Refused("unknown-soul".into(), None)
+    );
+    let (_, code) = former(&p, "s_nobody");
+    assert_eq!(
+        p.approve_with("acct_owner", &code, T0, &imported),
+        Err(("unknown-soul", None))
+    );
+    // Without an import, a former Soul is never made a new one.
+    let (_, code) = former(&p, "s_ada");
+    assert_eq!(
+        p.approve("acct_owner", &code, T0),
+        Err(("unknown-soul", None))
+    );
+    assert!(p.ask_former("BCDF-GHJK", "not-a-former").is_err());
+}
+
+#[test]
 fn w11b_the_souls_file_tells_the_world_of_saved_words_and_a_retire() {
     let (p, tokens) = store();
     let (_, grant) = pair_in(&p, "acct_owner", "mars");
@@ -574,4 +629,109 @@ fn w11b_the_souls_file_tells_the_world_of_saved_words_and_a_retire() {
         !file().lines().any(|l| l.starts_with("words ")),
         "a retired Soul's words are not sent"
     );
+}
+
+#[test]
+fn o24_operator_test_approval_uses_w2_delivery_and_k10_retirement_without_a_human() {
+    let (p, tokens) = store();
+    let (secret, code) = ask(&p, "release fixture", None, false, T0);
+    p.ask_world(&code, "eden").unwrap();
+    let grant = p.operator_approve("eden", &code, T0).unwrap();
+    assert!(p.is_operator_test(&grant).unwrap(), "mark precedes poll");
+    assert_eq!(p.mine("acct_owner").unwrap(), vec![]);
+    let Poll::Token {
+        token,
+        grant: delivered,
+    } = p.poll(&secret, T0 + INTERVAL)
+    else {
+        panic!("normal W2 token");
+    };
+    assert_eq!(delivered, grant);
+    assert!(
+        std::fs::read_to_string(&tokens)
+            .unwrap()
+            .contains(&to_hex(&sha256(token.as_bytes())))
+    );
+    assert!(p.operator_approve("eden", &code, T0 + 10).is_err());
+    let owner = p.soul_of(&grant).unwrap().unwrap().0;
+    assert_eq!(owner, "operator:test-souls");
+    assert_eq!(p.mine(&owner).unwrap()[0].world.as_deref(), Some("eden"));
+    p.set_profile(
+        &owner,
+        &grant,
+        &souls::Profile {
+            name: Some("renamed".into()),
+            description: None,
+        },
+    )
+    .unwrap();
+    assert!(p.is_operator_test(&grant).unwrap());
+    p.retire(&owner, &grant, T0 + 20).unwrap();
+    assert!(p.mine(&owner).unwrap().is_empty());
+    assert!(
+        p.is_operator_test(&grant).unwrap(),
+        "retirement cannot erase test provenance"
+    );
+    assert!(
+        !std::fs::read_to_string(&tokens)
+            .unwrap()
+            .contains(&to_hex(&sha256(token.as_bytes())))
+    );
+    assert!(
+        std::fs::read_to_string(tokens.with_file_name("tokens.txt.souls"))
+            .unwrap()
+            .contains(&format!("retired {grant}"))
+    );
+}
+
+#[test]
+fn o24_operator_refuses_wrong_world_named_former_creator_and_forced_requests() {
+    let (p, _) = store();
+    let (_, code) = ask(&p, "release fixture", None, false, T0);
+    p.ask_world(&code, "eden").unwrap();
+    assert_eq!(
+        p.operator_approve("elsewhere", &code, T0),
+        Err("operator.new-world-request-only")
+    );
+    // A refused operator attempt does not consume a valid waiting request.
+    assert!(p.operator_approve("eden", &code, T0).is_ok());
+    for (named, former, scope, force) in [
+        (
+            Some("soul-0123456789abcdef0123456789abcdef-4"),
+            false,
+            "soul",
+            false,
+        ),
+        (None, true, "soul", false),
+        (
+            Some("creator-0123456789abcdef0123456789abcdef-4"),
+            false,
+            "creator",
+            false,
+        ),
+        (None, false, "soul", true),
+    ] {
+        let a = Ask {
+            secret_hash: random(),
+            device: "release fixture".into(),
+            label: "fixture".into(),
+            soul: named.map(str::to_string),
+            scope: scope.into(),
+            force,
+        };
+        let code = p.ask(&a, T0).unwrap().code;
+        p.ask_world(&code, "eden").unwrap();
+        if former {
+            p.ask_former(&code, "s_former").unwrap();
+        }
+        assert_eq!(
+            p.operator_approve("eden", &code, T0),
+            Err("operator.new-world-request-only")
+        );
+    }
+    assert!(
+        !p.is_operator_test("soul-0123456789abcdef0123456789abcdef-4")
+            .unwrap()
+    );
+    assert!(!p.is_operator_test("unknown").unwrap());
 }

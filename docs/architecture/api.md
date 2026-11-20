@@ -72,7 +72,11 @@ Every installed client upgrades through these parts, so they never change (#1938
 `tools/world-launcher/soul-upgrade-compat.test.mjs` upgrades the released 2.32.0 client to head through them, and shows it
 printing the refusal. `v2/client/test/compat/upgrade-compat.test.mjs` (from v2/ alone) runs the released 2.36.2 client
 against the new engine's answers: it prints the refusal, and a home it keeps comes across by `upgrade`, its Souls paired
-again by their former ids and their memory untouched, and back by `upgrade --rollback` (R18, #2821).
+again by their former ids and their memory untouched, and back by `upgrade --rollback` (R18, #2821). The directory
+side of that pairing is directoryd's: `POST /v1/pair/request` takes `former` and `world` in place of `soul`, the owner's
+approval pairs the Soul X11 brought over for that former id (`imported_souls_v1`), only for its owning account, and refuses
+any other `unknown-soul`, and the poll answers `former` back. `v2/client/src/pair/former.test.mjs` runs R18's client
+against the real directoryd.
 
 ## Signed-in owner
 
