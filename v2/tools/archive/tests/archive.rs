@@ -1268,3 +1268,136 @@ fn w3c_view_effect(
     assert_eq!(entries.len(), 1);
     entries.pop()
 }
+
+#[test]
+fn w3655_legacy_empty_parts_preserve_day_source_and_reopen() {
+    use archive::Packer;
+    use replica::effects::Part;
+    let store = Memory::default();
+    let queued = Rc::new(RefCell::new(Vec::new()));
+    let log = queued.clone();
+    let mut world = script::world(
+        1,
+        0,
+        Some(Box::new(move |b| log.borrow_mut().push(b.to_vec()))),
+    );
+    let boot = queued.borrow().len();
+    script::tick(&mut world, 86_400 * 20 + 1, 1, 0);
+    let before_empty = world.tree.to_state();
+    let empty = script::tick(&mut world, 86_400 * 20 + 2, 0, 0);
+    assert!(Part::read(&empty).unwrap().effects.is_empty());
+    assert_eq!(
+        world.tree.to_state(),
+        before_empty,
+        "empty parts invent no time or state"
+    );
+    script::tick(&mut world, 86_400 * 20 + 3, 0, 0);
+    script::tick(&mut world, 2 * 86_400 * 20 + 1, 1, 0);
+    script::tick(&mut world, 2 * 86_400 * 20 + 2, 0, 0);
+    let records = queued.borrow().clone();
+    assert_eq!(records.len(), boot + 5);
+    let node = world.tree.node(world.tree.root()).unwrap();
+    let (root, kind) = (node.id(), node.kind().clone());
+    {
+        let mut packer =
+            Packer::open(&store, PREFIX, world.header.stored(), root, kind.clone()).unwrap();
+        packer.set_target(1);
+        for (n, raw) in records[..boot + 2].iter().enumerate() {
+            packer.push(n as u64, raw.clone()).unwrap();
+        }
+        packer.flush().unwrap();
+        assert_eq!(
+            fetch(&store, PREFIX)
+                .unwrap()
+                .manifests
+                .iter()
+                .map(|m| m.day)
+                .collect::<Vec<_>>(),
+            [0, 1]
+        );
+    }
+    let mut packer = Packer::open(&store, PREFIX, world.header.stored(), root, kind).unwrap();
+    packer.set_target(1);
+    for (n, raw) in records.iter().enumerate().skip(boot + 2) {
+        packer.push(n as u64, raw.clone()).unwrap();
+    }
+    packer.flush().unwrap();
+    let fetched = fetch(&store, PREFIX).unwrap();
+    assert_eq!(
+        fetched.manifests.iter().map(|m| m.day).collect::<Vec<_>>(),
+        [0, 1, 2]
+    );
+    assert_eq!(
+        fetched
+            .manifests
+            .iter()
+            .map(|m| m.rows.iter().map(|r| r.count).sum::<u64>())
+            .sum::<u64>(),
+        records.len() as u64
+    );
+    let mut next = 0;
+    let mut stored = Vec::new();
+    for segment in &fetched.segments {
+        assert_eq!(
+            segment.first, next,
+            "every accepted physical record is contiguous"
+        );
+        assert_eq!(segment.header, world.header.stored());
+        next += segment.records.len() as u64;
+        stored.extend(segment.records.clone());
+    }
+    assert_eq!(
+        stored, records,
+        "fetch validates original object checksums and exact source bytes"
+    );
+    assert_eq!(
+        state_hash(&mut restore(&fetched).unwrap()).unwrap(),
+        state_hash(&mut world.tree).unwrap()
+    );
+}
+
+#[test]
+fn w3655_legacy_empty_initial_part_keeps_named_refusals_and_store_unchanged() {
+    use archive::Packer;
+    use replica::effects::Part;
+    let store = Memory::default();
+    let mut world = script::world(0, 0, None);
+    let empty = script::tick(&mut world, 0, 0, 0);
+    assert!(Part::read(&empty).unwrap().effects.is_empty());
+    let node = world.tree.node(world.tree.root()).unwrap();
+    let (root, kind) = (node.id(), node.kind().clone());
+    let mut packer = Packer::open(&store, PREFIX, world.header.stored(), root, kind).unwrap();
+    packer.set_target(1);
+    assert_eq!(
+        packer.push(1, empty.clone()).unwrap_err().name,
+        "archive-gap"
+    );
+    assert!(store.keys().is_empty());
+    let malformed = vec![0xff];
+    let expected = Part::read(&malformed).unwrap_err().name;
+    assert_eq!(packer.push(0, malformed).unwrap_err().name, expected);
+    assert!(store.keys().is_empty());
+    packer.push(0, empty.clone()).unwrap();
+    packer.flush().unwrap();
+    let fetched = fetch(&store, PREFIX).unwrap();
+    assert_eq!(fetched.manifests.len(), 1);
+    assert_eq!(
+        fetched.manifests[0].day, 0,
+        "untimed initial metadata bucket is unchanged"
+    );
+    assert_eq!(fetched.segments[0].records, [empty]);
+    let before = store
+        .keys()
+        .iter()
+        .map(|k| (k.clone(), store.get(k).unwrap().unwrap().bytes))
+        .collect::<Vec<_>>();
+    assert_eq!(packer.push(2, vec![0xff]).unwrap_err().name, "archive-gap");
+    assert_eq!(
+        store
+            .keys()
+            .iter()
+            .map(|k| (k.clone(), store.get(k).unwrap().unwrap().bytes))
+            .collect::<Vec<_>>(),
+        before
+    );
+}
