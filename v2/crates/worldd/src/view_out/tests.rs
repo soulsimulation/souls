@@ -2490,6 +2490,43 @@ fn w3e_older_eligible_checkpoint_and_takeover_aware_original_source_bridge_legac
     assert_eq!(start.initial.version(), 0);
     assert_eq!(start.checkpoint.as_ref().unwrap(), &older);
     assert_eq!(actual.version(), 2, "the engine's newest copy is untouched");
+    // The engine's normal K5 writer retains only its newest two files. Captured public source bytes must survive
+    // that pruning; no observer IO is allowed to depend on the earlier pathname after answers starts.
+    let restored = sim::checkpoint::read_bytes(start.checkpoint.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        capture_checkpoint(
+            &checkpoints.join("ckpt-00000000000000000000"),
+            &restored.root
+        )
+        .unwrap(),
+        older
+    );
+    let selected_root = restored.root;
+    let mut newest = sim::checkpoint::restore(&checkpoints).unwrap().unwrap();
+    let mut writer = sim::checkpoint::Checkpoints::open(&checkpoints, 1, newest.blobs).unwrap();
+    writer
+        .take(&mut newest.tree, newest.root.version, 2, &[])
+        .unwrap();
+    writer.wait().unwrap();
+    assert!(
+        !checkpoints.join("ckpt-00000000000000000000").exists(),
+        "normal pruning removed the captured source"
+    );
+    assert_eq!(
+        capture_checkpoint(
+            &checkpoints.join("ckpt-00000000000000000000"),
+            &selected_root
+        )
+        .unwrap_err()
+        .name,
+        "stream-source-missing"
+    );
+    assert_eq!(
+        sim::checkpoint::read_bytes(start.checkpoint.as_ref().unwrap())
+            .unwrap()
+            .root,
+        selected_root
+    );
     let next = w3e_packet(
         &h,
         vec![w3e_effect(
@@ -2522,4 +2559,71 @@ fn w3e_older_eligible_checkpoint_and_takeover_aware_original_source_bridge_legac
     out.flush().unwrap();
     assert_eq!(out.public_player().version(), 3);
     assert_eq!(fs::read(legacy.dir().join("0")).unwrap(), old);
+}
+
+#[test]
+fn w3e_bootstrap_source_diagnostics_name_missing_changed_header_and_part() {
+    let h = header();
+    let d = scratch("w3e-source-stages");
+    let views = d.join("views");
+    let checkpoints = d.join("checkpoints");
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let checkpoint = w3e_checkpoint(&checkpoints, &h, &mut actual, 0);
+    let root = sim::checkpoint::read_bytes(&checkpoint).unwrap().root;
+    let checkpoint_path = checkpoints.join("ckpt-00000000000000000000");
+    let mut wrong = root.clone();
+    wrong.record = 1;
+    assert_eq!(
+        capture_checkpoint(&checkpoint_path, &wrong)
+            .unwrap_err()
+            .name,
+        "stream-source-changed"
+    );
+    fs::write(&checkpoint_path, b"damaged checkpoint").unwrap();
+    let invalid = capture_checkpoint(&checkpoint_path, &root).unwrap_err();
+    assert_eq!(invalid.name, "stream-source-invalid");
+    assert!(
+        invalid
+            .detail
+            .starts_with("selected checkpoint validation:")
+    );
+    fs::write(&checkpoint_path, &checkpoint).unwrap();
+    let body = Id::new(Scope([57; 16]), 1).unwrap();
+    let public = w3e_create(&h, 0, body, h.zone, Audience::Everyone);
+    let mut legacy = Writer::create(&views, &h, &key(&h), (0, 0)).unwrap();
+    legacy.frame(&frame(vec![public.to_value()])).unwrap();
+    legacy.flush().unwrap();
+    let select = || {
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(checkpoint.clone()),
+            text: None,
+            clock_seed: None,
+            history: None,
+        }
+        .earlier_legacy_checkpoint(&checkpoints)
+    };
+    let header_path = views.join(stream::header_path(&h));
+    let header_bytes = fs::read(&header_path).unwrap();
+    fs::remove_file(&header_path).unwrap();
+    let missing = select().unwrap_err();
+    assert_eq!(missing.name, "stream-source-missing");
+    assert!(missing.detail.starts_with("legacy header bytes:"));
+    fs::write(&header_path, b"damaged header").unwrap();
+    let invalid = select().unwrap_err();
+    assert_eq!(invalid.name, "stream-source-invalid");
+    assert!(invalid.detail.starts_with("legacy header validation:"));
+    fs::write(&header_path, header_bytes).unwrap();
+    fs::write(legacy.dir().join("0"), b"damaged part").unwrap();
+    let invalid = select().unwrap_err();
+    assert_eq!(invalid.name, "stream-source-invalid");
+    assert!(invalid.detail.starts_with("legacy part validation:"));
+    fs::remove_file(legacy.dir().join("0")).unwrap();
+    let missing = select().unwrap_err();
+    assert_eq!(missing.name, "stream-source-missing");
+    assert!(missing.detail.starts_with("legacy part bytes:"));
 }

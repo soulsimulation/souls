@@ -109,6 +109,33 @@ fn io(e: std::io::Error) -> Refusal {
     fault("stream-write", e.to_string())
 }
 
+// Source diagnostics name the bootstrap stage, never a device path. Required sources must not silently vanish.
+fn source_io(stage: &'static str, error: std::io::Error) -> Refusal {
+    let name = if error.kind() == std::io::ErrorKind::NotFound {
+        "stream-source-missing"
+    } else {
+        "stream-source-io"
+    };
+    fault(name, format!("{stage}: {:?}", error.kind()))
+}
+fn source_invalid(stage: &'static str, error: Refusal) -> Refusal {
+    fault("stream-source-invalid", format!("{stage}: {}", error.name))
+}
+/// Own the selected engine checkpoint bytes before its writer can prune files. CRC, hashes and the complete root
+/// must still match the actual selected restore; neither a changed source nor a missing one is a fresh bootstrap.
+pub fn capture_checkpoint(path: &Path, expected: &sim::checkpoint::Root) -> R<Vec<u8>> {
+    let bytes = fs::read(path).map_err(|e| source_io("selected checkpoint bytes", e))?;
+    let captured = sim::checkpoint::read_bytes(&bytes)
+        .map_err(|e| source_invalid("selected checkpoint validation", e))?;
+    if captured.root != *expected {
+        return Err(fault(
+            "stream-source-changed",
+            "selected checkpoint root differs",
+        ));
+    }
+    Ok(bytes)
+}
+
 /// Writes `bytes` to `path` under a temporary name, then renames it (rule 4).
 pub fn write_whole(path: &Path, bytes: &[u8]) -> R<()> {
     let mut tmp = path.as_os_str().to_owned();
@@ -961,19 +988,23 @@ impl PublicStart<'_> {
         let bytes = match fs::read(&path) {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(io(e)),
+            Err(e) => return Err(source_io("legacy pointer", e)),
         };
-        if object_map(&bytes)?.contains_key(&8) {
+        if object_map(&bytes)
+            .map_err(|e| source_invalid("legacy pointer map", e))?
+            .contains_key(&8)
+        {
             return Ok(());
         }
-        let pointer = Pointer::read(&bytes)?;
+        let pointer = Pointer::read(&bytes).map_err(|e| source_invalid("legacy pointer", e))?;
         let header = fs::read(self.root.join(format!(
             "{}/headers/{}",
             id_of(self.header),
             replica::encode::to_hex(&pointer.header)
         )))
-        .map_err(io)?;
-        let old = Header::read(&header)?;
+        .map_err(|e| source_io("legacy header bytes", e))?;
+        let old =
+            Header::read(&header).map_err(|e| source_invalid("legacy header validation", e))?;
         if old.lineage != self.header.lineage
             || old.zone != self.header.zone
             || old.epoch != self.header.epoch
@@ -983,12 +1014,18 @@ impl PublicStart<'_> {
                 "source selection header differs",
             ));
         }
-        let mut reader = replica::stream::Player::start(&header)?;
+        let mut reader = replica::stream::Player::start(&header)
+            .map_err(|e| source_invalid("legacy header player", e))?;
         if let Some(last) = pointer.newest {
             for n in 0..=last {
                 let bytes = fs::read(path.parent().expect("pointer parent").join(n.to_string()))
-                    .map_err(io)?;
-                if reader.play(&bytes)?.hash == Some(false) {
+                    .map_err(|e| source_io("legacy part bytes", e))?;
+                if reader
+                    .play(&bytes)
+                    .map_err(|e| source_invalid("legacy part validation", e))?
+                    .hash
+                    == Some(false)
+                {
                     return Err(fault("stream-legacy-hash", "legacy part differs"));
                 }
             }
@@ -998,8 +1035,10 @@ impl PublicStart<'_> {
             return Ok(());
         }
         let mut selected = None;
-        for entry in fs::read_dir(checkpoints).map_err(io)? {
-            let entry = entry.map_err(io)?;
+        for entry in
+            fs::read_dir(checkpoints).map_err(|e| source_io("legacy checkpoint directory", e))?
+        {
+            let entry = entry.map_err(|e| source_io("legacy checkpoint entry", e))?;
             let name = entry.file_name();
             let name = name.to_string_lossy();
             let Some(number) = name
@@ -1011,11 +1050,13 @@ impl PublicStart<'_> {
             let Ok(number) = number.parse::<u64>() else {
                 continue;
             };
-            let meta = fs::symlink_metadata(entry.path()).map_err(io)?;
+            let meta = fs::symlink_metadata(entry.path())
+                .map_err(|e| source_io("legacy checkpoint metadata", e))?;
             if !meta.is_file() || meta.file_type().is_symlink() {
                 continue;
             }
-            let bytes = fs::read(entry.path()).map_err(io)?;
+            let bytes =
+                fs::read(entry.path()).map_err(|e| source_io("legacy checkpoint bytes", e))?;
             let Ok(restored) = sim::checkpoint::read_bytes(&bytes) else {
                 continue;
             };

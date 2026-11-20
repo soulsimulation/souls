@@ -1060,8 +1060,7 @@ fn serve(args: &[String]) -> R<()> {
     let store = log.close();
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
-    let restored_stream = stored_header.is_some();
-    let (initial, base_record, stream_mapping) = if let Some(header) = stored_header {
+    let (initial, base_record, stream_mapping, checkpoint) = if let Some(header) = stored_header {
         let restored = sim::checkpoint::restore(&dir.join("checkpoints"))
             .map_err(refusal)?
             .ok_or("served-fork-checkpoint-missing")?;
@@ -1071,6 +1070,11 @@ fn serve(args: &[String]) -> R<()> {
             return Err("served-fork-checkpoint-mismatch".into());
         }
         let record = restored.root.record;
+        let checkpoint = view_out::capture_checkpoint(
+            &dir.join("checkpoints").join(format!("ckpt-{record:020}")),
+            &restored.root,
+        )
+        .map_err(refusal)?;
         let initial = Replica::restored(
             header.clone(),
             restored.tree,
@@ -1107,11 +1111,12 @@ fn serve(args: &[String]) -> R<()> {
             .town
             .copy()
             .map_err(|e| format!("the fork's planner: {e}"))?;
-        (initial, record, observer)
+        (initial, record, observer, Some(checkpoint))
     } else {
         (
             Replica::start(built.header.stored()).map_err(refusal)?,
             0,
+            None,
             None,
         )
     };
@@ -1242,6 +1247,42 @@ fn serve(args: &[String]) -> R<()> {
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
         bodies(town, planner, ground, placed, places.clone())
     }));
+    // Capture and validate the public source before answers starts its K5 writer: normal pruning may remove an
+    // eligible older checkpoint. The engine still starts from its newest restored state and unchanged clock.
+    let views = dir.join("views");
+    let key = Key {
+        node: built.header.zone,
+        level: Level::Full,
+        audience: Audience::Everyone,
+    };
+    let stream_store = supervisor::bucket::Bucket::from_spec(
+        bucket
+            .as_deref()
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("folder:{}", dir.join(".stream-recovery-store").display()))
+            .as_str(),
+    )
+    .map_err(refusal)?;
+    if let Some(seed) = stream_mapping {
+        println!(
+            "stream: initial mapping from durable record {} effect {}",
+            seed.record, seed.sequence
+        );
+    }
+    let mut public_start = view_out::PublicStart {
+        root: &views,
+        header: &built.header,
+        key,
+        initial: initial.frozen(),
+        record: base_record,
+        checkpoint,
+        text: cfg_text,
+        clock_seed: stream_mapping.map(|s| s.mapping),
+        history: Some(&found),
+    };
+    public_start
+        .earlier_legacy_checkpoint(&dir.join("checkpoints"))
+        .map_err(refusal)?;
     let world = answers::start(initial.frozen(), rules, store, cfg).map_err(refusal)?;
     println!(
         "restart: checkpoint {:?}, {} records read, {} applied",
@@ -1267,53 +1308,6 @@ fn serve(args: &[String]) -> R<()> {
         crate::watchdog::Real::start(),
         crate::watchdog::LIMIT_MS,
     );
-    // The public observer follows the same canonical durable records, off-clock. Recovery owns exact published
-    // bytes and its source checkpoint; never delete an existing immutable stream on restart.
-    let views = dir.join("views");
-    let key = Key {
-        node: built.header.zone,
-        level: Level::Full,
-        audience: Audience::Everyone,
-    };
-    let stream_store = supervisor::bucket::Bucket::from_spec(
-        bucket
-            .as_deref()
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("folder:{}", dir.join(".stream-recovery-store").display()))
-            .as_str(),
-    )
-    .map_err(refusal)?;
-    let checkpoint = if restored_stream {
-        Some(
-            std::fs::read(
-                dir.join("checkpoints")
-                    .join(format!("ckpt-{base_record:020}")),
-            )
-            .map_err(io(&dir))?,
-        )
-    } else {
-        None
-    };
-    if let Some(seed) = stream_mapping {
-        println!(
-            "stream: initial mapping from durable record {} effect {}",
-            seed.record, seed.sequence
-        );
-    }
-    let mut public_start = view_out::PublicStart {
-        root: &views,
-        header: &built.header,
-        key,
-        initial: initial.frozen(),
-        record: base_record,
-        checkpoint,
-        text: cfg_text,
-        clock_seed: stream_mapping.map(|s| s.mapping),
-        history: Some(&found),
-    };
-    public_start
-        .earlier_legacy_checkpoint(&dir.join("checkpoints"))
-        .map_err(refusal)?;
     let mut writer = view_out::PublicWriter::open(public_start, stream_store).map_err(refusal)?;
     // History remains a separate required archive prerequisite (#3634).
     let history = match off.as_ref().and_then(|o| o.archive.as_ref()) {
