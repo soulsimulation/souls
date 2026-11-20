@@ -35,3 +35,7 @@ v2/crates/sim/tests/hatch/chess-move.wasm
 # The released 2.36.2 client and skill, gzipped, which R18's upgrade-compat test (#2821) upgrades from.
 v2/client/test/compat/released/2.36.2/eden.mjs.gz
 v2/client/test/compat/released/2.36.2/skill.md.gz
+
+# Exact first-party 2.36.1 public client and skill, verified against the advertised release hashes (R18c).
+v2/client/test/compat/released/2.36.1/eden.mjs.gz
+v2/client/test/compat/released/2.36.1/skill.md.gz

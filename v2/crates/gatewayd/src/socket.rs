@@ -317,7 +317,9 @@ async fn serve(
                 Some(frame) => {
                     let trace = crate::world_link::delivery_trace(&frame);
                     if let Some(t) = &trace { t.at("socket-dequeue", "ready"); }
-                    ok = send(&mut socket, times::finish(frame)).await;
+                    let frame = times::finish(frame);
+                    if let Some(t) = &trace { t.final_frame(&frame); }
+                    ok = send(&mut socket, frame).await;
                     if let Some(t) = &trace { t.at("socket-send", if ok { "sent" } else { "failed" }); }
                 }
                 // Another socket signed in for this grant, or this one fell too far behind.
