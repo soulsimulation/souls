@@ -178,7 +178,8 @@ test('served ground walk: current planner result moves the ordinarily joined bod
   const crc=bytes=>{let n=0xffffffff;for(const byte of bytes){n^=byte;for(let k=0;k<8;k++)n=n&1?(n>>>1)^0x82f63b78:n>>>1;}return(n^0xffffffff)>>>0;};
   assert.equal(log.subarray(0,8).toString(),'souls-lg');assert.equal(log.readUInt32LE(8),1);
   assert.equal(log.readUInt32LE(12),0);assert.equal(log.readUInt32LE(24),0);
-  const header=decode(readFileSync(join(world,'header')));assert.equal(log.readBigUInt64LE(16),BigInt(header.get(5)));
+  const expectedEpoch=recoveredSource?decode(readFileSync(join(world,'header'))).get(5):1;
+  assert.equal(log.readBigUInt64LE(16),BigInt(expectedEpoch));
   const salt=log.readUInt32LE(28);assert.equal(crc(log.subarray(0,28)),salt,'K4 header checksum');
   const parts=[];let at=32,previous=salt,recordCount=0;
   while(at<log.length){
