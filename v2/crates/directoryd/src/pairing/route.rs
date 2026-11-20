@@ -224,6 +224,26 @@ pub fn route(
                 refuse(400, "confirm")
             } else {
                 let imported = |world: &str, former: &str| {
+                    if super::is_soul_grant(former) {
+                        let rows = app.store.imported_souls(&account).map_err(|_| "store")?;
+                        for (grant, imported_world, _, _) in rows {
+                            if grant != former {
+                                continue;
+                            }
+                            let same_world = match (
+                                p.authority(Some(world))?,
+                                p.authority(Some(&imported_world))?,
+                            ) {
+                                (Some(a), Some(b)) => a.world == b.world,
+                                (None, None) => world == imported_world,
+                                _ => false,
+                            };
+                            if same_world {
+                                return Ok(Some((grant, account.clone())));
+                            }
+                        }
+                        return Ok(None);
+                    }
                     app.store.imported_soul(world, former).map_err(|_| "store")
                 };
                 // A world's creator grant the account holds is its to pair alongside imported Souls.
@@ -238,7 +258,11 @@ pub fn route(
                         .store
                         .own(&account, &grant, follow_of(&grant).as_deref())
                     {
-                        Ok(()) => json(200, json!({"approved": true, "soul": grant}), note),
+                        Ok(()) => match p.initialize_imported_profile(&app.store, &account, &grant)
+                        {
+                            Ok(()) => json(200, json!({"approved": true, "soul": grant}), note),
+                            Err(e) => refuse(500, e),
+                        },
                         Err(_) => refuse(500, "store"),
                     },
                     Err(("code-guesses", _)) => refuse(429, "code-guesses"),
@@ -268,7 +292,7 @@ pub fn route(
             };
             let note = format!("account#{}", correlate(&account));
             if path == "/v1/account/souls" {
-                return Some(match p.mine(&account) {
+                return Some(match p.mine_with_imports(&app.store, &account) {
                     Ok(s) => json(
                         200,
                         json!({ "souls": s.iter().map(listed).collect::<Vec<_>>() }),
