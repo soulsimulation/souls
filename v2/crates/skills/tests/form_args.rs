@@ -359,3 +359,90 @@ fn a3_every_content_entry_passes_the_import_check() {
     assert!(seen > 300, "the content is there: {seen}");
     assert!(refused.is_empty(), "{refused:#?}");
 }
+
+#[test]
+fn deferred_walk_keeps_its_deadline_and_reads_a_moved_target_again() {
+    use replica::host::WalkPlan;
+    struct Pending {
+        fake: Fake,
+        ready: bool,
+        asked: RefCell<Vec<Vec3>>,
+    }
+    impl Host for Pending {
+        fn now(&self) -> Micros {
+            self.fake.now()
+        }
+        fn body(&self) -> Id {
+            self.fake.body()
+        }
+        fn read(&self, n: Id) -> Option<Seen> {
+            let mut seen = self.fake.read(n)?;
+            seen.parent = Some(fixture(0));
+            Some(seen)
+        }
+        fn ask(&self, q: &Ask) -> Option<Answer> {
+            self.fake.ask(q)
+        }
+        fn plan_walk(&self, _: usize, _: Id, at: Vec3, _: i64) -> WalkPlan {
+            self.asked.borrow_mut().push(at);
+            if self.ready {
+                WalkPlan::Legs(vec![(at, None)])
+            } else {
+                WalkPlan::Pending
+            }
+        }
+        fn set_timer(&mut self, after: Micros, n: Name) -> Id {
+            self.fake.set_timer(after, n)
+        }
+        fn clear_timer(&mut self, id: Id) {
+            self.fake.clear_timer(id);
+        }
+        fn draw(&mut self) -> u64 {
+            self.fake.draw()
+        }
+        fn control(&mut self, input: ControllerInput) {
+            self.fake.control(input);
+        }
+        fn cross(&mut self, id: Id, speed: i64) {
+            self.fake.cross(id, speed);
+        }
+        fn emit(&mut self, c: Vec<Change>, e: Option<Event>) -> Result<(), Refusal> {
+            self.fake.emit(c, e)
+        }
+    }
+    let steps = bind_with(&entry(), "visit", &args(&[("other", Arg::Node(other()))])).unwrap();
+    let mut host = Pending {
+        fake: Fake {
+            places: BTreeMap::from([(other(), mm(5, 0, 5))]),
+            next: 0,
+            reads: RefCell::default(),
+        },
+        ready: false,
+        asked: RefCell::default(),
+    };
+    let mut runner = Runner::new(steps, node(), Limits::default());
+    assert!(matches!(
+        runner.wake(&mut host, Woke::Start),
+        Next::Planning
+    ));
+    assert_eq!(host.fake.next, 1, "one original walk deadline");
+    host.fake.places.insert(other(), mm(8, 0, 9));
+    assert!(matches!(
+        runner.wake(&mut host, Woke::Planning),
+        Next::Planning
+    ));
+    assert_ne!(
+        host.asked.borrow()[0],
+        host.asked.borrow()[1],
+        "the target is read again"
+    );
+    host.ready = true;
+    assert!(matches!(
+        runner.wake(&mut host, Woke::Planning),
+        Next::Walk(_)
+    ));
+    assert_eq!(host.fake.next, 1, "planning never extends the deadline");
+    assert!(
+        matches!(runner.wake(&mut host, Woke::Timer(fixture(101))), Next::End(n) if n.as_str() == "deadline-passed")
+    );
+}

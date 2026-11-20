@@ -50,7 +50,8 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    `gateway-upgrade` (never in the same step as a world's deploy: the step lock); then the page (`/usr/local/lib/souls/web`);
    then the served client (`/usr/local/lib/souls/client`, which a world's address answers from, `v2/client/served/serve.mjs`).
    A failed deploy stops the release: worlds before it keep the new build, worlds after it the old. Each world's probe
-   is a sync ask that needs no body, so a release never drives anyone's Soul
+   enters and retires its own unpaired operator body through K10/C3 and requires an ordinary committed action,
+   so a release never drives a user's Soul
    ([deploy-and-roll-back.md](runbook/deploy-and-roll-back.md#what-a-deploy-does)). Each step is done
    once per release (`releases/<sha>/moved/`), so a second dispatch of the same commit moves nothing again.
 5. **Publish.** Only when every world runs the release: one news entry in `/var/lib/souls/news.jsonl`, keyed by its

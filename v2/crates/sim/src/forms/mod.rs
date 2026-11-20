@@ -98,7 +98,7 @@ use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Event, Header, Refusal, Rest, read_id,
 };
 use replica::encode::{Name, Value};
-use replica::host::Progress;
+use replica::host::{Progress, Skill};
 use replica::ids::{Id, Minter};
 use replica::moves::Move;
 use replica::pose::Vec3;
@@ -409,6 +409,7 @@ pub struct Forms {
     by_timer: BTreeMap<Id, RunId>,
     by_intent: BTreeMap<Id, RunId>,
     walks: Vec<Run>,
+    planning: BTreeSet<RunId>,
     last: RunId,
     /// Runs that ended, in order; the caller drains it.
     pub ended: Vec<Ended>,
@@ -552,6 +553,23 @@ impl Forms {
     pub fn holder(&self, thing: Id) -> Option<Id> {
         let run = self.reserved.get(&thing)?;
         self.runs.get(run).map(|fr| fr.body)
+    }
+
+    /// Current form identity for off-clock questions: intent, stage and step.
+    pub fn planning_context(&self) -> BTreeMap<Id, (Id, usize, usize)> {
+        self.runs
+            .values()
+            .filter_map(|fr| {
+                Some((
+                    fr.body,
+                    (
+                        fr.intent.id,
+                        fr.long.as_ref().map_or(0, |l| l.at),
+                        fr.runner.at()?,
+                    ),
+                ))
+            })
+            .collect()
     }
 
     /// The number of the step in progress of `body`'s run.
@@ -1114,9 +1132,27 @@ impl Forms {
         let long = fr.long.is_some();
         match next {
             Next::Sleep => {}
+            Next::Planning => {
+                // Claim the same walk resources at the original step start. An older walk is cancelled/neutralized
+                // now, so it cannot keep moving the sampled body while this form awaits its plan.
+                if fr.walk.is_none() {
+                    match w
+                        .controller
+                        .claim(body, &skills::route::Route::sent(0, 0).shape())
+                    {
+                        Ok(driver) => fr.walk = Some(driver),
+                        Err(r) => return self.finish(w, run, name(r.name), now),
+                    }
+                }
+                self.planning.insert(run);
+            }
             Next::End(how) if long && how.as_str() == "done" => self.stage_done(w, run, now),
             Next::End(how) => self.finish(w, run, how, now),
-            Next::Walk(skill) => match w.controller.claim(body, &skill.shape()) {
+            Next::Walk(skill) => match fr
+                .walk
+                .take()
+                .map_or_else(|| w.controller.claim(body, &skill.shape()), Ok)
+            {
                 Ok(driver) => {
                     fr.walk = Some(driver);
                     self.walks.push(Run {
@@ -1324,6 +1360,7 @@ impl Forms {
         how: Name,
         now: Micros,
     ) {
+        self.planning.remove(&run);
         let Some(fr) = self.runs.remove(&run) else {
             return;
         };
@@ -1378,6 +1415,20 @@ impl Forms {
     /// controller, and a walk that ended wakes its run. With no walk in progress it does nothing.
     pub fn tick<G: Geometry, R: Reach>(&mut self, w: &mut World<'_, G, R>, now: Micros) {
         self.forget(now);
+        for run in std::mem::take(&mut self.planning) {
+            let cancelled = self.runs.get(&run).is_some_and(|fr| {
+                fr.walk.is_some_and(|driver| {
+                    !w.controller
+                        .claims(fr.body)
+                        .is_some_and(|c| c.running().contains_key(&driver))
+                })
+            });
+            if cancelled {
+                self.finish(w, run, name("claim-taken"), now);
+                continue;
+            }
+            self.wake(w, run, Woke::Planning, now);
+        }
         if self.walks.is_empty() {
             return;
         }
