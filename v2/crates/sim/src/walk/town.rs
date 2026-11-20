@@ -365,10 +365,26 @@ impl Rebuilt {
         bases: &[crate::controller::BuildBasis],
         ground: Id,
     ) -> Result<Vec<crate::controller::PreparedRebind>, Refusal> {
+        let (surfaces, rebinds) = self.prepare_rebind_surfaces(bases, ground)?;
+        drop(surfaces);
+        Ok(rebinds)
+    }
+
+    /// Builds, once, each (class, node) surface the affected bodies stand on, and places them on it (B12b). The
+    /// surfaces are kept so a body that walked on can be placed again without building anything.
+    pub fn prepare_rebind_surfaces(
+        &self,
+        bases: &[crate::controller::BuildBasis],
+        ground: Id,
+    ) -> Result<(RebindSurfaces, Vec<crate::controller::PreparedRebind>), Refusal> {
         crate::commit::off_clock();
         let mut surfaces = BTreeMap::new();
-        let mut out = Vec::new();
-        for before in bases.iter().filter(|b| self.affects(b, ground)) {
+        let affected: Vec<_> = bases
+            .iter()
+            .filter(|b| self.affects(b, ground))
+            .cloned()
+            .collect();
+        for before in &affected {
             let key = (before.build.size, before.moved.pose.frame.node);
             if let std::collections::btree_map::Entry::Vacant(entry) = surfaces.entry(key) {
                 let prepared = if key == (Size::Standard, ground) {
@@ -396,28 +412,10 @@ impl Rebuilt {
                 };
                 entry.insert(prepared);
             }
-            let (surface, offset) = &surfaces[&key];
-            let mut moved = surface.place_built(
-                before.moved.id,
-                before.moved.pose.frame,
-                before.moved.pose.position,
-                before.moved.pose.orientation,
-                before.build,
-            )?;
-            moved.linear = before.moved.linear;
-            let triangle = surface.rebind_triangle(moved.piece, moved.tri, *offset)?;
-            if moved.pose != before.moved.pose {
-                return Err(refusal(
-                    "edit.body-support-changed",
-                    "prepared support differs",
-                ));
-            }
-            out.push(crate::controller::PreparedRebind {
-                before: before.clone(),
-                triangle,
-            });
         }
-        Ok(out)
+        let surfaces = RebindSurfaces(surfaces);
+        let rebinds = surfaces.place(&affected)?;
+        Ok((surfaces, rebinds))
     }
 
     /// Whether the whole ground was built again (the open ground was touched, or a building could not be read
@@ -440,6 +438,49 @@ impl Rebuilt {
             Fresh::Squares(sq, ..) => sq.len(),
             _ => 0,
         }
+    }
+}
+
+/// The (class, node) surfaces an edit's affected bodies were placed on off the clock (B12b): kept, unchanged, so
+/// the same bodies can be placed again where they now stand with no rebuild, map or search beyond the placing.
+#[derive(Default)]
+pub struct RebindSurfaces(pub(crate) BTreeMap<(Size, Id), (Surface, u32)>);
+
+impl RebindSurfaces {
+    /// Places exactly these bodies on the kept surfaces: their current point, unchanged; refused when a body's
+    /// class or node has no kept surface, or the placing would change its support.
+    pub fn place(
+        &self,
+        bases: &[crate::controller::BuildBasis],
+    ) -> Result<Vec<crate::controller::PreparedRebind>, Refusal> {
+        crate::commit::off_clock();
+        let mut out = Vec::with_capacity(bases.len());
+        for before in bases {
+            let key = (before.build.size, before.moved.pose.frame.node);
+            let Some((surface, offset)) = self.0.get(&key) else {
+                return Err(refusal("edit.body-stale", "prepared body changed"));
+            };
+            let mut moved = surface.place_built(
+                before.moved.id,
+                before.moved.pose.frame,
+                before.moved.pose.position,
+                before.moved.pose.orientation,
+                before.build,
+            )?;
+            moved.linear = before.moved.linear;
+            let triangle = surface.rebind_triangle(moved.piece, moved.tri, *offset)?;
+            if moved.pose != before.moved.pose {
+                return Err(refusal(
+                    "edit.body-support-changed",
+                    "prepared support differs",
+                ));
+            }
+            out.push(crate::controller::PreparedRebind {
+                before: before.clone(),
+                triangle,
+            });
+        }
+        Ok(out)
     }
 }
 

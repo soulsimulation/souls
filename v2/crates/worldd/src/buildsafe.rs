@@ -131,6 +131,8 @@ pub struct PreparedMaps {
     pub live: Rebuilt,
     pub worker: Rebuilt,
     pub rebinds: Vec<sim::controller::PreparedRebind>,
+    /// The (class, node) surfaces `rebinds` were placed on, kept for a reprepare (B12b) and released off the clock.
+    pub surfaces: sim::walk::town::RebindSurfaces,
 }
 
 impl PreparedMaps {
@@ -177,8 +179,8 @@ impl PreparedMaps {
             name: "edit.map-unchecked",
             detail,
         })?;
-        let rebinds = rebuilt
-            .prepare_rebinds(movers, source.ground)
+        let (surfaces, rebinds) = rebuilt
+            .prepare_rebind_surfaces(movers, source.ground)
             .map_err(|r| replica::edit::Refused {
                 op: None,
                 name: r.name,
@@ -192,7 +194,37 @@ impl PreparedMaps {
             live,
             worker,
             rebinds,
+            surfaces,
         })
+    }
+
+    /// Off the clock (B12b): places exactly the edit's affected bodies again, as they stand now, on the kept
+    /// surfaces. Nothing else changes: the map, the part and the bodies judged are the ones first prepared.
+    pub fn reprepare(
+        &mut self,
+        current: &[sim::controller::BuildBasis],
+    ) -> Result<(), replica::edit::Refused> {
+        let same = current.len() == self.rebinds.len()
+            && current
+                .iter()
+                .zip(&self.rebinds)
+                .all(|(c, r)| c.moved.id == r.before.moved.id);
+        if !same {
+            return Err(replica::edit::Refused {
+                op: None,
+                name: "edit.body-stale",
+                detail: "affected bodies changed".into(),
+            });
+        }
+        self.rebinds = self
+            .surfaces
+            .place(current)
+            .map_err(|r| replica::edit::Refused {
+                op: None,
+                name: r.name,
+                detail: r.detail,
+            })?;
+        Ok(())
     }
 }
 
