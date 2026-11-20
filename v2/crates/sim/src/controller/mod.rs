@@ -740,7 +740,6 @@ impl Controller {
             };
             if current.build != before.build
                 || current.claims != before.claims
-                || current.input != before.input
                 || current.track != before.track
                 || current.track.is_some()
                 || current.moved.pose.frame != before.moved.pose.frame
@@ -1438,6 +1437,22 @@ mod class_tests {
             before: c.build_basis(id).unwrap(),
             triangle: surface.rebind_triangle(0, moved.tri, 0).unwrap(),
         };
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(2_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        c.set(
+            id,
+            driver,
+            Part::Facing(Quat::from_yaw_mdeg(30_000).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(
+            c.check_build(&target.before).unwrap_err().name,
+            "body-change-stale"
+        );
         let out = c.step(&BTreeMap::from([(id, old)]), 50_000, 50_000);
         assert!(out.refused.is_empty());
         let current = c.build_basis(id).unwrap();
@@ -1445,10 +1460,31 @@ mod class_tests {
             current.moved.pose.position,
             target.before.moved.pose.position
         );
+        assert_ne!(current.input.velocity, target.before.input.velocity);
+        assert_ne!(current.input.facing, target.before.input.facing);
         let certified = c.certify_rebinds(std::slice::from_ref(&target)).unwrap();
         assert_eq!(certified[0].0, current);
         assert_eq!(certified[0].1.pose, current.moved.pose);
         assert_eq!(certified[0].1.linear, current.moved.linear);
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(3_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let drifted = c.build_basis(id).unwrap();
+        assert_eq!(
+            c.check_rebinds(&certified).unwrap_err().name,
+            "edit.body-stale"
+        );
+        assert_eq!(c.build_basis(id).unwrap(), drifted);
+        c.set(
+            id,
+            driver,
+            Part::Velocity(current.input.velocity, current.input.mode),
+        )
+        .unwrap();
+        assert_eq!(c.build_basis(id).unwrap(), current);
         assert_eq!(
             c.commit_rebinds(&certified, || Err::<(), _>(Refusal {
                 name: "paired-refusal",
@@ -1463,9 +1499,10 @@ mod class_tests {
         let mut rebound = current.clone();
         rebound.moved.piece = 0;
         assert_eq!(c.build_basis(id).unwrap(), rebound);
+        assert_eq!(c.input(id), Some(&current.input));
         assert_eq!(current.moved.piece, 1);
         assert_eq!(certified[0].1.piece, 0);
-        for change in 0..8 {
+        for change in 0..7 {
             let slot = c.bodies.get_mut(&id).unwrap();
             match change {
                 0 => slot.moved.pose.position.x = 100_000_000,
@@ -1473,8 +1510,7 @@ mod class_tests {
                 2 => slot.build.size = replica::kinds::sizes::Size::Large,
                 3 => slot.moved.pose.frame.slot = Some(1),
                 4 => slot.moved.pose.support = Support::Slot,
-                5 => slot.input.velocity.x += 1,
-                6 => {
+                5 => {
                     slot.track = Some(Track {
                         link: None,
                         line: vec![],
