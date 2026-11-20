@@ -314,7 +314,12 @@ async fn serve(
                 ok = socket.send(Message::Text(mail.into())).await.is_ok();
             }
             out = attached.frames.recv() => match out {
-                Some(frame) => ok = send(&mut socket, times::finish(frame)).await,
+                Some(frame) => {
+                    let trace = crate::world_link::delivery_trace(&frame);
+                    if let Some(t) = &trace { t.at("socket-dequeue", "ready"); }
+                    ok = send(&mut socket, times::finish(frame)).await;
+                    if let Some(t) = &trace { t.at("socket-send", if ok { "sent" } else { "failed" }); }
+                }
                 // Another socket signed in for this grant, or this one fell too far behind.
                 None => break,
             },
