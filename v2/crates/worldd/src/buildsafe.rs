@@ -138,23 +138,20 @@ impl PreparedMaps {
     ) -> Result<Self, replica::edit::Refused> {
         let mut preview = copy.frozen();
         let part = sim::edit::commit(&mut preview, &mut reserved, planned, souls, 0)?.part;
-        let rebuild = || {
-            Town::rebuild(
-                copy.tree().frozen(),
-                copy.header(),
-                source.ground,
-                &source.stamp,
-                &source.basis,
-                &part,
-            )
-            .map_err(|detail| replica::edit::Refused {
-                op: None,
-                name: "edit.map-unchecked",
-                detail,
-            })
-        };
-        let live = rebuild()?;
-        let worker = rebuild()?;
+        let rebuilt = Town::rebuild(
+            copy.tree().frozen(),
+            copy.header(),
+            source.ground,
+            &source.stamp,
+            &source.basis,
+            &part,
+        )
+        .map_err(|detail| replica::edit::Refused {
+            op: None,
+            name: "edit.map-unchecked",
+            detail,
+        })?;
+        let (live, worker) = rebuilt.into_pair();
         Ok(Self {
             part,
             before: Arc::clone(&source.stamp),

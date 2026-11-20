@@ -3337,6 +3337,16 @@ fn edit_checker(
     thread::Builder::new()
         .name("edit-check".into())
         .spawn(move || {
+            let trace = std::env::var_os("SOULS_K18D_EDIT_TRACE").is_some_and(|v| v == "1");
+            let started = trace.then(Instant::now);
+            let stage = |label: &str| {
+                if let Some(started) = started {
+                    eprintln!(
+                        "worldd: k18d-edit-stage {label} elapsed_us={}",
+                        started.elapsed().as_micros().min(120_000_000)
+                    );
+                }
+            };
             let mut town = buildsafe::TownCopy::new(world.kinds.clone());
             loop {
                 let next = rx.recv_timeout(EDIT_IDLE);
@@ -3348,18 +3358,25 @@ fn edit_checker(
                 let edited = walkers.edited();
                 let Ok((id, e, reserved)) = next else {
                     // No edit waits: the town is built, or kept, ahead of the next.
+                    stage("idle-copy-wait");
                     let copy = publisher.wait_for(edited, Duration::from_secs(1));
+                    stage("idle-town-start");
                     town.on(&copy, buildsafe::open_ground(&copy), &committed);
+                    stage("idle-town-end");
                     continue;
                 };
+                stage("dequeue");
                 let source = walkers.map();
                 let needed = source
                     .as_ref()
                     .map_or(edited, |m| edited.max(m.version))
                     .max(e.planned);
+                stage("copy-wait");
                 let copy = publisher.wait_for(needed, Duration::from_secs(1));
+                stage("copy-published");
                 let ground = buildsafe::open_ground(&copy);
                 let who = creator.as_ref().map_or(Some(world.creator), |c| c.get());
+                stage("check-start");
                 let checked = match who {
                     _ if copy.version() < needed => Err(Refused {
                         op: None,
@@ -3376,15 +3393,30 @@ fn edit_checker(
                         detail: "the world's record names no creator".into(),
                     }),
                 };
+                stage("check-end");
                 let checked = checked
-                    .and_then(|c| match town.on(&copy, ground, &committed) {
-                        Some(t) => sim::edit::plan_on(c, &copy, &Known::of(t)),
-                        None => sim::edit::plan(c, &copy, ground),
+                    .and_then(|c| {
+                        stage("town-start");
+                        let current = town.on(&copy, ground, &committed);
+                        stage("town-end");
+                        stage("plan-start");
+                        let planned = match current {
+                            Some(t) => sim::edit::plan_on(c, &copy, &Known::of(t)),
+                            None => sim::edit::plan(c, &copy, ground),
+                        };
+                        stage("plan-end");
+                        planned
                     })
                     .and_then(|p| {
-                        let places = crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
+                        stage("projection-start");
+                        let places = crate::edit_places::Projection::prepare(&copy, &p, &entries);
+                        stage("projection-end");
+                        let places = places?;
+                        stage("souls-start");
                         let tree = buildsafe::souls(&copy, &world.kinds);
                         let souls = buildsafe::judged(tree, &walkers.latest());
+                        stage("souls-end");
+                        stage("maps-start");
                         let maps = source
                             .as_ref()
                             .map(|source| {
@@ -3396,12 +3428,22 @@ fn edit_checker(
                                     source,
                                 )
                             })
-                            .transpose()?;
+                            .transpose();
+                        stage("maps-end");
+                        let maps = maps?;
                         Ok((p, souls, places, reserved, maps))
                     });
+                stage(if checked.is_ok() {
+                    "result-ok"
+                } else {
+                    "result-refused"
+                });
+                stage("result-send-start");
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
+                    stage("result-send-failed");
                     break;
                 }
+                stage("result-send-end");
             }
         })
         .map_err(io)?;

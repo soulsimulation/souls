@@ -73,6 +73,7 @@ fn orient(a: [i128; 2], b: [i128; 2], p: [i128; 2]) -> i128 {
 type Tri = ([[i128; 2]; 3], [u32; 3], [u32; 3]);
 
 /// The walkable pieces of one node, in its frame, ready to walk on.
+#[derive(Clone)]
 pub struct Surface {
     pub node: Id,
     pieces: Vec<Piece>,

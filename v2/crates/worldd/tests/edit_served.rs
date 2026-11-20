@@ -239,6 +239,9 @@ fn serve_with(w: &Seeded, socket: &Path, bucket: Option<&Path>) -> Served {
         let tx = tx.clone();
         std::thread::spawn(move || {
             for l in BufReader::new(pipe).lines().map_while(Result::ok) {
+                if l.starts_with("worldd: k18d-edit-stage ") {
+                    eprintln!("{l}");
+                }
                 let _ = tx.send(l);
             }
         });
@@ -327,12 +330,32 @@ fn served_copy(w: &Seeded) -> (replica::apply::Replica, replica::tree::Rules) {
             .kinds
             .extend(replica::world_model::parse_kinds(line).unwrap());
     }
-    let header = import_eden::header(w.root, &rules).unwrap();
-    let mut copy = replica::apply::Replica::start(header.stored()).unwrap();
-    for record in sim::log::recover(&std::fs::read(w.dir.join("log")).unwrap())
+    let prefix = import_eden::header(w.root, &rules).unwrap();
+    let records = sim::log::recover(&std::fs::read(w.dir.join("log")).unwrap())
         .unwrap()
-        .records
-    {
+        .records;
+    let first = records
+        .iter()
+        .find(|record| !sim::recorder::is_input(record))
+        .expect("the served log has a part");
+    let first = replica::effects::Part::read(first).expect("a non-input log record is a part");
+    let path = PathBuf::from(replica::stream::header_path(&prefix))
+        .with_file_name(replica::encode::to_hex(&first.header));
+    let header = replica::effects::Header::read(
+        &std::fs::read(w.dir.join("views").join(&path)).expect("the actual served header"),
+    )
+    .expect("a canonical served header");
+    assert_eq!(
+        header.hash().to_bytes(),
+        first.header,
+        "the header named by the part"
+    );
+    assert_eq!(
+        replica::stream::header_path(&header),
+        path.to_str().unwrap()
+    );
+    let mut copy = replica::apply::Replica::start(header.stored()).unwrap();
+    for record in records {
         if sim::recorder::is_input(&record) {
             continue;
         }

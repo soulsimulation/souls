@@ -304,16 +304,28 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
     .await;
     put(
         &mut soul,
-        soul_intent(&w, w.souls[0], 1, "eden:sit", Some(chair), BTreeMap::new()),
+        soul_intent(&w, w.souls[0], 1, "eden:walk", Some(chair), BTreeMap::new()),
+    )
+    .await;
+    let approached = terminal(&mut soul).await;
+    assert_eq!(
+        approached.kind, 1,
+        "normal walk reaches the new chair: {approached:?}"
+    );
+    assert!(!approached.entries.is_empty());
+    durable(&w, Actor::Soul(w.souls[0]), 1, &approached);
+    put(
+        &mut soul,
+        soul_intent(&w, w.souls[0], 2, "eden:sit", Some(chair), BTreeMap::new()),
     )
     .await;
     let seated = terminal(&mut soul).await;
     assert_eq!(
         seated.kind, 1,
-        "normal sit approaches the newly committed room and chair: {seated:?}"
+        "normal sit occupies the approached new chair: {seated:?}"
     );
     assert!(!seated.entries.is_empty());
-    durable(&w, Actor::Soul(w.souls[0]), 1, &seated);
+    durable(&w, Actor::Soul(w.souls[0]), 2, &seated);
     assert!(
         poses(&w).iter().any(|(body, pose)| *body == w.souls[0]
             && pose.frame.node == chair

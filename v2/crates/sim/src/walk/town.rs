@@ -251,6 +251,19 @@ pub struct Rebuilt {
 }
 
 impl Rebuilt {
+    /// Two independently mutable installations of one checked rebuild. Immutable basis handles stay shared;
+    /// all mutable geometry and route storage is copied here, before either installation reaches the clock.
+    pub fn into_pair(self) -> (Self, Self) {
+        crate::commit::off_clock();
+        let other = Self {
+            touched: self.touched.clone(),
+            versions: self.versions.clone(),
+            fresh: self.fresh.clone(),
+            why: self.why,
+        };
+        (self, other)
+    }
+
     /// Whether the whole ground was built again (the open ground was touched, or a building could not be read
     /// again alone), not only the touched buildings.
     pub fn whole(&self) -> bool {
@@ -279,6 +292,7 @@ impl Rebuilt {
 pub type Square = ((i32, i32), Vec<Piece>, Vec<Vec<bool>>);
 
 /// The ground a rebuild built: the whole, or what it cut again (read by G2's guard, G2b #3488).
+#[derive(Clone)]
 pub enum Fresh {
     Whole(Box<Assembled>),
     /// The open ground's squares cut again (G3b, #3449): each with its dry pieces and, per piece and triangle,
@@ -2208,5 +2222,100 @@ impl Links for Town {
             self.crossings.insert(body.id, Crossing { from, start });
         }
         Ok(track)
+    }
+}
+
+#[cfg(test)]
+mod prepared_transport_tests {
+    use super::*;
+    use crate::ground::Patch;
+    use crate::ground::scene::Xform;
+    use crate::links::{Kind, Link};
+    use replica::ids::Scope;
+
+    #[test]
+    fn prepared_installations_keep_geometry_and_versions_independent() {
+        let id = |n| Id::new(Scope([93; 16]), n).unwrap();
+        let floor = id(1);
+        let piece = Piece {
+            outline: vec![vec![[0, 0, 0], [1000, 0, 0], [0, 0, 1000]]],
+            vertices: vec![[0, 0, 0], [1000, 0, 0], [0, 0, 1000]],
+            triangles: vec![[0, 1, 2]],
+            ground: crate::gaits::Ground::Dry,
+        };
+        let building = Building {
+            thing: id(2),
+            links: vec![Link {
+                id: id(3),
+                kind: Kind::Step,
+                nodes: [floor, id(4)],
+                owner: id(2),
+                width: 1_000_000,
+                ends: [None, None],
+                line: vec![Vec3::ZERO, Vec3::new(100_000, 0, 100_000)],
+                door: None,
+                blocked: None,
+            }],
+            floors: BTreeMap::from([(
+                floor,
+                (
+                    0,
+                    Patch {
+                        radius: HUMAN_RADIUS,
+                        pieces: vec![piece.clone()],
+                        meets: Vec::new(),
+                    },
+                ),
+            )]),
+            place: Xform::IDENTITY,
+            loose: Vec::new(),
+        };
+        let prepared = Rebuilt {
+            touched: BTreeSet::from([floor]),
+            versions: Versions::default(),
+            fresh: Fresh::Buildings(vec![(
+                building,
+                BTreeMap::from([(floor, Surface::new(floor, vec![piece]))]),
+            )]),
+            why: None,
+        };
+        let (mut live, mut worker) = prepared.into_pair();
+        live.versions.bump([&floor]);
+        live.touched.clear();
+        assert_eq!(worker.versions.of(floor), 0);
+        assert!(worker.touched.contains(&floor));
+        let Fresh::Buildings(live) = &mut live.fresh else {
+            panic!("building install")
+        };
+        let Fresh::Buildings(worker) = &mut worker.fresh else {
+            panic!("building install")
+        };
+        live[0].0.links[0].line.clear();
+        live[0]
+            .1
+            .get_mut(&floor)
+            .unwrap()
+            .replace(&[0], Vec::new(), Vec::new());
+        let frame = Frame {
+            node: floor,
+            slot: None,
+        };
+        let at = Vec3::new(100_000, 0, 100_000);
+        assert!(
+            live[0].1[&floor]
+                .place(id(5), frame, at, Quat::IDENTITY)
+                .is_err()
+        );
+        assert!(
+            worker[0].1[&floor]
+                .place(id(5), frame, at, Quat::IDENTITY)
+                .is_ok()
+        );
+        assert_eq!(worker[0].0.links[0].line.len(), 2);
+        worker[0].0.floors.clear();
+        assert_eq!(
+            live[0].0.floors[&floor].1.pieces[0].triangles,
+            vec![[0, 1, 2]]
+        );
     }
 }
