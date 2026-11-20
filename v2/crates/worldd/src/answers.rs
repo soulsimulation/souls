@@ -4553,15 +4553,19 @@ mod tests {
     /// A lockstep lamps world at `rate`, run to tick `to`, then its root's mapping as a Soul's copy syncs it.
     fn clock_run(store: Held, rate: (i64, i64), to: i64) -> Option<Mapping> {
         let w = toggles::World::build(1, 4, 0);
+        let pair = w.pairs[0];
         let place = w.replica.header().zone;
         let mut cfg = Config::new(LINEAGE, 1);
         cfg.lockstep = true;
         cfg.measures = false;
         cfg.rate = Some(rate);
         let world = start(w.replica, toggles::rules(), store, cfg).expect("the world starts");
+        let receipt = send(&world, &toggle(pair.0, pair.1, to as u64, i64::MAX));
         let (done, ran) = channel();
         world.events.send(Event::RunTo { tick: to, done }).unwrap();
         ran.recv().unwrap();
+        // A fresh durable receipt follows this start's Parts on the sync queue.
+        assert_eq!(read(&answer(&receipt)).0, 1, "the publication barrier's act");
         // A Soul's copy: the scope the world grants every actor is the place, the zone's root (`sync_by_frames`).
         let mut copy = sync::Copy::default();
         sync_by_frames(&world, &mut copy, place);
