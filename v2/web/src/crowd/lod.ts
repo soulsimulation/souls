@@ -1,5 +1,6 @@
 // The crowd's coarser levels (V6, #2715): vertex clustering on the body's bind pose. Every vertex in one cell of a
-// grid becomes the cell's first vertex (its skin weights and colour with it); triangles that collapse are dropped.
+// grid takes the cell's first position; distinct attribute corners keep their UVs, materials and skin. Geometrically
+// collapsed triangles are dropped even when their corner indices differ.
 // Crude next to a quadric simplifier (apps/web's mesh-lod worker uses meshoptimizer), but it needs no dependency, runs
 // in a millisecond on a 6,000-triangle body, and keeps a body's outline at the distances its levels are drawn.
 
@@ -21,27 +22,31 @@ export type LodMesh = {
 export function cluster(m: LodMesh, cell: number): LodMesh {
   const n = m.position.length / 3;
   const first = new Map<string, number>();
-  const rep = new Uint32Array(n);
-  const uvAt = new Map<string, string>();
-  const seams = new Set<string>();
-  if (m.uv) for (let v = 0; v < n; v++) {
-    const p = `${m.position[v * 3]},${m.position[v * 3 + 1]},${m.position[v * 3 + 2]}`;
-    const uv = `${m.uv[v * 2]},${m.uv[v * 2 + 1]}`;
-    if (uvAt.has(p) && uvAt.get(p) !== uv) seams.add(p);
-    uvAt.set(p, uv);
-  }
+  const geometry = new Uint32Array(n), corner = new Uint32Array(n);
+  const attributes = new Map<string, number>();
   for (let v = 0; v < n; v++) {
-    const p = `${m.position[v * 3]},${m.position[v * 3 + 1]},${m.position[v * 3 + 2]}`;
-    const seam = m.uv && seams.has(p) ? `${m.uv[v * 2]},${m.uv[v * 2 + 1]}` : '';
-    const k = `${Math.floor(m.position[v * 3] / cell)},${Math.floor(m.position[v * 3 + 1] / cell)},${Math.floor(m.position[v * 3 + 2] / cell)}:${m.material?.[v] ?? 0}:${seam}`;
-    let r = first.get(k);
-    if (r === undefined) first.set(k, (r = v));
-    rep[v] = r;
+    const cellKey = `${Math.floor(m.position[v * 3] / cell)},${Math.floor(m.position[v * 3 + 1] / cell)},${Math.floor(m.position[v * 3 + 2] / cell)}`;
+    let at = first.get(cellKey);
+    if (at === undefined) first.set(cellKey, (at = v));
+    geometry[v] = at;
+    // UV/material and skin/normal discontinuities retain their own corners, at the shared snapped position.
+    const key = JSON.stringify([at, m.material?.[v] ?? 0,
+      ...(m.uv?.subarray(v * 2, v * 2 + 2) ?? []), ...m.normal.subarray(v * 3, v * 3 + 3),
+      ...m.color.subarray(v * 3, v * 3 + 3), ...m.skinIndex.subarray(v * 4, v * 4 + 4),
+      ...m.skinWeight.subarray(v * 4, v * 4 + 4)]);
+    let representative = attributes.get(key);
+    if (representative === undefined) attributes.set(key, (representative = v));
+    corner[v] = representative;
   }
   const tris: number[] = [];
   for (let t = 0; t < m.index.length; t += 3) {
-    const a = rep[m.index[t]], b = rep[m.index[t + 1]], c = rep[m.index[t + 2]];
-    if (a !== b && b !== c && a !== c) tris.push(a, b, c);
+    const a = m.index[t], b = m.index[t + 1], c = m.index[t + 2];
+    const pa = geometry[a] * 3, pb = geometry[b] * 3, pc = geometry[c] * 3;
+    const ux = m.position[pb] - m.position[pa], uy = m.position[pb + 1] - m.position[pa + 1], uz = m.position[pb + 2] - m.position[pa + 2];
+    const vx = m.position[pc] - m.position[pa], vy = m.position[pc + 1] - m.position[pa + 1], vz = m.position[pc + 2] - m.position[pa + 2];
+    if (uy * vz - uz * vy !== 0 || uz * vx - ux * vz !== 0 || ux * vy - uy * vx !== 0) {
+      tris.push(corner[a], corner[b], corner[c]);
+    }
   }
   const map = new Map<number, number>();
   const index = new Uint32Array(tris.length);
@@ -61,7 +66,8 @@ export function cluster(m: LodMesh, cell: number): LodMesh {
     index,
   };
   for (const [from, to] of map) {
-    out.position.set(m.position.subarray(from * 3, from * 3 + 3), to * 3);
+    const at = geometry[from] * 3;
+    out.position.set(m.position.subarray(at, at + 3), to * 3);
     out.normal.set(m.normal.subarray(from * 3, from * 3 + 3), to * 3);
     out.color.set(m.color.subarray(from * 3, from * 3 + 3), to * 3);
     if (out.uv && m.uv) out.uv.set(m.uv.subarray(from * 2, from * 2 + 2), to * 2);

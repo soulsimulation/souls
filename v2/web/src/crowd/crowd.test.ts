@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import type { BakedModel } from './bake.ts';
 import { CrowdBodies } from './bodies.ts';
 import { Crowd } from './crowd.ts';
-import { cluster, type LodMesh } from './lod.ts';
+import { cluster, simplify, type LodMesh } from './lod.ts';
 
 /** A strip of `n` quads along x, 1 cm wide and 5 cm high, two triangles each. */
 function strip(n: number): LodMesh {
@@ -26,8 +26,9 @@ test('clustering merges the vertices of a cell, drops collapsed triangles and ke
   assert.ok(c.index.length < m.index.length && c.index.length > 0);
   assert.equal(c.position.length / 3, Math.max(...c.index) + 1, 'only used vertices kept');
   for (let v = 0; v < c.position.length / 3; v++) {
-    const from = [...Array(m.position.length / 3).keys()].find((u) => m.position[u * 3] === c.position[v * 3] && m.position[u * 3 + 1] === c.position[v * 3 + 1])!;
-    assert.equal(c.skinIndex[v * 4], m.skinIndex[from * 4]);
+    assert.ok([...Array(m.position.length / 3).keys()].some((from) =>
+      m.skinIndex.slice(from * 4, from * 4 + 4).every((value, k) => value === c.skinIndex[v * 4 + k]) &&
+      m.skinWeight.slice(from * 4, from * 4 + 4).every((value, k) => value === c.skinWeight[v * 4 + k])));
   }
 });
 
@@ -101,10 +102,43 @@ test('CMESH2 retains textured material seams and legacy CMESH1 remains byte-comp
   const textured = { ...original, uv: new Float32Array(original.position.length / 3 * 2).map((_, i) => i % 2), material: new Uint16Array(original.position.length / 3).fill(1) };
   const encoded = encodeMesh(textured); assert.equal(new TextDecoder().decode(encoded.slice(0, 6)), 'CMESH2');
   assert.deepEqual(decodeMesh(encoded), textured); assert.ok(cluster(textured, 0.015).uv); assert.ok(cluster(textured, 0.015).material?.every((m) => m === 1));
-  const seam = { ...strip(1), uv: Float32Array.of(0, 0, 0, 1, 1, 0, 1, 1), material: new Uint16Array(4) };
-  // Two coincident vertices on separate islands must not become one UV representative.
-  seam.position.set(seam.position.subarray(0, 3), 6); seam.uv.set([0.8, 0.7], 4);
+  const seam: LodMesh = {
+    position: Float32Array.of(0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, -1, 0),
+    normal: new Float32Array(18).fill(1), color: new Float32Array(18).fill(0.5),
+    uv: Float32Array.of(0, 0, 1, 0, 0, 1, 0.8, 0.7, 0, 0, 1, 1), material: Uint16Array.of(0, 0, 0, 1, 1, 1),
+    skinIndex: new Uint16Array(24), skinWeight: new Float32Array(24).map((_, i) => i % 4 === 0 ? 1 : 0),
+    index: Uint32Array.of(0, 1, 2, 3, 4, 5),
+  };
   const clustered = cluster(seam, 0.001);
-  const at = [...Array(clustered.position.length / 3).keys()].filter((i) => clustered.position[i * 3] === seam.position[0] && clustered.position[i * 3 + 1] === seam.position[1]);
+  const at = [...Array(clustered.position.length / 3).keys()].filter((i) => clustered.position[i * 3] === 0 && clustered.position[i * 3 + 1] === 0);
+  assert.equal(clustered.index.length, 6, 'both seam triangles survive geometrically');
   assert.equal(at.length, 2); assert.notDeepEqual([...clustered.uv!.slice(at[0] * 2, at[0] * 2 + 2)], [...clustered.uv!.slice(at[1] * 2, at[1] * 2 + 2)]);
+  assert.notEqual(clustered.material![at[0]], clustered.material![at[1]]);
+
+  // Independent corners on every textured grid triangle must not prevent geometric simplification.
+  const points: number[] = [], uv: number[] = [], material: number[] = [], skin: number[] = [], weight: number[] = [];
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+    for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 0], [1, 1], [0, 1]]) {
+      points.push((x + dx) / 32, (y + dy) / 32, 0); uv.push(dx, dy); material.push(x < 16 ? 0 : 1);
+      skin.push(0, 1, 0, 0); weight.push((x + 1) / 33, 1 - (x + 1) / 33, 0, 0);
+    }
+  }
+  const dense: LodMesh = { position: Float32Array.from(points), normal: new Float32Array(points.length).fill(1), color: new Float32Array(points.length).fill(0.5),
+    uv: Float32Array.from(uv), material: Uint16Array.from(material), skinIndex: Uint16Array.from(skin), skinWeight: Float32Array.from(weight),
+    index: Uint32Array.from({ length: points.length / 3 }, (_, i) => i) };
+  const before = encodeMesh(dense), low = simplify(dense, 600);
+  assert.ok(low.index.length > 0 && low.index.length / 3 <= 600);
+  assert.deepEqual(encodeMesh(dense), before, 'full source input is unchanged');
+  const tuple = (mesh: LodMesh, v: number) => JSON.stringify([mesh.material![v], ...mesh.uv!.slice(v * 2, v * 2 + 2),
+    ...mesh.normal.slice(v * 3, v * 3 + 3), ...mesh.color.slice(v * 3, v * 3 + 3),
+    ...mesh.skinIndex.slice(v * 4, v * 4 + 4), ...mesh.skinWeight.slice(v * 4, v * 4 + 4)]);
+  const sourceCorners = new Set([...Array(dense.position.length / 3).keys()].map((v) => tuple(dense, v)));
+  for (let v = 0; v < low.position.length / 3; v++) assert.ok(sourceCorners.has(tuple(low, v)));
+  for (let i = 0; i < low.index.length; i += 3) {
+    const [a, b, c] = [...low.index.slice(i, i + 3)];
+    assert.equal(low.material![a], low.material![b]); assert.equal(low.material![b], low.material![c]);
+    const cross = (low.position[b * 3] - low.position[a * 3]) * (low.position[c * 3 + 1] - low.position[a * 3 + 1]) -
+      (low.position[b * 3 + 1] - low.position[a * 3 + 1]) * (low.position[c * 3] - low.position[a * 3]);
+    assert.notEqual(cross, 0, 'no geometrically degenerate triangles survive');
+  }
 });
