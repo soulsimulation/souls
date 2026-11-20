@@ -523,6 +523,7 @@ fn route(req: &Request, app: &App) -> (u16, Value, String) {
         ("OPTIONS", _) => return (204, Value::Null, "preflight".into()),
         ("GET" | "POST", "/v1/worlds") => return crate::worlds::list::http::route(req, app),
         ("POST", "/v1/worlds/settings") => return crate::worlds::list::http::settings(req, app),
+        ("POST", "/v1/worlds/archive") => return crate::worlds::list::http::archive(req, app),
         (
             "POST",
             "/v1/worlds/handoff/offer" | "/v1/worlds/handoff/cancel" | "/v1/worlds/handoff/accept",

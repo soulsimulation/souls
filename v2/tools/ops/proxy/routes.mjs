@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// The front door's map (Engine v2 O19, #2830), made from the directory: one empty file per world the directory lists, in
+// The front door's map (Engine v2 O19, #2830): one empty file per explicitly canonical trusted world mapping, in
 // <out>/slugs/, which soul-game.caddy's file matcher reads on each request (no proxy reload), and <out>/sitemap.xml:
-// today's sitemap plus each listed world's page on the public name.
+// today's sitemap plus each listed nonarchived world's page on the public name; archived entries are removed.
 //   node v2/tools/ops/proxy/routes.mjs --directory http://localhost:7310 --launcher http://localhost:<port> \
 //     --origin https://soul.game --out /var/lib/souls-routes
 // When the directory or the launcher does not answer, nothing is changed (the last map keeps routing) and it exits 1.
@@ -21,8 +21,12 @@ export function listedSlugs(list) {
 }
 
 /** Today's sitemap with each listed slug's page added (once). */
-export function mergedSitemap(todayXml, origin, slugs) {
-  const locs = [...todayXml.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => unxml(m[1]));
+export function mergedSitemap(todayXml, origin, slugs, archived = []) {
+  const hidden = new Set(archived);
+  const locs = [...todayXml.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => unxml(m[1])).filter(at => {
+    try { const url = new URL(at), match = /^\/w\/([^/]+)(?:\/|$)/.exec(url.pathname); return url.origin !== new URL(origin).origin || !match || !hidden.has(match[1]); }
+    catch { return true; }
+  });
   const all = [...new Set([...locs, ...slugs.map((s) => `${origin}/w/${s}/`)])];
   return ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
     ...all.map((u) => `  <url><loc>${xml(u)}</loc></url>`), '</urlset>', ''].join('\n');
@@ -35,8 +39,9 @@ export async function makeRoutes({ directory, launcher, origin, out, worldRoutes
     return kind === 'json' ? r.json() : r.text();
   };
   const mapped = readWorldRoutes(worldRoutes);
-  const slugs = listedSlugs(await get(`${directory}/v1/worlds`, 'json')).filter(slug => mapped[slug]?.canonical);
-  const sitemap = mergedSitemap(await get(`${launcher}/sitemap.xml`, 'text'), origin, slugs);
+  const listed = listedSlugs(await get(`${directory}/v1/worlds`, 'json')).filter(slug => mapped[slug]?.canonical && !mapped[slug]?.archived);
+  const slugs = Object.keys(mapped).filter(slug => mapped[slug].canonical).sort();
+  const sitemap = mergedSitemap(await get(`${launcher}/sitemap.xml`, 'text'), origin, listed, Object.keys(mapped).filter(slug => mapped[slug].archived));
   const dir = join(out, 'slugs');
   mkdirSync(dir, { recursive: true });
   const had = new Set(readdirSync(dir)), want = new Set(slugs);
