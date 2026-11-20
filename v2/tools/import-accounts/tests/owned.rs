@@ -265,6 +265,23 @@ fn b15_mapped_released_births() {
             .contains("contradictory")
     );
     assert!(!out.exists());
+    let mut metadata_alias = data.clone();
+    let index = entries
+        .iter()
+        .position(|e| e["legacy"][0].get("modelUrl").is_some())
+        .unwrap();
+    let value = &mut metadata_alias["bodies"][index]["legacy"][0];
+    value["modelUrl"] = Value::String(format!("/w/garden{}", value["modelUrl"].as_str().unwrap()));
+    std::fs::write(&catalogue_path, metadata_alias.to_string()).unwrap();
+    let refused = dir.join("metadata-alias");
+    assert!(
+        import_accounts::import_with_bodies(&dir.join("set"), &[], &refused, Some(&catalogue_path))
+            .is_err()
+    );
+    assert!(
+        !refused.exists(),
+        "public metadata cannot supply world aliases"
+    );
 }
 
 #[test]

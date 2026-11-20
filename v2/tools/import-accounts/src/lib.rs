@@ -352,6 +352,9 @@ impl LegacyBodies {
                 return Err("body.catalogue-invalid".into());
             }
             for definition in legacy {
+                if normalized_body(definition, "")? != *definition {
+                    return Err("body.legacy-noncanonical".into());
+                }
                 if defaults.contains(definition) {
                     return Err("body.legacy-contradictory".into());
                 }

@@ -586,7 +586,7 @@ fn b15_imported_choice_ordinary_c3() {
         !required || prepared.is_some(),
         "the prepared caller cannot use synthetic fallback"
     );
-    let (catalogue, soul, chosen, next) = if let Some(prepared) = prepared {
+    let (catalogue, soul, chosen, next, large) = if let Some(prepared) = prepared {
         let bytes = std::fs::read(prepared.join("bodies.json")).unwrap();
         let json = replica::rules::json::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();
         assert_eq!(json.get("bodies").and_then(Json::arr).unwrap().len(), 20);
@@ -627,9 +627,26 @@ fn b15_imported_choice_ordinary_c3() {
             .find(|p| p.hash != chosen)
             .unwrap()
             .hash;
-        (catalogue, soul, chosen, next)
+        let large = json
+            .get("bodies")
+            .and_then(Json::arr)
+            .unwrap()
+            .iter()
+            .filter_map(|body| catalogue.find(body.get("hash")?.str()?))
+            .max_by_key(|preset| preset.build.size.radius_mm())
+            .filter(|preset| preset.build.size.radius_mm() > 400)
+            .expect("a released larger footprint is required")
+            .name
+            .clone();
+        (catalogue, soul, chosen, next, large)
     } else {
-        (catalogue(), ada(), hash(SMALL), hash(TALL))
+        (
+            catalogue(),
+            ada(),
+            hash(SMALL),
+            hash(TALL),
+            "big-floater".to_owned(),
+        )
     };
     let expected_build = catalogue.get(&chosen).unwrap().build;
     let wearing = || Wearing {
@@ -669,4 +686,27 @@ fn b15_imported_choice_ordinary_c3() {
         "restart and birth choice cannot overwrite later wear"
     );
     restarted.stop();
+    // The actual released larger class uses the original 800 mm corridor and unchanged fit guard.
+    let (tight, mut client, _) = serve_selected(
+        "imported-fit",
+        Wearing {
+            catalogue: catalogue.clone(),
+            born: BTreeMap::new(),
+        },
+        ada(),
+        entry(),
+        Mem::with(Vec::new()),
+    );
+    assert_eq!(client.act("life:join", Some("Ada")).map(|r| r.len()), Ok(1));
+    let before = tight.worn(ada());
+    assert_eq!(
+        client.act(VERB, Some(&large)),
+        Err("size-would-not-fit".to_owned())
+    );
+    assert_eq!(
+        tight.worn(ada()),
+        before,
+        "refused released model preserves the old recorded body"
+    );
+    tight.stop();
 }
