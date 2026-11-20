@@ -15,8 +15,8 @@ async function fixture(){
   const binary=Buffer.from('bounded hash-pinned fixture; never executed');const build=`1220${hash(binary)}`;
   const config={format:'souls/placement/1',build,worldsRoot:join(dir,'worlds'),templates:join(dir,'templates'),library:join(dir,'library'),placement:join(dir,'protected'),backup:join(dir,'backup'),worldRoutes:join(dir,'routes/worlds.json'),routesOut:join(dir,'route-output'),portFirst:7500,portLast:7502,directory:'http://localhost:7310',originUpstream:'http://localhost:7320'};
   const world=join(config.worldsRoot,'worlds',id);
-  for(const path of [world,join(world,'ckpt'),join(config.worldsRoot,'builds',build),...['archived','archives','requests'].map(p=>join(config.placement,p))])await mkdir(path,{recursive:true});
-  await json(join(world,'world.json'),{name:id,creator:founder.replace(':','-')});await writeFile(join(world,'facts.json'),'public fixture facts');await writeFile(join(world,'log'),'canonical-source-placeholder; focused lifecycle test only');await writeFile(join(world,'ckpt','0'),'checkpoint-placeholder; never replayed');
+  for(const path of [world,join(world,'checkpoints'),join(config.worldsRoot,'builds',build),...['archived','archives','requests'].map(p=>join(config.placement,p))])await mkdir(path,{recursive:true});
+  await json(join(world,'world.json'),{name:id,creator:founder.replace(':','-')});await writeFile(join(world,'facts.json'),'public fixture facts');await writeFile(join(world,'log'),'canonical-source-placeholder; focused lifecycle test only');await writeFile(join(world,'checkpoints','0'),'checkpoint-placeholder; never replayed');
   await writeFile(join(world,'tokens'),'owned hash fixture');await writeFile(join(config.worldsRoot,'builds',build,'worldd'),binary);
   await json(join(config.placement,'authority.json'),{format:'souls/world-authority/1',worldsRoot:config.worldsRoot,worlds:{garden:{instance:id,lineage,zone:`${scope}:0`,creator:founder,port:7500}}});
   const route={gateway:'http://127.0.0.1:7500',stream:`/s/w/${id}/views/public/`,history:`/s/w/${id}/history/`,canonical:true};
@@ -91,6 +91,19 @@ test('W17 failed restore re-fences and stops both; repeated operator restores ex
 test('W17 missing data or occupied address refuses restore before CAS/start and preserves foreign route',async()=>{
   const f=await fixture();try{
     await archiveRequest(f.config,f.phase.request,f.options);const request=f.phase.request;
+    const checkpoints=join(f.world,'checkpoints'),checkpoint=await readFile(join(checkpoints,'0'));
+    const phaseBefore={...f.phase},callsBefore=f.calls.length;
+    const refusedBeforeStart=async expected=>{
+      await assert.rejects(operator(f.config,['restore','garden'],{...f.options,uid:0}),expected);
+      assert.deepEqual(f.phase,phaseBefore,'canonical data refusal precedes Store CAS');
+      assert.equal(f.calls.length,callsBefore,'canonical data refusal precedes every unit operation');
+    };
+    await rm(checkpoints,{recursive:true});await refusedBeforeStart({code:'ENOENT'});
+    await mkdir(join(f.world,'ckpt'));await writeFile(join(f.world,'ckpt','0'),checkpoint);
+    await refusedBeforeStart({code:'ENOENT'});
+    await mkdir(checkpoints);await refusedBeforeStart(/archive-data-missing/);
+    await writeFile(join(checkpoints,'0'),checkpoint);
+
     await rm(join(f.world,'facts.json'));await assert.rejects(operator(f.config,['restore','garden'],{...f.options,uid:0}),{code:'ENOENT'});
     assert.equal(f.phase.state,'archived');assert.equal(f.phase.request,request);assert.equal(f.units.size,0);
     await writeFile(join(f.world,'facts.json'),'public fixture facts');

@@ -97,7 +97,7 @@ async function identity(config,phase) {
   if(!/^1220[a-f0-9]{64}$/.test(phase.build))fail('archive-pin-invalid');
   const binary=await beneath(config.worldsRoot,join(config.worldsRoot,'builds',phase.build,'worldd'));
   if(`1220${sha(await data(binary,256<<20))}`!==phase.build)fail('archive-build-mismatch');
-  const checkpoints=await beneath(world,join(world,'ckpt'));
+  const checkpoints=await beneath(world,join(world,'checkpoints'));
   if(!(await readdir(checkpoints)).length)fail('archive-data-missing');
   const registry=JSON.parse(await data(await beneath(config.placement,join(config.placement,'authority.json'))));
   const authority=registry.worlds?.[phase.world];
