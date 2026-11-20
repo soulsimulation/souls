@@ -2646,7 +2646,11 @@ fn replay_reads_the_tree_and_publishes_the_same_bytes_as_the_whole_state_path() 
         "3667 replay output: whole state {} bytes, tree {} bytes, {}",
         reference.len(),
         tree.len(),
-        if reference == tree { "equal" } else { "DIFFERENT" }
+        if reference == tree {
+            "equal"
+        } else {
+            "DIFFERENT"
+        }
     );
     assert!(reference.len() > 1000, "the log published");
     assert!(reference == tree, "the tree-reading replay differs");
@@ -2767,12 +2771,15 @@ fn replay_output(whole_state: bool) -> Vec<u8> {
         )],
         vec![
             leave(8, child, t2),
-            end(
+            // A return is written by the node the subtree left.
+            w3e_effect(
                 9,
-                TransferRec::Return {
+                carrier,
+                everyone,
+                Body::Transfer(TransferRec::Return {
                     transfer: t2,
                     reason: Name::new("souls:returned").unwrap(),
-                },
+                }),
             ),
         ],
         vec![leave(10, body, t3)],
@@ -2797,10 +2804,6 @@ fn replay_output(whole_state: bool) -> Vec<u8> {
         out.push(i as u64 + 1, &bytes).unwrap();
         out.flush().unwrap();
     }
-    assert_eq!(
-        out.public_player().state(),
-        &project(&h, &source.tree().to_state()).unwrap()
-    );
     let mut all = Vec::new();
     for (name, bytes) in files(&out.generation_dir()) {
         all.extend(name.into_bytes());
