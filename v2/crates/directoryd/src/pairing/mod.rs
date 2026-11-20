@@ -20,6 +20,7 @@
 //! - Wrong short codes are counted per account: [`GUESSES_MOST`] in [`GUESS_WINDOW`] seconds, then every code is
 //!   refused `code-guesses` until the window passes.
 
+pub mod operator;
 pub mod route;
 pub mod souls;
 #[cfg(test)]
@@ -190,6 +191,7 @@ impl Pairing {
                device TEXT, token_hash TEXT);",
         )?;
         db.execute_batch(souls::SCHEMA)?;
+        db.execute_batch(operator::SCHEMA)?;
         Ok(Pairing {
             public_url: public_url.trim_end_matches('/').to_string(),
             db: Mutex::new(db),
