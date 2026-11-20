@@ -10,6 +10,58 @@ tool, write count) and `v2/crates/replica/src/history` (the bundle and day-index
 here: ten-second shipping (O3), serving a restored world (O12), search by Soul (W6), removal (W7), the corpus check
 (V18).
 
+## Forked worlds and checkpoint-based archives
+
+A filtered fork starts with a real K5 checkpoint, often at a high effect sequence and with a pinned root other than
+`souls:place`. Its archive does not pretend to start at sequence zero. On first publication, the server captures
+its original sealed record-zero fork checkpoint before pruning can start. It validates CRC, hashes, full header
+identity and definition pins, the exact initial K4 boundary, and canonical replay agreement with the newest engine
+checkpoint and complete log. Missing required original source refuses by name; the engine still restores its newest
+checkpoint. Those exact original bytes are stored privately as `archive/base/<SHA-256>`. The head's optional field
+5 binds that object. A legacy constructor explicitly refuses a based head; legacy heads and format-1 bundles
+retain their existing encoding and aligned windows.
+
+For a based head, record numbers are physical K4 record numbers. Validated K12 input records are retained alongside
+the original Parts, and replay skips inputs using the existing canonical replay rule. A missing local prefix may
+be recovered only from validated O3 shipping records with their actual takeover boundaries. Missing source or a
+changed duplicate is refused by name. Restart always uses the original archived base, even when the engine has a
+newer ordinary checkpoint. Store-only restore needs the private base, manifests and objects, not the local world.
+
+Based objects use `archive/obj/<epoch>-<first>-<SHA-256>`. Each closed range has an immutable manifest at
+`archive/range/<epoch>-<first>-<object SHA-256>`, linked to its predecessor; only the head advances with CAS.
+Header, base, ranges and source objects are create-only and an existing key is accepted only for identical bytes.
+This prevents a crash between object publication and head CAS from overwriting source on retry.
+
+Based public bundles use additive format 2: format-1 fields 2–6 retain their header/start/length/live snapshot/view
+meaning, and field 7 carries an authorized observation chain. Its version-1 fields are: header hash (2), initial
+public projection (3), physical record/effect-offset cursor (4), rows (5), terminal projection digest (6), terminal
+cursor (7), and original private-base digest (8). Each row binds the genuine physical cursor, effect sequence and
+world time, prior/result public digests, and the existing public projection delta. The producer validates each
+whole canonical Part first. The projection retains authorized carry/flight state and real opaque parent references;
+it never publishes private flight identity, private arrived bookkeeping or private fields. References and genuine
+Sampled records are scrubbed before hashing. A private-only change emits no observation row or private timestamp. The same existing
+text Store is opened once before archive replay; its current redaction list is checked at each publication boundary.
+A changed list rebuilds only derived public bundles/indices from the original private base and records, using new
+hash-addressed bundle keys. Store-only rebuild accepts that same authoritative list; no removal metadata is added
+to the archive and immutable cached objects are never rewritten.
+
+The reader validates the whole observation chain, keeps carry context internally across Return/Settle/Arrive and
+idempotent arrivals, and returns the same live public history state and sampled-motion API as before. Its hash is
+of that returned state. The native reader and the existing WASM `historyAt` caller use the same `state_at` path;
+there is no second transfer or movement implementation.
+
+Based windows are rolling sixty-second windows anchored at the first genuine public observation, so an initial
+observation at 59.5 seconds belongs to [59.5,119.5), not an overlapping shortened aligned window. A seek before that
+observation returns `history-none`; the existing previous-day search covers windows crossing midnight. Bundles
+are immutable at `bundles/<day>/<start>-<SHA-256>`. Extending an open window produces a new key and CAS-replaces only
+that start's row in the day index. Older cached indices still name exact unchanged bytes. Replaying the same base
+and source rebuilds the same bundle and event/count index hashes.
+
+The server mirrors only the validated header, bundles, bundle day indices, and `history/everyone` event/count
+objects into the existing world `history/` export, using atomic writes and refusing symlink traversal. The public
+pointer names `history/`, resolved by the existing configured world history URL. Private base, checkpoint, source,
+range, head and input objects remain private. This export does not add a proxy route or a storage lifecycle.
+
 ## The objects
 
 All keys are under the world's prefix. Every value is T0's deterministic CBOR ([encoding.md](encoding.md)); a key or

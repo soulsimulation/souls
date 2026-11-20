@@ -127,6 +127,7 @@ pub struct Bundle {
     pub length: i64,
     pub snapshot: Value,
     pub view: Value,
+    pub observation: Option<Value>,
     stored: Vec<u8>,
 }
 
@@ -157,8 +158,32 @@ impl Bundle {
             length,
             snapshot,
             view,
+            observation: None,
             stored,
         })
+    }
+
+    /// A rolling, checkpoint-based history window with an audience-authorized observation chain.
+    pub fn new_based(
+        header: Vec<u8>,
+        start: i64,
+        length: i64,
+        snapshot: Value,
+        view: Value,
+        observation: Value,
+    ) -> R<Bundle> {
+        let mut bundle = Self::new(header, start, length, snapshot, view)?;
+        bundle.observation = Some(observation.clone());
+        bundle.stored = enc(&Value::Map(BTreeMap::from([
+            (1, Value::Uint(2)),
+            (2, Value::Bytes(bundle.header.clone())),
+            (3, int(start)),
+            (4, int(length)),
+            (5, bundle.snapshot.clone()),
+            (6, bundle.view.clone()),
+            (7, observation),
+        ])))?;
+        Ok(bundle)
     }
 
     pub fn read(bytes: &[u8]) -> R<Bundle> {
@@ -189,7 +214,8 @@ impl Bundle {
             m.remove(&k)
                 .map_or_else(|| refuse("history-bad", format!("a bundle lacks {k}")), Ok)
         };
-        if take(1)? != Value::Uint(FORMAT) {
+        let format = take(1)?;
+        if format != Value::Uint(FORMAT) && format != Value::Uint(2) {
             return refuse("history-format", "a bundle of another format");
         }
         let Value::Bytes(header) = take(2)? else {
@@ -208,6 +234,11 @@ impl Bundle {
             length,
             snapshot: take(5)?,
             view: take(6)?,
+            observation: if format == Value::Uint(2) {
+                Some(take(7)?)
+            } else {
+                None
+            },
             stored: bytes.to_vec(),
         })
     }

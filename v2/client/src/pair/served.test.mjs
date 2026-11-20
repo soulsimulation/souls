@@ -28,12 +28,12 @@ const dir = mkdtempSync(join(tmpdir(), 'souls-r16b-'));
 const procs = [];
 let daemon = null;
 
-function run(path, args, ready) {
+function run(path, args, ready, observe = null) {
   const p = spawn(path, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   procs.push(p);
   return new Promise((ok, fail) => {
     let out = '';
-    const take = (d) => { out += d; const m = ready.exec(out); if (m) ok({ p, m }); };
+    const take = (d) => { out = (out + d).slice(-8192); observe?.(out); const m = ready.exec(out); if (m) ok({ p, m }); };
     p.stdout.on('data', take);
     p.stderr.on('data', take);
     p.on('exit', (c) => fail(new Error(`${path} ended (${c}): ${out}`)));
@@ -63,10 +63,36 @@ function souls(home, args) {
 after(async () => {
   if (daemon) await request(daemon.socket, { op: 'stop' }).catch(() => {});
   for (const p of procs) p.kill();
-  rmSync(dir, { recursive: true, force: true });
+  if (process.env.SERVED_HISTORY_KEEP !== '1') rmSync(dir, { recursive: true, force: true });
 });
 
 test('A2: pairing to worldd serve writes the history it advertises, and history --at <place> answers after scripted acts', async () => {
+  const observed = { stage: 'setup', archiverStops: [], storeConditions: [], http: {}, answers: [], lastHistory: null };
+  const named = (s) => typeof s === 'string' && /^(?:archive|history|bundle|store|view|header|precondition|immutable|io)(?:[-.][a-z0-9]+)*$/.test(s) && s.length <= 64 ? s : 'other';
+  const child = (text) => {
+    for (const m of text.matchAll(/worldd: the archiver (?:stopped, the world goes on: ([a-z][a-z0-9.-]*)|panicked, the world goes on)/g)) {
+      const code = m[1] ? named(m[1]) : 'panicked';
+      if (observed.archiverStops.length < 8 && !observed.archiverStops.includes(code)) observed.archiverStops.push(code);
+    }
+    // Existing Store refusal details remain private; retain only closed categories and condition relationships.
+    for (const m of text.matchAll(/worldd: the archiver stopped, the world goes on: precondition-failed: ([^\n]{1,4096}): asked (Absent|Is\("([a-f0-9]{64})"\)), the folder holds (None|Some\("([a-f0-9]{64})"\))/g)) {
+      const category = /(?:^|\/)archive\/day\/-?\d+$/.test(m[1]) ? 'archive-day'
+        : /(?:^|\/)archive\/obj\/[a-f0-9-]+$/.test(m[1]) ? 'archive-object'
+          : /(?:^|\/)archive\/head$/.test(m[1]) ? 'archive-head'
+            : /(?:^|\/)bundles\/-?\d+\/index$/.test(m[1]) ? 'bundle-index'
+              : /(?:^|\/)bundles\/-?\d+\/[a-f0-9-]+$/.test(m[1]) ? 'public-bundle'
+                : /(?:^|\/)history\/everyone\/events\/-?\d+(?:\/\d+)?$/.test(m[1]) ? 'event-index'
+                  : /(?:^|\/)history\/everyone\/counts\/(?:day|year)\/-?\d+$/.test(m[1]) ? 'counts' : 'other';
+      const item = { category, requested: m[2] === 'Absent' ? 'absent' : 'exact',
+        current: m[4] === 'None' ? 'missing' : 'present', relation: m[3] && m[5] ? (m[3] === m[5] ? 'equal' : 'different') : 'n/a' };
+      if (observed.storeConditions.length < 8 && !observed.storeConditions.some((old) => JSON.stringify(old) === JSON.stringify(item))) observed.storeConditions.push(item);
+    }
+  };
+  const summary = (a) => ({ ok: a?.ok === true, code: named(a?.code), bytes: Buffer.byteLength(JSON.stringify(a ?? null)),
+    found: typeof a?.found === 'number' ? a.found : null, lines: Array.isArray(a?.lines) ? a.lines.length : 0,
+    kinds: Object.fromEntries(['move-ended', 'act-deadline', 'light-changed', 'new-day', 'weather-changed']
+      .filter((k) => typeof a?.kinds?.[k] === 'number').map((k) => [k, a.kinds[k]])) });
+  try {
   // The world: N2's test world, seeded with one Soul and the doors' entries, served with a store.
   const facts = spawnSync(bin('testworld'), ['--out', dir], { encoding: 'utf8' });
   assert.equal(facts.status, 0, facts.stderr);
@@ -76,26 +102,33 @@ test('A2: pairing to worldd serve writes the history it advertises, and history 
   assert.equal(seeded.status, 0, seeded.stderr);
   const meta = JSON.parse(readFileSync(join(world, 'world.json'), 'utf8'));
   const name = meta.name, lineage = name.split('-')[0];
-  await run(bin('worldd'), ['serve', '--dir', world, '--socket', join(dir, 'w.sock'), '--store', bucket], /listening /);
+  await run(bin('worldd'), ['serve', '--dir', world, '--socket', join(dir, 'w.sock'), '--store', bucket], /listening /, child);
   const { m } = await run(bin('gatewayd'), ['--listen', '127.0.0.1:0', '--world', join(dir, 'w.sock'), '--tokens', join(world, 'tokens'),
     '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
   const gateway = `ws://${m[1]}/v2/ws`;
 
-  // One origin: the world's folder under w/<name>/, the store under s/, and the directory's two pairing calls, which
-  // hand over the seeded Soul's token once asked (the owner's approval stands in).
+  // One origin: the world's public folder and the directory's two pairing calls. Raw Store paths are not served.
+  // Pairing hands over the seeded Soul's token once asked (the owner's approval stands in).
   const token = readFileSync(join(world, 'souls.tokens'), 'utf8').split('\n')[0];
   const file = (root, rest) => {
     const p = normalize(join(root, decodeURIComponent(rest)));
     return p.startsWith(root) ? p : null;
   };
   const origin = createServer((req, res) => {
+    const category = req.url.startsWith('/v1/pair/') ? 'pair' : req.url.endsWith('/world.json') ? 'world-metadata'
+      : /\/history\/history\/everyone\/events\//.test(req.url) ? 'public-events'
+        : /\/history\/history\/everyone\/counts\/(day|year)\//.test(req.url) ? 'public-counts'
+          : req.url.startsWith('/w/eden/history/') ? 'public-history-other' : 'other';
+    res.once('finish', () => {
+      const key = `${category}:${res.statusCode}`;
+      if (Object.keys(observed.http).length < 16 || key in observed.http) observed.http[key] = (observed.http[key] ?? 0) + 1;
+    });
     let body = '';
     req.on('data', (d) => { body += d; });
     req.on('end', () => {
       if (req.url === '/v1/pair/request') return res.end(JSON.stringify({ code: 'BCDF-GHJK', link: 'x', interval: 0 }));
       if (req.url === '/v1/pair/poll') return res.end(JSON.stringify({ token, grant: token.split('.')[0] }));
-      const p = req.url.startsWith('/w/eden/') ? file(world, req.url.slice('/w/eden/'.length))
-        : req.url.startsWith('/s/') ? file(bucket, req.url.slice(3)) : null;
+      const p = req.url.startsWith('/w/eden/') ? file(world, req.url.slice('/w/eden/'.length)) : null;
       try {
         if (p && statSync(p).isFile()) return res.end(readFileSync(p));
       } catch { /* not there */ }
@@ -109,20 +142,22 @@ test('A2: pairing to worldd serve writes the history it advertises, and history 
   // Pairing writes the history address from the world's advert, with no hand edit.
   const home = join(dir, '.souls');
   const paired = await pair({ home, directory, world: 'eden', gateway, device: 'd', label: 'r16b', unit: 1, sleep: async () => {} });
-  const history = `${directory}/s/h/${name}/${lineage}/`;
+  const history = `${directory}/w/eden/history/`;
   assert.equal(paired.history, history);
   assert.equal(JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')).worlds.eden.history, history);
 
-  // The world advertises it: views/world.json names the archive's folder, relative to the world's.
-  assert.equal(JSON.parse(readFileSync(join(world, 'views/world.json'), 'utf8')).history, `../../s/h/${name}/${lineage}/`);
+  // The advert names only the mirrored public history, relative to the world's folder.
+  assert.equal(JSON.parse(readFileSync(join(world, 'views/world.json'), 'utf8')).history, 'history/');
 
   // Scripted acts: the Soul walks to the hall and to the building, as a harness sends them.
   daemon = runtimeOf(home, paired.soul);
   await souls(home, ['status']);
+  observed.stage = 'daemon-sync';
   await waitFor(async () => { const s = await request(daemon.socket, { op: 'status' }).catch(() => null); return s?.connected && !s.syncing; });
   const hall = (await souls(home, ['find', 'hall'])).found[0], building = (await souls(home, ['find', 'building'])).found[0];
   const beforeActs = Date.now() * 1000;
   const sent = [];
+  observed.stage = 'scripted-acts';
   for (const to of [hall, building]) {
     const r = await souls(home, ['act', to.id]);
     assert.equal(r.ok, true, JSON.stringify(r));
@@ -130,17 +165,22 @@ test('A2: pairing to worldd serve writes the history it advertises, and history 
   }
   // Each walk has its answer from the world, and ends: a public event the archive's index holds.
   const answers = [];
+  observed.stage = 'act-answers';
   await waitFor(async () => {
     answers.push(...(await request(daemon.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer' && sent.includes(e.sequence)));
+    observed.answers = answers.slice(0, 4).map((a) => ({ answer: Number.isInteger(a.answer) ? a.answer : null,
+      reason: ['completed', 'started', 'accepted', 'act-deadline', 'act-cancelled', 'out-of-reach', 'intent.expired', 'intent.stale-seq', 'intent.no-body', 'intent.ids-exhausted', 'intent.not-a-form-on-a-node'].includes(a.reason) ? a.reason : 'other' }));
     return answers.length === sent.length;
   });
 
   // `history --at <place>`: the world's own place, which holds everything, answers from the archive with both walks'
   // ends, by the Soul, and the world's day, light and weather; the index is written as it stands every 5 s.
   const place = `${lineage}-0`;
-  const ask = () => souls(home, ['history', '--at', place]);
+  observed.stage = 'history-two-move-ended';
+  const ask = async () => { const a = await souls(home, ['history', '--at', place]); observed.lastHistory = summary(a); return a; };
   const got = await waitFor(async () => { const a = await ask(); return a.kinds?.['move-ended'] === sent.length ? a : null; });
-  console.log(`A2: walks answered ${answers.map((a) => a.reason ?? a.answer).join(', ')}; history --at ${place}: ${JSON.stringify(got)}`);
+  observed.stage = 'history-assertions';
+  console.log(`served-history diagnostic: ${JSON.stringify(observed)}`);
   assert.equal(got.ok, true);
   assert.ok(got.span, 'the answer states its span');
   assert.equal(got.lines.filter((l) => l.includes('move-ended')).length, sent.length, 'each walk on its own line');
@@ -151,4 +191,9 @@ test('A2: pairing to worldd serve writes the history it advertises, and history 
   assert.equal(worldEvents.ok, true);
   assert.ok(['light-changed', 'new-day', 'weather-changed'].every((k) => worldEvents.kinds[k] >= 1 || worldEvents.lines.some((l) => l.includes(k))), 'and the world\'s own events');
   assert.ok(Buffer.byteLength(JSON.stringify(worldEvents)) <= 600);
+  } catch (err) {
+    observed.failure = { name: ['Error', 'AssertionError', 'TypeError'].includes(err.name) ? err.name : 'Error',
+      code: ['ERR_ASSERTION', 'ERR_TEST_FAILURE'].includes(err.code) ? err.code : 'other' };
+    throw new Error(`served-history diagnostic: ${JSON.stringify(observed)}`);
+  }
 });

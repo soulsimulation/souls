@@ -90,6 +90,65 @@ pub struct FormAnswer {
     pub result: FormResult,
 }
 
+/// Bounded worker-only breadcrumbs for the direct-ground handoff. No clock is read and no world content is emitted.
+#[derive(Default)]
+struct GroundTrace {
+    remaining: usize,
+    batch: u64,
+    active: bool,
+}
+
+impl GroundTrace {
+    fn begin(&mut self, w: &Wants) {
+        self.active = self.remaining > 0
+            && (!w.places.is_empty()
+                || w.marks
+                    .as_ref()
+                    .is_some_and(|ms| ms.iter().any(|m| m.spot.is_some())));
+        if self.active {
+            self.batch = self.batch.saturating_add(1);
+            self.line("dequeue", || {
+                format!(
+                    "marks={} asked={} places={}",
+                    w.marks.as_ref().map_or(0, Vec::len),
+                    w.marks
+                        .as_ref()
+                        .map_or(0, |ms| ms.iter().filter(|m| m.spot.is_some()).count()),
+                    w.places.len()
+                )
+            });
+        }
+    }
+
+    fn line(&mut self, stage: &'static str, detail: impl FnOnce() -> String) {
+        if !self.active || self.remaining == 0 {
+            return;
+        }
+        let line = format!(
+            "planner: ground-handoff batch={} stage={} {}",
+            self.batch,
+            stage,
+            detail()
+        );
+        let bytes = line.len() + 1;
+        if bytes > self.remaining {
+            self.remaining = 0;
+            return;
+        }
+        self.remaining -= bytes;
+        eprintln!("{line}");
+    }
+
+    fn key(body: replica::ids::Id, order: replica::ids::Id) -> String {
+        let mut bytes = Vec::with_capacity(48);
+        for id in [body, order] {
+            bytes.extend_from_slice(&id.scope().0);
+            bytes.extend_from_slice(&id.counter().to_le_bytes());
+        }
+        replica::encode::to_hex(&replica::ids::sha256(&bytes))
+    }
+}
+
 /// The planner over its own town.
 pub struct Planner {
     pub town: Town,
@@ -103,23 +162,58 @@ impl Planner {
     /// Answers one tick's wants: the spot tables written from its marks, then each waiting walk's place and legs,
     /// each walker's line and each reach question.
     pub fn answer(&mut self, w: &Wants) -> Planned {
+        self.answer_traced(w, &mut GroundTrace::default())
+    }
+
+    fn answer_traced(&mut self, w: &Wants, trace: &mut GroundTrace) -> Planned {
         let mut out = Planned::default();
-        if let Some(marks) = &w.marks
-            && let Err(r) = self.town.spots(marks, w.at)
-        {
-            eprintln!("planner: the spot tables were not written: {}", r.name);
+        trace.begin(w);
+        if let Some(marks) = &w.marks {
+            trace.line("spots-start", String::new);
+            let result = self.town.spots(marks, w.at);
+            trace.line("spots-end", || {
+                format!("result={}", result.as_ref().err().map_or("ok", |r| r.name))
+            });
+            if let Err(r) = result {
+                eprintln!("planner: the spot tables were not written: {}", r.name);
+            }
         }
         for (body, target, order) in &w.places {
             let r = match self.town.spot(body.id, target) {
                 Some(Ok(p)) => {
+                    trace.line("lookup-grant", || {
+                        format!("key={}", GroundTrace::key(body.id, *order))
+                    });
                     out.searched += 1;
-                    self.town
+                    trace.line("route-start", || {
+                        format!("key={}", GroundTrace::key(body.id, *order))
+                    });
+                    let result = self
+                        .town
                         .plan_with_metrics(body, target.node, p)
                         .map(|(legs, metrics)| (p, legs, metrics))
-                        .map_err(|e| e.name)
+                        .map_err(|e| e.name);
+                    trace.line("route-end", || {
+                        format!(
+                            "key={} result={}",
+                            GroundTrace::key(body.id, *order),
+                            result.as_ref().err().copied().unwrap_or("ok")
+                        )
+                    });
+                    result
                 }
-                Some(Err(name)) => Err(name),
-                None => continue,
+                Some(Err(name)) => {
+                    trace.line("lookup-refusal", || {
+                        format!("key={} result={name}", GroundTrace::key(body.id, *order))
+                    });
+                    Err(name)
+                }
+                None => {
+                    trace.line("lookup-none", || {
+                        format!("key={}", GroundTrace::key(body.id, *order))
+                    });
+                    continue;
+                }
             };
             out.places.insert(body.id, (*order, r));
         }
@@ -190,12 +284,32 @@ impl Thread {
         let handle = std::thread::Builder::new()
             .name("planner".into())
             .spawn(move || {
+                // Read once on this worker, never on the clock thread; all formatting/hashing stays here.
+                let mut trace = GroundTrace {
+                    remaining: if std::env::var("SOULS_GROUND_HANDOFF_TRACE").as_deref() == Ok("1")
+                    {
+                        64 * 1024
+                    } else {
+                        0
+                    },
+                    ..GroundTrace::default()
+                };
                 for w in wrx {
-                    let p = catch_unwind(AssertUnwindSafe(|| planner.answer(&w))).ok();
+                    let p =
+                        catch_unwind(AssertUnwindSafe(|| planner.answer_traced(&w, &mut trace)))
+                            .ok();
                     if p.is_none() {
                         eprintln!("planner: a batch's answers panicked; answered with nothing");
                     }
-                    if ptx.send(p).is_err() {
+                    let count = p.as_ref().map_or(0, |p| p.places.len());
+                    let sent = ptx.send(p);
+                    trace.line("answer-send", || {
+                        format!(
+                            "places={count} result={}",
+                            if sent.is_ok() { "ok" } else { "closed" }
+                        )
+                    });
+                    if sent.is_err() {
                         return;
                     }
                 }

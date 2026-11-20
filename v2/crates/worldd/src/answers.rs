@@ -904,38 +904,83 @@ enum Taken {
 
 /// A form's arguments from an intent's parameter 1: `[[name as bytes, id or slot number], ...]`, a thing by its id
 /// (F4) and a slot of the node by its number, 1, 2, ... in its entry's order (C12).
-fn thing_args(intent: &Intent) -> acts::Args {
-    let mut args = acts::Args::default();
-    let Some(Value::Array(pairs)) = intent.parameters.get(&1) else {
-        return args;
+fn keep_arg_names(intent: &mut Value) {
+    let Value::Map(intent) = intent else { return };
+    let Some(Value::Map(parameters)) = intent.get_mut(&4) else {
+        return;
     };
-    for p in pairs {
-        if let Value::Array(kv) = p
-            && let [Value::Bytes(k), v] = kv.as_slice()
-            && let Ok(k) = String::from_utf8(k.clone())
+    let Some(Value::Array(pairs)) = parameters.get_mut(&1) else {
+        return;
+    };
+    for pair in pairs {
+        let Value::Array(pair) = pair else { continue };
+        let [Value::Bytes(key), value] = pair.as_mut_slice() else {
+            continue;
+        };
+        if !key.is_empty()
+            && std::str::from_utf8(key).is_ok()
+            && let Value::Text(name) = value
+            && !name.as_str().contains(':')
         {
-            use skills::form_runner::Arg;
-            match v {
-                Value::Uint(n) => drop(args.slots.insert(k, *n)),
-                // A value by name, and words by their reference (`{21: id}`, K16): a set's arguments (C24).
-                Value::Text(n) => drop(args.values.insert(k, Arg::Name(n.as_str().to_owned()))),
-                Value::Map(m) if m.len() == 1 => {
-                    if let Some(Ok(id)) = m
-                        .get(&replica::audience::REFERENCE)
-                        .map(replica::effects::read_id)
-                    {
-                        args.values.insert(k, Arg::Text(id));
-                    }
+            *value = Value::Bytes(name.as_str().as_bytes().to_vec());
+        }
+    }
+}
+
+fn thing_args(intent: &Value) -> Result<acts::Args, &'static str> {
+    let mut args = acts::Args::default();
+    let pairs = match intent {
+        Value::Map(intent) => match intent.get(&4) {
+            Some(Value::Map(parameters)) => parameters.get(&1),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(Value::Array(pairs)) = pairs else {
+        return Ok(args);
+    };
+    let mut seen = BTreeSet::new();
+    for p in pairs {
+        let Value::Array(kv) = p else {
+            return Err("arg-malformed");
+        };
+        let [Value::Bytes(k), v] = kv.as_slice() else {
+            return Err("arg-malformed");
+        };
+        let k = String::from_utf8(k.clone()).map_err(|_| "arg-malformed")?;
+        if k.is_empty() {
+            return Err("arg-malformed");
+        }
+        if !seen.insert(k.clone()) {
+            return Err("arg-ambiguous");
+        }
+        use skills::form_runner::Arg;
+        match v {
+            Value::Uint(n) => drop(args.slots.insert(k, *n)),
+            Value::Bytes(b) => {
+                let n = std::str::from_utf8(b).map_err(|_| "arg-malformed")?;
+                if n.is_empty() || Name::new(n).is_none() {
+                    return Err("arg-malformed");
                 }
-                _ => {
-                    if let Ok(id) = replica::effects::read_id(v) {
-                        args.things.insert(k, id);
-                    }
-                }
+                args.values.insert(k, Arg::Name(n.to_owned()));
+            }
+            Value::Text(n) => drop(args.values.insert(k, Arg::Name(n.as_str().to_owned()))),
+            Value::Map(m) if m.len() == 1 => {
+                let id = m
+                    .get(&replica::audience::REFERENCE)
+                    .ok_or("arg-malformed")
+                    .and_then(|v| replica::effects::read_id(v).map_err(|_| "arg-malformed"))?;
+                args.values.insert(k, Arg::Text(id));
+            }
+            _ => {
+                args.things.insert(
+                    k,
+                    replica::effects::read_id(v).map_err(|_| "arg-malformed")?,
+                );
             }
         }
     }
-    args
+    Ok(args)
 }
 
 /// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name.
@@ -1277,6 +1322,7 @@ impl Clock {
             let _ = f.write_all(format!("{hex} {sequence}\n").as_bytes());
         }
         let mut value = intent.to_value();
+        keep_arg_names(&mut value);
         let form = words::form(&intent);
         // A turn into an activity is its members' alone: refused before its words are kept when the speaker is not one.
         let mut members = BTreeSet::new();
@@ -1469,6 +1515,18 @@ impl Clock {
                 return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
             }
         };
+        let form_args = if matches!(&taken, Taken::Form(a) if self.bodies.is_some() && a.spot.is_none())
+        {
+            match thing_args(&value) {
+                Ok(args) => args,
+                Err(reason) => {
+                    let a = self.refusal(actor, sequence, reason);
+                    return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+                }
+            }
+        } else {
+            acts::Args::default()
+        };
         let body = match &taken {
             Taken::Form(a) => a.body,
             Taken::Move(m) => m.body,
@@ -1518,7 +1576,7 @@ impl Clock {
             // With bodies, a form's act goes to the form runner at the next tick (C2), not to the checkers.
             Taken::Form(act) => {
                 let i = acts::intent(id, intent.expiry, actor, bytes);
-                self.forming.push((id, act, i, thing_args(&intent)));
+                self.forming.push((id, act, i, form_args));
             }
             Taken::Engine(a) => self.engine_acts.push(a),
             Taken::Edit(e) => {
@@ -3323,6 +3381,8 @@ pub fn start<S: Storage + 'static>(
                 - 1,
         ),
     };
+    // Body time is the next world tick start, not the real-time deadline returned by Ticker::due.
+    let body_start = line.tick_start(last.map_or(0, |n| n + 1)).map_err(time)?;
     let mut ticker = Ticker::new(line, mapping, last, real0).map_err(time)?;
     let beat = Arc::new(Heartbeat::new(real0));
     let tier = match cfg.views {
@@ -3533,7 +3593,7 @@ pub fn start<S: Storage + 'static>(
             if let Some(make) = make {
                 match make(&placed) {
                     Ok(mut b) => {
-                        let at = ticker.due().unwrap_or(0);
+                        let at = body_start;
                         b.begin(at);
                         // A free-running clock waits at most a tenth of a tick for each planner batch (K18b); a
                         // replay takes the batches where the recorder says the live run took them.
