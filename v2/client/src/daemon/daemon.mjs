@@ -102,8 +102,9 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock } from '../brief/brief.mjs';
-import { changedBetween, decode, rowsOf, sequenceOf } from '../brief/copy.mjs';
+import { changedBetween, decode, rememberPublicNames, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
+import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
 import { ageOf } from './age.mjs';
@@ -204,6 +205,7 @@ const copy = new wire.Copy(); // its scope, by hash (R5b)
 const SYNC_WITHIN = 10_000, SYNCS_KEPT = 8;
 const syncs = []; // the last syncs: kind, time and R5's counts
 let syncing = null, asked = 0; // the sync under way: its request's number, step, kind and start
+const publicNames = publicNameHydration(copy, () => ++asked, () => signedIn ? ws : null);
 let wakers = []; // `wait`s waiting for something addressed to this Soul
 const note = (e) => {
   events.push(e);
@@ -345,10 +347,11 @@ function awaitAnswer(sock) {
 }
 
 function syncAnswer(sock, n, refused, bytes) {
+  if (publicNames.answer(sock, n, refused, bytes)) return;
   if (!syncing || n !== syncing.n) return; // an answer to a request since given up
   if (refused !== '-') throw new Error(`sync refused: ${refused}`);
   if (syncing.step === 'hashes') syncing.version = copy.onHashes(bytes);
-  else copy.onRecords(bytes);
+  else { copy.onRecords(bytes); rememberPublicNames(copy, bytes); }
   syncing.n = ++asked;
   const next = copy.next(BigInt(syncing.n));
   if (next.length > 0) { syncing.step = 'records'; awaitAnswer(sock); sock.send(next); return; }
@@ -455,6 +458,7 @@ function connect() {
   function closed(code) {
     if (ended) return;
     ended = true;
+    publicNames.cancel(sock);
     clearTimeout(deadline);
     if (ws === sock) {
       ws = null; signedIn = false;
@@ -719,7 +723,12 @@ async function answer(req) {
       delete b.changed; // the answer's own closes it
       return b;
     });
-    case 'find': return closing({ ok: true }, (rows) => find(rows.values(), req.words, { limit: Math.min(Number(req.limit ?? 8), 50) }));
+    case 'find': {
+      const deadline = performance.now() + REFRESH_WITHIN, age = await ageAfter();
+      const hydrated = age.stale ? { ok: true } : await publicNames.hydrate(ws, deadline);
+      if (!hydrated.ok) { age.stale = true; age.gap = { ms: 0, why: hydrated.reason }; }
+      return closing({ ok: true }, (rows) => find(rows.values(), req.words, { limit: Math.min(Number(req.limit ?? 8), 50) }), { age });
+    }
     case 'wait': {
       const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000, until = Date.now() + ms;
       // R13: the queued wakes are handed as one delivery when the budget allows; over it, they wait for it to.
