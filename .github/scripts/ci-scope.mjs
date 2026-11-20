@@ -151,6 +151,66 @@ export function greenAtHead(runs = [], self = null, events = []) {
   return others[0]?.status === 'completed' && others[0].conclusion === 'success';
 }
 
+const AGGREGATE_STEP = 'Run echo "scope=$SCOPE repo=$REPO qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED green_at_head=$GREEN"';
+const RECEIPT_LOOKUP_LIMIT = 8;
+
+function completeJobs(run, evidence, sha) {
+  const jobs = evidence?.jobs;
+  if (!Array.isArray(jobs) || !Number.isInteger(evidence.total_count) || evidence.total_count !== jobs.length
+    || !jobs.length || jobs.length > 100 || new Set(jobs.map(j => j.name)).size !== jobs.length) return null;
+  if (jobs.some(j => j.run_id !== run.id || j.head_sha !== sha || j.status !== 'completed'
+    || !Array.isArray(j.steps) || (j.conclusion === 'success' && !j.steps.length)
+    || j.steps.some(s => s.status !== 'completed'))) return null;
+  return jobs;
+}
+
+/** Only this workflow's five-job closed-window shape proves deferral, without downloading logs. */
+export function deferredOnly(run, evidence, sha) {
+  const jobs = completeJobs(run, evidence, sha);
+  if (!jobs || run.event !== 'pull_request' || run.conclusion !== 'failure' || jobs.length !== 5
+    || jobs.map(j => j.name).sort().join(',') !== 'ci-ok,matrix.name,repo,scope,smoke') return false;
+  for (const job of jobs) {
+    if (['scope', 'repo'].includes(job.name)) {
+      if (job.conclusion !== 'success' || job.steps.some(s => !['success', 'skipped'].includes(s.conclusion))) return false;
+    } else if (['matrix.name', 'smoke'].includes(job.name)) {
+      if (job.conclusion !== 'skipped' || job.steps.length) return false;
+    } else {
+      const expected = new Map([['Set up job', 'success'], ['Full CI deferred', 'failure'], [AGGREGATE_STEP, 'skipped'], ['Complete job', 'success']]);
+      if (job.conclusion !== 'failure' || job.steps.length !== expected.size
+        || new Set(job.steps.map(s => s.name)).size !== expected.size
+        || job.steps.some(s => expected.get(s.name) !== s.conclusion)) return false;
+    }
+  }
+  return true;
+}
+
+function qualifiedSuccess(run, evidence, sha) {
+  const jobs = completeJobs(run, evidence, sha);
+  return !!jobs && run.conclusion === 'success'
+    && ['scope', 'repo', 'ci-ok'].every(name => jobs.some(j => j.name === name && j.conclusion === 'success'))
+    && jobs.some(j => JOBS.some(q => q.name === j.name) && j.conclusion === 'success'
+      && j.steps.some(s => s.name === 'Run assigned checks' && s.conclusion === 'success'))
+    && jobs.every(j => ['success', 'skipped'].includes(j.conclusion)
+      && j.steps.every(s => ['success', 'skipped'].includes(s.conclusion)));
+}
+
+/** A strict fallback only: every newer run must be proved deferred before an actual qualification receipt. */
+export function deferredReceipt(runs, evidence, { sha, self = null, events = [] }) {
+  const ordered = runs.filter(r => String(r.id) !== String(self ?? '') && (!events.length || events.includes(r.event)))
+    .sort((a, b) => b.id - a.id);
+  const deferred = [];
+  for (const run of ordered.slice(0, RECEIPT_LOOKUP_LIMIT)) {
+    if (!sha || run.head_sha !== sha || run.path !== '.github/workflows/ci.yml' || run.status !== 'completed'
+      || !Number.isSafeInteger(run.id) || !['success', 'failure'].includes(run.conclusion)) return { green: false };
+    if (!evidence.has(run.id)) return { inspect: run.id };
+    if (run.conclusion === 'success') return deferred.length && qualifiedSuccess(run, evidence.get(run.id), sha)
+      ? { green: true, receipt: run.id, deferred } : { green: false };
+    if (!deferredOnly(run, evidence.get(run.id), sha)) return { green: false };
+    deferred.push(run.id);
+  }
+  return { green: false };
+}
+
 /** The ci runs at `sha`, read from the REST API with `token` (GH_TOKEN). It uses fetch, not the gh CLI: the light
  * self-hosted runners have no gh, so a gh call failed there and every label run re-ran its jobs at a green head. An
  * unreadable answer throws; the caller reads that as not green, so the run does its jobs as before. */
@@ -162,9 +222,35 @@ export async function ciRunsAt(repo, sha, { token = process.env.GH_TOKEN || proc
   return (await res.json()).workflow_runs ?? [];
 }
 
+export async function ciJobsFor(repo, id, { token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN, api = process.env.GITHUB_API_URL || 'https://api.github.com', fetch: get = fetch } = {}) {
+  const res = await get(`${api}/repos/${repo}/actions/runs/${id}/jobs?filter=latest&per_page=100`, {
+    headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) throw new Error(`ci jobs for ${id}: HTTP ${res.status}`);
+  return res.json();
+}
+
 /** The `green` subcommand's answer: 'true' or 'false', never a throw (a failed read is 'false', with a warning). */
 export async function greenCommand({ repo, sha, self, events = [] }, opts = {}) {
-  try { return String(greenAtHead(await ciRunsAt(repo, sha, opts), self, events)); }
+  try {
+    const runs = await ciRunsAt(repo, sha, opts);
+    if (greenAtHead(runs, self, events)) {
+      const passed = runs.filter(r => String(r.id) !== String(self ?? '') && !['cancelled', 'skipped'].includes(r.conclusion)
+        && (!events.length || events.includes(r.event))).sort((a, b) => b.id - a.id)[0];
+      return String(passed.head_sha === sha && passed.path === '.github/workflows/ci.yml');
+    }
+    const evidence = new Map();
+    for (let read = 0; read <= RECEIPT_LOOKUP_LIMIT; read++) {
+      const selected = deferredReceipt(runs, evidence, { sha, self, events });
+      if (selected.inspect && read < RECEIPT_LOOKUP_LIMIT) {
+        evidence.set(selected.inspect, await ciJobsFor(repo, selected.inspect, opts));
+      } else {
+        if (selected.green) console.error(`::notice::Reused ci receipt ${selected.receipt}; verified deferred runs ${selected.deferred.join(', ')}`);
+        return String(selected.green === true);
+      }
+    }
+    return 'false';
+  }
   catch (e) { console.error(`::warning::green at head unknown, so this run does its jobs: ${e.message}`); return 'false'; }
 }
 
