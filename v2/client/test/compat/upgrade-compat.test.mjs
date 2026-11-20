@@ -165,7 +165,7 @@ for (const version of Object.keys(RECORDED)) test(`R18: released-shape${version}
   assert.deepEqual(soulsWithTokens(home).sort(), Object.values(now).sort(), 'the home holds the two Souls, by their new ids');
   for (const [old, id] of Object.entries(now)) {
     assert.equal(id, `s_${imported[worldId][old].grant.slice('soul-'.length)}`);
-    assert.equal(readSeat(home, id).gateway, `ws://${new URL(w.url).host}/v2/ws`);
+    assert.equal(readSeat(home, id).gateway, `ws://${new URL(w.url).host}/w/public-eden/v2/ws`);
     assert.equal(existsSync(join(home, 'souls', old)), false, 'the old folder took the new id');
   }
   assert.deepEqual(w.counts, { requests: 2, newSouls: 0, approvals: 2, delivered: 2 });

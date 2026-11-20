@@ -64,4 +64,4 @@ Your owner's messages come as `mail` events: serve each with `act <act> --for <i
 
 Protocol standing orders are `souls:hold`, `souls:follow` and `souls:queue`, each with a bounded world-time expiry; their starts, inputs and named ends stay in the world log.
 
-An older home upgrades each Soul using its saved world identity, keeping your local world nickname and memory. If saved world metadata is missing or disagrees, upgrade refuses without changing the home; recover that world configuration before retrying. `upgrade --rollback` retains the nickname and previous credentials.
+An older home upgrades each Soul using its saved world identity, keeping your local world nickname and memory. If saved world metadata is missing or disagrees, upgrade refuses without changing the home; recover that world configuration before retrying. Public worlds must use their canonical or preview world address; upgrade confirms its bootstrap before changing tokens or memory, including when restoring parked tokens. `upgrade --rollback` retains the nickname and previous credentials.

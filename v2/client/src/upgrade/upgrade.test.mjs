@@ -83,3 +83,75 @@ test('R18c: saved world identity is URL-bound; missing or contradictory metadata
   writeFileSync(join(d,'souls','s_ada','runtime','state.json'),JSON.stringify({world:url,worldId:'internal-id'}));
   assert.deepEqual(formerSouls(d).map(({world,formerWorld})=>({world,formerWorld})),[{world:'nickname',formerWorld:'internal-id'}]);
 });
+
+// The pairing fixture proves migration's file transaction; the separate served journey uses native gateways.
+test('R18d: canonical and preview addresses survive first migration, rollback and parked restore', async t => {
+  for (const prefix of ['/w/public-slug', '/preview/w/public-slug']) {
+    const grant = `soul-${randomBytes(16).toString('hex')}-0`;
+    const w = await frozenWorld({ imported: { 'internal-id': { s_ada: { account: 'a1', grant } } } });
+    t.after(() => w.close());
+    const d = join(dirname(home), prefix.includes('preview') ? 'preview-route' : 'canonical-route');
+    mkdirSync(join(d, 'souls', 's_ada'), { recursive: true });
+    mkdirSync(join(d, 'bin'), { recursive: true });
+    const url = w.origin + prefix;
+    writeFileSync(join(d, 'config.json'), JSON.stringify({ client: '3.0.0', previousClient: '2.36.2', worlds: { nickname: { url, worldId: 'internal-id' } }, souls: { s_ada: { name: 'Ada', world: 'nickname', state: 'active' } } }));
+    writeFileSync(join(d, 'credentials.json'), JSON.stringify({ souls: { s_ada: { nickname: { token: 'sim_fixture' } } } }), { mode: 0o600 });
+    writeFileSync(join(d, 'souls', 's_ada', 'memory.txt'), 'unaltered memory');
+    writeFileSync(join(d, 'bin', 'eden-2.36.2.mjs'), 'const VERSION = "2.36.2";\n');
+    const bootstrap = [];
+    const get = async (at, opts) => {
+      bootstrap.push(at);
+      assert.equal(at, new URL(prefix + '/v1/bootstrap', url).href);
+      const { signal, ...security } = opts;
+      assert.ok(signal instanceof AbortSignal);
+      assert.deepEqual(security, { redirect: 'error', credentials: 'omit', cache: 'no-store' });
+      return Response.json({ world: 'public-slug', directory: '/', gateway: prefix + '/v2/ws' });
+    };
+    let approvals = 0;
+    const first = await upgradeHome({ home: d, get, sleep: async () => {}, onAsk: a => { approvals++; w.approve(a.code, 'a1'); } });
+    const soul = first.souls[0].soul;
+    assert.ok(soul);
+    const gateway = url.replace(/^http/, 'ws') + '/v2/ws';
+    assert.equal(JSON.parse(readFileSync(join(d, 'config.json'))).worlds.nickname.gateway, gateway);
+    assert.equal(readAliases(d).toNew.get('s_ada'), soul);
+    assert.equal(readFileSync(join(d, 'souls', soul, 'memory.txt'), 'utf8'), 'unaltered memory');
+    rollbackHome(d);
+    const restored = await upgradeHome({ home: d, get, onAsk: () => { throw new Error('parked token needs no second approval'); } });
+    assert.deepEqual(restored, first);
+    assert.equal(approvals, 1);
+    assert.equal(bootstrap.length, 2, 'both crossings confirm the installed route');
+    assert.equal(JSON.parse(readFileSync(join(d, 'config.json'))).worlds.nickname.gateway, gateway);
+    assert.equal(readFileSync(join(d, 'souls', soul, 'memory.txt'), 'utf8'), 'unaltered memory');
+  }
+});
+
+test('R18d: invalid bootstrap cannot partially restore parked tokens or move any home file', async () => {
+  const good = { world: 'public-slug', directory: '/', gateway: '/w/public-slug/v2/ws' };
+  const cases = [
+    ['wrong-world', async () => Response.json({ ...good, world: 'other-world' })],
+    ['cross-origin', async () => Response.json({ ...good, gateway: 'wss://other.example.invalid/v2/ws' })],
+    ['wrong-directory', async () => Response.json({ ...good, directory: 'https://other.example.invalid/' })],
+    ['redirected', async () => ({ ok: true, redirected: true })],
+    ['changed-url', async () => ({ ok: true, url: 'https://other.example.invalid/v1/bootstrap' })],
+    ['malformed', async () => new Response('{')],
+    ['unavailable', async () => { throw new Error('unavailable'); }],
+    ['refused', async () => new Response('', { status: 503 })],
+    ['unsafe-fallback', async () => { throw new Error('must refuse before fetching'); }, 'https://world.example.invalid/legacy'],
+    ['malformed-url', async () => { throw new Error('must refuse before fetching'); }, 'not-a-url'],
+    ['credentials', async () => { throw new Error('must refuse before fetching'); }, 'https://user:secret@world.example.invalid/w/public-slug'],
+  ];
+  const snapshot = d => Object.fromEntries(readdirSync(d, { recursive: true, withFileTypes: true }).filter(e => e.isFile()).map(e => {
+    const file = join(e.parentPath, e.name); return [file.slice(d.length), readFileSync(file).toString('base64')];
+  }));
+  for (const [name, get, url = 'https://world.example.invalid/w/public-slug'] of cases) {
+    const d = join(dirname(home), 'refusal-' + name);
+    mkdirSync(join(d, 'souls', 's_ada'), { recursive: true });
+    writeFileSync(join(d, 'config.json'), JSON.stringify({ worlds: { valid: { url: 'https://valid.example.invalid/w/public-slug', worldId: 'another-internal-id' }, nickname: { url, worldId: 'internal-id' } }, souls: { s_bo: { state: 'active', world: 'valid' }, s_ada: { state: 'active', world: 'nickname' } } }));
+    writeFileSync(join(d, 'credentials.json'), JSON.stringify({ souls: { s_bo: { valid: { token: 'sim_bo' } }, s_ada: { nickname: { token: 'sim_fixture' } } }, upgraded: { souls: { s_bo_new: { valid: { token: 'parked-bo' } }, s_new: { nickname: { token: 'parked-fixture' } } } } }), { mode: 0o600 });
+    writeFileSync(join(d, 'upgrade.json'), JSON.stringify({ souls: { s_bo: 's_bo_new', s_ada: 's_new' } }));
+    writeFileSync(join(d, 'souls', 's_ada', 'memory.txt'), 'unchanged');
+    const before = snapshot(d);
+    await assert.rejects(upgradeHome({ home: d, get: (at, opts) => new URL(at).hostname === 'valid.example.invalid' ? Promise.resolve(Response.json(good)) : get(at, opts) }), { code: name === 'credentials' ? 'pair-names-a-world' : 'pair-world-routing' }, name);
+    assert.deepEqual(snapshot(d), before, name + ': no token, config, alias or memory mutation');
+  }
+});

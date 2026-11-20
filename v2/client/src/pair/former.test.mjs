@@ -138,7 +138,9 @@ test('R18c: actual importer and directory preserve a former Soul across distinct
   assert.deepEqual(await crossing('Ada owner','another-world'),{refused:'unknown-soul'});
   assert.deepEqual(await crossing('Ada owner',worldId,'s_absent'),{refused:'unknown-soul'});
   let approved;
-  const upgraded=await upgradeHome({home,device:'fixture device',onAsk:a=>{approved=approve('Ada owner')(a);},sleep:async(ms)=>{await approved;await new Promise(r=>setTimeout(r,ms));}});
+  // This isolated identity fixture has no public proxy; gateway connectivity is covered by R18d's served journey.
+  const get=async(at,options)=>{assert.equal(at,url+'/v1/bootstrap');const {signal,...security}=options;assert.ok(signal instanceof AbortSignal);assert.deepEqual(security,{redirect:'error',credentials:'omit',cache:'no-store'});return Response.json({world:slug,directory:'/',gateway:'/w/'+slug+'/v2/ws'});};
+  const upgraded=await upgradeHome({home,get,device:'fixture device',onAsk:a=>{approved=approve('Ada owner')(a);},sleep:async(ms)=>{await approved;await new Promise(r=>setTimeout(r,ms));}});
   const grant='soul-'+mapped.replace(':','-'),id='s_'+mapped.replace(':','-');
   assert.deepEqual(upgraded.souls,[{formerly:'s_ada',soul:id}]);
   assert.equal(readFileSync(join(home,'souls',id,'memory.txt'),'utf8'),'the original memory');
