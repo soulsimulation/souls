@@ -15,6 +15,9 @@ ring = "0.17"
 # The account store: one SQLite file, with SQLite's online backup for a consistent copy (W1).
 rusqlite = { version = "0.37", features = ["bundled", "backup"] }
 serde_json = "1"
+# Bounded private gateway-presence connect and overall steady I/O deadline (W15).
+socket2 = "0.6.5"
+rustix = { version = "1", default-features = false, features = ["time", "std"] }
 # The provider's public keys, fetched over HTTPS when its key id changes (W1); the object store over HTTP(S) (W8).
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 

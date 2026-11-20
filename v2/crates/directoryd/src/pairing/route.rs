@@ -59,10 +59,21 @@ fn listed(m: &Mine) -> Value {
 }
 
 /// The signed-in account of a request, as W1 signs one in.
-fn signed_in(app: &App, bearer: Option<&str>, body: &Value) -> Result<String, &'static str> {
+pub(super) fn signed_in(
+    app: &App,
+    bearer: Option<&str>,
+    body: &Value,
+) -> Result<String, &'static str> {
     let (issuer, subject) = if let Some(t) = bearer {
         let v = app.verifier.as_ref().ok_or("no-provider")?;
         let s = v.verify(t, now()).map_err(|r| r.name())?;
+        if app
+            .store
+            .revoked(&s.issuer, &s.session)
+            .map_err(|_| "store")?
+        {
+            return Err("signed-out");
+        }
         (s.issuer, s.subject)
     } else {
         match body.get("test_person").and_then(Value::as_str) {
@@ -92,6 +103,9 @@ pub fn route(
     body: &[u8],
 ) -> Option<Answer> {
     let p = app.pairing.as_ref()?;
+    if let Some(answer) = super::account::route(app, method, path, bearer, body) {
+        return Some(answer);
+    }
     let body = || serde_json::from_slice::<Value>(body).unwrap_or(Value::Null);
     let text = |b: &Value, k: &str| b.get(k).and_then(Value::as_str).map(str::to_string);
     Some(match (method, path) {

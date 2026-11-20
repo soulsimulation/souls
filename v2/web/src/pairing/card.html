@@ -33,7 +33,7 @@
 </head>
 <body>
 <main>
-  <h1>A device is asking to act as your Soul</h1>
+  <h1 id="heading">A device is asking to act as your Soul</h1>
   <p class="warn">Approve only if you started this yourself, on a machine you control, and the code below matches the
     code on your own screen. Anyone who sent you this link can be asking for your Soul.</p>
   <button id="signin" type="button">Sign in</button>
@@ -52,6 +52,7 @@
     </dl>
     <label class="match"><input type="checkbox" id="match"> The code matches the one on my screen</label><br>
     <button id="approve" disabled>Approve this device</button>
+    <button id="cancel" type="button" hidden>Refuse this request</button>
   </section>
   <p id="said" role="status"></p>
 </main>

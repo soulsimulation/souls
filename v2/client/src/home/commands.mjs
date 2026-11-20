@@ -7,8 +7,10 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { CREDENTIALS, Refused, runtimeOf, soulsWithTokens } from './home.mjs';
 import { request } from '../daemon/client.mjs';
 import { localId, pair } from '../pair/pair.mjs';
+import { pairAddress } from '../pair/address.mjs';
+import { accountCommand, accountList, accountPair, hasAccount } from '../account/account.mjs';
 
-export const HOME_COMMANDS = ['list', 'default', 'export', 'import', 'adopt', 'doctor'];
+export const HOME_COMMANDS = ['list', 'default', 'export', 'import', 'adopt', 'doctor', 'login', 'accounts', 'logout'];
 const ID = /^s_[A-Za-z0-9_-]+$/;
 const GRANT = /^soul-[0-9a-f]{32}-\d+$/;
 const VOLATILE = new Set(['runtime/daemon.lock', 'runtime/daemon.sock', 'runtime/daemon.log']);
@@ -236,26 +238,20 @@ export function importSoul(home, folder) {
   } finally { releaseSource(); }
 }
 
-export async function adoptSoul(home, named, url, { force = false, onAsk } = {}) {
+export async function adoptSoul(home, named, url, { force = false, onAsk, as, move = false } = {}) {
+  if (as || hasAccount(home)) return accountPair(home, named, url, { as, move: move || force });
   const grant = named?.startsWith('s_') ? `soul-${named.slice(2)}` : named;
   if (!GRANT.test(grant ?? '')) throw new Refused('adopt-names-a-soul', 'adopt <Soul id or grant> [world url]');
   if (soulsWithTokens(home).includes(localId(grant))) throw new Refused('already-here', 'the Soul is already paired in this home');
   const config = configOf(home);
-  let world, spec;
-  if (url) {
-    let u; try { u = new URL(url); } catch { throw new Refused('pair-names-a-world', 'name a world URL'); }
-    world = Object.keys(config.worlds ?? {}).find((k) => config.worlds[k].url === url);
-    const segments = u.pathname.split('/').filter(Boolean);
-    world ??= segments[0] === 'w' ? segments[1] : segments[0] ?? 'world';
-    const kept = config.worlds?.[world];
-    if (kept && new URL(kept.url).origin !== u.origin) throw new Refused('world-conflict', 'this world key already names another directory');
-    spec = { directory: u.origin, gateway: u.searchParams.get('gateway') ?? kept?.gateway ?? `${u.protocol === 'https:' ? 'wss' : 'ws'}://${u.host}/v2/ws` };
-  } else {
-    const worlds = Object.entries(config.worlds ?? {});
+  if (!url) {
+    const worlds = Object.values(config.worlds ?? {});
     if (worlds.length !== 1) throw new Refused('which-world', 'adopt needs a world URL when the home has several worlds or none');
-    [world, spec] = worlds[0];
-    spec = { ...spec, directory: new URL(spec.url).origin };
+    url = worlds[0].url;
   }
+  const spec = await pairAddress(url), world = spec.world;
+  if (config.worlds?.[world]?.url && new URL(config.worlds[world].url).origin !== spec.directory) throw new Refused('world-conflict', 'this world key already names another directory');
+  force ||= move;
   return { ok: true, paired: true, ...(await pair({ home, world, ...spec, device: 'agent', label: 'souls adopt', soul: grant, force, onAsk })) };
 }
 
@@ -288,7 +284,9 @@ export async function doctor(home) {
 }
 
 export async function homeCommand(home, command, args = [], options = {}) {
-  if (command === 'list') return { ok: true, souls: listSouls(home) };
+  const asAt = args.indexOf('--as'), as = asAt < 0 ? undefined : args[asAt + 1];
+  if (['login', 'accounts', 'logout'].includes(command)) return accountCommand(home, command, args);
+  if (command === 'list') return args.includes('--account') ? accountList(home, as) : { ok: true, souls: listSouls(home) };
   if (command === 'default') return setDefault(home, args[0]);
   if (command === 'doctor') return doctor(home);
   if (command === 'import') return importSoul(home, args[0]);
@@ -296,6 +294,6 @@ export async function homeCommand(home, command, args = [], options = {}) {
     const k = args.indexOf('--out');
     return exportSoul(home, args[0], k < 0 ? undefined : args[k + 1]);
   }
-  if (command === 'adopt') return adoptSoul(home, args[0], args.slice(1).find((a) => !a.startsWith('--')), { ...options, force: args.includes('--force') });
+  if (command === 'adopt') return adoptSoul(home, args[0], args.slice(1).find((a) => /^https?:\/\//.test(a)), { ...options, as, move: args.includes('--move'), force: args.includes('--force') });
   throw new Refused('unknown-command', 'choose a home command');
 }

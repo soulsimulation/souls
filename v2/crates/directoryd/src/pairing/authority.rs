@@ -16,9 +16,136 @@ pub(super) struct Authority {
     pub creator: String,
 }
 
+macro_rules! io_error {
+    ($stage:literal, $refusal:literal) => {
+        |error: std::io::Error| {
+            #[cfg(test)]
+            eprintln!(
+                "directoryd: presence stage={} kind={:?} errno={:?}",
+                $stage,
+                error.kind(),
+                error.raw_os_error()
+            );
+            #[cfg(not(test))]
+            let _ = error;
+            $refusal
+        }
+    };
+}
+
 impl Authority {
     pub(super) fn creator_grant(&self) -> String {
         format!("creator-{}", self.creator.replace(':', "-"))
+    }
+
+    /// Only an exact trusted world's private gateway can say whether its session is live.
+    /// No mutex, worker thread, credential or public address is involved.
+    pub(super) fn connected(&self, grant: &str) -> Result<bool, &'static str> {
+        use std::io::Write;
+        use std::net::Shutdown;
+        use std::os::unix::{
+            fs::{FileTypeExt, PermissionsExt},
+            net::UnixStream,
+        };
+        use std::time::Duration;
+        const WITHIN: u64 = 1_000_000;
+        let stamp = || {
+            let t = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+            u64::try_from(t.tv_sec).unwrap_or(0) * 1_000_000
+                + u64::try_from(t.tv_nsec).unwrap_or(0) / 1_000
+        };
+        let started = stamp();
+        let remaining = || {
+            let left = WITHIN.saturating_sub(stamp().saturating_sub(started));
+            if left == 0 {
+                Err("presence-unavailable")
+            } else {
+                Ok(Duration::from_micros(left))
+            }
+        };
+        let path = self.tokens.with_file_name("ctl.sock");
+        regular(path.parent().ok_or("world-authority-invalid")?)?;
+        let meta = std::fs::symlink_metadata(&path).map_err(|_| "presence-unavailable")?;
+        if !meta.file_type().is_socket() || meta.permissions().mode() & 0o777 != 0o600 {
+            return Err("presence-invalid");
+        }
+        let socket = socket2::Socket::new(socket2::Domain::UNIX, socket2::Type::STREAM, None)
+            .map_err(io_error!("socket-create", "presence-unavailable"))?;
+        // A trusted absolute authority may be long in an isolated checkout. A shorter path from the current
+        // working directory names the same validated socket, without changing process-global cwd.
+        let cwd = std::env::current_dir().map_err(|_| "presence-unavailable")?;
+        let short = path.strip_prefix(cwd).unwrap_or(&path);
+        let address =
+            socket2::SockAddr::unix(short).map_err(io_error!("address", "presence-invalid"))?;
+        socket
+            .connect_timeout(&address, remaining()?)
+            .map_err(io_error!("connect", "presence-unavailable"))?;
+        let fd: std::os::fd::OwnedFd = socket.into();
+        let mut stream: UnixStream = fd.into();
+        let request = format!("presence/1 {grant}\n");
+        let mut written = 0;
+        while written < request.len() {
+            let timeout = remaining()?;
+            #[cfg(test)]
+            eprintln!(
+                "directoryd: presence write-timeout-us={}",
+                timeout.as_micros()
+            );
+            stream
+                .set_write_timeout(Some(timeout))
+                .map_err(io_error!("write-timeout", "presence-unavailable"))?;
+            let n = stream
+                .write(&request.as_bytes()[written..])
+                .map_err(io_error!("write", "presence-unavailable"))?;
+            if n == 0 {
+                return Err("presence-unavailable");
+            }
+            written += n;
+        }
+        stream
+            .shutdown(Shutdown::Write)
+            .map_err(io_error!("shutdown", "presence-unavailable"))?;
+        read_presence(&mut stream, remaining)
+    }
+}
+
+// Reading remains bounded by the original overall deadline. A closed peer can leave a complete
+// buffered response while some platforms reject further receive socket options, so use nonblocking
+// reads instead of changing SO_RCVTIMEO. EOF, not the first newline, validates the complete reply.
+fn read_presence(
+    stream: &mut std::os::unix::net::UnixStream,
+    remaining: impl Fn() -> Result<std::time::Duration, &'static str>,
+) -> Result<bool, &'static str> {
+    use std::io::{ErrorKind, Read};
+    use std::time::Duration;
+    stream
+        .set_nonblocking(true)
+        .map_err(io_error!("nonblocking", "presence-unavailable"))?;
+    let mut bytes = Vec::new();
+    loop {
+        remaining()?;
+        let mut part = [0; 16];
+        let n = match stream.read(&mut part) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                std::thread::sleep(remaining()?.min(Duration::from_millis(1)));
+                continue;
+            }
+            Err(error) => return Err(io_error!("read", "presence-unavailable")(error)),
+        };
+        bytes.extend_from_slice(&part[..n]);
+        if bytes.len() > 16 {
+            return Err("presence-invalid");
+        }
+    }
+    remaining()?;
+    match bytes.as_slice() {
+        b"connected\n" => Ok(true),
+        b"disconnected\n" => Ok(false),
+        b"unavailable\n" => Err("presence-unavailable"),
+        _ => Err("presence-invalid"),
     }
 }
 
@@ -293,5 +420,99 @@ impl Pairing {
             );
         }
         changed.map_err(str::to_owned)
+    }
+}
+
+#[cfg(test)]
+mod presence_tests {
+    use super::read_presence;
+    use std::io::Write;
+    use std::net::Shutdown;
+    use std::os::unix::net::UnixStream;
+    use std::time::Duration;
+
+    fn stamp() -> u64 {
+        let t = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+        u64::try_from(t.tv_sec).unwrap() * 1_000_000 + u64::try_from(t.tv_nsec).unwrap() / 1_000
+    }
+
+    fn reply(
+        parts: Vec<&'static [u8]>,
+        hold: bool,
+        preclosed: bool,
+    ) -> (Result<bool, &'static str>, u64) {
+        let (mut client, mut peer) = UnixStream::pair().unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+        let worker = std::thread::spawn(move || {
+            for (index, part) in parts.into_iter().enumerate() {
+                if index != 0 {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                peer.write_all(part).unwrap();
+            }
+            if hold {
+                std::thread::sleep(Duration::from_millis(2_000));
+            }
+        });
+        // Immediate close is joined before reading to deterministically cover the shutdown/buffered case.
+        let worker = if preclosed {
+            worker.join().unwrap();
+            None
+        } else {
+            Some(worker)
+        };
+        let started = stamp();
+        let result = read_presence(&mut client, || {
+            let left = 1_000_000u64.saturating_sub(stamp().saturating_sub(started));
+            if left == 0 {
+                Err("presence-unavailable")
+            } else {
+                Ok(Duration::from_micros(left))
+            }
+        });
+        let elapsed = stamp().saturating_sub(started);
+        if let Some(worker) = worker {
+            worker.join().unwrap();
+        }
+        (result, elapsed)
+    }
+
+    #[test]
+    fn closed_peer_buffered_reply_and_strict_eof() {
+        assert_eq!(reply(vec![b"disconnected\n"], false, true).0, Ok(false));
+        assert_eq!(reply(vec![b"connected\n"], false, true).0, Ok(true));
+        assert_eq!(
+            reply(vec![b"unavailable\n"], false, true).0,
+            Err("presence-unavailable")
+        );
+        assert_eq!(
+            reply(vec![b"disconnected\nx"], false, true).0,
+            Err("presence-invalid")
+        );
+        assert_eq!(
+            reply(vec![b"disconnected"], false, true).0,
+            Err("presence-invalid")
+        );
+        assert_eq!(
+            reply(vec![b"01234567890123456"], false, true).0,
+            Err("presence-invalid")
+        );
+    }
+
+    #[test]
+    fn fragmented_reply_is_accepted_only_at_eof() {
+        assert_eq!(
+            reply(vec![b"dis", b"connected\n"], false, false).0,
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn peer_held_past_total_deadline_is_unavailable() {
+        // Keep the peer open so fragments are consumed separately, and reject even a complete line without EOF.
+        let (result, elapsed) = reply(vec![b"dis", b"connected\n"], true, false);
+        assert_eq!(result, Err("presence-unavailable"));
+        assert!(elapsed >= 1_000_000);
+        assert!(elapsed < 1_500_000, "bounded reader outlives peer hold");
     }
 }

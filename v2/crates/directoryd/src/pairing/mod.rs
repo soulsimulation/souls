@@ -20,6 +20,7 @@
 //! - Wrong short codes are counted per account: [`GUESSES_MOST`] in [`GUESS_WINDOW`] seconds, then every code is
 //!   refused `code-guesses` until the window passes.
 
+mod account;
 mod authority;
 pub mod operator;
 pub mod route;
@@ -195,6 +196,7 @@ impl Pairing {
         db.execute_batch(souls::SCHEMA)?;
         db.execute_batch(authority::SCHEMA)?;
         db.execute_batch(operator::SCHEMA)?;
+        db.execute_batch(account::SCHEMA)?;
         Ok(Pairing {
             public_url: public_url.trim_end_matches('/').to_string(),
             db: Mutex::new(db),
