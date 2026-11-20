@@ -5,7 +5,7 @@
 import { worldAddress } from '../source/address.ts';
 
 export type Row = { slug: string; name: string; href: string; system: 'v2' | 'today'; note: string };
-export type DirectoryList = { worlds?: { name: string; label?: string; template?: string; awake?: boolean }[] };
+export type DirectoryList = { worlds?: { name: string; label?: string; template?: string; awake?: boolean; ready?: boolean }[] };
 export type TodayList = {
   worlds?: { slug: string; name?: string; unlisted?: boolean; souls?: number | null }[];
   auth?: { clerkSatellite?: { signInUrl?: string } };
@@ -32,7 +32,7 @@ export function rows(directory: DirectoryList | null, today: TodayList | null): 
 
 /** Preview-only directory rows must not replace today's canonical world before activation. */
 export async function canonicalRows(directory: DirectoryList | null, today: TodayList | null, origin: string, get: typeof fetch = fetch): Promise<Row[]> {
-  const candidates = (directory?.worlds ?? []).filter(w => SLUG.test(w.name));
+  const candidates = (directory?.worlds ?? []).filter(w => w.ready !== false && SLUG.test(w.name));
   const active = await Promise.all(candidates.map(async w => {
     try { return await worldAddress(new URL(`/w/${w.name}/`, origin).href, get) ? w : null; } catch { return null; }
   }));

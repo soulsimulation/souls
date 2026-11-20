@@ -132,3 +132,52 @@ fn a_sealed_copy_opens_only_under_its_key_and_name() {
         "backup-sealed"
     );
 }
+
+#[test]
+fn w3b_placed_identity_and_private_authority_recovery_stores_are_covered() {
+    use directoryd::directory::store::{Store, When};
+    let root = scratch("w3b-placed");
+    machine(&root);
+    let world = directoryd::worlds::create::NameRecord {
+        name: "created".into(),
+        lineage: [3; 16],
+        zone: Id::new(Scope([1; 16]), 0).unwrap(),
+        creator: Id::new(Scope([2; 16]), 0).unwrap(),
+        source: [1; 16],
+    };
+    let folder = directoryd::directory::folder::Folder::new(root.join("worlds/directory"));
+    folder
+        .put(
+            &directoryd::worlds::create::NameRecord::key(&world.name),
+            &world.to_bytes().unwrap(),
+            When::Absent,
+        )
+        .unwrap();
+    folder
+        .put(
+            "world-create/request",
+            b"owned pending identity",
+            When::Absent,
+        )
+        .unwrap();
+    let backup = root.join("directory/placement-backup");
+    std::fs::create_dir_all(&backup).unwrap();
+    std::fs::write(backup.join("request"), world.to_bytes().unwrap()).unwrap();
+    for name in ["tokens", "tokens.souls"] {
+        std::fs::write(
+            root.join("worlds/w1").join(name),
+            b"derived world-bound authority",
+        )
+        .unwrap();
+    }
+    assert!(unlisted(&root, &checked_in().unwrap()).is_empty());
+    let held = folder
+        .get(&directoryd::worlds::create::NameRecord::key("created"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        directoryd::worlds::create::NameRecord::read(&held.bytes).unwrap(),
+        world
+    );
+    let _ = std::fs::remove_dir_all(root);
+}

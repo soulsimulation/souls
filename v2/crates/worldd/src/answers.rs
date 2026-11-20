@@ -3187,10 +3187,7 @@ pub fn start<S: Storage + 'static>(
             detail: e.to_string(),
         })?)?]
     };
-    let zone = Id::new(cfg.lineage, 0).ok_or(Refusal {
-        name: "id-counter",
-        detail: "the zone".into(),
-    })?;
+    let zone = world.header().zone;
     let records = found.first + found.records.len() as u64;
     // Restored trees retain sealed hashes: their unchanged records will not be emitted by the next seal.
     // Keep the validated blobs for sync before the checkpoint writer takes ownership of them.

@@ -359,6 +359,80 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
     })
 }
 
+/// Public, data-only serving support. Only the seed's facts, flattened public entries and optional moves are
+/// named; authority, creator metadata, logs and state are deliberately outside this manifest.
+fn public_boot(dir: &Path, header: &replica::effects::Header) -> R<Vec<u8>> {
+    let hash = |p: &Path| -> R<Value> {
+        Ok(Value::Bytes(
+            sha256(&std::fs::read(p).map_err(io(p))?).to_vec(),
+        ))
+    };
+    let mut files = Vec::new();
+    if dir.join("entries").is_dir() {
+        let mut paths = std::fs::read_dir(dir.join("entries"))
+            .map_err(io(dir))?
+            .map(|e| e.map(|e| e.path()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(io(dir))?;
+        paths.sort();
+        for path in paths {
+            let metadata = std::fs::symlink_metadata(&path).map_err(io(&path))?;
+            if !metadata.is_file() || path.extension().is_none_or(|e| e != "json") {
+                return Err("template-support-invalid: entries are regular JSON files".into());
+            }
+            let name = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .ok_or("template-support-invalid")?;
+            files.push(Value::Array(vec![
+                Value::Bytes(name.as_bytes().to_vec()),
+                hash(&path)?,
+            ]));
+        }
+    }
+    let mut values = BTreeMap::from([
+        (1, Value::Bytes(b"souls/public-boot/1".to_vec())),
+        (2, hash(&dir.join("facts.json"))?),
+        (
+            3,
+            Value::Array(header.kinds.iter().cloned().map(Value::Text).collect()),
+        ),
+        (4, Value::Array(files)),
+    ]);
+    if dir.join("moves.json").exists() {
+        values.insert(5, hash(&dir.join("moves.json"))?);
+    }
+    if dir.join("entry.json").exists() {
+        values.insert(6, hash(&dir.join("entry.json"))?);
+    }
+    encode(&Value::Map(values)).map_err(|e| e.to_string())
+}
+
+/// Checks a trusted public template's support against this build, including its authoritative sealed header.
+pub(crate) fn template_pins(dir: &Path) -> R<Vec<Name>> {
+    let facts = std::fs::read_to_string(dir.join("facts.json")).map_err(io(dir))?;
+    let mut kinds = Vec::new();
+    if dir.join("entries").is_dir() {
+        entries(&dir.join("entries"), &mut kinds)?;
+    }
+    let built = build(&facts, &kinds)?;
+    let manifest = std::fs::read(dir.join("boot")).map_err(io(dir))?;
+    if manifest != public_boot(dir, &built.header)? {
+        return Err(
+            "template-support-mismatch: public support fingerprints or runtime pins differ".into(),
+        );
+    }
+    let parent =
+        replica::effects::Header::read(&std::fs::read(dir.join("header")).map_err(io(dir))?)
+            .map_err(refusal)?;
+    if parent.zone != built.header.zone || parent.kinds != built.header.kinds {
+        return Err(
+            "template-pins-mismatch: public boot pins differ from the sealed template".into(),
+        );
+    }
+    Ok(parent.kinds)
+}
+
 /// A world creator's principal as `world.json` and `seed --creator` write it, `<32 hex>-<counter>` (its grant is
 /// `creator-<32 hex>-<counter>`, G7b).
 fn creator_of(text: &str) -> R<Id> {
@@ -541,6 +615,14 @@ fn seed_in(args: &[String]) -> R<String> {
         (z * 1000.0) as i64
     );
     std::fs::write(dir.join("world.json"), meta).map_err(io(&dir))?;
+    if souls == 0 {
+        std::fs::write(
+            dir.join("entry.json"),
+            format!("[{}, {}]", (x * 1000.0) as i64, (z * 1000.0) as i64),
+        )
+        .map_err(io(&dir))?;
+        std::fs::write(dir.join("boot"), public_boot(&dir, &built.header)?).map_err(io(&dir))?;
+    }
     Ok(name)
 }
 
@@ -775,7 +857,7 @@ fn off_machine(
     println!("store: {}", store.0.what());
     let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
     let mut d = Directory::new(store.clone(), machine);
-    let (lineage, zone) = (built.root.scope().0, built.header.zone);
+    let (lineage, zone) = (built.header.lineage.0, built.header.zone);
     match d.world(&lineage, zone) {
         Err(e) if e.name == "record-missing" => {
             // The build pinned on a first claim: the launcher's hash (`$WORLDD_BUILD`), as a SHA-256 multihash.
@@ -858,7 +940,7 @@ fn off_machine(
 /// read keeps the last.
 fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
     let store = supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?;
-    let (lineage, zone) = (built.root.scope().0, built.header.zone);
+    let (lineage, zone) = (built.header.lineage.0, built.header.zone);
     let read = move || directory_creator_of(&store, &lineage, zone);
     let creator = Arc::new(Creator::new(read().map_err(refusal)?));
     let say = |c: Option<Id>| c.map_or_else(|| "none".to_owned(), principal_text);
@@ -918,7 +1000,35 @@ fn serve(args: &[String]) -> R<()> {
         &std::fs::read_to_string(&facts).map_err(io(&facts))?,
         &kinds,
     )?;
-    let name = instance(built.root);
+    let stored_header = if meta.get("fork") == Some(&Json::Bool(true)) {
+        let header =
+            replica::effects::Header::read(&std::fs::read(dir.join("header")).map_err(io(&dir))?)
+                .map_err(refusal)?;
+        if header.zone != built.root
+            || header.kinds != built.header.kinds
+            || std::fs::read(dir.join("boot")).map_err(io(&dir))?
+                != public_boot(&dir, &built.header)?
+        {
+            return Err("served-fork-support-mismatch".into());
+        }
+        Some(header)
+    } else {
+        None
+    };
+    let name = stored_header.as_ref().map_or_else(
+        || instance(built.root),
+        |h| {
+            format!(
+                "{}-{}-{}",
+                to_hex(&h.lineage.0),
+                to_hex(&h.zone.scope().0),
+                h.zone.counter()
+            )
+        },
+    );
+    if meta.get("name").and_then(Json::str) != Some(name.as_str()) {
+        return Err("world-identity-mismatch".into());
+    }
     let moves = match std::fs::read_to_string(dir.join("moves.json")) {
         Ok(t) => json::parse(&t)?,
         Err(_) => Json::Obj(Vec::new()),
@@ -935,6 +1045,47 @@ fn serve(args: &[String]) -> R<()> {
         .collect();
     println!("activities: {}", names.join(", "));
     let mut built = built;
+    // The log read through once: its records feed the stream from record 0; then the loop opens it.
+    let log_path = dir.join("log");
+    let (log, found) =
+        Log::open(FileStore::open(&log_path).map_err(refusal)?, EPOCH).map_err(refusal)?;
+    let store = log.close();
+    // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
+    // records; imported facts contribute registered geometry/definitions, never replacement world state.
+    let (initial, base_record) = if let Some(header) = stored_header {
+        let restored = sim::checkpoint::restore(&dir.join("checkpoints"))
+            .map_err(refusal)?
+            .ok_or("served-fork-checkpoint-missing")?;
+        if restored.root.version.lineage != header.lineage
+            || restored.root.version.zone != header.zone
+        {
+            return Err("served-fork-checkpoint-mismatch".into());
+        }
+        let record = restored.root.record;
+        let initial = Replica::restored(
+            header.clone(),
+            restored.tree,
+            restored.root.version.sequence,
+        );
+        let mut live = initial.frozen();
+        for bytes in found.after(record) {
+            if !recorder::is_input(bytes) {
+                live.apply(&replica::effects::Part::read(bytes).map_err(refusal)?)
+                    .map_err(refusal)?;
+            }
+        }
+        built.header = header.clone();
+        let doors = Doors::new(header, built.rules.clone(), live.tree().next());
+        built.town = Town::new(live.tree().frozen(), built.ground, doors)
+            .map_err(|e| format!("the fork's town: {e}"))?;
+        built.planner = built
+            .town
+            .copy()
+            .map_err(|e| format!("the fork's planner: {e}"))?;
+        (initial, record)
+    } else {
+        (Replica::start(built.header.stored()).map_err(refusal)?, 0)
+    };
     let (places, things, all, left, moved) = places(&mut built.town, &kinds);
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
@@ -946,11 +1097,6 @@ fn serve(args: &[String]) -> R<()> {
         kinds: Json::Obj(kinds),
         moves,
     };
-    // The log read through once: its records feed the stream from record 0; then the loop opens it.
-    let log_path = dir.join("log");
-    let (log, found) =
-        Log::open(FileStore::open(&log_path).map_err(refusal)?, EPOCH).map_err(refusal)?;
-    let store = log.close();
     let bucket = arg(args, "--store")
         .cloned()
         .or_else(|| std::env::var("WORLDD_STORE").ok())
@@ -979,7 +1125,7 @@ fn serve(args: &[String]) -> R<()> {
         None => None,
     };
     let (tx, synced) = channel();
-    let mut cfg = Config::new(built.root.scope(), EPOCH);
+    let mut cfg = Config::new(built.header.lineage, EPOCH);
     let every = arg(args, "--checkpoint-every").map_or(Ok(EVERY), |n| {
         n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
     })?;
@@ -996,17 +1142,17 @@ fn serve(args: &[String]) -> R<()> {
     // world's words outlive a restart, and O20's shipper has them to ship.
     let text = sim::text::Store::open_dir(
         &dir.join("log.text"),
-        replica::ids::Minter::new(worldd::words::scope(built.root.scope())),
+        replica::ids::Minter::new(worldd::words::scope(built.header.lineage)),
     )
     .map_err(|e| format!("the text store: {}", refusal(e)))?;
     let text = Arc::new(text);
     cfg.text = Some(Arc::clone(&text));
     // Gateway subscriptions have their own off-clock tier, apart from the filesystem stream below. Restore its
     // body, ownership and activity membership indexes before the answers thread can hand it any live part.
-    let feed =
-        worldd::views::served::start_with(worldd::views::subscription::Hub::with_words(text))
-            .map_err(refusal)?;
-    for bytes in &found.records {
+    let mut hub = worldd::views::subscription::Hub::with_words(text);
+    hub.seed(initial.tree());
+    let feed = worldd::views::served::start_with(hub).map_err(refusal)?;
+    for bytes in found.after(base_record) {
         if !recorder::is_input(bytes) {
             feed.record(bytes.clone());
         }
@@ -1015,7 +1161,7 @@ fn serve(args: &[String]) -> R<()> {
     worldd::views::served::listen(feed, &socket.with_extension("views")).map_err(refusal)?;
     // O20's shipper for the world's own stores (its words, uploads and removal list), keyed by its lineage as O12's
     // restore reads them back (O20b, #3523); with no bucket set it says so once and ships nothing.
-    let lineage = to_hex(&built.root.scope().0);
+    let lineage = to_hex(&built.header.lineage.0);
     let stores = directoryd::backup::owned_by("worldd", &[&lineage]).map_err(refusal)?;
     let strip = format!("worlds/{lineage}/");
     let backup = directoryd::backup::run("worldd", dir.clone(), stores, Default::default(), &strip)
@@ -1023,7 +1169,7 @@ fn serve(args: &[String]) -> R<()> {
     println!("{backup}");
     cfg.synced = Some(tx);
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
-    cfg.sky = Some(eden_sky(built.root.scope()));
+    cfg.sky = Some(eden_sky(built.header.lineage));
     // The engine's own acts (C2) and the activities they run (C30).
     cfg.engine = Some((built.rules.clone(), built.activities.clone()));
     // With a directory, its authoritative creator (including none) is always used; static metadata is only the
@@ -1066,8 +1212,7 @@ fn serve(args: &[String]) -> R<()> {
     cfg.bodies = Some(Box::new(move |placed: &Placed| {
         bodies(town, planner, ground, placed, places.clone())
     }));
-    let empty = Replica::start(built.header.stored()).map_err(refusal)?;
-    let world = answers::start(empty.frozen(), rules, store, cfg).map_err(refusal)?;
+    let world = answers::start(initial.frozen(), rules, store, cfg).map_err(refusal)?;
     println!(
         "restart: checkpoint {:?}, {} records read, {} applied",
         world.restart.checkpoint, world.restart.read, world.restart.applied
@@ -1103,7 +1248,7 @@ fn serve(args: &[String]) -> R<()> {
     let tier = Arc::new(
         Tier::start(
             built.header.clone(),
-            empty.tree().to_state(),
+            initial.tree().to_state(),
             Redactions::new([]),
             world.durable,
         )
@@ -1115,7 +1260,7 @@ fn serve(args: &[String]) -> R<()> {
         Writer::create(&views, &built.header, &key, (now, (now / 1000) as u64)).map_err(refusal)?;
     // The history the world advertises (R16b): the archive's when it runs, as the origin serves the store.
     let history = match off.as_ref().and_then(|o| o.archive.as_ref()) {
-        Some(_) => format!("../../s/h/{name}/{}/", to_hex(&built.root.scope().0)),
+        Some(_) => format!("../../s/h/{name}/{}/", to_hex(&built.header.lineage.0)),
         None => "history/".to_owned(),
     };
     let pointer = format!(
@@ -1125,7 +1270,7 @@ fn serve(args: &[String]) -> R<()> {
     view_out::write_whole(&views.join("world.json"), pointer.as_bytes()).map_err(refusal)?;
     let writing = view_out::follow(writer, sub, Arc::new(AtomicBool::new(false)), answers::now);
     for (k, bytes) in found.records.into_iter().enumerate() {
-        if !recorder::is_input(&bytes) {
+        if found.first + k as u64 >= base_record && !recorder::is_input(&bytes) {
             tier.offer(found.first + k as u64, bytes);
         }
     }
