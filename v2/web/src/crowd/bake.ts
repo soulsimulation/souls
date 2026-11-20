@@ -160,7 +160,7 @@ export function geometry(m: LodMesh): THREE.BufferGeometry {
       values.push(m.index[i], m.index[i + 1], m.index[i + 2]); groups.set(mat, values);
     }
     const index: number[] = [];
-    for (const [mat, values] of groups) { g.addGroup(index.length, values.length, mat); index.push(...values); }
+    for (const [mat, values] of groups) { g.addGroup(index.length, values.length, mat); for (const value of values) index.push(value); }
     g.setIndex(index);
   }
   return g;

@@ -93,6 +93,11 @@ test('material batches retain UV seams and actual maps while capacity growth rem
   for (const child of crowd.group.children) assert.ok((child as THREE.InstancedMesh).material instanceof THREE.MeshStandardMaterial);
   const materials = crowd.group.children.map((child) => (child as THREE.InstancedMesh).material as THREE.MeshStandardMaterial);
   assert.ok(materials.some((material) => material.map === map)); assert.ok(materials.some((material) => material.color.getHex() === 0xff0000));
+  const large = { ...strip(1), material: new Uint16Array(4), index: Uint32Array.from({ length: 300_000 }, (_, i) => i % 3) };
+  const complete = geometry(large);
+  assert.equal(complete.index!.count, large.index.length);
+  assert.deepEqual(complete.groups, [{ start: 0, count: large.index.length, materialIndex: 0 }]);
+  for (let i = 0; i < large.index.length; i++) assert.equal(complete.index!.getX(i), large.index[i]);
 });
 
 test('CMESH2 retains textured material seams and legacy CMESH1 remains byte-compatible', async () => {
