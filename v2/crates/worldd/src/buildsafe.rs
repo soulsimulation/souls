@@ -130,7 +130,7 @@ pub struct PreparedMaps {
     pub after: Arc<Versions>,
     pub live: Rebuilt,
     pub worker: Rebuilt,
-    pub rebinds: Vec<(sim::controller::BuildBasis, sim::mover::Body)>,
+    pub rebinds: Vec<sim::controller::PreparedRebind>,
 }
 
 impl PreparedMaps {
