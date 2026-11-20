@@ -20,6 +20,7 @@
 //!    and hold point with [`PICTURE_BYTES`] and [`PICTURE_SIDE`], is kept stripped of metadata, and is one field of
 //!    the world's row, `picture`, a `data:` URL; a row without one lists `picture: null`.
 
+pub mod handoff;
 pub mod http;
 mod placement;
 
@@ -205,6 +206,7 @@ struct Inner<S: Store> {
 /// The list and create, over one directory.
 pub struct Worlds<S: Store> {
     inner: Mutex<Inner<S>>,
+    handoffs: Mutex<()>,
     /// The cached copy of [`KEY`]: its version and rows (rule 1).
     cache: Mutex<Option<(String, Vec<Json>)>>,
     pub templates: BTreeMap<String, Template>,
@@ -224,6 +226,7 @@ impl<S: Store> Worlds<S> {
     ) -> Worlds<S> {
         Worlds {
             inner: Mutex::new(Inner { dir }),
+            handoffs: Mutex::new(()),
             cache: Mutex::new(None),
             templates,
             limits: Limits::default(),
@@ -246,14 +249,17 @@ impl<S: Store> Worlds<S> {
     /// (G11, #3335).
     pub fn creators(&self) -> R<Vec<(String, String)>> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let rows = self.rows(&inner)?;
-        Ok(rows
-            .iter()
-            .filter_map(|r| {
-                let lineage = r.get("lineage")?.as_str()?.to_string();
-                Some((lineage, row_creator(r)?.to_string()))
-            })
-            .collect())
+        let (_, rows) = read_rows(&inner.dir.store)?;
+        let mut out = Vec::new();
+        for row in rows {
+            let owner = handoff::ownership(&inner.dir.store, &row)?;
+            // Keep the lineage present while fenced: the standalone prayer fallback must not claim it.
+            out.push((
+                to_hex(&owner.lineage),
+                owner.creator.map(principal_text).unwrap_or_default(),
+            ));
+        }
+        Ok(out)
     }
 
     /// The list (rule 1): every world's row, with whether it is awake by this machine's cached directory, and the
@@ -264,6 +270,7 @@ impl<S: Store> Worlds<S> {
         let mut rows = self.rows(&inner)?;
         rows.retain(|r| r.get("unlisted") != Some(&Json::Bool(true)));
         for row in &mut rows {
+            handoff::public_row(row);
             let awake = (|| {
                 let lineage: [u8; 16] = from_hex(row.get("lineage")?.as_str()?)
                     .ok()?
@@ -485,7 +492,6 @@ impl<S: Store> Worlds<S> {
         picture: Option<&str>,
     ) -> Result<Json, Refusal> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let who = principal_text(creator);
         let (etag, rows) = read_rows(&inner.dir.store)?;
         let set = |rows: &mut Vec<Json>| -> R<Json> {
             let Some(row) = rows
@@ -494,7 +500,7 @@ impl<S: Store> Worlds<S> {
             else {
                 return refuse("world-missing", world.to_owned());
             };
-            if row_creator(row) != Some(&who) {
+            if handoff::ownership(&inner.dir.store, row)?.creator != Some(creator) {
                 return refuse("not-the-creator", world.to_owned());
             }
             for (k, v) in [("unlisted", unlisted), ("closed", closed)] {
@@ -505,7 +511,9 @@ impl<S: Store> Worlds<S> {
             if let Some(p) = picture {
                 row["picture"] = json!(p);
             }
-            Ok(row.clone())
+            let mut public = row.clone();
+            handoff::public_row(&mut public);
+            Ok(public)
         };
         if unlisted.is_none() && closed.is_none() && picture.is_none() {
             return set(&mut rows.clone());
@@ -517,25 +525,18 @@ impl<S: Store> Worlds<S> {
 }
 
 /// The one creator of the world `lineage`/`zone`, as its directory record names it (G1e, #3532): its row in the list
-/// gives its name, and the name record (written once, never replaced) its creator. `None` when the list has no row
+/// gives its name, and the validated mutable authority its current creator. `None` when pending or no row
 /// for it, or the name record is not this world's.
 pub fn creator_of<S: Store>(store: &S, lineage: &[u8; 16], zone: Id) -> R<Option<Id>> {
     let (_, rows) = read_rows(store)?;
     let (l, z) = (to_hex(lineage), principal_text(zone));
-    let Some(name) = rows.iter().find_map(|r| {
-        (r.get("lineage")?.as_str()? == l && r.get("zone")?.as_str()? == z)
-            .then(|| r.get("name")?.as_str())
-            .flatten()
+    let Some(row) = rows.iter().find(|r| {
+        r.get("lineage").and_then(Json::as_str) == Some(&l)
+            && r.get("zone").and_then(Json::as_str) == Some(&z)
     }) else {
         return Ok(None);
     };
-    Ok(match store.get(&NameRecord::key(name))? {
-        Some(o) => {
-            let rec = NameRecord::read(&o.bytes)?;
-            (rec.lineage == *lineage && rec.zone == zone).then_some(rec.creator)
-        }
-        None => None,
-    })
+    Ok(handoff::ownership(store, row)?.creator)
 }
 
 fn read_rows<S: Store>(store: &S) -> R<(String, Vec<Json>)> {
