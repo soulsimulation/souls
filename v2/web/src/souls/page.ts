@@ -4,7 +4,7 @@
 // A Soul's page shows only what the public may see: name, description, status and recent public events. Every field is
 // set as text (`textContent`), never as markup.
 import * as THREE from 'three';
-import type { PartRec } from '../source/source.ts';
+import type { NodeRec, PartRec } from '../source/source.ts';
 import type { WorldView } from '../draw/world.ts';
 import { SoulsCopy, TestMark, label, wrap, type Status } from './souls.ts';
 import { SPEECH_W, measurer, paint, place, type Candidate, type Ctx, type Placed } from './layer.ts';
@@ -12,7 +12,7 @@ import { mountCard } from './mine.ts';
 
 const UM = 1e-6, HEAD = 2.1, FAR = 150;
 
-export type PageSouls = { copy: SoulsCopy; apply(p: PartRec): void; draw(t: number, camera: THREE.Camera): void; open(id: string | null): void; placed: Placed[] };
+export type PageSouls = { copy: SoulsCopy; snapshot(nodes: NodeRec[], removed: string[]): void; apply(p: PartRec): void; draw(t: number, camera: THREE.Camera): void; open(id: string | null): void; placed: Placed[] };
 
 /** The Soul page's panel: one element, its fields set as text. */
 function panel(onClose: () => void) {
@@ -111,6 +111,7 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
   const out: PageSouls = {
     copy,
     placed: [],
+    snapshot: (nodes, removed) => { copy.snapshot(nodes, removed); showMark(); },
     apply: (p) => { copy.apply(p); showMark(); },
     open(id) {
       open = id;

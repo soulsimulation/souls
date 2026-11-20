@@ -984,3 +984,114 @@ fn w3b_registry_upgrade_preserves_exact_legacy_world_hash_and_refuses_ambiguity(
     );
     assert_eq!(std::fs::read(&legacy).unwrap(), original);
 }
+
+#[test]
+fn x11b_listing_is_read_only_and_current_lifecycle_wins_over_imported_profile() {
+    let (p, tokens) = store();
+    let account_path = tokens.with_file_name("accounts.sqlite");
+    let grant = format!("soul-{}-0", "a1".repeat(16));
+    let soul = format!("{}:0", "a1".repeat(16));
+    {
+        let db = rusqlite::Connection::open(&account_path).unwrap();
+        db.execute_batch("CREATE TABLE imported_souls_v1(world TEXT,old_soul TEXT,soul TEXT); CREATE TABLE souls_v1(soul TEXT,account_id TEXT,name TEXT,description TEXT);").unwrap();
+        db.execute(
+            "INSERT INTO imported_souls_v1 VALUES('old-garden','s_original',?1)",
+            params![soul],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO souls_v1 VALUES(?1,'owner','Imported name','Imported description')",
+            params![soul],
+        )
+        .unwrap();
+    }
+    let accounts = crate::accounts::store::Store::open(&account_path).unwrap();
+    for _ in 0..2 {
+        let listed = p.mine_with_imports(&accounts, "owner").unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].soul, grant);
+        assert_eq!(listed[0].name.as_deref(), Some("Imported name"));
+        assert_eq!(
+            listed[0].description.as_deref(),
+            Some("Imported description")
+        );
+        assert_eq!(listed[0].world.as_deref(), Some("old-garden"));
+        assert!(listed[0].device.is_none());
+    }
+    assert!(p.mine_with_imports(&accounts, "other").unwrap().is_empty());
+    assert!(
+        p.mine("owner").unwrap().is_empty(),
+        "listing does not register the Soul"
+    );
+    assert!(p.stored_hashes().is_empty());
+    assert!(!tokens.exists(), "listing writes no authority file");
+    p.register(&grant, "owner").unwrap();
+    p.db.lock().unwrap().execute("INSERT INTO soul_profiles_v1(grant_text,world,name,description) VALUES(?1,'saved-alias','Owner edited','')",params![grant]).unwrap();
+    p.initialize_imported_profile(&accounts, "owner", &grant)
+        .unwrap();
+    let row = p.mine_with_imports(&accounts, "owner").unwrap().remove(0);
+    assert_eq!(row.world.as_deref(), Some("saved-alias"));
+    assert_eq!(row.name.as_deref(), Some("Owner edited"));
+    assert_eq!(
+        row.description.as_deref(),
+        Some(""),
+        "empty owner edits are not missing fields"
+    );
+    let db_path = tokens.with_file_name("pairing.sqlite");
+    drop(p);
+    let p = Pairing::open(&db_path, Some(tokens.clone()), "http://127.0.0.1:1").unwrap();
+    assert_eq!(p.mine_with_imports(&accounts, "owner").unwrap(), vec![row]);
+    p.retire("owner", &grant, T0).unwrap();
+    assert!(p.mine_with_imports(&accounts, "owner").unwrap().is_empty());
+    assert_eq!(
+        p.initialize_imported_profile(&accounts, "owner", &grant),
+        Err("not-yours")
+    );
+    let empty =
+        crate::accounts::store::Store::open(&tokens.with_file_name("no-import.sqlite")).unwrap();
+    assert_eq!(
+        p.mine_with_imports(&empty, "owner").unwrap(),
+        p.mine("owner").unwrap()
+    );
+}
+
+#[test]
+fn x11b_refused_imported_approval_never_registers_or_initializes_a_profile() {
+    let (p, tokens) = store();
+    let grant = format!("soul-{}-0", "a2".repeat(16));
+    let imported = |_: &str, _: &str| Ok(Some((grant.clone(), "owner".to_owned())));
+    let (_, wrong) = ask(&p, "fixture", None, false, T0);
+    p.ask_world(&wrong, "garden").unwrap();
+    p.ask_former(&wrong, "s_original").unwrap();
+    assert_eq!(
+        p.approve_with("other", &wrong, T0, &imported),
+        Err(("unknown-soul", None))
+    );
+    assert!(p.soul_of(&grant).unwrap().is_none());
+    p.db.lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO soul_profiles_v1(grant_text,world,retired_at) VALUES(?1,'garden',1)",
+            params![grant],
+        )
+        .unwrap();
+    let (_, retired) = ask(&p, "fixture", Some(&grant), false, T0);
+    p.ask_world(&retired, "garden").unwrap();
+    assert_eq!(
+        p.approve_with("owner", &retired, T0, &imported),
+        Err(("soul-retired", None))
+    );
+    assert!(p.soul_of(&grant).unwrap().is_none());
+    let row: (Option<String>, Option<String>) =
+        p.db.lock()
+            .unwrap()
+            .query_row(
+                "SELECT name,description FROM soul_profiles_v1 WHERE grant_text=?1",
+                params![grant],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+    assert_eq!(row, (None, None));
+    assert!(!tokens.exists());
+    assert!(!tokens.with_file_name("tokens.txt.souls").exists());
+}

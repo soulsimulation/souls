@@ -245,8 +245,10 @@ dependencies = [
  "replica",
  "ring",
  "rusqlite",
+ "rustix",
  "serde_json",
  "sim",
+ "socket2",
  "ureq",
 ]
 

@@ -94,7 +94,7 @@ pub struct Request {
     pub body: Vec<u8>,
 }
 
-fn read(stream: &TcpStream) -> Option<(Request, bool)> {
+fn read(stream: &TcpStream) -> Option<(Request, bool, Option<std::net::IpAddr>)> {
     let mut r = BufReader::new(stream.try_clone().ok()?);
     let mut line = String::new();
     r.read_line(&mut line).ok()?;
@@ -103,6 +103,7 @@ fn read(stream: &TcpStream) -> Option<(Request, bool)> {
     let path = words.next()?.split('?').next()?.to_string();
     let (mut bearer, mut soul, mut length) = (None, None, 0usize);
     let mut indirect = false;
+    let (mut forwarded, mut forwarded_count) = (None, 0u8);
     // A picture rides in a Soul's picture and in a world's settings (its list picture, G10).
     let most = if path == "/v1/account/souls/picture" || path == "/v1/worlds/settings" {
         PICTURE_BODY_MOST
@@ -123,6 +124,15 @@ fn read(stream: &TcpStream) -> Option<(Request, bool)> {
         let (name, value) = h.split_once(':')?;
         let value = value.trim();
         let lower = name.to_ascii_lowercase();
+        if lower == "x-forwarded-for" {
+            forwarded_count = forwarded_count.saturating_add(1);
+            // Caddy overwrites this header. A list, duplicate or non-address never supplies rate identity.
+            forwarded = if forwarded_count == 1 {
+                value.parse::<std::net::IpAddr>().ok()
+            } else {
+                None
+            };
+        }
         indirect |= lower.starts_with("x-forwarded-")
             || matches!(
                 lower.as_str(),
@@ -156,12 +166,49 @@ fn read(stream: &TcpStream) -> Option<(Request, bool)> {
             body,
         },
         indirect,
+        forwarded,
     ))
+}
+
+fn rate_identity(peer: std::net::IpAddr, forwarded: Option<std::net::IpAddr>) -> std::net::IpAddr {
+    if peer.is_loopback() {
+        forwarded.unwrap_or(peer)
+    } else {
+        peer
+    }
+}
+
+#[derive(Default)]
+struct AccountRates(std::collections::BTreeMap<(std::net::IpAddr, u8), Vec<u64>>);
+impl AccountRates {
+    fn allow(&mut self, peer: std::net::IpAddr, path: &str, at: u64) -> bool {
+        let (kind, most) = match path {
+            "/v1/agent/account/login" => (0, 6),
+            "/v1/agent/account/requests/poll" => (1, 60),
+            "/v1/agent/account/pair" => (2, 10),
+            p if p.starts_with("/v1/account/requests/") && p.ends_with("/approve") => (3, 10),
+            _ => return true,
+        };
+        self.0.retain(|_, hits| {
+            hits.retain(|t| at.saturating_sub(*t) < 60);
+            !hits.is_empty()
+        });
+        // Only security-rate metadata is capped; no live sessions, accounts or Souls are capped.
+        if self.0.len() >= 4096 && !self.0.contains_key(&(peer, kind)) {
+            return false;
+        }
+        let hits = self.0.entry((peer, kind)).or_default();
+        if hits.len() >= most {
+            return false;
+        }
+        hits.push(at);
+        true
+    }
 }
 
 fn handle(mut stream: TcpStream, app: &App) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let Some((req, indirect)) = read(&stream) else {
+    let Some((req, indirect, forwarded)) = read(&stream) else {
         let _ = respond(
             &mut stream,
             400,
@@ -172,6 +219,26 @@ fn handle(mut stream: TcpStream, app: &App) {
         return;
     };
     let direct = !indirect && stream.peer_addr().is_ok_and(|peer| peer.ip().is_loopback());
+    if req.method == "POST" {
+        static RATES: std::sync::OnceLock<Mutex<AccountRates>> = std::sync::OnceLock::new();
+        let allowed = stream.peer_addr().is_ok_and(|peer| {
+            RATES
+                .get_or_init(Mutex::default)
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .allow(rate_identity(peer.ip(), forwarded), &req.path, now())
+        });
+        if !allowed {
+            let _ = respond(
+                &mut stream,
+                429,
+                &json!({"refused":"account-rate"}),
+                "no-store",
+                app.origin.as_deref(),
+            );
+            return;
+        }
+    }
     let (status, kind, body, note) =
         crate::pairing::operator::route(app, &req.method, &req.path, &req.body, direct)
             .or_else(|| {
@@ -637,9 +704,77 @@ mod operator_transport_tests {
                 if header.is_empty() { "" } else { "\r\n" }
             )
             .unwrap();
-            let (req, indirect) = read(&server).unwrap();
+            let (req, indirect, _) = read(&server).unwrap();
             assert_eq!(req.body, b"{}");
             assert_eq!(indirect, !header.is_empty());
         }
+    }
+}
+
+#[cfg(test)]
+mod account_transport_tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+    fn address(last: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(192, 0, 2, last))
+    }
+    fn forwarded(headers: &str) -> Option<IpAddr> {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        write!(
+            client,
+            "POST /v1/agent/account/login HTTP/1.1\r\nContent-Length: 2\r\n{headers}\r\n{{}}"
+        )
+        .unwrap();
+        let (_, indirect, forwarded) = read(&server).unwrap();
+        assert!(
+            indirect,
+            "rate metadata must never make proxy traffic direct"
+        );
+        forwarded
+    }
+    #[test]
+    fn w15_rate_identity_accepts_only_one_proxy_address_from_a_loopback_peer() {
+        let one = address(1);
+        let two = address(2);
+        let local = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let a = forwarded(&format!("X-Forwarded-For: {one}\r\n"));
+        let b = forwarded(&format!("X-Forwarded-For: {two}\r\n"));
+        assert_eq!(rate_identity(local, a), one);
+        assert_eq!(rate_identity(local, b), two);
+        assert_eq!(
+            rate_identity(two, a),
+            two,
+            "off-host peers cannot supply rate identity"
+        );
+        for headers in [
+            format!("X-Forwarded-For: {one}, {two}\r\n"),
+            format!("X-Forwarded-For: {one}\r\nX-Forwarded-For: {two}\r\n"),
+            format!("X-Real-IP: {one}\r\n"),
+            "X-Forwarded-For: not-an-address\r\n".into(),
+        ] {
+            assert_eq!(forwarded(&headers), None);
+        }
+        let mut rates = AccountRates::default();
+        for _ in 0..6 {
+            assert!(rates.allow(rate_identity(local, a), "/v1/agent/account/login", 100));
+        }
+        assert!(!rates.allow(one, "/v1/agent/account/login", 100));
+        assert!(rates.allow(rate_identity(local, b), "/v1/agent/account/login", 100));
+        for _ in 0..60 {
+            assert!(rates.allow(one, "/v1/agent/account/requests/poll", 100));
+        }
+        assert!(!rates.allow(one, "/v1/agent/account/requests/poll", 100));
+        for path in [
+            "/v1/agent/account/pair",
+            "/v1/account/requests/aq_test/approve",
+        ] {
+            for _ in 0..10 {
+                assert!(rates.allow(one, path, 100));
+            }
+            assert!(!rates.allow(one, path, 100));
+        }
+        assert!(rates.allow(one, "/v1/agent/account/login", 160));
     }
 }

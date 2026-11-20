@@ -225,6 +225,38 @@ impl Store {
         }))
     }
 
+    /// Existing live imported Souls owned by this account, before their first v2 agent connection (W15).
+    pub fn imported_souls(
+        &self,
+        account: &str,
+    ) -> Result<Vec<(String, String, String, String)>, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let tables: i64 = db.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('imported_souls_v1','souls_v1')", [], |r| r.get(0))?;
+        if tables != 2 {
+            return Ok(Vec::new());
+        }
+        let mut query = db.prepare(
+            "SELECT i.soul,i.world,s.name,s.description FROM imported_souls_v1 i
+            JOIN souls_v1 s ON s.soul=i.soul WHERE s.account_id=?1 ORDER BY i.soul",
+        )?;
+        let rows = query.query_map(params![account], |r| {
+            Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (soul, world, name, description) = row?;
+            if let Some(id) = principal_from_text(&soul) {
+                out.push((
+                    super::view::grant_text("soul", id),
+                    world,
+                    name,
+                    description,
+                ));
+            }
+        }
+        Ok(out)
+    }
+
     /// How many accounts the store holds.
     pub fn accounts(&self) -> Result<u64, StoreError> {
         let db = self.db.lock().expect("the store");
