@@ -827,3 +827,1124 @@ pub fn follow(
         Ok(writer)
     })
 }
+
+// A stream observer has its own durable publication cursor. The canonical source copy validates WHOLE parts
+// before any projection is exposed; the public copy never receives the source's private ledger.
+use directoryd::directory::store::{Store as ObjectStore, When};
+use replica::stream::public::{
+    PublicPlayer, baseline as public_baseline, context as public_context, digest, project,
+};
+use replica::views::{Redactions, View};
+
+/// Public baseline stream plus exact immutable recovery records in the world's existing Store.
+/// The caller owns this off-clock follower; no engine acknowledgement or checkpoint policy changes.
+pub struct PublicWriter<S> {
+    store: S,
+    prefix: String,
+    dir: PathBuf,
+    root: PathBuf,
+    header: Header,
+    canonical: Replica,
+    player: PublicPlayer,
+    baseline: Vec<u8>,
+    seed: Vec<u8>,
+    head: Option<Vec<u8>>,
+    etag: Option<String>,
+    cursor: u64,
+    chunk_start: u64,
+    chunks: Vec<Vec<u8>>,
+    records: Vec<Value>,
+    duplicates: Vec<(u64, Id)>,
+    changes: BTreeMap<Id, u64>,
+    view: View,
+    window: Option<i64>,
+    last_to: Option<i64>,
+    text: Option<Arc<Store>>,
+    clock_seed: Option<Mapping>,
+    migration_cut: Option<u64>,
+    migration_state: Option<Value>,
+    legacy: Option<(u64, u64, Vec<u8>)>,
+    force_remainder: bool,
+}
+use std::collections::BTreeMap;
+fn stream_effect(header: &Header, value: Value) -> R<Effect> {
+    let bytes = wire(Value::Map(BTreeMap::from([
+        (1, Value::Bytes(header.hash().to_bytes())),
+        (2, Value::Array(vec![value])),
+    ])))?;
+    Part::read(&bytes)?
+        .effects
+        .pop()
+        .ok_or_else(|| fault("stream-frame", "missing effect"))
+}
+fn wire(v: Value) -> R<Vec<u8>> {
+    encode(&v).map_err(|e| fault("encoding", e.to_string()))
+}
+fn object_map(bytes: &[u8]) -> R<BTreeMap<u64, Value>> {
+    match decode(bytes)
+        .map_err(|e| fault("stream-recovery", e.to_string()))?
+        .value
+    {
+        Value::Map(m) => Ok(m),
+        _ => Err(fault("stream-recovery", "expected map")),
+    }
+}
+fn obj_bytes(m: &BTreeMap<u64, Value>, k: u64) -> R<Vec<u8>> {
+    match m.get(&k) {
+        Some(Value::Bytes(b)) => Ok(b.clone()),
+        _ => Err(fault("stream-recovery", "missing object bytes")),
+    }
+}
+fn obj_uint(m: &BTreeMap<u64, Value>, k: u64) -> R<u64> {
+    match m.get(&k) {
+        Some(Value::Uint(n)) => Ok(*n),
+        _ => Err(fault("stream-recovery", "missing object integer")),
+    }
+}
+fn id_of(header: &Header) -> String {
+    format!(
+        "{}/{}-{}/{}",
+        replica::encode::to_hex(&header.lineage.0),
+        replica::encode::to_hex(&header.zone.scope().0),
+        header.zone.counter(),
+        header.epoch
+    )
+}
+fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
+    if let Some(p) = path.parent() {
+        fs::create_dir_all(p).map_err(io)?;
+    }
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(mut f) => {
+            if let Err(e) = f.write_all(bytes).and_then(|_| f.sync_all()) {
+                let _ = fs::remove_file(path);
+                return Err(io(e));
+            }
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let meta = fs::symlink_metadata(path).map_err(io)?;
+            if !meta.is_file()
+                || meta.file_type().is_symlink()
+                || fs::read(path).map_err(io)? != bytes
+            {
+                return Err(fault("stream-immutable", "existing bytes differ"));
+            }
+            Ok(())
+        }
+        Err(e) => Err(io(e)),
+    }
+}
+pub struct PublicStart<'a> {
+    pub root: &'a Path,
+    pub header: &'a Header,
+    pub key: Key,
+    pub initial: Replica,
+    pub record: u64,
+    pub checkpoint: Option<Vec<u8>>,
+    pub text: Option<Arc<Store>>,
+    pub clock_seed: Option<Mapping>,
+    pub history: Option<&'a sim::log::Recovered>,
+}
+impl PublicStart<'_> {
+    /// Only the public legacy transition may choose an older retained source. The engine's newest restore stays
+    /// unchanged; each eligible checkpoint is independently CRC/hash/root checked before it can become a base.
+    pub fn earlier_legacy_checkpoint(&mut self, checkpoints: &Path) -> R<()> {
+        let path = self
+            .root
+            .join(stream::dir(self.header, &self.key))
+            .join(POINTER);
+        let bytes = match fs::read(&path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(io(e)),
+        };
+        if object_map(&bytes)?.contains_key(&8) {
+            return Ok(());
+        }
+        let pointer = Pointer::read(&bytes)?;
+        let header = fs::read(self.root.join(format!(
+            "{}/headers/{}",
+            id_of(self.header),
+            replica::encode::to_hex(&pointer.header)
+        )))
+        .map_err(io)?;
+        let old = Header::read(&header)?;
+        if old.lineage != self.header.lineage
+            || old.zone != self.header.zone
+            || old.epoch != self.header.epoch
+        {
+            return Err(fault(
+                "stream-legacy-identity",
+                "source selection header differs",
+            ));
+        }
+        let mut reader = replica::stream::Player::start(&header)?;
+        if let Some(last) = pointer.newest {
+            for n in 0..=last {
+                let bytes = fs::read(path.parent().expect("pointer parent").join(n.to_string()))
+                    .map_err(io)?;
+                if reader.play(&bytes)?.hash == Some(false) {
+                    return Err(fault("stream-legacy-hash", "legacy part differs"));
+                }
+            }
+        }
+        let target = reader.replica().version();
+        if self.initial.version() <= target {
+            return Ok(());
+        }
+        let mut selected = None;
+        for entry in fs::read_dir(checkpoints).map_err(io)? {
+            let entry = entry.map_err(io)?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let Some(number) = name
+                .strip_prefix("ckpt-")
+                .filter(|n| n.len() == 20 && n.bytes().all(|b| b.is_ascii_digit()))
+            else {
+                continue;
+            };
+            let Ok(number) = number.parse::<u64>() else {
+                continue;
+            };
+            let meta = fs::symlink_metadata(entry.path()).map_err(io)?;
+            if !meta.is_file() || meta.file_type().is_symlink() {
+                continue;
+            }
+            let bytes = fs::read(entry.path()).map_err(io)?;
+            let Ok(restored) = sim::checkpoint::read_bytes(&bytes) else {
+                continue;
+            };
+            let v = restored.root.version;
+            if restored.root.record != number
+                || v.lineage != self.header.lineage
+                || v.zone != self.header.zone
+                || v.epoch != self.header.epoch
+                || v.sequence > target
+                || restored.tree.next() != v.sequence
+            {
+                continue;
+            }
+            let state = restored.tree.to_state();
+            if state
+                .nodes
+                .values()
+                .chain(state.in_flight.values().flat_map(|f| f.nodes.values()))
+                .any(|n| !self.header.kinds.contains(&n.kind))
+            {
+                continue;
+            }
+            if selected
+                .as_ref()
+                .is_none_or(|(seq, _, _, _)| v.sequence > *seq)
+            {
+                selected = Some((v.sequence, number, restored.tree, bytes));
+            }
+        }
+        let Some((sequence, record, tree, bytes)) = selected else {
+            return Err(fault(
+                "stream-legacy-source-missing",
+                "no eligible earlier canonical checkpoint",
+            ));
+        };
+        self.initial = Replica::restored(self.header.clone(), tree, sequence);
+        self.record = record;
+        self.checkpoint = Some(bytes);
+        Ok(())
+    }
+}
+impl<S: ObjectStore> PublicWriter<S> {
+    fn put(&self, bytes: &[u8]) -> R<Vec<u8>> {
+        let hash = replica::ids::sha256(bytes).to_vec();
+        let key = format!("{}objects/{}", self.prefix, replica::encode::to_hex(&hash));
+        match self.store.put(&key, bytes, When::Absent) {
+            Ok(_) => {}
+            Err(e) if e.name == "precondition-failed" => {
+                if self.store.get(&key)?.is_none_or(|o| o.bytes != bytes) {
+                    return Err(fault("stream-immutable", "store bytes differ"));
+                }
+            }
+            Err(e) => return Err(e),
+        }
+        Ok(hash)
+    }
+    fn get(&self, hash: &[u8]) -> R<Vec<u8>> {
+        if hash.len() != 32 {
+            return Err(fault("stream-recovery", "invalid object hash"));
+        }
+        let key = format!("{}objects/{}", self.prefix, replica::encode::to_hex(hash));
+        let bytes = self
+            .store
+            .get(&key)?
+            .ok_or_else(|| fault("stream-recovery-missing", "required immutable object"))?
+            .bytes;
+        if replica::ids::sha256(&bytes).as_slice() != hash {
+            return Err(fault(
+                "stream-recovery-hash",
+                "object does not match its name",
+            ));
+        }
+        Ok(bytes)
+    }
+    /// `checkpoint` is the exact selected canonical K5 file, or none only for an ordinary root at record zero.
+    /// Existing recovery state wins over a newer supplied checkpoint; its header/identity must match.
+    pub fn open(start: PublicStart<'_>, store: S) -> R<Self> {
+        let PublicStart {
+            root,
+            header,
+            key,
+            initial,
+            record,
+            checkpoint,
+            text,
+            clock_seed,
+            history,
+        } = start;
+        if key.node != header.zone
+            || key.audience != Audience::Everyone
+            || key.level != replica::views::Level::Full
+        {
+            return Err(fault("public-stream-key", "requires the full public root"));
+        }
+        if initial.header().stored() != header.stored() {
+            return Err(fault("header-mismatch", "stream initial header"));
+        }
+        let baseline = public_baseline(header, &initial.tree().to_state(), record)?;
+        let player = PublicPlayer::start(header.stored(), &baseline)?;
+        let prefix = format!("stream-recovery/{}/", id_of(header));
+        let dir = root.join(stream::dir(header, &key));
+        let mut w = Self {
+            store,
+            prefix,
+            dir,
+            root: root.to_owned(),
+            header: header.clone(),
+            canonical: initial,
+            player,
+            baseline,
+            seed: Vec::new(),
+            head: None,
+            etag: None,
+            cursor: record,
+            chunk_start: record,
+            chunks: Vec::new(),
+            records: Vec::new(),
+            duplicates: Vec::new(),
+            changes: BTreeMap::new(),
+            view: View::new(key, header, &Redactions::default()),
+            window: None,
+            last_to: None,
+            text,
+            clock_seed,
+            migration_cut: None,
+            migration_state: None,
+            legacy: None,
+            force_remainder: false,
+        };
+        if let Some(head) = w.store.get(&format!("{}head", w.prefix))? {
+            let h = object_map(&head.bytes)?;
+            let hash = obj_bytes(&h, 1)?;
+            w.etag = Some(head.etag);
+            w.recover(&hash)?;
+            w.head = Some(hash);
+        } else {
+            if record != 0 && checkpoint.is_none() {
+                return Err(fault(
+                    "stream-recovery-checkpoint",
+                    "a nonzero source needs a checkpoint",
+                ));
+            }
+            if let Some(bytes) = &checkpoint {
+                let restored = sim::checkpoint::read_bytes(bytes)?;
+                if restored.root.record != record
+                    || restored.root.version.sequence != w.canonical.version()
+                    || restored.root.version.lineage != header.lineage
+                    || restored.root.version.zone != header.zone
+                    || restored.tree.to_state() != w.canonical.tree().to_state()
+                {
+                    return Err(fault(
+                        "stream-recovery-checkpoint",
+                        "source checkpoint differs",
+                    ));
+                }
+            }
+            let mut bootstrap = Vec::new();
+            let mut legacy_files = Vec::new();
+            let mut legacy_header = Vec::new();
+            if w.dir.join(POINTER).exists() {
+                let pointer = fs::read(w.dir.join(POINTER)).map_err(io)?;
+                if object_map(&pointer)?.contains_key(&8) {
+                    return Err(fault(
+                        "stream-recovery-missing",
+                        "public pointer has no recovery head",
+                    ));
+                }
+                let old = Pointer::read(&pointer)?;
+                let old_header = fs::read(w.root.join(format!(
+                    "{}/headers/{}",
+                    id_of(header),
+                    replica::encode::to_hex(&old.header)
+                )))
+                .map_err(io)?;
+                let oh = Header::read(&old_header)?;
+                if oh.lineage != header.lineage
+                    || oh.zone != header.zone
+                    || oh.epoch != header.epoch
+                    || oh.kinds.iter().collect::<std::collections::BTreeSet<_>>()
+                        != header.kinds.iter().collect()
+                {
+                    return Err(fault("stream-legacy-identity", "legacy header differs"));
+                }
+                let mut reader = replica::stream::Player::start(&old_header)?;
+                if let Some(last) = old.newest {
+                    for n in 0..=last {
+                        let bytes = fs::read(w.dir.join(n.to_string())).map_err(io)?;
+                        let played = reader.play(&bytes)?;
+                        legacy_files.push(Value::Array(vec![
+                            Value::Text(Name::new(&n.to_string()).expect("part name")),
+                            Value::Bytes(w.put(&bytes)?),
+                        ]));
+                        let file = format!("{n}.text");
+                        match fs::read(w.dir.join(&file)) {
+                            Ok(bytes) => legacy_files.push(Value::Array(vec![
+                                Value::Text(Name::new(&file).expect("text name")),
+                                Value::Bytes(w.put(&bytes)?),
+                            ])),
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(e) => return Err(io(e)),
+                        };
+                        if played.hash == Some(false) {
+                            return Err(fault("stream-legacy-hash", "legacy part hash differs"));
+                        }
+                    }
+                }
+                legacy_header = old_header.clone();
+                let target = reader.replica().version();
+                let expected = project(header, &reader.replica().tree().to_state())?;
+                if w.canonical.version() > target {
+                    return Err(fault(
+                        "stream-legacy-source-missing",
+                        "source checkpoint is newer than precise legacy terminal",
+                    ));
+                }
+                w.migration_cut = Some(target);
+                if w.canonical.version() == target {
+                    w.migration_state = Some(project(header, &w.canonical.tree().to_state())?);
+                }
+                let history = history.ok_or_else(|| {
+                    fault(
+                        "stream-legacy-source-missing",
+                        "canonical original records required",
+                    )
+                })?;
+                if w.migration_state.is_none() {
+                    w.bridge_to(history.first)?;
+                }
+                for (offset, raw) in history.records.iter().enumerate() {
+                    let n = history.first + offset as u64;
+                    if n < w.cursor {
+                        continue;
+                    }
+                    if w.migration_state.is_some() {
+                        break;
+                    }
+                    w.apply_record(n, raw)?;
+                }
+                let prefix = w.migration_state.take().ok_or_else(|| {
+                    fault(
+                        "stream-legacy-source-missing",
+                        "legacy terminal is not in validated source",
+                    )
+                })?;
+                if prefix != expected {
+                    return Err(fault(
+                        "stream-legacy-state",
+                        "actual legacy public terminal differs from canonical prefix",
+                    ));
+                }
+                // The whole original Part was validated before this prefix was selected. The source-applied cursor
+                // is complete; baseline/public cursor may precede its retained genuine remainder.
+                let public_record = if w.cursor > record {
+                    w.cursor - 1
+                } else {
+                    record
+                };
+                w.baseline = replica::stream::public::baseline_from_projection(
+                    header,
+                    prefix,
+                    public_record,
+                )?;
+                w.player = PublicPlayer::start(header.stored(), &w.baseline)?;
+                w.legacy = Some((target, reader.next(), digest(&expected)?));
+                w.force_remainder = w.canonical.version() > target;
+                bootstrap = std::mem::take(&mut w.chunks);
+                w.chunk_start = w.cursor;
+            }
+            let legacy = w
+                .legacy
+                .as_ref()
+                .map(|(v, n, h)| {
+                    Value::Array(vec![
+                        Value::Uint(*v),
+                        Value::Uint(*n),
+                        Value::Bytes(h.clone()),
+                    ])
+                })
+                .unwrap_or(Value::Array(Vec::new()));
+            let seed = wire(Value::Map(BTreeMap::from([
+                (1, Value::Bytes(header.stored().to_vec())),
+                (2, Value::Bytes(checkpoint.unwrap_or_default())),
+                (3, Value::Uint(record)),
+                (4, Value::Bytes(w.baseline.clone())),
+                (
+                    5,
+                    Value::Array(bootstrap.iter().map(|b| Value::Bytes(b.clone())).collect()),
+                ),
+                (6, legacy),
+                (7, Value::Array(legacy_files)),
+                (8, Value::Bytes(legacy_header)),
+                (9, Value::Bytes(w.put(&w.words(w.player.state())?)?)),
+            ])))?;
+            w.seed = w.put(&seed)?;
+            let manifest = wire(Value::Map(BTreeMap::from([
+                (1, Value::Bytes(w.seed.clone())),
+                (2, Value::Bytes(Vec::new())),
+                (3, Value::Bytes(Vec::new())),
+                (4, Value::Uint(0)),
+                (5, Value::Bytes(Vec::new())),
+                (6, Value::Bytes(Vec::new())),
+                (7, Value::Uint(w.cursor)),
+            ])))?;
+            w.commit(&manifest)?;
+        }
+        immutable(&w.root.join(stream::header_path(header)), header.stored())?;
+        immutable(&w.generation_dir().join("baseline"), &w.baseline)?;
+        let seed = object_map(&w.get(&w.seed)?)?;
+        immutable(
+            &w.generation_dir().join("baseline.text"),
+            &w.get(&obj_bytes(&seed, 9)?)?,
+        )?;
+        w.pointer(None)?;
+        Ok(w)
+    }
+    fn words(&self, value: &Value) -> R<Vec<u8>> {
+        let words = if let Some(store) = &self.text {
+            replica::audience::references(value)
+                .into_iter()
+                .filter_map(|r| {
+                    store
+                        .read(r, &[])
+                        .ok()
+                        .map(|w| Value::Array(vec![r.to_value(), Value::Bytes(w)]))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        wire(Value::Array(words))
+    }
+    fn generation_dir(&self) -> PathBuf {
+        self.dir
+            .join("g")
+            .join(replica::encode::to_hex(&replica::ids::sha256(
+                &self.baseline,
+            )))
+    }
+    pub fn source_cursor(&self) -> u64 {
+        self.cursor
+    }
+    /// A newest-only O3 restore may begin after the observer's last publication. Recover the intervening actual
+    /// immutable pieces through the existing takeover-aware reader; never jump to a newer checkpoint's state.
+    pub fn bridge_to(&mut self, target: u64) -> R<()> {
+        if self.cursor >= target {
+            return Ok(());
+        }
+        let key = replica::directory::WorldRecord::key(&self.header.lineage.0, self.header.zone);
+        let object = self.store.get(&key)?.ok_or_else(|| {
+            fault(
+                "stream-recovery-source-missing",
+                "world source directory record",
+            )
+        })?;
+        let authority = replica::directory::WorldRecord::read(&object.bytes)?;
+        let prefix = format!("part/{}/", key.trim_start_matches("world/"));
+        let keys = self.store.list(&prefix)?;
+        while self.cursor < target {
+            let mut found = None;
+            for key in &keys {
+                let bytes = self
+                    .store
+                    .get(key)?
+                    .ok_or_else(|| {
+                        fault("stream-recovery-source-missing", "source piece disappeared")
+                    })?
+                    .bytes;
+                let piece = crate::shipping::Piece::read(&bytes)?;
+                if piece.first <= self.cursor
+                    && self.cursor < piece.first + piece.records.len() as u64
+                    && let Some((_, actual, _)) =
+                        crate::shipping::piece_at(&self.store, &authority, piece.first)?
+                {
+                    if actual != piece {
+                        continue;
+                    }
+                    // An older piece may physically extend past a later claim's actual first upload. The
+                    // existing no-first-upload fallback still applies; never replay that superseded suffix.
+                    let mut end = piece.first + piece.records.len() as u64;
+                    let mut superseded = false;
+                    for takeover in authority.takeovers.iter().filter(|t| t.from > piece.first) {
+                        let key = replica::durability::part_key(
+                            &authority.lineage,
+                            authority.zone,
+                            takeover,
+                            takeover.from,
+                        );
+                        if self.store.get(&key)?.is_some() {
+                            if takeover.from <= self.cursor {
+                                superseded = true;
+                                break;
+                            }
+                            end = end.min(takeover.from);
+                        }
+                    }
+                    if !superseded {
+                        found = Some((piece, end));
+                        break;
+                    }
+                }
+            }
+            let (piece, end) = found.ok_or_else(|| {
+                fault(
+                    "stream-recovery-source-missing",
+                    "canonical source range is incomplete",
+                )
+            })?;
+            if piece.header != self.header.stored() {
+                return Err(fault("header-mismatch", "canonical source bridge"));
+            }
+            let start = usize::try_from(self.cursor - piece.first)
+                .map_err(|_| fault("stream-recovery", "source range overflow"))?;
+            for raw in &piece.records[start..] {
+                if self.cursor >= target || self.cursor >= end || self.migration_state.is_some() {
+                    break;
+                }
+                if self.migration_cut.is_some() {
+                    self.apply_record(self.cursor, raw)?;
+                } else {
+                    self.push(self.cursor, raw)?;
+                }
+            }
+            if self.migration_state.is_some() {
+                break;
+            }
+        }
+        Ok(())
+    }
+    pub fn public_player(&self) -> &PublicPlayer {
+        &self.player
+    }
+    fn commit(&mut self, manifest: &[u8]) -> R<()> {
+        let hash = self.put(manifest)?;
+        let bytes = wire(Value::Map(BTreeMap::from([(
+            1,
+            Value::Bytes(hash.clone()),
+        )])))?;
+        let etag = self.store.put(
+            &format!("{}head", self.prefix),
+            &bytes,
+            match self.etag.as_deref() {
+                Some(e) => When::Is(e),
+                None => When::Absent,
+            },
+        )?;
+        self.etag = Some(etag);
+        self.head = Some(hash);
+        Ok(())
+    }
+    fn recover(&mut self, head: &[u8]) -> R<()> {
+        let mut chain = Vec::new();
+        let mut h = head.to_vec();
+        let mut seen = std::collections::BTreeSet::new();
+        while !h.is_empty() {
+            if !seen.insert(h.clone()) {
+                return Err(fault("stream-recovery", "manifest cycle"));
+            }
+            let m = object_map(&self.get(&h)?)?;
+            h = obj_bytes(&m, 2)?;
+            chain.push(m);
+        }
+        chain.reverse();
+        let first = chain
+            .first()
+            .ok_or_else(|| fault("stream-recovery", "empty chain"))?;
+        self.seed = obj_bytes(first, 1)?;
+        let seed = object_map(&self.get(&self.seed)?)?;
+        if obj_bytes(&seed, 1)? != self.header.stored() {
+            return Err(fault("header-mismatch", "recovery seed"));
+        }
+        self.baseline = obj_bytes(&seed, 4)?;
+        self.player = PublicPlayer::start(self.header.stored(), &self.baseline)?;
+        let checkpoint = obj_bytes(&seed, 2)?;
+        let record = obj_uint(&seed, 3)?;
+        self.canonical = if checkpoint.is_empty() {
+            if record != 0 {
+                return Err(fault("stream-recovery", "empty nonzero checkpoint"));
+            }
+            Replica::start(self.header.stored())?
+        } else {
+            let r = sim::checkpoint::read_bytes(&checkpoint)?;
+            if r.root.record != record
+                || r.root.version.lineage != self.header.lineage
+                || r.root.version.zone != self.header.zone
+            {
+                return Err(fault("stream-recovery", "checkpoint identity"));
+            }
+            Replica::restored(self.header.clone(), r.tree, r.root.version.sequence)
+        };
+        self.cursor = record;
+        self.chunk_start = record;
+        if let Some(Value::Bytes(old_header)) = seed.get(&8)
+            && !old_header.is_empty()
+        {
+            let old = Header::read(old_header)?;
+            if old.lineage != self.header.lineage
+                || old.zone != self.header.zone
+                || old.epoch != self.header.epoch
+            {
+                return Err(fault("stream-legacy-identity", "recovery legacy header"));
+            }
+            immutable(&self.root.join(stream::header_path(&old)), old_header)?;
+        }
+        if let Some(Value::Array(files)) = seed.get(&7) {
+            for row in files {
+                let Value::Array(row) = row else {
+                    return Err(fault("stream-recovery", "legacy file shape"));
+                };
+                let [Value::Text(name), Value::Bytes(hash)] = row.as_slice() else {
+                    return Err(fault("stream-recovery", "legacy file fields"));
+                };
+                let number = name.as_str().strip_suffix(".text").unwrap_or(name.as_str());
+                if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+                    return Err(fault("stream-recovery", "invalid legacy file name"));
+                }
+                immutable(&self.dir.join(name.as_str()), &self.get(hash)?)?;
+            }
+        }
+        if let Some(Value::Array(legacy)) = seed.get(&6)
+            && !legacy.is_empty()
+        {
+            let [Value::Uint(v), Value::Uint(n), Value::Bytes(hash)] = legacy.as_slice() else {
+                return Err(fault("stream-recovery", "legacy cursor shape"));
+            };
+            self.legacy = Some((*v, *n, hash.clone()));
+            self.migration_cut = Some(*v);
+            if self.canonical.version() == *v {
+                self.migration_state =
+                    Some(project(&self.header, &self.canonical.tree().to_state())?);
+            }
+        }
+        if let Some(Value::Array(bootstrap)) = seed.get(&5) {
+            for raw in bootstrap {
+                let Value::Bytes(raw) = raw else {
+                    return Err(fault("stream-recovery", "bootstrap original bytes"));
+                };
+                self.apply_record(self.cursor, raw)?;
+            }
+        }
+        let expected = self
+            .migration_state
+            .take()
+            .unwrap_or(project(&self.header, &self.canonical.tree().to_state())?);
+        if expected != *self.player.state() {
+            return Err(fault(
+                "stream-recovery",
+                "baseline differs from canonical prefix",
+            ));
+        }
+        self.chunks.clear();
+        self.chunk_start = self.cursor;
+        self.force_remainder = self.canonical.version() > self.player.version();
+
+        for m in chain {
+            if obj_bytes(&m, 1)? != self.seed {
+                return Err(fault("stream-recovery", "generation source changed"));
+            }
+            let chunk = obj_bytes(&m, 3)?;
+            if chunk.is_empty() {
+                if obj_uint(&m, 7)? != self.cursor {
+                    return Err(fault("stream-recovery", "initial cursor"));
+                }
+                continue;
+            }
+            let c = object_map(&self.get(&chunk)?)?;
+            if obj_uint(&c, 1)? != self.cursor {
+                return Err(fault("stream-recovery", "source record gap"));
+            }
+            let Some(Value::Array(records)) = c.get(&2) else {
+                return Err(fault("stream-recovery", "source records missing"));
+            };
+            for raw in records {
+                let Value::Bytes(raw) = raw else {
+                    return Err(fault("stream-recovery", "source record bytes"));
+                };
+                self.apply_record(self.cursor, raw)?;
+            }
+            if self.cursor != obj_uint(&m, 7)? {
+                return Err(fault("stream-recovery", "manifest source cursor"));
+            }
+            let number = obj_uint(&m, 4)?;
+            if number != self.player.next() {
+                return Err(fault("stream-recovery", "part number"));
+            }
+            let bytes = self.get(&obj_bytes(&m, 5)?)?;
+            self.player.play(&bytes)?;
+            if project(&self.header, &self.canonical.tree().to_state())? != *self.player.state() {
+                return Err(fault("stream-recovery", "canonical projection differs"));
+            }
+            immutable(&self.generation_dir().join(number.to_string()), &bytes)?;
+            let text = obj_bytes(&m, 6)?;
+            if !text.is_empty() {
+                immutable(
+                    &self.generation_dir().join(format!("{number}.text")),
+                    &self.get(&text)?,
+                )?;
+            }
+            self.last_to = Some(StreamPart::read(&bytes)?.to);
+            self.clear_pending();
+        }
+        Ok(())
+    }
+    fn apply_record(&mut self, record: u64, raw: &[u8]) -> R<()> {
+        if record != self.cursor {
+            return Err(fault(
+                "stream-source-gap",
+                "physical record does not follow",
+            ));
+        }
+        if !sim::recorder::is_input(raw) {
+            let part = Part::read(raw)?;
+            // Whole canonical validation first. Never publish a partial producer result or private ledger.
+            let mut checked = self.canonical.frozen();
+            checked.apply(&part)?;
+            let before_version = self.canonical.version();
+            let mut walk = self.canonical.frozen();
+            for effect in &part.effects {
+                let before = walk.tree().to_state();
+                if effect.envelope.audience == Audience::Everyone
+                    && let Body::Transfer(replica::effects::TransferRec::Arrive {
+                        transfer, ..
+                    }) = &effect.body
+                    && before.arrived.contains(transfer)
+                {
+                    self.duplicates.push((effect.envelope.sequence, *transfer));
+                }
+                let one = wire(Value::Map(BTreeMap::from([
+                    (1, Value::Bytes(self.header.hash().to_bytes())),
+                    (2, Value::Array(vec![effect.to_value()])),
+                ])))?;
+                walk.apply(&Part::read(&one)?)?;
+                if self.migration_cut == Some(walk.version()) {
+                    self.migration_state = Some(project(&self.header, &walk.tree().to_state())?);
+                }
+                self.view.step(
+                    &before,
+                    effect,
+                    &walk.tree().to_state(),
+                    &Redactions::default(),
+                )?;
+            }
+            for (_, record) in self.view.take() {
+                if Carried::read(&record)?.is_none() {
+                    let seq = stream_effect(&self.header, record.clone())?
+                        .envelope
+                        .sequence;
+                    if self.migration_cut.is_none_or(|v| seq >= v) {
+                        self.records.push(record)
+                    }
+                }
+            }
+            let after = checked.tree().to_state();
+            let old = project(&self.header, &self.canonical.tree().to_state())?;
+            let new = project(&self.header, &after)?;
+            let visible = |v: &Value, id: Id| matches!(v,Value::Map(m) if matches!(m.get(&2),Some(Value::Array(rows)) if rows.iter().any(|r|matches!(r,Value::Array(p) if p.first()==Some(&id.to_value())))));
+            for (id, v) in checked.changed_since(before_version) {
+                if (visible(&old, id) || visible(&new, id))
+                    && self.migration_cut.is_none_or(|cut| v > cut)
+                {
+                    self.changes.insert(id, v);
+                }
+            }
+            self.duplicates
+                .retain(|(seq, _)| self.migration_cut.is_none_or(|cut| *seq >= cut));
+            self.canonical = checked;
+            let at = part.effects.last().map(|e| e.envelope.at);
+            if let Some(at) = at {
+                let win = at.div_euclid(stream::PERIOD_US);
+                self.window.get_or_insert(win);
+            }
+        }
+        self.cursor = self
+            .cursor
+            .checked_add(1)
+            .ok_or_else(|| fault("stream-source-gap", "cursor overflow"))?;
+        self.chunks.push(raw.to_vec());
+        Ok(())
+    }
+    pub fn push(&mut self, record: u64, raw: &[u8]) -> R<()> {
+        let window = self.window;
+        self.apply_record(record, raw)?;
+        if let (Some(before), Some(last)) = (window, self.records.last())
+            && stream_effect(&self.header, last.clone())?
+                .envelope
+                .at
+                .div_euclid(stream::PERIOD_US)
+                > before
+        {
+            self.flush()?;
+        }
+        Ok(())
+    }
+    fn clear_pending(&mut self) {
+        self.chunk_start = self.cursor;
+        self.chunks.clear();
+        self.records.clear();
+        self.duplicates.clear();
+        self.changes.clear();
+        self.window = None;
+        self.force_remainder = false;
+    }
+    pub fn flush(&mut self) -> R<()> {
+        if self.chunks.is_empty() && !self.force_remainder {
+            return Ok(());
+        }
+        let after = project(&self.header, &self.canonical.tree().to_state())?;
+        if self.records.is_empty() {
+            let mut old = self.player.state().clone();
+            if let Value::Map(m) = &mut old
+                && let Value::Map(a) = &after
+            {
+                m.insert(1, a[&1].clone());
+            }
+            if old == after && !self.force_remainder {
+                return Ok(());
+            }
+        }
+        let expected = self.player.version();
+        let version = self.canonical.version();
+        let mut cursor = expected;
+        let mut gaps = Vec::new();
+        for record in &self.records {
+            let e = stream_effect(&self.header, record.clone())?;
+            let seq = e.envelope.sequence;
+            if seq < cursor {
+                return Err(fault("stream-sequence", "public entry order"));
+            }
+            if seq > cursor {
+                gaps.push((cursor, seq - cursor));
+            }
+            cursor = seq
+                .checked_add(1)
+                .ok_or_else(|| fault("stream-sequence", "overflow"))?;
+        }
+        if cursor < version {
+            gaps.push((cursor, version - cursor));
+        }
+        let part = wire(Value::Map(BTreeMap::from([
+            (1, Value::Bytes(self.header.hash().to_bytes())),
+            (2, Value::Array(self.records.clone())),
+        ])))?;
+        let at = self
+            .canonical
+            .tree()
+            .time()
+            .iter()
+            .rev()
+            .find_map(|t| {
+                if let TimeEffect::Mapping(m) = t {
+                    Some(m.world_us)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+        let window = self.window.unwrap_or(at.div_euclid(stream::PERIOD_US));
+        let mut sp = StreamPart {
+            number: self.player.next(),
+            from: window * stream::PERIOD_US,
+            to: (window + 1) * stream::PERIOD_US,
+            first: self
+                .records
+                .first()
+                .and_then(|r| {
+                    if let Value::Map(m) = r {
+                        if let Some(Value::Uint(n)) = m.get(&1) {
+                            Some(*n)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(version),
+            entries: self.records.len() as u64,
+            part,
+            hash: Some(digest(&after)?),
+            gaps,
+            carried: Vec::new(),
+        };
+        // The end covers every actual public effect in this cut, even across a still interval.
+        if let Some(last) = self.records.last() {
+            sp.to = sp
+                .to
+                .max(stream_effect(&self.header, last.clone())?.envelope.at);
+        }
+        // A returned public child can become live without being canonically touched by Return. Bind its
+        // actual query version, including zero for an ordinary checkpoint's formerly flying child.
+        let flying = replica::stream::public::flying_ids(self.player.state())?;
+        let before = object_map(&wire(self.player.state().clone())?)?;
+        let Value::Array(old_rows) = &before[&2] else {
+            unreachable!("validated projection")
+        };
+        let Value::Map(after_map) = &after else {
+            unreachable!("validated projection")
+        };
+        let Value::Array(new_rows) = &after_map[&2] else {
+            unreachable!("validated projection")
+        };
+        for row in new_rows {
+            let Value::Array(row) = row else {
+                unreachable!("validated pair")
+            };
+            let id = replica::effects::read_id(&row[0])?;
+            let existed = old_rows
+                .iter()
+                .any(|r| matches!(r,Value::Array(p) if p.first()==Some(&id.to_value())));
+            if flying.contains(&id) && !existed && !self.changes.contains_key(&id) {
+                let query = wire(Value::Map(BTreeMap::from([
+                    (1, Value::Uint(1)),
+                    (2, id.to_value()),
+                ])))?;
+                let node = object_map(&self.canonical.query(&query)?)?;
+                let version = obj_uint(&node, 10)?;
+                self.changes.insert(id, version);
+            }
+        }
+        let context = public_context(
+            &self.baseline,
+            self.player.state(),
+            &after,
+            self.cursor,
+            &self.duplicates,
+            &self
+                .changes
+                .iter()
+                .map(|(i, v)| (*i, *v))
+                .collect::<Vec<_>>(),
+        )?;
+        let mut value = object_map(&sp.to_bytes()?)?;
+        value.insert(10, Value::Bytes(context));
+        let bytes = wire(Value::Map(value))?;
+        // Validate exactly as the native/WASM reader before storing or publishing bytes.
+        let number = self.player.next();
+        let chunk = wire(Value::Map(BTreeMap::from([
+            (1, Value::Uint(self.chunk_start)),
+            (
+                2,
+                Value::Array(
+                    self.chunks
+                        .iter()
+                        .map(|b| Value::Bytes(b.clone()))
+                        .collect(),
+                ),
+            ),
+        ])))?;
+        let chunk_hash = self.put(&chunk)?;
+        let part_hash = self.put(&bytes)?;
+        let text = self.words(&Value::Array(vec![
+            after.clone(),
+            Value::Array(self.records.clone()),
+        ]))?;
+        let text_hash = self.put(&text)?;
+        self.player.play(&bytes)?;
+        let manifest = wire(Value::Map(BTreeMap::from([
+            (1, Value::Bytes(self.seed.clone())),
+            (2, Value::Bytes(self.head.clone().unwrap_or_default())),
+            (3, Value::Bytes(chunk_hash)),
+            (4, Value::Uint(number)),
+            (5, Value::Bytes(part_hash)),
+            (6, Value::Bytes(text_hash)),
+            (7, Value::Uint(self.cursor)),
+        ])))?;
+        self.commit(&manifest)?;
+        // Commit exact recovery bytes before exposing local immutable files. A killed publication replays the
+        // same committed bytes, never a new cut at an orphan file's address.
+        immutable(&self.generation_dir().join(number.to_string()), &bytes)?;
+        immutable(&self.generation_dir().join(format!("{number}.text")), &text)?;
+        self.last_to = Some(sp.to);
+        self.clear_pending();
+        self.pointer(None)
+    }
+    fn pointer(&self, quiet: Option<i64>) -> R<()> {
+        let real = crate::answers::now();
+        let world =
+            mapped_now(self.canonical.tree().time(), self.clock_seed, real).or_else(|_| {
+                if self.canonical.tree().time().is_empty() {
+                    Ok(0)
+                } else {
+                    Err(fault("stream-clock", "no applicable mapping"))
+                }
+            })?;
+        let pointer = Pointer {
+            newest: self.player.next().checked_sub(1),
+            period: stream::PERIOD_US,
+            header: self.header.hash().to_bytes(),
+            newest_to: self.last_to,
+            anchor_world: world,
+            anchor_wall_ms: u64::try_from(real.div_euclid(1000))
+                .map_err(|_| fault("stream-clock", "negative wall time"))?,
+            quiet_until: quiet,
+        };
+        let mut value = object_map(&pointer.to_bytes()?)?;
+        value.insert(
+            8,
+            Value::Bytes(replica::ids::sha256(&self.baseline).to_vec()),
+        );
+        if let Some((version, number, hash)) = &self.legacy {
+            value.insert(
+                9,
+                Value::Array(vec![
+                    Value::Uint(*version),
+                    Value::Uint(*number),
+                    Value::Bytes(hash.clone()),
+                ]),
+            );
+        }
+        write_whole(&self.dir.join(POINTER), &wire(Value::Map(value))?)
+    }
+    pub fn idle(&mut self, real: i64) -> R<()> {
+        if self.canonical.tree().time().is_empty() && self.clock_seed.is_none() {
+            return Ok(());
+        }
+        let world = mapped_now(self.canonical.tree().time(), self.clock_seed, real)?;
+        if self
+            .window
+            .is_some_and(|w| world >= (w + 1) * stream::PERIOD_US + SETTLE_US)
+        {
+            self.flush()?;
+        }
+        let mut published = self.player.state().clone();
+        let current = project(&self.header, &self.canonical.tree().to_state())?;
+        if let (Value::Map(a), Value::Map(b)) = (&mut published, &current) {
+            a.insert(1, b[&1].clone());
+        }
+        if self.records.is_empty() && published == current {
+            self.pointer(Some(world.saturating_sub(SETTLE_US)))?;
+        }
+        Ok(())
+    }
+}

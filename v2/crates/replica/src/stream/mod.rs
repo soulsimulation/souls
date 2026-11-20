@@ -34,7 +34,36 @@
 //!    in flight just before the arrive of its sequence, which lands it (`Replica::apply_view`). A carried record that
 //!    names no destination (revision 1) is refused as `carried-no-destination`.
 
+//!
+//! 8. **Checkpoint public observations** (#3639, [`public::PublicPlayer`]). The old constructor and fields retain
+//!    their meanings. An explicit pointer field8 is a 32-byte SHA-256 baseline/generation id. Its immutable files
+//!    are `g/<hex>/baseline`, `baseline.text`, and numbered parts/text. A baseline is
+//!    `{1: 1, 2: exact header hash, 3: authorized projection, 4: physical source cursor}`. The projection retains
+//!    exact root kind/fields, live nodes/links, public flight context, public timers/time and opaque public flying
+//!    nodes/owned links; it never includes the global arrived ledger or private ancestors. Opaque references are not nodes.
+//!    Public queries keep all six R1 shapes; unresolved frame paths refuse `frame-unavailable` without stopping
+//!    other queries. Node hashes keep their existing labeled public-node contract; observation digests are
+//!    separately SHA-256 over the authorized projection, never a private/global state hash.
+//! 9. **One canonical producer, one observer.** Only after validating the WHOLE actual canonical source Part does
+//!    the producer attach field10 context beside the unchanged R3 public effects/events. Context is
+//!    `{1: 1, 2: baseline digest, 3: prior projection digest, 4: result digest, 5: projection delta,
+//!    6: complete physical cursor, 7: [[actual duplicate-Arrive sequence, visible transfer], ...],
+//!    8: [[authorized changed node, version], ...]}`. Deltas replace scalar/time fields and upsert/remove id rows
+//!    for nodes, links, flights and timers. The trusted producer authorizes observations; a hash alone does not.
+//!    The public observer stores them atomically, preserving actual motion samples/events, public sequence gaps
+//!    and terminal private gaps, without a second engine apply, manufactured history or private transfer ledger.
+//! 10. **Continuity.** Immutable old headers/parts remain at their addresses. An optional pointer field9
+//!     `[legacy public version, legacy next-part count, legacy projection digest]` requires an open legacy reader
+//!     to drain and compare its actual public state before installing the successor baseline. The browser reconciles baseline nodes through a separate
+//!     snapshot callback with no part time, samples, events or playback counters. That terminal may
+//!     lie within a physical source Part: the producer validates the whole Part first, retains its original bytes,
+//!     and accounts for its genuine remainder once. Baseline/public and complete source cursors are distinct.
+//!     A normal restart recovers the same generation, cursor and exact public bytes from the existing private
+//!     Store; a newer ordinary checkpoint never replaces that generation's source. Missing/corrupt source is a
+//!     named refusal, never a quiet pointer or a ready stream. No epoch, core transfer or retention policy changes.
+
 pub mod lz;
+pub mod public;
 #[cfg(all(target_arch = "wasm32", not(feature = "checker")))]
 mod wasm;
 

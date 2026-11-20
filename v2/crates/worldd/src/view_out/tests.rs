@@ -1026,3 +1026,1500 @@ fn a_still_world_is_marked_quiet_and_a_burst_after_it_is_written() {
         written as f64 / 1e6
     );
 }
+
+// #3639: the actual canonical producer and the shared native/WASM observer contract.
+fn w3e_packet(h: &Header, effects: Vec<Effect>) -> Vec<u8> {
+    wire(Value::Map(BTreeMap::from([
+        (1, Value::Bytes(h.hash().to_bytes())),
+        (
+            2,
+            Value::Array(effects.iter().map(Effect::to_value).collect()),
+        ),
+    ])))
+    .unwrap()
+}
+fn w3e_effect(seq: u64, node: Id, audience: Audience, body: Body) -> Effect {
+    Effect {
+        envelope: Envelope {
+            sequence: seq,
+            at: seq as i64 * 50_000,
+            node,
+            audience,
+            cause: Cause::World,
+            actor: Actor::World,
+        },
+        body,
+        events: None,
+        rest: Rest::new(),
+    }
+}
+fn w3e_create(h: &Header, seq: u64, node: Id, parent: Id, audience: Audience) -> Effect {
+    let mut change = create(h, node);
+    if let Change::Create {
+        pose, audience: a, ..
+    } = &mut change
+    {
+        pose.frame.node = parent;
+        pose.support = Support::Surface {
+            surface: parent,
+            height: 0,
+        };
+        *a = audience;
+    }
+    w3e_effect(
+        seq,
+        parent,
+        audience,
+        Body::Changes(vec![ChangeRec {
+            change,
+            rest: Rest::new(),
+        }]),
+    )
+}
+fn w3e_checkpoint(d: &Path, h: &Header, copy: &mut Replica, record: u64) -> Vec<u8> {
+    use replica::ids::Version;
+    let mut cp =
+        sim::checkpoint::Checkpoints::open(d, 1, sim::checkpoint::Blobs::default()).unwrap();
+    let version = Version {
+        lineage: h.lineage,
+        zone: h.zone,
+        epoch: h.epoch,
+        sequence: copy.version(),
+    };
+    cp.take(copy.tree_for_seal(), version, record, &[]).unwrap();
+    cp.wait().unwrap();
+    fs::read(d.join(format!("ckpt-{record:020}"))).unwrap()
+}
+fn w3e_query(which: u64, arg: Value) -> Vec<u8> {
+    wire(Value::Map(BTreeMap::from([
+        (1, Value::Uint(which)),
+        (2, arg),
+    ])))
+    .unwrap()
+}
+// Canonical query bytes with only the audience projection applied; opaque path references stay explicit.
+fn w3e_compare_transfer_queries(public: &PublicPlayer, canonical: &Replica, authorized: &[Id]) {
+    for id in authorized {
+        let Some(Value::Map(mut node)) = canonical.node(*id) else {
+            continue;
+        };
+        if let Some(Value::Array(links)) = node.get_mut(&9) {
+            links.retain(|l| matches!(l,Value::Array(r) if r.get(3)==Some(&Value::Map(BTreeMap::from([(1, Value::Uint(1))]))) && r.get(2).is_some_and(|i| authorized.iter().any(|id|i==&id.to_value()))));
+        }
+        assert_eq!(
+            public.query(&w3e_query(1, id.to_value())).unwrap(),
+            wire(Value::Map(node.clone())).unwrap(),
+            "canonical node/version bytes"
+        );
+        node.remove(&10);
+        let hash = replica::ids::Hash::of(
+            replica::ids::Purpose::StatePublic,
+            &wire(Value::Map(node)).unwrap(),
+        );
+        assert_eq!(
+            public.query(&w3e_query(6, id.to_value())).unwrap(),
+            wire(Value::Bytes(hash.to_bytes())).unwrap()
+        );
+        let children = canonical
+            .children(*id, None)
+            .unwrap()
+            .into_iter()
+            .filter(|i| authorized.contains(i))
+            .map(Id::to_value)
+            .collect();
+        assert_eq!(
+            public.query(&w3e_query(2, id.to_value())).unwrap(),
+            wire(Value::Array(children)).unwrap()
+        );
+        let links = canonical
+            .links(*id)
+            .into_iter()
+            .filter(|l| {
+                l.audience == Audience::Everyone && l.ends.iter().all(|i| authorized.contains(i))
+            })
+            .map(|l| {
+                Value::Array(vec![
+                    l.link.to_value(),
+                    Value::Text(l.ty),
+                    Value::Array(l.ends.iter().map(|i| i.to_value()).collect()),
+                    Value::Uint(u64::from(l.owner == replica::world_model::End::Second)),
+                    Value::Map(BTreeMap::from([(1, Value::Uint(1))])),
+                ])
+            })
+            .collect();
+        assert_eq!(
+            public.query(&w3e_query(3, id.to_value())).unwrap(),
+            wire(Value::Array(links)).unwrap()
+        );
+        let path = canonical.path(*id).unwrap();
+        if path.iter().all(|i| authorized.contains(i)) {
+            assert_eq!(
+                public.query(&w3e_query(4, id.to_value())).unwrap(),
+                canonical.query(&w3e_query(4, id.to_value())).unwrap()
+            );
+        } else {
+            assert_eq!(
+                public.query(&w3e_query(4, id.to_value())).unwrap_err().name,
+                "frame-unavailable"
+            );
+        }
+    }
+    for since in 0..=canonical.version() {
+        let changed = canonical
+            .changed_since(since)
+            .into_iter()
+            .filter(|(i, _)| authorized.contains(i))
+            .map(|(i, v)| Value::Array(vec![i.to_value(), Value::Uint(v)]))
+            .collect();
+        assert_eq!(
+            public.query(&w3e_query(5, Value::Uint(since))).unwrap(),
+            wire(Value::Array(changed)).unwrap(),
+            "canonical public changed_since {since}"
+        );
+    }
+}
+
+#[test]
+fn w3e_exact_imported_root_frontier_queries_and_whole_part_refusal() {
+    let mut value = if let Value::Map(m) = header().to_value() {
+        m
+    } else {
+        unreachable!()
+    };
+    let root = Name::new(
+        "eden:world@1220e1771ee3471091196ed3afb3796e05602c106a5e95aae791d1d5ba0ba5c01b86",
+    )
+    .unwrap();
+    if let Some(Value::Array(kinds)) = value.get_mut(&6) {
+        kinds.push(Value::Text(root.clone()));
+    }
+    let h = Header::read(&wire(Value::Map(value)).unwrap()).unwrap();
+    let mut actual = Replica::restored(h.clone(), replica::tree::Tree::start(h.zone, root), 0);
+    let d = scratch("w3e-root");
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let private = Id::new(Scope([91; 16]), 1).unwrap();
+    let child = Id::new(Scope([92; 16]), 1).unwrap();
+    let audience = Audience::Of(private);
+    let words = Arc::new(
+        Store::open_dir(
+            &d.join("words"),
+            replica::ids::Minter::at(Scope([58; 16]), 0),
+        )
+        .unwrap(),
+    );
+    let said = words
+        .write(b"public event words", Audience::Everyone, child)
+        .unwrap();
+    let whisper = words
+        .write(b"private never published", audience, private)
+        .unwrap();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: Some(words),
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let mut secret = w3e_create(&h, 0, private, h.zone, audience);
+    let mut public = w3e_create(&h, 1, child, private, Audience::Everyone);
+    for (effect, reference) in [(&mut secret, whisper), (&mut public, said)] {
+        effect.events = Some(vec![replica::effects::Event {
+            name: Name::new("souls:said").unwrap(),
+            fields: BTreeMap::from([(1, Value::Map(BTreeMap::from([(21, reference.to_value())])))]),
+            changes: Vec::new(),
+            rest: Rest::new(),
+        }]);
+    }
+    let bytes = w3e_packet(&h, vec![secret, public]);
+    actual.apply_bytes(&bytes).unwrap();
+    out.push(0, &bytes).unwrap();
+    out.flush().unwrap();
+    assert_eq!(
+        out.public_player().state(),
+        &project(&h, &actual.tree().to_state()).unwrap()
+    );
+    let text = fs::read(out.generation_dir().join("0.text")).unwrap();
+    let Value::Array(text) = decode(&text).unwrap().value else {
+        panic!("text")
+    };
+    assert_eq!(
+        text,
+        vec![Value::Array(vec![
+            said.to_value(),
+            Value::Bytes(b"public event words".to_vec())
+        ])],
+        "actual public event words survive without private event words"
+    );
+    assert_eq!(out.public_player().events().len(), 1);
+    let node = out
+        .public_player()
+        .query(&w3e_query(1, child.to_value()))
+        .unwrap();
+    let Value::Map(node) = decode(&node).unwrap().value else {
+        panic!("node")
+    };
+    assert_eq!(node[&3], private.to_value());
+    assert_eq!(
+        out.public_player()
+            .query(&w3e_query(1, private.to_value()))
+            .unwrap_err()
+            .name,
+        "node-missing"
+    );
+    assert_eq!(
+        out.public_player()
+            .query(&w3e_query(4, child.to_value()))
+            .unwrap_err()
+            .name,
+        "frame-unavailable"
+    );
+    for which in [2, 3, 6] {
+        out.public_player()
+            .query(&w3e_query(which, h.zone.to_value()))
+            .unwrap();
+    }
+    out.public_player()
+        .query(&w3e_query(5, Value::Uint(0)))
+        .unwrap();
+    let before = out.public_player().hash().unwrap();
+    let cursor = out.source_cursor();
+    let head = store.get(&format!("{}head", out.prefix)).unwrap().unwrap();
+    let bad = w3e_packet(
+        &h,
+        vec![
+            w3e_effect(
+                2,
+                child,
+                Audience::Everyone,
+                Body::Changes(vec![ChangeRec {
+                    change: Change::Set {
+                        node: child,
+                        field: 77,
+                        to: Value::Uint(1),
+                        by: None,
+                    },
+                    rest: Rest::new(),
+                }]),
+            ),
+            w3e_effect(4, child, Audience::Everyone, Body::Changes(Vec::new())),
+        ],
+    );
+    assert_eq!(out.push(1, &bad).unwrap_err().name, "sequence-gap");
+    assert_eq!(out.source_cursor(), cursor);
+    assert_eq!(out.public_player().hash().unwrap(), before);
+    assert_eq!(
+        store.get(&format!("{}head", out.prefix)).unwrap().unwrap(),
+        head
+    );
+}
+
+#[test]
+fn w3e_public_and_private_root_flights_return_settle_arrive_and_duplicate_events() {
+    use replica::effects::{Event, TransferRec};
+    for private_root in [false, true] {
+        for ending in ["return", "settle", "arrive"] {
+            let h = header();
+            let d = scratch(&format!("w3e-flight-{private_root}-{ending}"));
+            let mut actual = Replica::start(h.stored()).unwrap();
+            let carrier = Id::new(Scope([81; 16]), 1).unwrap();
+            let child = Id::new(Scope([82; 16]), 1).unwrap();
+            let transfer = Id::new(Scope([83; 16]), 1).unwrap();
+            let hidden = Audience::Of(carrier);
+            let aud = if private_root {
+                hidden
+            } else {
+                Audience::Everyone
+            };
+            let moving = if private_root { child } else { carrier };
+            let parent = if private_root { carrier } else { h.zone };
+            let motion = HandOff {
+                node: moving,
+                at: 100_000,
+                from: replica::pose::Owner::Mover,
+                to: replica::pose::Owner::Mover,
+                pose: Pose {
+                    frame: Frame {
+                        node: parent,
+                        slot: None,
+                    },
+                    position: Vec3::new(123, 0, 456),
+                    orientation: Quat::IDENTITY,
+                    support: Support::Surface {
+                        surface: parent,
+                        height: 0,
+                    },
+                },
+                linear: Vec3::new(1000, 0, 2000),
+                angular: Vec3::ZERO,
+            };
+            let slotted = Id::new(Scope([84; 16]), 7).unwrap();
+            let mut slot = create(&h, slotted);
+            if let Change::Create { pose, .. } = &mut slot {
+                pose.frame.slot = Some(7);
+                pose.support = Support::Slot;
+            }
+            let branch = Id::new(Scope([85; 16]), 1).unwrap();
+            let frontier = Id::new(Scope([86; 16]), 1).unwrap();
+            let public_link = Id::new(Scope([87; 16]), 1).unwrap();
+            let private_link = Id::new(Scope([88; 16]), 1).unwrap();
+            let link = Change::Link {
+                link: public_link,
+                ty: Name::new("souls:near").unwrap(),
+                ends: [moving, frontier],
+                owner: End::First,
+                audience: Audience::Everyone,
+            };
+            let secret = Change::Link {
+                link: private_link,
+                ty: Name::new("private:never-published").unwrap(),
+                ends: [branch, frontier],
+                owner: End::First,
+                audience: hidden,
+            };
+            let first = w3e_packet(
+                &h,
+                vec![
+                    w3e_create(&h, 0, carrier, h.zone, aud),
+                    w3e_create(
+                        &h,
+                        1,
+                        child,
+                        carrier,
+                        if private_root {
+                            Audience::Everyone
+                        } else {
+                            hidden
+                        },
+                    ),
+                    w3e_effect(
+                        2,
+                        moving,
+                        Audience::Everyone,
+                        Body::Changes(vec![ChangeRec {
+                            change: Change::Motion(motion),
+                            rest: Rest::new(),
+                        }]),
+                    ),
+                    w3e_effect(
+                        3,
+                        h.zone,
+                        Audience::Everyone,
+                        Body::Changes(vec![ChangeRec {
+                            change: slot,
+                            rest: Rest::new(),
+                        }]),
+                    ),
+                    w3e_create(&h, 4, branch, carrier, hidden),
+                    w3e_create(&h, 5, frontier, branch, Audience::Everyone),
+                    w3e_effect(
+                        6,
+                        moving,
+                        Audience::Everyone,
+                        Body::Changes(vec![ChangeRec {
+                            change: link,
+                            rest: Rest::new(),
+                        }]),
+                    ),
+                    w3e_effect(
+                        7,
+                        branch,
+                        hidden,
+                        Body::Changes(vec![ChangeRec {
+                            change: secret,
+                            rest: Rest::new(),
+                        }]),
+                    ),
+                ],
+            );
+            actual.apply_bytes(&first).unwrap();
+            let destination = Pose {
+                frame: Frame {
+                    node: h.zone,
+                    slot: None,
+                },
+                position: Vec3::ZERO,
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: h.zone,
+                    height: 0,
+                },
+            };
+            let leave = w3e_packet(
+                &h,
+                vec![w3e_effect(
+                    8,
+                    carrier,
+                    aud,
+                    Body::Transfer(TransferRec::Leave {
+                        transfer,
+                        node: carrier,
+                        lineage: h.lineage,
+                        zone: h.zone,
+                        pose: destination,
+                    }),
+                )],
+            );
+            actual.apply_bytes(&leave).unwrap();
+            // One real writer retains the validated blobs that earlier seals may reference.
+            let cp_dir = d.join("cp");
+            let mut checkpoints =
+                sim::checkpoint::Checkpoints::open(&cp_dir, 1, sim::checkpoint::Blobs::default())
+                    .unwrap();
+            let mut checkpoint = |copy: &mut Replica, record: u64| {
+                let version = replica::ids::Version {
+                    lineage: h.lineage,
+                    zone: h.zone,
+                    epoch: h.epoch,
+                    sequence: copy.version(),
+                };
+                checkpoints
+                    .take(copy.tree_for_seal(), version, record, &[])
+                    .unwrap();
+                checkpoints
+                    .wait()
+                    .unwrap_or_else(|e| panic!("flight checkpoint record {record}: {e:?}"));
+                fs::read(cp_dir.join(format!("ckpt-{record:020}"))).unwrap()
+            };
+            let cp = checkpoint(&mut actual, 2);
+            // Match the ordinary checkpoint's canonical baseline: live nodes take its version; flying
+            // nodes are not fabricated into the restored change index and retain canonical fallback zero.
+            let mut actual = Replica::restored(h.clone(), actual.tree().frozen(), actual.version());
+            let authorized = [h.zone, moving, frontier, slotted];
+            let store = directoryd::directory::store::Memory::default();
+            let mut out = PublicWriter::open(
+                PublicStart {
+                    root: &d.join("views"),
+                    header: &h,
+                    key: key(&h),
+                    initial: actual.frozen(),
+                    record: 2,
+                    checkpoint: Some(cp),
+                    text: None,
+                    clock_seed: None,
+                    history: None,
+                },
+                &store,
+            )
+            .unwrap();
+            let public_bytes = wire(out.public_player().state().clone()).unwrap();
+            let snapshot = decode(&out.public_player().snapshot().unwrap())
+                .unwrap()
+                .value;
+            let Value::Array(snapshot) = snapshot else {
+                panic!("snapshot")
+            };
+            assert!(snapshot.iter().any(|n|matches!(n,Value::Map(m) if m.get(&1)==Some(&slotted.to_value())&&m.get(&4)==Some(&Value::Uint(7)))));
+            let projection = out.public_player().state();
+            assert_eq!(projection, &project(&h, &actual.tree().to_state()).unwrap());
+            let contains = |id: Id| {
+                let encoded = wire(id.to_value()).unwrap();
+                public_bytes.windows(encoded.len()).any(|w| w == encoded)
+            };
+            assert!(
+                contains(public_link),
+                "a private-root flight still carries its actual owned public links"
+            );
+            assert!(!contains(private_link));
+            let Value::Map(projection) = projection else {
+                panic!("projection")
+            };
+            let pairs = |v: &Value| {
+                let Value::Array(rows) = v else {
+                    panic!("pairs")
+                };
+                rows.iter()
+                    .map(|r| {
+                        let Value::Array(p) = r else { panic!("pair") };
+                        (replica::effects::read_id(&p[0]).unwrap(), p[1].clone())
+                    })
+                    .collect::<BTreeMap<_, _>>()
+            };
+            let carried = if private_root {
+                assert!(!contains(transfer));
+                let nodes = pairs(&projection[&8]);
+                assert_eq!(
+                    nodes.len(),
+                    2,
+                    "two independent public frontiers in one private flight"
+                );
+                nodes
+            } else {
+                let flight = pairs(&projection[&4]);
+                let Value::Map(f) = &flight[&transfer] else {
+                    panic!("flight")
+                };
+                pairs(&f[&5])
+            };
+            let recorded = NodeState::read(&carried[&moving]).unwrap();
+            let state = actual.tree().to_state();
+            assert_eq!(recorded, state.in_flight[&transfer].nodes[&moving]);
+            assert!(recorded.motion.is_some());
+            assert_eq!(
+                NodeState::read(&carried[&frontier]).unwrap().parent,
+                Some(branch)
+            );
+            for id in [moving, frontier, h.zone] {
+                let query = w3e_query(3, id.to_value());
+                assert_eq!(
+                    out.public_player().query(&query).unwrap(),
+                    actual.query(&query).unwrap(),
+                    "flying link query keeps canonical live-index semantics"
+                );
+            }
+            w3e_compare_transfer_queries(out.public_player(), &actual, &authorized);
+            // A newer ordinary checkpoint while the transfer is still in flight must not reset public
+            // query versions. Remove every local public/recovery file and recover only the original Store.
+            let advance = w3e_packet(
+                &h,
+                vec![w3e_effect(
+                    9,
+                    h.zone,
+                    Audience::Everyone,
+                    Body::Changes(Vec::new()),
+                )],
+            );
+            actual.apply_bytes(&advance).unwrap();
+            out.push(2, &advance).unwrap();
+            out.flush().unwrap();
+            let baseline = out.baseline.clone();
+            let dir = out.generation_dir();
+            let old_part = fs::read(dir.join("0")).unwrap();
+            let newer = checkpoint(&mut actual, 3);
+            drop(out);
+            fs::remove_dir_all(d.join("views")).unwrap();
+            let mut out = PublicWriter::open(
+                PublicStart {
+                    root: &d.join("views"),
+                    header: &h,
+                    key: key(&h),
+                    initial: Replica::restored(h.clone(), actual.tree().frozen(), actual.version()),
+                    record: 3,
+                    checkpoint: Some(newer),
+                    text: None,
+                    clock_seed: None,
+                    history: None,
+                },
+                &store,
+            )
+            .unwrap();
+            assert_eq!(fs::read(dir.join("0")).unwrap(), old_part);
+            w3e_compare_transfer_queries(out.public_player(), &actual, &authorized);
+            let end = match ending {
+                "return" => TransferRec::Return {
+                    transfer,
+                    reason: Name::new("souls:returned").unwrap(),
+                },
+                "settle" => TransferRec::Settle { transfer },
+                _ => TransferRec::Arrive {
+                    transfer,
+                    carried: Vec::new(),
+                },
+            };
+            let bytes = w3e_packet(&h, vec![w3e_effect(10, h.zone, aud, Body::Transfer(end))]);
+            actual.apply_bytes(&bytes).unwrap();
+            out.push(3, &bytes).unwrap();
+            out.flush().unwrap();
+            w3e_compare_transfer_queries(out.public_player(), &actual, &authorized);
+            if ending == "return" {
+                let bytes = fs::read(dir.join("1")).unwrap();
+                for mode in ["wrong historical", "unrelated", "missing"] {
+                    let mut reader = PublicPlayer::start(h.stored(), &baseline).unwrap();
+                    reader.play(&old_part).unwrap();
+                    let before = reader.hash().unwrap();
+                    let before_version = reader.version();
+                    let before_next = reader.next();
+                    let mut part = object_map(&bytes).unwrap();
+                    let mut context = object_map(&obj_bytes(&part, 10).unwrap()).unwrap();
+                    let Value::Array(rows) = context.get_mut(&8).unwrap() else {
+                        panic!("version rows")
+                    };
+                    match mode {
+                        "wrong historical" => {
+                            let row=rows.iter_mut().find(|r|matches!(r,Value::Array(p) if p.first()==Some(&moving.to_value()))).unwrap();
+                            let Value::Array(row) = row else {
+                                unreachable!()
+                            };
+                            row[1] = Value::Uint(1);
+                        }
+                        "unrelated" => {
+                            rows.push(Value::Array(vec![slotted.to_value(), Value::Uint(0)]))
+                        }
+                        _ => rows.retain(
+                            |r| !matches!(r,Value::Array(p) if p.first()==Some(&moving.to_value())),
+                        ),
+                    }
+                    part.insert(10, Value::Bytes(wire(Value::Map(context)).unwrap()));
+                    assert_eq!(
+                        reader
+                            .play(&wire(Value::Map(part)).unwrap())
+                            .unwrap_err()
+                            .name,
+                        "public-stream-record",
+                        "{mode}"
+                    );
+                    assert_eq!(reader.hash().unwrap(), before);
+                    assert_eq!(reader.version(), before_version);
+                    assert_eq!(reader.next(), before_next);
+                }
+                // A later live->Leave->Return retains a genuine known version, including through a newer
+                // checkpoint taken while flying and a second Store-only cold reopen.
+                let leave = w3e_packet(
+                    &h,
+                    vec![w3e_effect(
+                        11,
+                        carrier,
+                        aud,
+                        Body::Transfer(TransferRec::Leave {
+                            transfer: Id::new(Scope([89; 16]), 1).unwrap(),
+                            node: carrier,
+                            lineage: h.lineage,
+                            zone: h.zone,
+                            pose: destination,
+                        }),
+                    )],
+                );
+                actual.apply_bytes(&leave).unwrap();
+                out.push(4, &leave).unwrap();
+                out.flush().unwrap();
+                let cp = checkpoint(&mut actual, 5);
+                drop(out);
+                fs::remove_dir_all(d.join("views")).unwrap();
+                let mut recovered = PublicWriter::open(
+                    PublicStart {
+                        root: &d.join("views"),
+                        header: &h,
+                        key: key(&h),
+                        initial: Replica::restored(
+                            h.clone(),
+                            actual.tree().frozen(),
+                            actual.version(),
+                        ),
+                        record: 5,
+                        checkpoint: Some(cp),
+                        text: None,
+                        clock_seed: None,
+                        history: None,
+                    },
+                    &store,
+                )
+                .unwrap();
+                let returned = w3e_packet(
+                    &h,
+                    vec![w3e_effect(
+                        12,
+                        h.zone,
+                        aud,
+                        Body::Transfer(TransferRec::Return {
+                            transfer: Id::new(Scope([89; 16]), 1).unwrap(),
+                            reason: Name::new("souls:returned").unwrap(),
+                        }),
+                    )],
+                );
+                actual.apply_bytes(&returned).unwrap();
+                recovered.push(5, &returned).unwrap();
+                recovered.flush().unwrap();
+                w3e_compare_transfer_queries(recovered.public_player(), &actual, &authorized);
+                out = recovered;
+            }
+            assert_eq!(
+                out.public_player().state(),
+                &project(&h, &actual.tree().to_state()).unwrap()
+            );
+            if ending == "arrive" && !private_root {
+                let mut duplicate = w3e_effect(
+                    11,
+                    h.zone,
+                    aud,
+                    Body::Transfer(TransferRec::Arrive {
+                        transfer,
+                        carried: Vec::new(),
+                    }),
+                );
+                duplicate.events = Some(vec![Event {
+                    name: Name::new("souls:arrived-again").unwrap(),
+                    fields: BTreeMap::new(),
+                    changes: Vec::new(),
+                    rest: Rest::new(),
+                }]);
+                let bytes = w3e_packet(&h, vec![duplicate]);
+                actual.apply_bytes(&bytes).unwrap();
+                out.push(4, &bytes).unwrap();
+                out.flush().unwrap();
+                assert_eq!(out.public_player().events().len(), 1);
+                assert_eq!(out.public_player().version(), 12);
+                w3e_compare_transfer_queries(out.public_player(), &actual, &authorized);
+                assert_eq!(
+                    out.public_player().state(),
+                    &project(&h, &actual.tree().to_state()).unwrap()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn w3e_store_only_restart_preserves_old_bytes_cursor_and_live_reader() {
+    let h = header();
+    let d = scratch("w3e-cold");
+    let views = d.join("views");
+    let store = directoryd::directory::store::Memory::default();
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: None,
+            text: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let body = Id::new(Scope([71; 16]), 1).unwrap();
+    let first = w3e_packet(
+        &h,
+        vec![w3e_create(&h, 0, body, h.zone, Audience::Everyone)],
+    );
+    actual.apply_bytes(&first).unwrap();
+    out.push(0, &first).unwrap();
+    out.flush().unwrap();
+    let baseline = out.baseline.clone();
+    let dir = out.generation_dir();
+    let old = fs::read(dir.join("0")).unwrap();
+    let header_bytes = fs::read(views.join(stream::header_path(&h))).unwrap();
+    let mut open = PublicPlayer::start(&header_bytes, &baseline).unwrap();
+    open.play(&old).unwrap();
+    drop(out);
+    let cp = w3e_checkpoint(&d.join("newer-cp"), &h, &mut actual, 1);
+    // No local public files or recovery metadata remain. The newest ordinary checkpoint is deliberately newer
+    // than the generation source; recovery must use the Store's exact source and existing immutable bytes.
+    fs::remove_dir_all(&views).unwrap();
+    let mut recovered = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 1,
+            checkpoint: Some(cp),
+            text: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    assert_eq!(fs::read(dir.join("0")).unwrap(), old);
+    assert_eq!(
+        fs::read(views.join(stream::header_path(&h))).unwrap(),
+        header_bytes
+    );
+    assert_eq!(recovered.source_cursor(), 1);
+    let next = w3e_packet(
+        &h,
+        vec![w3e_effect(
+            1,
+            body,
+            Audience::Everyone,
+            Body::Changes(vec![ChangeRec {
+                change: Change::Set {
+                    node: body,
+                    field: 40,
+                    to: Value::Uint(9),
+                    by: None,
+                },
+                rest: Rest::new(),
+            }]),
+        )],
+    );
+    actual.apply_bytes(&next).unwrap();
+    recovered.push(1, &next).unwrap();
+    recovered.flush().unwrap();
+    let bytes = fs::read(dir.join("1")).unwrap();
+    open.play(&bytes).unwrap();
+    assert_eq!(open.state(), recovered.public_player().state());
+    let mut fresh = PublicPlayer::start(h.stored(), &baseline).unwrap();
+    fresh.play(&old).unwrap();
+    fresh.play(&bytes).unwrap();
+    assert_eq!(fresh.hash().unwrap(), open.hash().unwrap());
+    assert_eq!(fs::read(dir.join("0")).unwrap(), old);
+    let mut untouched = PublicPlayer::start(h.stored(), &baseline).unwrap();
+    let before = untouched.hash().unwrap();
+    let mut corrupted = object_map(&old).unwrap();
+    corrupted.insert(7, Value::Bytes(vec![0; 32]));
+    assert_eq!(
+        untouched
+            .play(&wire(Value::Map(corrupted)).unwrap())
+            .unwrap_err()
+            .name,
+        "public-stream-record"
+    );
+    assert_eq!(untouched.hash().unwrap(), before);
+    let mut corrupted = object_map(&old).unwrap();
+    let mut context = object_map(&obj_bytes(&corrupted, 10).unwrap()).unwrap();
+    context.insert(2, Value::Bytes(vec![0; 32]));
+    corrupted.insert(10, Value::Bytes(wire(Value::Map(context)).unwrap()));
+    assert_eq!(
+        untouched
+            .play(&wire(Value::Map(corrupted)).unwrap())
+            .unwrap_err()
+            .name,
+        "public-stream-record"
+    );
+    assert_eq!(untouched.hash().unwrap(), before);
+}
+
+#[test]
+fn w3e_complete_query_bytes_keep_nonzero_restored_baseline_and_untouched_node_versions() {
+    let h = header();
+    let d = scratch("w3e-query");
+    let store = directoryd::directory::store::Memory::default();
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let body = Id::new(Scope([60; 16]), 1).unwrap();
+    let other = Id::new(Scope([60; 16]), 2).unwrap();
+    let link = Id::new(Scope([60; 16]), 3).unwrap();
+    actual
+        .apply_bytes(&w3e_packet(
+            &h,
+            vec![
+                w3e_create(&h, 0, body, h.zone, Audience::Everyone),
+                w3e_create(&h, 1, other, h.zone, Audience::Everyone),
+            ],
+        ))
+        .unwrap();
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 1);
+    // A public checkpoint is an observation baseline, with the same documented changed-at semantics as the
+    // existing canonical restored replica: every live node starts at that baseline version, not a guessed past.
+    let mut actual = Replica::restored(h.clone(), actual.tree().frozen(), actual.version());
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 1,
+            checkpoint: Some(cp),
+            text: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let compare = |public: &PublicPlayer, canonical: &Replica, ids: &[Id]| {
+        for id in ids {
+            for which in [1, 2, 3, 4, 6] {
+                let q = w3e_query(which, id.to_value());
+                assert_eq!(
+                    public.query(&q).unwrap(),
+                    canonical.query(&q).unwrap(),
+                    "exact public query {which}"
+                );
+            }
+        }
+        for since in [0, 1, 2, 3, 4, 5] {
+            let q = w3e_query(5, Value::Uint(since));
+            assert_eq!(
+                public.query(&q).unwrap(),
+                canonical.query(&q).unwrap(),
+                "exact change query since {since}"
+            );
+        }
+    };
+    compare(out.public_player(), &actual, &[h.zone, body, other]);
+    let bytes = w3e_packet(
+        &h,
+        vec![w3e_effect(
+            2,
+            body,
+            Audience::Everyone,
+            Body::Changes(vec![ChangeRec {
+                change: set(body, 40, Value::Uint(7)),
+                rest: Rest::new(),
+            }]),
+        )],
+    );
+    actual.apply_bytes(&bytes).unwrap();
+    out.push(1, &bytes).unwrap();
+    out.flush().unwrap();
+    compare(out.public_player(), &actual, &[h.zone, body, other]);
+    let Value::Map(root) = decode(
+        &out.public_player()
+            .query(&w3e_query(1, h.zone.to_value()))
+            .unwrap(),
+    )
+    .unwrap()
+    .value
+    else {
+        panic!("root")
+    };
+    assert_eq!(
+        root[&10],
+        Value::Uint(2),
+        "an untouched root does not advance with the public version"
+    );
+    let bytes = w3e_packet(
+        &h,
+        vec![w3e_effect(
+            3,
+            body,
+            Audience::Everyone,
+            Body::Changes(vec![ChangeRec {
+                change: Change::Link {
+                    link,
+                    ty: Name::new("souls:near").unwrap(),
+                    ends: [body, other],
+                    owner: End::First,
+                    audience: Audience::Everyone,
+                },
+                rest: Rest::new(),
+            }]),
+        )],
+    );
+    actual.apply_bytes(&bytes).unwrap();
+    out.push(2, &bytes).unwrap();
+    out.flush().unwrap();
+    compare(out.public_player(), &actual, &[h.zone, body, other]);
+    let bytes = w3e_packet(
+        &h,
+        vec![w3e_effect(
+            4,
+            other,
+            Audience::Everyone,
+            Body::Changes(vec![ChangeRec {
+                change: Change::Remove { node: other },
+                rest: Rest::new(),
+            }]),
+        )],
+    );
+    actual.apply_bytes(&bytes).unwrap();
+    out.push(3, &bytes).unwrap();
+    out.flush().unwrap();
+    compare(out.public_player(), &actual, &[h.zone, body]);
+    assert_eq!(
+        out.public_player()
+            .query(&w3e_query(1, other.to_value()))
+            .unwrap_err()
+            .name,
+        "node-missing"
+    );
+}
+
+#[test]
+fn w3e_legacy_terminal_inside_source_part_keeps_exact_private_remainder() {
+    let h = header();
+    let d = scratch("w3e-legacy");
+    let views = d.join("views");
+    let initial = Replica::start(h.stored()).unwrap();
+    let body = Id::new(Scope([61; 16]), 1).unwrap();
+    let hidden = Id::new(Scope([62; 16]), 1).unwrap();
+    let public = w3e_create(&h, 0, body, h.zone, Audience::Everyone);
+    let private = w3e_create(&h, 1, hidden, h.zone, Audience::Of(hidden));
+    let original = w3e_packet(&h, vec![public.clone(), private]);
+    let mut legacy = Writer::create(&views, &h, &key(&h), (0, 0)).unwrap();
+    legacy.frame(&frame(vec![public.to_value()])).unwrap();
+    legacy.flush().unwrap();
+    let old = fs::read(legacy.dir().join("0")).unwrap();
+    let mut old_reader = Player::start(h.stored()).unwrap();
+    old_reader.play(&old).unwrap();
+    assert_eq!(old_reader.replica().version(), 1);
+    let history = sim::log::Recovered {
+        header: None,
+        first: 0,
+        start: 0,
+        records: vec![original],
+        end: 0,
+        last_crc: 0,
+        torn: None,
+    };
+    let store = directoryd::directory::store::Memory::default();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial,
+            record: 0,
+            checkpoint: None,
+            text: None,
+            clock_seed: None,
+            history: Some(&history),
+        },
+        &store,
+    )
+    .unwrap();
+    assert_eq!(out.source_cursor(), 1);
+    assert_eq!(out.public_player().version(), 1);
+    assert_eq!(out.canonical.version(), 2);
+    assert_eq!(
+        out.player.hash().unwrap(),
+        digest(&project(&h, &old_reader.replica().tree().to_state()).unwrap()).unwrap()
+    );
+    out.flush().unwrap();
+    assert_eq!(out.public_player().version(), 2);
+    assert!(out.public_player().events().is_empty());
+    assert_eq!(fs::read(legacy.dir().join("0")).unwrap(), old);
+    let remainder = fs::read(out.generation_dir().join("0")).unwrap();
+    let part = StreamPart::read(&remainder).unwrap();
+    assert_eq!(part.entries, 0);
+    assert_eq!(part.gaps, vec![(1, 1)]);
+    drop(out);
+    fs::remove_dir_all(&views).unwrap();
+    let mut recovered = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: Replica::start(h.stored()).unwrap(),
+            record: 0,
+            checkpoint: None,
+            text: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    assert_eq!(recovered.public_player().version(), 2);
+    assert_eq!(fs::read(legacy.dir().join("0")).unwrap(), old);
+    assert_eq!(
+        fs::read(recovered.generation_dir().join("0")).unwrap(),
+        remainder
+    );
+    recovered.flush().unwrap();
+}
+
+#[derive(Default)]
+struct W3eFaultStore {
+    inner: directoryd::directory::store::Memory,
+    fail_head: std::cell::Cell<bool>,
+    missing: std::cell::RefCell<Option<String>>,
+    corrupt: std::cell::RefCell<Option<String>>,
+}
+impl ObjectStore for W3eFaultStore {
+    fn get(&self, key: &str) -> R<Option<directoryd::directory::store::Object>> {
+        if self.missing.borrow().as_deref() == Some(key) {
+            return Ok(None);
+        }
+        let mut object = self.inner.get(key)?;
+        if self.corrupt.borrow().as_deref() == Some(key)
+            && let Some(o) = &mut object
+        {
+            o.bytes.push(0);
+        }
+        Ok(object)
+    }
+    fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+        if key.ends_with("/head") && self.fail_head.get() {
+            return Err(fault(
+                "store-unreachable",
+                "injected publication interruption",
+            ));
+        }
+        self.inner.put(key, bytes, when)
+    }
+    fn list(&self, prefix: &str) -> R<Vec<String>> {
+        self.inner.list(prefix)
+    }
+}
+
+#[test]
+fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_false_ready() {
+    let h = header();
+    let d = scratch("w3e-atomic");
+    let views = d.join("views");
+    let store = W3eFaultStore::default();
+    let actual = Replica::start(h.stored()).unwrap();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: None,
+            text: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let pointer = fs::read(out.dir.join(POINTER)).unwrap();
+    let initial_head = store.get(&format!("{}head", out.prefix)).unwrap().unwrap();
+    let body = Id::new(Scope([59; 16]), 1).unwrap();
+    let bytes = w3e_packet(
+        &h,
+        vec![w3e_create(&h, 0, body, h.zone, Audience::Everyone)],
+    );
+    out.push(0, &bytes).unwrap();
+    store.fail_head.set(true);
+    assert_eq!(out.flush().unwrap_err().name, "store-unreachable");
+    assert_eq!(fs::read(out.dir.join(POINTER)).unwrap(), pointer);
+    assert!(!out.generation_dir().join("0").exists());
+    assert_eq!(
+        store.get(&format!("{}head", out.prefix)).unwrap().unwrap(),
+        initial_head
+    );
+    drop(out);
+    store.fail_head.set(false);
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: None,
+            text: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    // The conditional head commits before local publication. An interrupted/mismatched local file is never
+    // overwritten; a clean cold restore recovers exactly the committed bytes, including its source cursor.
+    out.push(0, &bytes).unwrap();
+    let dir = out.generation_dir();
+    fs::write(dir.join("0"), b"unpublished interruption").unwrap();
+    assert_eq!(out.flush().unwrap_err().name, "stream-immutable");
+    assert_eq!(
+        fs::read(dir.join("0")).unwrap(),
+        b"unpublished interruption"
+    );
+    drop(out);
+    fs::remove_dir_all(&views).unwrap();
+    let out = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: None,
+            text: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    assert_eq!(out.public_player().version(), 1);
+    assert_eq!(out.source_cursor(), 1);
+    let valid = fs::read(dir.join("0")).unwrap();
+    assert_ne!(valid, b"unpublished interruption");
+    let prefix = out.prefix.clone();
+    drop(out);
+    fs::remove_dir_all(&views).unwrap();
+    let head = object_map(&store.get(&format!("{prefix}head")).unwrap().unwrap().bytes).unwrap();
+    let required = format!(
+        "{prefix}objects/{}",
+        replica::encode::to_hex(&obj_bytes(&head, 1).unwrap())
+    );
+    store.missing.replace(Some(required.clone()));
+    let result = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: None,
+            text: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    );
+    assert!(matches!(
+        result,
+        Err(Refusal {
+            name: "stream-recovery-missing",
+            ..
+        })
+    ));
+    assert!(!views.join(stream::dir(&h, &key(&h))).join(POINTER).exists());
+    store.missing.replace(None);
+    store.corrupt.replace(Some(required));
+    let result = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: actual,
+            record: 0,
+            checkpoint: None,
+            text: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    );
+    assert!(matches!(
+        result,
+        Err(Refusal {
+            name: "stream-recovery-hash",
+            ..
+        })
+    ));
+    assert!(!views.join(stream::dir(&h, &key(&h))).join(POINTER).exists());
+}
+
+#[test]
+fn w3e_first_durable_mapping_timers_and_pending_slowdown_remain_authoritative() {
+    let h = header();
+    let d = scratch("w3e-time");
+    let views = d.join("views");
+    let real = 1_000_000_000_000;
+    let mapping = Mapping::new(0, real, 1, 1).unwrap();
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: None,
+            clock_seed: Some(mapping),
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let body = Id::new(Scope([57; 16]), 1).unwrap();
+    let timer = Id::new(Scope([57; 16]), 2).unwrap();
+    let first = w3e_packet(
+        &h,
+        vec![
+            w3e_effect(
+                0,
+                h.zone,
+                Audience::Everyone,
+                Body::Time(vec![TimeEffect::Mapping(mapping)]),
+            ),
+            w3e_create(&h, 1, body, h.zone, Audience::Everyone),
+            w3e_effect(
+                2,
+                body,
+                Audience::Everyone,
+                Body::Timers(vec![TimerRec::Set {
+                    timer,
+                    due: 10_000_000,
+                    name: Name::new("souls:light").unwrap(),
+                }]),
+            ),
+        ],
+    );
+    actual.apply_bytes(&first).unwrap();
+    out.push(0, &first).unwrap();
+    out.flush().unwrap();
+    for which in [1, 2, 3, 4, 6] {
+        assert_eq!(
+            out.public_player()
+                .query(&w3e_query(which, body.to_value()))
+                .unwrap(),
+            actual.query(&w3e_query(which, body.to_value())).unwrap(),
+            "complete query ABI {which}"
+        );
+    }
+    assert_eq!(
+        out.public_player()
+            .query(&w3e_query(5, Value::Uint(0)))
+            .unwrap(),
+        actual.query(&w3e_query(5, Value::Uint(0))).unwrap()
+    );
+    let mut clear = w3e_effect(
+        3,
+        body,
+        Audience::Everyone,
+        Body::Timers(vec![TimerRec::Clear { timer }]),
+    );
+    clear.envelope.at = 5_000_000;
+    let mut slow = w3e_effect(
+        4,
+        h.zone,
+        Audience::Everyone,
+        Body::Time(vec![TimeEffect::Mapping(
+            Mapping::new(5_000_000, real + 5_000_000, 1, 2).unwrap(),
+        )]),
+    );
+    slow.envelope.at = 5_000_000;
+    let later = w3e_packet(&h, vec![clear, slow]);
+    actual.apply_bytes(&later).unwrap();
+    out.push(1, &later).unwrap();
+    let previous = fs::read(out.dir.join(POINTER)).unwrap();
+    out.idle(real + 6_400_000).unwrap();
+    assert_eq!(
+        out.public_player().next(),
+        1,
+        "pending slowdown has not settled its stretch"
+    );
+    assert_eq!(
+        fs::read(out.dir.join(POINTER)).unwrap(),
+        previous,
+        "pending visibility cannot publish old-mapping quiet time"
+    );
+    out.idle(real + 8_000_000).unwrap();
+    assert_eq!(out.public_player().next(), 2);
+    assert_eq!(
+        out.public_player().state(),
+        &project(&h, &actual.tree().to_state()).unwrap()
+    );
+    let pointer = Pointer::read(&fs::read(out.dir.join(POINTER)).unwrap()).unwrap();
+    assert_eq!(pointer.quiet_until, Some(6_250_000));
+    let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
+    for n in 0..2 {
+        reader
+            .play(&fs::read(out.generation_dir().join(n.to_string())).unwrap())
+            .unwrap();
+    }
+    assert_eq!(reader.state(), out.public_player().state());
+}
+
+#[test]
+fn w3e_older_eligible_checkpoint_and_takeover_aware_original_source_bridge_legacy_terminal() {
+    let h = header();
+    let d = scratch("w3e-earlier");
+    let views = d.join("views");
+    let checkpoints = d.join("checkpoints");
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let older = w3e_checkpoint(&checkpoints, &h, &mut actual, 0);
+    let body = Id::new(Scope([55; 16]), 1).unwrap();
+    let hidden = Id::new(Scope([56; 16]), 1).unwrap();
+    let public = w3e_create(&h, 0, body, h.zone, Audience::Everyone);
+    let original = w3e_packet(
+        &h,
+        vec![
+            public.clone(),
+            w3e_create(&h, 1, hidden, h.zone, Audience::Of(hidden)),
+        ],
+    );
+    actual.apply_bytes(&original).unwrap();
+    let newer = w3e_checkpoint(&checkpoints, &h, &mut actual, 1);
+    let mut legacy = Writer::create(&views, &h, &key(&h), (0, 0)).unwrap();
+    legacy.frame(&frame(vec![public.to_value()])).unwrap();
+    legacy.flush().unwrap();
+    let old = fs::read(legacy.dir().join("0")).unwrap();
+    let history = sim::log::Recovered {
+        header: None,
+        first: 2,
+        start: 0,
+        records: Vec::new(),
+        end: 0,
+        last_crc: 0,
+        torn: None,
+    };
+    let store = directoryd::directory::store::Memory::default();
+    let takeover = replica::durability::Takeover {
+        epoch: h.epoch,
+        from: 0,
+        machine: Name::new("fixture-authority").unwrap(),
+        token: replica::durability::Token([7; 16]),
+    };
+    let successor = replica::durability::Takeover {
+        epoch: h.epoch + 1,
+        from: 1,
+        machine: Name::new("fixture-successor").unwrap(),
+        token: replica::durability::Token([8; 16]),
+    };
+    let authority = replica::directory::WorldRecord {
+        lineage: h.lineage.0,
+        zone: h.zone,
+        takeovers: vec![takeover.clone(), successor.clone()],
+        mark: Some(1),
+        wake: None,
+        build: h.build.clone(),
+        writes: 2,
+    };
+    store
+        .put(
+            &replica::directory::WorldRecord::key(&h.lineage.0, h.zone),
+            &authority.to_bytes().unwrap(),
+            When::Absent,
+        )
+        .unwrap();
+    let superseded = w3e_packet(
+        &h,
+        vec![w3e_effect(
+            999,
+            body,
+            Audience::Everyone,
+            Body::Changes(Vec::new()),
+        )],
+    );
+    let piece = crate::shipping::Piece {
+        header: h.stored().to_vec(),
+        first: 0,
+        records: vec![original, superseded],
+    };
+    let piece_key = replica::durability::part_key(&h.lineage.0, h.zone, &takeover, 0);
+    store
+        .put(&piece_key, &piece.to_bytes().unwrap(), When::Absent)
+        .unwrap();
+    let mut start = PublicStart {
+        root: &views,
+        header: &h,
+        key: key(&h),
+        initial: actual.frozen(),
+        record: 1,
+        checkpoint: Some(newer),
+        text: None,
+        clock_seed: None,
+        history: Some(&history),
+    };
+    start.earlier_legacy_checkpoint(&checkpoints).unwrap();
+    assert_eq!(start.record, 0);
+    assert_eq!(start.initial.version(), 0);
+    assert_eq!(start.checkpoint.as_ref().unwrap(), &older);
+    assert_eq!(actual.version(), 2, "the engine's newest copy is untouched");
+    let next = w3e_packet(
+        &h,
+        vec![w3e_effect(
+            2,
+            body,
+            Audience::Everyone,
+            Body::Changes(vec![ChangeRec {
+                change: set(body, 40, Value::Uint(9)),
+                rest: Rest::new(),
+            }]),
+        )],
+    );
+    let piece = crate::shipping::Piece {
+        header: h.stored().to_vec(),
+        first: 1,
+        records: vec![next],
+    };
+    store
+        .put(
+            &replica::durability::part_key(&h.lineage.0, h.zone, &successor, 1),
+            &piece.to_bytes().unwrap(),
+            When::Absent,
+        )
+        .unwrap();
+    let mut out = PublicWriter::open(start, &store).unwrap();
+    assert_eq!(out.public_player().version(), 1);
+    assert_eq!(out.source_cursor(), 1);
+    out.bridge_to(2).unwrap();
+    assert_eq!(out.source_cursor(), 2);
+    out.flush().unwrap();
+    assert_eq!(out.public_player().version(), 3);
+    assert_eq!(fs::read(legacy.dir().join("0")).unwrap(), old);
+}

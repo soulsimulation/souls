@@ -21,7 +21,7 @@
 //! - `tokens`: the gateway's tokens file, `<grant> <sha-256 hex>` per Soul, never a token. `souls.tokens` (mode 0600)
 //!   holds the Souls' tokens themselves, for a local client; it is never copied off the machine.
 //! - `log.text/`: K16's text store, every word said in the world (O20b, #3523).
-//! - `views/`: V1's stream of the zone's root (full, everyone), written by a view tier of the process's own, and
+//! - `views/`: V1's stream of the zone's root (full, everyone), written by its off-clock canonical public observer, and
 //!   `views/world.json`, `{"stream": "views/<its folder>/", "history": "history/"}`, both relative to the world's
 //!   folder, which the page reads for `?world=` and pairing for the Soul's `history` (R16b, #3480). With a store
 //!   (below) the history is the archive's, `../../s/h/<world name>/<lineage hex>/`: the origin serves worlds under
@@ -33,7 +33,7 @@
 //! **A start** reads the log through once (its records feed the stream from record 0), then hands it to K18's loop
 //! (`answers::start`), which restores the newest checkpoint and replays the records after it. It prints `worldd:
 //! started at tick <n> state <hash>`: after a SIGKILL that hash is the last logged tick's (K18's A3), bodies included.
-//! Each record the loop syncs comes back on [`answers::Config::synced`] and goes to the stream's tier, off the clock
+//! Each record the loop syncs comes back on [`answers::Config::synced`] and goes to the public observer, off the clock
 //! thread. No body stands on a first start; after it, each body the log has stands where the log last had it.
 //! `world.json`'s Souls are their tokens' grants (`souls.tokens`), born as any Soul is.
 //!
@@ -86,6 +86,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+#[cfg(test)]
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 
@@ -105,7 +106,9 @@ use replica::pose::{Frame, Vec3};
 use replica::rules::json::{self, Value as Json};
 use replica::stream;
 use replica::time::{Mapping, TimeEffect};
-use replica::views::{Key, Level, Redactions};
+#[cfg(test)]
+use replica::views::Redactions;
+use replica::views::{Key, Level};
 use replica::world_model::{Audience, Kind, parse_kinds, plain};
 use sim::links::Doors;
 use sim::log::{FileStore, Log};
@@ -118,7 +121,10 @@ use worldd::bodies::{Bodies, Placed};
 use worldd::buildsafe::Creator;
 use worldd::checkers::Rules;
 use worldd::shipping::{self, Item, Shipper, Wall};
-use worldd::view_out::{self, Writer};
+use worldd::view_out;
+#[cfg(test)]
+use worldd::view_out::Writer;
+#[cfg(test)]
 use worldd::views::Tier;
 
 type R<T> = Result<T, String>;
@@ -128,6 +134,7 @@ const EPOCH: u64 = 1;
 /// K5's checkpoint interval: one each 8 MiB of log (the bench constant, as `worldd fork`).
 const EVERY: u64 = 8 << 20;
 /// The stream writer's queue in the tier: deliveries it may fall behind by before it is handed a snapshot.
+#[cfg(test)]
 const BOUND: usize = 1 << 16;
 /// Eden's zone, America/New_York (today's default, `apps/server/src/god/real-clock.ts`): standard time is UTC−5, and
 /// from 2 AM on March's second Sunday to 2 AM on November's first it is UTC−4. Offsets are written to 2100.
@@ -1128,14 +1135,14 @@ fn serve(args: &[String]) -> R<()> {
         Some(spec) => Some(creator(spec, &built)?),
         None => None,
     };
-    let mut off = match bucket {
+    let mut off = match &bucket {
         Some(spec) => {
             let machine = arg(args, "--machine")
                 .cloned()
                 .or_else(|| std::env::var("WORLDD_MACHINE").ok())
                 .unwrap_or_else(|| "local".to_owned());
             Some(off_machine(
-                &spec,
+                spec,
                 &machine,
                 &built,
                 &name,
@@ -1169,6 +1176,7 @@ fn serve(args: &[String]) -> R<()> {
     .map_err(|e| format!("the text store: {}", refusal(e)))?;
     let text = Arc::new(text);
     cfg.text = Some(Arc::clone(&text));
+    let cfg_text = Some(Arc::clone(&text));
     // Gateway subscriptions have their own off-clock tier, apart from the filesystem stream below. Restore its
     // body, ownership and activity membership indexes before the answers thread can hand it any live part.
     let mut hub = worldd::views::subscription::Hub::with_words(text);
@@ -1259,55 +1267,76 @@ fn serve(args: &[String]) -> R<()> {
         crate::watchdog::Real::start(),
         crate::watchdog::LIMIT_MS,
     );
-    // The stream's tier and writer start at the same checkpoint, then receive only records after its base.
+    // The public observer follows the same canonical durable records, off-clock. Recovery owns exact published
+    // bytes and its source checkpoint; never delete an existing immutable stream on restart.
     let views = dir.join("views");
-    let _ = std::fs::remove_dir_all(&views);
     let key = Key {
         node: built.header.zone,
         level: Level::Full,
         audience: Audience::Everyone,
     };
-    let stream_start = initial.tree().to_state();
-    let tier = Arc::new(
-        Tier::start(
-            built.header.clone(),
-            stream_start.clone(),
-            Redactions::new([]),
-            world.durable,
+    let stream_store = supervisor::bucket::Bucket::from_spec(
+        bucket
+            .as_deref()
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("folder:{}", dir.join(".stream-recovery-store").display()))
+            .as_str(),
+    )
+    .map_err(refusal)?;
+    let checkpoint = if restored_stream {
+        Some(
+            std::fs::read(
+                dir.join("checkpoints")
+                    .join(format!("ckpt-{base_record:020}")),
+            )
+            .map_err(io(&dir))?,
         )
-        .map_err(refusal)?,
-    );
-    let sub = tier.subscribe(vec![key], BOUND);
-    let now = answers::now();
+    } else {
+        None
+    };
     if let Some(seed) = stream_mapping {
         println!(
             "stream: initial mapping from durable record {} effect {}",
             seed.record, seed.sequence
         );
     }
-    let writer = stream_writer(
-        &views,
-        &built.header,
-        &key,
-        &stream_start,
-        restored_stream,
-        now,
-        stream_mapping,
-    )?;
-    // The history the world advertises (R16b): the archive's when it runs, as the origin serves the store.
+    let mut public_start = view_out::PublicStart {
+        root: &views,
+        header: &built.header,
+        key,
+        initial: initial.frozen(),
+        record: base_record,
+        checkpoint,
+        text: cfg_text,
+        clock_seed: stream_mapping.map(|s| s.mapping),
+        history: Some(&found),
+    };
+    public_start
+        .earlier_legacy_checkpoint(&dir.join("checkpoints"))
+        .map_err(refusal)?;
+    let mut writer = view_out::PublicWriter::open(public_start, stream_store).map_err(refusal)?;
+    // History remains a separate required archive prerequisite (#3634).
     let history = match off.as_ref().and_then(|o| o.archive.as_ref()) {
         Some(_) => format!("../../s/h/{name}/{}/", to_hex(&built.header.lineage.0)),
         None => "history/".to_owned(),
     };
     let pointer = format!(
-        "{{\"stream\": \"views/{}/\", \"history\": \"{history}\"}}\n",
+        "{{\"stream\":\"views/{}/\",\"history\":\"{history}\"}}\n",
         stream::dir(&built.header, &key)
     );
     view_out::write_whole(&views.join("world.json"), pointer.as_bytes()).map_err(refusal)?;
-    let writing = view_out::follow(writer, sub, Arc::new(AtomicBool::new(false)), answers::now);
-    replay_stream(&tier, &found, base_record);
+    // Physical cursor includes input records; public effect versions are independently validated by the observer.
+    writer.bridge_to(found.first).map_err(refusal)?;
+    for (offset, bytes) in found.records.iter().enumerate() {
+        let record = found.first + offset as u64;
+        if record >= writer.source_cursor() {
+            writer.push(record, bytes).map_err(refusal)?;
+        }
+    }
+    writer.flush().map_err(refusal)?;
     drop(found);
-    let fed = Arc::clone(&tier);
+    let (stream_tx, stream_rx) = channel::<(u64, Vec<u8>)>();
+    // Shipping/archive delivery remains independent of a stopped public observer.
     std::thread::Builder::new()
         .name("synced".into())
         .spawn(move || {
@@ -1315,20 +1344,38 @@ fn serve(args: &[String]) -> R<()> {
                 if let Some(o) = &mut off {
                     o.take(s.record, &s.bytes, s.input);
                 }
-                if !s.input {
-                    fed.offer(s.record, s.bytes);
-                }
+                let _ = stream_tx.send((s.record, s.bytes));
             }
         })
         .map_err(|e| e.to_string())?;
-    std::thread::spawn(move || match writing.join() {
-        Ok(Err(e)) => eprintln!(
-            "worldd: the stream stopped, the world goes on: {}",
-            refusal(e)
-        ),
-        Err(_) => eprintln!("worldd: the stream writer panicked, the world goes on"),
-        Ok(Ok(_)) => {}
-    });
+    std::thread::Builder::new()
+        .name("public-stream".into())
+        .spawn(move || {
+            let result = (|| -> Result<(), Refusal> {
+                loop {
+                    match stream_rx.recv_timeout(std::time::Duration::from_millis(20)) {
+                        Ok((record, bytes)) => {
+                            if record >= writer.source_cursor() {
+                                writer.push(record, &bytes)?;
+                            }
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                            writer.flush()?;
+                            return Ok(());
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    }
+                    writer.idle(answers::now())?;
+                }
+            })();
+            if let Err(e) = result {
+                eprintln!(
+                    "worldd: the public stream stopped, the world goes on: {}",
+                    refusal(e)
+                );
+            }
+        })
+        .map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).map_err(io(&socket))?;
     println!("listening {}", socket.display());
@@ -1340,6 +1387,7 @@ fn serve(args: &[String]) -> R<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn stream_writer(
     views: &Path,
     header: &Header,
@@ -1398,6 +1446,7 @@ fn first_stream_mapping(
     None
 }
 
+#[cfg(test)]
 fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
     for (k, bytes) in found.records.iter().enumerate() {
         let record = found.first + k as u64;

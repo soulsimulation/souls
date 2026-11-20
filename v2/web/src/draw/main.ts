@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { FreeCamera } from '../camera/camera.ts';
 import { CameraDirector } from '../camera/director.ts';
 import { PlaybackClock, caughtUp } from '../clock/clock.ts';
-import type { Pointer } from '../source/source.ts';
+import { reconcileSnapshot, type Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
 import { localAddresses, worldAddress } from '../source/address.ts';
 import { SocketSource, chooseFollow, exchange, type Session } from '../source/socket.ts';
@@ -107,6 +107,14 @@ cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 const firstFrame = arrive(worldName, status);
 const live = (address: string) => new StreamSource(address).start({
   pointer: (p) => (pointer = p),
+  snapshot: (snapshot) => {
+    const s = reconcileSnapshot(world.nodes.keys(), snapshot);
+    world.apply(s.nodes, s.removed, []);
+    sky.apply(s.nodes);
+    things.apply(s.nodes, s.removed);
+    sound.part(s.nodes, s.removed, [], []);
+    souls.snapshot(s.nodes, s.removed);
+  },
   part: (p) => {
     world.apply(p.nodes, p.removed, p.samples);
     sky.apply(p.nodes, p);
