@@ -146,3 +146,32 @@ backup (the validator also accepts several facts files). The convenience `import
 - Sleep and wake (O2, #2731) is not built; the install has no unit for it.
 - Log shipping (O3, #2732) runs inside `worldd`; its object-store keys go in `secrets.env` once it lands.
 - Pairing (W2, #2705) runs inside `directoryd`; it needs nothing more from the install.
+
+## Private owner overview
+
+The origin serves `/ops` without today's launcher. Its HTML contains only the existing public provider fields;
+serving the shell neither loads the snapshot nor contacts another service. Private JSON uses the directory's
+existing provider-session endpoint and requires an explicit site-owner account on every request.
+
+Configure these names in the origin's existing `origin.env` (the origin service reads this file):
+
+- `AUTH_PROVIDER`, `CLERK_PUBLISHABLE_KEY`, `CLERK_ISSUER_URL`: the existing production Clerk public settings.
+- `CLERK_AUTHORIZED_PARTIES` and `SOULS_OPS_PUBLIC_ORIGIN`: the explicit application origins and exact public
+  application origin. The latter must occur in the former and match the directory's provider configuration.
+- `SOULS_OPS_DIRECTORY`: the trusted numeric loopback HTTP origin of the directory. The installer records its
+  default directory listener; adjust it if that listener changes. No path, credentials, query or fragment is allowed.
+- `SIM_SITE_OWNERS`: explicit comma-separated canonical account ids. `CATALOG_GENE_OWNER_ID` remains the
+  compatibility fallback only when `SIM_SITE_OWNERS` is empty. Neither setting grants a world-owner fallback.
+- `SOULS_DATA`: the existing data location; its `owner-overview.json` is the existing collector's snapshot.
+
+The directory must use the same production provider and allowed application origins. The origin forwards only the
+session bearer and configured application Origin to fixed `POST /v1/account/session`; there is no operator, local,
+header or test sign-in bypass. It never opens the account store or adds a second verifier. Owner removal and directory
+session revocation apply on the next request. No bearer is cached or written; only the bounded snapshot projection
+is retained privately, preserving today's last-valid/stale behavior. This change does not install a collector.
+
+Missing or invalid settings or unavailable authority fail closed as `owner-access-unconfigured`; missing/invalid
+sessions receive `sign-in` (401), verified non-owners `not-owner` (403), and saturated authority work `busy` (429).
+Directory requests have a three-second total bound, two simultaneous slots and a four-KiB response limit, and never
+follow redirects. Snapshots remain private/no-store/noindex and are not exposed as a static file. Never put secret
+keys, session tokens or credentials in the origin environment file or public auth response.
