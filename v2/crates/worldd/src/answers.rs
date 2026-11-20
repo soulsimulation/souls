@@ -3268,7 +3268,11 @@ pub fn start<S: Storage + 'static>(
     let last = match (last, cfg.lockstep) {
         (Some(n), _) => Some(n),
         (None, true) => None,
-        (None, false) => Some(real0.div_euclid(tick_us) - 1),
+        (None, false) => Some(
+            line.tick_of(line.world_at(real0).map_err(time)?)
+                .map_err(time)?
+                - 1,
+        ),
     };
     let mut ticker = Ticker::new(line, mapping, last, real0).map_err(time)?;
     let beat = Arc::new(Heartbeat::new(real0));
@@ -4453,6 +4457,126 @@ mod tests {
         sync_by_frames(&world, &mut copy, place);
         world.stop();
         root_mapping(&copy, place)
+    }
+
+    #[test]
+    fn w3b_a_mapped_free_running_fork_ticks_answers_and_restarts_without_a_gap() {
+        // A filtered fork retains a world clock far below its real-time anchor and has no logged tick yet.
+        struct MappedPace {
+            real: Micros,
+            zero: std::sync::OnceLock<Instant>,
+        }
+        impl Pace for MappedPace {
+            fn now(&mut self) -> Micros {
+                self.real + self.zero.get_or_init(Instant::now).elapsed().as_micros() as Micros
+            }
+            fn sleep_until(&mut self, _: Micros) {}
+        }
+        let real = 1_000_000_000_000;
+        let first_mapping = Mapping::new(0, real - 1_000_000, 1, 1).unwrap();
+        let mapping = Mapping::new(1_000_000, real, 1, 1).unwrap();
+        let mappings = [first_mapping, mapping].map(TimeEffect::Mapping);
+        let mut seed = toggles::World::build(1, 1, 0);
+        let pair = seed.pairs[0];
+        let effect = Effect {
+            envelope: Envelope {
+                sequence: seed.replica.version(),
+                at: mapping.world_us,
+                cause: Cause::World,
+                actor: Actor::World,
+                audience: Audience::Everyone,
+                node: seed.replica.header().zone,
+            },
+            body: Body::Time(mappings.to_vec()),
+            events: None,
+            rest: Rest::new(),
+        };
+        let part = Part::read(
+            &encode(&Value::Map(BTreeMap::from([
+                (1, Value::Bytes(seed.replica.header().hash().to_bytes())),
+                (2, Value::Array(vec![effect.to_value()])),
+            ])))
+            .unwrap(),
+        )
+        .unwrap();
+        seed.replica.apply(&part).unwrap();
+        let store = Held::new(Vec::new());
+        let mut last_logged = None;
+        for restart in 0..2 {
+            let mut cfg = Config::new(LINEAGE, 1);
+            cfg.measures = true;
+            cfg.rate = Some((1, 1));
+            cfg.clock = Some(Box::new(MappedPace {
+                real: real + restart * 1_000_000,
+                zero: std::sync::OnceLock::new(),
+            }));
+            let world = start(seed.replica.frozen(), toggles::rules(), store.clone(), cfg).unwrap();
+            let response = answer(&send(
+                &world,
+                &toggle(pair.0, pair.1, restart as u64 + 1, 60_000_000),
+            ));
+            let beat = Arc::clone(&world.beat);
+            let measured = Arc::clone(world.measures.as_ref().unwrap());
+            world.stop();
+            // Joined clock: measures and heartbeat now describe exactly the same completed ticks.
+            let beat = beat.read();
+            let health = replica::rules::json::parse(&measured.health(0)).unwrap();
+            let Some(replica::rules::json::Value::Int(count)) =
+                health.get("ticks").and_then(|t| t.get("count"))
+            else {
+                panic!("actual completed tick count: {health:?}");
+            };
+            let first = last_logged.map_or(20, |tick| tick + 1);
+            assert_eq!(
+                *count,
+                i128::from(beat.0 - first + 1),
+                "every due tick runs, including idle catch-up"
+            );
+            assert_eq!(read(&response).0, 1, "mapped free-running act is admitted");
+            assert!(beat.0 >= 20, "the mapped clock advances: {beat:?}");
+            assert!(
+                beat.0 <= mapping.world_at(beat.1).unwrap().div_euclid(50_000),
+                "heartbeat never precedes its start on the preserved world line: {beat:?}"
+            );
+            last_logged = recover(&store.bytes())
+                .unwrap()
+                .records
+                .iter()
+                .filter(|bytes| !recorder::is_input(bytes))
+                .filter_map(|bytes| match Part::read(bytes).unwrap().rest.get(&TICK) {
+                    Some(Value::Uint(tick)) => Some(*tick as i64),
+                    _ => None,
+                })
+                .next_back();
+            assert!(last_logged.is_some(), "receipt's actual logged tick");
+        }
+        let mut replay = seed.replica.frozen();
+        let mut ticks = Vec::new();
+        for bytes in recover(&store.bytes()).unwrap().records {
+            if recorder::is_input(&bytes) {
+                continue;
+            }
+            let part = Part::read(&bytes).unwrap();
+            if let Some(Value::Uint(tick)) = part.rest.get(&TICK) {
+                ticks.push(*tick);
+            }
+            replay.apply(&part).unwrap();
+        }
+        assert_eq!(
+            ticks.first(),
+            Some(&20),
+            "first tick is due on the preserved world line"
+        );
+        assert!(
+            ticks.windows(2).all(|w| w[1] > w[0]),
+            "persisted ticks increase; idle ticks need no record: {ticks:?}"
+        );
+        assert_eq!(replay.tree().time(), &mappings);
+        let tree = replay.tree();
+        assert_eq!(
+            Mapping::from_fields(tree.node(tree.root()).unwrap().fields()),
+            Some(mapping)
+        );
     }
 
     #[test]
