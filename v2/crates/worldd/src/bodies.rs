@@ -358,6 +358,22 @@ impl Bodies {
         &self,
         maps: &crate::buildsafe::PreparedMaps,
     ) -> Result<(), replica::edit::Refused> {
+        match self.check_map_or_walked(maps)? {
+            None => Ok(()),
+            Some(_) => Err(replica::edit::Refused {
+                op: None,
+                name: "edit.body-stale",
+                detail: "prepared triangle differs".into(),
+            }),
+        }
+    }
+
+    /// As `check_map`, but when every guard holds and an affected body only walked out of its prepared triangle
+    /// (B12b), the current bases of exactly the prepared bodies, in order, for a reprepare off the clock.
+    pub(crate) fn check_map_or_walked(
+        &self,
+        maps: &crate::buildsafe::PreparedMaps,
+    ) -> Result<Option<Vec<sim::controller::BuildBasis>>, replica::edit::Refused> {
         if !Arc::ptr_eq(&maps.before, &self.form_map) {
             return Err(replica::edit::Refused {
                 op: None,
@@ -385,9 +401,10 @@ impl Bodies {
                 detail: "affected bodies changed".into(),
             });
         }
-        self.runner
+        let certified = self
+            .runner
             .controller
-            .certify_rebinds(&maps.rebinds)
+            .certify_or_walked(&maps.rebinds)
             .map_err(|r| replica::edit::Refused {
                 op: None,
                 name: r.name,
@@ -399,7 +416,21 @@ impl Bodies {
                 op: None,
                 name: r.name,
                 detail: r.detail,
-            })
+            })?;
+        match certified {
+            sim::controller::Certified::Ready(_) => Ok(None),
+            sim::controller::Certified::WalkedOn => maps
+                .rebinds
+                .iter()
+                .map(|t| self.runner.controller.build_basis(t.before.moved.id))
+                .collect::<Option<Vec<_>>>()
+                .map(Some)
+                .ok_or(replica::edit::Refused {
+                    op: None,
+                    name: "edit.body-stale",
+                    detail: "prepared body missing".into(),
+                }),
+        }
     }
 
     /// Pairs the town transaction with the existing live edit write. Every input refusal leaves both unchanged.
