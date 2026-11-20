@@ -7,7 +7,8 @@
 // - **One per Soul.** `runtime/daemon.lock` is created exclusively; a second start while the first lives is refused
 //   as `daemon-already-running`, naming the Soul and the pid.
 // - **Commands on a Unix socket** (`runtime/daemon.sock`), one JSON line each way. No TCP port.
-//     {"op":"status"}            where it is: connected, cursor, intents sent and answered, memory
+//     {"op":"status"}            where it is: connected, cursor, intents sent and answered, memory, and the world's
+//                                clock from its copy (E7b, #3516, `../clock/clock.mjs`): `clock` and `worldUs`, now
 //     {"op":"act","verb":"...","target":"<scope hex>-<counter>"}  builds the next intent (the target optional) and
 //                                sends it once (now, or at the next sign-in)
 //     {"op":"read"}              gives and clears what happened since the last read (it never wakes the model)
@@ -42,6 +43,8 @@
 //     {"op":"wake","do":"add|remove|budget|list",...}   the wake rules; `wait` hands the queued wakes as `wakes`
 //     {"op":"act",...,"for":"<message id>"}           this act serves that message: its outcome closes it
 //     {"op":"event","event":{...}}                    an event as R9's matcher takes it, until frames carry them
+//     {"op":"pending"}                                R20's (#3328) check for a scheduler: `due` when a message is
+//                                                     open or wakes can be handed now; it sends and takes nothing
 //   and G11's (#3335), prayers, the mailbox's other direction: a request goes to the gateway as a text frame and the
 //   directory's reply comes back on the socket (`n` matches them); an answer to this Soul's prayer arrives as a
 //   `prayer-answered` event, which wakes a `wait`, its words quoted as data. A creator's daemon lists and answers:
@@ -75,7 +78,8 @@
 //       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
 //       intent's basis is the version the model was last shown, not the send-time version.
 //   and R15's (#2757), the Soul's own schedule (`../schedule/schedule.mjs`): the owner's `memory/schedule.md`, read
-//   again when it changes and checked each second (no long timer: Node turns one over 24.8 days into 1 ms). An entry's
+//   again when it changes and real times checked each second. World times use one deadline from the copy's published
+//   mapping/calendar, re-armed after sync or a rate change (R15b); very long timers stay within Node's limit. An entry's
 //   acts are checked (R8) and sent with no model turn; a wake goes through R13's budget. A change entry fires on R9's
 //   events (the `event` op, and what this Soul hears). Each occurrence is marked on disk with its sequence before
 //   it is sent. What was missed while the daemon was off is listed once, in the next answer, as `missed`.
@@ -110,9 +114,11 @@ import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
+import { clockOf, worldNow } from '../clock/clock.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
+import { calendarOf, worldDue } from '../schedule/world.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -218,7 +224,7 @@ const movesOf = new Map(); // sequence → its move's form (C14), until answered
 const joinsOf = new Set(); // own join sequences: only a successful receipt requests a post-birth copy
 
 // --- The socket to the gateway ------------------------------------------------------------------------------------
-let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now();
+let ws = null, signedIn = false, attempt = 0, stopping = false, since = Date.now(), signedInAt = 0;
 
 function send(bytes, sequence, ranked) {
   // Written down before it goes, so neither a drop nor a restart sends it again.
@@ -232,12 +238,14 @@ function send(bytes, sequence, ranked) {
 
 /** Signed in and current: intents go now, and (once a socket) the subscription to what this Soul hears (C6). */
 function current() {
+  if (!signedIn) signedInAt = Date.now();
   signedIn = true;
   attempt = 0;
   while (closes.length > 0 && signedIn) ws.send(closes.shift());
   hearing();
   while (queued.length > 0 && signedIn) { const q = queued.shift(); send(q.bytes, q.sequence, q.ranked); }
   follow();
+  scheduleWorld();
 }
 
 /** Follow this principal's current body; the world alone resolves private audience authority. */
@@ -357,7 +365,7 @@ function syncAnswer(sock, n, refused, bytes) {
   for (const w of waiters) w(true);
   // A refresh (R7) brings the copy current for an answer, and a follow for an entry (R9b); the stream's cursor stays
   // the last frame it was given.
-  if (done.kind === 'refresh' || done.kind === 'follow') { follow(); return; }
+  if (done.kind === 'refresh' || done.kind === 'follow') { scheduleWorld(); follow(); return; }
   state.cursor = copyVersion; // the stream carries on from the version the hashes are at
   state.seen = null; // no frame of it applied: the gateway's default
   save();
@@ -590,7 +598,9 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer']);
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
 const nothingYet = () => !events.some((e) => e.kind !== 'synced');
 
 // --- G7 (#2796): a creator's edits -------------------------------------------------------------------------------
@@ -680,11 +690,22 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry }) {
 
 async function answer(req) {
   // R13: a command from the model's turn shows that what a reader was handed was taken.
-  if (!['wait', 'status'].includes(req.op)) wakes.confirm();
+  if (!['wait', 'status', 'pending'].includes(req.op)) wakes.confirm();
   switch (req.op) {
+    case 'pending': {
+      // R20 (#3328): whether a turn has anything to serve: an open message, or wakes the budget lets through now. It
+      // sends nothing and takes nothing. A daemon just signed in waits for the gateway's first read of the mailbox
+      // (about a second, gatewayd's mailbox POLL), so a message written while it was down is seen on this check.
+      const until = Date.now() + Math.min(Number(req.within ?? 4000), 10_000);
+      while (!signedIn && Date.now() < until) await sleep(50);
+      while (signedIn && mail.size === 0 && Date.now() - signedInAt < MAILBOX_FIRST_MS && Date.now() < until) await sleep(50);
+      return { ok: true, due: mail.size > 0 || wakes.due(Date.now()), mail: mail.size, connected: signedIn };
+    }
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
+      const clock = clockOf(copy);
       return {
+        clock, worldUs: worldNow(clock),
         ok: true, soul, pid: process.pid, world: seat.world, connected: signedIn, cursor: state.cursor,
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),
@@ -883,17 +904,19 @@ const server = createServer((c) => {
       Promise.resolve().then(() => { const req = JSON.parse(line); op = OPS.has(req.op) ? req.op : 'unknown'; return answer(req); })
         .catch((e) => ({ ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }))
         .then((out) => {
+          // R20: a scheduler's check is not the agent: it takes nothing an answer to the agent would carry.
+          const check = op === 'pending';
           // R9: the reflexes that fired since the answer before, in this one's `changed`.
-          const fired = reflexes.changed();
+          const fired = check ? [] : reflexes.changed();
           if (fired.length) out.changed = { ...(out.changed ?? {}), reflexes: fired };
           // R15: what the schedule missed while the daemon was off, once, in the next answer.
-          if (state.schedule.missed.length) {
+          if (!check && state.schedule.missed.length) {
             out.missed = { note: MISSED_NOTE, entries: state.schedule.missed.splice(0) };
             save();
           }
           // Every answer carries its age (R10); each but stats's is traced with the bytes it prints.
           const said = JSON.stringify('age' in out ? out : { ...out, ...ageNow() }) + '\n';
-          if (op !== 'stats') trace.write({ k: 'cmd', op, bytes: Buffer.byteLength(said) });
+          if (op !== 'stats' && !check) trace.write({ k: 'cmd', op, bytes: Buffer.byteLength(said) });
           if (!c.destroyed) c.write(said);
         });
     }
@@ -905,8 +928,8 @@ const server = createServer((c) => {
 const SCHEDULE = join(soulDirOf(home, soul), 'memory', 'schedule.md');
 const BEAT_MS = 1000, BEAT_SAVED_MS = 10_000, GAP_MS = 15_000;
 const MISSED_NOTE = 'not sent: their moment passed while this daemon was off or asleep. Tell your owner; send what still matters yourself.';
-state.schedule = { marks: {}, beat: null, missed: [], dropped: 0, ...(state.schedule ?? {}) };
-let entries = [], stamp = null, beatSaved = 0;
+state.schedule = { marks: {}, targets: {}, beat: null, missed: [], dropped: 0, ...(state.schedule ?? {}) };
+let entries = [], stamp = null, beatSaved = 0, worldTimer = null;
 const inFlight = new Set();
 
 /** The file's entries, read again only when it changed; a line that does not parse is logged once and inert. */
@@ -977,6 +1000,25 @@ function beat() {
   }
   if (missed.length || now - beatSaved >= BEAT_SAVED_MS) { beatSaved = now; save(); }
   for (const f of fire) fireEntry(f.e, now, f.late);
+  scheduleWorld(now, off);
+}
+
+/** One deadline on the current copy's mapping. A sync/rate change and the existing file beat re-arm it; no polling. */
+function scheduleWorld(now = Date.now(), off = null) {
+  clearTimeout(worldTimer);
+  worldTimer = null;
+  if (!signedIn || syncing) return;
+  const s = state.schedule;
+  const { fire, missed, next, resolved } = worldDue(scheduleNow(), s.marks, s.targets, clockOf(copy), calendarOf(copy), now, off);
+  for (const m of missed) {
+    s.marks[m.e.key] = { at: now, missed: true };
+    if (m.told) {
+      s.missed.push({ ...shownEntry(m.e), lateMs: m.late, ...(m.off ? { off: m.off.map((t) => new Date(t).toISOString()) } : {}) });
+    } else s.dropped++;
+  }
+  if (resolved || missed.length) save(); // keep the occurrence before a restart, and before any send
+  for (const f of fire) fireEntry(f.e, now, f.late);
+  if (next !== null) worldTimer = setTimeout(scheduleWorld, Math.min(next - now, 2_147_483_647));
 }
 
 /** The change entries an event fires, sent at once. */

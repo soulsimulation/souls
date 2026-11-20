@@ -145,6 +145,12 @@ export class Wakes {
     return Math.max(byHour, byDay);
   }
 
+  /** R20: whether a reader would be handed wakes now. Charges nothing. */
+  due(now) {
+    this.expire(now);
+    return this.queue.length > 0 && !this.over(now);
+  }
+
   /** A command from the model's turn: what was handed was taken. */
   confirm() {
     this.held = [];

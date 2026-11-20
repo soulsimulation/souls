@@ -121,6 +121,7 @@ test('A2: pairing to worldd serve writes the history it advertises, and history 
   await souls(home, ['status']);
   await waitFor(async () => { const s = await request(daemon.socket, { op: 'status' }).catch(() => null); return s?.connected && !s.syncing; });
   const hall = (await souls(home, ['find', 'hall'])).found[0], building = (await souls(home, ['find', 'building'])).found[0];
+  const beforeActs = Date.now() * 1000;
   const sent = [];
   for (const to of [hall, building]) {
     const r = await souls(home, ['act', to.id]);
@@ -143,6 +144,11 @@ test('A2: pairing to worldd serve writes the history it advertises, and history 
   assert.equal(got.ok, true);
   assert.ok(got.span, 'the answer states its span');
   assert.equal(got.lines.filter((l) => l.includes('move-ended')).length, sent.length, 'each walk on its own line');
-  assert.ok(['light-changed', 'new-day', 'weather-changed'].every((k) => got.kinds[k] >= 1 || got.lines.some((l) => l.includes(k))), 'and the world\'s own events');
   assert.ok(Buffer.byteLength(JSON.stringify(got)) <= 600);
+  // Compact history keeps only four kind counts and five newest lines. Ask for the boot interval separately so
+  // later action/deadline events cannot hide a world's event from the compact answer.
+  const worldEvents = await souls(home, ['history', '--at', place, '--until', String(beforeActs)]);
+  assert.equal(worldEvents.ok, true);
+  assert.ok(['light-changed', 'new-day', 'weather-changed'].every((k) => worldEvents.kinds[k] >= 1 || worldEvents.lines.some((l) => l.includes(k))), 'and the world\'s own events');
+  assert.ok(Buffer.byteLength(JSON.stringify(worldEvents)) <= 600);
 });
