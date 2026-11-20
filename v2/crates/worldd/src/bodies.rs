@@ -479,6 +479,8 @@ impl Bodies {
                 p
             }
         };
+        // A previous map's route, line, reach or form result cannot enter any current cache.
+        p.keep_map(&self.form_map);
         // A replaced move's in-flight answer cannot be used by a newer order on the same body/fixture/slot.
         p.reach.retain(|(body, thing, slot, order), _| {
             self.waiting
@@ -683,6 +685,7 @@ impl Bodies {
         if !pairs.is_empty() {
             let reach = self.reach_of(pairs);
             self.planner.send(Wants {
+                form_map: Some(Arc::clone(&self.form_map)),
                 reach,
                 ..Wants::default()
             });
@@ -824,12 +827,14 @@ impl Bodies {
             let planned = std::mem::take(&mut self.planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
             // Every body in a seat move, with its seat: its reach for the next tick's phase timers.
-            let seated: Vec<(Id, Id, Id)> = self
+            let mut seated: Vec<(Id, Id, Id)> = self
                 .live
                 .iter()
                 .filter(|(_, (_, l))| matches!(l, Live::Place(_)))
                 .filter_map(|(b, (id, _))| Some((*b, self.slots.held_by(*b)?, *id)))
                 .collect();
+            // A discarded obsolete reach is asked again for the same still-waiting move and exact slot.
+            seated.extend(self.waiting.iter().filter_map(|w| Some((w.body, w.place?, w.id))));
             wants.reach = self.reach_of(seated);
             // One metadata snapshot per map revision, shared by all form questions in the batch.
             if *self.form_map != self.town.versions {

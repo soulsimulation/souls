@@ -251,6 +251,19 @@ pub struct Rebuilt {
 }
 
 impl Rebuilt {
+    /// Two independently mutable installations of one checked rebuild. Immutable basis handles stay shared;
+    /// all mutable geometry and route storage is copied here, before either installation reaches the clock.
+    pub fn into_pair(self) -> (Self, Self) {
+        crate::commit::off_clock();
+        let other = Self {
+            touched: self.touched.clone(),
+            versions: self.versions.clone(),
+            fresh: self.fresh.clone(),
+            why: self.why,
+        };
+        (self, other)
+    }
+
     /// Whether the whole ground was built again (the open ground was touched, or a building could not be read
     /// again alone), not only the touched buildings.
     pub fn whole(&self) -> bool {
@@ -279,6 +292,7 @@ impl Rebuilt {
 pub type Square = ((i32, i32), Vec<Piece>, Vec<Vec<bool>>);
 
 /// The ground a rebuild built: the whole, or what it cut again (read by G2's guard, G2b #3488).
+#[derive(Clone)]
 pub enum Fresh {
     Whole(Box<Assembled>),
     /// The open ground's squares cut again (G3b, #3449): each with its dry pieces and, per piece and triangle,
@@ -654,30 +668,51 @@ impl Town {
         Some(out)
     }
 
+    /// Lookup-only preflight before the caller commits the same prepared map and part.
+    pub fn check_install(&self, r: &Rebuilt) -> Result<(), Refusal> {
+        if let Fresh::Squares(sq, ..) = &r.fresh {
+            let keys: Vec<(i32, i32)> = sq.iter().map(|(k, ..)| *k).collect();
+            let link_of = |id: Id| find_link(&self.link_at, &self.buildings, id).cloned();
+            self.map
+                .check_squares(self.ground, &keys, &link_of)
+                .map_err(|e| refusal("ground-changed", e))?;
+        }
+        Ok(())
+    }
+
     /// On the tick `part` commits: commits it through the zone's one write, its effects numbered from the zone's next
     /// sequence (doors may have opened since it was checked), and installs the ground `r` built for it, in the same
     /// call: the whole ground swapped in, or each building read again replaced on the map. The walks planned on the
     /// changed ground are listed in [`Town::stale`], and the lines of corners on it are dropped. A refused part
     /// installs nothing.
     pub fn install(&mut self, r: Rebuilt, part: &Part) -> Result<(), Refusal> {
+        self.install_then(r, part, || Ok(()))
+    }
+
+    /// All map and tree input checks precede the paired live write. Its refusal rolls the town tree back;
+    /// its success leaves only installation of already checked geometry, with no fallible input check.
+    pub fn install_then<T>(
+        &mut self,
+        r: Rebuilt,
+        part: &Part,
+        commit: impl FnOnce() -> Result<T, Refusal>,
+    ) -> Result<T, Refusal> {
         // What the threads' route searches found joins the map before it changes (N17b): no scratch outlives its map.
         for s in &mut self.scratches {
             self.map.keep(s);
         }
-        let link_of = |id: Id| find_link(&self.link_at, &self.buildings, id).cloned();
-        if let Fresh::Squares(sq, ..) = &r.fresh {
-            let keys: Vec<(i32, i32)> = sq.iter().map(|(k, ..)| *k).collect();
-            self.map
-                .check_squares(self.ground, &keys, &link_of)
-                .map_err(|e| refusal("ground-changed", e))?;
-        }
+        self.check_install(&r)?;
         let mut p = part.clone();
         for (k, e) in p.effects.iter_mut().enumerate() {
             e.envelope.sequence = self.doors.next + k as u64;
         }
         let bytes = encode(&p.to_value()).map_err(|e| refusal("encoding", e.to_string()))?;
-        self.tree
-            .commit(&self.doors.header, &Part::read(&bytes)?, &self.doors.rules)?;
+        let committed = self.tree.commit_then(
+            &self.doors.header,
+            &Part::read(&bytes)?,
+            &self.doors.rules,
+            commit,
+        )?;
         self.doors.next += part.effects.len() as u64;
         let Rebuilt {
             mut touched,
@@ -711,7 +746,7 @@ impl Town {
                     .collect();
                 self.map
                     .replace_squares(ground, versions.of(ground), cut, &link_of)
-                    .map_err(|e| refusal("ground-changed", e))?;
+                    .expect("the same map and links passed check_install before the paired write");
                 let (mut drop, mut add, mut on) = (Vec::new(), Vec::new(), Vec::new());
                 for (sq, pieces, flags) in &squares {
                     drop.extend(self.square_pieces.get(sq).into_iter().flatten().copied());
@@ -796,7 +831,7 @@ impl Town {
         self.lines.retain(|(_, l)| {
             !(changed(&l.node) || (l.node == ground && touched.contains(&ground) && crosses(l)))
         });
-        Ok(())
+        Ok(committed)
     }
 
     /// Each building read again replaced on the route map, its floors' surfaces with it.
@@ -2187,5 +2222,100 @@ impl Links for Town {
             self.crossings.insert(body.id, Crossing { from, start });
         }
         Ok(track)
+    }
+}
+
+#[cfg(test)]
+mod prepared_transport_tests {
+    use super::*;
+    use crate::ground::Patch;
+    use crate::ground::scene::Xform;
+    use crate::links::{Kind, Link};
+    use replica::ids::Scope;
+
+    #[test]
+    fn prepared_installations_keep_geometry_and_versions_independent() {
+        let id = |n| Id::new(Scope([93; 16]), n).unwrap();
+        let floor = id(1);
+        let piece = Piece {
+            outline: vec![vec![[0, 0, 0], [1000, 0, 0], [0, 0, 1000]]],
+            vertices: vec![[0, 0, 0], [1000, 0, 0], [0, 0, 1000]],
+            triangles: vec![[0, 1, 2]],
+            ground: crate::gaits::Ground::Dry,
+        };
+        let building = Building {
+            thing: id(2),
+            links: vec![Link {
+                id: id(3),
+                kind: Kind::Step,
+                nodes: [floor, id(4)],
+                owner: id(2),
+                width: 1_000_000,
+                ends: [None, None],
+                line: vec![Vec3::ZERO, Vec3::new(100_000, 0, 100_000)],
+                door: None,
+                blocked: None,
+            }],
+            floors: BTreeMap::from([(
+                floor,
+                (
+                    0,
+                    Patch {
+                        radius: HUMAN_RADIUS,
+                        pieces: vec![piece.clone()],
+                        meets: Vec::new(),
+                    },
+                ),
+            )]),
+            place: Xform::IDENTITY,
+            loose: Vec::new(),
+        };
+        let prepared = Rebuilt {
+            touched: BTreeSet::from([floor]),
+            versions: Versions::default(),
+            fresh: Fresh::Buildings(vec![(
+                building,
+                BTreeMap::from([(floor, Surface::new(floor, vec![piece]))]),
+            )]),
+            why: None,
+        };
+        let (mut live, mut worker) = prepared.into_pair();
+        live.versions.bump([&floor]);
+        live.touched.clear();
+        assert_eq!(worker.versions.of(floor), 0);
+        assert!(worker.touched.contains(&floor));
+        let Fresh::Buildings(live) = &mut live.fresh else {
+            panic!("building install")
+        };
+        let Fresh::Buildings(worker) = &mut worker.fresh else {
+            panic!("building install")
+        };
+        live[0].0.links[0].line.clear();
+        live[0]
+            .1
+            .get_mut(&floor)
+            .unwrap()
+            .replace(&[0], Vec::new(), Vec::new());
+        let frame = Frame {
+            node: floor,
+            slot: None,
+        };
+        let at = Vec3::new(100_000, 0, 100_000);
+        assert!(
+            live[0].1[&floor]
+                .place(id(5), frame, at, Quat::IDENTITY)
+                .is_err()
+        );
+        assert!(
+            worker[0].1[&floor]
+                .place(id(5), frame, at, Quat::IDENTITY)
+                .is_ok()
+        );
+        assert_eq!(worker[0].0.links[0].line.len(), 2);
+        worker[0].0.floors.clear();
+        assert_eq!(
+            live[0].0.floors[&floor].1.pieces[0].triangles,
+            vec![[0, 1, 2]]
+        );
     }
 }

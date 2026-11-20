@@ -44,6 +44,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::index::Index;
 use crate::mover::{Body as Moved, Surface};
+use replica::kinds::sizes::{Build, Size};
 use replica::bodies::{Body as Claims, Class, Family, SkillShape};
 use replica::effects::Refusal;
 use replica::encode::{Name, Value};
@@ -379,6 +380,7 @@ impl Track {
 }
 
 struct Slot {
+    build: Build,
     claims: Claims,
     moved: Moved,
     input: Input,
@@ -387,6 +389,16 @@ struct Slot {
     touched: bool,
     track: Option<Track>,
     voice: Voice,
+}
+
+/// Immutable admission basis. Resource claims, input and crossing state are checked again before a change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuildBasis {
+    pub moved: Moved,
+    pub build: Build,
+    claims: Claims,
+    input: Input,
+    track: Option<Track>,
 }
 
 /// Every body's claims, input and mover state; the only way any of them is moved or posed.
@@ -576,6 +588,11 @@ impl Controller {
 
     /// Adds a body of `family`, standing as the mover placed it, with the neutral input facing as it faces.
     pub fn add(&mut self, family: Family, moved: Moved) -> R<()> {
+        self.add_built(family, moved, Build::STANDARD)
+    }
+
+    /// Adds an already admitted body, using the surfaces prepared for this exact class.
+    pub fn add_built(&mut self, family: Family, moved: Moved, build: Build) -> R<()> {
         if self.get(moved.id).is_some() {
             return refuse("body-duplicate", replica::world_model::show(moved.id));
         }
@@ -584,6 +601,7 @@ impl Controller {
         self.bodies.insert(
             moved.id,
             Slot {
+                build,
                 claims: Claims::new(family),
                 moved,
                 input,
@@ -625,6 +643,38 @@ impl Controller {
     /// The body as the mover last left it, or as it sits in its slot.
     pub fn body(&self, body: Id) -> Option<&Moved> {
         self.get(body).map(|s| &s.moved)
+    }
+
+    /// The admitted build, retained separately from the mover's position.
+    pub fn build(&self, body: Id) -> Option<Build> { self.get(body).map(|s| s.build) }
+
+    /// A bounded snapshot for an off-clock supported-size check.
+    pub fn build_basis(&self, body: Id) -> Option<BuildBasis> {
+        let s = self.get(body)?;
+        Some(BuildBasis { moved: s.moved, build: s.build, claims: s.claims.clone(), input: s.input.clone(), track: s.track.clone() })
+    }
+
+    /// Lookup-only validation; a refused or stale change has not touched any actor state.
+    pub fn check_build(&self, basis: &BuildBasis) -> R<()> {
+        if self.build_basis(basis.moved.id).as_ref() != Some(basis) {
+            return refuse("body-change-stale", "the body, claims, input or class changed");
+        }
+        if basis.track.is_some() || basis.moved.pose.support == Support::Slot {
+            return refuse("body-change-in-use", "the occupied support is in use");
+        }
+        Ok(())
+    }
+
+    /// Pairs the existing recorded write with a checked surface rebind, never a movement path.
+    pub fn commit_build<T>(&mut self, basis: &BuildBasis, moved: Moved, build: Build, commit: impl FnOnce() -> R<T>) -> R<T> {
+        self.check_build(basis)?;
+        if moved.id != basis.moved.id || moved.pose.frame != basis.moved.pose.frame || moved.pose.position != basis.moved.pose.position || moved.pose.orientation != basis.moved.pose.orientation || moved.linear != basis.moved.linear {
+            return refuse("body-change-moved", "a body change cannot move the actor");
+        }
+        let value = commit()?;
+        let s = self.bodies.get_mut(&moved.id).expect("validated surface-owned body");
+        s.moved = moved; s.build = build; s.touched = true;
+        Ok(value)
     }
 
     /// The body's input now.
@@ -943,6 +993,11 @@ impl Controller {
         at: Micros,
         threads: usize,
     ) -> Stepped {
+        self.step_on_selected(|_, _| Some(surfaces), dt, at, threads)
+    }
+
+    /// The same controller step, selecting each body's exact admitted-class surface bank.
+    pub fn step_on_selected<'a>(&mut self, surfaces: impl Fn(Id, Size) -> Option<&'a BTreeMap<Id, Surface>> + Sync, dt: Micros, at: Micros, threads: usize) -> Stepped {
         let mut out = Stepped::default();
         for id in std::mem::take(&mut self.woken) {
             if let Some(s) = self.rested.get_mut(&id) {
@@ -959,8 +1014,10 @@ impl Controller {
         let step_run = |run: &mut [(Id, &mut Slot)]| {
             let mut o = Gave::default();
             for (id, s) in run.iter_mut() {
-                let put = s.step_one(*id, surfaces, dt, at, &mut o);
-                o.put.push(put);
+                match surfaces(*id, s.build.size) {
+                    Some(on) => { let put = s.step_one(*id, on, dt, at, &mut o); o.put.push(put); }
+                    None => { o.refused.push((*id, Refusal { name: "body-class-unprepared", detail: "the admitted class has no prepared surfaces".into() })); o.put.push(false); },
+                }
             }
             o
         };
