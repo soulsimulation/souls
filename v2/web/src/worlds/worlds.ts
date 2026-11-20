@@ -1,3 +1,4 @@
+import { browserSession, localTestSignIn, sessionRequest } from '../source/signin.ts';
 // The list of worlds, and making one (Engine v2 W3, #2799).
 //
 // - The list is one request, `GET /v1/worlds`, answered from the directory's cached copy; it asks no world anything.
@@ -5,9 +6,9 @@
 // - One click is one key: the key is made when the form is sent and kept until an answer, so a second click (or a
 //   retry after a dropped answer) makes the same world. The directory keeps the answer by key.
 // - The world's page opens on the answer; the click's time goes with it, so that page can time its first frame.
-// - Sign-in here is W1's sign-in for test worlds (`Bearer test:<name>`); a provider's token rides the same header.
+// - Sign-in uses the existing provider session; explicit test people remain confined to HTTP loopback.
 
-export type Row = { name: string; label: string; template: string; awake: boolean; picture: string | null; closed?: boolean };
+export type Row = { name: string; label: string; template: string; awake: boolean; picture: string | null; closed?: boolean; ready?: boolean };
 export type Listing = { worlds: Row[]; templates: string[] };
 
 /** What a refusal says, in words: a limit's name and when to retry. */
@@ -45,14 +46,16 @@ function page(): void {
   const list = $<HTMLUListElement>('list'), form = $<HTMLFormElement>('create'), go = $<HTMLButtonElement>('go');
   const progress = $<HTMLDivElement>('progress'), template = $<HTMLSelectElement>('template');
   const who = $<HTMLInputElement>('who'), label = $<HTMLInputElement>('label'), name = $<HTMLInputElement>('name');
+  who.required = localTestSignIn(location.href);
+  who.parentElement!.hidden = !who.required;
   const key = new ClickKey();
   let busy = false;
 
   fetch('/v1/worlds').then((r) => r.json() as Promise<Listing>).then((l) => {
-    list.replaceChildren(...(l.worlds.length ? l.worlds.map((w) => {
+    list.replaceChildren(...(l.worlds.filter(w => w.ready !== false).length ? l.worlds.filter(w => w.ready !== false).map((w) => {
       const li = document.createElement('li'), a = document.createElement('a'), s = document.createElement('span');
       a.textContent = w.name;
-      a.href = `../../?world=${encodeURIComponent(w.name)}`;
+      a.href = `/w/${encodeURIComponent(w.name)}/`;
       s.className = 'muted';
       s.textContent = `${w.label} · ${w.template} · ${w.awake ? 'awake' : 'asleep'}${w.closed ? ' · closed to visitors' : ''}`;
       li.append(a, s);
@@ -74,25 +77,25 @@ function page(): void {
     progress.textContent = `Making ${name.value}…`;
     const tick = setInterval(() => (progress.textContent = `Making ${name.value}… ${((Date.now() - clickAt) / 1000).toFixed(1)} s`), 100);
     try {
-      const r = await fetch('/v1/worlds', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer test:${who.value}` },
-        body: JSON.stringify({ key: key.take(), name: name.value, template: template.value, label: label.value }),
-      });
+      const session = await browserSession(who.value);
+      if (!session) { progress.textContent = 'Finish signing in, then select Create again.'; return; }
+      const r = await fetch('/v1/worlds', await sessionRequest(session, 'world', { key: key.take(), name: name.value, template: template.value, label: label.value }));
       const body = await r.json();
-      key.answered();
+      if (r.status !== 503) key.answered();
       if (!r.ok) {
         progress.className = 'refused';
-        progress.textContent = refusalText(r.status, body);
+        progress.textContent = body.refused === 'world-starting'
+          ? 'Your world is starting. Select Create again to check the same request.'
+          : refusalText(r.status, body);
         return;
       }
       progress.textContent = `Made ${name.value}; opening it…`;
       sessionStorage.setItem('v2-created', JSON.stringify({ world: body.world.name, clickAt }));
-      location.href = `../../?world=${encodeURIComponent(body.world.name)}`;
-    } catch {
+      location.href = `/w/${encodeURIComponent(body.world.name)}/`;
+    } catch (e) {
       // No answer: the key is kept, so sending again cannot make a second world.
       progress.className = 'refused';
-      progress.textContent = 'No answer from the directory; send again to retry the same click.';
+      progress.textContent = (e as Error).message || 'No answer from the directory; send again to retry the same click.';
     } finally {
       clearInterval(tick);
       busy = false;

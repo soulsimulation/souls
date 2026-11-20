@@ -53,6 +53,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use replica::encode::Value;
 use tokio::sync::mpsc;
 
+pub mod control;
 pub mod creator;
 pub mod gate;
 pub mod mailbox;
@@ -160,6 +161,20 @@ pub struct Attached {
 }
 
 impl Gateway {
+    /// Live socket state at this lookup, never inferred from a stored token. A stopping gateway is unknown.
+    pub fn connected(&self, grant: Grant) -> Option<bool> {
+        if *self.closing.borrow() {
+            return None;
+        }
+        let hub = self.hub.lock().unwrap_or_else(|e| e.into_inner());
+        Some(
+            hub.grants
+                .get(&grant.key())
+                .and_then(|h| h.session.as_ref())
+                .is_some_and(|(_, tx)| !tx.is_closed()),
+        )
+    }
+
     pub fn new(tokens: Tokens, build: Vec<u8>, log: Log) -> Arc<Gateway> {
         Gateway::with_receipts(tokens, build, log, Receipts::off())
     }
@@ -378,11 +393,31 @@ impl Gateway {
         let held = hub.grants.entry(key.clone()).or_default();
         self.answered(held, &key, &frame);
         held.kept.push(at, frame.clone());
-        if let Some((_, tx)) = &held.session
-            && tx.try_send(frame).is_err()
-        {
-            held.session = None;
-            (self.log)("a socket's outbound queue was full; it was let go and may resume");
+        let trace = world_link::delivery_trace(&frame);
+        if let Some((_, tx)) = &held.session {
+            match tx.try_send(frame) {
+                Ok(()) => {
+                    if let Some(t) = &trace {
+                        t.at("gateway-channel", "queued");
+                    }
+                }
+                Err(e) => {
+                    if let Some(t) = &trace {
+                        t.at(
+                            "gateway-channel",
+                            if matches!(e, tokio::sync::mpsc::error::TrySendError::Full(_)) {
+                                "full"
+                            } else {
+                                "closed"
+                            },
+                        );
+                    }
+                    held.session = None;
+                    (self.log)("a socket's outbound queue was full; it was let go and may resume");
+                }
+            }
+        } else if let Some(t) = &trace {
+            t.at("gateway-channel", "no-session");
         }
     }
 }

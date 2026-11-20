@@ -368,11 +368,13 @@ pub fn wire_intent(
         .unwrap_or_default()
         .split(' ')
         .filter(|a| !a.is_empty()))
-    .map(|a| match a.split_once('=').map(|(k, v)| (k, node(v))) {
-        Some((k, Ok(Some(Target::Node(id))))) => {
-            Ok(Value::Array(vec![Value::Bytes(k.into()), id.to_value()]))
-        }
-        _ => Err(JsError::new("arg-not-name-and-id")),
+    .map(|a| -> Result<Value, JsError> {
+        let (key, value) = a
+            .split_once('=')
+            .filter(|(k, v)| !k.is_empty() && !v.is_empty())
+            .ok_or_else(|| JsError::new("arg-not-name-and-id"))?;
+        let value = named_arg(value, &node)?;
+        Ok(Value::Array(vec![Value::Bytes(key.into()), value]))
     })
     .collect::<Result<Vec<_>, _>>()?;
     let scope = Scope(
@@ -407,17 +409,33 @@ pub fn wire_intent(
             })
         })
         .collect::<Result<_, _>>()?;
-    let mut parameters: BTreeMap<_, _> = words
-        .map(|w| {
-            (
-                1,
-                Value::Map(BTreeMap::from([(23, Value::Bytes(w.into_bytes()))])),
-            )
-        })
-        .into_iter()
-        .chain((!args.is_empty()).then_some((1, Value::Array(args))))
-        .chain(numbered(params.as_deref(), &node)?)
-        .collect();
+    let mut parameters: BTreeMap<_, _> = numbered(params.as_deref(), &node)?.into_iter().collect();
+    if !args.is_empty() {
+        if parameters.contains_key(&1) || words.is_some() {
+            return Err(JsError::new("arg-ambiguous"));
+        }
+        parameters.insert(1, Value::Array(args));
+    }
+    if let Some(w) = words {
+        if parameters.contains_key(&1) {
+            return Err(JsError::new("arg-ambiguous"));
+        }
+        parameters.insert(
+            1,
+            Value::Map(BTreeMap::from([(23, Value::Bytes(w.into_bytes()))])),
+        );
+    }
+    if let Some(Value::Array(pairs)) = parameters.get(&1) {
+        let mut seen = std::collections::BTreeSet::new();
+        for pair in pairs {
+            if let Value::Array(pair) = pair
+                && let [Value::Bytes(key), _] = pair.as_slice()
+                && !seen.insert(key)
+            {
+                return Err(JsError::new("arg-ambiguous"));
+            }
+        }
+    }
     // An activity kind is pinned as a name and a binary hash, like an edit's kind: no text exceeds I2's limit.
     if matches!(verb.as_str(), "activity:offer" | "activity:propose")
         && let Some(Value::Text(kind)) = parameters.get(&1)
@@ -1105,6 +1123,23 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
     format!(r#"{{"ok":true,"kinds":{}}}"#, kinds.is_some())
 }
 
+/// A declared bare argument name is bytes; a valid thing id keeps its existing array form.
+fn named_arg(
+    value: &str,
+    node: &dyn Fn(&str) -> Result<Option<Target>, JsError>,
+) -> Result<Value, JsError> {
+    match node(value) {
+        Ok(Some(Target::Node(id))) => Ok(id.to_value()),
+        _ if value.rsplit_once('-').is_some_and(|(s, _)| s.len() == 32) => {
+            Err(JsError::new("arg-not-name-and-id"))
+        }
+        _ if !value.is_empty() && Name::new(value).is_some() => {
+            Ok(Value::Bytes(value.as_bytes().to_vec()))
+        }
+        _ => Err(JsError::new("arg-not-name-and-id")),
+    }
+}
+
 /// E26: `wireIntent`'s numbered parameters, read from a JSON object; a text is an id when it reads as one.
 fn numbered(
     params: Option<&str>,
@@ -1117,14 +1152,28 @@ fn numbered(
         node: &dyn Fn(&str) -> Result<Option<Target>, JsError>,
     ) -> Result<Value, JsError> {
         Ok(match v {
+            Json::Int(n) if *n >= 0 => {
+                Value::Uint(u64::try_from(*n).map_err(|_| JsError::new("param-out-of-range"))?)
+            }
             Json::Int(n) => {
-                Value::Uint(u64::try_from(*n).map_err(|_| JsError::new("param-negative"))?)
+                Value::Nint(u64::try_from(-1 - *n).map_err(|_| JsError::new("param-out-of-range"))?)
             }
             Json::Str(t) => match node(t) {
                 Ok(Some(Target::Node(id))) => id.to_value(),
                 _ => Value::Text(Name::new(t).ok_or_else(|| JsError::new("param-not-a-name"))?),
             },
             Json::Arr(a) => Value::Array(a.iter().map(|x| one(x, node)).collect::<Result<_, _>>()?),
+            Json::Obj(m) if m.len() == 1 => match (&m[0].0[..], &m[0].1) {
+                ("23", Json::Str(words)) => Value::Map(BTreeMap::from([(
+                    23,
+                    Value::Bytes(words.as_bytes().to_vec()),
+                )])),
+                ("21", Json::Str(id)) => match node(id)? {
+                    Some(Target::Node(id)) => Value::Map(BTreeMap::from([(21, id.to_value())])),
+                    _ => return Err(JsError::new("param-unsupported")),
+                },
+                _ => return Err(JsError::new("param-unsupported")),
+            },
             _ => return Err(JsError::new("param-unsupported")),
         })
     }
@@ -1135,7 +1184,23 @@ fn numbered(
         return Err(bad());
     };
     m.iter()
-        .map(|(k, v)| Ok((k.parse().map_err(|_| bad())?, one(v, node)?)))
+        .map(|(k, v)| {
+            let key = k.parse().map_err(|_| bad())?;
+            let value = if key == 1 {
+                if let Json::Arr(pairs) = v {
+                    if pairs.iter().all(|p| matches!(p, Json::Arr(kv) if matches!(kv.as_slice(), [Json::Str(_), _]))) {
+                        Value::Array(pairs.iter().map(|p| {
+                            let Json::Arr(kv) = p else { unreachable!() };
+                            let Json::Str(name) = &kv[0] else { unreachable!() };
+                            if name.is_empty() { return Err(JsError::new("arg-malformed")); }
+                            let value = match &kv[1] { Json::Str(t) => named_arg(t, node)?, v => one(v, node)? };
+                            Ok(Value::Array(vec![Value::Bytes(name.as_bytes().to_vec()), value]))
+                        }).collect::<Result<_, _>>()?)
+                    } else { one(v, node)? }
+                } else { one(v, node)? }
+            } else { one(v, node)? };
+            Ok((key, value))
+        })
         .collect()
 }
 fn sync_map(frame: &[u8]) -> Result<BTreeMap<u64, Value>, JsError> {

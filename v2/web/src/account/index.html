@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="referrer" content="no-referrer">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2712%27 fill=%27%233d6fb6%27/%3E%3C/svg%3E">
     <title>Souls v2 account</title>
     <style>
       html, body { margin: 0; background: #10141a; color: #e8e6e1; font: 15px/1.5 system-ui, sans-serif; }
@@ -43,6 +44,7 @@
   <body>
     <main>
       <h1>Your account</h1>
+      <button id="signin" type="button">Sign in</button>
       <form id="who" hidden>
         <label>Signed in as (test sign-in)<input id="person" autocomplete="off" required maxlength="64"></label>
         <button type="submit">Sign in</button>
@@ -50,6 +52,9 @@
       <div id="signed" hidden>
         <h2>Your Souls</h2>
         <ul id="souls"><li class="muted">reading your Souls</li></ul>
+        <h2>Connected agents</h2>
+        <p>Disconnecting an account login prevents future adoptions. Soul credentials and memories stay where they are.</p>
+        <ul id="agents"></ul>
         <h2>A world's settings</h2>
         <form id="pick">
           <label>Your world's name<input id="world" autocomplete="off" required maxlength="40"></label>

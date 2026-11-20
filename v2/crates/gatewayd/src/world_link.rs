@@ -43,6 +43,87 @@ use crate::receipts::Outcome;
 use crate::resume::Cursor;
 use crate::times;
 
+/// Opt-in native delivery evidence. Hashes correlate frames without exposing actor ids or payloads.
+pub(crate) struct DeliveryTrace {
+    actor: String,
+    sequence: u64,
+    kind: u64,
+    version: Option<u64>,
+}
+
+impl DeliveryTrace {
+    pub(crate) fn at(&self, stage: &str, outcome: &str) {
+        eprintln!(
+            "gatewayd: join-delivery stage={stage} actor-hash={} sequence={} kind={} version={:?} outcome={outcome} elapsed-us={}",
+            self.actor,
+            self.sequence,
+            self.kind,
+            self.version,
+            delivery_elapsed_us()
+        );
+    }
+
+    /// The application binary payload after its one existing timing-block finish, not a WebSocket header.
+    pub(crate) fn final_frame(&self, frame: &[u8]) {
+        eprintln!(
+            "gatewayd: join-delivery stage=socket-final-frame actor-hash={} sequence={} kind={} version={:?} bytes={} sha256={} elapsed-us={}",
+            self.actor,
+            self.sequence,
+            self.kind,
+            self.version,
+            frame.len(),
+            replica::encode::to_hex(&replica::ids::sha256(frame)),
+            delivery_elapsed_us()
+        );
+    }
+}
+
+// Called only through an enabled DeliveryTrace; the disabled fast path performs no clock read.
+fn delivery_elapsed_us() -> u64 {
+    static START: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    let now = crate::times::stamp();
+    let origin = START.get_or_init(|| now);
+    now.saturating_sub(*origin).min(120_000_000)
+}
+
+pub(crate) fn delivery_trace(frame: &[u8]) -> Option<DeliveryTrace> {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ENABLED
+        .get_or_init(|| std::env::var_os("SOULS_JOIN_DELIVERY_TRACE").is_some_and(|v| v == "1"))
+    {
+        return None;
+    }
+    delivery_metadata(frame)
+}
+
+fn delivery_metadata(frame: &[u8]) -> Option<DeliveryTrace> {
+    let Value::Map(m) = decode(frame).ok()?.value else {
+        return None;
+    };
+    let Value::Map(a) = m.get(&2)? else {
+        return None;
+    };
+    let (Some(actor), Some(Value::Uint(sequence)), Some(Value::Uint(kind))) =
+        (a.get(&1), a.get(&2), a.get(&3))
+    else {
+        return None;
+    };
+    let actor = replica::encode::to_hex(&replica::ids::sha256(&encode(actor).ok()?));
+    let version = match m.get(&1) {
+        Some(Value::Array(v)) => v.last().and_then(|v| match v {
+            Value::Uint(n) => Some(*n),
+            _ => None,
+        }),
+        _ => None,
+    };
+    Some(DeliveryTrace {
+        actor,
+        sequence: *sequence,
+        kind: *kind,
+        version,
+    })
+}
+
 /// The answer to an intent sent while the world restarts.
 pub const RESTARTING: &str = "world.restarting";
 
@@ -320,6 +401,10 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
             if read.read_exact(&mut frame).await.is_err() {
                 break;
             }
+            let trace = delivery_trace(&frame);
+            if let Some(t) = &trace {
+                t.at("native-read", "complete");
+            }
             if let Some(answer) = gw.link.sync_answered(&frame) {
                 if let Some((key, frame)) = answer {
                     gw.reply(&key, frame);
@@ -337,9 +422,20 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
             match read_answer(&frame) {
                 Some((key, sequence, version, cursor, outcome)) => {
                     if let Some((received, handed)) = gw.link.answered(&key, sequence, &version) {
+                        if let Some(t) = &trace {
+                            t.at("pending-match", "matched");
+                        }
                         gw.record(&key, outcome);
+                        if let Some(t) = &trace {
+                            t.at("receipt-record", "returned");
+                        }
                         let frame = times::read_from_world(frame, received, handed, at);
                         gw.deliver(key, cursor, frame);
+                        if let Some(t) = &trace {
+                            t.at("deliver", "returned");
+                        }
+                    } else if let Some(t) = &trace {
+                        t.at("pending-match", "unmatched");
                     }
                 }
                 None => (gw.log)("a frame from the world was not {1: version, 2: answer}"),
@@ -409,4 +505,71 @@ fn read_answer(frame: &[u8]) -> Option<(Vec<u8>, u64, Value, Cursor, Outcome)> {
         _ => Outcome::Receipt,
     };
     Some((key, *sequence, version, cursor, outcome))
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::*;
+    use replica::ids::{Id, Scope, Version};
+    use replica::intents::Answer;
+
+    fn frame(counter: u64, refused: bool) -> Vec<u8> {
+        let scope = Scope([0x51; 16]);
+        let actor = Actor::Soul(Id::new(scope, counter).unwrap());
+        let version = Version {
+            lineage: scope,
+            zone: Id::new(scope, 0).unwrap(),
+            epoch: 1,
+            sequence: 7,
+        }
+        .to_value();
+        let answer = if refused {
+            Answer::Refused {
+                actor,
+                sequence: 1,
+                reason: Name::new("intent.expired").unwrap(),
+                now: version.clone(),
+                changed: Vec::new(),
+                op: None,
+            }
+        } else {
+            Answer::Receipt {
+                actor,
+                sequence: 1,
+                intent: Id::new(scope, 9).unwrap(),
+                entries: vec![6],
+                names: BTreeMap::new(),
+            }
+        };
+        encode(&Value::Map([(1, version), (2, answer.to_value())].into())).unwrap()
+    }
+
+    #[test]
+    fn malformed_and_nonanswer_frames_have_no_delivery_metadata() {
+        assert!(delivery_metadata(&[0xff]).is_none());
+        let sync = sync_refused(Value::Uint(1), RESTARTING);
+        assert!(delivery_metadata(&sync).is_none());
+        let missing_actor = encode(&Value::Map(
+            [(
+                2,
+                Value::Map([(2, Value::Uint(1)), (3, Value::Uint(1))].into()),
+            )]
+            .into(),
+        ))
+        .unwrap();
+        assert!(delivery_metadata(&missing_actor).is_none());
+    }
+
+    #[test]
+    fn synthetic_actor_hash_correlates_receipt_refusal_and_isolates_actors() {
+        let receipt = delivery_metadata(&frame(100, false)).unwrap();
+        let refusal = delivery_metadata(&frame(100, true)).unwrap();
+        let other = delivery_metadata(&frame(101, false)).unwrap();
+        assert_eq!(receipt.actor, refusal.actor);
+        assert_ne!(receipt.actor, other.actor);
+        assert_eq!(receipt.actor.len(), 64);
+        assert_eq!((receipt.sequence, refusal.sequence), (1, 1));
+        assert_eq!((receipt.kind, refusal.kind), (1, 2));
+        assert_eq!((receipt.version, refusal.version), (Some(7), Some(7)));
+    }
 }

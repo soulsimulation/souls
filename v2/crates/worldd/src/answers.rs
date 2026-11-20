@@ -901,38 +901,83 @@ enum Taken {
 
 /// A form's arguments from an intent's parameter 1: `[[name as bytes, id or slot number], ...]`, a thing by its id
 /// (F4) and a slot of the node by its number, 1, 2, ... in its entry's order (C12).
-fn thing_args(intent: &Intent) -> acts::Args {
-    let mut args = acts::Args::default();
-    let Some(Value::Array(pairs)) = intent.parameters.get(&1) else {
-        return args;
+fn keep_arg_names(intent: &mut Value) {
+    let Value::Map(intent) = intent else { return };
+    let Some(Value::Map(parameters)) = intent.get_mut(&4) else {
+        return;
     };
-    for p in pairs {
-        if let Value::Array(kv) = p
-            && let [Value::Bytes(k), v] = kv.as_slice()
-            && let Ok(k) = String::from_utf8(k.clone())
+    let Some(Value::Array(pairs)) = parameters.get_mut(&1) else {
+        return;
+    };
+    for pair in pairs {
+        let Value::Array(pair) = pair else { continue };
+        let [Value::Bytes(key), value] = pair.as_mut_slice() else {
+            continue;
+        };
+        if !key.is_empty()
+            && std::str::from_utf8(key).is_ok()
+            && let Value::Text(name) = value
+            && !name.as_str().contains(':')
         {
-            use skills::form_runner::Arg;
-            match v {
-                Value::Uint(n) => drop(args.slots.insert(k, *n)),
-                // A value by name, and words by their reference (`{21: id}`, K16): a set's arguments (C24).
-                Value::Text(n) => drop(args.values.insert(k, Arg::Name(n.as_str().to_owned()))),
-                Value::Map(m) if m.len() == 1 => {
-                    if let Some(Ok(id)) = m
-                        .get(&replica::audience::REFERENCE)
-                        .map(replica::effects::read_id)
-                    {
-                        args.values.insert(k, Arg::Text(id));
-                    }
+            *value = Value::Bytes(name.as_str().as_bytes().to_vec());
+        }
+    }
+}
+
+fn thing_args(intent: &Value) -> Result<acts::Args, &'static str> {
+    let mut args = acts::Args::default();
+    let pairs = match intent {
+        Value::Map(intent) => match intent.get(&4) {
+            Some(Value::Map(parameters)) => parameters.get(&1),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(Value::Array(pairs)) = pairs else {
+        return Ok(args);
+    };
+    let mut seen = BTreeSet::new();
+    for p in pairs {
+        let Value::Array(kv) = p else {
+            return Err("arg-malformed");
+        };
+        let [Value::Bytes(k), v] = kv.as_slice() else {
+            return Err("arg-malformed");
+        };
+        let k = String::from_utf8(k.clone()).map_err(|_| "arg-malformed")?;
+        if k.is_empty() {
+            return Err("arg-malformed");
+        }
+        if !seen.insert(k.clone()) {
+            return Err("arg-ambiguous");
+        }
+        use skills::form_runner::Arg;
+        match v {
+            Value::Uint(n) => drop(args.slots.insert(k, *n)),
+            Value::Bytes(b) => {
+                let n = std::str::from_utf8(b).map_err(|_| "arg-malformed")?;
+                if n.is_empty() || Name::new(n).is_none() {
+                    return Err("arg-malformed");
                 }
-                _ => {
-                    if let Ok(id) = replica::effects::read_id(v) {
-                        args.things.insert(k, id);
-                    }
-                }
+                args.values.insert(k, Arg::Name(n.to_owned()));
+            }
+            Value::Text(n) => drop(args.values.insert(k, Arg::Name(n.as_str().to_owned()))),
+            Value::Map(m) if m.len() == 1 => {
+                let id = m
+                    .get(&replica::audience::REFERENCE)
+                    .ok_or("arg-malformed")
+                    .and_then(|v| replica::effects::read_id(v).map_err(|_| "arg-malformed"))?;
+                args.values.insert(k, Arg::Text(id));
+            }
+            _ => {
+                args.things.insert(
+                    k,
+                    replica::effects::read_id(v).map_err(|_| "arg-malformed")?,
+                );
             }
         }
     }
-    args
+    Ok(args)
 }
 
 /// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name.
@@ -1274,6 +1319,7 @@ impl Clock {
             let _ = f.write_all(format!("{hex} {sequence}\n").as_bytes());
         }
         let mut value = intent.to_value();
+        keep_arg_names(&mut value);
         let form = words::form(&intent);
         // A turn into an activity is its members' alone: refused before its words are kept when the speaker is not one.
         let mut members = BTreeSet::new();
@@ -1466,6 +1512,18 @@ impl Clock {
                 return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
             }
         };
+        let form_args = if matches!(&taken, Taken::Form(a) if self.bodies.is_some() && a.spot.is_none())
+        {
+            match thing_args(&value) {
+                Ok(args) => args,
+                Err(reason) => {
+                    let a = self.refusal(actor, sequence, reason);
+                    return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+                }
+            }
+        } else {
+            acts::Args::default()
+        };
         let body = match &taken {
             Taken::Form(a) => a.body,
             Taken::Move(m) => m.body,
@@ -1515,7 +1573,7 @@ impl Clock {
             // With bodies, a form's act goes to the form runner at the next tick (C2), not to the checkers.
             Taken::Form(act) => {
                 let i = acts::intent(id, intent.expiry, actor, bytes);
-                self.forming.push((id, act, i, thing_args(&intent)));
+                self.forming.push((id, act, i, form_args));
             }
             Taken::Engine(a) => self.engine_acts.push(a),
             Taken::Edit(e) => {
@@ -2895,6 +2953,35 @@ impl Clock {
     }
 }
 
+// Diagnostic only: enabled on the I/O threads, never by the deterministic clock. No payload or actor id leaves.
+fn delivery_trace(enabled: bool, stage: &str, frame: &[u8], outcome: &str) {
+    if !enabled {
+        return;
+    }
+    let Ok(d) = decode(frame) else { return };
+    let Value::Map(m) = d.value else { return };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return;
+    };
+    let (Some(actor), Some(Value::Uint(sequence)), Some(Value::Uint(kind))) =
+        (a.get(&1), a.get(&2), a.get(&3))
+    else {
+        return;
+    };
+    let Ok(actor) = encode(actor) else { return };
+    let actor = replica::encode::to_hex(&replica::ids::sha256(&actor));
+    let version = match m.get(&1) {
+        Some(Value::Array(v)) => v.last().and_then(|v| match v {
+            Value::Uint(n) => Some(*n),
+            _ => None,
+        }),
+        _ => None,
+    };
+    eprintln!(
+        "worldd: join-delivery stage={stage} actor-hash={actor} sequence={sequence} kind={kind} version={version:?} outcome={outcome}"
+    );
+}
+
 /// The answers thread: each tick's records appended and on the disk before its answers leave, then the part handed to
 /// the view tier. A log that fails stops it for good: nothing is answered that is not on the disk.
 // Each argument is one consumer of the durable tick (views, follower, served feed, sync thread); a struct would only
@@ -2910,6 +2997,7 @@ fn answer_loop<S: Storage + 'static>(
     mut follow: Option<Offer>,
     syncs: Sender<ToSync>,
 ) {
+    let trace = std::env::var_os("SOULS_JOIN_DELIVERY_TRACE").is_some_and(|v| v == "1");
     for (k, t) in ticks.into_iter().enumerate() {
         let k = k as u64;
         if let Some(m) = &measures {
@@ -2951,11 +3039,21 @@ fn answer_loop<S: Storage + 'static>(
                 }
             }
         }
+        if trace {
+            for (_, frame, _) in &t.replies {
+                delivery_trace(trace, "log-wait", frame, "appended");
+            }
+        }
         if let Some(n) = last
             && let Err(e) = log.wait_durable(n + 1)
         {
             eprintln!("worldd: the log failed, nothing more is answered: {e}");
             return;
+        }
+        if trace {
+            for (_, frame, _) in &t.replies {
+                delivery_trace(trace, "log-durable", frame, "ready");
+            }
         }
         if let Some(tx) = &synced {
             for s in appended {
@@ -2982,7 +3080,13 @@ fn answer_loop<S: Storage + 'static>(
                 None => frame,
             };
             for w in waiters {
-                let _ = w.send(frame.clone());
+                let sent = w.send(frame.clone());
+                delivery_trace(
+                    trace,
+                    "reply-channel",
+                    &frame,
+                    if sent.is_ok() { "queued" } else { "closed" },
+                );
             }
         }
         for (waiters, frame) in t.bare {
@@ -3196,10 +3300,7 @@ pub fn start<S: Storage + 'static>(
             detail: e.to_string(),
         })?)?]
     };
-    let zone = Id::new(cfg.lineage, 0).ok_or(Refusal {
-        name: "id-counter",
-        detail: "the zone".into(),
-    })?;
+    let zone = world.header().zone;
     let records = found.first + found.records.len() as u64;
     // Restored trees retain sealed hashes: their unchanged records will not be emitted by the next seal.
     // Keep the validated blobs for sync before the checkpoint writer takes ownership of them.
@@ -3280,8 +3381,14 @@ pub fn start<S: Storage + 'static>(
     let last = match (last, cfg.lockstep) {
         (Some(n), _) => Some(n),
         (None, true) => None,
-        (None, false) => Some(real0.div_euclid(tick_us) - 1),
+        (None, false) => Some(
+            line.tick_of(line.world_at(real0).map_err(time)?)
+                .map_err(time)?
+                - 1,
+        ),
     };
+    // Body time is the next world tick start, not the real-time deadline returned by Ticker::due.
+    let body_start = line.tick_start(last.map_or(0, |n| n + 1)).map_err(time)?;
     let mut ticker = Ticker::new(line, mapping, last, real0).map_err(time)?;
     let beat = Arc::new(Heartbeat::new(real0));
     let tier = match cfg.views {
@@ -3495,7 +3602,7 @@ pub fn start<S: Storage + 'static>(
             if let Some(make) = make {
                 match make(&placed) {
                     Ok(mut b) => {
-                        let at = ticker.due().unwrap_or(0);
+                        let at = body_start;
                         b.begin(at);
                         // A free-running clock waits at most a tenth of a tick for each planner batch (K18b); a
                         // replay takes the batches where the recorder says the live run took them.
@@ -3730,16 +3837,20 @@ fn edit_checker(
 /// bytes): each intent read goes through `world`'s door (stamped there, O4), each answer goes back on the same
 /// connection, in the order sent.
 pub fn serve(world: Door, mut stream: UnixStream) {
+    let trace = std::env::var_os("SOULS_JOIN_DELIVERY_TRACE").is_some_and(|v| v == "1");
     let Ok(mut out) = stream.try_clone() else {
         return;
     };
     let (reply, answers) = channel::<Vec<u8>>();
     std::thread::spawn(move || {
         for frame in answers {
+            delivery_trace(trace, "native-write-start", &frame, "ready");
             let len = u32::try_from(frame.len()).unwrap_or(u32::MAX).to_be_bytes();
             if out.write_all(&len).is_err() || out.write_all(&frame).is_err() {
+                delivery_trace(trace, "native-write", &frame, "failed");
                 return;
             }
+            delivery_trace(trace, "native-write", &frame, "sent");
         }
     });
     loop {
@@ -4476,6 +4587,126 @@ mod tests {
         sync_by_frames(&world, &mut copy, place);
         world.stop();
         root_mapping(&copy, place)
+    }
+
+    #[test]
+    fn w3b_a_mapped_free_running_fork_ticks_answers_and_restarts_without_a_gap() {
+        // A filtered fork retains a world clock far below its real-time anchor and has no logged tick yet.
+        struct MappedPace {
+            real: Micros,
+            zero: std::sync::OnceLock<Instant>,
+        }
+        impl Pace for MappedPace {
+            fn now(&mut self) -> Micros {
+                self.real + self.zero.get_or_init(Instant::now).elapsed().as_micros() as Micros
+            }
+            fn sleep_until(&mut self, _: Micros) {}
+        }
+        let real = 1_000_000_000_000;
+        let first_mapping = Mapping::new(0, real - 1_000_000, 1, 1).unwrap();
+        let mapping = Mapping::new(1_000_000, real, 1, 1).unwrap();
+        let mappings = [first_mapping, mapping].map(TimeEffect::Mapping);
+        let mut seed = toggles::World::build(1, 1, 0);
+        let pair = seed.pairs[0];
+        let effect = Effect {
+            envelope: Envelope {
+                sequence: seed.replica.version(),
+                at: mapping.world_us,
+                cause: Cause::World,
+                actor: Actor::World,
+                audience: Audience::Everyone,
+                node: seed.replica.header().zone,
+            },
+            body: Body::Time(mappings.to_vec()),
+            events: None,
+            rest: Rest::new(),
+        };
+        let part = Part::read(
+            &encode(&Value::Map(BTreeMap::from([
+                (1, Value::Bytes(seed.replica.header().hash().to_bytes())),
+                (2, Value::Array(vec![effect.to_value()])),
+            ])))
+            .unwrap(),
+        )
+        .unwrap();
+        seed.replica.apply(&part).unwrap();
+        let store = Held::new(Vec::new());
+        let mut last_logged = None;
+        for restart in 0..2 {
+            let mut cfg = Config::new(LINEAGE, 1);
+            cfg.measures = true;
+            cfg.rate = Some((1, 1));
+            cfg.clock = Some(Box::new(MappedPace {
+                real: real + restart * 1_000_000,
+                zero: std::sync::OnceLock::new(),
+            }));
+            let world = start(seed.replica.frozen(), toggles::rules(), store.clone(), cfg).unwrap();
+            let response = answer(&send(
+                &world,
+                &toggle(pair.0, pair.1, restart as u64 + 1, 60_000_000),
+            ));
+            let beat = Arc::clone(&world.beat);
+            let measured = Arc::clone(world.measures.as_ref().unwrap());
+            world.stop();
+            // Joined clock: measures and heartbeat now describe exactly the same completed ticks.
+            let beat = beat.read();
+            let health = replica::rules::json::parse(&measured.health(0)).unwrap();
+            let Some(replica::rules::json::Value::Int(count)) =
+                health.get("ticks").and_then(|t| t.get("count"))
+            else {
+                panic!("actual completed tick count: {health:?}");
+            };
+            let first = last_logged.map_or(20, |tick| tick + 1);
+            assert_eq!(
+                *count,
+                i128::from(beat.0 - first + 1),
+                "every due tick runs, including idle catch-up"
+            );
+            assert_eq!(read(&response).0, 1, "mapped free-running act is admitted");
+            assert!(beat.0 >= 20, "the mapped clock advances: {beat:?}");
+            assert!(
+                beat.0 <= mapping.world_at(beat.1).unwrap().div_euclid(50_000),
+                "heartbeat never precedes its start on the preserved world line: {beat:?}"
+            );
+            last_logged = recover(&store.bytes())
+                .unwrap()
+                .records
+                .iter()
+                .filter(|bytes| !recorder::is_input(bytes))
+                .filter_map(|bytes| match Part::read(bytes).unwrap().rest.get(&TICK) {
+                    Some(Value::Uint(tick)) => Some(*tick as i64),
+                    _ => None,
+                })
+                .next_back();
+            assert!(last_logged.is_some(), "receipt's actual logged tick");
+        }
+        let mut replay = seed.replica.frozen();
+        let mut ticks = Vec::new();
+        for bytes in recover(&store.bytes()).unwrap().records {
+            if recorder::is_input(&bytes) {
+                continue;
+            }
+            let part = Part::read(&bytes).unwrap();
+            if let Some(Value::Uint(tick)) = part.rest.get(&TICK) {
+                ticks.push(*tick);
+            }
+            replay.apply(&part).unwrap();
+        }
+        assert_eq!(
+            ticks.first(),
+            Some(&20),
+            "first tick is due on the preserved world line"
+        );
+        assert!(
+            ticks.windows(2).all(|w| w[1] > w[0]),
+            "persisted ticks increase; idle ticks need no record: {ticks:?}"
+        );
+        assert_eq!(replay.tree().time(), &mappings);
+        let tree = replay.tree();
+        assert_eq!(
+            Mapping::from_fields(tree.node(tree.root()).unwrap().fields()),
+            Some(mapping)
+        );
     }
 
     #[test]

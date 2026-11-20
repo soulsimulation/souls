@@ -353,6 +353,88 @@ fn seeded(d: &Path) -> (PathBuf, Id, Id, Id) {
     (dir, body, root, ground)
 }
 
+/// Follow the actual public pointer and validate its immutable files with the supported native reader.
+fn served_stream(dir: &Path) -> (u64, BTreeMap<PathBuf, Vec<u8>>) {
+    use replica::effects::Header;
+    use replica::stream::{Player, Pointer, public::PublicPlayer};
+
+    let world =
+        json::parse(&std::fs::read_to_string(dir.join("views/world.json")).unwrap()).unwrap();
+    let stream = dir.join(world.get("stream").and_then(json::Value::str).unwrap());
+    let pointer_bytes = std::fs::read(stream.join("pointer")).expect("the stream's pointer");
+    let pointer = Pointer::read(&pointer_bytes).expect("a valid stream pointer");
+    let Value::Map(fields) = decode(&pointer_bytes).expect("pointer CBOR").value else {
+        panic!("the pointer is a map");
+    };
+    // stream::dir is lineage/zone/epoch/node/level/audience; headers share its epoch directory.
+    let header_path = stream
+        .ancestors()
+        .nth(3)
+        .unwrap()
+        .join("headers")
+        .join(to_hex(&pointer.header));
+    let header_bytes = std::fs::read(&header_path).expect("the exact published header");
+    let header = Header::read(&header_bytes).expect("a valid stream header");
+    assert_eq!(
+        pointer.header,
+        header.hash().to_bytes(),
+        "the pointer's header hash"
+    );
+    assert_eq!(
+        header_path,
+        dir.join("views")
+            .join(replica::stream::header_path(&header))
+    );
+    enum Reader {
+        Based(Box<PublicPlayer>),
+        Legacy(Box<Player>),
+    }
+    let mut immutable = BTreeMap::from([(header_path, header_bytes.clone())]);
+    let (parts, mut reader) = match fields.get(&8) {
+        Some(Value::Bytes(generation)) => {
+            assert_eq!(generation.len(), 32, "the baseline digest");
+            let parts = stream.join("g").join(to_hex(generation));
+            let path = parts.join("baseline");
+            let baseline = std::fs::read(&path).expect("the published generation baseline");
+            assert_eq!(
+                replica::ids::sha256(&baseline).as_slice(),
+                generation,
+                "the exact baseline hash"
+            );
+            let player =
+                PublicPlayer::start(&header_bytes, &baseline).expect("the normal based reader");
+            immutable.insert(path, baseline);
+            (parts, Reader::Based(Box::new(player)))
+        }
+        None => (
+            stream,
+            Reader::Legacy(Box::new(
+                Player::start(&header_bytes).expect("the normal legacy reader"),
+            )),
+        ),
+        _ => panic!("the generation is a digest"),
+    };
+    let newest = pointer.newest.expect("at least one genuine published part");
+    let mut entries = 0;
+    for number in 0..=newest {
+        let path = parts.join(number.to_string());
+        let bytes = std::fs::read(&path).expect("a genuine immutable numbered part");
+        let played = match &mut reader {
+            Reader::Based(player) => player.play(&bytes),
+            Reader::Legacy(player) => player.play(&bytes),
+        }
+        .expect("the normal reader validates the published part");
+        assert_eq!(played.number, number);
+        if played.hash.is_some() {
+            assert_eq!(played.hash, Some(true), "the part's hash");
+        }
+        entries += played.entries;
+        immutable.insert(path, bytes);
+    }
+    assert!(entries > 0, "the first stream contains genuine effects");
+    (newest + 1, immutable)
+}
+
 fn serves_walks_and_restarts(w: Served, d: &Path, dir: &Path, body: Id, root: Id, ground: Id) {
     let socket = d.join("s");
     let dir = dir.to_path_buf();
@@ -365,18 +447,8 @@ fn serves_walks_and_restarts(w: Served, d: &Path, dir: &Path, body: Id, root: Id
     std::thread::sleep(Duration::from_millis(1500));
 
     // A2: the stream of the zone's root is written under views/, and named by views/world.json.
-    let pointer =
-        json::parse(&std::fs::read_to_string(dir.join("views/world.json")).unwrap()).unwrap();
-    let stream = dir.join(pointer.get("stream").and_then(json::Value::str).unwrap());
-    assert!(stream.join("pointer").exists(), "the stream's pointer");
-    assert!(
-        stream.join("0").exists(),
-        "the stream's first part (the import)"
-    );
-    println!(
-        "A2: {} parts",
-        std::fs::read_dir(&stream).unwrap().count() - 1
-    );
+    let (parts, immutable) = served_stream(&dir);
+    println!("A2: {parts} genuine parts validated");
 
     // A5: SIGKILL mid-walk; the restart resumes from a checkpoint with the last logged tick's state.
     w.kill();
@@ -404,6 +476,18 @@ fn serves_walks_and_restarts(w: Served, d: &Path, dir: &Path, body: Id, root: Id
         (1, String::new()),
         "a walk after the restart"
     );
+    let (restarted_parts, restarted_files) = served_stream(&dir);
+    assert!(
+        restarted_parts >= parts,
+        "the stream continues after restart"
+    );
+    for (path, bytes) in immutable {
+        assert_eq!(
+            restarted_files.get(&path),
+            Some(&bytes),
+            "published bytes survive restart"
+        );
+    }
     w.kill();
     let _ = std::fs::remove_dir_all(d);
 }

@@ -196,6 +196,67 @@ impl Store {
         Ok(())
     }
 
+    /// The Soul X11 brought over for today's Soul `former` at `world` (`imported_souls_v1`, R18): its grant and the
+    /// account that owns it (`souls_v1`). `None` when the store holds no import or none for that Soul.
+    pub fn imported_soul(
+        &self,
+        world: &str,
+        former: &str,
+    ) -> Result<Option<(String, String)>, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let tables: i64 = db.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('imported_souls_v1', 'souls_v1')",
+            [],
+            |r| r.get(0),
+        )?;
+        if tables < 2 {
+            return Ok(None);
+        }
+        let row: Option<(String, String)> = db
+            .query_row(
+                "SELECT i.soul, s.account_id FROM imported_souls_v1 i JOIN souls_v1 s ON s.soul = i.soul
+                 WHERE i.world = ?1 AND i.old_soul = ?2",
+                params![world, former],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(row.and_then(|(soul, account)| {
+            principal_from_text(&soul).map(|id| (super::view::grant_text("soul", id), account))
+        }))
+    }
+
+    /// Existing live imported Souls owned by this account, before their first v2 agent connection (W15).
+    pub fn imported_souls(
+        &self,
+        account: &str,
+    ) -> Result<Vec<(String, String, String, String)>, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let tables: i64 = db.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('imported_souls_v1','souls_v1')", [], |r| r.get(0))?;
+        if tables != 2 {
+            return Ok(Vec::new());
+        }
+        let mut query = db.prepare(
+            "SELECT i.soul,i.world,s.name,s.description FROM imported_souls_v1 i
+            JOIN souls_v1 s ON s.soul=i.soul WHERE s.account_id=?1 ORDER BY i.soul",
+        )?;
+        let rows = query.query_map(params![account], |r| {
+            Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (soul, world, name, description) = row?;
+            if let Some(id) = principal_from_text(&soul) {
+                out.push((
+                    super::view::grant_text("soul", id),
+                    world,
+                    name,
+                    description,
+                ));
+            }
+        }
+        Ok(out)
+    }
+
     /// How many accounts the store holds.
     pub fn accounts(&self) -> Result<u64, StoreError> {
         let db = self.db.lock().expect("the store");

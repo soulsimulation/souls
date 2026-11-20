@@ -21,6 +21,7 @@
 //!    the world's row, `picture`, a `data:` URL; a row without one lists `picture: null`.
 
 pub mod http;
+mod placement;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -28,7 +29,7 @@ use std::sync::Mutex;
 
 use replica::effects::{Refusal, read_id};
 use replica::encode::{Name, Value, decode, from_hex, to_hex};
-use replica::ids::{Hash, Id, Purpose};
+use replica::ids::{Id, sha256};
 use serde_json::{Value as Json, json};
 
 use crate::accounts::{principal_text, random};
@@ -157,7 +158,9 @@ pub struct Start<'a> {
     pub template: &'a Path,
     pub lineage: [u8; 16],
     pub creator: Id,
-    pub claim: &'a Claim,
+    pub claim: Option<&'a Claim>,
+    /// Stable, creator-bound durable request identity.
+    pub request: &'a str,
 }
 
 pub type Starter = Box<dyn Fn(&Start) -> R<()> + Send + Sync>;
@@ -197,8 +200,6 @@ impl Template {
 
 struct Inner<S: Store> {
     dir: Directory<S>,
-    /// Answers by request key (rule 3).
-    answered: BTreeMap<String, Result<Json, Refusal>>,
 }
 
 /// The list and create, over one directory.
@@ -222,10 +223,7 @@ impl<S: Store> Worlds<S> {
         starter: Starter,
     ) -> Worlds<S> {
         Worlds {
-            inner: Mutex::new(Inner {
-                dir,
-                answered: BTreeMap::new(),
-            }),
+            inner: Mutex::new(Inner { dir }),
             cache: Mutex::new(None),
             templates,
             limits: Limits::default(),
@@ -292,15 +290,7 @@ impl<S: Store> Worlds<S> {
         now: u64,
     ) -> Result<Json, Refusal> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(a) = inner.answered.get(&ask.key) {
-            return a.clone();
-        }
-        let out = self.make(&mut inner, ask, creator, account_made, now);
-        // A refusal by the store is not kept: the same click may be sent again and pass.
-        if !matches!(&out, Err(e) if e.name == "store-unreachable") {
-            inner.answered.insert(ask.key.clone(), out.clone());
-        }
-        out
+        self.make(&mut inner, ask, creator, account_made, now)
     }
 
     fn make(
@@ -327,60 +317,160 @@ impl<S: Store> Worlds<S> {
         let Some(template) = self.templates.get(&ask.template) else {
             return refuse("template-missing", ask.template.clone());
         };
-        let (etag, rows) = read_rows(&inner.dir.store)?;
         let who = principal_text(creator);
-        let made: Vec<u64> = rows
-            .iter()
-            .filter(|r| row_creator(r) == Some(&who))
-            .filter_map(|r| r.get("made").and_then(Json::as_u64))
-            .collect();
-        if let Err(o) = self.limits.check(account_made, &made, now) {
-            return Err(Refusal {
-                name: o.name,
-                detail: json!({"limit": o.limit, "retry_after": o.retry_after}).to_string(),
-            });
+        let request = to_hex(&sha256(format!("{who}:{}", ask.key).as_bytes()));
+        let intent_key = format!("world-create/{request}");
+        let fingerprint =
+            json!({"name": ask.name, "template": ask.template, "label": label, "creator": who});
+        let mut intent = match inner.dir.store.get(&intent_key)? {
+            Some(o) => {
+                let value: Json = serde_json::from_slice(&o.bytes)
+                    .or_else(|_| refuse("create-intent-invalid", "the stored create request"))?;
+                if value.get("ask") != Some(&fingerprint) {
+                    return refuse(
+                        "create-key-reused",
+                        "this click already names a different world request",
+                    );
+                }
+                value
+            }
+            None => {
+                crate::worlds::create::check_name(&ask.name)?;
+                let (_, rows) = read_rows(&inner.dir.store)?;
+                let made: Vec<u64> = rows
+                    .iter()
+                    .filter(|r| row_creator(r) == Some(&who))
+                    .filter_map(|r| r.get("made").and_then(Json::as_u64))
+                    .collect();
+                if let Err(o) = self.limits.check(account_made, &made, now) {
+                    return Err(Refusal {
+                        name: o.name,
+                        detail: json!({"limit": o.limit, "retry_after": o.retry_after}).to_string(),
+                    });
+                }
+                if rows.iter().any(|r| {
+                    r.get("label").and_then(Json::as_str) == Some(label)
+                        && row_creator(r) != Some(&who)
+                }) {
+                    return refuse("label-taken", label.to_owned());
+                }
+                if inner.dir.store.get(&NameRecord::key(&ask.name))?.is_some() {
+                    return refuse("name-taken", ask.name.clone());
+                }
+                let lineage: [u8; 16] = random();
+                let value = json!({"request": request, "ask": fingerprint, "row": {
+                    "name": ask.name, "label": label, "template": ask.template,
+                    "lineage": to_hex(&lineage), "zone": principal_text(template.zone),
+                    "creator": who, "made": now, "ready": false,
+                }});
+                inner.dir.store.put(
+                    &intent_key,
+                    &serde_json::to_vec(&value).unwrap(),
+                    When::Absent,
+                )?;
+                value
+            }
+        };
+        let mut row = intent["row"].clone();
+        if row.get("ready") == Some(&Json::Bool(true)) {
+            return Ok(json!({"world": row, "epoch": 1}));
         }
-        if rows.iter().any(|r| {
-            r.get("label").and_then(Json::as_str) == Some(label) && row_creator(r) != Some(&who)
-        }) {
-            return refuse("label-taken", label.to_owned());
+        let lineage: [u8; 16] = from_hex(row["lineage"].as_str().unwrap_or_default())
+            .ok()
+            .and_then(|s| s.try_into().ok())
+            .ok_or_else(|| Refusal {
+                name: "create-intent-invalid",
+                detail: "lineage".into(),
+            })?;
+        if row["zone"] != principal_text(template.zone) || row["creator"] != who {
+            return refuse(
+                "create-intent-invalid",
+                "the template or creator no longer matches",
+            );
         }
-        let lineage: [u8; 16] = random();
-        let build = Hash::of(Purpose::Fixture, b"souls/worldd/0.0.0").to_bytes();
-        let (claim, ()) = create(
-            &mut inner.dir,
-            Create {
-                name: &ask.name,
-                creator,
-                source: Source::Template {
-                    lineage: template.lineage,
-                },
-                lineage,
-                zone: template.zone,
-                build: &build,
-            },
-            |claim| {
-                (self.starter)(&Start {
-                    name: &ask.name,
-                    template: &template.dir,
-                    lineage,
-                    creator,
-                    claim,
-                })
-            },
-        )?;
-        let row = json!({
-            "name": ask.name,
-            "label": label,
-            "template": ask.template,
-            "lineage": to_hex(&lineage),
-            "zone": principal_text(template.zone),
-            "creator": who,
-            "made": now,
-        });
-        let rows = add_row(&inner.dir.store, etag, rows, row.clone())?;
+        let build = placement::build_pin()?;
+        let claim = match inner.dir.store.get(&NameRecord::key(&ask.name))? {
+            None => Some(
+                create(
+                    &mut inner.dir,
+                    Create {
+                        name: &ask.name,
+                        creator,
+                        source: Source::Template {
+                            lineage: template.lineage,
+                        },
+                        lineage,
+                        zone: template.zone,
+                        build: &build,
+                    },
+                    |_| Ok(()),
+                )?
+                .0,
+            ),
+            Some(o) => {
+                let named = NameRecord::read(&o.bytes)?;
+                if named.creator != creator
+                    || named.lineage != lineage
+                    || named.zone != template.zone
+                    || named.source != template.lineage
+                {
+                    return refuse("name-taken", ask.name.clone());
+                }
+                // A crash after name reservation may precede the build/claim; the supervisor owns later epochs.
+                inner.dir.set_build(&lineage, template.zone, &build)?;
+                if inner
+                    .dir
+                    .world(&lineage, template.zone)?
+                    .current()
+                    .is_none()
+                {
+                    Some(inner.dir.claim(&lineage, template.zone)?)
+                } else {
+                    None
+                }
+            }
+        };
+        let (etag, rows) = read_rows(&inner.dir.store)?;
+        let (rows, ()) = write_rows(&inner.dir.store, etag, rows, |rows| {
+            if !rows.iter().any(|r| r.get("name") == row.get("name")) {
+                rows.push(row.clone());
+            }
+            Ok(())
+        })?;
         *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
-        Ok(json!({"world": row, "epoch": claim.takeover.epoch}))
+        (self.starter)(&Start {
+            name: &ask.name,
+            template: &template.dir,
+            lineage,
+            creator,
+            claim: claim.as_ref(),
+            request: &request,
+        })?;
+        row["ready"] = json!(true);
+        let (etag, rows) = read_rows(&inner.dir.store)?;
+        let (rows, ()) = write_rows(&inner.dir.store, etag, rows, |rows| {
+            let found = rows
+                .iter_mut()
+                .find(|r| r.get("name") == row.get("name"))
+                .ok_or_else(|| Refusal {
+                    name: "create-intent-invalid",
+                    detail: "the world row is absent".into(),
+                })?;
+            *found = row.clone();
+            Ok(())
+        })?;
+        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
+        intent["row"] = row.clone();
+        let prior = inner.dir.store.get(&intent_key)?.ok_or_else(|| Refusal {
+            name: "create-intent-invalid",
+            detail: "the create request is absent".into(),
+        })?;
+        inner.dir.store.put(
+            &intent_key,
+            &serde_json::to_vec(&intent).unwrap(),
+            When::Is(&prior.etag),
+        )?;
+        Ok(json!({"world": row, "epoch": 1}))
     }
 
     /// A world's settings (rules 6 and 7): `creator` sets `unlisted`, `closed` and the list's `picture` (a checked
@@ -462,20 +552,6 @@ fn read_rows<S: Store>(store: &S) -> R<(String, Vec<Json>)> {
     }
 }
 
-/// Adds `row` on condition of the version read; a write refused because another machine added a row reads again.
-fn add_row<S: Store>(
-    store: &S,
-    etag: String,
-    rows: Vec<Json>,
-    row: Json,
-) -> R<(String, Vec<Json>)> {
-    let ((etag, rows), ()) = write_rows(store, etag, rows, |next| {
-        next.push(row.clone());
-        Ok(())
-    })?;
-    Ok((etag, rows))
-}
-
 /// Changes the rows with `change` and writes them on condition of the version read; a write refused because another
 /// machine wrote reads again and changes the new rows.
 fn write_rows<S: Store, T>(
@@ -537,7 +613,9 @@ pub fn from_env(machine: &str) -> Option<R<Worlds<&'static (dyn Store + Send + S
     let run = || -> R<Worlds<&'static (dyn Store + Send + Sync)>> {
         let store: Box<dyn Store + Send + Sync> = match crate::directory::s3::S3::from_env() {
             Some(s) => Box::new(s?),
-            None => Box::new(crate::directory::store::Memory::default()),
+            None => Box::new(crate::directory::folder::Folder::new(PathBuf::from(
+                std::env::var_os("DIRECTORYD_WORLD_STORE").unwrap_or_else(|| "directory".into()),
+            ))),
         };
         let store: &'static (dyn Store + Send + Sync) = Box::leak(store);
         let mut found = BTreeMap::new();
@@ -559,10 +637,7 @@ pub fn from_env(machine: &str) -> Option<R<Worlds<&'static (dyn Store + Send + S
         Ok(Worlds::new(
             Directory::new(store, machine),
             found,
-            worldd_starter(
-                var("DIRECTORYD_WORLDD", "worldd"),
-                var("DIRECTORYD_WORLDS", "worlds"),
-            ),
+            placement::starter(var("DIRECTORYD_PLACEMENT", "placement")),
         ))
     };
     Some(run())

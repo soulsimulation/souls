@@ -31,6 +31,26 @@ price are the owner's (C4 on #2636).
 
 `v2/tools/origin/origin.test.mjs` asserts the table (CI's `v2` job, step `origin-headers`).
 
+## Checkpoint continuity
+
+Checkpoint-backed public streams use the explicit generation/baseline extension in `replica::stream` (#3639).
+The pointer selects immutable `g/<baseline digest>/baseline`, `baseline.text` and numbered part/text files. These
+files use the same immutable cache treatment as earlier parts; old numbered files and headers remain unchanged.
+A public baseline preserves the actual pinned root, authorized local frames, motion, slots and timers. It is
+reconciled as a non-advancing snapshot, with no fabricated part timestamp, motion samples or replayed events. An opaque
+reference to a private frame supplies no transform: it remains queryable while drawing waits for a real public
+frame chain. It never supplies private ancestor records or the world's private arrival ledger.
+
+The canonical producer validates whole durable source parts before publishing public observations beside their
+original effects and events. The browser and native reader share the observer implementation. A protocol handoff
+drains an open legacy reader to its exact public terminal version and digest before installing the new baseline;
+physical record and public-effect cursors are checked independently. Ordinary restarts retain one generation.
+Exact source/checkpoint/public objects reach the world's existing private Store before a conditional recovery head
+and then the public pointer. A Store-only restore reconstructs those immutable bytes, even when the ordinary
+checkpoint has advanced. This private recovery data is outside the origin's exported views; missing or corrupt
+required source produces a named refusal instead of a false-ready stream. History archives remain a separate
+required release prerequisite (#3634).
+
 ## What a cache in front must do
 
 | Rule | Why | On nginx |

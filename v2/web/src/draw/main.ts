@@ -5,10 +5,11 @@ import * as THREE from 'three';
 import { FreeCamera } from '../camera/camera.ts';
 import { CameraDirector } from '../camera/director.ts';
 import { PlaybackClock, caughtUp } from '../clock/clock.ts';
-import type { Pointer } from '../source/source.ts';
+import { reconcileSnapshot, type Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
+import { localAddresses, worldAddress } from '../source/address.ts';
 import { SocketSource, chooseFollow, exchange, type Session } from '../source/socket.ts';
-import { providerSession } from '../source/signin.ts';
+import { browserSession, localTestSignIn } from '../source/signin.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
 import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
@@ -28,11 +29,13 @@ installNightLighting(); // V19b: the lamps' night pools, before any lit material
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const status = document.getElementById('status') as HTMLDivElement;
-const address = new URLSearchParams(location.search).get('stream');
+let addressError = '';
+const installed = await worldAddress(location.href).catch(e => { addressError = String(e.message); return null; });
+const address = installed?.stream ?? (addressError ? null : new URLSearchParams(location.search).get('stream'));
 // C1 (#3365): `?world=<name>` names a placed world instead: its `views/world.json` (under `?worlds=`, default `./w/`)
 // gives its stream's folder and its history's, both relative to the world's own folder.
 const worldName = new URLSearchParams(location.search).get('world');
-let worldHistory: string | null = null;
+let worldHistory: string | null = installed?.history ?? null;
 const moment = readMoment(location.hash); // V9: a link to a moment opens history
 // V13/V13b/V13c: the owner's near-live view, from the web session alone: `directory` is the directory's origin,
 // `gateway` the world's socket. The session is the provider's, its script loaded behind today's configuration
@@ -41,8 +44,7 @@ const moment = readMoment(location.hash); // V9: a link to a moment opens histor
 const q = new URLSearchParams(location.search);
 const signIn = async (): Promise<Session | null> => {
   const env = { document, href: location.href, global: globalThis as any, navigate: (u: string) => location.assign(u) };
-  const provider = await providerSession((globalThis as any).__simConfig ?? {}, env);
-  return provider ?? (q.get('as') ? { testName: q.get('as')! } : null);
+  return browserSession(q.get('as') ?? undefined, env);
 };
 let near: SocketSource | null = null;
 
@@ -105,6 +107,14 @@ cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 const firstFrame = arrive(worldName, status);
 const live = (address: string) => new StreamSource(address).start({
   pointer: (p) => (pointer = p),
+  snapshot: (snapshot) => {
+    const s = reconcileSnapshot(world.nodes.keys(), snapshot);
+    world.apply(s.nodes, s.removed, []);
+    sky.apply(s.nodes);
+    things.apply(s.nodes, s.removed);
+    sound.part(s.nodes, s.removed, [], []);
+    souls.snapshot(s.nodes, s.removed);
+  },
   part: (p) => {
     world.apply(p.nodes, p.removed, p.samples);
     sky.apply(p.nodes, p);
@@ -134,8 +144,9 @@ let history = moment && new HistoryPage(moment, cam, {
 if (history) (framed = true), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, history, clock } });
 else if (address) {
   live(address);
-  const directory = q.get('directory'), gateway = q.get('gateway');
-  if (directory && gateway) signIn().then(async (session) => {
+  const { directory, gateway } = installed ?? localAddresses(location.href);
+  const ownerIntent = q.has('follow') || (localTestSignIn(location.href) && (q.has('as') || q.has('directory')));
+  if (directory && gateway && ownerIntent) signIn().then(async (session) => {
     if (!session) return;
     const g = await exchange(directory, session);
     const follow = chooseFollow(g.owned, q.get('follow'));
@@ -152,7 +163,7 @@ else if (worldName) resolveWorld(worldName, new URLSearchParams(location.search)
   (w) => ((worldHistory = w.history), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, stream: w.stream, worldHistory } }), live(w.stream)),
   (e) => (error = String(e)),
 );
-else status.textContent = 'no stream: open this page with ?stream=<the stream directory> or ?world=<name>';
+else status.textContent = addressError || 'no stream: open this page with ?stream=<the stream directory> or ?world=<name>';
 
 const secs = (us: number) => (us / 1e6).toFixed(2);
 const clockText = (us: number) => {
