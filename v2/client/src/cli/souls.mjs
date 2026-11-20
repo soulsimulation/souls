@@ -66,6 +66,7 @@ import { consolidateIn, digestOf, rememberIn, searchIn, soulDirOf } from '../mem
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
 import { runShoot } from '../shoot/shoot.mjs';
 import { pairAddress } from '../pair/address.mjs';
+import { accountPair, hasAccount } from '../account/account.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
 export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'converse', 'lie', 'pray', 'prayers', 'wait', 'history', 'stats', 'pending', 'stop'];
@@ -120,7 +121,7 @@ export function requestOf(argv) {
   if (op === 'act' || op === 'can') req.acts = rest;
   if (op === 'act' && opts.for !== undefined) req.for = opts.for;
   if (op === 'pending' && rest[0] !== '--check') return { refused: 'pending-check', detail: 'pending --check; a turn reads what waits with wait 0' };
-  if (op === 'pair') req.url = rest[0];
+  if (op === 'pair') { req.url = rest[0]; if (opts.as !== undefined) req.as = opts.as; if (rest.includes('--move')) req.move = true; }
   if (op === 'say' || op === 'pray') req.words = rest.join(' ');
   if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
   if (op === 'lie') req.this = rest[0];
@@ -161,6 +162,7 @@ const shq = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
  * the harness's own login.
  */
 function help(home, named, topic) {
+  if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
   if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake'), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;
@@ -213,7 +215,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (asked.home) out(await homeCommand(home, asked.home, asked.args, { onAsk: (a) => out({ ok: true, step: 'approve', ...a }) }));
     else if (process.argv[2] === 'upgrade') out(await (await import('../upgrade/upgrade.mjs')).main(process.argv.slice(3)));
     else if (asked.local) out(await local(asked, home));
-    else if (req.op === 'pair') { out(await pairing(home, req.url)); process.exit(0); }
+    else if (req.op === 'pair') { out(req.as || hasAccount(home) ? await accountPair(home, null, req.url, { as: req.as, move: req.move, fresh: true }) : await pairing(home, req.url)); process.exit(0); }
     else {
       const { soul, resident } = await chooseCommandSoul(home, named);
       const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : 5000;

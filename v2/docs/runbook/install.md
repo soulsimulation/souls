@@ -147,6 +147,56 @@ backup (the validator also accepts several facts files). The convenience `import
 - Log shipping (O3, #2732) runs inside `worldd`; its object-store keys go in `secrets.env` once it lands.
 - Pairing (W2, #2705) runs inside `directoryd`; it needs nothing more from the install.
 
+## Creating served worlds (W3b)
+
+The installed `souls-place.path` and `souls-place.service` are initially inactive, like the other units. The
+path unit watches a request-ID-only inbox. Its finite initializer has the existing world's 2G memory envelope
+and CPUWeight 100 inside the same slice; it does not change the slice or any world's startup/restart limits.
+Directoryd stays at 256M. The root phase writes only protected placement metadata and the existing per-world unit
+configuration. A fixed child clears supplementary groups and drops to the installed Souls account before touching
+world data, forking, exporting streams or updating world route metadata. No request chooses a program, path or unit.
+
+Package the **existing public Eden template**, with serving support made by the same build, before enabling creation:
+
+```sh
+worldd seed --facts <approved-public-facts> --entries <existing-public-entries> --souls 0 --dir <support>
+templates <approved-public-facts> <catalogue> --support <support>
+bash v2/tools/ops/install.sh bundle <out> <binaries> <page> <catalogue>
+```
+
+Only allowlisted facts, public entry/move data, entry coordinates and exact runtime pin/hash metadata are packaged.
+Creator metadata, tokens, logs and seeded state are excluded. The published filtered checkpoint remains the world;
+the child verifies its manifest, sealed template header and compiled runtime pins before creating any output.
+
+The release owner configures `/etc/souls/placement.json` before activating the path unit: confirm the installed build
+hash and trusted catalogue, directory/origin addresses and reserved gateway port range. The installed helper requires
+the fixed route metadata `/var/lib/souls/routes/worlds.json` and route output `/var/lib/souls-routes`. Installation
+never overwrites this operator configuration. The existing route service owns its launcher/public-origin settings.
+When upgrading its build, update that pin to the verified installed binary. The inbox is root:souls 0770; the fixed
+parent, private status/authority files and attempts stay root-owned. The directory can write only the inbox there.
+Atomic token and retirement-notice replacement also needs the directory service's sandbox to permit writes to
+the fixed placed-world subtree `/var/lib/souls/worlds/worlds`, owned by the existing Souls account. This is subtree
+write permission, not file-only isolation; the private root-owned registry and exact-world authorization remain
+mandatory. The installer creates that subtree before activation.
+
+Existing/imported worlds require explicit entries in the private `souls/world-authority/1` registry: each canonical
+world maps to its exact stored instance and creator; any imported aliases are explicit `aliases` entries. Never infer
+an imported instance from a public slug or reuse an all-world token file. Unconfigured legacy single-world pairing
+continues to use its configured file; a configured but unreadable/unknown mapping refuses closed. Preserve Eden's
+preview-only route while enabling new canonical worlds.
+
+After reviewing the install plan and configuration, the release owner may enable the path unit. A create reserves
+its request, immutable name, creator and lineage durably, then reports that placement is pending. The page retains
+the same click key on a retryable response: selecting Create again checks that same request. A ready answer follows
+real native/gateway health, an advancing served stream and exact world authority publication. The initializer then
+starts the existing `souls-routes.service`, the sole map writer, and requires this world's regular activation marker
+before reporting ready. A coalesced invocation with an earlier map stays pending and retries the same request. The
+route unit binds only the mandatory route JSON into its own runtime directory, read-only; it gets no Souls group
+membership. Its fixed process environment overrides an optional conflicting route-file environment value. Missing
+source refuses the route job and preserves the last map. Install this reviewed route unit before enabling creation.
+An interrupted initializer leaves its owned pending world; it never fabricates a ready answer, reforks under
+a new identity, overwrites a running world's data or stops its clock. Malformed inbox entries are retained outside
+the inbox, so they cannot retrigger a failure loop or block an unrelated valid request.
 ## Private owner overview
 
 The origin serves `/ops` without today's launcher. Its HTML contains only the existing public provider fields;

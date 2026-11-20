@@ -7,8 +7,10 @@ import { createServer } from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createTestRunner, runOwnedAttempt } from './owned-attempt.mjs';
+import { verifyAccountArtifacts } from './v2-account-fixture.mjs';
+import { createHash } from 'node:crypto';
 
-const parent = resolve('.e2e/670'); mkdirSync(parent, { recursive: true });
+const parent = resolve('.local/proof-owned-attempt-tests'); mkdirSync(parent, { recursive: true });
 function setup(t, overrides = {}) {
   const root = mkdtempSync(join(parent, 'lifecycle-')), product = join(root, 'product'); mkdirSync(product);
   writeFileSync(join(product, 'fix.ts'), 'export const repaired = true;\n');
@@ -305,4 +307,80 @@ for (const signalName of ['SIGINT','SIGTERM','SIGHUP']) test(`production browser
   assert.equal(closed, true); assert.equal(report.teardown.browserClosed, true); assert.equal(report.teardown.worldStopped, true);
   assert.ok(existsSync(join(report.paths.dir, 'report.json'))); assert.equal(f.ledger().cycles[0].inFlight, undefined);
   assert.equal(existsSync(f.o.ledger + '.lock'), false, 'finalized interruption releases its owned lock');
+});
+
+
+test('native-v2 monitors every child and retains death even after passing assertions', async t => {
+  const children=[];
+  const f=setup(t,{boot:async o=>{
+    for(let i=0;i<4;i++){const c=Object.assign(new EventEmitter(),{pid:undefined,exitCode:null,signalCode:null});children.push(c);o.onSpawn(c);}
+    return {child:children[0],children,base:`http://example.com:${o.port}`,dataDir:o.data};
+  },stop:async c=>{if(c.exitCode===null)c.exitCode=0;}});
+  f.o.world.kind='v2-account';f.o.journey=async c=>{children[2].exitCode=1;children[2].emit('exit',1);c.check('visible-assertion',true);};
+  const report=await f.runner(f.o);assert.equal(report.status,'FAIL');assert.equal(report.qualified,false);
+  assert.equal(report.teardown.children.length,4);assert(report.teardown.children.every(c=>c.exited));assert.equal(report.teardown.children[2].exitCode,1);
+});
+
+test('native-v2 partial boot stops every registered child before browser creation', async t => {
+  const children=[];const f=setup(t,{boot:async o=>{
+    for(let i=0;i<3;i++){const c=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});children.push(c);o.onSpawn(c);}
+    throw Error('third native service never ready');
+  }});f.o.world.kind='v2-account';const report=await f.runner(f.o);
+  assert.equal(report.status,'BOOT_ABORT');assert.equal(report.browserStarted,false);assert.equal(report.teardown.children.length,3);
+  assert(children.every(c=>c.exitCode===0));assert(!existsSync(f.o.ledger+'.lock'));
+});
+
+test('native-v2 incomplete cleanup retains ownership lock and per-child evidence', async t => {
+  const children=[];const f=setup(t,{boot:async o=>{
+    for(let i=0;i<4;i++){const c=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});children.push(c);o.onSpawn(c);}
+    return {child:children[0],children,base:`http://example.com:${o.port}`,dataDir:o.data};
+  },stop:async c=>{if(c===children[1])throw Error('owned child still live');c.exitCode=0;}});
+  f.o.world.kind='v2-account';const report=await f.runner(f.o);assert.equal(report.status,'CLEANUP_FAIL');assert.equal(report.qualified,false);
+  assert.equal(report.teardown.children.length,4);assert.equal(report.teardown.children[1].exited,false);assert(existsSync(f.o.ledger+'.lock'));
+});
+
+test('native-v2 fixed recipe rejects arbitrary kind and tampered/source-mismatched artifact receipts', async t => {
+  const f=setup(t);await assert.rejects(f.runner({...f.o,world:{...f.o.world,kind:'existing-url'}}),/unknown-fixture-kind/);
+  const file=join(f.product,'artifact.json');writeFileSync(file,'{}');assert.throws(()=>verifyAccountArtifacts(f.product,{file:'artifact.json',hash:'0'.repeat(64)}),/artifact-pin/);
+  const git=(...args)=>execFileSync('git',['-C',f.product,...args],{encoding:'utf8'}).trim();
+  git('init','-q');git('add','fix.ts');git('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','Create isolated artifact fixture');
+  const body=JSON.stringify({schema:'v2-account-proof-artifacts/1',sourceHead:git('rev-parse','HEAD'),source:{'fix.ts':'0'.repeat(64)}});writeFileSync(file,body);
+  assert.throws(()=>verifyAccountArtifacts(f.product,{file:'artifact.json',hash:createHash('sha256').update(body).digest('hex')}),/artifact-source/);
+  assert.equal(f.children.length,0);
+});
+
+
+test('native-v2 keeps expected negative HTTP and unrelated network errors in failed evidence', async t => {
+  const children=[];const f=setup(t,{boot:async o=>{
+    for(let i=0;i<4;i++){const child=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});children.push(child);o.onSpawn(child);}
+    return {child:children[0],children,base:`http://example.com:${o.port}`,dataDir:o.data};
+  },browser:async(o,paths,base)=>{
+    let url=base;const page=Object.assign(new EventEmitter(),{url:()=>url,screenshot:async()=>Buffer.from('PNG'),locator:()=>({ariaSnapshot:async()=>'- account'}),goto:async value=>{
+      url=value;page.emit('response',{status:()=>503,url:()=>base+'/v1/auth/config'});
+      page.emit('requestfailed',{method:()=>'GET',url:()=>base+'/assets/missing.js',failure:()=>({errorText:'connection lost'})});
+    }});return {page,close:async()=>{}};
+  }});f.o.world.kind='v2-account';f.o.journey=async c=>{c.expectHttp('/v1/auth/config',503,'explicit local test configuration');c.check('visible-control',true);};
+  const report=await f.runner(f.o);assert.equal(report.status,'FAIL');assert.match(report.error,/unexpected-network-error/);
+  const network=JSON.parse(readFileSync(join(report.paths.dir,'network.json')));assert.equal(network.length,2);assert.equal(network[0].expected,true);assert.equal(network[1].expected,false);assert.equal(report.qualified,false);
+});
+
+
+test('native-v2 console errors require exact owned-origin HTTP evidence and narrow browser text', async t => {
+  const text='Failed to load resource: the server responded with a status of 503 (Service Unavailable)';
+  const sample=async({foreignResponse=false,foreignConsole=false,message=text}={})=>{
+    const children=[];const f=setup(t,{boot:async o=>{
+      for(let i=0;i<4;i++){const c=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});children.push(c);o.onSpawn(c);}
+      return {child:children[0],children,base:`http://example.com:${o.port}`,dataDir:o.data};
+    },browser:async(o,paths,base)=>{
+      let url=base;const page=Object.assign(new EventEmitter(),{url:()=>url,screenshot:async()=>Buffer.from('PNG'),locator:()=>({ariaSnapshot:async()=>'- account'}),goto:async value=>{
+        url=value;page.emit('response',{status:()=>503,url:()=>(foreignResponse?'https://other.example':base)+'/v1/auth/config'});
+        page.emit('console',{type:()=>'error',text:()=>message,location:()=>({url:(foreignConsole?'https://other.example':base)+'/v1/auth/config',lineNumber:0,columnNumber:0})});
+      }});return {page,close:async()=>{}};
+    }});f.o.world.kind='v2-account';f.o.journey=async c=>{c.expectHttp('/v1/auth/config',503,'explicit loopback provider absence');c.check('observed-page',true);};return f.runner(f.o);
+  };
+  const expected=await sample();assert.equal(expected.status,'PASS');assert.equal(expected.qualified,false);
+  const console=JSON.parse(readFileSync(join(expected.paths.dir,'console.json')));assert.equal(console[0].expected,true);assert.equal(console[0].location.lineNumber,0);
+  const unrelated=await sample({message:'Unrelated application failure'});assert.equal(unrelated.status,'FAIL');assert.match(unrelated.error,/unexpected-console-error/);
+  const otherOrigin=await sample({foreignResponse:true,foreignConsole:true});assert.equal(otherOrigin.status,'FAIL');assert.match(otherOrigin.error,/unexpected-network-error/);
+  const unmatched=await sample({foreignConsole:true});assert.equal(unmatched.status,'FAIL');assert.match(unmatched.error,/unexpected-console-error/);
 });

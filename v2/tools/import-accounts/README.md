@@ -41,3 +41,16 @@ cargo run -p import-accounts --release -- <backup set> [--world <file.db>]… --
 Test (makes its own stage with today's server code, backs it up with today's backup tool, under
 `.local/import-accounts/test`; needs `pnpm install` and cargo), from the repository root:
 `node --test v2/tools/import-accounts/test/import-accounts.test.ts`.
+
+## Served identity after import
+
+The signed-in My Souls route merges unpaired imported identities with current pairings, returning each live Soul
+once with its saved world, name and description. The account connection reads the same view. Listing is read-only:
+it does not register a pairing, mint a token or birth a body. Current paired ownership, retirement and saved profile
+fields take precedence over the immutable import; accounts never see another account's imported identities.
+
+Owner approval accepts the same imported grant or the existing former-id path. Imported account adoption validates
+its candidate without writing, checks the trusted world's live session, then initializes missing pairing/profile
+fields only inside its final validated transaction. Existing names, descriptions (including empty edits), world
+aliases and retirement are preserved. Successful approval publishes saved words through W11b's existing world-bound
+Souls file; the ordinary C3 join still births the body. The directory never births one while listing or approving.

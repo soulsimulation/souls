@@ -20,6 +20,8 @@
 //! - Wrong short codes are counted per account: [`GUESSES_MOST`] in [`GUESS_WINDOW`] seconds, then every code is
 //!   refused `code-guesses` until the window passes.
 
+mod account;
+mod authority;
 pub mod operator;
 pub mod route;
 pub mod souls;
@@ -100,6 +102,7 @@ pub struct Pairing {
     db: Mutex<Connection>,
     /// The gateway's tokens file, rewritten from the stored hashes after each pairing.
     tokens_file: Option<PathBuf>,
+    authority_file: Option<PathBuf>,
     /// Per account, the times of its wrong short codes.
     guesses: Mutex<BTreeMap<String, Vec<u64>>>,
     /// Per secret hash, the last poll and the interval.
@@ -191,11 +194,14 @@ impl Pairing {
                device TEXT, token_hash TEXT);",
         )?;
         db.execute_batch(souls::SCHEMA)?;
+        db.execute_batch(authority::SCHEMA)?;
         db.execute_batch(operator::SCHEMA)?;
+        db.execute_batch(account::SCHEMA)?;
         Ok(Pairing {
             public_url: public_url.trim_end_matches('/').to_string(),
             db: Mutex::new(db),
             tokens_file,
+            authority_file: std::env::var_os("DIRECTORYD_AUTHORITY_MAP").map(PathBuf::from),
             guesses: Mutex::default(),
             polls: Mutex::default(),
         })
@@ -205,7 +211,17 @@ impl Pairing {
     pub fn start(c: &crate::accounts::start::Config) -> Result<Option<Pairing>, rusqlite::Error> {
         c.pairing
             .as_ref()
-            .map(|p| Pairing::open(p, c.gateway_tokens.clone(), &c.public_url))
+            .map(|path| {
+                let pairing = Pairing::open(path, c.gateway_tokens.clone(), &c.public_url)?;
+                {
+                    let db = pairing.db.lock().expect("the store");
+                    pairing
+                        .write_tokens(&db)
+                        .and_then(|()| pairing.write_souls(&db))
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                }
+                Ok(pairing)
+            })
             .transpose()
     }
 
@@ -343,7 +359,7 @@ impl Pairing {
     pub fn show(&self, account: &str, code: &str, now: u64) -> Result<Card, &'static str> {
         let (code, device, soul, label, force, created, scope) = self.guess(account, code, now)?;
         let connected = match &soul {
-            Some(g) => self.soul_of(g)?.and_then(|(_, d)| d),
+            Some(g) => self.soul_for_request(g, &code)?.and_then(|(_, d)| d),
             None => None,
         };
         let former = self.former_of(&code)?.map(|(_, f)| f);
@@ -419,13 +435,14 @@ impl Pairing {
                 Err(_) => Err(("store", None)),
             }
         };
+        // Imported candidates remain read-only until every approval check passes.
+        let mut imported_candidate = false;
         // R18: a request naming a former Soul pairs the Soul X11 brought over for it, only for its own account.
         let soul = match (soul, self.former_of(&code).map_err(|e| (e, None))?) {
             (None, Some((world, former))) => {
                 match imported(&world, &former).map_err(|e| (e, None))? {
                     Some((grant, owner)) if owner == account && is_soul_grant(&grant) => {
-                        self.register(&grant, account)
-                            .map_err(|_| ("store", None))?;
+                        imported_candidate = self.soul_of(&grant).map_err(|e| (e, None))?.is_none();
                         Some(grant)
                     }
                     _ => return refuse("unknown-soul", None),
@@ -433,8 +450,24 @@ impl Pairing {
             }
             (soul, _) => soul,
         };
+        if let Some(g) = soul.as_deref().filter(|g| is_soul_grant(g))
+            && self.soul_of(g).map_err(|e| (e, None))?.is_none()
+            && !imported_candidate
+        {
+            let world = Self::request_world(&self.db.lock().expect("the store"), &code)
+                .map_err(|e| (e, None))?;
+            if let Some(world) = world {
+                imported_candidate = imported(&world, g)
+                    .map_err(|e| (e, None))?
+                    .is_some_and(|(found, owner)| found == g && owner == account);
+            }
+        }
         let grant = match soul {
-            Some(g) => match self.soul_of(&g).map_err(|e| (e, None))? {
+            Some(g) => match self
+                .soul_for_request(&g, &code)
+                .map_err(|e| (e, None))?
+                .or_else(|| imported_candidate.then(|| (account.to_owned(), None)))
+            {
                 None if is_creator_grant(&g) => return refuse("not-the-creator", None),
                 None => return refuse("unknown-soul", None),
                 Some((owner, _)) if owner != account && is_creator_grant(&g) => {
@@ -455,19 +488,40 @@ impl Pairing {
                 g
             }
         };
-        let changed = self
-            .db
-            .lock()
-            .expect("the store")
-            .execute(
-                "UPDATE pair_requests_v1 SET state = 'approved', account = ?2, grant_text = ?3
-                 WHERE code = ?1 AND state = 'pending'",
-                params![code, account, grant],
+        self.check_world(&code, &grant).map_err(|e| (e, None))?;
+        let mut db = self.db.lock().expect("the store");
+        let tx = db.transaction().map_err(|_| ("store", None))?;
+        if imported_candidate {
+            let owner: Option<String> = tx
+                .query_row(
+                    "SELECT account FROM paired_souls_v1 WHERE grant_text=?1",
+                    params![grant],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(|_| ("store", None))?;
+            if owner.as_deref().is_some_and(|a| a != account) {
+                return Err(("not-yours", None));
+            }
+            let retired: bool = tx.query_row("SELECT COALESCE((SELECT retired_at IS NOT NULL FROM soul_profiles_v1 WHERE grant_text=?1),0)",params![grant],|r|r.get(0)).map_err(|_|("store",None))?;
+            if retired {
+                return Err(("soul-retired", None));
+            }
+            tx.execute(
+                "INSERT OR IGNORE INTO paired_souls_v1(grant_text,account) VALUES(?1,?2)",
+                params![grant, account],
             )
             .map_err(|_| ("store", None))?;
+        }
+        let changed = tx.execute(
+            "UPDATE pair_requests_v1 SET state = 'approved', account = ?2, grant_text = ?3 WHERE code = ?1 AND state = 'pending'",
+            params![code, account, grant],
+        ).map_err(|_|("store",None))?;
         if changed == 0 {
             return Err(("unknown-code", None));
         }
+        tx.commit().map_err(|_| ("store", None))?;
+        drop(db);
         self.note_world(&code, &grant).map_err(|e| (e, None))?;
         Ok(grant)
     }
@@ -506,20 +560,38 @@ impl Pairing {
             ("pending", _) => Poll::Pending,
             ("refused", _) => Poll::Refused(refusal.unwrap_or_default(), refusal_device),
             ("approved", Some(grant)) => {
+                let code: String = match db.query_row(
+                    "SELECT code FROM pair_requests_v1 WHERE secret_hash=?1",
+                    params![to_hex(&hash)],
+                    |r| r.get(0),
+                ) {
+                    Ok(code) => code,
+                    Err(_) => return refused("store"),
+                };
+                let world = match Self::request_world(&db, &code) {
+                    Ok(world) => world,
+                    Err(e) => return refused(e),
+                };
+                let authority = match self.authority(world.as_deref()) {
+                    Ok(authority) => authority,
+                    Err(e) => return refused(e),
+                };
+                if let Some(authority) = &authority
+                    && is_creator_grant(&grant)
+                    && grant != authority.creator_grant()
+                {
+                    return refused("not-the-creator");
+                }
                 let token = format!("{grant}.{}", to_hex(&random::<32>()));
                 let token_hash = to_hex(&sha256(token.as_bytes()));
                 let stored = (|| -> Result<Result<(), String>, rusqlite::Error> {
                     let tx = db.transaction()?;
                     // An approval made while the Soul was free does not take it from a device that connected since,
                     // unless the request was forced.
-                    let now_on: Option<String> = tx
-                        .query_row(
-                            "SELECT device FROM paired_souls_v1 WHERE grant_text = ?1 AND token_hash IS NOT NULL",
-                            params![grant],
-                            |r| r.get(0),
-                        )
-                        .optional()?
-                        .flatten();
+                    let now_on: Option<String> = match &authority {
+                        Some(authority) => tx.query_row("SELECT device FROM paired_world_tokens_v1 WHERE grant_text=?1 AND world=?2", params![grant, authority.world], |r| r.get(0)).optional()?,
+                        None => tx.query_row("SELECT device FROM paired_souls_v1 WHERE grant_text=?1 AND token_hash IS NOT NULL", params![grant], |r| r.get(0)).optional()?.flatten(),
+                    };
                     if let Some(other) = now_on.filter(|d| !force && *d != device) {
                         tx.execute(
                             "UPDATE pair_requests_v1 SET state = 'refused', refusal = 'soul-connected',
@@ -533,6 +605,20 @@ impl Pairing {
                         "UPDATE paired_souls_v1 SET device = ?2, token_hash = ?3 WHERE grant_text = ?1",
                         params![grant, device, token_hash],
                     )?;
+                    if let Some(authority) = &authority {
+                        if is_soul_grant(&grant) {
+                            tx.execute(
+                                "DELETE FROM paired_world_tokens_v1 WHERE grant_text=?1",
+                                params![grant],
+                            )?;
+                        }
+                        tx.execute("INSERT INTO paired_world_tokens_v1(grant_text,world,device,token_hash) VALUES(?1,?2,?3,?4)
+                            ON CONFLICT(grant_text,world) DO UPDATE SET device=excluded.device,token_hash=excluded.token_hash", params![grant, authority.world, device, token_hash])?;
+                    }
+                    // Publish the exact world's authority before the request can become delivered. A failed file
+                    // write rolls back the SQL approval transition and the same request remains recoverable.
+                    self.write_tokens(&tx)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
                     tx.execute(
                         "UPDATE pair_requests_v1 SET state = 'delivered' WHERE secret_hash = ?1",
                         params![to_hex(&hash)],
@@ -545,9 +631,6 @@ impl Pairing {
                     Ok(Err(other)) => return Poll::Refused("soul-connected".into(), Some(other)),
                     Ok(Ok(())) => {}
                 }
-                if self.write_tokens(&db).is_err() {
-                    return refused("tokens-file");
-                }
                 Poll::Token { token, grant }
             }
             _ => refused("delivered"),
@@ -556,6 +639,9 @@ impl Pairing {
 
     /// Rewrites the gateway's tokens file from the stored hashes: written whole, then renamed into place.
     fn write_tokens(&self, db: &Connection) -> std::io::Result<()> {
+        if self.write_world_tokens(db)? {
+            return Ok(());
+        }
         let Some(file) = &self.tokens_file else {
             return Ok(());
         };
@@ -606,6 +692,11 @@ impl Pairing {
         db.execute(
             "UPDATE paired_souls_v1 SET device = NULL, token_hash = NULL WHERE grant_text = ?1 AND account = ?2",
             params![grant, account],
+        )
+        .map_err(|_| "store")?;
+        db.execute(
+            "DELETE FROM paired_world_tokens_v1 WHERE grant_text=?1",
+            params![grant],
         )
         .map_err(|_| "store")?;
         self.write_tokens(&db).map_err(|_| "tokens-file")
