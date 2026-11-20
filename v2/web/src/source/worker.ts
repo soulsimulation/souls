@@ -5,7 +5,7 @@
 // ...]`, the public audience's, written by V1's writer beside the part), kept by reference across parts.
 import init, { StreamPlayer, readPointer } from 'replica';
 import { decode, encode } from 'cborg';
-import type { NodeRec, PartRec, Pointer, SaidRec } from './source.ts';
+import { publicSoul, type NodeRec, type PartRec, type Pointer, type SaidRec } from './source.ts';
 import { happenedInPart } from '../sound/record.ts';
 import { skyFields } from '../sky/record.ts';
 
@@ -49,6 +49,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
     pos: ((pose?.get(2) as unknown[]) ?? [0, 0, 0]).map(num) as NodeRec['pos'],
     rot: ((pose?.get(3) as unknown[]) ?? [1 << 30, 0, 0, 0]).map(num) as NodeRec['rot'],
     at: moved ? num(moved.get(1)) : null,
+    soul: publicSoul(v.get(9)),
   };
   if (f.has(1)) rec.origin = new TextDecoder().decode(f.get(1) as Uint8Array);
   if (f.has(11)) rec.outline = rows(f.get(11));

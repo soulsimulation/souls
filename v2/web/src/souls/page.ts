@@ -1,12 +1,12 @@
 // The Souls on the page (W4, #2748): chips, status and speech over the view, and a Soul's page, all drawn from the
-// copy the page already holds (`SoulsCopy`, fed by the parts it plays). Nothing here makes a request. Clicking a chip or
+// copy the page already holds (`SoulsCopy`, fed by the parts it plays). Opening a card also reads its immutable test mark. Clicking a chip or
 // a line of speech opens that Soul's page; `soul=<id>` opens one from the address; `chips=0` draws none.
 // A Soul's page shows only what the public may see: name, description, status and recent public events. Every field is
 // set as text (`textContent`), never as markup.
 import * as THREE from 'three';
 import type { PartRec } from '../source/source.ts';
 import type { WorldView } from '../draw/world.ts';
-import { SoulsCopy, label, wrap, type Status } from './souls.ts';
+import { SoulsCopy, TestMark, label, wrap, type Status } from './souls.ts';
 import { SPEECH_W, measurer, paint, place, type Candidate, type Ctx, type Placed } from './layer.ts';
 import { mountCard } from './mine.ts';
 
@@ -25,14 +25,16 @@ function panel(onClose: () => void) {
   close.setAttribute('aria-label', 'Close');
   close.style.cssText = 'float:right;background:none;border:0;color:inherit;font-size:20px;line-height:1;cursor:pointer';
   close.onclick = onClose;
+  const test = document.createElement('p');
+  test.style.cssText = 'margin:0 0 6px;font-weight:bold';
   const name = document.createElement('h2'), desc = document.createElement('p'), status = document.createElement('p'), list = document.createElement('ol');
   name.style.cssText = 'margin:0 0 4px;font-size:16px';
   desc.style.cssText = 'margin:0 0 6px;color:#c9c4ba';
   status.style.cssText = 'margin:0 0 8px;color:#9fb3c4;font-size:12px';
   list.style.cssText = 'margin:0;padding:0 0 0 18px';
-  el.append(close, name, desc, status, list);
+  el.append(close, name, test, desc, status, list);
   document.body.append(el);
-  return { el, name, desc, status, list };
+  return { el, name, test, desc, status, list };
 }
 
 const clock = (us: number) => {
@@ -55,6 +57,22 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
   if (worldName) mountCard(worldName);
   let open: string | null = params.get('soul');
   let shown = '';
+  const mark = new TestMark(async (soul) => {
+    const response = await fetch('/v1/pair/test-status', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ soul }),
+      credentials: 'omit', redirect: 'error',
+    });
+    if (!response.ok) return null;
+    const answer = await response.json();
+    return typeof answer.test === 'boolean' ? answer.test : null;
+  });
+  let marked: string | null | undefined;
+  const showMark = () => {
+    const soul = open ? copy.souls.get(open)?.soul ?? null : null;
+    if (soul === marked) return;
+    marked = soul;
+    mark.open(soul, (test) => { ui.test.textContent = test === true ? 'Test Soul' : test === false ? '' : 'Test status unavailable'; });
+  };
   const v = new THREE.Vector3(), m = new THREE.Vector3();
 
   const showPage = (t: number) => {
@@ -93,10 +111,12 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
   const out: PageSouls = {
     copy,
     placed: [],
-    apply: (p) => copy.apply(p),
+    apply: (p) => { copy.apply(p); showMark(); },
     open(id) {
       open = id;
       shown = '';
+      marked = undefined;
+      showMark();
     },
     draw(t, camera) {
       const dpr = Math.min(devicePixelRatio, 2), vw = innerWidth, vh = innerHeight;

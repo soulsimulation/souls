@@ -94,7 +94,7 @@ pub struct Request {
     pub body: Vec<u8>,
 }
 
-fn read(stream: &TcpStream) -> Option<Request> {
+fn read(stream: &TcpStream) -> Option<(Request, bool)> {
     let mut r = BufReader::new(stream.try_clone().ok()?);
     let mut line = String::new();
     r.read_line(&mut line).ok()?;
@@ -102,6 +102,7 @@ fn read(stream: &TcpStream) -> Option<Request> {
     let method = words.next()?.to_string();
     let path = words.next()?.split('?').next()?.to_string();
     let (mut bearer, mut soul, mut length) = (None, None, 0usize);
+    let mut indirect = false;
     // A picture rides in a Soul's picture and in a world's settings (its list picture, G10).
     let most = if path == "/v1/account/souls/picture" || path == "/v1/worlds/settings" {
         PICTURE_BODY_MOST
@@ -121,6 +122,21 @@ fn read(stream: &TcpStream) -> Option<Request> {
         }
         let (name, value) = h.split_once(':')?;
         let value = value.trim();
+        let lower = name.to_ascii_lowercase();
+        indirect |= lower.starts_with("x-forwarded-")
+            || matches!(
+                lower.as_str(),
+                "forwarded"
+                    | "x-real-ip"
+                    | "client-ip"
+                    | "x-client-ip"
+                    | "true-client-ip"
+                    | "cf-connecting-ip"
+                    | "fastly-client-ip"
+                    | "x-envoy-external-address"
+                    | "via"
+                    | "origin"
+            );
         if name.eq_ignore_ascii_case("content-length") {
             length = value.parse().ok().filter(|n| *n <= most)?;
         } else if name.eq_ignore_ascii_case("authorization") {
@@ -131,18 +147,21 @@ fn read(stream: &TcpStream) -> Option<Request> {
     }
     let mut body = vec![0; length];
     r.read_exact(&mut body).ok()?;
-    Some(Request {
-        method,
-        path,
-        bearer,
-        soul,
-        body,
-    })
+    Some((
+        Request {
+            method,
+            path,
+            bearer,
+            soul,
+            body,
+        },
+        indirect,
+    ))
 }
 
 fn handle(mut stream: TcpStream, app: &App) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let Some(req) = read(&stream) else {
+    let Some((req, indirect)) = read(&stream) else {
         let _ = respond(
             &mut stream,
             400,
@@ -152,21 +171,26 @@ fn handle(mut stream: TcpStream, app: &App) {
         );
         return;
     };
-    let (status, kind, body, note) = crate::pairing::route::route(
-        app,
-        &req.method,
-        &req.path,
-        req.bearer.as_deref(),
-        &req.body,
-    )
-    .unwrap_or_else(|| {
-        let (status, body, note) = route(&req, app);
-        // A text answer (the mailbox's open lines) is written as it is.
-        match body {
-            Value::String(s) => (status, "text/plain; charset=utf-8", s, note),
-            v => (status, "application/json", text(&v), note),
-        }
-    });
+    let direct = !indirect && stream.peer_addr().is_ok_and(|peer| peer.ip().is_loopback());
+    let (status, kind, body, note) =
+        crate::pairing::operator::route(app, &req.method, &req.path, &req.body, direct)
+            .or_else(|| {
+                crate::pairing::route::route(
+                    app,
+                    &req.method,
+                    &req.path,
+                    req.bearer.as_deref(),
+                    &req.body,
+                )
+            })
+            .unwrap_or_else(|| {
+                let (status, body, note) = route(&req, app);
+                // A text answer (the mailbox's open lines) is written as it is.
+                match body {
+                    Value::String(s) => (status, "text/plain; charset=utf-8", s, note),
+                    v => (status, "application/json", text(&v), note),
+                }
+            });
     // The world list may be cached a short while (W3, #2799); everything else is no-store.
     let list = req.method == "GET" && req.path == "/v1/worlds" && status == 200;
     let cache = if list {
@@ -515,4 +539,107 @@ fn respond_as(
          cache-control: {cache}\r\n{cors}connection: close\r\n\r\n{body}",
         body.len()
     )
+}
+
+#[cfg(test)]
+mod operator_transport_tests {
+    use super::*;
+
+    #[test]
+    fn o24_actual_http_refuses_indirect_operator_and_public_status_hides_ordinary_existence() {
+        let ordinary = "soul-0123456789abcdef0123456789abcdef-4";
+        let pairing = crate::pairing::Pairing::open(
+            std::path::Path::new(":memory:"),
+            None,
+            "https://example.invalid",
+        )
+        .unwrap();
+        pairing.register(ordinary, "acct_owner").unwrap();
+        let app = App {
+            store: Store::open(std::path::Path::new(":memory:")).unwrap(),
+            verifier: None,
+            test_sign_in: false,
+            view_key: None,
+            origin: None,
+            mailbox_key: None,
+            pairing: Some(pairing),
+            log: Mutex::new(Box::new(std::io::sink())),
+            worlds: None,
+        };
+        for (path, header, body, expected, contains) in [
+            ("/v1/pair/operator/list", "", "{}".to_string(), 200, "souls"),
+            (
+                "/v1/pair/operator/list",
+                "Forwarded: for=example\r\n",
+                "{}".to_string(),
+                403,
+                "operator.direct-only",
+            ),
+            (
+                "/v1/pair/operator/list",
+                "Origin: https://example.invalid\r\n",
+                "{}".to_string(),
+                403,
+                "operator.direct-only",
+            ),
+            (
+                "/v1/pair/test-status",
+                "",
+                json!({"soul": ordinary}).to_string(),
+                200,
+                "\"test\":false",
+            ),
+            (
+                "/v1/pair/test-status",
+                "",
+                json!({"soul": "soul-ffffffffffffffffffffffffffffffff-0"}).to_string(),
+                200,
+                "\"test\":false",
+            ),
+        ] {
+            let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            let (server, _) = listener.accept().unwrap();
+            write!(
+                client,
+                "POST {path} HTTP/1.1\r\nContent-Length: {}\r\n{header}\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            handle(server, &app);
+            let mut answer = String::new();
+            client.read_to_string(&mut answer).unwrap();
+            assert!(
+                answer.starts_with(&format!("HTTP/1.1 {expected}")),
+                "{answer}"
+            );
+            assert!(answer.contains(contains), "{answer}");
+        }
+    }
+
+    #[test]
+    fn o24_actual_reader_marks_proxy_and_browser_identity_headers_indirect() {
+        for header in [
+            "",
+            "Forwarded: for=example",
+            "X-Forwarded-For: example",
+            "X-Real-IP: example",
+            "Via: proxy",
+            "Origin: https://example.invalid",
+        ] {
+            let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            let (server, peer) = listener.accept().unwrap();
+            assert!(peer.ip().is_loopback());
+            write!(
+                client,
+                "POST /v1/pair/operator/list HTTP/1.1\r\nContent-Length: 2\r\n{header}{}\r\n{{}}",
+                if header.is_empty() { "" } else { "\r\n" }
+            )
+            .unwrap();
+            let (req, indirect) = read(&server).unwrap();
+            assert_eq!(req.body, b"{}");
+            assert_eq!(indirect, !header.is_empty());
+        }
+    }
 }
