@@ -103,6 +103,10 @@ impl Ground for W<'_> {
 }
 
 impl Where for W<'_> {
+    fn toward(&self, _: Id, to: Vec3) -> Option<Vec3> {
+        // This fixture's admitted surface is flat and has no obstructing solids.
+        self.stand(self.floor, to).map(|(on, _)| on)
+    }
     fn slot(&self, thing: Id) -> Option<SlotAt> {
         if self.gone {
             return None;
@@ -905,4 +909,93 @@ fn served_soul_body_is_resolved_internally_and_restored_without_a_wire_body_fiel
         .expect("restore trusted body");
     assert_eq!(back, vec![id]);
     assert_eq!(w.orders.open(body).unwrap().actor, Actor::Soul(soul));
+}
+
+/// A refused supported-way answer; the ground and ownership remain the ordinary fixture's.
+struct NoWay<'a>(W<'a>);
+impl Ground for NoWay<'_> {
+    fn stand(&self, n: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.0.stand(n, p)
+    }
+    fn passage(&self, n: Id, p: Vec3) -> bool {
+        self.0.passage(n, p)
+    }
+    fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
+        self.0.walk(an, a, bn, b)
+    }
+}
+impl Where for NoWay<'_> {
+    fn toward(&self, _: Id, _: Vec3) -> Option<Vec3> {
+        None
+    }
+    fn slot(&self, thing: Id) -> Option<SlotAt> {
+        self.0.slot(thing)
+    }
+}
+
+#[test]
+fn b7c_unreachable_releases_driver_without_stopping_unrelated_body() {
+    let mut w = world();
+    let blocked = w.body(5_000, 8_000);
+    let other = w.body(-8_000, -8_000);
+    let source = w.intent(
+        blocked,
+        "souls:queue",
+        Some(w.chair),
+        vec![(1, Value::Text(name("eden:sit")))],
+        10_000_000,
+    );
+    let order = w.accept(&source).unwrap();
+    w.script(other, Vec3::new(1_000_000, 0, 0), 20);
+    let before = w.at(other);
+    let where_ = NoWay(W {
+        floor: w.floor,
+        slots: &w.slots,
+        gone: false,
+    });
+    assert!(w.orders.step(&mut w.c, &where_, w.now).is_empty());
+    assert_eq!(
+        w.ends().get(&order).map(String::as_str),
+        Some("souls:no-way")
+    );
+    assert!(w.orders.open(blocked).is_none());
+    assert!(w.c.claims(blocked).unwrap().running().is_empty());
+    for _ in 0..10 {
+        assert!(w.tick().is_empty());
+    }
+    assert!(w.at(other).x > before.x);
+    assert!(w.orders.log.iter().all(|e| event(e).name.as_str() != TAKE));
+}
+
+#[test]
+fn b7c_same_coordinates_on_another_floor_cannot_take() {
+    let mut w = world();
+    let body = w.body(0, 300);
+    let mut place = w.slots.place(w.chair).unwrap().clone();
+    place.floor = w.mint.mint().unwrap();
+    w.slots = Slots::new();
+    w.slots.add(place).unwrap();
+    let source = w.intent(
+        body,
+        "souls:queue",
+        Some(w.chair),
+        vec![(1, Value::Text(name("eden:sit")))],
+        10_000_000,
+    );
+    let order = w.accept(&source).unwrap();
+    w.orders.freed(
+        &W {
+            floor: w.floor,
+            slots: &w.slots,
+            gone: false,
+        },
+        w.chair,
+    );
+    assert!(w.tick().is_empty());
+    assert_eq!(
+        w.ends().get(&order).map(String::as_str),
+        Some("souls:no-way")
+    );
+    assert!(w.c.claims(body).unwrap().running().is_empty());
+    assert!(w.orders.log.iter().all(|e| event(e).name.as_str() != TAKE));
 }
