@@ -13,6 +13,8 @@
       #status { font-size: 13px; color: #555; }
       .tools { display: none; flex-direction: column; gap: 8px; }
       body.creator .tools { display: flex; }
+      #archive { display: none; }
+      body.creator #archive, #archive[data-operation] { display: block; }
       body.creator #signin { display: none; }
       body.refused #status { color: #a33; }
       button, select, input { font: inherit; padding: 4px 8px; }
@@ -51,15 +53,15 @@
           <button type="button" data-cancel>Cancel offer</button>
           <p role="status" aria-live="polite"></p>
         </section>
+        <div>Batches, newest first</div>
+        <ol id="batches"></ol>
+      </div>
         <section id="archive" aria-label="Archive this world">
           <h2>Archive this world</h2>
           <p>This stops the world and keeps its data and address. An operator can restore it.</p>
           <form><label>Type <strong data-world></strong> to confirm<input autocomplete="off" required></label><button type="submit">Archive world</button></form>
           <p role="status" aria-live="polite"></p>
         </section>
-        <div>Batches, newest first</div>
-        <ol id="batches"></ol>
-      </div>
     </aside>
     <script type="module" src="./main.ts"></script>
   </body>

@@ -269,7 +269,9 @@ function showPrayers() {
 }
 
 /** Account changes revoke this page's old authority and private UI before any new exchange. */
+let resetArchive = () => {};
 function invalidateCreator() {
+  resetArchive();
   openAttempt++;
   const previous = activeSocket;
   activeSocket = null; session = null;
@@ -376,4 +378,4 @@ requestAnimationFrame(draw);
 
 creatorHandoff($<HTMLElement>('handoff'), installed?.world ?? null, installed?.directory ?? location.origin, () => $<HTMLInputElement>('who').value);
 
-creatorArchive($<HTMLElement>('archive'), installed?.world ?? null, installed?.directory ?? location.origin, () => $<HTMLInputElement>('who').value);
+resetArchive = creatorArchive($<HTMLElement>('archive'), installed?.world ?? null, installed?.directory ?? location.origin, () => $<HTMLInputElement>('who').value);
