@@ -4,6 +4,297 @@ use replica::pose::{Frame, Quat};
 use sim::links::Doors;
 use sim::walk::town::Town;
 
+fn seating_entry(kind: &str) -> Json {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../content/kinds/seating")
+        .join(format!("{kind}.json"));
+    replica::rules::json::parse(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[test]
+fn fixture_sit_dispatch_uses_only_the_declared_approach_without_explicit_args() {
+    use replica::encode::Value;
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let node = Id::new(Scope([0x73; 16]), 1).unwrap();
+    for kind in ["bench", "stump", "armchair"] {
+        let entry = seating_entry(kind);
+        let kind_name = entry.get("kind").and_then(Json::str).unwrap();
+        let tree = Tree::start(node, Name::new(kind_name).unwrap());
+        let acts = Acts::new(
+            Json::object([(kind_name, entry.clone())]),
+            Vec::new(),
+            header.clone(),
+            node.scope(),
+        );
+        let intent = WireIntent {
+            actor: Actor::Soul(node),
+            verb: Name::new("eden:sit").unwrap(),
+            target: Some(Target::Node(node)),
+            parameters: BTreeMap::new(),
+            sequence: 1,
+            basis: Value::Array(Vec::new()),
+            expiry: 10_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+        };
+        assert!(
+            acts.fixture_sit(&tree, &intent),
+            "{kind} keeps its approach"
+        );
+        let changed = |verb: &str, target, parameters| WireIntent {
+            verb: Name::new(verb).unwrap(),
+            target,
+            parameters,
+            ..intent.clone()
+        };
+        assert!(!acts.fixture_sit(
+            &tree,
+            &changed("souls:sit", intent.target.clone(), BTreeMap::new())
+        ));
+        assert!(!acts.fixture_sit(
+            &tree,
+            &changed("eden:walk", intent.target.clone(), BTreeMap::new())
+        ));
+        assert!(!acts.fixture_sit(
+            &tree,
+            &changed(
+                "eden:sit",
+                Some(Target::Selector(2, BTreeMap::new())),
+                BTreeMap::new()
+            )
+        ));
+        assert!(!acts.fixture_sit(
+            &tree,
+            &changed(
+                "eden:sit",
+                intent.target.clone(),
+                BTreeMap::from([(1, Value::Array(Vec::new()))])
+            )
+        ));
+        assert!(!acts.fixture_sit(
+            &Tree::start(node, Name::new("souls:body").unwrap()),
+            &intent
+        ));
+        // Unsupported selectors and body/ground settle retain their own binding/refusal path.
+        let text = entry.to_json();
+        for changed in [
+            text.replace("nearest", "farthest"),
+            text.replace("walk_to", "settle"),
+        ] {
+            let changed = replica::rules::json::parse(&changed).unwrap();
+            assert_eq!(fixture_seat(&changed, "sit"), None);
+        }
+        assert_eq!(fixture_seat(&entry, "lie"), None);
+    }
+}
+
+#[test]
+fn fixture_sit_default_uses_live_free_slots_and_preserves_explicit_binding() {
+    use replica::bodies::{Class, Family};
+    use replica::encode::{Value, decode};
+    use replica::moves::Place;
+    use sim::controller::Stance;
+    use sim::ground::Piece;
+    use sim::mover::Surface;
+    use sim::slots::{PlaceAt, Slots};
+    use skills::form_runner::{Arg, Step};
+    let floor = Id::new(Scope([0x74; 16]), 1).unwrap();
+    let fixture = Id::new(floor.scope(), 2).unwrap();
+    let body = Id::new(floor.scope(), 3).unwrap();
+    let first = Id::new(floor.scope(), 4).unwrap();
+    let second = Id::new(floor.scope(), 5).unwrap();
+    let corners = vec![
+        [-5000, 0, -5000],
+        [5000, 0, -5000],
+        [5000, 0, 5000],
+        [-5000, 0, 5000],
+    ];
+    let surface = Surface::new(
+        floor,
+        vec![Piece {
+            outline: vec![corners.clone()],
+            vertices: corners,
+            triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: sim::gaits::Ground::Dry,
+        }],
+    );
+    let bytes = replica::effects::fixture_bytes(include_str!(
+        "../../../replica/fixtures/bodies/families.diag"
+    ))
+    .unwrap();
+    let Value::Array(families) = decode(&bytes).unwrap().value else {
+        panic!("families")
+    };
+    let family = families
+        .iter()
+        .map(|f| Family::from_value(f).unwrap())
+        .find(|f| f.resources.iter().any(|r| r.class == Class::Manipulator))
+        .unwrap();
+    let mut controller = Controller::new();
+    for id in [body, first, second] {
+        let moved = surface
+            .place(
+                id,
+                Frame {
+                    node: floor,
+                    slot: None,
+                },
+                Vec3::new(-400_000, 0, 574_000),
+                Quat::IDENTITY,
+            )
+            .unwrap();
+        controller.add(family.clone(), moved).unwrap();
+    }
+    let mut slots = Slots::new();
+    for (slot, x) in [(1, -400_000), (2, 400_000)] {
+        slots
+            .add(PlaceAt {
+                thing: fixture,
+                place: Place {
+                    slot,
+                    height: 465_000,
+                    stand: [0, 554_000],
+                },
+                point: Vec3::new(x, 465_000, 20_000),
+                facing: Quat::IDENTITY,
+                floor,
+            })
+            .unwrap();
+    }
+    let entry = seating_entry("bench");
+    let bind = |args: &mut skills::form_runner::Args, slots: &Slots, controller: &Controller| {
+        bind_fixture_seat(
+            &entry,
+            "sit",
+            args,
+            body,
+            fixture,
+            Some((slots, controller)),
+        )
+    };
+    let mut args = BTreeMap::new();
+    bind(&mut args, &slots, &controller).unwrap();
+    assert_eq!(args["seat"], Arg::Name("left".into()));
+    let steps = skills::form_runner::bind_with(&entry, "sit", &args).unwrap();
+    assert!(matches!(&steps[0], Step::WalkTo { point, at, on: None }
+        if point.as_str() == "left" && *at == Vec3::new(-400_000, 0, 574_000)));
+    assert_eq!(
+        steps[1],
+        Step::Sit {
+            slot: 1,
+            lie: false
+        }
+    );
+    assert_eq!(
+        slots.holder_in(fixture, 1),
+        None,
+        "binding does not reserve a slot"
+    );
+
+    // A real restored hold changes the default; an explicit choice remains exact, including a taken slot.
+    slots
+        .restore(&mut controller, first, (fixture, Some(1)), Stance::Sit, 0)
+        .unwrap();
+    let mut args = BTreeMap::new();
+    bind(&mut args, &slots, &controller).unwrap();
+    assert_eq!(args["seat"], Arg::Name("right".into()));
+    assert_eq!(
+        skills::form_runner::bind_with(&entry, "sit", &args).unwrap()[1],
+        Step::Sit {
+            slot: 2,
+            lie: false
+        }
+    );
+    let mut explicit = skills::form_runner::args_in(
+        &entry,
+        &BTreeMap::new(),
+        &BTreeMap::from([("seat".into(), 1)]),
+    )
+    .unwrap();
+    bind(&mut explicit, &slots, &controller).unwrap();
+    assert_eq!(explicit["seat"], Arg::Name("left".into()));
+    let mut invalid = BTreeMap::from([("seat".into(), Arg::Int(1))]);
+    bind(&mut invalid, &slots, &controller).unwrap();
+    assert_eq!(
+        invalid["seat"],
+        Arg::Int(1),
+        "an invalid explicit value is not defaulted"
+    );
+    assert_eq!(
+        skills::form_runner::bind_with(&entry, "sit", &invalid)
+            .unwrap_err()
+            .name,
+        "step-malformed"
+    );
+    assert_eq!(
+        skills::form_runner::args_in(
+            &entry,
+            &BTreeMap::new(),
+            &BTreeMap::from([("seat".into(), 0)])
+        )
+        .unwrap_err()
+        .name,
+        "slot-unknown"
+    );
+    assert_eq!(
+        skills::form_runner::args_in(
+            &entry,
+            &BTreeMap::new(),
+            &BTreeMap::from([("seat".into(), 3)])
+        )
+        .unwrap_err()
+        .name,
+        "slot-unknown"
+    );
+    slots
+        .restore(&mut controller, second, (fixture, Some(2)), Stance::Sit, 0)
+        .unwrap();
+    let mut args = BTreeMap::new();
+    assert_eq!(
+        bind(&mut args, &slots, &controller).unwrap_err().name,
+        "place-taken"
+    );
+    assert!(args.is_empty());
+    assert_eq!(slots.holder_in(fixture, 1), Some(first));
+    assert_eq!(slots.holder_in(fixture, 2), Some(second));
+    assert_eq!(
+        bind_fixture_seat(&entry, "sit", &mut args, body, fixture, None)
+            .unwrap_err()
+            .name,
+        "place-unknown"
+    );
+    assert_eq!(
+        bind_fixture_seat(
+            &entry,
+            "sit",
+            &mut args,
+            floor,
+            fixture,
+            Some((&slots, &controller))
+        )
+        .unwrap_err()
+        .name,
+        "body-unknown"
+    );
+    assert_eq!(
+        bind_fixture_seat(
+            &entry,
+            "sit",
+            &mut args,
+            body,
+            floor,
+            Some((&slots, &controller))
+        )
+        .unwrap_err()
+        .name,
+        "place-unknown"
+    );
+}
+
 #[test]
 fn same_ground_form_walk_keeps_the_planned_doorway_links() {
     let generated = testworld::generate(1, 0).expect("the synthetic world");

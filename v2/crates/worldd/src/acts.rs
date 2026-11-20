@@ -1,6 +1,6 @@
 //! Soul Actions acts in a running world (Engine v2 C2, #3366): a form intent on a world with bodies is carried out
-//! by F1/F2's form runner (`sim::forms`), over the world's loaded entries, on the clock thread. No code here names a
-//! kind, a form or a move.
+//! by F1/F2's form runner (`sim::forms`), over the world's loaded entries, on the clock thread. A bare fixture sit
+//! binds its declared nearest-free seat from the live table, then runs the entry's walk and sit steps.
 //!
 //! - **Committed at the next tick.** [`crate::answers`] takes a form's act like a move: an id, a deadline and a place
 //!   in the next tick. There [`Acts::commit`] finds the node's kind in the replica's tree and its entry in the world's
@@ -59,6 +59,7 @@ use replica::effects::{Actor, Body, Effect, Refusal, TimerRec};
 use replica::encode::Name;
 use replica::host::{Answer, Ask, F_CROSSING, Seen};
 use replica::ids::{Id, Minter, Scope};
+use replica::intents::{Intent as WireIntent, Target};
 use replica::kinds::sizes::Build;
 use replica::moves::{Effector, Move};
 use replica::pose::Vec3;
@@ -676,7 +677,86 @@ fn plain(kind: &Name) -> &str {
     k.split_once('@').map_or(k, |(p, _)| p)
 }
 
+/// Only the existing declared nearest-free seat form: its chosen slot is approached before it is taken.
+fn fixture_seat<'a>(entry: &'a Json, form: &str) -> Option<&'a str> {
+    if form != "sit" {
+        return None;
+    }
+    let f = entry.get("forms")?.get(form)?;
+    let [(arg, take)] = f.get("takes")?.obj()? else {
+        return None;
+    };
+    let select = take.get("select")?;
+    if take.get("type")?.str()? != "slot"
+        || select.obj()?.len() != 5
+        || select.get("of")?.str()? != "free_slots"
+        || select.get("in")?.str()? != "this"
+        || select.get("anchor")?.str()? != "me"
+        || select.get("order")?.str()? != "nearest"
+        || !matches!(select.get("rank"), Some(Json::Int(1)))
+    {
+        return None;
+    }
+    let [walk, sit] = f.get("steps")?.arr()? else {
+        return None;
+    };
+    (walk.get("step")?.str()? == "walk_to"
+        && walk.get("point")?.get("arg")?.str()? == arg
+        && sit.get("step")?.str()? == "sit"
+        && sit.get("slot")?.get("arg")?.str()? == arg)
+        .then_some(arg.as_str())
+}
+
+fn bind_fixture_seat(
+    entry: &Json,
+    form: &str,
+    args: &mut skills::form_runner::Args,
+    body: Id,
+    node: Id,
+    places: Option<(&sim::slots::Slots, &Controller)>,
+) -> R<()> {
+    let Some(arg) = fixture_seat(entry, form).filter(|arg| !args.contains_key(*arg)) else {
+        return Ok(());
+    };
+    let (slots, controller) = places.ok_or_else(|| refusal("place-unknown", "fixture sit"))?;
+    if controller.body(body).is_none() {
+        return Err(refusal("body-unknown", "fixture sit"));
+    }
+    let slot = slots.free(controller, body, node).ok_or_else(|| {
+        refusal(
+            if slots.place(node).is_some() {
+                "place-taken"
+            } else {
+                "place-unknown"
+            },
+            "fixture sit",
+        )
+    })?;
+    args.extend(skills::form_runner::args_in(
+        entry,
+        &BTreeMap::new(),
+        &BTreeMap::from([(arg.to_owned(), slot)]),
+    )?);
+    Ok(())
+}
+
 impl Acts {
+    /// A bare fixture sit uses its actual entry's approach; explicit arguments and selectors keep their path.
+    pub(crate) fn fixture_sit(&self, tree: &Tree, intent: &WireIntent) -> bool {
+        if intent.parameters.contains_key(&1)
+            || !matches!(intent.verb.as_str().split_once(':'), Some((ns, "sit")) if ns != "souls")
+        {
+            return false;
+        }
+        let Some(Target::Node(node)) = &intent.target else {
+            return false;
+        };
+        tree.handle(*node)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| self.kinds.get(plain(n.kind())))
+            .is_some_and(|entry| fixture_seat(entry, "sit").is_some())
+    }
+
     /// No forms yet, over the world's entries by kind and the moves' library ([`library`]), in the zone `header`
     /// names, minting ids of `scope`: F4's amounts read the entries' fields (`Forms::kinds`), and a take or a put writes under the zone.
     pub fn new(
@@ -850,6 +930,17 @@ impl Acts {
                 first.get_or_insert(refusal("arg-ambiguous", key));
                 continue;
             }
+            if let Err(e) = bind_fixture_seat(
+                entry,
+                form,
+                &mut all,
+                body,
+                *node,
+                bodies.as_ref().map(|b| (&b.slots, &b.runner.controller)),
+            ) {
+                first.get_or_insert(e);
+                continue;
+            }
             let incompatible = entry
                 .get("forms")
                 .and_then(|f| f.get(form))
@@ -895,7 +986,7 @@ impl Acts {
             }
             let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
             let r = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
-                if args.things.is_empty() && args.slots.is_empty() && args.values.is_empty() {
+                if all.is_empty() {
                     return forms.commit(
                         w,
                         &audiences,
