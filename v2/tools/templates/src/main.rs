@@ -232,7 +232,7 @@ mod tests {
             (
                 3,
                 Value::Array(vec![Value::Text(
-                    Name::new(format!("souls:body@1220{}", "00".repeat(32))).unwrap(),
+                    Name::new(&format!("souls:body@1220{}", "00".repeat(32))).unwrap(),
                 )]),
             ),
             (4, Value::Array(vec![])),
