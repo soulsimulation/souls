@@ -65,6 +65,8 @@ import { chooseCommandSoul, chooseSoul, HOME_COMMANDS, homeCommand } from '../ho
 import { consolidateIn, digestOf, rememberIn, searchIn, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
 import { runShoot } from '../shoot/shoot.mjs';
+import { pairAddress } from '../pair/address.mjs';
+export { pairAddress, worldOf } from '../pair/address.mjs';
 
 export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'converse', 'lie', 'pray', 'prayers', 'wait', 'history', 'stats', 'pending', 'stop'];
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
@@ -72,23 +74,11 @@ export const LOCAL = ['digest', 'consolidate', 'schedule', 'help', 'memory', 're
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /**
- * A world's url as W2's pairing needs it: its directory (the url's origin), its key (the first path segment, else
- * `world`) and its gateway (`?gateway=`, else the origin's `/v2/ws`).
- */
-export function worldOf(text) {
-  let u;
-  try { u = new URL(text); } catch { throw Object.assign(new Error('pair <world url>, as https://host/<world>'), { code: 'pair-names-a-world' }); }
-  const world = u.pathname.split('/').filter(Boolean)[0] ?? 'world';
-  const gateway = u.searchParams.get('gateway') ?? `${u.protocol === 'https:' ? 'wss' : 'ws'}://${u.host}/v2/ws`;
-  return { directory: u.origin, world, gateway };
-}
-
-/**
  * Starts W2's pairing detached, its lines in `<home>/pairing.log`, and gives its first: the link and code, or the
  * refusal. The pairing polls on and writes the token where the daemon reads it once the owner approves.
  */
 async function pairing(home, url, { within = 15_000 } = {}) {
-  const { directory, world, gateway } = worldOf(url);
+  const { directory, world, gateway } = await pairAddress(url);
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const log = join(home, 'pairing.log');
   writeFileSync(log, '', { mode: 0o600 });

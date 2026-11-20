@@ -20,6 +20,7 @@
 //! - Wrong short codes are counted per account: [`GUESSES_MOST`] in [`GUESS_WINDOW`] seconds, then every code is
 //!   refused `code-guesses` until the window passes.
 
+pub mod operator;
 pub mod route;
 pub mod souls;
 #[cfg(test)]
@@ -89,6 +90,8 @@ pub struct Card {
     pub force: bool,
     /// The device the Soul is connected to now, if any.
     pub connected: Option<String>,
+    /// The id today's client knew the Soul by, for a Soul X11 brought over (R18), if the request named one.
+    pub former: Option<String>,
 }
 
 pub struct Pairing {
@@ -159,6 +162,8 @@ fn new_code() -> String {
 }
 
 type Row = (String, String, Option<String>, String, bool, u64, String);
+/// Finds the Soul X11 brought over for `(world, former id)`: its grant and its owning account (R18).
+pub type Imported<'a> = &'a dyn Fn(&str, &str) -> Result<Option<(String, String)>, &'static str>;
 type PollRow = (
     String,
     String,
@@ -186,6 +191,7 @@ impl Pairing {
                device TEXT, token_hash TEXT);",
         )?;
         db.execute_batch(souls::SCHEMA)?;
+        db.execute_batch(operator::SCHEMA)?;
         Ok(Pairing {
             public_url: public_url.trim_end_matches('/').to_string(),
             db: Mutex::new(db),
@@ -340,6 +346,7 @@ impl Pairing {
             Some(g) => self.soul_of(g)?.and_then(|(_, d)| d),
             None => None,
         };
+        let former = self.former_of(&code)?.map(|(_, f)| f);
         Ok(Card {
             device,
             label,
@@ -349,6 +356,7 @@ impl Pairing {
             scope,
             force,
             connected,
+            former,
         })
     }
 
@@ -360,18 +368,37 @@ impl Pairing {
         code: &str,
         now: u64,
     ) -> Result<String, (&'static str, Option<String>)> {
-        self.approve_holding(account, code, now, |_| false)
+        self.approve_with(account, code, now, &|_, _| Ok(None))
     }
 
-    /// [`Pairing::approve`], where `holds` says which grants the account holds in the accounts store (a world's
-    /// creator account holds its `creator-…` grant, recorded by the import or `--test-own`; G7b, #3477): a creator
-    /// grant the approving account holds is registered to it first. A creator grant no account here holds, or another
-    /// account does, is refused `not-the-creator`.
+    /// Approval with X11's imported former-Soul lookup; creator holdings are absent for this wrapper.
+    pub fn approve_with(
+        &self,
+        account: &str,
+        code: &str,
+        now: u64,
+        imported: Imported<'_>,
+    ) -> Result<String, (&'static str, Option<String>)> {
+        self.approve_combined(account, code, now, imported, |_| false)
+    }
+
+    /// Approval with the account's creator holdings; imported former Souls are absent for this wrapper.
     pub fn approve_holding(
         &self,
         account: &str,
         code: &str,
         now: u64,
+        holds: impl Fn(&str) -> bool,
+    ) -> Result<String, (&'static str, Option<String>)> {
+        self.approve_combined(account, code, now, &|_, _| Ok(None), holds)
+    }
+
+    fn approve_combined(
+        &self,
+        account: &str,
+        code: &str,
+        now: u64,
+        imported: Imported<'_>,
         holds: impl Fn(&str) -> bool,
     ) -> Result<String, (&'static str, Option<String>)> {
         let (code, _, soul, _, force, _, _) =
@@ -391,6 +418,20 @@ impl Pairing {
                 Ok(_) => Err((name, device)),
                 Err(_) => Err(("store", None)),
             }
+        };
+        // R18: a request naming a former Soul pairs the Soul X11 brought over for it, only for its own account.
+        let soul = match (soul, self.former_of(&code).map_err(|e| (e, None))?) {
+            (None, Some((world, former))) => {
+                match imported(&world, &former).map_err(|e| (e, None))? {
+                    Some((grant, owner)) if owner == account && is_soul_grant(&grant) => {
+                        self.register(&grant, account)
+                            .map_err(|_| ("store", None))?;
+                        Some(grant)
+                    }
+                    _ => return refuse("unknown-soul", None),
+                }
+            }
+            (soul, _) => soul,
         };
         let grant = match soul {
             Some(g) => match self.soul_of(&g).map_err(|e| (e, None))? {

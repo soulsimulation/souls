@@ -9,6 +9,7 @@
 import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readWorldRoutes, WORLD_ROUTES } from '../../origin/world-routes.mjs';
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const xml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
@@ -27,13 +28,14 @@ export function mergedSitemap(todayXml, origin, slugs) {
     ...all.map((u) => `  <url><loc>${xml(u)}</loc></url>`), '</urlset>', ''].join('\n');
 }
 
-export async function makeRoutes({ directory, launcher, origin, out, fetchImpl = fetch }) {
+export async function makeRoutes({ directory, launcher, origin, out, worldRoutes = process.env.SOULS_WORLD_ROUTES || WORLD_ROUTES, fetchImpl = fetch }) {
   const get = async (url, kind) => {
     const r = await fetchImpl(url, { signal: AbortSignal.timeout(10_000), headers: { 'user-agent': 'souls-routes' } });
     if (!r.ok) throw Error(`${url}: ${r.status}`);
     return kind === 'json' ? r.json() : r.text();
   };
-  const slugs = listedSlugs(await get(`${directory}/v1/worlds`, 'json'));
+  const mapped = readWorldRoutes(worldRoutes);
+  const slugs = listedSlugs(await get(`${directory}/v1/worlds`, 'json')).filter(slug => mapped[slug]?.canonical);
   const sitemap = mergedSitemap(await get(`${launcher}/sitemap.xml`, 'text'), origin, slugs);
   const dir = join(out, 'slugs');
   mkdirSync(dir, { recursive: true });

@@ -30,6 +30,7 @@ pub const DESCRIPTION_MOST: usize = 280;
 /// The tables this module adds to the pairing store.
 pub(super) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS pair_request_worlds_v1(code TEXT PRIMARY KEY, world TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS pair_request_formers_v1(code TEXT PRIMARY KEY, former TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS soul_profiles_v1(grant_text TEXT PRIMARY KEY, world TEXT, name TEXT, description TEXT,
       retire_asked INTEGER NOT NULL DEFAULT 0, retired_at INTEGER);
     CREATE TABLE IF NOT EXISTS soul_pictures_v1(grant_text TEXT PRIMARY KEY, format TEXT NOT NULL, hash TEXT NOT NULL,
@@ -66,6 +67,16 @@ pub fn is_world(text: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
+/// The id today's client knew a Soul by (`s_…`, R18): `s_` and 1 to 78 of `A-Z`, `a-z`, `0-9`, `_` and `-`.
+pub fn is_former(text: &str) -> bool {
+    text.strip_prefix("s_").is_some_and(|rest| {
+        (1..=78).contains(&rest.len())
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    })
+}
+
 fn store<T>(r: rusqlite::Result<T>) -> Result<T, &'static str> {
     r.map_err(|_| "store")
 }
@@ -81,6 +92,51 @@ impl Pairing {
             params![code, world],
         ))
         .map(|_| ())
+    }
+
+    /// Keeps the former id (R18) a pending request (by its code) names; its world is kept by [`Pairing::ask_world`].
+    pub fn ask_former(&self, code: &str, former: &str) -> Result<(), &'static str> {
+        if !is_former(former) {
+            return Err("former");
+        }
+        store(self.db.lock().expect("the store").execute(
+            "INSERT OR REPLACE INTO pair_request_formers_v1(code, former) VALUES (?1, ?2)",
+            params![code, former],
+        ))
+        .map(|_| ())
+    }
+
+    /// The world and former id a request (by its code) names, if it names a former Soul.
+    pub(super) fn former_of(&self, code: &str) -> Result<Option<(String, String)>, &'static str> {
+        store(
+            self.db
+                .lock()
+                .expect("the store")
+                .query_row(
+                    "SELECT w.world, f.former FROM pair_request_formers_v1 f
+                       JOIN pair_request_worlds_v1 w ON w.code = f.code WHERE f.code = ?1",
+                    params![code],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional(),
+        )
+    }
+
+    /// The former id a request names, by the secret its daemon polls with: the poll says it back (R18).
+    pub fn former_by_secret(&self, secret: &str) -> Option<String> {
+        let hash = to_hex(&sha256(secret.as_bytes()));
+        self.db
+            .lock()
+            .expect("the store")
+            .query_row(
+                "SELECT f.former FROM pair_request_formers_v1 f
+                   JOIN pair_requests_v1 r ON r.code = f.code WHERE r.secret_hash = ?1",
+                params![hash],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
     }
 
     /// At an approval: the Soul `grant` is now paired for the world its request named, if it named one.
