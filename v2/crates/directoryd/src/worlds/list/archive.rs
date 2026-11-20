@@ -9,6 +9,7 @@ pub struct Phase {
     pub lineage: [u8; 16],
     pub zone: Id,
     pub creator: Id,
+    pub founder: Id,
     pub creator_generation: u64,
     pub generation: u64,
     pub request: String,
@@ -19,7 +20,7 @@ pub struct Phase {
 impl Phase {
     pub fn json(&self) -> Json {
         json!({"world":self.world,"lineage":to_hex(&self.lineage),"zone":principal_text(self.zone),
-            "creator":principal_text(self.creator),"creator_generation":self.creator_generation,
+            "creator":principal_text(self.creator),"founder":principal_text(self.founder),"creator_generation":self.creator_generation,
             "generation":self.generation,"request":self.request,"action":self.action,"state":self.state})
     }
     pub fn instance(&self) -> String {
@@ -53,6 +54,7 @@ fn read<S: Store>(store: &S, row: &Json) -> R<Phase> {
         lineage: owner.lineage,
         zone: owner.zone,
         creator,
+        founder: owner.founder,
         creator_generation: owner.generation,
         generation: 0,
         request: String::new(),

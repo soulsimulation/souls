@@ -5,7 +5,8 @@ import { join, resolve, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { record, beneath, data, atomic, command, checkedConfig, ready } from './place-created-world.mjs';
+import { parseEnv } from 'node:util';
+import { beneath, data, atomic, command, checkedConfig, ready } from './place-created-world.mjs';
 import { readWorldRoutes } from '../origin/world-routes.mjs';
 import { updateWorldRoute } from './proxy/route-config.mjs';
 
@@ -13,8 +14,54 @@ const REQUEST=/^[a-f0-9]{64}$/, INSTANCE=/^[a-f0-9]{32}-[a-f0-9]{32}-[0-9]+$/, S
 const CONFIG='/etc/souls/placement.json';
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const fail=name=>{throw Error(name);};
-const same=(a,b)=>['world','lineage','zone','creator','creator_generation','generation','request','action'].every(k=>a?.[k]===b?.[k]);
+const same=(a,b)=>['world','lineage','zone','founder','creator','creator_generation','generation','request','action'].every(k=>a?.[k]===b?.[k]);
 const instance=phase=>`${phase.lineage}-${phase.zone.replace(':','-')}`;
+
+const STORE_KEYS=['DIRECTORY_STORE_URL','DIRECTORY_STORE_ENDPOINT','DIRECTORY_STORE_BUCKET','DIRECTORY_STORE_REGION',
+  'DIRECTORY_STORE_ACCESS_KEY_ID','DIRECTORY_STORE_SECRET_ACCESS_KEY','DIRECTORY_STORE_PREFIX',
+  'AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','AWS_DEFAULT_REGION'];
+const STORE_NAMES=new Set([...STORE_KEYS,'DIRECTORYD_WORLD_STORE']);
+const STORE_FILES=['/etc/souls/directory.args','/etc/souls/secrets.env'];
+
+/** Exactly the directory unit's fixed trusted files and precedence; never inherit the invoking shell's store. */
+export async function archiveStoreEnvironment(config,{inspect=lstat,load=data}={}) {
+  const merged={};
+  try {
+    const parent=await inspect('/etc/souls');
+    if(!parent.isDirectory()||parent.isSymbolicLink()||parent.uid!==0||(parent.mode&0o022))fail('archive-store-untrusted');
+    for(const [index,file]of STORE_FILES.entries()) {
+      let stat;try{stat=await inspect(file);}catch(error){if(index===1&&error.code==='ENOENT')continue;throw error;}
+      if(!stat.isFile()||stat.isSymbolicLink()||stat.uid!==0||(stat.mode&0o022))fail('archive-store-untrusted');
+      const text=(await load(file)).toString('utf8'),parsed=parseEnv(text),last={};
+      for(const line of text.split(/\r?\n/)) {
+        const lead=/^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\b/.exec(line);
+        if(!lead||!STORE_NAMES.has(lead[1]))continue;
+        const assignment=/^\s*([A-Z][A-Z0-9_]*)\s*=(.*)$/.exec(line);
+        if(!assignment)fail('archive-store-settings');
+        const raw=assignment[2].trim();
+        if(raw.endsWith('\\'))fail('archive-store-settings');
+        if(raw.startsWith("'")||raw.startsWith('"')) {
+          const quote=raw[0],end=raw.indexOf(quote,1);
+          if(end<0||!/^\s*(?:#.*)?$/.test(raw.slice(end+1)))fail('archive-store-settings');
+        }
+        const one=parseEnv(line),name=lead[1];
+        if(!Object.hasOwn(one,name)||/[\r\n\0]/.test(one[name]))fail('archive-store-settings');
+        last[name]=one[name];
+      }
+      for(const name of STORE_NAMES)if(Object.hasOwn(parsed,name)) {
+        if(!Object.hasOwn(last,name)||last[name]!==parsed[name])fail('archive-store-settings');
+        merged[name]=parsed[name];
+      }
+      for(const name of Object.keys(last))if(!Object.hasOwn(parsed,name))fail('archive-store-settings');
+    }
+    const remote=!!merged.DIRECTORY_STORE_URL?.trim()||Object.hasOwn(merged,'DIRECTORY_STORE_ENDPOINT');
+    if(!remote&&Object.hasOwn(merged,'DIRECTORYD_WORLD_STORE')&&merged.DIRECTORYD_WORLD_STORE!==join(config.worldsRoot,'directory'))fail('archive-store-mismatch');
+    return Object.fromEntries(STORE_KEYS.filter(name=>Object.hasOwn(merged,name)).map(name=>[name,merged[name]]));
+  } catch(error) {
+    if(['archive-store-untrusted','archive-store-settings','archive-store-mismatch'].includes(error.message))throw error;
+    fail('archive-store-unavailable');
+  }
+}
 
 async function boundedExit(child, ms) {
   let timer; const terminal=new Promise((ok,no)=>{child.once('error',no);child.once('exit',code=>ok(code));});
@@ -56,10 +103,7 @@ async function identity(config,phase) {
   const authority=registry.worlds?.[phase.world];
   if(registry.format!=='souls/world-authority/1'||registry.worldsRoot!==config.worldsRoot||authority?.instance!==id
       ||authority.lineage!==phase.lineage||authority.zone!==phase.zone)fail('archive-authority-mismatch');
-  const named=record(await data(await beneath(config.worldsRoot,join(config.worldsRoot,'directory/world-name',phase.world))));
-  if(!(named instanceof Map)||named.get(1)?.toString('utf8')!==phase.world||named.get(2)?.toString('hex')!==phase.lineage
-      ||`${named.get(3)?.[0]?.toString('hex')}:${named.get(3)?.[1]}`!==phase.zone
-      ||`${named.get(4)?.[0]?.toString('hex')}:${named.get(4)?.[1]}`!==authority.creator)fail('archive-authority-mismatch');
+  if(authority.creator!==phase.founder)fail('archive-authority-mismatch');
   // Keep exact existing addresses; an alias is explicit route metadata pointing into this instance, never a guess.
   return {id,world,authority,metadataHash,factsHash,build:phase.build};
 }
@@ -225,6 +269,7 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
     if(config.placement!=='/etc/souls/placement-data'||config.worldRoutes!=='/var/lib/souls/routes/worlds.json')fail('archive-config-untrusted');
     if(process.argv[2]==='--as-souls') {
       const args=process.argv.slice(3);
+      const storeSettings=args[0]==='mirror'?null:await archiveStoreEnvironment(config);
       const uid=Number(execFileSync('/usr/bin/id',['-u','souls'],{encoding:'utf8'}).trim()),gid=Number(execFileSync('/usr/bin/id',['-g','souls'],{encoding:'utf8'}).trim());
       if(!Number.isInteger(uid)||uid<=0||!Number.isInteger(gid)||gid<=0)fail('archive-account-invalid');
       process.setgroups([gid]);process.setgid(gid);process.setuid(uid);
@@ -233,7 +278,7 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
         await atomic(join(config.backup,'archives',args[1]),kept);console.log('{}');
       } else {
         if(!['list','request','get','restore','finish','recover'].includes(args[0])||args.length>3)fail('archive-arguments-invalid');
-        const child=spawn(join(config.library,'supervisor'),['archive-state',...args],{env:{PATH:'/usr/bin:/bin',WORLDS_ROOT:config.worldsRoot},stdio:'inherit'});
+        const child=spawn(join(config.library,'supervisor'),['archive-state',...args],{env:{PATH:'/usr/bin:/bin',WORLDS_ROOT:config.worldsRoot,...storeSettings},stdio:'inherit'});
         await boundedExit(child,10_000);
       }
     } else console.log(JSON.stringify(await operator(config,process.argv.slice(2))));

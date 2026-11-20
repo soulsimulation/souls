@@ -556,6 +556,7 @@ fn w17_current_creator_confirmation_archive_restore_and_reservations_survive_rel
     );
     let phase = archive::begin(&store, "garden", Some(person(2)), "garden", false).unwrap();
     assert_eq!(phase.creator, person(2));
+    assert_eq!(phase.founder, person(1));
     assert_eq!(phase.creator_generation, 1);
     assert_eq!(
         archive::begin(&store, "garden", Some(person(2)), "garden", false).unwrap(),
