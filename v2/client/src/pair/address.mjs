@@ -39,4 +39,3 @@ export async function pairAddress(text, get = fetch) {
   if (data?.world !== address.world || data.directory !== '/' || data.gateway !== `${base}/v2/ws`) throw Object.assign(new Error('world bootstrap is invalid'), { code: 'pair-world-routing' });
   return address;
 }
-
