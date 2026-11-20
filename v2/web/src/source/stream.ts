@@ -15,6 +15,7 @@ export class StreamSource implements Source {
       const m = e.data;
       if (m.t === 'pointer') on.pointer(m.p);
       else if (m.t === 'part') on.part(m.p);
+      else if (m.t === 'snapshot') on.snapshot?.(m.s);
       else on.error(m.message);
     };
     this.worker.onerror = (e) => on.error(e.message);

@@ -343,6 +343,17 @@ fn read_one(bytes: &[u8]) -> R<(Tree, Root, Blobs)> {
     Ok((tree, root, blobs))
 }
 
+/// Reads an immutable recovery checkpoint with exactly the normal CRC, hash and root validation.
+pub fn read_bytes(bytes: &[u8]) -> R<Restored> {
+    let (tree, root, blobs) = read_one(bytes)?;
+    Ok(Restored {
+        tree,
+        root,
+        blobs,
+        rejected: Vec::new(),
+    })
+}
+
 /// The newest checkpoint in `dir` that verifies, else the one before (rule 5). `None` when there is none at all.
 pub fn restore(dir: &Path) -> R<Option<Restored>> {
     let mut rejected = Vec::new();

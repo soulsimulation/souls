@@ -59,7 +59,20 @@ export type SaidRec = { speaker: string; at: number; length: number; reach: numb
  * utterance in it (V1b). */
 export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[]; happened?: Happened[] };
 
+/** The COMPLETE currently drawable public state, including no opaque-frame descendants. A new source/worker
+ * cannot know the caller's previous nodes. No invented part time, effects, events or motion. */
+export type SnapshotRec = { nodes: NodeRec[]; removed: string[] };
+
+/** Reconcile a full snapshot against the actual caller's retained state, including a history/live/source restart. */
+export function reconcileSnapshot(previous: Iterable<string>, snapshot: SnapshotRec): SnapshotRec {
+  const present = new Set(snapshot.nodes.map(n => n.id));
+  const removed = new Set(snapshot.removed);
+  for (const id of previous) if (!present.has(id)) removed.add(id);
+  return { nodes: snapshot.nodes, removed: [...removed] };
+}
+
 export type SourceEvents = {
+  snapshot?(s: SnapshotRec): void;
   pointer(p: Pointer): void;
   part(p: PartRec): void;
   error(message: string): void;
