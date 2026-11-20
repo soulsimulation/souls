@@ -81,10 +81,17 @@ struct World {
 const FLOOR: i64 = 5_000_000;
 
 fn world(place: Place) -> World {
+    let point = Vec3::new(0, place.height, 0);
+    world_with(place, point, -5_000, 300_000)
+}
+
+/// A chair of `place` with its slot at `point` on a floor from z `front` mm to 5 m (the floor's walkable piece, as
+/// clearance cut it), with two bodies at z `at` µm, 100 mm either side of the chair's line.
+fn world_with(place: Place, point: Vec3, front: i32, at: i64) -> World {
     let floor = fixture(1);
     let corners = vec![
-        [-5_000, 0, -5_000],
-        [5_000, 0, -5_000],
+        [-5_000, 0, front],
+        [5_000, 0, front],
         [5_000, 0, 5_000],
         [-5_000, 0, 5_000],
     ];
@@ -109,7 +116,7 @@ fn world(place: Place) -> World {
             slot: None,
         };
         let placed = surface
-            .place(id, frame, Vec3::new(x, 0, 300_000), Quat::IDENTITY)
+            .place(id, frame, Vec3::new(x, 0, at), Quat::IDENTITY)
             .expect("placed");
         c.add(family(), placed).expect("added");
         bodies.push(id);
@@ -118,7 +125,7 @@ fn world(place: Place) -> World {
     slots
         .add(PlaceAt {
             thing: chair,
-            point: Vec3::new(0, place.height, 0),
+            point,
             place,
             facing: Quat::IDENTITY,
             floor,
@@ -201,6 +208,7 @@ impl World {
             &mut w.mint,
             &mut w.moves,
             &geo,
+            &w.floors,
             &reqs,
             0,
         )
@@ -485,6 +493,7 @@ fn c19_three_bodies_share_a_thing_each_in_its_own_slot() {
             &mut w.mint,
             &mut w.moves,
             &Near,
+            &w.floors,
             &reqs,
             0,
         );
@@ -554,4 +563,125 @@ fn seat_ownership_changes_wake_once_for_take_and_release() {
         .release_body(w.bodies[1])
         .expect("retirement releases slot");
     assert_eq!(w.slots.changes(), vec![w.chair]);
+}
+
+/// Eden's chair `e_3403bec8` (B7c, #3593): its slot [0, 470, 20] mm and its stand point [0, 0, 509] mm, which lies 19 mm
+/// inside the clearance of the chair's own collider: the walkable floor starts at z 528 mm. Bodies wait at z `at` µm.
+fn clearance_chair(front: i32, at: i64) -> World {
+    let place = Place {
+        height: 470_000,
+        stand: [0, 489_000],
+        ..chair()
+    };
+    world_with(place, Vec3::new(0, 470_000, 20_000), front, at)
+}
+
+/// #1960 (B7c's stuck Soul): a body seated in a chair whose stand point lies in the chair's own clearance rises onto
+/// the first supported point out along the chair's exit, stands on the floor, frees the seat, and walks the next tick.
+#[test]
+fn a_body_rises_from_a_chair_whose_stand_point_is_in_its_own_clearance() {
+    let (sit, rise) = (mv("souls:sit"), mv("souls:rise"));
+    let mut w = clearance_chair(528, 700_000);
+    let b = w.bodies[0];
+    let stand = w.slots.place(w.chair).unwrap().stand().unwrap();
+    assert_eq!(
+        (stand.x, stand.z),
+        (0, 509_000),
+        "the chair's own stand point"
+    );
+    let frame = Frame {
+        node: fixture(1),
+        slot: None,
+    };
+    assert!(
+        w.floors[&fixture(1)]
+            .place(b, frame, stand, Quat::IDENTITY)
+            .is_err(),
+        "the exact stand point is off the floor"
+    );
+    // Reach is not what this tests: every point is within it (the served world measures it to the stand point).
+    let run = |w: &mut World, until: i64| {
+        while let Some(t) = w.due.fire(until) {
+            w.slots
+                .fire(
+                    &mut w.c,
+                    &mut w.due,
+                    &mut w.mint,
+                    &mut w.moves,
+                    &Near,
+                    &w.floors,
+                    &t,
+                )
+                .expect("a move's timer");
+        }
+    };
+    let req = Request {
+        body: b,
+        thing: w.chair,
+        slot: None,
+        mv: &sit,
+        stance: Stance::Sit,
+    };
+    let r = w
+        .slots
+        .commit(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &mut w.moves,
+            &Near,
+            &w.floors,
+            &[req],
+            0,
+        )
+        .remove(0)
+        .1;
+    r.expect("the sit is admitted");
+    run(&mut w, i64::MAX);
+    assert_eq!(w.c.body(b).unwrap().pose.support, Support::Slot);
+    let n = w
+        .slots
+        .rise(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &mut w.moves,
+            &Near,
+            b,
+            &rise,
+            2_000_000,
+        )
+        .expect("rising");
+    let contact = w.moves.record(n).expect("in progress").contact_at();
+    run(&mut w, contact + 1);
+    let p = w.c.body(b).unwrap().pose;
+    assert!(
+        matches!(p.support, Support::Surface { .. }),
+        "on the floor: {p:?}"
+    );
+    assert_eq!(
+        (p.position.x, p.position.z),
+        (0, 529_000),
+        "the first supported point out"
+    );
+    assert_eq!(w.c.input(b).unwrap().stance, Stance::Stand);
+    assert_eq!(w.slots.holder(w.chair), None, "the seat is free");
+    run(&mut w, i64::MAX);
+    let d = w.c.claim(b, &walk_shape()).expect("a walk takes the legs");
+    walks_away(&mut w, b, d);
+}
+
+/// #1960: a seat with no supported point out of it within the body's standing reach (the floor starts 2.5 m out, past
+/// the standard body's 2.06 m) is refused up front by name, so no body sits where it cannot rise; nothing changes.
+#[test]
+fn a_sit_with_nowhere_to_rise_within_reach_is_refused_up_front() {
+    let sit = mv("souls:sit");
+    let mut w = clearance_chair(2_500, 2_600_000);
+    let b = w.bodies[0];
+    let before = w.c.body(b).unwrap().pose;
+    let e = w.sit(&[0], &sit).remove(0).1.expect_err("refused");
+    assert_eq!(e.name, "place-no-stand-point", "{e}");
+    assert!(e.detail.contains("2060000"), "{e}");
+    assert!(w.moves.is_empty() && w.slots.is_empty() && w.due.is_empty());
+    assert_eq!(w.c.body(b).unwrap().pose, before);
 }

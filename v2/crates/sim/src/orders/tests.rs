@@ -349,6 +349,7 @@ impl World {
             &mut w.mint,
             &mut w.moves,
             &geo,
+            &w.floors,
             &[Request {
                 body,
                 thing: w.chair,
