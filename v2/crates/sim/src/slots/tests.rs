@@ -601,10 +601,7 @@ fn a_standard_body_takes_seats_up_to_its_standing_reach() {
     let sit = mv("souls:sit");
     for height in [650_000, 1_000_000, 1_600_000, STANDARD_REACH] {
         assert!(height > sit.reach || height == 650_000);
-        let mut w = world(Place {
-            height,
-            ..chair()
-        });
+        let mut w = world(Place { height, ..chair() });
         let b = w.bodies[0];
         w.flat = true;
         let r = w.sit(&[0], &sit).remove(0).1;
@@ -627,10 +624,7 @@ fn a_seat_above_the_bodys_own_standing_reach_is_refused_and_nothing_changes() {
     };
     let reach = standing_reach(small);
     for (height, admitted) in [(reach, true), (reach + 1, false), (1_600_000, false)] {
-        let mut w = world(Place {
-            height,
-            ..chair()
-        });
+        let mut w = world(Place { height, ..chair() });
         let b = w.bodies[0];
         w.slots.admit(b, small);
         let before = w.c.body(b).expect("a body").pose;
@@ -642,16 +636,16 @@ fn a_seat_above_the_bodys_own_standing_reach_is_refused_and_nothing_changes() {
         }
         let e = r.expect_err("refused");
         assert_eq!(e.name, "place-out-of-reach");
-        assert!(e.detail.contains(&format!("standing reach {reach} µm")), "{e}");
+        assert!(
+            e.detail.contains(&format!("standing reach {reach} µm")),
+            "{e}"
+        );
         assert!(w.moves.is_empty() && w.slots.is_empty() && w.due.is_empty());
         assert_eq!(w.c.body(b).expect("a body").pose, before);
         assert_eq!(w.slots.holder(w.chair), None);
     }
     for height in [19_000_000, 33_900_000] {
-        let mut w = world(Place {
-            height,
-            ..chair()
-        });
+        let mut w = world(Place { height, ..chair() });
         w.flat = true;
         let e = w.sit(&[0], &sit).remove(0).1.expect_err("refused");
         assert_eq!(e.name, "place-out-of-reach", "a cabin {height} µm up");
