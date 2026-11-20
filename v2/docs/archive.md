@@ -13,9 +13,11 @@ here: ten-second shipping (O3), serving a restored world (O12), search by Soul (
 ## Forked worlds and checkpoint-based archives
 
 A filtered fork starts with a real K5 checkpoint, often at a high effect sequence and with a pinned root other than
-`souls:place`. Its archive does not pretend to start at sequence zero. The server captures the selected checkpoint
-bytes before the clock can start checkpoint pruning, validates its CRC, hashes, header identity, pinned root and
-next effect sequence, and stores those exact bytes privately as `archive/base/<SHA-256>`. The head's optional field
+`souls:place`. Its archive does not pretend to start at sequence zero. On first publication, the server captures
+its original sealed record-zero fork checkpoint before pruning can start. It validates CRC, hashes, full header
+identity and definition pins, the exact initial K4 boundary, and canonical replay agreement with the newest engine
+checkpoint and complete log. Missing required original source refuses by name; the engine still restores its newest
+checkpoint. Those exact original bytes are stored privately as `archive/base/<SHA-256>`. The head's optional field
 5 binds that object. A legacy constructor explicitly refuses a based head; legacy heads and format-1 bundles
 retain their existing encoding and aligned windows.
 

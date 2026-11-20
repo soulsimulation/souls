@@ -336,6 +336,62 @@ fn w3c_checkpoint(
 }
 
 #[test]
+fn w3c_initial_fork_base_matches_newest_checkpoint_and_complete_source() {
+    let (scratch, mut fork, original) = w3c_fork("initial-base");
+    let input = sim::recorder::record(1, &[sim::recorder::Input::Time { real: 1 }]).unwrap();
+    w3c_append(&mut fork, &input);
+    let raw = w3c_set(&fork.header, &mut fork.tree, 60_000_000, 7);
+    w3c_append(&mut fork, &raw);
+    let newest = w3c_checkpoint(&scratch, &mut fork);
+    let recovered = sim::log::recover(&std::fs::read(scratch.join("child/log")).unwrap()).unwrap();
+    let selected = archive::Base::initial_fork(
+        &original.header,
+        &original.checkpoint,
+        &newest.checkpoint,
+        &recovered,
+    )
+    .unwrap();
+    assert_eq!(selected, original);
+    assert_eq!(selected.record, 0);
+    assert!(newest.record > 0);
+    let mut missing = recovered.clone();
+    missing.first = 1;
+    missing.records.remove(0);
+    assert_eq!(
+        archive::Base::initial_fork(
+            &original.header,
+            &original.checkpoint,
+            &newest.checkpoint,
+            &missing
+        )
+        .unwrap_err()
+        .name,
+        "archive-source-missing"
+    );
+    let mut changed = original.checkpoint.clone();
+    let last = changed.len() - 1;
+    changed[last] ^= 1;
+    assert!(
+        archive::Base::initial_fork(&original.header, &changed, &newest.checkpoint, &recovered)
+            .is_err()
+    );
+    // A valid K5 with unlogged state cannot replace proof of the exact canonical boundary.
+    w3c_set(&fork.header, &mut fork.tree, 61_000_000, 9);
+    let mismatched = w3c_checkpoint(&scratch, &mut fork);
+    assert_eq!(
+        archive::Base::initial_fork(
+            &original.header,
+            &original.checkpoint,
+            &mismatched.checkpoint,
+            &recovered
+        )
+        .unwrap_err()
+        .name,
+        "archive-source-mismatch"
+    );
+}
+
+#[test]
 fn w3c_actual_fork_base_physical_inputs_restart_store_only_and_rolling_seek() {
     use directoryd::directory::store::When;
     use replica::encode::{Value, encode};

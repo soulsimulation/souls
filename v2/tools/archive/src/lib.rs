@@ -418,6 +418,84 @@ impl Base {
             record: restored.root.record,
         })
     }
+    /// First publication of a filtered fork uses its original sealed record-zero base. Engine recovery still
+    /// uses its newest checkpoint; both routes must reach exactly the same canonical state and durable boundary.
+    pub fn initial_fork(
+        header: &[u8],
+        original: &[u8],
+        newest: &[u8],
+        found: &sim::log::Recovered,
+    ) -> R<Self> {
+        let base = Self::read(header, original)?;
+        let latest = Self::read(header, newest)?;
+        let h = Header::read(header)?;
+        let initial = sim::checkpoint::read_bytes(original)?;
+        let log = found.header.as_ref().ok_or_else(|| Refusal {
+            name: "archive-source-missing",
+            detail: "fork log header".into(),
+        })?;
+        if base.record != 0
+            || found.first != 0
+            || log.epoch != h.epoch
+            || initial.root.log
+                != Some(sim::log::At {
+                    record: 0,
+                    offset: sim::log::HEADER_LEN as u64,
+                    crc: log.salt,
+                })
+            || latest.record > found.records.len() as u64
+        {
+            return refuse(
+                "archive-source-missing",
+                "original fork boundary or contiguous source",
+            );
+        }
+        let check_pins = |tree: &Tree| -> R<()> {
+            let state = tree.to_state();
+            if state
+                .nodes
+                .values()
+                .chain(state.in_flight.values().flat_map(|f| f.nodes.values()))
+                .any(|n| !h.kinds.contains(&n.kind))
+            {
+                return refuse(
+                    "archive-base-mismatch",
+                    "checkpoint definition pin absent from exact header",
+                );
+            }
+            Ok(())
+        };
+        let mut from_original = base.tree()?;
+        let mut from_latest = latest.tree()?;
+        check_pins(&from_original)?;
+        check_pins(&from_latest)?;
+        for (record, bytes) in found.records.iter().enumerate() {
+            if record as u64 == latest.record
+                && state_hash(&mut from_original)? != state_hash(&mut from_latest)?
+            {
+                return refuse(
+                    "archive-source-mismatch",
+                    "original replay differs from newest checkpoint",
+                );
+            }
+            if sim::recorder::is_input(bytes) {
+                sim::recorder::read(bytes)?;
+            } else {
+                let part = Part::read(bytes)?;
+                from_original.apply(&h, &part)?;
+                if record as u64 >= latest.record {
+                    from_latest.apply(&h, &part)?;
+                }
+            }
+        }
+        if state_hash(&mut from_original)? != state_hash(&mut from_latest)? {
+            return refuse(
+                "archive-source-mismatch",
+                "original and newest final replay differ",
+            );
+        }
+        Ok(base)
+    }
     pub fn tree(&self) -> R<Tree> {
         Ok(sim::checkpoint::read_bytes(&self.checkpoint)?.tree)
     }

@@ -947,8 +947,10 @@ impl Off {
             stakes: false,
         });
         if let Some(a) = &self.archive {
-            if self.based && record >= self.archive_base {
-                let _ = a.send((record, bytes.to_vec()));
+            if self.based {
+                if record >= self.archive_base {
+                    let _ = a.send((record, bytes.to_vec()));
+                }
             } else if !input {
                 let _ = a.send((self.parts, bytes.to_vec()));
                 self.parts += 1;
@@ -1088,10 +1090,69 @@ fn archive_bridge(
     Ok(())
 }
 
+/// Existing immutable archive state wins; a first fork publication captures its original sealed source before
+/// answers can start checkpoint pruning. Open-file identity checks refuse a symlink/replacement before reading it.
+fn fork_archive_base<S: Store>(
+    store: &S,
+    prefix: &str,
+    dir: &Path,
+    header: &Header,
+    newest: &[u8],
+    found: &sim::log::Recovered,
+) -> Result<ArchiveBase, Refusal> {
+    if store.get(&format!("{prefix}archive/head"))?.is_some() {
+        let base = archive::fetch(store, prefix)?.base.ok_or_else(|| Refusal {
+            name: "archive-unbased-head",
+            detail: "fork requires its durable based archive".into(),
+        })?;
+        if base.header != header.stored() {
+            return Err(Refusal {
+                name: "archive-base-mismatch",
+                detail: "stored fork header differs".into(),
+            });
+        }
+        return Ok(base);
+    }
+    use std::io::Read;
+    use std::os::unix::fs::MetadataExt;
+    let path = dir.join("checkpoints/ckpt-00000000000000000000");
+    let io = |e: std::io::Error| Refusal {
+        name: if e.kind() == std::io::ErrorKind::NotFound {
+            "archive-source-missing"
+        } else {
+            "archive-source-io"
+        },
+        detail: format!("original fork checkpoint: {:?}", e.kind()),
+    };
+    let before = std::fs::symlink_metadata(&path).map_err(io)?;
+    if !before.is_file() || before.file_type().is_symlink() {
+        return Err(Refusal {
+            name: "archive-source-invalid",
+            detail: "original fork checkpoint must be regular".into(),
+        });
+    }
+    let mut file = std::fs::File::open(&path).map_err(io)?;
+    let opened = file.metadata().map_err(io)?;
+    let after = std::fs::symlink_metadata(&path).map_err(io)?;
+    if !opened.is_file()
+        || !after.is_file()
+        || after.file_type().is_symlink()
+        || (before.dev(), before.ino()) != (opened.dev(), opened.ino())
+        || (before.dev(), before.ino()) != (after.dev(), after.ino())
+    {
+        return Err(Refusal {
+            name: "archive-source-changed",
+            detail: "original fork checkpoint changed before capture".into(),
+        });
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(io)?;
+    ArchiveBase::initial_fork(header.stored(), &bytes, newest, found)
+}
+
 /// Already captured recovery source and the same authoritative text Store, kept together at startup.
 struct SourceContext<'a> {
-    first: u64,
-    records: &'a [Vec<u8>],
+    recovered: &'a sim::log::Recovered,
     checkpoint: Option<&'a [u8]>,
     text: Arc<sim::text::Store>,
 }
@@ -1107,15 +1168,20 @@ fn off_machine(
     source: SourceContext<'_>,
 ) -> R<Off> {
     let SourceContext {
-        first,
-        records,
+        recovered,
         checkpoint,
         text,
     } = source;
+    let (first, records) = (recovered.first, recovered.records.as_slice());
     let store: Bucket = Shared(Arc::new(
         supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?,
     ));
     println!("store: {}", store.0.what());
+    let prefix = format!("h/{name}/{}/", to_hex(&built.header.lineage.0));
+    let fork_base = checkpoint
+        .map(|newest| fork_archive_base(&store, &prefix, dir, &built.header, newest, recovered))
+        .transpose()
+        .map_err(refusal)?;
     let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
     let mut d = Directory::new(store.clone(), machine);
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
@@ -1152,7 +1218,6 @@ fn off_machine(
     report("the shipper", h);
     let mut based = false;
     let mut archive_base = 0;
-    let prefix = format!("h/{name}/{}/", to_hex(&lineage));
     let again = Again {
         store: Under {
             store: store.clone(),
@@ -1161,8 +1226,7 @@ fn off_machine(
         public: dir.join("history"),
         header: built.header.stored().to_vec(),
     };
-    let archive = if let Some(checkpoint) = checkpoint {
-        let base = ArchiveBase::read(built.header.stored(), checkpoint).map_err(refusal)?;
+    let archive = if let Some(base) = fork_base {
         let mut a =
             Archiver::open_based_with_redactions(again.clone(), "", &base, text.redactions())
                 .map_err(refusal)?;
@@ -1207,8 +1271,10 @@ fn off_machine(
         if record >= from {
             off.take(record, bytes, input);
         } else if let Some(a) = &off.archive {
-            if off.based && record >= off.archive_base {
-                let _ = a.send((record, bytes.clone()));
+            if off.based {
+                if record >= off.archive_base {
+                    let _ = a.send((record, bytes.clone()));
+                }
             } else if !input {
                 let _ = a.send((off.parts, bytes.clone()));
                 off.parts += 1;
@@ -1436,8 +1502,7 @@ fn serve(args: &[String]) -> R<()> {
                 &name,
                 &dir,
                 SourceContext {
-                    first: found.first,
-                    records: &found.records,
+                    recovered: &found,
                     checkpoint: checkpoint.as_deref(),
                     text: Arc::clone(&text),
                 },
@@ -1729,6 +1794,59 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn w3c_off_keeps_physical_based_delivery_separate_from_legacy_counter() {
+        let mut world = archive::script::world(1, 1, None);
+        let part = archive::script::tick(&mut world, 0, 1, 0);
+        let input = sim::recorder::record(0, &[sim::recorder::Input::Time { real: 1 }]).unwrap();
+        sim::recorder::read(&input).unwrap();
+        let (ship, shipped) = channel();
+        let (archive, archived) = channel();
+        let mut off = Off {
+            ship,
+            archive: Some(archive),
+            parts: 0,
+            based: true,
+            archive_base: 4,
+        };
+        for (record, bytes, is_input) in [
+            (0, &part, false),
+            (1, &input, true),
+            (4, &input, true),
+            (5, &part, false),
+        ] {
+            off.take(record, bytes, is_input);
+            let actual = shipped.try_recv().unwrap();
+            assert_eq!(actual.record, record);
+            assert_eq!(&actual.bytes, bytes);
+        }
+        assert_eq!(archived.try_recv().unwrap(), (4, input.clone()));
+        assert_eq!(archived.try_recv().unwrap(), (5, part.clone()));
+        assert!(archived.try_recv().is_err());
+        assert_eq!(off.parts, 0);
+        let (ship, shipped) = channel();
+        let (archive, archived) = channel();
+        let mut legacy = Off {
+            ship,
+            archive: Some(archive),
+            parts: 0,
+            based: false,
+            archive_base: 4,
+        };
+        for (record, bytes, is_input) in
+            [(10, &input, true), (11, &part, false), (12, &part, false)]
+        {
+            legacy.take(record, bytes, is_input);
+            let actual = shipped.try_recv().unwrap();
+            assert_eq!(actual.record, record);
+            assert_eq!(&actual.bytes, bytes);
+        }
+        assert_eq!(archived.try_recv().unwrap(), (0, part.clone()));
+        assert_eq!(archived.try_recv().unwrap(), (1, part));
+        assert!(archived.try_recv().is_err());
+        assert_eq!(legacy.parts, 2);
+    }
 
     #[test]
     fn w3c_public_history_mirror_is_strict_immutable_and_symlink_safe() {
