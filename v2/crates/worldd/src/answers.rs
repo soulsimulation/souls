@@ -1518,14 +1518,7 @@ impl Clock {
                 Ok(args) => args,
                 Err(reason) => {
                     let a = self.refusal(actor, sequence, reason);
-                    return self.answered(
-                        key,
-                        sequence,
-                        None,
-                        Some(value),
-                        &a,
-                        (vec![reply], stamps),
-                    );
+                    return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
                 }
             }
         } else {

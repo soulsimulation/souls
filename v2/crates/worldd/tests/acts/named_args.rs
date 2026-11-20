@@ -292,6 +292,13 @@ fn named_args_dresser_part_and_private_text_through_gateway() {
             vec![pair("drawer", Value::Text(name("not_a_drawer")))],
             "point-unknown",
         ),
+        (
+            vec![Value::Array(vec![
+                Value::Bytes(vec![0xff]),
+                Value::Text(name("top")),
+            ])],
+            "arg-malformed",
+        ),
         (vec![pair("drawer", vessel().to_value())], "arg-type"),
         (
             vec![pair("drawer", Value::Bytes(vec![0xff]))],
