@@ -5,13 +5,37 @@ import { lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync } from 'n
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const args = process.argv.slice(2), outAt = args.indexOf('--out'), test = args.includes('--test');
-if (outAt < 0 || !args[outAt + 1] || args.length !== (test ? 3 : 2)) throw Error('usage: prepare.mjs --out <prepared> [--test]');
-const out = resolve(args[outAt + 1]), start = performance.now(), total = 300_000;
 const inputs = [
   ...['verdelis.glb', 'kalama.glb', 'kweku.glb', 'mycos.glb', 'ada.glb', 'shuijing.glb', 'nyx.glb', 'kin/green-patterns-blue.glb', 'kin/chebel.glb', 'kin/colors-lemuet.glb', 'kin/crystal-freeman.glb', 'kin/dark-blue.glb', 'kin/green-brains-out.glb'].map((name) => 'worlds/littlemartians/characters/' + name),
   ...['animated-casual.glb', 'animated-casual.mesh.glb', 'animated-punk.mesh.glb', 'animated-woman.mesh.glb', 'clips-ual.glb', 'clips-ual-woman.glb'].map((name) => 'mars/viewer/public/modular/environment/' + name),
 ];
+/** Fixed existing dependencies for the released renderer's source/type closure; no package install. */
+export function prepareDependencies() {
+  const manifest = JSON.parse(readFileSync(join(repo, 'v2/web/package.json'), 'utf8'));
+  const packages = JSON.parse(readFileSync(join(repo, 'v2/web/package-lock.json'), 'utf8')).packages;
+  for (const [name, version] of [['three', '0.187.0'], ['@types/three', '0.187.0'], ['zod', '4.6.7']]) {
+    const file = join(repo, 'v2/web/node_modules', name, 'package.json');
+    const info = lstatSync(file);
+    if (!info.isFile() || info.isSymbolicLink() || JSON.parse(readFileSync(file, 'utf8')).version !== version ||
+      packages['node_modules/' + name]?.version !== version ||
+      (manifest.dependencies?.[name] ?? manifest.devDependencies?.[name]) !== version ||
+      (packages[''].dependencies?.[name] ?? packages[''].devDependencies?.[name]) !== version) throw Error('body.dependency-lock');
+  }
+  for (const [path, target] of [
+    ['mars/viewer/node_modules/three', '../../../v2/web/node_modules/three'],
+    ['mars/viewer/node_modules/@types/three', '../../../../v2/web/node_modules/@types/three'],
+    ['mars/viewer/node_modules/zod', '../../../v2/web/node_modules/zod'],
+    ['packages/engine-contract/node_modules/zod', '../../../v2/web/node_modules/zod'],
+  ]) {
+    const leaf = join(repo, path); mkdirSync(dirname(leaf), { recursive: true });
+    try { if (!lstatSync(leaf).isSymbolicLink() || readlinkSync(leaf) !== target) throw Error('body.dependency-link-conflict'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; symlinkSync(target, leaf); }
+  }
+}
+function main() {
+const args = process.argv.slice(2), outAt = args.indexOf('--out'), test = args.includes('--test');
+if (outAt < 0 || !args[outAt + 1] || args.length !== (test ? 3 : 2)) throw Error('usage: prepare.mjs --out <prepared> [--test]');
+const out = resolve(args[outAt + 1]), start = performance.now(), total = 300_000;
 const cache = join(process.env.RUNNER_TEMP ?? join(repo, '.local/2750'), 'body-input-cache');
 function run(stage, argv, env = process.env, executable = process.execPath, cwd = repo) {
   const remaining = total - (performance.now() - start); if (remaining <= 0) throw Error('body.prepare-deadline');
@@ -22,13 +46,7 @@ function run(stage, argv, env = process.env, executable = process.execPath, cwd 
 }
 try {
   run('inputs', ['tools/assets/pull.mjs', '--only', inputs.join(','), '--cache', cache, '--concurrency', '4']);
-  const packages = JSON.parse(readFileSync(join(repo, 'v2/web/package-lock.json'), 'utf8')).packages;
-  const version = JSON.parse(readFileSync(join(repo, 'v2/web/node_modules/three/package.json'), 'utf8')).version;
-  if (version !== '0.187.0' || packages['node_modules/three']?.version !== version) throw Error('body.three-lock');
-  const parent = join(repo, 'mars/viewer/node_modules'), leaf = join(parent, 'three'), target = '../../../v2/web/node_modules/three';
-  mkdirSync(parent, { recursive: true });
-  try { if (!lstatSync(leaf).isSymbolicLink() || readlinkSync(leaf) !== target) throw Error('body.three-link-conflict'); }
-  catch (error) { if (error.code !== 'ENOENT') throw error; symlinkSync(target, leaf); }
+  prepareDependencies();
   run('import', ['v2/tools/import-body/presets.ts', '--out', out, '--media', repo]);
   if (!lstatSync(join(out, 'body-assets.json')).isFile()) throw Error('body.assets-missing');
   if (test) {
@@ -41,3 +59,5 @@ try {
     }
   }
 } catch (error) { console.error(error.message); process.exitCode = 1; }
+}
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
