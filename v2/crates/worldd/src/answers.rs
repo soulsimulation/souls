@@ -486,6 +486,8 @@ pub struct Config {
     pub served: Option<crate::views::served::Feed>,
     /// K16's text store, where an intent's words are kept (V1b); a store in memory when none is given.
     pub text: Option<Arc<Store>>,
+    /// Immutable imported public name bytes, attached only to delivered public record references off the clock.
+    pub public_names: Arc<crate::views::names::PublicNames>,
     /// Called once at start with the log's durable mark; what it gives is handed each part record as it is appended
     /// (its number and bytes): a view tier's `offer`, so a stream writer follows the world (V1b).
     pub follow: Option<Follow>,
@@ -590,6 +592,7 @@ impl Config {
             sky: None,
             served: None,
             text: None,
+            public_names: Arc::new(Default::default()),
             follow: None,
             rate: None,
             engine: None,
@@ -3411,7 +3414,13 @@ pub fn start<S: Storage + 'static>(
     // one complete cache: restored records, the pre-clock checkpoint's records, and this seal's incremental records.
     let first = world.seal()?;
     kept.keep(&first);
-    let syncs = syncs::start(world.frozen(), kept, (cfg.lineage, zone, cfg.epoch)).map_err(io)?;
+    let syncs = syncs::start(
+        world.frozen(),
+        kept,
+        (cfg.lineage, zone, cfg.epoch),
+        Arc::clone(&cfg.public_names),
+    )
+    .map_err(io)?;
     let fresh = if cfg.checkpoints.is_some() {
         first.nodes
     } else {
