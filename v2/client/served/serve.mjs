@@ -21,6 +21,7 @@ const TYPES = {
 
 /** The answer for `path` (no query), or null when it is not one of the served addresses. */
 export function answer(dir, path) {
+  path = path.replace(/\/llms\.txt$/, '/instructions.md'); // The world's short agent guide is the current instructions.
   const config = /\/v1\/config$/.test(path), name = /\/([a-z_.]+)$/.exec(path)?.[1];
   if (!config && !TYPES[name]) return null;
   try {
