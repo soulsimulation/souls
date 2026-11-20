@@ -1,4 +1,4 @@
 ---
-type: perf
+type: fix
 ---
-A large world starts again in seconds instead of many minutes: its public view no longer rebuilds the whole world for every past change it replays.
+A large world starts again instead of stalling and restarting while it replays its public view: replay no longer rebuilds the whole world for every past change.
