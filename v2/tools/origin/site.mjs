@@ -14,12 +14,12 @@
 //   GET /w/<slug>/<client file>    R17's installed client files and v1/config (serve.mjs); the front door selects v2 slugs
 //
 // Files are read when asked (no-cache: a release's new page shows at once); the feed re-reads news.jsonl when it
-// changed. Nothing here writes, and nothing here makes a request of its own. `web` defaults to the install's
+// changed. Nothing here writes. Only an authenticated ops data request calls the configured directory. `web` defaults to the install's
 // /usr/local/lib/souls/web, `data` to /var/lib/souls and `client` to /usr/local/lib/souls/client
 // (SOULS_WEB, SOULS_DATA, SOULS_CLIENT).
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { serveOps } from './ops.mjs';
+import { opsOverview } from './ops.mjs';
 
 // install.sh puts the served-client adapter beside this file; the checkout keeps it with the client.
 const { answer } = await import(existsSync(new URL('./serve.mjs', import.meta.url)) ? './serve.mjs' : '../../client/served/serve.mjs');
@@ -107,7 +107,7 @@ export function publicAuth(env = process.env) {
 
 /** The site's routes: `handle(req, res)` answers and returns true for a site path, false for anything else. */
 export function siteRoutes({ web = process.env.SOULS_WEB || '/usr/local/lib/souls/web', data = process.env.SOULS_DATA || '/var/lib/souls', client = process.env.SOULS_CLIENT || '/usr/local/lib/souls/client', auth = process.env } = {}) {
-  const feed = newsFeed(data);
+  const feed = newsFeed(data), ops = opsOverview({ data, env: auth, publicAuth: () => publicAuth(auth) });
   const file = (req, res, name, type) => {
     let body; try { body = readFileSync(join(web, name)); } catch { json(res, 404, { ok: false, code: 'not-found' }); return; }
     res.writeHead(200, { 'content-type': type, 'content-length': body.length, 'cache-control': 'no-cache', vary: 'Accept' }).end(req.method === 'HEAD' ? undefined : body);
@@ -116,7 +116,7 @@ export function siteRoutes({ web = process.env.SOULS_WEB || '/usr/local/lib/soul
     const url = new URL(req.url, 'http://origin'), path = url.pathname;
     const isClient = CLIENT_PATH.test(path);
     if (!SITE_PATHS.includes(path) && !isClient) return false;
-    if (path === '/ops') { serveOps(req, res, url); return true; }
+    if (path === '/ops') { ops(req, res, url); return true; }
     if (req.method !== 'GET' && req.method !== 'HEAD') { json(res, 405, { ok: false, code: 'read-only' }, { allow: 'GET, HEAD' }); return true; }
     if (path === '/v1/auth/config') {
       const cfg = publicAuth(auth);
