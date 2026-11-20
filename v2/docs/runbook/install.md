@@ -154,7 +154,7 @@ path unit watches a request-ID-only inbox. Its finite initializer has the existi
 and CPUWeight 100 inside the same slice; it does not change the slice or any world's startup/restart limits.
 Directoryd stays at 256M. The root phase writes only protected placement metadata and the existing per-world unit
 configuration. A fixed child clears supplementary groups and drops to the installed Souls account before touching
-world data, forking, exporting streams or updating the route map. No request chooses a program, path or unit.
+world data, forking, exporting streams or updating world route metadata. No request chooses a program, path or unit.
 
 Package the **existing public Eden template**, with serving support made by the same build, before enabling creation:
 
@@ -168,9 +168,10 @@ Only allowlisted facts, public entry/move data, entry coordinates and exact runt
 Creator metadata, tokens, logs and seeded state are excluded. The published filtered checkpoint remains the world;
 the child verifies its manifest, sealed template header and compiled runtime pins before creating any output.
 
-The release owner configures `/etc/souls/placement.json` before activating the path unit: set the actual old
-launcher's loopback URL (initially empty), confirm the installed build hash and trusted catalogue, directory/origin
-addresses, route files and reserved gateway port range. Installation never overwrites this operator configuration.
+The release owner configures `/etc/souls/placement.json` before activating the path unit: confirm the installed build
+hash and trusted catalogue, directory/origin addresses and reserved gateway port range. The installed helper requires
+the fixed route metadata `/var/lib/souls/routes/worlds.json` and route output `/var/lib/souls-routes`. Installation
+never overwrites this operator configuration. The existing route service owns its launcher/public-origin settings.
 When upgrading its build, update that pin to the verified installed binary. The inbox is root:souls 0770; the fixed
 parent, private status/authority files and attempts stay root-owned. The directory can write only the inbox there.
 Atomic token and retirement-notice replacement also needs the directory service's sandbox to permit writes to
@@ -187,7 +188,12 @@ preview-only route while enabling new canonical worlds.
 After reviewing the install plan and configuration, the release owner may enable the path unit. A create reserves
 its request, immutable name, creator and lineage durably, then reports that placement is pending. The page retains
 the same click key on a retryable response: selecting Create again checks that same request. A ready answer follows
-real native/gateway health, an advancing served stream, exact world authority publication and successful route-map
-refresh. An interrupted initializer leaves its owned pending world; it never fabricates a ready answer, reforks under
+real native/gateway health, an advancing served stream and exact world authority publication. The initializer then
+starts the existing `souls-routes.service`, the sole map writer, and requires this world's regular activation marker
+before reporting ready. A coalesced invocation with an earlier map stays pending and retries the same request. The
+route unit binds only the mandatory route JSON into its own runtime directory, read-only; it gets no Souls group
+membership. Its fixed process environment overrides an optional conflicting route-file environment value. Missing
+source refuses the route job and preserves the last map. Install this reviewed route unit before enabling creation.
+An interrupted initializer leaves its owned pending world; it never fabricates a ready answer, reforks under
 a new identity, overwrites a running world's data or stops its clock. Malformed inbox entries are retained outside
 the inbox, so they cannot retrigger a failure loop or block an unrelated valid request.
