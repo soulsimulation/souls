@@ -2,8 +2,9 @@
 //! floor and a seat's slot through the controller, and a seat holds one body.
 //!
 //! - **A seat** is one slot of a thing, with its kind's data ([`replica::moves::Place`]): the slot's height above the
-//!   floor from the kind's model geometry, and a stand point. A seat higher than the move's reach (the body's standing
-//!   reach) is refused `place-out-of-reach`, by its height alone.
+//!   floor from the kind's model geometry, and a stand point. A seat higher than the body's standing reach
+//!   ([`standing_reach`], today's SEATDEF: the overhead reach of its admitted build) is refused `place-out-of-reach`,
+//!   by its height alone (#3600). The move's own reach is horizontal: how far the body is from the seat at contact.
 //! - **Reserved at commit.** The requests of one tick are taken together ([`Slots::commit`]) and ordered by a stable
 //!   key, the body's id and then the seat's, never by arrival. The first takes the seat; every later one is refused
 //!   `place-taken`, naming the holder. The hold is a field of this table, keyed by the seat's thing and slot, so the
@@ -40,6 +41,7 @@ use replica::bodies::{Class, SkillShape, Want};
 use replica::effects::Refusal;
 use replica::encode::Name;
 use replica::ids::{Id, Minter};
+use replica::kinds::sizes::{Build, Size};
 use replica::moves::{Move, Place};
 use replica::pose::{Frame, HandOff, Quat, Vec3};
 use replica::time::Micros;
@@ -58,6 +60,28 @@ fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
         name,
         detail: detail.into(),
     })
+}
+
+/// Today's standing reach of the standard 1.75 m body (`BODY_MODEL.overheadMax`, 2.06 m), µm: the highest seat top it
+/// gets onto. Above it a body would have to climb.
+pub const STANDARD_REACH: i64 = 2_060_000;
+
+/// The build a body has until its admitted one is given ([`Slots::admit`]): today's walking body, 1.75 m.
+pub const STANDARD_BUILD: Build = Build {
+    size: Size::Standard,
+    height_mm: 1_750,
+    hover_mm: 0,
+};
+
+/// A body's standing reach, µm (today's `seatReach`, #1083): [`STANDARD_REACH`] scaled by its height over the standard
+/// 1.75 m; a hovering body (a floater) reaches the standard height, unscaled.
+pub fn standing_reach(build: Build) -> i64 {
+    if build.hover_mm > 0 {
+        return STANDARD_REACH;
+    }
+    let h = i128::from(build.height_mm.max(0));
+    i64::try_from(i128::from(STANDARD_REACH) * h / i128::from(STANDARD_BUILD.height_mm))
+        .unwrap_or(i64::MAX)
 }
 
 /// A seat where it is: its thing, its kind's data, its slot's point and facing in the floor's frame (µm), and the
@@ -136,11 +160,23 @@ pub struct Slots {
     held: BTreeMap<Key, Hold>,
     by_body: BTreeMap<Id, Key>,
     changed: Vec<Id>,
+    /// Each body's admitted build, as its adapter gave it; [`STANDARD_BUILD`] when none was.
+    builds: BTreeMap<Id, Build>,
 }
 
 impl Slots {
     pub fn new() -> Slots {
         Slots::default()
+    }
+
+    /// Gives `body`'s admitted build, whose standing reach a seat's height is compared with ([`standing_reach`]).
+    pub fn admit(&mut self, body: Id, build: Build) {
+        self.builds.insert(body, build);
+    }
+
+    /// `body`'s standing reach, µm: its admitted build's, else the standard body's.
+    pub fn reach_of(&self, body: Id) -> i64 {
+        standing_reach(self.builds.get(&body).copied().unwrap_or(STANDARD_BUILD))
     }
 
     /// Seat ownership changes, drained by the world to wake standing queues.
@@ -322,14 +358,15 @@ impl Slots {
                 format!("{} holds {}", show(r.body), show(t.0)),
             );
         }
-        if at.place.height > r.mv.reach {
+        let reach = self.reach_of(r.body);
+        if at.place.height > reach {
             return refuse(
                 "place-out-of-reach",
                 format!(
                     "{}: {} µm above the floor, standing reach {} µm",
                     show(r.thing),
                     at.place.height,
-                    r.mv.reach
+                    reach
                 ),
             );
         }

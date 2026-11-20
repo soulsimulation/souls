@@ -14,7 +14,10 @@ use replica::moves::{Effector, Move, Place};
 use replica::pose::{Frame, Quat, Support, Vec3, fixture};
 use replica::world_model::show;
 
-use super::{PlaceAt, Request, Slots, clear_spot, seated_shape};
+use super::{
+    PlaceAt, Request, STANDARD_BUILD, STANDARD_REACH, Slots, clear_spot, seated_shape,
+    standing_reach,
+};
 use crate::controller::{Controller, Part, Stance};
 use crate::ground::Piece;
 use crate::mover::Surface;
@@ -76,6 +79,8 @@ struct World {
     floors: BTreeMap<Id, Surface>,
     chair: Id,
     bodies: Vec<Id>,
+    /// Reach on the floor's plane, as the served world asks it (#3600): see [`World::geo`].
+    flat: bool,
 }
 
 const FLOOR: i64 = 5_000_000;
@@ -133,11 +138,27 @@ fn world(place: Place) -> World {
         floors: BTreeMap::from([(floor, surface)]),
         chair,
         bodies,
+        flat: false,
     }
 }
 
 impl World {
+    /// Each body's and named point's distance; with `flat`, on the floor's plane: the served world's reach is
+    /// horizontal, from the body to the seat's stand point (`worldd::bodies` asks it at height 0), so a seat's height
+    /// is the standing reach's alone (#3600).
     fn geo(&self) -> Geo {
+        let Geo(bodies, points) = self.geo3();
+        if !self.flat {
+            return Geo(bodies, points);
+        }
+        let flat = |p: Vec3| Vec3::new(p.x, 0, p.z);
+        Geo(
+            bodies.into_iter().map(|(b, p)| (b, flat(p))).collect(),
+            points.into_iter().map(|(n, p)| (n, flat(p))).collect(),
+        )
+    }
+
+    fn geo3(&self) -> Geo {
         let at = self.slots.place(self.chair).expect("the chair");
         let stand = at.stand().expect("a stand point");
         let points = BTreeMap::from([("souls:slot", at.point), ("souls:stand", stand)]);
@@ -266,7 +287,7 @@ fn a_sit_cancelled_before_contact_frees_the_seat() {
 fn a_seat_above_standing_reach_is_refused_by_name() {
     let sit = mv("souls:sit");
     let mut w = world(Place {
-        height: sit.reach + 1,
+        height: STANDARD_REACH + 1,
         ..chair()
     });
     let r = w.sit(&[0], &sit).remove(0).1.expect_err("refused");
@@ -554,4 +575,86 @@ fn seat_ownership_changes_wake_once_for_take_and_release() {
         .release_body(w.bodies[1])
         .expect("retirement releases slot");
     assert_eq!(w.slots.changes(), vec![w.chair]);
+}
+
+/// #3600 A1: the standing reach is the admitted build's overhead reach (today's `seatReach`): 2.06 m for the standard
+/// 1.75 m body, scaled by height, and unscaled for a hovering body.
+#[test]
+fn standing_reach_is_the_builds_overhead_reach() {
+    assert_eq!(standing_reach(STANDARD_BUILD), 2_060_000);
+    let of = |height_mm, hover_mm| {
+        standing_reach(replica::kinds::sizes::Build {
+            height_mm,
+            hover_mm,
+            ..STANDARD_BUILD
+        })
+    };
+    assert_eq!(of(1_850, 0), 2_177_714);
+    assert_eq!(of(1_000, 0), 1_177_142);
+    assert_eq!(of(1_000, 300), STANDARD_REACH, "a hovering body, unscaled");
+}
+
+/// #3600 A1: a standard body takes ordinary seats above the sit move's 0.6 m contact reach and up to its standing
+/// reach (C22's rows at 0.65 to 1.60 m: stool, guitar stool, hammock, wagon), and is seated in the slot.
+#[test]
+fn a_standard_body_takes_seats_up_to_its_standing_reach() {
+    let sit = mv("souls:sit");
+    for height in [650_000, 1_000_000, 1_600_000, STANDARD_REACH] {
+        assert!(height > sit.reach || height == 650_000);
+        let mut w = world(Place {
+            height,
+            ..chair()
+        });
+        let b = w.bodies[0];
+        w.flat = true;
+        let r = w.sit(&[0], &sit).remove(0).1;
+        assert!(r.is_ok(), "a seat {height} µm up: {r:?}");
+        w.run(i64::MAX);
+        assert_eq!(w.c.body(b).expect("a body").pose.support, Support::Slot);
+        assert_eq!(w.slots.holder(w.chair), Some(b));
+    }
+}
+
+/// #3600 A2: a smaller body is refused a seat above its own standing reach by name, its body and the seat as they were;
+/// at its reach it is seated. The cable car's cabins (19 m and 33.9 m above their stops) stay refused for every body.
+#[test]
+fn a_seat_above_the_bodys_own_standing_reach_is_refused_and_nothing_changes() {
+    let sit = mv("souls:sit");
+    let small = replica::kinds::sizes::Build {
+        size: replica::kinds::sizes::Size::Small,
+        height_mm: 1_000,
+        hover_mm: 0,
+    };
+    let reach = standing_reach(small);
+    for (height, admitted) in [(reach, true), (reach + 1, false), (1_600_000, false)] {
+        let mut w = world(Place {
+            height,
+            ..chair()
+        });
+        let b = w.bodies[0];
+        w.slots.admit(b, small);
+        let before = w.c.body(b).expect("a body").pose;
+        w.flat = true;
+        let r = w.sit(&[0], &sit).remove(0).1;
+        if admitted {
+            assert!(r.is_ok(), "at its reach: {r:?}");
+            continue;
+        }
+        let e = r.expect_err("refused");
+        assert_eq!(e.name, "place-out-of-reach");
+        assert!(e.detail.contains(&format!("standing reach {reach} µm")), "{e}");
+        assert!(w.moves.is_empty() && w.slots.is_empty() && w.due.is_empty());
+        assert_eq!(w.c.body(b).expect("a body").pose, before);
+        assert_eq!(w.slots.holder(w.chair), None);
+    }
+    for height in [19_000_000, 33_900_000] {
+        let mut w = world(Place {
+            height,
+            ..chair()
+        });
+        w.flat = true;
+        let e = w.sit(&[0], &sit).remove(0).1.expect_err("refused");
+        assert_eq!(e.name, "place-out-of-reach", "a cabin {height} µm up");
+        assert!(w.slots.is_empty());
+    }
 }
