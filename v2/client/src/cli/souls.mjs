@@ -72,15 +72,38 @@ export const LOCAL = ['digest', 'consolidate', 'schedule', 'help', 'memory', 're
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /**
- * A world's url as W2's pairing needs it: its directory (the url's origin), its key (the first path segment, else
- * `world`) and its gateway (`?gateway=`, else the origin's `/v2/ws`).
+ * A world's public URL selects its own gateway path. Explicit gateway queries are local development only.
  */
 export function worldOf(text) {
   let u;
   try { u = new URL(text); } catch { throw Object.assign(new Error('pair <world url>, as https://host/<world>'), { code: 'pair-names-a-world' }); }
-  const world = u.pathname.split('/').filter(Boolean)[0] ?? 'world';
-  const gateway = u.searchParams.get('gateway') ?? `${u.protocol === 'https:' ? 'wss' : 'ws'}://${u.host}/v2/ws`;
+  if (!['https:', 'http:'].includes(u.protocol) || u.username || u.password) throw Object.assign(new Error('name an HTTP world URL'), { code: 'pair-names-a-world' });
+  const installed = /^\/(preview\/)?w\/([a-z0-9][a-z0-9-]{0,62})(?:\/|$)/.exec(u.pathname);
+  const world = installed?.[2] ?? u.pathname.split('/').filter(Boolean)[0] ?? 'world';
+  const base = installed ? `/${installed[1] ?? ''}w/${world}` : '';
+  const socket = new URL(`${base}/v2/ws`, u.href.replace(/^http/, 'ws'));
+  const local = (at) => at.protocol === 'http:' && (at.hostname === 'localhost' || at.hostname === '[::1]' || /^127\.(?:\d{1,3}\.){2}\d{1,3}$/.test(at.hostname));
+  const explicit = !installed && local(u) && u.searchParams.get('gateway');
+  if (explicit) {
+    const target = new URL(explicit);
+    if (target.protocol !== 'ws:' || !local(new URL(target.href.replace(/^ws:/, 'http:'))) || target.username || target.password || target.search || target.hash) throw Object.assign(new Error('local gateway must be WS loopback'), { code: 'pair-names-a-world' });
+    socket.href = target.href;
+  }
+  const gateway = socket.href;
   return { directory: u.origin, world, gateway };
+}
+
+/** Canonical/preview addresses must confirm the same-origin installed bootstrap before any pairing request. */
+export async function pairAddress(text, get = fetch) {
+  const address = worldOf(text), at = new URL(text);
+  const match = /^\/(preview\/)?w\/([a-z0-9][a-z0-9-]{0,62})(?:\/|$)/.exec(at.pathname);
+  if (!match) return address;
+  const base = `/${match[1] ?? ''}w/${match[2]}`;
+  const res = await get(`${at.origin}${base}/v1/bootstrap`, { redirect: 'error', credentials: 'omit', cache: 'no-store' });
+  if (!res.ok) throw Object.assign(new Error(`world bootstrap refused: ${res.status}`), { code: 'pair-world-routing' });
+  const data = await res.json();
+  if (data.world !== address.world || data.directory !== '/' || data.gateway !== `${base}/v2/ws`) throw Object.assign(new Error('world bootstrap is invalid'), { code: 'pair-world-routing' });
+  return address;
 }
 
 /**
@@ -88,7 +111,7 @@ export function worldOf(text) {
  * refusal. The pairing polls on and writes the token where the daemon reads it once the owner approves.
  */
 async function pairing(home, url, { within = 15_000 } = {}) {
-  const { directory, world, gateway } = worldOf(url);
+  const { directory, world, gateway } = await pairAddress(url);
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const log = join(home, 'pairing.log');
   writeFileSync(log, '', { mode: 0o600 });
