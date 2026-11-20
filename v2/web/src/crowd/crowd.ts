@@ -23,7 +23,8 @@ export class Crowd {
   readonly bodyLoads = new Map<string, { state: 'loading' | 'ready' | 'unavailable'; model?: number; reason?: string }>();
   ready: Uint8Array;
   /** The per-body bone texture V7 fills: a row per body, three texels per bone, as the bake's rows. */
-  readonly live: THREE.DataTexture;
+  private readonly liveUniform: { value: THREE.DataTexture };
+  get live(): THREE.DataTexture { return this.liveUniform.value; }
   count = 0;
   private cap: number;
   x: Float32Array; y: Float32Array; z: Float32Array; yaw: Float32Array;
@@ -49,7 +50,7 @@ export class Crowd {
     this.blend = new Float32Array(capacity); this.model = new Uint32Array(capacity); this.lod = new Uint8Array(capacity);
     this.liveRow = new Int16Array(capacity).fill(-1);
     const bones = Math.max(...models.map((m) => m.bones));
-    this.live = new THREE.DataTexture(new Float32Array(bones * 3 * LIVE_ROWS * 4), bones * 3, LIVE_ROWS, THREE.RGBAFormat, THREE.FloatType);
+    this.liveUniform = { value: new THREE.DataTexture(new Float32Array(bones * 3 * LIVE_ROWS * 4), bones * 3, LIVE_ROWS, THREE.RGBAFormat, THREE.FloatType) };
     this.live.minFilter = this.live.magFilter = THREE.NearestFilter;
     this.live.needsUpdate = true;
     this.draws = models.map((m) => this.makeDraws(m, capacity));
@@ -59,7 +60,7 @@ export class Crowd {
     if (m.clips.length > MAX_CLIPS) throw new Error(`${m.name}: more than ${MAX_CLIPS} clips`);
     const pad = (a: number[]) => [...a, ...new Array(MAX_CLIPS - a.length).fill(0)];
     const uniforms: CrowdUniforms = {
-      uBake: { value: m.bake }, uLive: { value: this.live },
+      uBake: { value: m.bake }, uLive: this.liveUniform,
       uClipStart: { value: pad(m.clips.map((c) => c.start)) }, uClipFrames: { value: pad(m.clips.map((c) => c.frames)) },
     };
     return m.lods.map((g, level) => {
@@ -91,7 +92,9 @@ export class Crowd {
     if (width > old.width) {
       const data = new Float32Array(width * LIVE_ROWS * 4);
       for (let row = 0; row < LIVE_ROWS; row++) data.set((old.data as Float32Array).subarray(row * old.width * 4, (row + 1) * old.width * 4), row * width * 4);
-      this.live.image = { data, width, height: LIVE_ROWS }; this.live.needsUpdate = true;
+      const previous = this.live, texture = new THREE.DataTexture(data, width, LIVE_ROWS, THREE.RGBAFormat, THREE.FloatType);
+      texture.minFilter = texture.magFilter = THREE.NearestFilter; texture.needsUpdate = true;
+      this.liveUniform.value = texture; previous.dispose();
     }
     const index = this.models.length; this.models.push(m); this.draws.push(this.makeDraws(m, this.cap)); return index;
   }

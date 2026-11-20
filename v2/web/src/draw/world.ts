@@ -66,7 +66,7 @@ export class WorldView {
   apply(nodes: NodeRec[], removed: string[], samples: SampleRec[] = []): void {
     for (const n of nodes) {
       this.nodes.set(n.id, n);
-      if (n.at !== null) {
+      if (n.at !== null || plain(n.kind) === 'souls:body') {
         if (!this.tracks.has(n.id)) {
           this.tracks.set(n.id, new Track());
           this.bodyIds.push(n.id);
@@ -175,7 +175,7 @@ export class WorldView {
     const boxes: THREE.Matrix4[] = [];
     const tags: number[] = [];
     for (const n of this.nodes.values()) {
-      if (n.at !== null || STRUCTURE.has(plain(n.kind))) continue;
+      if (n.at !== null || plain(n.kind) === 'souls:body' || STRUCTURE.has(plain(n.kind))) continue;
       const f = this.frame(n.id);
       const s = (n.scale ?? 1_000_000) / 1_000_000;
       const solids = n.solids?.length ? n.solids : [[0, 0, 250, 250, 0, 0, 500, 0, 0]];
@@ -271,9 +271,9 @@ export class WorldView {
     for (const id of this.bodyIds) {
       const tr = this.tracks.get(id)!;
       tr.trim(t);
-      const p = tr.at(t);
       const n = this.nodes.get(id);
-      if (!p || !n) continue;
+      if (!n) continue;
+      const p = tr.at(t) ?? n.pos;
       v.set(p[0] * UM, p[1] * UM, p[2] * UM).applyMatrix4(this.frame(n.parent));
       if (crowd) (crowd.place(id, v.x, v.y, v.z, n.body), k++);
       else this.bodies.setMatrixAt(k++, m.makeTranslation(v.x, v.y, v.z));
@@ -291,7 +291,7 @@ export class WorldView {
   crowd(t: number): THREE.Vector3 | null {
     const at: THREE.Vector3[] = [];
     for (const id of this.bodyIds) {
-      const p = this.tracks.get(id)!.at(t), n = this.nodes.get(id);
+      const n = this.nodes.get(id), p = this.tracks.get(id)!.at(t) ?? n?.pos;
       if (p && n) at.push(new THREE.Vector3(p[0] * UM, p[1] * UM, p[2] * UM).applyMatrix4(this.frame(n.parent)));
     }
     let best: THREE.Vector3 | null = null, most = -1;
