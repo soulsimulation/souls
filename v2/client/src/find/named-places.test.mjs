@@ -119,3 +119,45 @@ test('overlapping A to B socket replacement finishes A and isolates both promise
   assert.deepEqual(await second, { ok: true });
   assert.equal(find(rowsOf(copy).values(), 'west lake').found.length, 1);
 });
+
+test('a changed root refuses hydration before any name installation', async () => {
+  const a = fixture('Plaza'), b = fixture('Harbour'), copy = held(a);
+  const sock = { send() {} }, helper = publicNameHydration(copy, () => 1, () => sock);
+  const pass = helper.hydrate(sock, performance.now() + 1000);
+  // The old canonical record may still be held during a descent; its old public root is no longer current.
+  const roots = copy.roots; copy.all.set(b.hash, b.raw);
+  copy.roots = () => JSON.stringify({ changed: b.hash });
+  helper.answer(sock, 1, '-', reply([a]));
+  assert.equal((await pass).reason, 'public-names-changed');
+  copy.roots = roots;
+  assert.equal(find(rowsOf(copy).values(), 'plaza').found.length, 0);
+});
+
+test('multiple batches read the reachable copy once, then only their expected records', async () => {
+  const records = Array.from({ length: 130 }, (_, i) => fixture(`Place ${i}`, 1, i + 1));
+  const copy = held(...records), byHash = new Map(records.map((r) => [r.hash, r]));
+  let reads = 0, requests = 0, number = 0;
+  const read = copy.record; copy.record = (hash) => { reads++; return read(hash); };
+  const sock = { send(frame) {
+    requests++; const ask = decode(frame), hashes = ask.get(22);
+    assert.ok(hashes.length <= 64);
+    const batch = hashes.map((h) => byHash.get(Buffer.from(h).toString('hex')));
+    queueMicrotask(() => helper.answer(sock, ask.get(20), '-', reply(batch)));
+  } };
+  const helper = publicNameHydration(copy, () => ++number, () => sock);
+  assert.deepEqual(await helper.hydrate(sock, performance.now() + 1000), { ok: true });
+  assert.equal(requests, 3);
+  assert.equal(reads, 2 * records.length);
+});
+
+test('synchronous validation past the original deadline cannot report a fresh success', async (t) => {
+  let now = 0, late = false;
+  t.mock.method(performance, 'now', () => now);
+  const a = fixture(), copy = held(a), read = copy.record;
+  copy.record = (hash) => { if (late) now = 1001; return read(hash); };
+  const sock = { send() {} }, helper = publicNameHydration(copy, () => 1, () => sock);
+  const pass = helper.hydrate(sock, 1000); late = true;
+  helper.answer(sock, 1, '-', reply([a]));
+  assert.equal((await pass).reason, 'public-names-timeout');
+  assert.equal(find(rowsOf(copy).values(), 'west lake').found.length, 0);
+});

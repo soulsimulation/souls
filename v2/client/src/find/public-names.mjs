@@ -31,13 +31,14 @@ export function publicNameHydration(copy, nextNumber, currentSocket) {
         if (currentSocket() !== sock || refused !== '-') throw new Error('public-names-refused');
         const records = decode(bytes).get(22), expected = pending.records;
         if (!Array.isArray(records) || records.length !== expected.length) throw new Error('public-name-records');
-        const reachable = new Map(publicNameRecords(copy, false).map((r) => [r.hash, r]));
         for (let k = 0; k < records.length; k++) {
-          const now = reachable.get(expected[k].hash);
-          if (!now || !(records[k] instanceof Uint8Array) || !Buffer.from(records[k]).equals(Buffer.from(expected[k].bytes)) || !Buffer.from(now.bytes).equals(Buffer.from(expected[k].bytes))) throw new Error('public-name-current-record');
+          const now = copy.record(expected[k].hash);
+          if (!now || !(records[k] instanceof Uint8Array) || !Buffer.from(records[k]).equals(Buffer.from(expected[k].bytes)) || !Buffer.from(now).equals(Buffer.from(expected[k].bytes))) throw new Error('public-name-current-record');
         }
+        if (copy.roots() !== owner.roots) { finish(owner, { ok: false, reason: 'public-names-changed' }); return true; }
+        if (performance.now() >= owner.deadline) { finish(owner, { ok: false, reason: 'public-names-timeout' }); return true; }
         rememberPublicNames(copy, bytes, new Set(expected.map((r) => r.reference)));
-        finish(owner, { ok: true });
+        finish(owner, performance.now() < owner.deadline ? { ok: true } : { ok: false, reason: 'public-names-timeout' });
       } catch { finish(owner, { ok: false, reason: 'public-names-refused' }); }
       return true;
     },
@@ -45,7 +46,8 @@ export function publicNameHydration(copy, nextNumber, currentSocket) {
       if (running?.sock === sock) return running.promise;
       if (!sock || currentSocket() !== sock) return Promise.resolve({ ok: false, reason: 'public-names-disconnected' });
       if (pending && pending.sock !== sock) finish(pending, { ok: false, reason: 'public-names-disconnected' });
-      const pass = { sock };
+      // Unchanged canonical roots preserve the reachability of these already-validated immutable records.
+      const pass = { sock, roots: copy.roots() };
       pass.promise = (async () => {
         let seen = attempted.get(sock);
         if (!seen) attempted.set(sock, (seen = new Set()));
@@ -56,7 +58,7 @@ export function publicNameHydration(copy, nextNumber, currentSocket) {
           if (left <= 0) return { ok: false, reason: 'public-names-timeout' };
           const records = wanted.slice(at, at + 64), n = nextNumber();
           const result = await new Promise((resolve) => {
-            const owner = { sock, n, records, resolve };
+            const owner = { sock, n, records, resolve, roots: pass.roots, deadline };
             owner.timer = setTimeout(() => finish(owner, { ok: false, reason: 'public-names-timeout' }), left);
             pending = owner;
             try { sock.send(recordsRequest(n, records.map((r) => r.hash))); } catch { finish(owner, { ok: false, reason: 'public-names-disconnected' }); }
@@ -64,7 +66,7 @@ export function publicNameHydration(copy, nextNumber, currentSocket) {
           if (!result.ok) return result;
           for (const r of records) seen.add(r.hash);
         }
-        return { ok: true };
+        return performance.now() < deadline ? { ok: true } : { ok: false, reason: 'public-names-timeout' };
       })().finally(() => { if (running === pass) running = null; });
       running = pass;
       return pass.promise;
