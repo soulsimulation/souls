@@ -416,6 +416,13 @@ pub struct PreparedRebind {
     pub triangle: crate::mover::RebindTriangle,
 }
 
+/// A certificate's outcome (B12b): the rebinds to commit, or every guard held and a body only walked on.
+#[derive(Debug)]
+pub enum Certified {
+    Ready(Vec<(BuildBasis, Moved)>),
+    WalkedOn,
+}
+
 /// Every body's claims, input and mover state; the only way any of them is moved or posed.
 #[derive(Default)]
 pub struct Controller {
@@ -732,7 +739,18 @@ impl Controller {
     /// Validates every precomputed topology rebind without searching or mutating the live actor.
     /// Validates unchanged admission state, then certifies the current point without moving it.
     pub fn certify_rebinds(&self, prepared: &[PreparedRebind]) -> R<Vec<(BuildBasis, Moved)>> {
+        match self.certify_or_walked(prepared)? {
+            Certified::Ready(out) => Ok(out),
+            Certified::WalkedOn => refuse("edit.body-stale", "prepared triangle differs"),
+        }
+    }
+
+    /// As `certify_rebinds`, but tells apart (B12b) the one case where every guard holds and a body's current point
+    /// has only walked out of its prepared triangle: the caller may place the same bodies again off the clock.
+    pub fn certify_or_walked(&self, prepared: &[PreparedRebind]) -> R<Certified> {
         let mut out = Vec::with_capacity(prepared.len());
+        let mut walked = false;
+        let mut seen = BTreeSet::new();
         for target in prepared {
             let before = &target.before;
             let Some(current) = self.build_basis(before.moved.id) else {
@@ -745,20 +763,26 @@ impl Controller {
                 || current.moved.pose.frame != before.moved.pose.frame
                 || current.moved.pose.support != before.moved.pose.support
                 || !self.bodies.contains_key(&before.moved.id)
+                || !seen.insert(before.moved.id)
             {
                 return refuse("edit.body-stale", "prepared body changed");
             }
-            let after = target
-                .triangle
-                .rebind(&current.moved)
-                .ok_or_else(|| Refusal {
-                    name: "edit.body-stale",
-                    detail: "prepared triangle differs".into(),
-                })?;
-            out.push((current, after));
+            match target.triangle.rebind(&current.moved) {
+                Some(after) => out.push((current, after)),
+                None if !target.triangle.contains(&current.moved) => walked = true,
+                None => {
+                    return Err(Refusal {
+                        name: "edit.body-stale",
+                        detail: "prepared triangle differs".into(),
+                    });
+                }
+            }
+        }
+        if walked {
+            return Ok(Certified::WalkedOn);
         }
         self.check_rebinds(&out)?;
-        Ok(out)
+        Ok(Certified::Ready(out))
     }
 
     pub fn check_rebinds(&self, prepared: &[(BuildBasis, Moved)]) -> R<()> {
@@ -1553,6 +1577,84 @@ mod class_tests {
             "edit.body-stale"
         );
         assert_eq!(c.build_basis(id).unwrap(), changed);
+    }
+
+    #[test]
+    fn a_body_that_walked_out_of_its_prepared_triangle_is_placed_again_on_the_kept_surfaces() {
+        let (id, family, surface) = fixture();
+        let frame = Frame {
+            node: id,
+            slot: None,
+        };
+        let moved = surface
+            .place(id, frame, Vec3::new(-50_000, 0, 0), Quat::IDENTITY)
+            .unwrap();
+        let mut c = Controller::new();
+        c.add(family, moved).unwrap();
+        let shape = SkillShape {
+            name: Name::new("souls:walk").unwrap(),
+            claims: vec![Want::All(Class::Locomotion)],
+            blocks: Vec::new(),
+            cancelled_by: Vec::new(),
+        };
+        let driver = c.claim(id, &shape).unwrap();
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(1_000_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let before = c.build_basis(id).unwrap();
+        let kept = crate::walk::town::RebindSurfaces(BTreeMap::from([(
+            (before.build.size, id),
+            (surface.clone(), 0),
+        )]));
+        let prepared = kept.place(std::slice::from_ref(&before)).unwrap();
+        assert!(matches!(
+            c.certify_or_walked(&prepared).unwrap(),
+            Certified::Ready(_)
+        ));
+        let surfaces = BTreeMap::from([(id, surface)]);
+        let mut at = 0;
+        while prepared[0].triangle.contains(c.body(id).unwrap()) {
+            at += 50_000;
+            assert!(at < 100_000_000, "the body never left its triangle");
+            assert!(c.step(&surfaces, 50_000, at).refused.is_empty());
+        }
+        let current = c.build_basis(id).unwrap();
+        assert_ne!(current.moved.tri, before.moved.tri);
+        // The old certificate refuses, by its existing name; the distinct outcome only says the body walked on.
+        assert!(matches!(
+            c.certify_or_walked(&prepared).unwrap(),
+            Certified::WalkedOn
+        ));
+        assert_eq!(
+            c.certify_rebinds(&prepared).unwrap_err().name,
+            "edit.body-stale"
+        );
+        assert_eq!(c.build_basis(id).unwrap(), current);
+        // Placed again, as it stands now, on the same kept surfaces: no rebuild, map or search.
+        let again = kept.place(std::slice::from_ref(&current)).unwrap();
+        let Certified::Ready(certified) = c.certify_or_walked(&again).unwrap() else {
+            panic!("the reprepared certificate holds");
+        };
+        c.commit_rebinds(&certified, || Ok(())).unwrap();
+        let mut expected = current.clone();
+        expected.moved.piece = certified[0].1.piece;
+        expected.moved.tri = certified[0].1.tri;
+        assert_eq!(c.build_basis(id).unwrap(), expected);
+        assert_eq!(c.input(id), Some(&current.input));
+        assert_eq!(c.body(id).unwrap().pose, current.moved.pose);
+        assert_eq!(c.body(id).unwrap().linear, current.moved.linear);
+        let x = c.body(id).unwrap().pose.position.x;
+        assert!(c.step(&surfaces, 50_000, at + 50_000).refused.is_empty());
+        assert!(c.body(id).unwrap().pose.position.x > x);
+        // A changed admission still refuses by its existing name, never as walked on.
+        c.bodies.get_mut(&id).unwrap().moved.pose.position.y += 1;
+        assert_eq!(
+            c.certify_or_walked(&again).unwrap_err().name,
+            "edit.body-stale"
+        );
     }
 
     #[test]
