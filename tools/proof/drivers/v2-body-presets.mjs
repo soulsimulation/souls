@@ -92,7 +92,7 @@ export default async function ({ page, base, arm, fixture, check }) {
   if (nextSecond <= oldSecond || nextSecond - oldSecond > 8) fail('history-moment-distance');
   await liveAt(nextSecond);
   const history = new URL(page.url()); history.hash = new URLSearchParams({ w: owned.recipe.world, l: owned.recipe.lineage, t: String(nextSecond * 1e6) }).toString();
-  await page.goto(history.href); await drawn(page, next.hash); await snapshot(page); await page.getByRole('button', { name: 'pause', exact: true }).click(); check('history-new-hash', (await drawn(page, next.hash)).hash === next.hash);
+  await page.goto(history.href); await page.reload(); await page.waitForFunction(() => typeof globalThis.v2?.history?.opened.hash === 'string', null, { timeout: 8000 }); await drawn(page, next.hash); await snapshot(page); await page.getByRole('button', { name: 'pause', exact: true }).click(); check('history-new-hash', (await drawn(page, next.hash)).hash === next.hash);
   for (let i = 0; i < nextSecond - oldSecond; i++) { await snapshot(page); await page.getByRole('slider').focus(); await Promise.all([page.waitForEvent('domcontentloaded'), page.getByRole('slider').press('ArrowLeft')]); }
   await drawn(page, old.hash); check('history-old-hash-via-real-slider', (await drawn(page, old.hash)).hash === old.hash);
   await snapshot(page); await page.getByRole('button', { name: 'back to live', exact: true }).click(); await drawn(page, next.hash); check('ordinary-back-to-live', true);
