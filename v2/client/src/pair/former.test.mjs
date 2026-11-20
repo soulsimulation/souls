@@ -258,16 +258,25 @@ test('X11b: imported profiles reach the owner route and a real C3 public body', 
   const wire=await import(pathToFileURL(join(pkg,'replica.js')).href);wire.initSync({module:readFileSync(join(pkg,'replica_bg.wasm'))});
   const {decode,idText}=await import('../brief/copy.mjs'),{encode}=await import('../history/day.mjs');
   const pointers=folder=>readdirSync(folder,{withFileTypes:true}).flatMap(d=>d.isDirectory()?pointers(join(folder,d.name)):d.name==='pointer'&&folder.endsWith('/everyone')?[folder]:[]);
-  const soulId=[Buffer.from(ada.split(':')[0],'hex'),Number(ada.split(':')[1])];
+  const soulId=[new Uint8Array(Buffer.from(ada.split(':')[0],'hex')),Number(ada.split(':')[1])];
   const publicWords=()=>{
     for(const stream of pointers(join(world,'views'))){
       const pointer=decode(readFileSync(join(stream,'pointer')));if(!pointer.has(1))continue;
       const header=readFileSync(resolve(stream,'../../../headers',Buffer.from(pointer.get(3)).toString('hex')));
-      const player=new wire.StreamPlayer(header),words=new Map();
+      const generation=pointer.get(8),words=new Map();
+      let player,parts=stream;
+      if(generation!==undefined){
+        assert.ok(generation instanceof Uint8Array&&generation.byteLength===32,'actual public generation is a SHA-256 digest');
+        const digest=Buffer.from(generation).toString('hex');parts=join(stream,'g',digest);
+        const baseline=readFileSync(join(parts,'baseline'));
+        assert.equal(createHash('sha256').update(baseline).digest('hex'),digest,'actual baseline matches the published generation');
+        player=wire.StreamPlayer.fromBaseline(header,baseline);
+        for(const [ref,text]of decode(readFileSync(join(parts,'baseline.text'))))words.set(idText(ref),Buffer.from(text).toString('utf8'));
+      }else player=new wire.StreamPlayer(header);
       try{
-        for(let n=0;n<=pointer.get(1);n++){
-          player.play(readFileSync(join(stream,String(n))));
-          for(const [ref,text]of decode(readFileSync(join(stream,`${n}.text`))))words.set(idText(ref),Buffer.from(text).toString('utf8'));
+        for(let n=player.next();n<=pointer.get(1);n++){
+          player.play(readFileSync(join(parts,String(n))));
+          for(const [ref,text]of decode(readFileSync(join(parts,`${n}.text`))))words.set(idText(ref),Buffer.from(text).toString('utf8'));
         }
         const links=decode(player.query(encode(new Map([[1,3],[2,soulId]]))));
         const of=links.find(l=>String(l[1]).split('@')[0]==='souls:body-of');
