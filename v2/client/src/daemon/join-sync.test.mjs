@@ -20,6 +20,9 @@ const pkg = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
 const wire = await import(pathToFileURL(join(pkg, 'replica.js')).href);
 wire.initSync({ module: readFileSync(join(pkg, 'replica_bg.wasm')) });
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+// One observer clock for relay events and arrival of child stderr. Arrival is not the child's actual send epoch.
+const observedStart = process.hrtime.bigint();
+const observedUs = () => Number((process.hrtime.bigint() - observedStart) / 1000n);
 async function until(f, ms = 10_000) {
   const end = Date.now() + ms;
   for (;;) { const value = await f(); if (value) return value; if (Date.now() > end) throw new Error('timed out'); await sleep(10); }
@@ -29,12 +32,21 @@ async function until(f, ms = 10_000) {
 // control frames. The production encoder supplies complete unfragmented messages for these small sync answers.
 async function relay(port) {
   const sockets = new Set();
-  const r = { hold: false, held: null, scopeAnswers: 0, release: null, inject: null, observed: [] };
+  const r = { hold: false, held: null, scopeAnswers: 0, release: null, inject: null, observed: [], metadata: [], connections: [] };
+  let connection = 0;
   const server = createServer((down) => {
     const up = createConnection(port, '127.0.0.1');
     sockets.add(up); sockets.add(down);
     down.pipe(up);
     let data = Buffer.alloc(0), upgraded = false;
+    const state = { connection: ++connection, receivedBytes: 0, frames: 0, bufferedBytes: 0, upgraded: false };
+    r.connections.push(state); if (r.connections.length > 4) r.connections.shift();
+    const mark = (kind, fields = {}) => {
+      state.bufferedBytes = data.length; state.upgraded = upgraded;
+      state.upDestroyed = up.destroyed; state.downDestroyed = down.destroyed;
+      r.metadata.push({ atUs: observedUs(), connection: state.connection, kind, ...fields });
+      if (r.metadata.length > 64) r.metadata.shift();
+    };
     r.inject = (bytes) => {
       assert.ok(bytes.length < 126);
       down.write(Buffer.concat([Buffer.from([0x82, bytes.length]), bytes]));
@@ -45,22 +57,30 @@ async function relay(port) {
       if (r.observed.length > 24) r.observed.shift();
     };
     up.on('data', (chunk) => {
+      state.receivedBytes += chunk.length;
       data = Buffer.concat([data, chunk]);
+      mark('chunk', { bytes: chunk.length, totalBytes: state.receivedBytes, bufferedBytes: data.length });
       if (!upgraded) {
         const end = data.indexOf('\r\n\r\n');
-        if (end < 0) return;
+        if (end < 0) { mark('wait-upgrade', { bufferedBytes: data.length }); return; }
         down.write(data.subarray(0, end + 4)); data = data.subarray(end + 4); upgraded = true;
+        mark('upgraded');
       }
       while (data.length >= 2) {
         let size = data[1] & 127, at = 2;
-        if (size === 126) { if (data.length < 4) return; size = data.readUInt16BE(2); at = 4; }
-        if (size === 127) { if (data.length < 10) return; size = Number(data.readBigUInt64BE(2)); at = 10; }
-        if (data.length < at + size) return;
+        if (size === 126) { if (data.length < 4) { mark('wait-header', { needBytes: 4 }); return; } size = data.readUInt16BE(2); at = 4; }
+        if (size === 127) { if (data.length < 10) { mark('wait-header', { needBytes: 10 }); return; } size = Number(data.readBigUInt64BE(2)); at = 10; }
+        if (data.length < at + size) { mark('wait-payload', { needBytes: at + size, bufferedBytes: data.length }); return; }
         const frame = data.subarray(0, at + size), payload = frame.subarray(at);
         data = data.subarray(at + size);
+        state.frames++;
+        mark('complete-frame', { frame: state.frames, opcode: frame[0] & 15, fin: !!(frame[0] & 128),
+          masked: !!(frame[1] & 128), bytes: payload.length, sha256: createHash('sha256').update(payload).digest('hex') });
         let summary = null;
         if ((frame[0] & 15) === 2) {
-          const value = decode(payload);
+          let value;
+          try { value = decode(payload); }
+          catch (error) { mark('parse-error', { parser: 'cbor' }); throw error; }
           if (value instanceof Map) {
             const answer = value.get(2), request = value.get(20);
             if (typeof request === 'number') summary = { kind: 'sync', request,
@@ -69,19 +89,30 @@ async function relay(port) {
               sequence: typeof answer.get(2) === 'number' ? answer.get(2) : null,
               answer: typeof answer.get(3) === 'number' ? answer.get(3) : null };
           }
+          mark('parsed', { category: summary?.kind ?? 'other', summary });
           if (value instanceof Map && value.has(20) && value.has(25)) r.scopeAnswers++;
-          if (r.hold && wire.wireFrame(payload).startsWith('sync ')) {
+          let heldSync = false;
+          if (r.hold) {
+            try { heldSync = wire.wireFrame(payload).startsWith('sync '); }
+            catch (error) { mark('parse-error', { parser: 'wire-frame' }); throw error; }
+          }
+          if (r.hold && heldSync) {
             r.hold = false; r.held = frame;
-            observed(summary, false);
-            r.release = () => { down.write(r.held); observed(summary, true); r.held = null; };
+            observed(summary, false); mark('held', { frame: state.frames });
+            r.release = () => { down.write(r.held); observed(summary, true); r.held = null; mark('released'); };
             continue;
           }
         }
         down.write(frame);
-        observed(summary, true);
+        observed(summary, true); mark('forwarded', { frame: state.frames });
       }
+      mark('parser-idle', { bufferedBytes: data.length });
     });
-    for (const s of [up, down]) { s.on('error', () => {}); s.on('close', () => { up.destroy(); down.destroy(); }); }
+    for (const [side, s] of [['up', up], ['down', down]]) {
+      s.on('error', (error) => { mark('error', { side, code: /^[A-Z0-9_]+$/.test(error.code ?? '') ? error.code : 'other' }); });
+      s.on('end', () => { mark('end', { side }); });
+      s.on('close', (hadError) => { mark('close', { side, hadError, upDestroyed: up.destroyed, downDestroyed: down.destroyed }); up.destroy(); down.destroy(); });
+    }
   });
   await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
   r.port = server.address().port;
@@ -101,10 +132,25 @@ test('R21: a held pre-birth sync cannot satisfy the successful join refresh; unr
       .replaceAll(/\/(?:Users|home|private|tmp|var)\/[^\s"'\\]*/g, '<path>');
   };
   const run = (name, args, ready) => new Promise((ok, fail) => {
-    const p = spawn(bin(name), args, { stdio: ['ignore', 'pipe', 'pipe'] }); procs.push(p);
-    const child = { name, exit: null, stdout: '', stderr: '' }; children.push(child);
+    const env = ['worldd', 'gatewayd'].includes(name) ? { ...process.env, SOULS_JOIN_DELIVERY_TRACE: '1' } : process.env;
+    const p = spawn(bin(name), args, { stdio: ['ignore', 'pipe', 'pipe'], env }); procs.push(p);
+    const child = { name, exit: null, stdout: '', stderr: '', delivery: '' }; children.push(child);
     let out = '';
+    let deliveryLine = '';
+    const deliveryLines = [];
+    let deliveryBytes = 0;
     const take = (stream, d) => {
+      if (stream === 'stderr') {
+        const lines = (deliveryLine + d).split('\n'); deliveryLine = lines.pop().slice(-4096);
+        for (const line of lines) {
+          if (!line.startsWith('worldd: join-delivery ') && !line.startsWith('gatewayd: join-delivery ')) continue;
+          const complete = line + ` captured-us=${observedUs()}\n`, bytes = Buffer.byteLength(complete);
+          if (bytes > 65536) continue;
+          deliveryLines.push(complete); deliveryBytes += bytes;
+          while (deliveryBytes > 65536) deliveryBytes -= Buffer.byteLength(deliveryLines.shift());
+          child.delivery = deliveryLines.join('');
+        }
+      }
       child[stream] = (child[stream] + d).slice(-2048);
       out = (out + d).slice(-4096); const found = ready?.exec(out); if (found) ok(found);
     };
@@ -171,6 +217,7 @@ test('R21: a held pre-birth sync cannot satisfy the successful join refresh; unr
       assert.equal((await status()).follows, stable.follows, 'no continuing refresh loop');
     }
   } catch (error) {
+    const failureObservedUs = observedUs();
     const cases = [];
     for (const client of clients) {
       let events = [], readError = null, daemon = '';
@@ -180,6 +227,8 @@ test('R21: a held pre-birth sync cannot satisfy the successful join refresh; unr
       cases.push({ case: client.case, stage: client.stage, sent: client.sent, lastStatus: client.lastStatus,
         receipt: client.receipt ?? (client.sent?.sequence === undefined ? null : events.find((e) => e.sequence === client.sent.sequence) ?? null),
         relay: client.proxy.observed.slice(-24),
+        relayMetadata: client.proxy.metadata.slice(-64), relayConnections: client.proxy.connections,
+        failureObservedUs, timingLimit: 'Child stderr capture is arrival on the relay observer clock, not actual native send time; cross-process elapsed clocks have separate origins.',
         recentEvents: events.slice(-12), readError, daemon });
     }
     const kept = join(v2, '..', '.local', `r21-join-sync-failure-${randomBytes(6).toString('hex')}`);

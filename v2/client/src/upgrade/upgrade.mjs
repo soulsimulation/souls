@@ -27,6 +27,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CREDENTIALS, Refused, findHome } from '../home/home.mjs';
 import { localId } from '../pair/pair.mjs';
+import { pairAddress } from '../pair/address.mjs';
 
 export const RECORD = 'upgrade.json';
 const RECORD_VERSION = 'souls-upgrade/1';
@@ -55,9 +56,38 @@ const putJson = (file, value, mode = 0o600) => put(file, JSON.stringify(value, n
 const credentialsOf = (home) => ({ souls: {}, ...readJson(join(home, CREDENTIALS)) });
 
 /** Where a world's v2 directory and gateway are, from the address today's home knows it by. */
-export function endpointsOf(url) {
-  const u = new URL(url);
-  return { directory: u.origin, gateway: `${u.protocol === 'https:' ? 'wss' : 'ws'}://${u.host}/v2/ws` };
+export async function endpointsOf(url, get = fetch) {
+  let at;
+  try { at = new URL(url); } catch { throw new Refused('pair-world-routing', 'the saved world address is invalid; the home is unchanged'); }
+  const loopback = at.protocol === 'http:' && (['localhost', '[::1]'].includes(at.hostname) || at.hostname.endsWith('.localhost') || /^127\.(?:\d{1,3}\.){2}\d{1,3}$/.test(at.hostname));
+  const installed = /^\/(preview\/)?w\/([a-z0-9][a-z0-9-]{0,62})(?:\/|$)/.test(at.pathname);
+  if ((!installed && !loopback) || (at.protocol !== 'https:' && !loopback)) throw new Refused('pair-world-routing', 'save the canonical or preview world address before upgrading; the home is unchanged');
+  return pairAddress(url, get);
+}
+
+/** The old database identity is not this home's nickname or its public URL slug. */
+function formerWorldOf(home, old, world) {
+  const valid = (id) => typeof id === 'string' && id.length > 0 && id.length <= 256
+    && id === id.trim() && !/[\u0000-\u001f\u007f]/.test(id);
+  const ids = [];
+  if (world.worldId !== undefined) {
+    if (!valid(world.worldId)) throw new Refused('former-world-invalid', 'the saved old world identity is invalid; the home is unchanged');
+    ids.push(world.worldId);
+  }
+  // Released homes keep their Soul's current world in this noncredential runtime state.
+  // A visit elsewhere cannot identify its home world: only the configured URL may supply a fallback.
+  const file = join(home, 'souls', old, 'runtime', 'state.json');
+  let state;
+  try { state = JSON.parse(readFileSync(file, 'utf8')); } catch (e) {
+    if (e.code !== 'ENOENT') throw new Refused('former-world-unreadable', 'the saved old world state cannot be read; the home is unchanged');
+  }
+  if (state?.world === world.url && state.worldId !== undefined) {
+    if (!valid(state.worldId)) throw new Refused('former-world-invalid', 'the saved old world identity is invalid; the home is unchanged');
+    ids.push(state.worldId);
+  }
+  if (!ids.length) throw new Refused('former-world-missing', 'the saved old world identity is missing; recover its world configuration before upgrading; the home is unchanged');
+  if (new Set(ids).size !== 1) throw new Refused('former-world-conflict', 'saved identities for the same old world disagree; the home is unchanged');
+  return ids[0];
 }
 
 /** Today's Souls in the home: active in config.json, with a token that is not a v2 token. */
@@ -65,8 +95,10 @@ export function formerSouls(home) {
   const config = readJson(join(home, 'config.json')), creds = credentialsOf(home);
   return Object.entries(config.souls ?? {}).filter(([id, e]) => SOUL_ID.test(id) && e?.state === 'active').flatMap(([id, e]) => {
     const world = Object.keys(creds.souls[id] ?? {}).find((k) => typeof creds.souls[id][k]?.token === 'string' && !V2_TOKEN.test(creds.souls[id][k].token));
-    const url = world && config.worlds?.[world]?.url;
-    return url ? [{ old: id, name: e.name ?? id, world, url }] : [];
+    const saved = world && config.worlds?.[world], url = saved?.url;
+    if (!world) return [];
+    if (!url) throw new Refused('former-world-missing', 'the saved old world address is missing; the home is unchanged');
+    return [{ old: id, name: e.name ?? id, world, formerWorld: formerWorldOf(home, id, saved), url }];
   });
 }
 
@@ -135,7 +167,7 @@ function move(home, from, to) {
 }
 
 /** After a rollback, the parked new tokens come back with no approval. */
-function restoreParked(home, souls) {
+function restoreParked(home, souls, addresses) {
   const record = recordOf(home), creds = credentialsOf(home), came = [];
   for (const s of souls) {
     const now = record.souls[s.old];
@@ -150,7 +182,7 @@ function restoreParked(home, souls) {
   putJson(join(home, CREDENTIALS), creds);
   if (!existsSync(join(home, BEFORE))) put(join(home, BEFORE), readFileSync(join(home, 'config.json')), 0o600);
   const config = readJson(join(home, 'config.json'));
-  for (const s of souls.filter((x) => came.some((c) => c.formerly === x.old))) config.worlds[s.world] = { ...config.worlds[s.world], gateway: endpointsOf(s.url).gateway };
+  for (const s of souls.filter((x) => came.some((c) => c.formerly === x.old))) config.worlds[s.world] = { ...config.worlds[s.world], gateway: addresses.get(s.url).gateway };
   putJson(join(home, 'config.json'), config, 0o600);
   for (const c of came) move(home, c.formerly, c.soul);
   return came;
@@ -160,13 +192,16 @@ function restoreParked(home, souls) {
  * Brings every Soul of today's client across. `onAsk({formerly, name, link, code})` is called once per Soul that needs
  * its owner's approval. Resolves to `{souls: [{formerly, soul} | {formerly, refused}]}`.
  */
-export async function upgradeHome({ home, device = hostname().slice(0, 64), label = 'souls upgrade', onAsk, sleep }) {
-  const all = formerSouls(home), came = restoreParked(home, all);
+export async function upgradeHome({ home, device = hostname().slice(0, 64), label = 'souls upgrade', onAsk, sleep, get = fetch }) {
+  const all = formerSouls(home);
+  // Validate every route before restoring even one parked token or changing any home file.
+  const addresses = new Map(await Promise.all([...new Set(all.map(s => s.url))].map(async url => [url, await endpointsOf(url, get)])));
+  const came = restoreParked(home, all, addresses);
   const left = all.filter((s) => !came.some((c) => c.formerly === s.old));
   const paired = await Promise.all(left.map(async (s) => {
-    const { directory, gateway } = endpointsOf(s.url);
+    const { directory, gateway } = addresses.get(s.url);
     try {
-      const got = await pairFormer({ directory, world: s.world, former: s.old, device, label, sleep, onAsk: (a) => onAsk?.({ formerly: s.old, name: s.name, ...a }) });
+      const got = await pairFormer({ directory, world: s.formerWorld, former: s.old, device, label, sleep, onAsk: (a) => onAsk?.({ formerly: s.old, name: s.name, ...a }) });
       return { formerly: s.old, soul: keep(home, s, got, gateway) };
     } catch (e) {
       return { formerly: s.old, refused: e.code ?? 'failed' };

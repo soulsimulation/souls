@@ -7,25 +7,25 @@
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { pairFormer } from '../upgrade/upgrade.mjs';
+import { pairFormer, upgradeHome } from '../upgrade/upgrade.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const bin = process.env.DIRECTORYD ?? join(v2, 'target/debug/directoryd');
-const dir = mkdtempSync(join(tmpdir(), 'souls-r18-dir-'));
+const scratch = join(v2,'..','.local','former-upgrade');mkdirSync(scratch,{recursive:true});
+const dir = mkdtempSync(join(scratch, 'souls-r18-dir-'));
 const store = join(dir, 'accounts.sqlite'), tokens = join(dir, 'gateway-tokens.txt');
 const procs = new Set();
 after(() => { for (const p of procs) p.kill(); rmSync(dir, { recursive: true, force: true }); });
 
 /** directoryd on its own store, as the switch-over runs it: its origin and a stop that waits for its exit. */
-async function directoryd() {
-  const p = spawn(bin, ['--listen', '127.0.0.1:0', '--public-url', 'http://127.0.0.1:1', '--store', store, '--test-sign-in',
-    '--pairing', join(dir, 'pairing.sqlite'), '--gateway-tokens', tokens], { stdio: ['ignore', 'pipe', 'pipe'] });
+async function directoryd({storePath=store,tokensPath=tokens,pairingPath=join(dir,'pairing.sqlite')}={}) {
+  const p = spawn(bin, ['--listen', '127.0.0.1:0', '--public-url', 'http://127.0.0.1:1', '--store', storePath, '--test-sign-in',
+    '--pairing', pairingPath, '--gateway-tokens', tokensPath], { stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(p);
   const origin = await new Promise((ok, fail) => {
     let out = '';
@@ -97,4 +97,57 @@ test('R18: the real directory pairs a former Soul as the Soul X11 brought over, 
   assert.deepEqual([other, nobody], [{ refused: 'unknown-soul' }, { refused: 'unknown-soul' }]);
   assert.deepEqual((await post(d.origin, '/v1/account/souls', { test_person: 'Someone else' })).body.souls, []);
   await d.stop();
+});
+
+
+test('R18c: actual importer and directory preserve a former Soul across distinct world names', async (t) => {
+  const base=join(dir,'real-import'), backup=join(base,'backup'), out=join(base,'out');mkdirSync(join(backup,'worlds'),{recursive:true});
+  const owner='acct_00000000-0000-4000-8000-00000000000a', stranger='acct_00000000-0000-4000-8000-00000000000b';
+  const worldId='world-internal-7', slug='public-eden', alias='my-eden';
+  // Existing import-accounts/tests/owned.rs backup shape: synthetic source rows, never imported-map fabrication.
+  for(const [name,rows] of [['accounts.sqlite',[[owner,'Ada owner'],[stranger,'Someone else']]],['forks-accounts.sqlite',[]]]){
+    const db=new DatabaseSync(join(backup,name));db.exec('CREATE TABLE provider_accounts_v1(account_id TEXT PRIMARY KEY,issuer TEXT,subject TEXT,created_at INTEGER)');
+    for(const [id,subject]of rows)db.prepare('INSERT INTO provider_accounts_v1 VALUES (?, ?, ?, 0)').run(id,'test:local',subject);db.close();
+  }
+  writeFileSync(join(backup,'worlds.json'),JSON.stringify([{slug,owner}]));
+  const old=new DatabaseSync(join(backup,'worlds',slug+'.db'));
+  old.exec('CREATE TABLE worlds(id TEXT PRIMARY KEY); CREATE TABLE snapshots(world_id TEXT,tick INTEGER,snapshot TEXT); CREATE TABLE souls(id TEXT,world_id TEXT,owner TEXT,entity_id TEXT,name TEXT,description TEXT,retired_at INTEGER,created_at INTEGER)');
+  old.prepare('INSERT INTO worlds VALUES (?)').run(worldId);
+  old.prepare('INSERT INTO souls VALUES (?, ?, ?, ?, ?, ?, NULL, 0)').run('s_ada',worldId,owner,'s_ada','Ada','kept identity');old.close();
+  const importer=process.env.IMPORT_ACCOUNTS??join(v2,'target/debug/import-accounts');
+  await new Promise((ok,fail)=>{
+    const p=spawn(importer,[backup,'--out',out,'--json'],{stdio:['ignore','pipe','pipe']});procs.add(p);let stdout='',stderr='';
+    p.stdout.on('data',b=>stdout+=b);p.stderr.on('data',b=>stderr+=b);p.once('error',fail);
+    p.once('exit',code=>{procs.delete(p);if(code!==0)return fail(Error('actual importer failed: '+stderr));try{assert.equal(JSON.parse(stdout).clean,true);ok();}catch(e){fail(e);}});
+  });
+  const imported=new DatabaseSync(join(out,'accounts.sqlite'));
+  const mapped=imported.prepare('SELECT soul FROM imported_souls_v1 WHERE world=? AND old_soul=?').get(worldId,'s_ada').soul;
+  const before=imported.prepare('SELECT COUNT(*) AS n FROM souls_v1').get().n;imported.close();
+  let d=await directoryd({storePath:join(out,'accounts.sqlite'),tokensPath:join(base,'gateway-tokens'),pairingPath:join(base,'pairing.sqlite')});t.after(async()=>{if(d)await d.stop();});
+  const url=d.origin+'/w/'+slug;
+  const home=join(base,'.souls');mkdirSync(join(home,'souls','s_ada'),{recursive:true});
+  writeFileSync(join(home,'config.json'),JSON.stringify({worlds:{[alias]:{url,worldId}},souls:{s_ada:{state:'active',world:alias}}}));
+  writeFileSync(join(home,'credentials.json'),JSON.stringify({souls:{s_ada:{[alias]:{token:'sim_synthetic'}}}}),{mode:0o600});
+  writeFileSync(join(home,'souls','s_ada','memory.txt'),'the original memory');
+  const approve=person=>({code})=>post(d.origin,'/v1/pair/approve',{code,confirm:true,test_person:person});
+  const crossing=async(person,world,former='s_ada')=>{
+    let approved;
+    return pairFormer({directory:d.origin,world,former,device:'fixture device',label:'R18c',onAsk:a=>{approved=approve(person)(a);},sleep:async(ms)=>{await approved;await new Promise(r=>setTimeout(r,ms));}}).then(got=>({got}),e=>({refused:e.code}));
+  };
+  assert.deepEqual(await crossing('Someone else',worldId),{refused:'unknown-soul'});
+  assert.deepEqual(await crossing('Ada owner','another-world'),{refused:'unknown-soul'});
+  assert.deepEqual(await crossing('Ada owner',worldId,'s_absent'),{refused:'unknown-soul'});
+  let approved;
+  // This isolated identity fixture has no public proxy; gateway connectivity is covered by R18d's served journey.
+  const get=async(at,options)=>{assert.equal(at,url+'/v1/bootstrap');const {signal,...security}=options;assert.ok(signal instanceof AbortSignal);assert.deepEqual(security,{redirect:'error',credentials:'omit',cache:'no-store'});return Response.json({world:slug,directory:'/',gateway:'/w/'+slug+'/v2/ws'});};
+  const upgraded=await upgradeHome({home,get,device:'fixture device',onAsk:a=>{approved=approve('Ada owner')(a);},sleep:async(ms)=>{await approved;await new Promise(r=>setTimeout(r,ms));}});
+  const grant='soul-'+mapped.replace(':','-'),id='s_'+mapped.replace(':','-');
+  assert.deepEqual(upgraded.souls,[{formerly:'s_ada',soul:id}]);
+  assert.equal(readFileSync(join(home,'souls',id,'memory.txt'),'utf8'),'the original memory');
+  const config=JSON.parse(readFileSync(join(home,'config.json')));assert.deepEqual(Object.keys(config.worlds),[alias]);assert.equal(config.worlds[alias].worldId,worldId);
+  const listed=(await post(d.origin,'/v1/account/souls',{test_person:'Ada owner'})).body.souls;
+  assert.deepEqual(listed.map(s=>[s.soul,s.device,s.world]),[[grant,'fixture device',worldId]]);
+  assert.deepEqual((await post(d.origin,'/v1/account/souls',{test_person:'Someone else'})).body.souls,[]);
+  await d.stop();d=null;
+  const check=new DatabaseSync(join(out,'accounts.sqlite'));assert.equal(check.prepare('SELECT COUNT(*) AS n FROM souls_v1').get().n,before,'no replacement Soul minted');check.close();
 });

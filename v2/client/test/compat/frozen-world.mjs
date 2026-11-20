@@ -37,6 +37,7 @@ export async function frozenWorld({ slug = 'eden', client, contract = 'souls-v2/
     req.on('end', () => {
       const path = req.url.split('?')[0], body = raw ? JSON.parse(raw) : {};
       const inWorld = path.startsWith(`/w/${slug}/`) ? path.slice(`/w/${slug}`.length) : null;
+      if (inWorld === '/v1/bootstrap') return json(res, 200, { world: slug, directory: '/', gateway: `/w/${slug}/v2/ws` });
       if (inWorld === '/v1/config') return json(res, 200, { ok: true, ...(soulClient ? { soulClient } : {}) });
       if (inWorld === '/eden.mjs' && client) { res.writeHead(200, { 'content-type': 'text/javascript' }); return res.end(client); }
       if (inWorld && /^\/v1\/(edge|agent)\//.test(inWorld)) {
