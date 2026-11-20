@@ -1224,9 +1224,7 @@ fn archiving(
                 indexed = a.shelf.writes.bundles;
             }
             if fresh && viewed.elapsed() >= VIEWS_EVERY {
-                if a.is_based() {
-                    a.publish_open()?;
-                }
+                a.publish_open()?;
                 for (k, v) in a.open_views()? {
                     a.shelf.put_view(&k, &v)?;
                 }
