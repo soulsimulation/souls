@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Places a seeded world on this machine (Engine v2 C1, #3365): `worldd seed` made the folder; this puts it where
-# `supervisor launch <name>` finds it and writes what its two units read. Runbook: v2/docs/runbook/place-a-world.md.
+# `supervisor launch <name>` finds it and writes what its two units read. Runbook: v2/docs/runbook/install.md.
 #
 #   bash place-world.sh <seeded folder> --port <gateway port> [--build <hex>] [--start]
 #
@@ -23,22 +23,35 @@ die() {
 }
 
 R=${PLACE_ROOT:-}
-SRC=${1:-}
-[ -n "$SRC" ] && [ -f "$SRC/world.json" ] || die "usage: place-world.sh <seeded folder> --port <n> [--build <hex>] [--start]"
-shift
-PORT='' BUILD=unpinned START=0
+SRC='' NAME='' CREATOR='' PORT='' BUILD=unpinned START=0 RESUME=0 DIRECTORY=''
+DATA_ONLY=0 CONFIG_ONLY=0
+if [ "${1:-}" = --configuration-only ]; then CONFIG_ONLY=1; shift
+else SRC=${1:-}; [ -n "$SRC" ] || die "a seeded folder is needed"; shift; fi
 while [ $# -gt 0 ]; do
   case "$1" in
     --port) PORT=$2; shift 2 ;;
     --build) BUILD=$2; shift 2 ;;
     --start) START=1; shift ;;
+    --resume) RESUME=1; shift ;;
+    --data-only) DATA_ONLY=1; shift ;;
+    --instance) NAME=$2; shift 2 ;;
+    --creator) CREATOR=$2; shift 2 ;;
+    --directory) DIRECTORY=$2; shift 2 ;;
     *) die "unknown argument $1" ;;
   esac
 done
-[[ "$PORT" =~ ^[0-9]+$ ]] || die "--port <n> is needed"
-NAME=$(sed -n 's/.*"name": *"\([0-9a-f-]*\)".*/\1/p' "$SRC/world.json")
-[[ "$NAME" =~ ^[0-9a-f]{32}-[0-9a-f]{32}-[0-9]+$ ]] || die "world.json names no world"
-
+[[ "$PORT" =~ ^[0-9]+$ ]] && [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "--port <n> is needed"
+[[ "$BUILD" = unpinned || "$BUILD" =~ ^1220[0-9a-f]{64}$ ]] || die "--build is a pinned build hash"
+if [ -n "$DIRECTORY" ]; then [[ "$DIRECTORY" =~ ^(127\.0\.0\.1|localhost):[0-9]+$ ]] || die "--directory is the installed loopback directory"; fi
+[ "$CONFIG_ONLY" = 0 ] || [ "$DATA_ONLY" = 0 ] || die "placement modes conflict"
+[ "$DATA_ONLY" = 0 ] || [ "$START" = 0 ] || die "data placement does not start units"
+if [ "$CONFIG_ONLY" = 0 ]; then
+  [ -f "$SRC/world.json" ] && [ ! -L "$SRC/world.json" ] || die "the source has no regular world.json"
+  NAME=$(sed -n 's/.*"name": *"\([0-9a-f-]*\)".*/\1/p' "$SRC/world.json")
+  if [ -n "$DIRECTORY" ]; then CREATOR=$(sed -n 's/.*"creator": *"\([0-9a-f-]*\)".*/\1/p' "$SRC/world.json"); fi
+fi
+[[ "$NAME" =~ ^[0-9a-f]{32}-[0-9a-f]{32}-[0-9]+$ ]] || die "no valid world instance"
+if [ -n "$DIRECTORY" ]; then [[ "$CREATOR" =~ ^[0-9a-f]{32}-[0-9]+$ ]] || die "no valid world creator"; fi
 DATA=/var/lib/souls
 WORLD=$DATA/worlds/worlds/$NAME
 SOCKET=$DATA/run/$NAME.sock
@@ -48,28 +61,46 @@ DROPIN=$UNITS/worldd@$NAME.service.d/place.conf
 WANTS=$UNITS/multi-user.target.wants
 LINKS=$DATA/views/w/$NAME
 
-for p in "$WORLD" "$ENV" "$DROPIN"; do
-  [ ! -e "$R$p" ] || die "already placed: $p exists"
-done
-
-mkdir -p "$R$(dirname "$WORLD")" "$R$DATA/run" "$R/etc/souls" "$R$(dirname "$DROPIN")" "$R$WANTS" "$R$LINKS"
-mkdir -p "$R$WORLD"
-# The folder as seeded, less a socket a local run left (sockets are not copied) and its stream (rebuilt at each start).
-(cd "$SRC" && tar cf - --exclude ./gateway.sock --exclude ./views .) | (cd "$R$WORLD" && tar xf -)
-mkdir -p "$R$WORLD/views" "$R$WORLD/history" "$R$WORLD/receipts"
-printf 'GATEWAYD_ARGS=--listen 127.0.0.1:%s --world %s --tokens %s --build %s --receipts %s\n' \
-  "$PORT" "$SOCKET" "$WORLD/tokens" "$BUILD" "$WORLD/receipts" > "$R$ENV"
-printf '# Written by place-world.sh (C1, #3365).\n[Service]\nEnvironment=WORLDD_SOCKET=%s\n' "$SOCKET" > "$R$DROPIN"
-ln -s "$UNITS/worldd@.service" "$R$WANTS/worldd@$NAME.service"
-ln -s "$UNITS/souls-gateway@.service" "$R$WANTS/souls-gateway@$NAME.service"
-ln -s "$WORLD/views" "$R$LINKS/views"
-ln -s "$WORLD/history" "$R$LINKS/history"
-if [ -z "$R" ] && id souls > /dev/null 2>&1; then
-  chown -R souls:souls "$WORLD" "$DATA/run" "$LINKS"
+if [ "$CONFIG_ONLY" = 0 ]; then
+  [ ! -L "$R$WORLD" ] || die "world placement path is a symlink"
+  if [ "$RESUME" = 0 ]; then [ ! -e "$R$WORLD" ] || die "already placed: world exists"; fi
+  mkdir -p "$R$(dirname "$WORLD")" "$R$DATA/run" "$R$LINKS"
+  if [ ! -e "$R$WORLD" ]; then
+    # An interrupted copy is never served. Existing live world data is never overwritten during resume.
+    STAGING=$(mktemp -d "$R$(dirname "$WORLD")/.placing-$NAME.XXXXXX")
+    (cd "$SRC" && tar cf - --exclude ./gateway.sock --exclude ./views .) | (cd "$STAGING" && tar xf -)
+    mv "$STAGING" "$R$WORLD"
+  else
+    for f in world.json facts.json boot; do
+      if [ -f "$SRC/$f" ]; then cmp -s "$SRC/$f" "$R$WORLD/$f" || die "placed identity or public support differs"; fi
+    done
+  fi
+  mkdir -p "$R$WORLD/views" "$R$WORLD/history" "$R$WORLD/receipts"
+  link() { if [ -L "$2" ]; then [ "$(readlink "$2")" = "$1" ] || die "placement link differs"; elif [ -e "$2" ]; then die "placement link is occupied"; else ln -s "$1" "$2"; fi; }
+  link "$WORLD/views" "$R$LINKS/views"
+  link "$WORLD/history" "$R$LINKS/history"
+  if [ "$DATA_ONLY" = 0 ] && [ -z "$R" ] && id souls > /dev/null 2>&1; then chown -R souls:souls "$WORLD" "$DATA/run" "$LINKS"; fi
 fi
-echo "placed $NAME: worldd@$NAME, souls-gateway@$NAME on 127.0.0.1:$PORT, page ?world=$NAME"
+if [ "$DATA_ONLY" = 0 ]; then
+  # Configuration-only never reads or mutates DATA. Every identity above comes from the protected descriptor.
+  for p in "$ENV" "$DROPIN"; do
+    [ ! -L "$R$p" ] || die "unit configuration path is a symlink"
+    if [ "$RESUME" = 0 ]; then [ ! -e "$R$p" ] || die "already placed: unit configuration exists"; fi
+  done
+  mkdir -p "$R/etc/souls" "$R$(dirname "$DROPIN")" "$R$WANTS"
+  EXCHANGE=''; STORE=''
+  if [ -n "$DIRECTORY" ]; then EXCHANGE=" --creator $CREATOR --directory $DIRECTORY"; STORE=$(printf '\nEnvironment=WORLDD_STORE=%s' "$DATA/worlds/directory"); fi
+  ENV_TEXT=$(printf 'GATEWAYD_ARGS=--listen 127.0.0.1:%s --world %s --tokens %s --build %s --receipts %s%s' "$PORT" "$SOCKET" "$WORLD/tokens" "$BUILD" "$WORLD/receipts" "$EXCHANGE")
+  DROP_TEXT=$(printf '# Written by place-world.sh (C1, #3365).\n[Service]\nEnvironment=WORLDD_SOCKET=%s%s' "$SOCKET" "$STORE")
+  if [ -e "$R$ENV" ]; then [ "$(cat "$R$ENV")" = "$ENV_TEXT" ] || die "gateway configuration differs"; else printf '%s\n' "$ENV_TEXT" > "$R$ENV"; fi
+  if [ -e "$R$DROPIN" ]; then [ "$(cat "$R$DROPIN")" = "$DROP_TEXT" ] || die "world configuration differs"; else printf '%s\n' "$DROP_TEXT" > "$R$DROPIN"; fi
+  unit_link() { if [ -L "$2" ]; then [ "$(readlink "$2")" = "$1" ] || die "unit link differs"; elif [ -e "$2" ]; then die "unit link occupied"; else ln -s "$1" "$2"; fi; }
+  unit_link "$UNITS/worldd@.service" "$R$WANTS/worldd@$NAME.service"
+  unit_link "$UNITS/souls-gateway@.service" "$R$WANTS/souls-gateway@$NAME.service"
+fi
+echo "placed $NAME: worldd@$NAME, souls-gateway@$NAME"
 if [ "$START" = 1 ]; then
-  [ -z "$R" ] || die "--start places on this machine only (PLACE_ROOT is set)"
+  [ -z "$R" ] || die "--start places on this machine only"
   systemctl daemon-reload
   systemctl start "worldd@$NAME" "souls-gateway@$NAME"
 fi

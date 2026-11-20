@@ -28,7 +28,7 @@ ETC=/etc/souls
 UNITS=/etc/systemd/system
 STATE=$ETC/install.state
 PROGRAMS=(supervisor worldd gatewayd directoryd deploy gateway-upgrade import-accounts import-world)
-UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service)
+UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service souls-place.path souls-place.service)
 DROPIN=$UNITS/worldd@.service.d
 # Everything it may make, and so everything it may remove: the user, three folders it owns whole, its units.
 OWNED=("user $ACCOUNT" "tree $LIB" "tree $DATA" "tree $ETC" "tree $DROPIN")
@@ -169,8 +169,22 @@ install_all() {
   for p in "${PROGRAMS[@]}"; do ensure_file "$from/bin/$p" "$LIB/$p" 755 root root; done
   ensure_tree "$from/origin" "$LIB/origin"
   ensure_tree "$from/web" "$LIB/web"
+  ensure_tree "$from/ops" "$LIB/ops"
+  ensure_dir "$LIB/templates" 755 root root
+  if [ -d "$from/templates" ]; then ensure_tree "$from/templates" "$LIB/templates"; fi
   ensure_dir "$DATA" 750 "$ACCOUNT" "$ACCOUNT" "tree $DATA"
   for p in worlds directory views; do ensure_dir "$DATA/$p" 750 "$ACCOUNT" "$ACCOUNT"; done
+  ensure_dir "$DATA/worlds/directory" 750 "$ACCOUNT" "$ACCOUNT"
+  ensure_dir "$DATA/worlds/worlds" 750 "$ACCOUNT" "$ACCOUNT"
+  ensure_dir "$DATA/directory/placement-backup" 750 "$ACCOUNT" "$ACCOUNT"
+  ensure_dir "$ETC/placement-data" 750 root "$ACCOUNT"
+  ensure_dir "$ETC/placement-data/requests" 770 root "$ACCOUNT"
+  ensure_dir "$ETC/placement-data/status" 750 root "$ACCOUNT"
+  ensure_dir "$ETC/placement-data/attempts" 700 root root
+  ensure_once "$ETC/placement-data/authority.json" 640 root "$ACCOUNT" '{"format":"souls/world-authority/1","worldsRoot":"/var/lib/souls/worlds","worlds":{}}'
+  local build
+  build=$(node -e 'const f=require("node:fs"),c=require("node:crypto");process.stdout.write("1220"+c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"))' "$from/bin/worldd")
+  ensure_once "$ETC/placement.json" 640 root "$ACCOUNT" "{\"format\":\"souls/placement/1\",\"build\":\"$build\",\"worldsRoot\":\"$DATA/worlds\",\"templates\":\"$LIB/templates\",\"library\":\"$LIB\",\"placement\":\"$ETC/placement-data\",\"backup\":\"$DATA/directory/placement-backup\",\"directory\":\"http://localhost:$DIRECTORY_PORT\",\"launcher\":\"\",\"origin\":\"https://soul.game\",\"originUpstream\":\"http://localhost:7320\",\"worldRoutes\":\"$DATA/routes/worlds.json\",\"routesOut\":\"/var/lib/souls-routes\",\"portFirst\":7500,\"portLast\":7999}"
   ensure_once "$ETC/directory.args" 640 root "$ACCOUNT" "$args"
   ensure_once "$ETC/origin.env" 640 root "$ACCOUNT" "# Public browser sign-in only: AUTH_PROVIDER=clerk, CLERK_PUBLISHABLE_KEY, CLERK_ISSUER_URL.
 # Optional CLERK_SATELLITE_DOMAIN and CLERK_SIGN_IN_URL. Never put secrets or tokens here."
@@ -334,6 +348,10 @@ bundle() {
   mkdir -p "$out/origin"
   cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../../client/served/serve.mjs" "$out/origin/"
   cp -R "$page" "$out/web"
+  mkdir -p "$out/ops/proxy"
+  cp "$HERE/place-created-world.mjs" "$HERE/place-world.sh" "$out/ops/"
+  cp "$HERE/proxy/route-config.mjs" "$HERE/proxy/routes.mjs" "$out/ops/proxy/"
+  if [ -n "${4:-}" ]; then cp -R "$4" "$out/templates"; fi
   cp "$HERE"/units/* "$out/units/"
   install -m 755 "$0" "$out/install.sh"
   echo "bundle: $(cd "$out" && find . -type f | wc -l | tr -d ' ') files in $out"

@@ -100,3 +100,25 @@ instead, never production's bucket or keys.
 Every write lost was acknowledged after the last copy of its store (70.65 s and 48.96 s before the loss); every
 write before it came back. No file on machine-b fell outside the list. The removal list shipped 103 and 95 times, its
 last copy 1.05 s and 2.43 s before the loss, and no erased sentence read again.
+
+## Created-world placement and authority (W3b)
+
+`world-directory` backs up the durable create intents, immutable name/creator records, world claims and list under
+`worlds/directory/`. `placement-backup` copies the private data-only receipt/authority mirror under
+`directory/placement-backup/`. Each placed world's token hashes and K10 notices are covered alongside its own log;
+the pairing SQL contains the authoritative per-world grants, devices and hashes, and republishes these derived files
+when directoryd starts. No placement mirror contains raw tokens.
+
+Restore the directory/pairing and world stores first and preserve the original placed instance, lineage and zone.
+Restore the known trusted installed configuration/catalogue separately under root ownership; do not copy a writable
+mirror wholesale into the protected live registry. For each restored request, enqueue only its original 64-hex
+request identity in the fixed placement inbox. The same initializer compares the mirror receipt to the durable
+request, immutable name, creator, template lineage and trusted catalogue/build. It restores only that verified
+identity's bounded port, configures the existing units, probes native and advancing public stream readiness, installs
+only that world's authority row, refreshes routing and writes a new protected ready receipt. A mismatch refuses;
+existing world data is retained. Imported aliases remain explicit operator configuration.
+
+This also recovers an interrupted placement with the same request identity. A partial fork without its complete
+serving metadata is retained and named `placement-fork-incomplete`; it requires operator inspection rather than an
+automatic destructive refork. A route refresh failure leaves the protected request pending and can be retried without
+replacing its world or touching another route, including preview Eden.

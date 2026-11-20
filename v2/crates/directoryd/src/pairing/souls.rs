@@ -30,6 +30,7 @@ pub const DESCRIPTION_MOST: usize = 280;
 /// The tables this module adds to the pairing store.
 pub(super) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS pair_request_worlds_v1(code TEXT PRIMARY KEY, world TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS pair_request_formers_v1(code TEXT PRIMARY KEY, former TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS soul_profiles_v1(grant_text TEXT PRIMARY KEY, world TEXT, name TEXT, description TEXT,
       retire_asked INTEGER NOT NULL DEFAULT 0, retired_at INTEGER);
     CREATE TABLE IF NOT EXISTS soul_pictures_v1(grant_text TEXT PRIMARY KEY, format TEXT NOT NULL, hash TEXT NOT NULL,
@@ -66,6 +67,16 @@ pub fn is_world(text: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
+/// The id today's client knew a Soul by (`s_…`, R18): `s_` and 1 to 78 of `A-Z`, `a-z`, `0-9`, `_` and `-`.
+pub fn is_former(text: &str) -> bool {
+    text.strip_prefix("s_").is_some_and(|rest| {
+        (1..=78).contains(&rest.len())
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    })
+}
+
 fn store<T>(r: rusqlite::Result<T>) -> Result<T, &'static str> {
     r.map_err(|_| "store")
 }
@@ -76,11 +87,57 @@ impl Pairing {
         if !is_world(world) {
             return Err("world");
         }
+        self.authority(Some(world))?;
         store(self.db.lock().expect("the store").execute(
             "INSERT OR REPLACE INTO pair_request_worlds_v1(code, world) VALUES (?1, ?2)",
             params![code, world],
         ))
         .map(|_| ())
+    }
+
+    /// Keeps the former id (R18) a pending request (by its code) names; its world is kept by [`Pairing::ask_world`].
+    pub fn ask_former(&self, code: &str, former: &str) -> Result<(), &'static str> {
+        if !is_former(former) {
+            return Err("former");
+        }
+        store(self.db.lock().expect("the store").execute(
+            "INSERT OR REPLACE INTO pair_request_formers_v1(code, former) VALUES (?1, ?2)",
+            params![code, former],
+        ))
+        .map(|_| ())
+    }
+
+    /// The world and former id a request (by its code) names, if it names a former Soul.
+    pub(super) fn former_of(&self, code: &str) -> Result<Option<(String, String)>, &'static str> {
+        store(
+            self.db
+                .lock()
+                .expect("the store")
+                .query_row(
+                    "SELECT w.world, f.former FROM pair_request_formers_v1 f
+                       JOIN pair_request_worlds_v1 w ON w.code = f.code WHERE f.code = ?1",
+                    params![code],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional(),
+        )
+    }
+
+    /// The former id a request names, by the secret its daemon polls with: the poll says it back (R18).
+    pub fn former_by_secret(&self, secret: &str) -> Option<String> {
+        let hash = to_hex(&sha256(secret.as_bytes()));
+        self.db
+            .lock()
+            .expect("the store")
+            .query_row(
+                "SELECT f.former FROM pair_request_formers_v1 f
+                   JOIN pair_requests_v1 r ON r.code = f.code WHERE r.secret_hash = ?1",
+                params![hash],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
     }
 
     /// At an approval: the Soul `grant` is now paired for the world its request named, if it named one.
@@ -150,6 +207,62 @@ impl Pairing {
 
     /// Writes the Souls file beside the gateway's tokens file (W11b), when there is one.
     pub(super) fn write_souls(&self, db: &rusqlite::Connection) -> std::io::Result<()> {
+        if let Some(authorities) = self.authorities().map_err(std::io::Error::other)? {
+            for (key, authority) in authorities.iter() {
+                if key != &authority.world {
+                    continue;
+                }
+                let mut text = String::from("# World-bound Soul lifecycle notices\n");
+                let mut query = db.prepare("SELECT grant_text,world,retired_at IS NOT NULL,name,description FROM soul_profiles_v1 WHERE retired_at IS NOT NULL OR name IS NOT NULL OR description IS NOT NULL ORDER BY 1").map_err(std::io::Error::other)?;
+                let rows = query
+                    .query_map([], |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, Option<String>>(1)?,
+                            r.get::<_, bool>(2)?,
+                            r.get::<_, Option<String>>(3)?,
+                            r.get::<_, Option<String>>(4)?,
+                        ))
+                    })
+                    .map_err(std::io::Error::other)?;
+                for row in rows {
+                    let (grant, world, retired, name, description) =
+                        row.map_err(std::io::Error::other)?;
+                    if world
+                        .as_ref()
+                        .and_then(|world| authorities.get(world))
+                        .is_none_or(|bound| bound.world != authority.world)
+                    {
+                        continue;
+                    }
+                    if retired {
+                        text.push_str(&format!("retired {grant}\n"));
+                    } else {
+                        let hex = |word: Option<String>| {
+                            word.map_or_else(|| "-".to_owned(), |w| to_hex(w.as_bytes()))
+                        };
+                        text.push_str(&format!(
+                            "words {grant} {} {}\n",
+                            hex(name),
+                            hex(description)
+                        ));
+                    }
+                }
+                let name = format!(
+                    "{}.souls",
+                    authority
+                        .tokens
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                );
+                let file = authority.tokens.with_file_name(name);
+                let temporary = file.with_extension("souls-tmp");
+                std::fs::write(&temporary, text)?;
+                std::fs::rename(temporary, file)?;
+            }
+            return Ok(());
+        }
         let Some(tokens) = &self.tokens_file else {
             return Ok(());
         };
@@ -290,6 +403,10 @@ impl Pairing {
             "INSERT INTO soul_profiles_v1(grant_text, retired_at) VALUES (?1, ?2)
              ON CONFLICT(grant_text) DO UPDATE SET retired_at = ?2",
             params![grant, now as i64],
+        ))?;
+        store(db.execute(
+            "DELETE FROM paired_world_tokens_v1 WHERE grant_text=?1",
+            params![grant],
         ))?;
         self.write_tokens(&db).map_err(|_| "tokens-file")?;
         self.write_souls(&db).map_err(|_| "souls-file")

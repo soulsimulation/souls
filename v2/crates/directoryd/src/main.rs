@@ -98,11 +98,16 @@ fn main() {
     // O20's shipper for the directory's stores (O20b, #3523): the account store's copy is handed over by this program,
     // which holds it exclusively; with no bucket set it says so once and ships nothing.
     let mut stores = Vec::new();
+    let world_store = std::env::var_os("DIRECTORYD_WORLD_STORE").map(std::path::PathBuf::from);
+    let placement_backup =
+        std::env::var_os("DIRECTORYD_PLACEMENT_BACKUP").map(std::path::PathBuf::from);
     for mut e in backup::owned_by("directoryd", &[]).unwrap_or_default() {
         let at = match e.name.as_str() {
             "accounts" => Some(&config.store),
             "pairing" => config.pairing.as_ref(),
             "gateway-tokens" => config.gateway_tokens.as_ref(),
+            "world-directory" => world_store.as_ref(),
+            "placement-backup" => placement_backup.as_ref(),
             _ => None,
         };
         if let Some(at) = at.and_then(|p| std::path::absolute(p).ok()) {

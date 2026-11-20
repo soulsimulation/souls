@@ -36,7 +36,7 @@ use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, TransferRec,
     schema_hash,
 };
-use replica::encode::{Value, encode};
+use replica::encode::{Name, Value, encode};
 use replica::ids::{Id, Minter, Scope, Version};
 use replica::pose::{Frame, Pose};
 use replica::time::{Line, Mapping, Micros, TimeEffect, TimeRefusal};
@@ -151,6 +151,13 @@ impl Head {
 
 /// Forks the newest good checkpoint in `parent` into `dir` (new or empty) through `req.through` (rules 1 to 4).
 pub fn fork(parent: &Path, dir: &Path, req: Request) -> R<Forked> {
+    fork_with_kinds(parent, dir, req, &[])
+}
+
+/// A served fork also retains explicitly approved public runtime pins. The caller validates their exact
+/// identities against its trusted public template manifest and registered definitions; no definition bytes are
+/// accepted here. Pins are checked and unioned before any output is created. An empty set is the ordinary fork.
+pub fn fork_with_kinds(parent: &Path, dir: &Path, req: Request, boot_pins: &[Name]) -> R<Forked> {
     if fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some()) {
         return refuse("fork-dir-not-empty", dir.display().to_string());
     }
@@ -172,12 +179,13 @@ pub fn fork(parent: &Path, dir: &Path, req: Request) -> R<Forked> {
         .map(|n| n.id())
         .unwrap_or_else(|| unreachable!("a root"));
     // The kinds the fork's nodes rest on, so its readers (a replica, the view tier) can apply what it makes (G9).
-    let kinds: BTreeSet<_> = tree
+    let mut kinds: BTreeSet<_> = tree
         .to_state()
         .nodes
         .into_values()
         .map(|n| n.kind)
         .collect();
+    kinds.extend(boot_pins.iter().cloned());
     let header = header(
         &req.build,
         req.scope,

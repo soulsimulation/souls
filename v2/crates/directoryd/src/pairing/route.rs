@@ -2,9 +2,12 @@
 //!
 //! - `POST /v1/pair/request` `{secret_hash, device, label, soul | new: true, scope: "soul", force?}`, or a
 //!   creator's `{secret_hash, device, label, creator, scope: "creator", force?}` (G7) →
-//!   `{code, link, interval}`. No sign-in: the daemon asks.
+//!   `{code, link, interval}`. No sign-in: the daemon asks. A Soul of today's client (R18) is asked for as
+//!   `{…, former: "s_…", world, scope: "soul"}` in place of `soul` or `new`: the owner's approval pairs the Soul X11
+//!   brought over for that former id at that world (`imported_souls_v1`), only for the account that owns it, and
+//!   refuses any other `unknown-soul`.
 //! - `POST /v1/pair/poll` `{secret}` → `{pending: "authorization_pending" | "slow_down", interval?}`,
-//!   `{refused, device?}` or, once, `{token, grant}`.
+//!   `{refused, device?}` or, once, `{token, grant}`, with `former` for a former Soul's request.
 //! - `GET /pair` → the approval card. It shows and changes nothing until the signed-in owner acts in it.
 //! - `POST /v1/pair/show` and `POST /v1/pair/approve` `{code, confirm: true}`, signed in: W1's session token as
 //!   `Authorization: Bearer`, or on a test world W1's test person as `test_person`. An approval records the Soul, and
@@ -104,6 +107,8 @@ pub fn route(
                 .and_then(|h| from_hex(&h).ok())
                 .and_then(|h| h.try_into().ok());
             let new = b.get("new").and_then(Value::as_bool) == Some(true);
+            // R18: a Soul of today's client, named by its former id and its world, for the Soul X11 brought over.
+            let former = text(&b, "former");
             // A creator's request names its grant as `creator` (G7); a Soul's as `soul`.
             let soul = text(&b, "soul").or_else(|| text(&b, "creator"));
             let (Some(secret_hash), Some(device), Some(label)) =
@@ -111,13 +116,24 @@ pub fn route(
             else {
                 return Some(refuse(400, "request"));
             };
-            if new == soul.is_some() || !is_name(&device) || !is_name(&label) {
+            let named =
+                usize::from(new) + usize::from(soul.is_some()) + usize::from(former.is_some());
+            if named != 1 || !is_name(&device) || !is_name(&label) {
                 return Some(refuse(400, "request"));
             }
-            // The world the Soul is paired for (W11), kept with the request until its approval.
+            // The world the Soul is paired for (W11), kept with the request until its approval; a former Soul's
+            // request must name it.
             let world = text(&b, "world");
-            if world.as_deref().is_some_and(|w| !super::souls::is_world(w)) {
+            if world.as_deref().is_some_and(|w| !super::souls::is_world(w))
+                || (former.is_some() && world.is_none())
+            {
                 return Some(refuse(400, "world"));
+            }
+            if former
+                .as_deref()
+                .is_some_and(|f| !super::souls::is_former(f))
+            {
+                return Some(refuse(400, "former"));
             }
             let ask = Ask {
                 secret_hash,
@@ -128,7 +144,10 @@ pub fn route(
                 force: b.get("force").and_then(Value::as_bool) == Some(true),
             };
             match p.ask(&ask, now()) {
-                Ok(a) if world.is_some_and(|w| p.ask_world(&a.code, &w).is_err()) => {
+                Ok(a)
+                    if world.is_some_and(|w| p.ask_world(&a.code, &w).is_err())
+                        || former.is_some_and(|f| p.ask_former(&a.code, &f).is_err()) =>
+                {
                     refuse(500, "store")
                 }
                 Ok(a) => json(
@@ -140,23 +159,31 @@ pub fn route(
                 Err(e) => refuse(400, e),
             }
         }
-        ("POST", "/v1/pair/poll") => match text(&body(), "secret").map(|s| p.poll(&s, now())) {
-            None => refuse(400, "request"),
-            Some(Poll::Pending) => {
-                json(200, json!({"pending": "authorization_pending"}), "pending")
+        ("POST", "/v1/pair/poll") => {
+            match text(&body(), "secret").map(|s| (p.poll(&s, now()), s)) {
+                None => refuse(400, "request"),
+                Some((Poll::Pending, _)) => {
+                    json(200, json!({"pending": "authorization_pending"}), "pending")
+                }
+                Some((Poll::SlowDown(n), _)) => json(
+                    200,
+                    json!({"pending": "slow_down", "interval": n}),
+                    "slow_down",
+                ),
+                Some((Poll::Refused(name, device), _)) => {
+                    json(200, json!({"refused": name, "device": device}), name)
+                }
+                // R18: a former Soul's answer says its former id back.
+                Some((Poll::Token { token, grant }, secret)) => match p.former_by_secret(&secret) {
+                    Some(former) => json(
+                        200,
+                        json!({"token": token, "grant": grant, "former": former}),
+                        "delivered",
+                    ),
+                    None => json(200, json!({"token": token, "grant": grant}), "delivered"),
+                },
             }
-            Some(Poll::SlowDown(n)) => json(
-                200,
-                json!({"pending": "slow_down", "interval": n}),
-                "slow_down",
-            ),
-            Some(Poll::Refused(name, device)) => {
-                json(200, json!({"refused": name, "device": device}), name)
-            }
-            Some(Poll::Token { token, grant }) => {
-                json(200, json!({"token": token, "grant": grant}), "delivered")
-            }
-        },
+        }
         ("POST", "/v1/pair/show" | "/v1/pair/approve") => {
             let b = body();
             let account = match signed_in(app, bearer, &b) {
@@ -172,7 +199,8 @@ pub fn route(
                     Ok(c) => json(
                         200,
                         json!({"device": c.device, "label": c.label, "soul": c.soul, "code": c.code,
-                               "age": c.age, "scope": c.scope, "force": c.force, "connected": c.connected}),
+                               "age": c.age, "scope": c.scope, "force": c.force, "connected": c.connected,
+                               "former": c.former}),
                         note,
                     ),
                     Err(e @ "code-guesses") => refuse(429, e),
@@ -181,13 +209,16 @@ pub fn route(
             } else if b.get("confirm").and_then(Value::as_bool) != Some(true) {
                 refuse(400, "confirm")
             } else {
-                // G7b: a world's creator grant the account holds in the accounts store is its to pair.
+                let imported = |world: &str, former: &str| {
+                    app.store.imported_soul(world, former).map_err(|_| "store")
+                };
+                // A world's creator grant the account holds is its to pair alongside imported Souls.
                 let holds = |g: &str| {
                     app.store
                         .grants(&account)
                         .is_ok_and(|gs| gs.iter().any(|(h, _)| h == g))
                 };
-                match p.approve_holding(&account, &code, now(), holds) {
+                match p.approve_combined(&account, &code, now(), &imported, holds) {
                     // V13c: the approving account owns the Soul, and its page follows the Soul's own body.
                     Ok(grant) => match app
                         .store

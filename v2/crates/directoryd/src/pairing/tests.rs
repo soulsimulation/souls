@@ -551,6 +551,61 @@ fn w11_a4_a_retire_takes_effect_only_after_the_owners_confirmed_post() {
 }
 
 #[test]
+fn r18_a_former_soul_pairs_only_as_the_soul_x11_brought_over_for_its_owner() {
+    let (p, _) = store();
+    let brought = format!("soul-{}-0", "ab".repeat(16));
+    let imported = |world: &str, former: &str| {
+        Ok((world == "eden" && former == "s_ada")
+            .then(|| (brought.clone(), "acct_owner".to_string())))
+    };
+    let former = |p: &Pairing, f: &str| {
+        let (secret, code) = ask(p, "studio laptop", None, false, T0);
+        p.ask_world(&code, "eden").expect("a world");
+        p.ask_former(&code, f).expect("a former id");
+        (secret, code)
+    };
+    // The owner's approval pairs the Soul brought over, and the poll can say the former id back.
+    let (secret, code) = former(&p, "s_ada");
+    let card = p.show("acct_owner", &code, T0).expect("a card");
+    assert_eq!(card.former.as_deref(), Some("s_ada"));
+    assert_eq!(
+        p.approve_with("acct_owner", &code, T0, &imported),
+        Ok(brought.clone())
+    );
+    let Poll::Token { grant, .. } = p.poll(&secret, T0 + INTERVAL) else {
+        panic!("a token")
+    };
+    assert_eq!(grant, brought);
+    assert_eq!(p.former_by_secret(&secret).as_deref(), Some("s_ada"));
+    assert_eq!(
+        p.souls("acct_owner"),
+        Ok(vec![(brought.clone(), Some("studio laptop".into()))])
+    );
+    // Another account, or a former id not brought over, is refused by name, and its daemon learns it.
+    let (secret, code) = former(&p, "s_ada");
+    assert_eq!(
+        p.approve_with("acct_other", &code, T0, &imported),
+        Err(("unknown-soul", None))
+    );
+    assert_eq!(
+        p.poll(&secret, T0 + INTERVAL),
+        Poll::Refused("unknown-soul".into(), None)
+    );
+    let (_, code) = former(&p, "s_nobody");
+    assert_eq!(
+        p.approve_with("acct_owner", &code, T0, &imported),
+        Err(("unknown-soul", None))
+    );
+    // Without an import, a former Soul is never made a new one.
+    let (_, code) = former(&p, "s_ada");
+    assert_eq!(
+        p.approve("acct_owner", &code, T0),
+        Err(("unknown-soul", None))
+    );
+    assert!(p.ask_former("BCDF-GHJK", "not-a-former").is_err());
+}
+
+#[test]
 fn w11b_the_souls_file_tells_the_world_of_saved_words_and_a_retire() {
     let (p, tokens) = store();
     let (_, grant) = pair_in(&p, "acct_owner", "mars");
@@ -574,4 +629,358 @@ fn w11b_the_souls_file_tells_the_world_of_saved_words_and_a_retire() {
         !file().lines().any(|l| l.starts_with("words ")),
         "a retired Soul's words are not sent"
     );
+}
+
+#[test]
+fn o24_operator_test_approval_uses_w2_delivery_and_k10_retirement_without_a_human() {
+    let (p, tokens) = store();
+    let (secret, code) = ask(&p, "release fixture", None, false, T0);
+    p.ask_world(&code, "eden").unwrap();
+    let grant = p.operator_approve("eden", &code, T0).unwrap();
+    assert!(p.is_operator_test(&grant).unwrap(), "mark precedes poll");
+    assert_eq!(p.mine("acct_owner").unwrap(), vec![]);
+    let Poll::Token {
+        token,
+        grant: delivered,
+    } = p.poll(&secret, T0 + INTERVAL)
+    else {
+        panic!("normal W2 token");
+    };
+    assert_eq!(delivered, grant);
+    assert!(
+        std::fs::read_to_string(&tokens)
+            .unwrap()
+            .contains(&to_hex(&sha256(token.as_bytes())))
+    );
+    assert!(p.operator_approve("eden", &code, T0 + 10).is_err());
+    let owner = p.soul_of(&grant).unwrap().unwrap().0;
+    assert_eq!(owner, "operator:test-souls");
+    assert_eq!(p.mine(&owner).unwrap()[0].world.as_deref(), Some("eden"));
+    p.set_profile(
+        &owner,
+        &grant,
+        &souls::Profile {
+            name: Some("renamed".into()),
+            description: None,
+        },
+    )
+    .unwrap();
+    assert!(p.is_operator_test(&grant).unwrap());
+    p.retire(&owner, &grant, T0 + 20).unwrap();
+    assert!(p.mine(&owner).unwrap().is_empty());
+    assert!(
+        p.is_operator_test(&grant).unwrap(),
+        "retirement cannot erase test provenance"
+    );
+    assert!(
+        !std::fs::read_to_string(&tokens)
+            .unwrap()
+            .contains(&to_hex(&sha256(token.as_bytes())))
+    );
+    assert!(
+        std::fs::read_to_string(tokens.with_file_name("tokens.txt.souls"))
+            .unwrap()
+            .contains(&format!("retired {grant}"))
+    );
+}
+
+#[test]
+fn o24_operator_refuses_wrong_world_named_former_creator_and_forced_requests() {
+    let (p, _) = store();
+    let (_, code) = ask(&p, "release fixture", None, false, T0);
+    p.ask_world(&code, "eden").unwrap();
+    assert_eq!(
+        p.operator_approve("elsewhere", &code, T0),
+        Err("operator.new-world-request-only")
+    );
+    // A refused operator attempt does not consume a valid waiting request.
+    assert!(p.operator_approve("eden", &code, T0).is_ok());
+    for (named, former, scope, force) in [
+        (
+            Some("soul-0123456789abcdef0123456789abcdef-4"),
+            false,
+            "soul",
+            false,
+        ),
+        (None, true, "soul", false),
+        (
+            Some("creator-0123456789abcdef0123456789abcdef-4"),
+            false,
+            "creator",
+            false,
+        ),
+        (None, false, "soul", true),
+    ] {
+        let a = Ask {
+            secret_hash: random(),
+            device: "release fixture".into(),
+            label: "fixture".into(),
+            soul: named.map(str::to_string),
+            scope: scope.into(),
+            force,
+        };
+        let code = p.ask(&a, T0).unwrap().code;
+        p.ask_world(&code, "eden").unwrap();
+        if former {
+            p.ask_former(&code, "s_former").unwrap();
+        }
+        assert_eq!(
+            p.operator_approve("eden", &code, T0),
+            Err("operator.new-world-request-only")
+        );
+    }
+    assert!(
+        !p.is_operator_test("soul-0123456789abcdef0123456789abcdef-4")
+            .unwrap()
+    );
+    assert!(!p.is_operator_test("unknown").unwrap());
+}
+
+#[test]
+fn w3b_world_bound_normal_soul_creator_and_retirement_authority() {
+    let (mut p, legacy) = store();
+    let root = legacy.parent().unwrap().canonicalize().unwrap();
+    let creator = "0123456789abcdef0123456789abcdef:0";
+    let instance_a = "11111111111111111111111111111111-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-0";
+    let instance_b = "22222222222222222222222222222222-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-0";
+    for instance in [instance_a, instance_b] {
+        std::fs::create_dir_all(root.join("worlds").join(instance)).unwrap();
+        std::fs::write(root.join("worlds").join(instance).join("tokens"), "").unwrap();
+    }
+    let registry = root.join("authority.json");
+    std::fs::write(&registry, serde_json::json!({"format":"souls/world-authority/1","worldsRoot":root,
+        "worlds":{"one":{"instance":instance_a,"creator":creator},"two":{"instance":instance_b,"creator":creator}},
+        "aliases":{"old-one":"one"}}).to_string()).unwrap();
+    p.authority_file = Some(registry);
+    let file_a = root.join("worlds").join(instance_a).join("tokens");
+    let file_b = root.join("worlds").join(instance_b).join("tokens");
+    let (secret, code) = ask(&p, "agent", None, false, T0);
+    p.ask_world(&code, "one").unwrap();
+    let grant = p.approve("acct_owner", &code, T0).unwrap();
+    let Poll::Token { token, .. } = p.poll(&secret, T0 + INTERVAL) else {
+        panic!("normal world-bound delivery")
+    };
+    assert!(
+        std::fs::read_to_string(&file_a)
+            .unwrap()
+            .contains(&to_hex(&sha256(token.as_bytes())))
+    );
+    assert!(!std::fs::read_to_string(&file_b).unwrap().contains(&grant));
+    let (_, wrong) = ask(&p, "other world", Some(&grant), true, T0 + 100);
+    p.ask_world(&wrong, "two").unwrap();
+    assert_eq!(
+        p.approve("acct_owner", &wrong, T0 + 100),
+        Err(("soul-in-another-world", None))
+    );
+    assert_eq!(p.ask_world(&wrong, "unknown"), Err("world-unplaced"));
+    p.set_profile(
+        "acct_owner",
+        &grant,
+        &souls::Profile {
+            name: Some("Marked".into()),
+            description: None,
+        },
+    )
+    .unwrap();
+    assert!(
+        std::fs::read_to_string(file_a.with_file_name("tokens.souls"))
+            .unwrap()
+            .contains(&grant)
+    );
+    assert!(
+        !std::fs::read_to_string(file_b.with_file_name("tokens.souls"))
+            .unwrap()
+            .contains(&grant)
+    );
+    let creator_grant = "creator-0123456789abcdef0123456789abcdef-0".to_owned();
+    p.register(&creator_grant, "acct_owner").unwrap();
+    for (n, world) in ["one", "two"].iter().enumerate() {
+        let secret = to_hex(&random::<32>());
+        let asked = p
+            .ask(
+                &Ask {
+                    secret_hash: sha256(secret.as_bytes()),
+                    device: format!("creator-{n}"),
+                    label: "creator".into(),
+                    soul: Some(creator_grant.clone()),
+                    scope: "creator".into(),
+                    force: false,
+                },
+                T0 + 200 + n as u64 * 100,
+            )
+            .unwrap();
+        p.ask_world(&asked.code, world).unwrap();
+        assert_eq!(
+            p.approve("acct_owner", &asked.code, T0 + 200 + n as u64 * 100),
+            Ok(creator_grant.clone())
+        );
+        assert!(matches!(
+            p.poll(&secret, T0 + 210 + n as u64 * 100),
+            Poll::Token { .. }
+        ));
+    }
+    assert!(
+        std::fs::read_to_string(&file_a)
+            .unwrap()
+            .contains(&creator_grant)
+    );
+    assert!(
+        std::fs::read_to_string(&file_b)
+            .unwrap()
+            .contains(&creator_grant)
+    );
+    p.retire("acct_owner", &grant, T0 + 500).unwrap();
+    assert!(!std::fs::read_to_string(&file_a).unwrap().contains(&grant));
+    assert!(
+        std::fs::read_to_string(file_a.with_file_name("tokens.souls"))
+            .unwrap()
+            .contains(&format!("retired {grant}"))
+    );
+    assert!(
+        !std::fs::read_to_string(file_b.with_file_name("tokens.souls"))
+            .unwrap()
+            .contains(&grant)
+    );
+    assert!(
+        !legacy.exists(),
+        "mapped operation never writes the legacy all-world file"
+    );
+}
+
+#[test]
+fn w3b_registry_upgrade_preserves_exact_legacy_world_hash_and_refuses_ambiguity() {
+    let (mut p, legacy) = store();
+    let root = legacy.parent().unwrap().canonicalize().unwrap();
+    let (token, grant) = pair_in(&p, "acct_owner", "imported-eden");
+    let hash = to_hex(&sha256(token.as_bytes()));
+    let creator = "0123456789abcdef0123456789abcdef:0";
+    let instances = [
+        "11111111111111111111111111111111-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-0",
+        "22222222222222222222222222222222-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-0",
+    ];
+    let files: Vec<_> = instances
+        .iter()
+        .map(|instance| {
+            let dir = root.join("worlds").join(instance);
+            std::fs::create_dir_all(&dir).unwrap();
+            let file = dir.join("tokens");
+            std::fs::write(&file, "# unchanged empty world\n").unwrap();
+            file
+        })
+        .collect();
+    let original = std::fs::read(&legacy).unwrap();
+    std::fs::write(&files[0], &original).unwrap();
+    let registry = root.join("authority.json");
+    std::fs::write(&registry,serde_json::json!({"format":"souls/world-authority/1","worldsRoot":root,
+        "worlds":{"eden":{"instance":instances[0],"creator":creator},"other":{"instance":instances[1],"creator":creator}},
+        "aliases":{"imported-eden":"eden"}}).to_string()).unwrap();
+    p.authority_file = Some(registry.clone());
+    // A wrong-world token is not evidence for this Soul's explicit imported-world profile.
+    std::fs::write(&files[0], "# wrong world\n").unwrap();
+    std::fs::write(&files[1], &original).unwrap();
+    let before: Vec<_> = files.iter().map(|f| std::fs::read(f).unwrap()).collect();
+    assert!(p.write_tokens(&p.db.lock().unwrap()).is_err());
+    assert_eq!(
+        files
+            .iter()
+            .map(|f| std::fs::read(f).unwrap())
+            .collect::<Vec<_>>(),
+        before
+    );
+    assert_eq!(
+        p.db.lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM paired_world_tokens_v1", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    std::fs::write(&files[0], &original).unwrap();
+    std::fs::write(&files[1], "# unchanged empty world\n").unwrap();
+    p.write_tokens(&p.db.lock().unwrap()).unwrap();
+    assert!(
+        std::fs::read_to_string(&files[0])
+            .unwrap()
+            .contains(&format!("{grant} {hash}"))
+    );
+    assert!(!std::fs::read_to_string(&files[1]).unwrap().contains(&grant));
+    let device: String =
+        p.db.lock()
+            .unwrap()
+            .query_row(
+                "SELECT device FROM paired_world_tokens_v1 WHERE grant_text=?1 AND world='eden'",
+                params![grant],
+                |r| r.get(0),
+            )
+            .unwrap();
+    assert_eq!(device, "studio laptop");
+    let db_path = root.join("pairing.sqlite");
+    drop(p);
+    let mut p = Pairing::open(&db_path, Some(legacy.clone()), "https://example.invalid").unwrap();
+    p.authority_file = Some(registry);
+    // Once scoped, a stale global value cannot replace the preserved scoped device/hash on restart.
+    p.db.lock()
+        .unwrap()
+        .execute(
+            "UPDATE paired_souls_v1 SET token_hash=?2 WHERE grant_text=?1",
+            params![grant, "a".repeat(64)],
+        )
+        .unwrap();
+    p.write_tokens(&p.db.lock().unwrap()).unwrap();
+    assert!(
+        std::fs::read_to_string(&files[0])
+            .unwrap()
+            .contains(&format!("{grant} {hash}"))
+    );
+    assert_eq!(
+        p.db.lock()
+            .unwrap()
+            .query_row(
+                "SELECT device FROM paired_world_tokens_v1 WHERE grant_text=?1 AND world='eden'",
+                params![grant],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "studio laptop"
+    );
+    let creator_grant = "creator-0123456789abcdef0123456789abcdef-0".to_owned();
+    let creator_hash = "b".repeat(64);
+    p.db.lock().unwrap().execute("INSERT INTO paired_souls_v1(grant_text,account,device,token_hash) VALUES(?1,'acct_owner','creator-device',?2)",params![creator_grant,creator_hash]).unwrap();
+    for file in &files {
+        let text = std::fs::read_to_string(file).unwrap();
+        std::fs::write(file, format!("{text}{creator_grant} {creator_hash}\n")).unwrap();
+    }
+    let before: Vec<_> = files.iter().map(|f| std::fs::read(f).unwrap()).collect();
+    assert!(p.write_tokens(&p.db.lock().unwrap()).is_err());
+    assert_eq!(
+        files
+            .iter()
+            .map(|f| std::fs::read(f).unwrap())
+            .collect::<Vec<_>>(),
+        before
+    );
+    assert_eq!(
+        p.db.lock()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM paired_world_tokens_v1 WHERE grant_text=?1",
+                params![creator_grant],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    std::fs::write(&files[1], "# unchanged empty world\n").unwrap();
+    p.write_tokens(&p.db.lock().unwrap()).unwrap();
+    assert!(
+        std::fs::read_to_string(&files[0])
+            .unwrap()
+            .contains(&creator_grant)
+    );
+    assert!(
+        !std::fs::read_to_string(&files[1])
+            .unwrap()
+            .contains(&creator_grant)
+    );
+    assert_eq!(std::fs::read(&legacy).unwrap(), original);
 }

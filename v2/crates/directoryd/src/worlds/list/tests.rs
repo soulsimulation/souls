@@ -286,3 +286,70 @@ fn g10_a4_the_creators_list_picture_passes_g6_and_shows_on_a_cold_machine() {
         json!(url)
     );
 }
+
+#[test]
+fn w3b_pending_retry_survives_directory_restart_and_keeps_owned_identity() {
+    let (store, gets, calls) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let mut first = worlds(&store, &gets, calls.clone());
+    let started = calls.clone();
+    first.starter = Box::new(move |_| {
+        started.fetch_add(1, Ordering::SeqCst);
+        refuse("world-starting", "pending")
+    });
+    let click = ask("durable-click", "durable", "Owner");
+    assert_eq!(
+        first
+            .create(&click, person(1), 0, 10 * DAY)
+            .unwrap_err()
+            .name,
+        "world-starting"
+    );
+    let pending = first.list().unwrap()["worlds"][0].clone();
+    assert_eq!(pending["ready"], false);
+    drop(first);
+    let resumed = worlds(&store, &gets, calls.clone());
+    let answer = resumed.create(&click, person(1), 0, 10 * DAY + 1).unwrap();
+    assert_eq!(answer["world"]["lineage"], pending["lineage"]);
+    assert_eq!(answer["world"]["creator"], pending["creator"]);
+    assert_eq!(answer["world"]["ready"], true);
+    assert_eq!(
+        resumed.create(&click, person(1), 0, 10 * DAY + 2).unwrap(),
+        answer
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "one pending handoff and one recovery, no repeated ready fork"
+    );
+    let mut changed = click.clone();
+    changed.name = "other".into();
+    assert_eq!(
+        resumed
+            .create(&changed, person(1), 0, 10 * DAY + 3)
+            .unwrap_err()
+            .name,
+        "create-key-reused"
+    );
+    assert_eq!(
+        resumed
+            .create(&click, person(2), 0, 10 * DAY + 3)
+            .unwrap_err()
+            .name,
+        "label-taken"
+    );
+    let expected: [u8; 16] = from_hex(pending["lineage"].as_str().unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_eq!(
+        store
+            .get(&NameRecord::key("durable"))
+            .unwrap()
+            .map(|o| NameRecord::read(&o.bytes).unwrap().lineage),
+        Some(expected)
+    );
+}

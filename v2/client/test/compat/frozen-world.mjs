@@ -5,7 +5,7 @@
 //   request under /v1/edge or /v1/agent from a client below the minimum gets 426 `client.upgrade-required`.
 // - The directory's pairing (W2) for a Soul X11 brought over: a request names the Soul's `former` id and its `world`;
 //   the owner's approval pairs the Soul X11's table holds for that former id, and only for its own account; the poll
-//   answers `{token, grant, former}`. directoryd does not answer `former` yet: this is the half R18's client speaks.
+//   answers `{token, grant, former}`. directoryd answers the same (`v2/client/src/pair/former.test.mjs`).
 
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';

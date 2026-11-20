@@ -126,7 +126,16 @@ pub fn route(req: &Request, app: &App) -> Answer {
     };
     let note = format!("account#{}", correlate(&account.account));
     match worlds.create(&ask, account.principal, made, now()) {
-        Ok(v) => (200, v, note),
+        Ok(v) => {
+            let grant = format!(
+                "creator-{}",
+                crate::accounts::principal_text(account.principal).replace(':', "-")
+            );
+            if app.store.own(&account.account, &grant, None).is_err() {
+                return refuse(503, "store");
+            }
+            (200, v, note)
+        }
         Err(e) if e.name.starts_with("world-limit") => {
             let mut v: Value = serde_json::from_str(&e.detail).unwrap_or(json!({}));
             v["refused"] = json!(e.name);
@@ -134,7 +143,7 @@ pub fn route(req: &Request, app: &App) -> Answer {
         }
         Err(e) => {
             let status = match e.name {
-                "store-unreachable" | "start-failed" => 503,
+                "store-unreachable" | "start-failed" | "world-starting" => 503,
                 _ => 409,
             };
             // A failed start's detail is the machine's (its paths): it stays in the machine's own log.
