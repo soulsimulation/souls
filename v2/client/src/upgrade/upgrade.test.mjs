@@ -5,7 +5,7 @@
 
 import { strict as assert } from 'node:assert';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +25,7 @@ test('A2: old ids read as "formerly" after the upgrade; the other Soul reads by 
   const w = await frozenWorld({ imported });
   t.after(() => w.close());
   mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, 'config.json'), JSON.stringify({ version: 1, client: '3.0.0', previousClient: '2.36.2', worlds: { eden: { url: w.url } },
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ version: 1, client: '3.0.0', previousClient: '2.36.2', worlds: { eden: { url: w.url, worldId: 'eden' } },
     souls: { s_ada: { name: 'Ada', world: 'eden', state: 'active' }, s_bo: { name: 'Bo', world: 'eden', state: 'active' } } }));
   writeFileSync(join(home, 'credentials.json'), JSON.stringify({ version: 1, souls: { s_ada: { eden: { token: 'sim_a' } }, s_bo: { eden: { token: 'sim_b' } } } }), { mode: 0o600 });
   // Ada meets Bo (a Soul of this home) and Cal (one it never names) at the cafe, over five days.
@@ -52,4 +52,34 @@ test('A2: old ids read as "formerly" after the upgrade; the other Soul reads by 
 
   // A rollback refuses with no kept client, and changes nothing.
   assert.throws(() => rollbackHome(home), { code: 'nothing-to-roll-back' });
+});
+
+
+test('R18c: saved world identity is URL-bound; missing or contradictory metadata cannot mutate a home', async (t) => {
+  const cases = [
+    { name: 'missing', saved: {}, state: null, code: 'former-world-missing' },
+    { name: 'wrong-url', saved: {}, state: { world: 'https://other.example.test/w/away', worldId: 'other-id' }, code: 'former-world-missing' },
+    { name: 'conflict', saved: { worldId: 'internal-id' }, state: { world: 'https://world.example.test/w/public-slug', worldId: 'different-id' }, code: 'former-world-conflict' },
+    { name: 'invalid', saved: { worldId: '' }, state: null, code: 'former-world-invalid' },
+  ];
+  const snapshot = (dir) => Object.fromEntries(readdirSync(dir, { recursive: true, withFileTypes: true }).filter(e=>e.isFile()).map(e=>{
+    const file=join(e.parentPath,e.name);return [file.slice(dir.length),readFileSync(file).toString('base64')];
+  }));
+  for (const c of cases) {
+    const d=join(dirname(home),c.name);mkdirSync(join(d,'souls','s_ada','runtime'),{recursive:true});
+    writeFileSync(join(d,'config.json'),JSON.stringify({worlds:{nickname:{url:'https://world.example.test/w/public-slug',...c.saved}},souls:{s_ada:{state:'active',world:'nickname'}}}));
+    writeFileSync(join(d,'credentials.json'),JSON.stringify({souls:{s_ada:{nickname:{token:'sim_fixture'}}},upgraded:{souls:{s_new:{nickname:{token:'parked-fixture'}}}}}),{mode:0o600});
+    writeFileSync(join(d,'upgrade.json'),JSON.stringify({souls:{s_ada:'s_new'}}));
+    writeFileSync(join(d,'souls','s_ada','memory.txt'),'unchanged memory');
+    if(c.state)writeFileSync(join(d,'souls','s_ada','runtime','state.json'),JSON.stringify(c.state));
+    const before=snapshot(d);
+    await assert.rejects(upgradeHome({home:d}),{code:c.code},c.name);
+    assert.deepEqual(snapshot(d),before,'validation precedes parked-token/config/memory changes');
+  }
+  const d=join(dirname(home),'recovery');mkdirSync(join(d,'souls','s_ada','runtime'),{recursive:true});
+  const url='https://world.example.test/w/public-slug';
+  writeFileSync(join(d,'config.json'),JSON.stringify({worlds:{nickname:{url}},souls:{s_ada:{state:'active',world:'nickname'}}}));
+  writeFileSync(join(d,'credentials.json'),JSON.stringify({souls:{s_ada:{nickname:{token:'sim_fixture'}}}}),{mode:0o600});
+  writeFileSync(join(d,'souls','s_ada','runtime','state.json'),JSON.stringify({world:url,worldId:'internal-id'}));
+  assert.deepEqual(formerSouls(d).map(({world,formerWorld})=>({world,formerWorld})),[{world:'nickname',formerWorld:'internal-id'}]);
 });
