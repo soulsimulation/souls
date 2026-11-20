@@ -178,6 +178,8 @@ install_all() {
   ensure_dir "$DATA/worlds/worlds" 750 "$ACCOUNT" "$ACCOUNT"
   ensure_dir "$DATA/directory/placement-backup" 750 "$ACCOUNT" "$ACCOUNT"
   ensure_dir "$ETC/placement-data" 750 root "$ACCOUNT"
+  ensure_dir "$ETC/placement-data/archived" 750 root "$ACCOUNT"
+  ensure_dir "$ETC/placement-data/archives" 750 root "$ACCOUNT"
   ensure_dir "$ETC/placement-data/requests" 770 root "$ACCOUNT"
   ensure_dir "$ETC/placement-data/status" 750 root "$ACCOUNT"
   ensure_dir "$ETC/placement-data/attempts" 700 root root
@@ -353,7 +355,7 @@ bundle() {
   cp "$HERE/../../../tools/world-launcher/owner-overview-data.mjs" "$out/origin/"
   cp -R "$page" "$out/web"
   mkdir -p "$out/ops/proxy"
-  cp "$HERE/place-created-world.mjs" "$HERE/place-world.sh" "$out/ops/"
+  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$out/ops/"
   cp "$HERE/proxy/route-config.mjs" "$HERE/proxy/routes.mjs" "$out/ops/proxy/"
   if [ -n "${4:-}" ]; then cp -R "$4" "$out/templates"; fi
   cp "$HERE"/units/* "$out/units/"

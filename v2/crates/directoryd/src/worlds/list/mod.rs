@@ -2,8 +2,8 @@
 //!
 //! 1. **One object, one read.** Every world made through the directory has a row in one object, `world-list`:
 //!    `{"worlds": [{name, label, template, lineage, zone, creator, made}]}`, written after G9's create on condition of
-//!    the version read (rows are only added). The list request is answered from this machine's cached copy of it,
-//!    read from the store at most once; it asks no world anything, so it wakes none. Awake or asleep comes from the
+//!    the version read. Each list request reads this one authoritative object, including operator archive changes;
+//!    it asks no world anything, so it wakes none. Awake or asleep comes from the
 //!    world records this machine's directory has cached, never from the store or a world.
 //! 2. **Create** takes a name, a template and the creator's label, and runs G9's create
 //!    ([`crate::worlds::create`]) with the starter: the fork, in its own process (`worldd fork`).
@@ -20,6 +20,7 @@
 //!    and hold point with [`PICTURE_BYTES`] and [`PICTURE_SIDE`], is kept stripped of metadata, and is one field of
 //!    the world's row, `picture`, a `data:` URL; a row without one lists `picture: null`.
 
+pub mod archive;
 pub mod handoff;
 pub mod http;
 mod placement;
@@ -234,17 +235,6 @@ impl<S: Store> Worlds<S> {
         }
     }
 
-    /// The rows, from the cached copy; read from the store only when there is none.
-    fn rows(&self, inner: &Inner<S>) -> R<Vec<Json>> {
-        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((_, rows)) = &*cache {
-            return Ok(rows.clone());
-        }
-        let (etag, rows) = read_rows(&inner.dir.store)?;
-        *cache = Some((etag, rows.clone()));
-        Ok(rows)
-    }
-
     /// Every world's lineage (hex) and creator (a principal's text), unlisted ones too: whom a world's prayers go to
     /// (G11, #3335).
     pub fn creators(&self) -> R<Vec<(String, String)>> {
@@ -267,8 +257,8 @@ impl<S: Store> Worlds<S> {
     pub fn list(&self) -> R<Json> {
         // Locks are taken in one order, the directory then the cached copy.
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let mut rows = self.rows(&inner)?;
-        rows.retain(|r| r.get("unlisted") != Some(&Json::Bool(true)));
+        let (_, mut rows) = read_rows(&inner.dir.store)?;
+        rows.retain(|r| r.get("unlisted") != Some(&Json::Bool(true)) && archive::active(r).is_ok());
         for row in &mut rows {
             handoff::public_row(row);
             let awake = (|| {
@@ -378,6 +368,13 @@ impl<S: Store> Worlds<S> {
                 value
             }
         };
+        let (_, current_rows) = read_rows(&inner.dir.store)?;
+        if let Some(current) = current_rows
+            .iter()
+            .find(|r| r.get("name").and_then(Json::as_str) == Some(ask.name.as_str()))
+        {
+            archive::active(current)?;
+        }
         let mut row = intent["row"].clone();
         if row.get("ready") == Some(&Json::Bool(true)) {
             return Ok(json!({"world": row, "epoch": 1}));
@@ -439,6 +436,9 @@ impl<S: Store> Worlds<S> {
         };
         let (etag, rows) = read_rows(&inner.dir.store)?;
         let (rows, ()) = write_rows(&inner.dir.store, etag, rows, |rows| {
+            if let Some(current) = rows.iter().find(|r| r.get("name") == row.get("name")) {
+                archive::active(current)?;
+            }
             if !rows.iter().any(|r| r.get("name") == row.get("name")) {
                 rows.push(row.clone());
             }
@@ -463,7 +463,9 @@ impl<S: Store> Worlds<S> {
                     name: "create-intent-invalid",
                     detail: "the world row is absent".into(),
                 })?;
-            *found = row.clone();
+            archive::active(found)?;
+            // Keep concurrent settings/authority metadata rather than replacing the current row from an old intent.
+            found["ready"] = json!(true);
             Ok(())
         })?;
         *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
