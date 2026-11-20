@@ -34,6 +34,7 @@ use replica::encode::{Name, Value, decode, encode};
 use replica::history::events::Indexer;
 use replica::history::{Bundle, DayIndex, WINDOW_LEAST, day_of, public_snapshot};
 use replica::ids::{Id, sha256};
+use replica::stream::public::{digest, observation_delta, project};
 use replica::tree::Tree;
 use replica::views::{Key, Level, Redactions, View};
 use replica::world_model::Audience;
@@ -341,16 +342,19 @@ pub struct Head {
     pub root: Id,
     pub kind: Name,
     pub newest: String,
+    pub base: Option<[u8; 32]>,
 }
 
 impl Head {
     pub fn to_bytes(&self) -> R<Vec<u8>> {
-        enc(&map(vec![
+        let mut fields = vec![
             (1, Value::Uint(FORMAT)),
             (2, self.root.to_value()),
             (3, Value::Text(self.kind.clone())),
             (4, text(&self.newest)),
-        ]))
+        ];
+        fields.extend(self.base.map(|b| (5, Value::Bytes(b.to_vec()))));
+        enc(&map(fields))
     }
 
     pub fn read(bytes: &[u8]) -> R<Head> {
@@ -364,7 +368,76 @@ impl Head {
             root: read_id(root)?,
             kind: kind.clone(),
             newest: read_text(m.get(&4), "the newest manifest")?,
+            base: m
+                .get(&5)
+                .map(|v| match v {
+                    Value::Bytes(b) => b
+                        .as_slice()
+                        .try_into()
+                        .or_else(|_| refuse("archive-base", "base digest")),
+                    _ => refuse("archive-base", "base digest"),
+                })
+                .transpose()?,
         })
+    }
+}
+
+/// Exact trusted K5/header recovery source; private and immutable, never a public bundle.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Base {
+    pub header: Vec<u8>,
+    pub checkpoint: Vec<u8>,
+    pub record: u64,
+}
+impl Base {
+    pub fn read(header: &[u8], checkpoint: &[u8]) -> R<Self> {
+        let h = Header::read(header)?;
+        let restored = sim::checkpoint::read_bytes(checkpoint)?;
+        let root = restored
+            .tree
+            .node(restored.tree.root())
+            .ok_or_else(|| Refusal {
+                name: "archive-base",
+                detail: "checkpoint root missing".into(),
+            })?;
+        if restored.root.version.lineage != h.lineage
+            || restored.root.version.zone != h.zone
+            || restored.root.version.epoch != h.epoch
+            || restored.root.version.sequence != restored.tree.next()
+            || root.id() != h.zone
+            || !h.kinds.contains(root.kind())
+        {
+            return refuse(
+                "archive-base-mismatch",
+                "checkpoint identity/version/root pin",
+            );
+        }
+        Ok(Self {
+            header: header.to_vec(),
+            checkpoint: checkpoint.to_vec(),
+            record: restored.root.record,
+        })
+    }
+    pub fn tree(&self) -> R<Tree> {
+        Ok(sim::checkpoint::read_bytes(&self.checkpoint)?.tree)
+    }
+    pub fn bytes(&self) -> R<Vec<u8>> {
+        enc(&map(vec![
+            (1, Value::Uint(1)),
+            (2, Value::Bytes(self.header.clone())),
+            (3, Value::Bytes(self.checkpoint.clone())),
+        ]))
+    }
+    fn stored(bytes: &[u8]) -> R<Self> {
+        let Value::Map(m) = dec(bytes)? else {
+            return refuse("archive-base", "base map");
+        };
+        let (Some(Value::Uint(1)), Some(Value::Bytes(h)), Some(Value::Bytes(c))) =
+            (m.get(&1), m.get(&2), m.get(&3))
+        else {
+            return refuse("archive-base", "base fields");
+        };
+        Self::read(h, c)
     }
 }
 
@@ -386,6 +459,7 @@ pub struct Packer<S: Store> {
     next: u64,
     day: Option<(Manifest, Option<String>)>,
     head_etag: Option<String>,
+    base: Option<[u8; 32]>,
     pub writes: Writes,
 }
 
@@ -409,11 +483,16 @@ impl<S: Store> Packer<S> {
             next: 0,
             day: None,
             head_etag: None,
+            base: None,
             writes: Writes::default(),
         };
         if let Some(h) = p.store.get(&p.key("head"))? {
             p.head_etag = Some(h.etag);
-            let newest = Head::read(&h.bytes)?.newest;
+            let head = Head::read(&h.bytes)?;
+            if head.base.is_some() {
+                return refuse("archive-based-head", "use the based archive reader");
+            }
+            let newest = head.newest;
             let Some(m) = p.store.get(&newest)? else {
                 return refuse("archive-missing", newest);
             };
@@ -422,6 +501,69 @@ impl<S: Store> Packer<S> {
                 p.next = r.first + r.count;
             }
             p.day = Some((manifest, Some(m.etag)));
+        }
+        p.open_first = p.next;
+        Ok(p)
+    }
+
+    fn open_based(store: S, prefix: &str, base: &Base) -> R<Self> {
+        let header = Header::read(&base.header)?;
+        let tree = base.tree()?;
+        let root = tree.node(tree.root()).ok_or_else(|| Refusal {
+            name: "archive-base",
+            detail: "root missing".into(),
+        })?;
+        let bytes = base.bytes()?;
+        let hash = sha256(&bytes);
+        let mut p = Self {
+            store,
+            prefix: prefix.into(),
+            target: TARGET,
+            header: base.header.clone(),
+            epoch: header.epoch,
+            root: root.id(),
+            kind: root.kind().clone(),
+            open: Vec::new(),
+            open_first: base.record,
+            open_bytes: 0,
+            open_day: 0,
+            next: base.record,
+            day: None,
+            head_etag: None,
+            base: Some(hash),
+            writes: Writes::default(),
+        };
+        let key = p.key(&format!("base/{}", replica::encode::to_hex(&hash)));
+        immutable_store(&p.store, &key, &bytes)?;
+        if let Some(old) = p.store.get(&p.key("head"))? {
+            let h = Head::read(&old.bytes)?;
+            if h.base != Some(hash) || h.root != p.root || h.kind != p.kind {
+                return refuse("archive-base-mismatch", "durable archive base differs");
+            }
+            p.head_etag = Some(old.etag);
+            if !h.newest.is_empty() {
+                let m = get(&p.store, &h.newest)?;
+                let m = Manifest::read(&m)?;
+                let row = m.rows.last().ok_or_else(|| Refusal {
+                    name: "archive-gap",
+                    detail: "empty based range".into(),
+                })?;
+                p.next = row.first.checked_add(row.count).ok_or_else(|| Refusal {
+                    name: "archive-gap",
+                    detail: "range overflow".into(),
+                })?;
+                p.open_day = m.day;
+                p.day = Some((m, Some(h.newest)));
+            }
+        } else {
+            let h = Head {
+                root: p.root,
+                kind: p.kind.clone(),
+                newest: String::new(),
+                base: Some(hash),
+            };
+            p.head_etag = Some(p.store.put(&p.key("head"), &h.to_bytes()?, When::Absent)?);
+            p.writes.heads += 1;
         }
         p.open_first = p.next;
         Ok(p)
@@ -444,7 +586,18 @@ impl<S: Store> Packer<S> {
         if n > self.next {
             return refuse("archive-gap", format!("record {n} after {}", self.next));
         }
-        let day = day_of(record_at(&bytes)?);
+        let day = if self.base.is_some() {
+            if sim::recorder::is_input(&bytes) {
+                sim::recorder::read(&bytes)?;
+                self.open_day
+            } else if Part::read(&bytes)?.effects.is_empty() {
+                self.open_day
+            } else {
+                day_of(record_at(&bytes)?)
+            }
+        } else {
+            day_of(record_at(&bytes)?)
+        };
         if !self.open.is_empty() && day != self.open_day {
             self.close()?;
         }
@@ -473,7 +626,16 @@ impl<S: Store> Packer<S> {
             records: std::mem::take(&mut self.open),
         };
         let bytes = seg.to_bytes()?;
-        let key = self.key(&format!("obj/{:010}-{:020}", self.epoch, seg.first));
+        let key = if self.base.is_some() {
+            self.key(&format!(
+                "obj/{:010}-{:020}-{}",
+                self.epoch,
+                seg.first,
+                replica::encode::to_hex(&sha256(&bytes))
+            ))
+        } else {
+            self.key(&format!("obj/{:010}-{:020}", self.epoch, seg.first))
+        };
         put(&self.store, &key, &bytes, None)?;
         self.writes.objects += 1;
         let row = Row {
@@ -485,6 +647,37 @@ impl<S: Store> Packer<S> {
         };
         self.open_first = self.next;
         self.open_bytes = 0;
+        if let Some(base) = self.base {
+            let previous = self.day.as_ref().and_then(|(_, key)| key.clone());
+            let manifest = Manifest {
+                day: self.open_day,
+                rows: vec![row],
+                previous,
+            };
+            let key = self.key(&format!(
+                "range/{:010}-{:020}-{}",
+                self.epoch,
+                seg.first,
+                replica::encode::to_hex(&sha256(&bytes))
+            ));
+            immutable_store(&self.store, &key, &manifest.to_bytes()?)?;
+            let head = Head {
+                root: self.root,
+                kind: self.kind.clone(),
+                newest: key.clone(),
+                base: Some(base),
+            };
+            self.head_etag = Some(put(
+                &self.store,
+                &self.key("head"),
+                &head.to_bytes()?,
+                self.head_etag.as_deref(),
+            )?);
+            self.day = Some((manifest, Some(key)));
+            self.writes.manifests += 1;
+            self.writes.heads += 1;
+            return Ok(());
+        }
         let new_day = match &self.day {
             Some((m, _)) => m.day != self.open_day,
             None => true,
@@ -511,6 +704,7 @@ impl<S: Store> Packer<S> {
                 root: self.root,
                 kind: self.kind.clone(),
                 newest: mkey,
+                base: None,
             };
             let hkey = self.key("head");
             self.head_etag = Some(put(
@@ -535,6 +729,24 @@ pub const WINDOW: i64 = WINDOW_LEAST;
 /// Builds bundles from records (rule 3): the root's public view at the history level ([`Level::Sampled`]: motion
 /// thinned to one sample a second per node, R3's lowest level that still draws motion), in windows of [`WINDOW`] of
 /// world time, each with the public snapshot at its start.
+#[derive(Clone)]
+struct BasedWindow {
+    start: i64,
+    snapshot: Value,
+    view: View,
+    baseline: Value,
+    observed: Value,
+    cursor: (u64, u64),
+    rows: Vec<Value>,
+    base_hash: [u8; 32],
+}
+#[derive(Default)]
+struct BasedHistory {
+    anchor: Option<i64>,
+    open: Option<BasedWindow>,
+    base_hash: [u8; 32],
+}
+
 pub struct Bundler {
     header: Option<Header>,
     redactions: Redactions,
@@ -542,6 +754,7 @@ pub struct Bundler {
     after: State,
     root: Id,
     open: Option<(i64, Value, View)>,
+    based: Option<BasedHistory>,
 }
 
 impl Bundler {
@@ -554,7 +767,197 @@ impl Bundler {
             after: s,
             root,
             open: None,
+            based: None,
         }
+    }
+
+    pub fn from_base(base: &Base) -> R<Self> {
+        Self::from_base_with_redactions(base, Redactions::default())
+    }
+    pub fn from_base_with_redactions(base: &Base, redactions: Redactions) -> R<Self> {
+        let tree = base.tree()?;
+        let state = tree.to_state();
+        Ok(Self {
+            header: Some(Header::read(&base.header)?),
+            redactions,
+            before: state.clone(),
+            after: state,
+            root: tree
+                .node(tree.root())
+                .ok_or_else(|| Refusal {
+                    name: "archive-base",
+                    detail: "root missing".into(),
+                })?
+                .id(),
+            open: None,
+            based: Some(BasedHistory {
+                base_hash: sha256(&base.bytes()?),
+                ..BasedHistory::default()
+            }),
+        })
+    }
+    fn projected(&self, header: &Header, state: &State) -> R<Value> {
+        let public = self.redactions.scrub(project(header, state)?);
+        replica::stream::public::validate_projection(header, &public)?;
+        Ok(public)
+    }
+    fn close_based(&self, header: &Header, open: BasedWindow) -> R<Option<Bundle>> {
+        if open.rows.is_empty() && open.view.output().records.is_empty() {
+            return Ok(None);
+        }
+        let terminal = open
+            .rows
+            .last()
+            .and_then(|r| {
+                if let Value::Array(r) = r {
+                    Some(Value::Array(r[..2].to_vec()))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| {
+                Value::Array(vec![Value::Uint(open.cursor.0), Value::Uint(open.cursor.1)])
+            });
+        let published = open
+            .rows
+            .last()
+            .and_then(|r| {
+                if let Value::Array(r) = r {
+                    r.get(2)
+                } else {
+                    None
+                }
+            })
+            .and_then(|v| {
+                if let Value::Uint(n) = v {
+                    Some(*n)
+                } else {
+                    None
+                }
+            });
+        let observation = map(vec![
+            (1, Value::Uint(1)),
+            (2, Value::Bytes(header.hash().to_bytes())),
+            (3, open.baseline),
+            (
+                4,
+                Value::Array(vec![Value::Uint(open.cursor.0), Value::Uint(open.cursor.1)]),
+            ),
+            (5, Value::Array(open.rows)),
+            (6, Value::Bytes(digest(&open.observed)?)),
+            (7, terminal),
+            (8, Value::Bytes(open.base_hash.to_vec())),
+        ]);
+        let mut view = open.view.output();
+        // Unseen entries advance the internal sampler, but cannot make a private-only public bundle update.
+        view.position.sequence = published;
+        Bundle::new_based(
+            header.hash().to_bytes(),
+            open.start,
+            WINDOW,
+            open.snapshot,
+            view.to_value(),
+            observation,
+        )
+        .map(Some)
+    }
+    fn feed_based(&mut self, header: &Header, record: u64, bytes: &[u8]) -> R<Vec<Bundle>> {
+        let part = Part::read(bytes)?;
+        let mut whole = self.before.clone();
+        whole.apply(header, &part)?;
+        let mut mode = self.based.take().ok_or_else(|| Refusal {
+            name: "archive-base",
+            detail: "based builder missing".into(),
+        })?;
+        let result = (|| {
+            let mut done = Vec::new();
+            for (offset, e) in part.effects.iter().enumerate() {
+                self.after.apply_entry(header, e)?;
+                let old = self.projected(header, &self.before)?;
+                let after = self.projected(header, &self.after)?;
+                let start = match mode.anchor {
+                    Some(anchor) => e
+                        .envelope
+                        .at
+                        .checked_sub(anchor)
+                        .and_then(|n| n.div_euclid(WINDOW).checked_mul(WINDOW))
+                        .and_then(|n| anchor.checked_add(n))
+                        .ok_or_else(|| Refusal {
+                            name: "history-window",
+                            detail: "rolling range overflow".into(),
+                        })?,
+                    None => e.envelope.at,
+                };
+                let same = mode.open.as_ref().is_some_and(|o| o.start == start);
+                let mut probe = (!same).then(|| {
+                    View::new(
+                        Key {
+                            node: self.root,
+                            level: Level::Sampled,
+                            audience: Audience::Everyone,
+                        },
+                        header,
+                        &self.redactions,
+                    )
+                });
+                let view = if same {
+                    &mut mode.open.as_mut().expect("open window").view
+                } else {
+                    probe.as_mut().expect("candidate view")
+                };
+                let prior = view.output().records.len();
+                view.step(&self.before, e, &self.after, &self.redactions)?;
+                let kept = view.output().records.len() != prior;
+                let mut old_visible = old.clone();
+                let mut after_visible = after.clone();
+                if let Value::Map(m) = &mut old_visible {
+                    m.remove(&1);
+                }
+                if let Value::Map(m) = &mut after_visible {
+                    m.remove(&1);
+                }
+                let thinned = matches!(&e.body,replica::effects::Body::Changes(cs) if !cs.is_empty() && cs.iter().all(|c|matches!(&c.change,replica::effects::Change::Motion(_))))
+                    && !kept;
+                let observe = kept || (!thinned && old_visible != after_visible);
+                if observe {
+                    mode.anchor.get_or_insert(e.envelope.at);
+                    if !same {
+                        if let Some(open) = mode.open.take() {
+                            done.extend(self.close_based(header, open)?);
+                        }
+                        mode.open = Some(BasedWindow {
+                            start,
+                            snapshot: public_snapshot(
+                                &replica::history::seek::live_observation(header, &old)?,
+                                &self.redactions,
+                            ),
+                            view: probe.take().expect("candidate view"),
+                            baseline: old.clone(),
+                            observed: old,
+                            cursor: (record, offset as u64),
+                            rows: Vec::new(),
+                            base_hash: mode.base_hash,
+                        });
+                    }
+                    let open = mode.open.as_mut().expect("observation window");
+                    let delta = observation_delta(header, &open.observed, &after)?;
+                    open.rows.push(Value::Array(vec![
+                        Value::Uint(record),
+                        Value::Uint(offset as u64 + 1),
+                        Value::Uint(e.envelope.sequence),
+                        int(e.envelope.at),
+                        Value::Bytes(digest(&open.observed)?),
+                        Value::Bytes(digest(&after)?),
+                        delta,
+                    ]));
+                    open.observed = after;
+                }
+                self.before.apply_entry(header, e)?;
+            }
+            Ok(done)
+        })();
+        self.based = Some(mode);
+        result
     }
 
     fn close(&mut self) -> R<Option<Bundle>> {
@@ -602,6 +1005,13 @@ impl Bundler {
 
     /// Closes the open window (at shutdown).
     pub fn finish(&mut self) -> R<Option<Bundle>> {
+        if let Some(mode) = &mut self.based {
+            let open = mode.open.clone();
+            return match open {
+                Some(open) => self.close_based(self.header.as_ref().expect("based header"), open),
+                None => Ok(None),
+            };
+        }
         self.close()
     }
 }
@@ -630,6 +1040,7 @@ pub struct Shelf<S: Store> {
     /// The ETag of each view written here (V4's event index and coarse levels), to write over it.
     etags: BTreeMap<String, String>,
     pub writes: Writes,
+    based: bool,
 }
 
 impl<S: Store> Shelf<S> {
@@ -640,12 +1051,25 @@ impl<S: Store> Shelf<S> {
             day: None,
             etags: BTreeMap::new(),
             writes: Writes::default(),
+            based: false,
         }
+    }
+
+    fn new_based(store: S, prefix: &str) -> Self {
+        let mut shelf = Self::new(store, prefix);
+        shelf.based = true;
+        shelf
     }
 
     /// Writes a view of the event index or the coarse levels (V4) at `key` under the prefix, over its last version.
     pub fn put_view(&mut self, key: &str, bytes: &[u8]) -> R<()> {
         let key = format!("{}{key}", self.prefix);
+        if self.based
+            && !self.etags.contains_key(&key)
+            && let Some(old) = self.store.get(&key)?
+        {
+            self.etags.insert(key.clone(), old.etag);
+        }
         let e = put(
             &self.store,
             &key,
@@ -680,19 +1104,47 @@ impl<S: Store> Shelf<S> {
             self.write_index()?;
             self.day = None;
         }
-        let key = format!("{}bundles/{day:08}/{:020}", self.prefix, b.start);
-        put(&self.store, &key, &bundle_stored(b), None)?;
-        self.writes.bundles += 1;
-        let (ix, _) = self.day.get_or_insert_with(|| {
-            (
-                DayIndex {
-                    day,
-                    bundles: Vec::new(),
-                },
-                None,
+        let key = if b.observation.is_some() {
+            format!(
+                "{}bundles/{day:08}/{:020}-{}",
+                self.prefix,
+                b.start,
+                replica::encode::to_hex(&b.hash())
             )
-        });
+        } else {
+            format!("{}bundles/{day:08}/{:020}", self.prefix, b.start)
+        };
+        if b.observation.is_some() {
+            immutable_store(&self.store, &key, &bundle_stored(b))?;
+        } else {
+            put(&self.store, &key, &bundle_stored(b), None)?;
+        }
+        self.writes.bundles += 1;
+        if self.day.is_none() {
+            let existing = if self.based {
+                self.store.get(&self.index_key(day))?
+            } else {
+                None
+            };
+            self.day = Some(match existing {
+                Some(object) => (DayIndex::read(&object.bytes)?, Some(object.etag)),
+                None => (
+                    DayIndex {
+                        day,
+                        bundles: Vec::new(),
+                    },
+                    None,
+                ),
+            });
+        }
+        let (ix, _) = self.day.as_mut().expect("day index");
+        if b.observation.is_some() {
+            ix.bundles.retain(|(start, _, _)| *start != b.start);
+        }
         ix.bundles.push((b.start, key, b.hash()));
+        if self.based {
+            ix.bundles.sort_by_key(|(start, _, _)| *start);
+        }
         Ok(())
     }
 
@@ -712,6 +1164,7 @@ pub struct Archiver<S: Store> {
     bundler: Bundler,
     indexer: Indexer,
     header: Header,
+    based: Option<(Tree, BTreeMap<u64, Vec<u8>>, Base)>,
 }
 
 impl<S: Store + Clone> Archiver<S> {
@@ -722,22 +1175,202 @@ impl<S: Store + Clone> Archiver<S> {
             bundler: Bundler::new(root, kind),
             indexer: Indexer::default(),
             header: header.clone(),
+            based: None,
         })
+    }
+}
+
+impl<S: Store + Clone> Archiver<S> {
+    /// The original durable base wins on reopen; a newer ordinary checkpoint never replaces it.
+    pub fn open_based(store: S, prefix: &str, candidate: &Base) -> R<Self> {
+        Self::open_based_with_redactions(store, prefix, candidate, Redactions::default())
+    }
+    pub fn open_based_with_redactions(
+        store: S,
+        prefix: &str,
+        candidate: &Base,
+        redactions: Redactions,
+    ) -> R<Self> {
+        let checked = Base::read(&candidate.header, &candidate.checkpoint)?;
+        if checked.record != candidate.record {
+            return refuse("archive-base-mismatch", "checkpoint cursor differs");
+        }
+        let fetched = if store.get(&format!("{prefix}archive/head"))?.is_some() {
+            Some(fetch(&store, prefix)?)
+        } else {
+            None
+        };
+        let base = match &fetched {
+            Some(f) => f.base.clone().ok_or_else(|| Refusal {
+                name: "archive-unbased-head",
+                detail: "cannot implicitly convert a legacy archive".into(),
+            })?,
+            None => candidate.clone(),
+        };
+        if base.header != candidate.header {
+            return refuse("archive-base-mismatch", "current world header differs");
+        }
+        let header = Header::read(&base.header)?;
+        let canonical = match &fetched {
+            Some(f) => restore(f)?,
+            None => base.tree()?,
+        };
+        let mut out = Self {
+            packer: Packer::open_based(store.clone(), prefix, &base)?,
+            shelf: Shelf::new_based(store, prefix),
+            bundler: Bundler::from_base_with_redactions(&base, redactions.clone())?,
+            indexer: Indexer::new(redactions.clone()),
+            header,
+            based: Some((canonical, BTreeMap::new(), base)),
+        };
+        if let Some(f) = fetched {
+            for segment in f.segments {
+                for (offset, raw) in segment.records.into_iter().enumerate() {
+                    let n = segment.first + offset as u64;
+                    if sim::recorder::is_input(&raw) {
+                        sim::recorder::read(&raw)?;
+                    }
+                    out.based.as_mut().expect("based archive").1.insert(n, raw);
+                }
+            }
+        }
+        out.refresh_redactions_inner(redactions, true)?;
+        Ok(out)
     }
 }
 
 impl<S: Store> Archiver<S> {
     /// Takes record `n` of the log, once durable.
-    pub fn push(&mut self, n: u64, bytes: Vec<u8>) -> R<()> {
-        for b in self.bundler.feed(&self.header, &bytes)? {
-            self.shelf.put(&b)?;
+    pub fn source_cursor(&self) -> u64 {
+        self.packer.next
+    }
+    pub fn is_based(&self) -> bool {
+        self.based.is_some()
+    }
+    pub fn source_base(&self) -> u64 {
+        self.based.as_ref().map_or(0, |(_, _, base)| base.record)
+    }
+    /// The existing authoritative text Store is consulted by the caller before publication. Rebuild only the
+    /// derived public views when that list changes; private base/source and old hash-addressed bundles stay exact.
+    pub fn refresh_redactions(&mut self, redactions: Redactions) -> R<bool> {
+        self.refresh_redactions_inner(redactions, false)
+    }
+    fn refresh_redactions_inner(&mut self, redactions: Redactions, force: bool) -> R<bool> {
+        let Some((_, known, base)) = &self.based else {
+            return Ok(false);
+        };
+        if !force && self.bundler.redactions.hash() == redactions.hash() {
+            return Ok(false);
         }
-        for e in &Part::read(&bytes)?.effects {
+        let mut bundler = Bundler::from_base_with_redactions(base, redactions.clone())?;
+        let mut indexer = Indexer::new(redactions);
+        let mut bundles = Vec::new();
+        let mut views = BTreeMap::new();
+        for (n, raw) in known {
+            if sim::recorder::is_input(raw) {
+                sim::recorder::read(raw)?;
+                continue;
+            }
+            bundles.extend(bundler.feed_based(&self.header, *n, raw)?);
+            for effect in &Part::read(raw)?.effects {
+                views.extend(indexer.feed(effect)?);
+            }
+        }
+        bundles.extend(bundler.finish()?);
+        views.extend(indexer.clone().finish()?);
+        // A removed event may leave an old mutable index with no surviving rows. Publish its canonical empty form.
+        for key in self
+            .shelf
+            .store
+            .list(&format!("{}history/everyone/", self.shelf.prefix))?
+        {
+            let Some(relative) = key.strip_prefix(&self.shelf.prefix) else {
+                continue;
+            };
+            if views.contains_key(relative) {
+                continue;
+            }
+            let raw = get(&self.shelf.store, &key)?;
+            let bytes = if relative.starts_with("history/everyone/events/") {
+                let mut index = replica::history::events::EventIndex::read(&raw)?;
+                index.rows.clear();
+                index.split.clear();
+                index.to_bytes()?
+            } else if relative.starts_with("history/everyone/counts/") {
+                let counts = replica::history::events::Counts::read(&raw)?;
+                replica::history::events::Counts::new(counts.span).to_bytes()?
+            } else {
+                continue;
+            };
+            views.insert(relative.to_owned(), bytes);
+        }
+        // Derive/validate everything before publishing any replacement index.
+        for bundle in bundles {
+            self.shelf.put(&bundle)?;
+        }
+        for (key, bytes) in views {
+            self.shelf.put_view(&key, &bytes)?;
+        }
+        self.shelf.flush()?;
+        self.bundler = bundler;
+        self.indexer = indexer;
+        Ok(true)
+    }
+    /// Publish the existing open public window/index without inventing effects or forcing a private packing cut.
+    pub fn publish_open(&mut self) -> R<()> {
+        if let Some(bundle) = self.bundler.finish()? {
+            self.shelf.put(&bundle)?;
+        }
+        for (k, v) in self.indexer.clone().finish()? {
+            self.shelf.put_view(&k, &v)?;
+        }
+        self.shelf.flush()
+    }
+    fn feed_public(&mut self, n: u64, bytes: &[u8]) -> R<()> {
+        let bundles = if self.bundler.based.is_some() {
+            self.bundler.feed_based(&self.header, n, bytes)?
+        } else {
+            self.bundler.feed(&self.header, bytes)?
+        };
+        for bundle in bundles {
+            self.shelf.put(&bundle)?;
+        }
+        for e in &Part::read(bytes)?.effects {
             for (k, v) in self.indexer.feed(e)? {
                 self.shelf.put_view(&k, &v)?;
             }
         }
-        self.packer.push(n, bytes)
+        Ok(())
+    }
+    pub fn push(&mut self, n: u64, bytes: Vec<u8>) -> R<()> {
+        if let Some((tree, known, _)) = &mut self.based {
+            if n < self.packer.next {
+                return if known.get(&n) == Some(&bytes) {
+                    Ok(())
+                } else {
+                    refuse(
+                        "archive-source-mismatch",
+                        "duplicate physical source differs",
+                    )
+                };
+            }
+            if n != self.packer.next {
+                return refuse("archive-gap", "physical source does not follow");
+            }
+            if sim::recorder::is_input(&bytes) {
+                sim::recorder::read(&bytes)?;
+            } else {
+                tree.apply(&self.header, &Part::read(&bytes)?)?;
+            }
+        }
+        if !(self.based.is_some() && sim::recorder::is_input(&bytes)) {
+            self.feed_public(n, &bytes)?;
+        }
+        self.packer.push(n, bytes.clone())?;
+        if let Some((_, known, _)) = &mut self.based {
+            known.insert(n, bytes);
+        }
+        Ok(())
     }
 
     /// Closes what is open: the object, the window and the day's index.
@@ -746,7 +1379,12 @@ impl<S: Store> Archiver<S> {
         if let Some(b) = self.bundler.finish()? {
             self.shelf.put(&b)?;
         }
-        for (k, v) in self.indexer.finish()? {
+        let views = if self.based.is_some() {
+            self.indexer.clone().finish()?
+        } else {
+            self.indexer.finish()?
+        };
+        for (k, v) in views {
             self.shelf.put_view(&k, &v)?;
         }
         self.shelf.flush()
@@ -788,6 +1426,18 @@ pub struct Fetched {
     pub manifests: Vec<Manifest>,
     pub segments: Vec<Segment>,
     pub log: Vec<String>,
+    pub base: Option<Base>,
+}
+
+fn immutable_store<S: Store>(store: &S, key: &str, bytes: &[u8]) -> R<()> {
+    match store.put(key, bytes, When::Absent) {
+        Ok(_) => Ok(()),
+        Err(e) if e.name == "precondition-failed" => match store.get(key)? {
+            Some(o) if o.bytes == bytes => Ok(()),
+            _ => Err(e),
+        },
+        Err(e) => Err(e),
+    }
 }
 
 fn get<S: Store>(store: &S, key: &str) -> R<Vec<u8>> {
@@ -808,8 +1458,34 @@ pub fn fetch<S: Store>(store: &S, prefix: &str) -> R<Fetched> {
         head.newest
     ));
     let mut manifests = Vec::new();
-    let mut next = Some(head.newest.clone());
+    let base = match head.base {
+        Some(hash) => {
+            let bytes = get(
+                store,
+                &format!("{prefix}archive/base/{}", replica::encode::to_hex(&hash)),
+            )?;
+            if sha256(&bytes) != hash {
+                return refuse("archive-base-hash", "base digest differs");
+            }
+            let base = Base::stored(&bytes)?;
+            let tree = base.tree()?;
+            let root = tree.node(tree.root()).ok_or_else(|| Refusal {
+                name: "archive-base",
+                detail: "root missing".into(),
+            })?;
+            if root.id() != head.root || *root.kind() != head.kind {
+                return refuse("archive-base-mismatch", "head root differs");
+            }
+            Some(base)
+        }
+        None => None,
+    };
+    let mut next = (!head.newest.is_empty()).then(|| head.newest.clone());
+    let mut visited = std::collections::BTreeSet::new();
     while let Some(k) = next {
+        if !visited.insert(k.clone()) {
+            return refuse("archive-gap", "manifest cycle");
+        }
         let m = Manifest::read(&get(store, &k)?)?;
         next = m.previous.clone();
         manifests.push(m);
@@ -824,7 +1500,14 @@ pub fn fetch<S: Store>(store: &S, prefix: &str) -> R<Fetched> {
                 return refuse("archive-hash", r.key.clone());
             }
             let s = Segment::read(&bytes)?;
-            let at = expect.entry(r.epoch).or_insert(0);
+            if let Some(base) = &base
+                && (s.header != base.header || r.epoch != Header::read(&base.header)?.epoch)
+            {
+                return refuse("archive-base-mismatch", "range header or epoch differs");
+            }
+            let at = expect
+                .entry(r.epoch)
+                .or_insert(base.as_ref().map_or(0, |b| b.record));
             if s.first != *at || r.first != s.first || s.records.len() as u64 != r.count {
                 return refuse(
                     "archive-gap",
@@ -854,13 +1537,24 @@ pub fn fetch<S: Store>(store: &S, prefix: &str) -> R<Fetched> {
         manifests,
         segments,
         log,
+        base,
     })
 }
 
 /// The world rebuilt from what was fetched: its root, then every record replayed in order (K5's replay).
 pub fn restore(f: &Fetched) -> R<Tree> {
-    let mut tree = Tree::start(f.head.root, f.head.kind.clone());
+    let mut tree = match &f.base {
+        Some(base) => base.tree()?,
+        None => Tree::start(f.head.root, f.head.kind.clone()),
+    };
     for s in &f.segments {
+        if f.base.is_some() {
+            for raw in &s.records {
+                if sim::recorder::is_input(raw) {
+                    sim::recorder::read(raw)?;
+                }
+            }
+        }
         replay(&mut tree, &Header::read(&s.header)?, &s.records, 0)?;
     }
     Ok(tree)
@@ -879,12 +1573,26 @@ pub fn state_hash(tree: &mut Tree) -> R<String> {
 
 /// Bundles made again from what was fetched, as the archiver made them live.
 pub fn rebuild_bundles(f: &Fetched) -> R<Vec<Bundle>> {
-    let mut b = Bundler::new(f.head.root, f.head.kind.clone());
+    rebuild_bundles_with_redactions(f, Redactions::default())
+}
+pub fn rebuild_bundles_with_redactions(f: &Fetched, redactions: Redactions) -> R<Vec<Bundle>> {
+    let mut b = match &f.base {
+        Some(base) => Bundler::from_base_with_redactions(base, redactions)?,
+        None => Bundler::new(f.head.root, f.head.kind.clone()),
+    };
     let mut out = Vec::new();
     for s in &f.segments {
         let h = Header::read(&s.header)?;
-        for r in &s.records {
-            out.extend(b.feed(&h, r)?);
+        for (offset, r) in s.records.iter().enumerate() {
+            if f.base.is_some() && sim::recorder::is_input(r) {
+                sim::recorder::read(r)?;
+                continue;
+            }
+            out.extend(if f.base.is_some() {
+                b.feed_based(&h, s.first + offset as u64, r)?
+            } else {
+                b.feed(&h, r)?
+            });
         }
     }
     out.extend(b.finish()?);
@@ -895,6 +1603,22 @@ pub fn rebuild_bundles(f: &Fetched) -> R<Vec<Bundle>> {
 pub fn stored_bundles<S: Store>(store: &S, prefix: &str, f: &Fetched) -> R<Vec<Bundle>> {
     let mut out = Vec::new();
     let mut days: Vec<i64> = f.manifests.iter().map(|m| m.day).collect();
+    if f.base.is_some() {
+        for segment in &f.segments {
+            for raw in &segment.records {
+                if sim::recorder::is_input(raw) {
+                    continue;
+                }
+                for effect in Part::read(raw)?.effects {
+                    days.push(day_of(effect.envelope.at));
+                    if let Some(before) = effect.envelope.at.checked_sub(WINDOW - 1) {
+                        days.push(day_of(before));
+                    }
+                }
+            }
+        }
+    }
+    days.sort_unstable();
     days.dedup();
     for d in days {
         let Some(ix) = store.get(&format!("{prefix}bundles/{d:08}/index"))? else {
@@ -957,10 +1681,20 @@ pub fn words_in_bundle(bytes: &[u8], known: &[&str]) -> R<Vec<String>> {
 /// The event index and the coarse levels made again from what was fetched, as the archiver made them live: each
 /// view's key (under the prefix) and its last bytes.
 pub fn rebuild_views(f: &Fetched) -> R<BTreeMap<String, Vec<u8>>> {
-    let mut ix = Indexer::default();
+    rebuild_views_with_redactions(f, Redactions::default())
+}
+pub fn rebuild_views_with_redactions(
+    f: &Fetched,
+    redactions: Redactions,
+) -> R<BTreeMap<String, Vec<u8>>> {
+    let mut ix = Indexer::new(redactions);
     let mut out = BTreeMap::new();
     for s in &f.segments {
         for r in &s.records {
+            if f.base.is_some() && sim::recorder::is_input(r) {
+                sim::recorder::read(r)?;
+                continue;
+            }
             for e in &Part::read(r)?.effects {
                 out.extend(ix.feed(e)?);
             }

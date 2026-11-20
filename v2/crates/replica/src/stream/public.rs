@@ -393,6 +393,75 @@ pub fn baseline_from_projection(header: &Header, state: Value, record: u64) -> R
 }
 /// Integrity-bound observation, computed only after the producer canonically applied a whole source part.
 /// The delta replaces only changed top-level projection fields; no historical effects are manufactured.
+/// Audience-validated public observation delta, shared by stream and history readers.
+pub fn observation_delta(header: &Header, before: &Value, after: &Value) -> R<Value> {
+    validate(header, before)?;
+    validate(header, after)?;
+    let old = map(before)?;
+    let new = map(after)?;
+    let mut delta = BTreeMap::new();
+    for (k, v) in new.iter().filter(|(k, v)| old.get(k) != Some(v)) {
+        if [2, 3, 4, 6, 8, 9].contains(k) {
+            let a = pairs(&old[k])?;
+            let b = pairs(v)?;
+            let ids: BTreeSet<Id> = a.keys().chain(b.keys()).copied().collect();
+            let rows = ids
+                .into_iter()
+                .filter(|i| a.get(i) != b.get(i))
+                .map(|i| {
+                    let mut row = vec![i.to_value()];
+                    row.extend(b.get(&i).cloned());
+                    Value::Array(row)
+                })
+                .collect();
+            delta.insert(*k, Value::Array(rows));
+        } else {
+            delta.insert(*k, v.clone());
+        }
+    }
+    Ok(Value::Map(delta))
+}
+
+/// Check an existing authorized projection without exposing the private canonical state.
+pub fn validate_projection(header: &Header, value: &Value) -> R<()> {
+    validate(header, value)
+}
+
+/// Apply exactly the existing public per-id delta rules, atomically, for an integrity-bound observation.
+pub fn apply_observation(header: &Header, before: &Value, delta: &Value) -> R<Value> {
+    validate(header, before)?;
+    let mut next = map(before)?.clone();
+    for (k, v) in map(delta)? {
+        if [2, 3, 4, 6, 8, 9].contains(k) {
+            let mut entries = pairs(field(&next, *k)?)?;
+            let mut ids = BTreeSet::new();
+            for row in arr(v)? {
+                let row = arr(row)?;
+                if !(1..=2).contains(&row.len()) {
+                    return bad("delta row shape");
+                }
+                let id = read_id(&row[0])?;
+                if !ids.insert(id) {
+                    return bad("duplicate delta id");
+                }
+                if row.len() == 1 {
+                    if entries.remove(&id).is_none() {
+                        return bad("delta removes absent id");
+                    }
+                } else {
+                    entries.insert(id, row[1].clone());
+                }
+            }
+            next.insert(*k, paired(entries));
+        } else {
+            next.insert(*k, v.clone());
+        }
+    }
+    let next = Value::Map(next);
+    validate(header, &next)?;
+    Ok(next)
+}
+
 pub fn context(
     baseline: &[u8],
     before: &Value,
