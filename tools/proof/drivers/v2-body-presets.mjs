@@ -62,7 +62,7 @@ async function drawn(page, hash, within = 8000) {
     } return false;
   }, hash, { timeout: within });
   return page.evaluate(expected => { const v = globalThis.v2, c = v.world.crowdBodies, crowd = c.crowd; const [id, i] = [...c.index].find(([id]) => v.world.nodes.get(id)?.body === expected); const model = crowd.models[crowd.model[i]];
-    return { id, hash: v.world.nodes.get(id).body, model: model.name, materials: model.sourceMaterials?.length ?? 0, maps: model.sourceMaterials?.filter(m => m.map).length ?? 0, bones: model.bones, rendered: v.renderer.info.render.calls, at: v.history ? v.history.clock.t : v.clock.t }; }, hash);
+    return { id, hash: v.world.nodes.get(id).body, model: model.name, materials: model.sourceMaterials?.length ?? 0, maps: model.sourceMaterials?.filter(m => m.map).length ?? 0, bones: model.bones, rendered: v.renderer.info.render.calls }; }, hash);
 }
 async function wear(page, row, check) {
   const before = Date.now(), sent = await command(['wear', row.preset]);
@@ -82,11 +82,15 @@ export default async function ({ page, base, arm, fixture, check }) {
   const old = owned.catalogue.find(row => row.preset === 'pip'), next = owned.catalogue.find(row => row.preset === 'ghost');
   await drawn(page, old.hash);
   const oldSecond = Math.ceil((await command(['status'])).worldUs / 1e6) + 1;
-  await page.waitForFunction(t => globalThis.v2.clock.t >= t, oldSecond * 1e6, { timeout: 6000 });
+  const liveAt = async second => page.waitForFunction(target => {
+    const time = /^world time\s+(\d+):([0-5]\d)$/m.exec(document.getElementById('status')?.textContent ?? '');
+    return time !== null && Number(time[1]) * 60 + Number(time[2]) >= target;
+  }, second, { timeout: 6000 });
+  await liveAt(oldSecond);
   await wear(page, next, check);
   const nextSecond = Math.ceil((await command(['status'])).worldUs / 1e6) + 1;
   if (nextSecond <= oldSecond || nextSecond - oldSecond > 8) fail('history-moment-distance');
-  await page.waitForFunction(t => globalThis.v2.clock.t >= t, nextSecond * 1e6, { timeout: 6000 });
+  await liveAt(nextSecond);
   const history = new URL(page.url()); history.hash = new URLSearchParams({ w: owned.recipe.world, l: owned.recipe.lineage, t: String(nextSecond * 1e6) }).toString();
   await page.goto(history.href); await drawn(page, next.hash); await snapshot(page); await page.getByRole('button', { name: 'pause', exact: true }).click(); check('history-new-hash', (await drawn(page, next.hash)).hash === next.hash);
   for (let i = 0; i < nextSecond - oldSecond; i++) { await snapshot(page); await page.getByRole('slider').focus(); await Promise.all([page.waitForEvent('domcontentloaded'), page.getByRole('slider').press('ArrowLeft')]); }
