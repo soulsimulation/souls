@@ -145,7 +145,8 @@ test('A1, A2: can answers from the local check; a walk to a named thing and a si
 });
 
 test('A1: pair <world url> prints the link and code and returns; once the owner approves, the Soul is ready to act', async () => {
-  const tokensFile = join(dir, 'pair-tokens.txt');
+  const tokensFile = join(dir, 'pair-gateway', 'tokens.txt');
+  mkdirSync(dirname(tokensFile), { recursive: true });
   const { m } = await run(bin('directoryd'), ['--listen', '127.0.0.1:0', '--public-url', 'http://127.0.0.1:1',
     '--store', join(dir, 'accounts.sqlite'), '--test-sign-in', '--pairing', join(dir, 'pairing.sqlite'),
     '--gateway-tokens', tokensFile], /listening on (\S+)\n/);

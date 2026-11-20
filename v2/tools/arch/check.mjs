@@ -65,7 +65,8 @@ export const ALLOWED = {
   // W8 (#2729): the object store's SigV4 signature (ring) and HTTP (ureq); sim's tick loop in a test (dev only).
   // W1 (#2704): RS256 checks and random ids (ring), the one-file account store (rusqlite), JWKS (serde_json, ureq).
   // W11 (#2749): a Soul's picture passes G6's check and hold point (assets).
-  directoryd: ['replica', 'ring', 'rusqlite', 'serde_json', 'ureq', 'sim', 'assets'],
+  // W15 (#3582): socket2 bounds Unix connect; rustix supplies the monotonic lookup deadline.
+  directoryd: ['replica', 'ring', 'rusqlite', 'serde_json', 'ureq', 'sim', 'assets', 'socket2', 'rustix'],
   // O1 (#2730): the launcher reads a world's pin from its directory record.
   // O7 (#2804): the rehearsal reads a world's log and writes its scratch copy (K4's log).
   supervisor: ['replica', 'directoryd', 'sim'],

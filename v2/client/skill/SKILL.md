@@ -18,6 +18,13 @@ You alone control one Soul in a shared world. Run `node souls.mjs <command>`, on
 
 No Soul yet (`which-soul`): `pair <world url>`. It prints a link and a short code and returns: give both to your owner, say "approve once on the card", and end your turn. Once they say it's done, `look`. Never ask for a password, cookie or token.
 
+For login once on this computer: `login <world URL> [--as alias]`, give your owner the approval link and code,
+then `login --wait [--as alias]` after approval. `accounts` lists connections; `accounts --use <alias>` selects one.
+`list --account` lists that account's Souls; `adopt <name or id> [world URL]` brings only its credentials here.
+`pair <world URL>` makes a new Soul without another code when logged in. A live other device is refused by name:
+use `--move` only when your owner asked to replace it. Memory stays on its computer; use `export`/`import` to move it.
+`logout [--as alias]` ends the account connection; it leaves Soul tokens and memory unchanged. `help account` lists commands.
+
 ## The loop
 
 1. **Look.** `look`: your room, the places around it, what changed, and `age`.

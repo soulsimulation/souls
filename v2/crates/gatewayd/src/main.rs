@@ -70,6 +70,19 @@ async fn main() {
     let receipts = arg("--receipts").map_or_else(Receipts::off, |d| Receipts::to_dir(d.into()));
     let gw = Gateway::with_receipts(tokens, build, stderr_log(), receipts);
     let _ = gw.tokens_file.set(source);
+    let control_path = PathBuf::from(&tokens_file).with_file_name(gatewayd::control::NAME);
+    let control_listener = match gatewayd::control::bind(&control_path).await {
+        Ok(listener) => listener,
+        Err(name) => {
+            eprintln!("gatewayd: {name}");
+            std::process::exit(1);
+        }
+    };
+    tokio::spawn(gatewayd::control::run(
+        gw.clone(),
+        control_path,
+        control_listener,
+    ));
     if let Some(path) = arg("--view-key") {
         let key = std::fs::read_to_string(&path)
             .ok()

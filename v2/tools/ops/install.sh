@@ -186,8 +186,11 @@ install_all() {
   build=$(node -e 'const f=require("node:fs"),c=require("node:crypto");process.stdout.write("1220"+c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"))' "$from/bin/worldd")
   ensure_once "$ETC/placement.json" 640 root "$ACCOUNT" "{\"format\":\"souls/placement/1\",\"build\":\"$build\",\"worldsRoot\":\"$DATA/worlds\",\"templates\":\"$LIB/templates\",\"library\":\"$LIB\",\"placement\":\"$ETC/placement-data\",\"backup\":\"$DATA/directory/placement-backup\",\"directory\":\"http://localhost:$DIRECTORY_PORT\",\"originUpstream\":\"http://localhost:7320\",\"worldRoutes\":\"$DATA/routes/worlds.json\",\"routesOut\":\"/var/lib/souls-routes\",\"portFirst\":7500,\"portLast\":7999}"
   ensure_once "$ETC/directory.args" 640 root "$ACCOUNT" "$args"
-  ensure_once "$ETC/origin.env" 640 root "$ACCOUNT" "# Public browser sign-in only: AUTH_PROVIDER=clerk, CLERK_PUBLISHABLE_KEY, CLERK_ISSUER_URL.
-# Optional CLERK_SATELLITE_DOMAIN and CLERK_SIGN_IN_URL. Never put secrets or tokens here."
+  ensure_once "$ETC/origin.env" 640 root "$ACCOUNT" "# Browser provider: AUTH_PROVIDER=clerk, CLERK_PUBLISHABLE_KEY, CLERK_ISSUER_URL.
+# Optional CLERK_SATELLITE_DOMAIN and CLERK_SIGN_IN_URL. Never put secrets or tokens here.
+# Private ops settings: SIM_SITE_OWNERS, SOULS_OPS_PUBLIC_ORIGIN, CLERK_AUTHORIZED_PARTIES.
+# Match the provider and application origin configured for souls-directory.
+SOULS_OPS_DIRECTORY=http://127.0.0.1:$DIRECTORY_PORT"
   ensure_once "$ETC/secrets.env" 600 root root "$SECRETS"
   for u in "${UNIT_FILES[@]}"; do
     record "file $UNITS/$u"
@@ -346,7 +349,8 @@ bundle() {
   for p in "${PROGRAMS[@]}"; do install -m 755 "$bins/$p" "$out/bin/$p"; done
   rm -rf "$out/origin" "$out/web"
   mkdir -p "$out/origin"
-  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../../client/served/serve.mjs" "$out/origin/"
+  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/owner-auth.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../../client/served/serve.mjs" "$out/origin/"
+  cp "$HERE/../../../tools/world-launcher/owner-overview-data.mjs" "$out/origin/"
   cp -R "$page" "$out/web"
   mkdir -p "$out/ops/proxy"
   cp "$HERE/place-created-world.mjs" "$HERE/place-world.sh" "$out/ops/"

@@ -2,18 +2,46 @@
 // (tools/world-launcher/owner-overview.mjs; `browser` and `overviewShell` below are copied as they are), so it keeps
 // answering once the launcher is gone. The page is one document with its own CSP (its script by hash), `noindex` in a
 // meta tag and a header, and no store. Serving it reads nothing and asks nothing of anyone: no outgoing request.
-// Its data (`?json=1`, the owner's snapshot behind sign-in) fails closed here: the new system names no site owner to
-// check against yet, so it answers 503 `owner-access-unconfigured`, which the page shows as "Owner access is not
-// configured", as today's launcher does without owner settings.
+// Data requests use the configured directory's existing session authority and today's bounded snapshot projection.
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { ownerAuth } from './owner-auth.mjs';
+const { presentSnapshot, validateSnapshot } = await import(existsSync(new URL('./owner-overview-data.mjs', import.meta.url))
+  ? './owner-overview-data.mjs' : '../../../tools/world-launcher/owner-overview-data.mjs');
 
 export const HEADERS = { 'cache-control': 'private, no-store, max-age=0', vary: 'Authorization, Cookie', 'x-robots-tag': 'noindex, nofollow, noarchive', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY' };
 
-/** GET|HEAD /ops: the page; /ops?json=1: 503 until the new system names a site owner; any other method: 405. */
-export function serveOps(req, res, url, pub = null) {
+/** One installed route; serving the shell does no IO. Private data is read only after owner authorization. */
+export function opsOverview({ data, env, publicAuth, now = Date.now }) {
+  const allowed = ownerAuth(env, publicAuth), file = join(data, 'owner-overview.json');
+  let last = null, signature = null;
+  const snapshot = () => {
+    let failure = null;
+    try {
+      const st = statSync(file);
+      if (!st.isFile() || st.size > 512 * 1024) throw Error('invalid snapshot');
+      const next = `${st.ino}:${st.mtimeMs}:${st.size}`;
+      if (next !== signature) { last = validateSnapshot(JSON.parse(readFileSync(file, 'utf8'))); signature = next; }
+    } catch { failure = 'unavailable'; }
+    return presentSnapshot(last, now(), failure);
+  };
+  return (req, res, url) => serveOps(req, res, url, publicAuth(), async () => {
+    const status = await allowed(req);
+    return status === 200 ? { status, body: snapshot() } : { status, body: { ok: false,
+      code: status === 401 ? 'sign-in' : status === 403 ? 'not-owner' : status === 429 ? 'busy' : 'owner-access-unconfigured' } };
+  });
+}
+
+/** GET|HEAD /ops: shell; private JSON requires the configured owner authority. */
+export function serveOps(req, res, url, pub = null, privateData = null) {
   const respond = (status, value, headers = {}) => res.writeHead(status, { ...HEADERS, 'content-type': 'application/json; charset=utf-8', ...headers }).end(req.method === 'HEAD' ? undefined : JSON.stringify(value));
   if (!['GET', 'HEAD'].includes(req.method)) { respond(405, { ok: false, code: 'read-only' }, { allow: 'GET, HEAD' }); return; }
-  if (url.searchParams.has('json')) { respond(503, { ok: false, code: 'owner-access-unconfigured' }); return; }
+  if (url.searchParams.has('json')) {
+    if (!privateData) { respond(503, { ok: false, code: 'owner-access-unconfigured' }); return; }
+    return privateData().then(({ status, body }) => { if (!res.destroyed) respond(status, body); })
+      .catch(() => { if (!res.destroyed && !res.headersSent) respond(503, { ok: false, code: 'owner-access-unconfigured' }); });
+  }
   const page = overviewShell(pub);
   res.writeHead(200, { ...HEADERS, 'content-type': 'text/html; charset=utf-8', 'content-security-policy': page.csp }).end(req.method === 'HEAD' ? undefined : page.html);
 }

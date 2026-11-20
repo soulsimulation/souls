@@ -195,6 +195,82 @@ impl Pairing {
         store(rows.collect())
     }
 
+    /// The existing owner page plus X11 identities not yet paired. Reading never registers a Soul or mints a token.
+    pub(super) fn mine_with_imports(
+        &self,
+        store: &crate::accounts::store::Store,
+        account: &str,
+    ) -> Result<Vec<Mine>, &'static str> {
+        let mut rows = self.mine(account)?;
+        for (grant, world, name, description) in
+            store.imported_souls(account).map_err(|_| "store")?
+        {
+            if self.soul_of(&grant)?.is_some() {
+                // Current paired ownership and retirement win over immutable imported ownership.
+                if let Some(row) = rows.iter_mut().find(|row| row.soul == grant) {
+                    row.world.get_or_insert(world);
+                    row.name.get_or_insert(name);
+                    row.description.get_or_insert(description);
+                }
+                continue;
+            }
+            if self.retired(&grant)? {
+                continue;
+            }
+            rows.push(Mine {
+                soul: grant,
+                world: Some(world),
+                name: Some(name),
+                description: Some(description),
+                device: None,
+                picture: None,
+                retire_asked: false,
+            });
+        }
+        rows.sort_by(|a, b| a.soul.cmp(&b.soul));
+        Ok(rows)
+    }
+
+    // Only absent fields are initialized. Empty edited strings and every existing world/alias remain authoritative.
+    pub(super) fn import_profile(
+        db: &rusqlite::Connection,
+        grant: &str,
+        world: &str,
+        name: &str,
+        description: &str,
+    ) -> Result<(), &'static str> {
+        store(db.execute("INSERT INTO soul_profiles_v1(grant_text,world,name,description) VALUES(?1,?2,?3,?4)
+            ON CONFLICT(grant_text) DO UPDATE SET world=COALESCE(soul_profiles_v1.world,excluded.world),
+            name=COALESCE(soul_profiles_v1.name,excluded.name),description=COALESCE(soul_profiles_v1.description,excluded.description)
+            WHERE soul_profiles_v1.retired_at IS NULL",params![grant,world,name,description])).map(|_|())
+    }
+
+    /// Called only after successful owner approval/adoption and account holding; never from a listing or refusal.
+    pub(super) fn initialize_imported_profile(
+        &self,
+        imported: &crate::accounts::store::Store,
+        account: &str,
+        grant: &str,
+    ) -> Result<(), &'static str> {
+        let Some((_, world, name, description)) = imported
+            .imported_souls(account)
+            .map_err(|_| "store")?
+            .into_iter()
+            .find(|row| row.0 == grant)
+        else {
+            return Ok(());
+        };
+        let mut db = self.db.lock().expect("the store");
+        let tx = store(db.transaction())?;
+        let owned: bool = store(tx.query_row("SELECT EXISTS(SELECT 1 FROM paired_souls_v1 s LEFT JOIN soul_profiles_v1 p USING(grant_text) WHERE s.grant_text=?1 AND s.account=?2 AND p.retired_at IS NULL)",params![grant,account],|r|r.get(0)))?;
+        if !owned {
+            return Err("not-yours");
+        }
+        Self::import_profile(&tx, grant, &world, &name, &description)?;
+        store(tx.commit())?;
+        self.write_souls(&db).map_err(|_| "souls-file")
+    }
+
     /// The owner of the unretired Soul `grant`, if it is `account`'s; refused by name otherwise.
     fn owned(&self, account: &str, grant: &str) -> Result<(), &'static str> {
         match self.soul_of(grant)? {
