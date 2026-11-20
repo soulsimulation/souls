@@ -76,7 +76,7 @@ step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test w
 # The words path (V1b, #3361): a local world's said sentence, and a body's name and description, through the page's
 # worker within the stream's lag; a whisper in no public file (web/src/source/words.test.ts). A still world is drawn
 # at once and kept live (V5b, web/src/source/still.test.ts).
-step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts web/src/source/still.test.ts web/src/source/continuity.test.ts'
+step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts web/src/source/still.test.ts web/src/source/continuity.test.ts web/src/worlds/worlds.test.ts'
 
 # The ids goldens (T3, #2640): the same WASM build in Node gives fixtures/ids/goldens.txt exactly, as the native build
 # does in `cargo test` (crates/replica/tests/ids.rs).

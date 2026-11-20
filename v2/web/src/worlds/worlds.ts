@@ -1,3 +1,4 @@
+import { recipientHandoff } from './handoff.ts';
 import { browserSession, localTestSignIn, sessionRequest } from '../source/signin.ts';
 // The list of worlds, and making one (Engine v2 W3, #2799).
 //
@@ -42,6 +43,7 @@ export class ClickKey {
 }
 
 function page(): void {
+  recipientHandoff();
   const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
   const list = $<HTMLUListElement>('list'), form = $<HTMLFormElement>('create'), go = $<HTMLButtonElement>('go');
   const progress = $<HTMLDivElement>('progress'), template = $<HTMLSelectElement>('template');
