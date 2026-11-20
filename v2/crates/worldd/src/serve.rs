@@ -1100,8 +1100,12 @@ fn fork_archive_base<S: Store>(
     newest: &[u8],
     found: &sim::log::Recovered,
 ) -> Result<ArchiveBase, Refusal> {
-    if store.get(&format!("{prefix}archive/head"))?.is_some() {
-        let base = archive::fetch(store, prefix)?.base.ok_or_else(|| Refusal {
+    let scoped = Under {
+        store,
+        prefix: prefix.to_owned(),
+    };
+    if scoped.get("archive/head")?.is_some() {
+        let base = archive::fetch(&scoped, "")?.base.ok_or_else(|| Refusal {
             name: "archive-unbased-head",
             detail: "fork requires its durable based archive".into(),
         })?;
@@ -1794,6 +1798,65 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn w3c_stored_fork_base_reopens_scoped_nonempty_archive_without_local_checkpoint() {
+        use directoryd::directory::folder::Folder;
+        use replica::ids::Version;
+        use sim::checkpoint::{Blobs, Checkpoints};
+        let dir = std::env::temp_dir().join(format!("w3c-scoped-base-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut world = archive::script::world(1, 1, None);
+        let mut checkpoints =
+            Checkpoints::open(&dir.join("checkpoint"), 1 << 20, Blobs::default()).unwrap();
+        let version = Version {
+            lineage: world.header.lineage,
+            zone: world.header.zone,
+            epoch: world.header.epoch,
+            sequence: world.tree.next(),
+        };
+        checkpoints
+            .take(&mut world.tree, version, 0, b"scoped archive fixture")
+            .unwrap();
+        checkpoints.wait().unwrap();
+        let bytes = std::fs::read(dir.join("checkpoint/ckpt-00000000000000000000")).unwrap();
+        let base = ArchiveBase::read(world.header.stored(), &bytes).unwrap();
+        let raw = Folder::new(dir.join("store"));
+        let prefix = "h/scoped-world/lineage/";
+        let scoped = Under {
+            store: &raw,
+            prefix: prefix.to_owned(),
+        };
+        let mut writer = Archiver::open_based(&scoped, "", &base).unwrap();
+        writer
+            .push(0, archive::script::tick(&mut world, 0, 1, 0))
+            .unwrap();
+        writer.flush().unwrap();
+        drop(writer);
+        let head =
+            archive::Head::read(&scoped.get("archive/head").unwrap().unwrap().bytes).unwrap();
+        assert!(!head.newest.is_empty());
+        assert!(scoped.get(&head.newest).unwrap().is_some());
+        assert!(raw.get(&head.newest).unwrap().is_none());
+        let missing = dir.join("no-local-checkpoint");
+        assert!(!missing.exists());
+        let recovered =
+            sim::log::recover(&sim::log::Header::new(world.header.epoch).to_bytes()).unwrap();
+        let reopened = fork_archive_base(
+            &raw,
+            prefix,
+            &missing,
+            &world.header,
+            b"not a replacement checkpoint",
+            &recovered,
+        )
+        .unwrap();
+        assert_eq!(
+            reopened, base,
+            "original durable base wins without local cp0"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn w3c_off_keeps_physical_based_delivery_separate_from_legacy_counter() {
