@@ -384,3 +384,30 @@ test('native-v2 console errors require exact owned-origin HTTP evidence and narr
   const otherOrigin=await sample({foreignResponse:true,foreignConsole:true});assert.equal(otherOrigin.status,'FAIL');assert.match(otherOrigin.error,/unexpected-network-error/);
   const unmatched=await sample({foreignConsole:true});assert.equal(unmatched.status,'FAIL');assert.match(unmatched.error,/unexpected-console-error/);
 });
+
+test('body recipe owns successful finite seed children and all three services without qualifying injection', async t => {
+  const services=[];let seed;const f=setup(t,{boot:async o=>{
+    seed=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});o.onSpawn(seed,{transient:true});seed.exitCode=0;seed.emit('exit',0);
+    for(let i=0;i<3;i++){const c=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});services.push(c);o.onSpawn(c);}
+    return {child:services[0],children:services,base:`http://example.com:${o.port}`,viewer:`http://example.com:${o.port}/?stream=/s/fixed/`,dataDir:o.data};
+  }});f.o.world.kind='v2-bodies';const report=await f.runner(f.o);
+  assert.equal(report.status,'PASS');assert.equal(report.qualified,false);assert.equal(report.injected,true);
+  assert.equal(report.teardown.children.length,4);assert(report.teardown.children.every(c=>c.exited));assert.equal(seed.exitCode,0);
+});
+
+test('body recipe aborts abnormal finite child exit before opening the browser', async t => {
+  const services=[];const f=setup(t,{boot:async o=>{
+    for(let i=0;i<3;i++){const c=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});services.push(c);o.onSpawn(c);}
+    const command=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});o.onSpawn(command,{transient:true});command.exitCode=1;command.emit('exit',1);
+    return {child:services[0],children:services,base:`http://example.com:${o.port}`,viewer:`http://example.com:${o.port}/`,dataDir:o.data};
+  }});f.o.world.kind='v2-bodies';const report=await f.runner(f.o);
+  assert.equal(report.status,'BOOT_ABORT');assert.equal(report.browserStarted,false);assert.equal(report.teardown.children.length,4);assert(report.teardown.children.every(c=>c.exited));
+});
+
+test('body recipe service death remains fatal after finite child success', async t => {
+  const services=[];const f=setup(t,{boot:async o=>{
+    for(let i=0;i<3;i++){const c=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});services.push(c);o.onSpawn(c);}
+    return {child:services[0],children:services,base:`http://example.com:${o.port}`,viewer:`http://example.com:${o.port}/`,dataDir:o.data};
+  }});f.o.world.kind='v2-bodies';f.o.journey=async c=>{services[1].exitCode=0;services[1].emit('exit',0);c.check('observed',true);};
+  const report=await f.runner(f.o);assert.equal(report.status,'FAIL');assert.equal(report.qualified,false);assert(report.teardown.children.every(c=>c.exited));
+});

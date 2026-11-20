@@ -182,3 +182,25 @@ delay or adoption retry establishes readiness. CLI transcripts retain exit/signa
 termination even if partial stdout contains success JSON. Observer cleanup attempts sockets and transient
 children concurrently and preserves all failures. Expected browser resource errors require the exact owned
 origin, path, status and matching response evidence; unrelated console errors fail the attempt.
+
+The literal `world.kind: 'v2-bodies'` recipe uses `v2-body-fixture.mjs` and the committed
+`drivers/v2-body-presets.mjs`. Its descriptor pins the existing synthetic world generator, matching native world,
+consumer-bound gateway, WASM, actual prepared catalogue and bundled page. It seeds through existing native callers,
+then owns the world, gateway and static public-file origin. Only views and public history exports are served beside
+the exact built page. Seed/generator and ordinary CLI commands are registered finite children: successful exit is
+expected for them, while signal, error or nonzero exit fails. Long-lived services and the explicitly registered
+resident agent must remain alive through finalization; every child is included in teardown evidence. The original
+and account recipes keep their existing child semantics.
+
+The two predeclared functional slots are all twenty live preset renders and agent changes, then named birth,
+old/new history through the real slider, return to live and named refusal retaining the current rendered body.
+Each uses a fresh owned lifecycle and at most ninety seconds of uncut video. Existing renderer/crowd state is read
+only; camera/replay controls use real input. The prepared native corridor test separately proves the fit refusal;
+a local viewer result does not qualify public provider input or the release walks. No arbitrary running URL,
+command recipe, personal profile, state injection or fallback model can qualify this proof.
+
+The body component fixture supplies only a public placement `live` locator derived from the native
+`views/world.json` full-zone, everyone stream. It writes no header, part, body pose or private-audience data.
+This supplied metadata tests the existing Back to live consumer; deployed locator production remains unproved
+and is tracked separately in #3661. The fixture's exact favicon route returns 204. Neither behavior qualifies
+deployed replay or public release input.
