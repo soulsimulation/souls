@@ -163,3 +163,36 @@ test('CMESH2 retains textured material seams and legacy CMESH1 remains byte-comp
     assert.notEqual(cross, 0, 'no geometrically degenerate triangles survive');
   }
 });
+
+
+test('a wider live bone texture preserves rows and rebinds every color and depth material before disposal', () => {
+  const crowd = new Crowd([model('old')], 1), old = crowd.live;
+  const rowWidth = old.image.width * 4, oldData = old.image.data as Float32Array;
+  oldData[0] = 7; oldData[rowWidth] = 11;
+  const uniform = (material: THREE.Material) => {
+    const shader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: '' };
+    material.onBeforeCompile(shader as Parameters<THREE.Material['onBeforeCompile']>[0], {} as THREE.WebGLRenderer);
+    return shader.uniforms.uLive;
+  };
+  const oldBindings = crowd.group.children.flatMap(child => {
+    const mesh = child as THREE.InstancedMesh;
+    return [uniform(mesh.material as THREE.Material), uniform(mesh.customDepthMaterial!)];
+  });
+  let disposed = 0;
+  old.addEventListener('dispose', () => {
+    disposed++; assert.notEqual(crowd.live, old);
+    for (const binding of oldBindings) assert.equal(binding.value, crowd.live, 'rebound before old storage is disposed');
+  });
+  crowd.addModel({ ...model('wider'), bones: 3 });
+  const texture = crowd.live;
+  assert.notEqual(texture, old); assert.equal(old.image.width, 6); assert.equal(texture.image.width, 9);
+  assert.equal(disposed, 1); assert.equal(texture.minFilter, THREE.NearestFilter);
+  const data = texture.image.data as Float32Array;
+  assert.equal(data[0], 7); assert.equal(data[texture.image.width * 4], 11);
+  for (const child of crowd.group.children) {
+    const mesh = child as THREE.InstancedMesh;
+    assert.equal(uniform(mesh.material as THREE.Material).value, texture);
+    assert.equal(uniform(mesh.customDepthMaterial!).value, texture);
+  }
+  crowd.addModel(model('smaller')); assert.equal(crowd.live, texture); assert.equal(disposed, 1);
+});
