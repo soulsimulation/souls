@@ -101,10 +101,25 @@ test('R21: a held pre-birth sync cannot satisfy the successful join refresh; unr
       .replaceAll(/\/(?:Users|home|private|tmp|var)\/[^\s"'\\]*/g, '<path>');
   };
   const run = (name, args, ready) => new Promise((ok, fail) => {
-    const p = spawn(bin(name), args, { stdio: ['ignore', 'pipe', 'pipe'] }); procs.push(p);
-    const child = { name, exit: null, stdout: '', stderr: '' }; children.push(child);
+    const env = ['worldd', 'gatewayd'].includes(name) ? { ...process.env, SOULS_JOIN_DELIVERY_TRACE: '1' } : process.env;
+    const p = spawn(bin(name), args, { stdio: ['ignore', 'pipe', 'pipe'], env }); procs.push(p);
+    const child = { name, exit: null, stdout: '', stderr: '', delivery: '' }; children.push(child);
     let out = '';
+    let deliveryLine = '';
+    const deliveryLines = [];
+    let deliveryBytes = 0;
     const take = (stream, d) => {
+      if (stream === 'stderr') {
+        const lines = (deliveryLine + d).split('\n'); deliveryLine = lines.pop().slice(-4096);
+        for (const line of lines) {
+          if (!line.startsWith('worldd: join-delivery ') && !line.startsWith('gatewayd: join-delivery ')) continue;
+          const complete = line + '\n', bytes = Buffer.byteLength(complete);
+          if (bytes > 65536) continue;
+          deliveryLines.push(complete); deliveryBytes += bytes;
+          while (deliveryBytes > 65536) deliveryBytes -= Buffer.byteLength(deliveryLines.shift());
+          child.delivery = deliveryLines.join('');
+        }
+      }
       child[stream] = (child[stream] + d).slice(-2048);
       out = (out + d).slice(-4096); const found = ready?.exec(out); if (found) ok(found);
     };
