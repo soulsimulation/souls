@@ -1,3 +1,4 @@
+import { creatorArchive } from '../worlds/archive.ts';
 import { creatorHandoff } from '../worlds/handoff.ts';
 import { browserSession, localTestSignIn, sessionRequest } from '../source/signin.ts';
 import { worldAddress } from '../source/address.ts';
@@ -268,7 +269,9 @@ function showPrayers() {
 }
 
 /** Account changes revoke this page's old authority and private UI before any new exchange. */
+let resetArchive = () => {};
 function invalidateCreator() {
+  resetArchive();
   openAttempt++;
   const previous = activeSocket;
   activeSocket = null; session = null;
@@ -374,3 +377,5 @@ Object.assign(globalThis, { panel: { nodes, get session() { return session; }, g
 requestAnimationFrame(draw);
 
 creatorHandoff($<HTMLElement>('handoff'), installed?.world ?? null, installed?.directory ?? location.origin, () => $<HTMLInputElement>('who').value);
+
+resetArchive = creatorArchive($<HTMLElement>('archive'), installed?.world ?? null, installed?.directory ?? location.origin, () => $<HTMLInputElement>('who').value);
