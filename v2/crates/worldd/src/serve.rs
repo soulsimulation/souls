@@ -25,6 +25,7 @@
 //!   `views/world.json`, `{"stream": "views/<its folder>/", "history": "history/"}`, both relative to the world's
 //!   folder, which the page reads for `?world=` and pairing for the Soul's `history` (R16b, #3480). With a store,
 //!   only public archive bundles/indexes are mirrored into `history/`; private bases/source remain in the Store.
+//!   `history/live` is mutable public navigation metadata binding the instance/lineage to that exact full public stream.
 //! - `gateway.sock`: the gateway's local socket (I1's framing, `answers::serve`), unless `--socket` or
 //!   `$WORLDD_SOCKET` names another (a placed world's: a socket's path is at most 108 bytes, and a world folder's
 //!   name is 67). `health.json`: O4's.
@@ -967,6 +968,46 @@ fn bodies(
 
 type Bucket = Shared<supervisor::bucket::Bucket>;
 
+/// Public navigation only: the same restored header/root as the live writer, beside the history export.
+fn public_history_live(dir: &Path, name: &str, header: &Header, key: &Key) -> R<()> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || !name
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
+        || key.node != header.zone
+        || key.level != Level::Full
+        || key.audience != Audience::Everyone
+    {
+        return Err("history-live-invalid".into());
+    }
+    let history = dir.join("history");
+    match std::fs::symlink_metadata(&history) {
+        Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {}
+        Ok(_) => return Err("history-live-export".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(&history).map_err(|_| "history-live-export")?;
+        }
+        Err(_) => return Err("history-live-export".into()),
+    }
+    for path in [history.join("live"), history.join("live.tmp")] {
+        match std::fs::symlink_metadata(path) {
+            Ok(m) if m.is_file() && !m.file_type().is_symlink() => {}
+            Ok(_) => return Err("history-live-export".into()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("history-live-export".into()),
+        }
+    }
+    let bytes = format!(
+        "{{\"format\":\"souls/history-live/1\",\"world\":\"{name}\",\"lineage\":\"{}\",\"stream\":\"../views/{}/\"}}\n",
+        to_hex(&header.lineage.0),
+        stream::dir(header, key)
+    );
+    view_out::write_whole(&history.join("live"), bytes.as_bytes())
+        .map_err(|_| "history-live-export".to_owned())
+}
+
 /// How often a running world's open event index is written, at most (R16b): a question sees acts this old.
 const VIEWS_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -1902,6 +1943,14 @@ fn serve(args: &[String]) -> R<()> {
         stream::dir(&built.header, &key)
     );
     view_out::write_whole(&views.join("world.json"), pointer.as_bytes()).map_err(refusal)?;
+    public_history_live(
+        &dir,
+        meta.get("name")
+            .and_then(Json::str)
+            .ok_or("history-live-invalid")?,
+        &built.header,
+        &key,
+    )?;
     // Physical cursor includes input records; public effect versions are independently validated by the observer.
     writer.bridge_to(found.first).map_err(refusal)?;
     for (offset, bytes) in found.records.iter().enumerate() {
@@ -2036,6 +2085,68 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn v9b_public_history_live_binds_restored_header_and_refuses_unsafe_exports() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../.local")
+            .join(format!("v9b-history-live-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut header = archive::script::world(0, 0, None).header;
+        let key = Key {
+            node: header.zone,
+            level: Level::Full,
+            audience: Audience::Everyone,
+        };
+        public_history_live(&dir, "original-instance", &header, &key).unwrap();
+        let read = || std::fs::read_to_string(dir.join("history/live")).unwrap();
+        let first = read();
+        let locator = json::parse(&first).unwrap();
+        assert_eq!(
+            locator.get("world").and_then(Json::str),
+            Some("original-instance")
+        );
+        assert_eq!(
+            locator.get("lineage").and_then(Json::str),
+            Some(to_hex(&header.lineage.0).as_str())
+        );
+        let expected = format!("../views/{}/", stream::dir(&header, &key));
+        assert_eq!(
+            locator.get("stream").and_then(Json::str),
+            Some(expected.as_str())
+        );
+        assert!(expected.ends_with("/1/everyone/"));
+        public_history_live(&dir, "original-instance", &header, &key).unwrap();
+        assert_eq!(
+            read(),
+            first,
+            "same restored identity has stable navigation bytes"
+        );
+        header.epoch += 1;
+        header = Header::read(&encode(&header.to_value()).unwrap()).unwrap();
+        public_history_live(&dir, "restored-instance", &header, &key).unwrap();
+        let restored = read();
+        assert!(restored.contains(&stream::dir(&header, &key)));
+        assert!(!restored.contains("original-instance"));
+        assert!(public_history_live(&dir, "../foreign", &header, &key).is_err());
+        let private = Key {
+            audience: Audience::Of(header.zone),
+            ..key
+        };
+        assert!(public_history_live(&dir, "restored-instance", &header, &private).is_err());
+        assert_eq!(read(), restored);
+        std::fs::remove_file(dir.join("history/live")).unwrap();
+        std::os::unix::fs::symlink(dir.join("outside"), dir.join("history/live")).unwrap();
+        assert!(public_history_live(&dir, "restored-instance", &header, &key).is_err());
+        assert!(!dir.join("outside").exists());
+        std::fs::remove_file(dir.join("history/live")).unwrap();
+        std::fs::remove_dir(dir.join("history")).unwrap();
+        std::fs::create_dir(dir.join("outside")).unwrap();
+        std::os::unix::fs::symlink(dir.join("outside"), dir.join("history")).unwrap();
+        assert!(public_history_live(&dir, "restored-instance", &header, &key).is_err());
+        assert!(!dir.join("outside/live").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn public_boot_carries_only_a_valid_regular_catalogue() {
