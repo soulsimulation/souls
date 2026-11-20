@@ -125,15 +125,25 @@ fn support(dir: &Path, facts: &[u8]) -> Result<PublicSupport, String> {
         files.push((PathBuf::from("entry.json"), bytes));
     }
     if let Some(value) = m.get(&7) {
-        let Value::Bytes(hash) = value else { return Err("template-bodies-invalid".into()); };
+        let Value::Bytes(hash) = value else {
+            return Err("template-bodies-invalid".into());
+        };
         let path = dir.join("bodies.json");
-        if hash.len() != 32 || !std::fs::symlink_metadata(&path).map_err(|_| "template-bodies-invalid")?.is_file() {
+        if hash.len() != 32
+            || !std::fs::symlink_metadata(&path)
+                .map_err(|_| "template-bodies-invalid")?
+                .is_file()
+        {
             return Err("template-bodies-invalid".into());
         }
         let bytes = std::fs::read(&path).map_err(|_| "template-bodies-invalid")?;
-        if sha256(&bytes).as_slice() != hash { return Err("template-bodies-mismatch".into()); }
-        skills::wear::Catalogue::read(std::str::from_utf8(&bytes).map_err(|_| "template-bodies-invalid")?)
-            .map_err(|_| "template-bodies-invalid")?;
+        if sha256(&bytes).as_slice() != hash {
+            return Err("template-bodies-mismatch".into());
+        }
+        skills::wear::Catalogue::read(
+            std::str::from_utf8(&bytes).map_err(|_| "template-bodies-invalid")?,
+        )
+        .map_err(|_| "template-bodies-invalid")?;
         files.push((PathBuf::from("bodies.json"), bytes));
     }
     if m.keys().any(|key| !(1..=7).contains(key)) {
@@ -211,13 +221,20 @@ mod tests {
     use std::collections::BTreeMap;
     #[test]
     fn public_catalogue_is_hash_checked_and_legacy_support_is_unchanged() {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../.local")
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../.local")
             .join(format!("b15-template-catalogue-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let facts = b"{}";
         let mut boot = BTreeMap::from([
-            (1, Value::Bytes(b"souls/public-boot/1".to_vec())), (2, Value::Bytes(sha256(facts).to_vec())),
-            (3, Value::Array(vec![Value::Text(Name::new(format!("souls:body@1220{}", "00".repeat(32))).unwrap())])),
+            (1, Value::Bytes(b"souls/public-boot/1".to_vec())),
+            (2, Value::Bytes(sha256(facts).to_vec())),
+            (
+                3,
+                Value::Array(vec![Value::Text(
+                    Name::new(format!("souls:body@1220{}", "00".repeat(32))).unwrap(),
+                )]),
+            ),
             (4, Value::Array(vec![])),
         ]);
         std::fs::write(dir.join("facts.json"), facts).unwrap();
@@ -230,9 +247,15 @@ mod tests {
         std::fs::write(dir.join("boot"), encode(&Value::Map(boot.clone())).unwrap()).unwrap();
         let (_, files) = support(&dir, facts).unwrap();
         assert_eq!(files.len(), 3);
-        assert_eq!(files.last().unwrap(), &(PathBuf::from("bodies.json"), catalogue.to_vec()));
+        assert_eq!(
+            files.last().unwrap(),
+            &(PathBuf::from("bodies.json"), catalogue.to_vec())
+        );
         std::fs::write(dir.join("bodies.json"), b"{}").unwrap();
-        assert_eq!(support(&dir, facts).unwrap_err(), "template-bodies-mismatch");
+        assert_eq!(
+            support(&dir, facts).unwrap_err(),
+            "template-bodies-mismatch"
+        );
         boot.insert(7, Value::Bytes(vec![0; 31]));
         std::fs::write(dir.join("boot"), encode(&Value::Map(boot)).unwrap()).unwrap();
         assert_eq!(support(&dir, facts).unwrap_err(), "template-bodies-invalid");

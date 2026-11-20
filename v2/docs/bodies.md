@@ -218,3 +218,5 @@ files, source pins and the complete catalogue/model/default/decoder closure befo
 Install and release callers prepare that input through the existing verified asset pull. No runtime model fetch
 comes from a recorded arbitrary URL. Optional public-boot field7 pins the regular `bodies.json`; template creation
 and fork carry only its validated bytes. Without field7 the legacy support encoding is unchanged.
+
+The prepared catalogue also pins canonical released BODY-v1 definitions for account migration. Mapped `import-accounts --bodies` validates every owned live look before output and records choices only in the private per-world birth file. Serve validates that fixed `births.json` against its actual header and catalogue before handing choices to the existing C3 path. Existing bodies and subsequent wear are unchanged; private birth choices are never public boot support. Unknown/custom looks require an explicit supported migration, rather than silently becoming the default.

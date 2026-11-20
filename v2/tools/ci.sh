@@ -73,6 +73,8 @@ step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit
 # The page's pose (V7, #2716): a body's bones as a function of its record and time, the same at 30 and 144 frames a
 # second, in any order and in a fresh process, with the hand on its contact point (web/src/pose/pose.test.ts).
 step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test web/src/pose/*.test.ts web/src/source/signin.test.ts'
+# B15: acquire only the released inputs and exercise the actual prepared artifact, after the locked page dependencies.
+step body-presets bash -c 'node tools/import-body/prepare.mjs --out .local/ci-body-assets --test'
 # The words path (V1b, #3361): a local world's said sentence, and a body's name and description, through the page's
 # worker within the stream's lag; a whisper in no public file (web/src/source/words.test.ts). A still world is drawn
 # at once and kept live (V5b, web/src/source/still.test.ts).

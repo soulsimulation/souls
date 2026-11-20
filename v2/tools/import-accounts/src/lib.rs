@@ -251,6 +251,139 @@ fn look(body: &Json) -> (String, String, String, bool) {
     )
 }
 
+/// Public released definitions are mapping data, never account or mint authority.
+struct LegacyBodies {
+    hash: String,
+    defaults: Vec<Json>,
+    definitions: Vec<(Json, String)>,
+}
+
+fn normalized_body(body: &Json, world: &str) -> R<Json> {
+    let mut body = body.clone();
+    let Some(fields) = body.as_object_mut() else {
+        return Ok(body);
+    };
+    fn url(value: &mut Json, world: &str) -> R<()> {
+        let text = value.as_str().ok_or("body.legacy-unavailable")?;
+        let prefix = format!("/w/{world}");
+        let text = text
+            .strip_prefix(&prefix)
+            .filter(|tail| tail.starts_with('/'))
+            .unwrap_or(text);
+        if text.contains(['?', '#', '%'])
+            || !(text.starts_with("/v1/edge/body/assets/body_")
+                || text.starts_with("/world-assets/littlemartians/characters/"))
+        {
+            return Err("body.legacy-unavailable".into());
+        }
+        *value = Json::String(text.to_owned());
+        Ok(())
+    }
+    if let Some(value) = fields.get_mut("modelUrl") {
+        url(value, world)?;
+    }
+    if let Some(value) = fields
+        .get_mut("avatar")
+        .and_then(Json::as_object_mut)
+        .and_then(|v| v.get_mut("modelUrl"))
+    {
+        url(value, world)?;
+    }
+    Ok(body)
+}
+
+impl LegacyBodies {
+    fn read(path: &Path) -> R<Self> {
+        let metadata = fs::symlink_metadata(path).map_err(|_| "body.catalogue-unavailable")?;
+        if !metadata.is_file() || metadata.len() > 4 * 1024 * 1024 {
+            return Err("body.catalogue-invalid".into());
+        }
+        let bytes = fs::read(path).map_err(|_| "body.catalogue-unavailable")?;
+        let text = std::str::from_utf8(&bytes).map_err(|_| "body.catalogue-invalid")?;
+        let catalogue = skills::wear::Catalogue::read(text)?;
+        let data: Json = serde_json::from_str(text).map_err(|_| "body.catalogue-invalid")?;
+        let defaults = data
+            .get("legacyDefaults")
+            .and_then(Json::as_array)
+            .ok_or("body.legacy-defaults")?
+            .clone();
+        let fixed = [
+            Json::Null,
+            serde_json::json!({"family":"humanoid"}),
+            serde_json::json!({"family":"humanoid","type":"humanoid"}),
+        ];
+        if defaults.len() != 4
+            || defaults[..3] != fixed
+            || defaults[3].as_object().is_none_or(|d| d.len() != 3)
+            || defaults[3].get("family").and_then(Json::as_str) != Some("humanoid")
+            || defaults[3].get("params") != Some(&serde_json::json!({}))
+            || defaults[3]
+                .get("model")
+                .and_then(Json::as_str)
+                .is_none_or(|s| {
+                    s.len() != 26
+                        || !s.starts_with("humanoid2-")
+                        || !s[10..].bytes().all(|c| c.is_ascii_hexdigit())
+                })
+        {
+            return Err("body.legacy-defaults".into());
+        }
+        let mut definitions: Vec<(Json, String)> = Vec::new();
+        let rows = data
+            .get("bodies")
+            .and_then(Json::as_array)
+            .ok_or("body.catalogue-invalid")?;
+        if rows.len() > 128 {
+            return Err("body.catalogue-invalid".into());
+        }
+        for entry in rows {
+            let hash = entry
+                .get("hash")
+                .and_then(Json::as_str)
+                .ok_or("body.catalogue-invalid")?;
+            if catalogue.find(hash).is_none() {
+                return Err("body.catalogue-invalid".into());
+            }
+            let legacy = entry
+                .get("legacy")
+                .and_then(Json::as_array)
+                .ok_or("body.legacy-unavailable")?;
+            if legacy.is_empty() || legacy.len() > 8 {
+                return Err("body.catalogue-invalid".into());
+            }
+            for definition in legacy {
+                if defaults.contains(definition) {
+                    return Err("body.legacy-contradictory".into());
+                }
+                if let Some((_, held)) = definitions.iter().find(|(d, _)| d == definition) {
+                    if held != hash {
+                        return Err("body.legacy-contradictory".into());
+                    }
+                } else {
+                    definitions.push((definition.clone(), hash.to_owned()));
+                }
+            }
+        }
+        Ok(Self {
+            hash: to_hex(&sha256(&bytes)),
+            defaults,
+            definitions,
+        })
+    }
+
+    fn choice(&self, body: &Json, world: &str) -> R<Option<String>> {
+        let body = normalized_body(body, world)?;
+        if self.defaults.contains(&body) {
+            return Ok(None);
+        }
+        self.definitions
+            .iter()
+            .find(|(definition, _)| definition == &body)
+            .map(|(_, hash)| Some(hash.clone()))
+            .ok_or_else(|| "body.legacy-unavailable".to_owned())
+    }
+}
+
 // --- The directory's objects as files -------------------------------------------------------------------------------
 
 /// W8's object store as files under a folder, with the store's two conditions: for the cut-over's own runs, before the
@@ -375,6 +508,16 @@ fn sq<T>(r: rusqlite::Result<T>) -> R<T> {
 /// Brings the backup set at `set` (and any further world files, `extra`) into `out`: `out/accounts.sqlite` (W1's store
 /// and the private tables), `out/directory/` (W8's objects) and `out/births/<world>.json` (K10's births).
 pub fn import(set: &Path, extra: &[PathBuf], out: &Path) -> R<Report> {
+    import_with_bodies(set, extra, out, None)
+}
+
+/// Mapped release mode: validate every owned live look before creating any output.
+pub fn import_with_bodies(
+    set: &Path,
+    extra: &[PathBuf],
+    out: &Path,
+    bodies: Option<&Path>,
+) -> R<Report> {
     let stage = registry(&set.join("accounts.sqlite"))?;
     let forks = registry(&set.join("forks-accounts.sqlite"))?;
     let creators: BTreeMap<String, String> = match fs::read_to_string(set.join("worlds.json")) {
@@ -407,6 +550,21 @@ pub fn import(set: &Path, extra: &[PathBuf], out: &Path) -> R<Report> {
         .iter()
         .map(|f| read_world(f, &creators))
         .collect::<R<Vec<_>>>()?;
+
+    let mapped = bodies.map(LegacyBodies::read).transpose()?;
+    if let Some(catalogue) = &mapped {
+        for world in &worlds {
+            for soul in &world.live {
+                if stage
+                    .iter()
+                    .chain(&forks)
+                    .any(|account| account.id == soul.owner)
+                {
+                    catalogue.choice(&soul.body, &world.world)?;
+                }
+            }
+        }
+    }
 
     fs::create_dir_all(out.join("births")).map_err(|e| format!("{}: {e}", out.display()))?;
     let store_path = out.join("accounts.sqlite");
@@ -555,7 +713,7 @@ pub fn import(set: &Path, extra: &[PathBuf], out: &Path) -> R<Report> {
                 }
             };
             let (family, preset, hash, no_kind) = look(&s.body);
-            if no_kind {
+            if no_kind && mapped.is_none() {
                 *row.no_kind.entry(preset.clone()).or_default() += 1;
             }
             sq(tx.execute(
@@ -578,16 +736,25 @@ pub fn import(set: &Path, extra: &[PathBuf], out: &Path) -> R<Report> {
             }
             // K10's Birth: the Soul, the entry it comes in by (the world's arrival point: its root until N9 declares
             // one), asked at the start of the new history.
-            births.push(serde_json::json!({ "soul": principal_text(soul), "entry": principal_text(zone), "asked": 0 }));
+            let mut birth = serde_json::json!({ "soul": principal_text(soul), "entry": principal_text(zone), "asked": 0 });
+            if let Some(catalogue) = &mapped
+                && let Some(hash) = catalogue.choice(&s.body, &w.world)?
+            {
+                birth["body"] = Json::String(hash);
+            }
+            births.push(birth);
             row.brought += 1;
         }
-        let file = serde_json::json!({
+        let mut file = serde_json::json!({
             "format": "souls-births/1",
             "world": w.world,
             "lineage": to_hex(&lineage),
             "zone": principal_text(zone),
             "births": births,
         });
+        if let Some(catalogue) = &mapped {
+            file["catalogueHash"] = Json::String(catalogue.hash.clone());
+        }
         fs::write(
             out.join("births").join(format!("{}.json", w.world)),
             serde_json::to_string_pretty(&file).expect("json") + "\n",

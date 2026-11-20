@@ -40,6 +40,8 @@ export type BakedModel = {
   radius?: number;
   centerY?: number;
   walkSpeed?: number;
+  /** Authored rigid motion has a time period, independent of travel distance. */
+  fixedWalk?: boolean;
 };
 
 const loader = new GLTFLoader();
@@ -239,7 +241,7 @@ export function bakeModel(name: string, gltf: GLTF, animations: THREE.AnimationC
   skeleton.boneInverses.forEach((b, i) => joints.set(new THREE.Vector3().setFromMatrixPosition(m.copy(b).invert()).toArray(), i * 3));
   return {
     name, lods: levels.map(geometry), bake, bones, clips, materials, sourceMaterials, joints,
-    radius, centerY: (bounds.min.y + bounds.max.y) / 2,
+    radius, centerY: (bounds.min.y + bounds.max.y) / 2, fixedWalk: !!motion,
     names: skeleton.bones.map((b) => b.name), parents: Int16Array.from(skeleton.bones, (b) => skeleton.bones.indexOf(b.parent as THREE.Bone)),
     triangles: levels.map((l) => l.index.length / 3), height: bounds.max.y - bounds.min.y,
   };

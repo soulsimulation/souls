@@ -13,6 +13,8 @@ test('prepared publication carries every pinned preset and refuses modified, mis
   const files = bodyAssetFiles(prepared);
   const catalogue = JSON.parse(files.find((f) => f.path === 'bodies.json')!.bytes.toString('utf8'));
   assert.equal(catalogue.bodies.length, 20);
+  assert.equal(catalogue.legacyDefaults.length, 4);
+  assert.ok(catalogue.bodies.every((body: { legacy: unknown[] }) => body.legacy.length === 1));
   const scratch = join(repo, '.local/2750'); mkdirSync(scratch, { recursive: true });
   const tmp = mkdtempSync(join(scratch, 'plugin-test-')); cpSync(prepared, tmp, { recursive: true });
   try {

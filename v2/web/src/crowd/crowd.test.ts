@@ -67,13 +67,13 @@ test('bodies enter the crowd when placed and leave it when a frame no longer pla
 test('body hash loading is single-flight, preserves model-specific clips and never substitutes for unknown hashes', async () => {
   const crowd = new Crowd([model('default')], 1), bodies = new CrowdBodies(crowd);
   let requests = 0;
-  crowd.worn = async (hash) => { requests++; if (hash === 'unknown') throw Error('body.unknown-hash'); const m = model(hash); m.clips.reverse(); m.clips[0].seconds = 4; return m; };
+  crowd.worn = async (hash) => { requests++; if (hash === 'unknown') throw Error('body.unknown-hash'); const m = model(hash); m.clips.reverse(); m.clips[0].seconds = 4; m.fixedWalk = true; return m; };
   bodies.begin(0); bodies.place('one', 0, 0, 0, 'known'); bodies.place('two', 0, 0, 0, 'known');
   assert.equal(crowd.ready[0], 0); assert.equal(requests, 1);
   await Promise.resolve();
   bodies.begin(1); bodies.place('one', 0, 0, 0, 'known'); bodies.place('two', 0, 0, 0, 'known');
   assert.equal(crowd.ready[0], 1); assert.equal(crowd.models[crowd.model[0]].name, 'known');
-  assert.equal(crowd.clipA[0], 1); assert.equal(crowd.clipB[0], 0);
+  assert.equal(crowd.clipA[0], 1); assert.equal(crowd.clipB[0], 0); assert.equal(crowd.rateB[0], 1 / 4, 'rigid motion keeps its authored period');
   bodies.begin(2); bodies.place('one', 0, 0, 0, 'unknown'); await Promise.resolve();
   assert.equal(crowd.ready[0], 0); assert.equal(crowd.bodyLoads.get('unknown')?.reason, 'body.unknown-hash');
   bodies.place('one', 0, 0, 0); assert.equal(crowd.models[crowd.model[0]].name, 'default'); assert.equal(crowd.ready[0], 1);
@@ -101,4 +101,10 @@ test('CMESH2 retains textured material seams and legacy CMESH1 remains byte-comp
   const textured = { ...original, uv: new Float32Array(original.position.length / 3 * 2).map((_, i) => i % 2), material: new Uint16Array(original.position.length / 3).fill(1) };
   const encoded = encodeMesh(textured); assert.equal(new TextDecoder().decode(encoded.slice(0, 6)), 'CMESH2');
   assert.deepEqual(decodeMesh(encoded), textured); assert.ok(cluster(textured, 0.015).uv); assert.ok(cluster(textured, 0.015).material?.every((m) => m === 1));
+  const seam = { ...strip(1), uv: Float32Array.of(0, 0, 0, 1, 1, 0, 1, 1), material: new Uint16Array(4) };
+  // Two coincident vertices on separate islands must not become one UV representative.
+  seam.position.set(seam.position.subarray(0, 3), 6); seam.uv.set([0.8, 0.7], 4);
+  const clustered = cluster(seam, 0.001);
+  const at = [...Array(clustered.position.length / 3).keys()].filter((i) => clustered.position[i * 3] === seam.position[0] && clustered.position[i * 3 + 1] === seam.position[1]);
+  assert.equal(at.length, 2); assert.notDeepEqual([...clustered.uv!.slice(at[0] * 2, at[0] * 2 + 2)], [...clustered.uv!.slice(at[1] * 2, at[1] * 2 + 2)]);
 });

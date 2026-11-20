@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { FLOATER_MODELS } from '../../../mars/viewer/engine/bodies/models.ts';
-import { CREATURE_IDS } from '../../../mars/viewer/engine/bodies/creatures.ts';
+import { CREATURE_IDS, creatureBody } from '../../../mars/viewer/engine/bodies/creatures.ts';
 import { LITTLE_MARTIANS_MOTION } from '../../../mars/viewer/engine/bodies/motion.ts';
 import { authorCentaur } from '../../../tools/body-authoring/centaur/author.mjs';
 import { authorGhost } from '../../../tools/body-authoring/ghost/author.mjs';
@@ -14,6 +14,10 @@ import { authorPip } from '../../../tools/body-authoring/robot/author.mjs';
 import { bindBodyDefinition, admitBodyGLB } from '../../../apps/server/src/edge/body/admission.ts';
 import { validateUpload, BODY_UPLOAD_POLICY } from '../../../apps/server/src/moderation/validate.ts';
 import { coreAsset } from '../../../apps/server/src/edge/body/core-revisions.ts';
+import { PIP_PRESET } from '../../../apps/server/src/edge/body/pip.ts';
+import { MONSTER_PRESET, GHOST_PRESET, CENTAUR_PRESET } from '../../../apps/server/src/edge/body/shared-bodies.ts';
+import { HUMANOID2_DEF } from '../../../packages/world-compiler/src/core-kit/humanoid2.ts';
+import { sha256Hex, stableStringify } from '../../../packages/world-compiler/src/hash.ts';
 import { BODY_SOURCE_FILES } from '../../web/body-assets.ts';
 import { bakeCreature, encodeBaked } from '../../web/src/crowd/bake.ts';
 import { decodeBaked } from '../../web/src/crowd/bake.ts';
@@ -22,7 +26,33 @@ import { imported, measure, measured, validate, write, type Report, type Importe
 
 const REPO = resolve(import.meta.dirname, '../../..');
 const sha = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
-export type Entry = { preset: string; hash: string; size: string; height: number; hover: number; entry: string; entryHash: string };
+export type Entry = { preset: string; hash: string; size: string; height: number; hover: number; entry: string; entryHash: string; legacy: unknown[] };
+export function legacyBody(preset: string): unknown {
+  const shared = [PIP_PRESET, MONSTER_PRESET, GHOST_PRESET, CENTAUR_PRESET].find((p) => p.id === preset);
+  if (shared) return structuredClone(shared.body);
+  if (CREATURE_IDS.includes(preset as typeof CREATURE_IDS[number])) return creatureBody(preset as typeof CREATURE_IDS[number]);
+  const model = FLOATER_MODELS.find((m) => m.id === preset);
+  if (!model) throw Error('body.legacy-unavailable');
+  const modelUrl = `/world-assets/littlemartians/characters/${model.file.replace(/^kin\//, '')}`;
+  return { family: 'floater', type: 'ceramic', model: model.id, modelUrl, avatar: { kind: 'body', modelUrl, bodyType: 'ceramic' }, radius: .35, hoverHeight: 1.45, motion: structuredClone(LITTLE_MARTIANS_MOTION) };
+}
+function canonicalDefaultLook() {
+  const source = readFileSync(join(REPO, 'apps/web/src/humanoid/look.ts'), 'utf8');
+  const contracts = [
+    "export const LOOK_KEY_PREFIX = 'humanoid2-';",
+    "export const ACCESSORY_SLOTS = ['facialHair', 'scarf', 'gloves', 'mask', 'jewellery'] as const;",
+    "export const SHAPE_KEYS = ['shoulders', 'chest', 'hips', 'weight'] as const;",
+    "export const V2_KEYS = [...ACCESSORY_SLOTS, 'accessory', ...SHAPE_KEYS] as const;",
+    'for (const k of V2_KEYS) if (look[k] === HUMANOID_PARAMS[k].default) delete look[k];',
+    'return LOOK_KEY_PREFIX + sha256Hex(stableStringify(look)).slice(0, 16);',
+  ];
+  if (contracts.some((contract) => !source.includes(contract))) throw Error('body.legacy-default-source');
+  if (HUMANOID2_DEF.params?.preset.default !== 'none') throw Error('body.legacy-default-source');
+  const look = Object.fromEntries(Object.entries(HUMANOID2_DEF.params ?? {}).map(([key, field]) => [key, field.default]));
+  for (const key of ['facialHair', 'scarf', 'gloves', 'mask', 'jewellery', 'accessory', 'shoulders', 'chest', 'hips', 'weight']) delete look[key];
+  return { family: 'humanoid', model: 'humanoid2-' + sha256Hex(stableStringify(look)).slice(0, 16), params: {} };
+}
+export const legacyDefaults = [null, { family: 'humanoid' }, { family: 'humanoid', type: 'humanoid' }, canonicalDefaultLook()];
 const rigidActions = ['go', 'stand', 'turn', 'look', 'speak', 'rest', 'wake']; // Existing validator's RIGID_CORE.
 export function pinnedScan(preset: string, bytes: Buffer): Buffer {
   const source = JSON.parse(readFileSync(join(REPO, 'worlds/littlemartians/characters/manifest.json'), 'utf8')).models.find((m: { id: string }) => m.id === preset);
@@ -40,7 +70,7 @@ export async function importPresets(out: string, media = REPO) {
     const result = write(body, out), entry = result.file.replace(/\.diag$/, '.json');
     const file = join(out, entry), data = JSON.parse(readFileSync(file, 'utf8'));
     writeFileSync(file, JSON.stringify({ ...data, ...extra }) + '\n');
-    bodies.push({ preset, hash: sha(body.text), size: body.size, height: body.heightMm, hover: body.hoverMm, entry, entryHash: sha(readFileSync(file)) });
+    bodies.push({ preset, hash: sha(body.text), size: body.size, height: body.heightMm, hover: body.hoverMm, entry, entryHash: sha(readFileSync(file)), legacy: [legacyBody(preset)] });
   }
   try {
     for (const model of FLOATER_MODELS) {
@@ -80,7 +110,7 @@ export async function importPresets(out: string, media = REPO) {
       // Keep the encoded artifact's validation on the producer boundary too.
       decodeBaked(bytes);
     }
-    writeFileSync(join(out, 'bodies.json'), JSON.stringify({ format: 'souls/bodies/1', bodies }) + '\n');
+    writeFileSync(join(out, 'bodies.json'), JSON.stringify({ format: 'souls/bodies/1', bodies, legacyDefaults }) + '\n');
     stage = 'default-assets';
     const defaults = ['animated-casual.mesh.glb', 'animated-punk.mesh.glb', 'animated-woman.mesh.glb', 'clips-ual.glb', 'clips-ual-woman.glb'];
     const manifest = JSON.parse(readFileSync(join(REPO, 'tools/assets/manifest.json'), 'utf8'));

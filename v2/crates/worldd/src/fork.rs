@@ -20,16 +20,28 @@ fn catalogue_support(dir: &std::path::Path) -> Result<Option<Vec<u8>>, String> {
     let Value::Map(manifest) = decode(&bytes).map_err(|e| e.to_string())?.value else {
         return Err("template-bodies-invalid".into());
     };
-    let Some(value) = manifest.get(&7) else { return Ok(None); };
-    let Value::Bytes(hash) = value else { return Err("template-bodies-invalid".into()); };
+    let Some(value) = manifest.get(&7) else {
+        return Ok(None);
+    };
+    let Value::Bytes(hash) = value else {
+        return Err("template-bodies-invalid".into());
+    };
     let path = dir.join("bodies.json");
-    if hash.len() != 32 || !std::fs::symlink_metadata(&path).map_err(|_| "template-bodies-invalid")?.is_file() {
+    if hash.len() != 32
+        || !std::fs::symlink_metadata(&path)
+            .map_err(|_| "template-bodies-invalid")?
+            .is_file()
+    {
         return Err("template-bodies-invalid".into());
     }
     let bytes = std::fs::read(&path).map_err(|_| "template-bodies-invalid")?;
-    if replica::ids::sha256(&bytes).as_slice() != hash { return Err("template-bodies-mismatch".into()); }
-    skills::wear::Catalogue::read(std::str::from_utf8(&bytes).map_err(|_| "template-bodies-invalid")?)
-        .map_err(|_| "template-bodies-invalid")?;
+    if replica::ids::sha256(&bytes).as_slice() != hash {
+        return Err("template-bodies-mismatch".into());
+    }
+    skills::wear::Catalogue::read(
+        std::str::from_utf8(&bytes).map_err(|_| "template-bodies-invalid")?,
+    )
+    .map_err(|_| "template-bodies-invalid")?;
     Ok(Some(bytes))
 }
 
@@ -104,9 +116,16 @@ pub fn run(args: &[String]) -> i32 {
         eprintln!("worldd: fork: template-checkpoint-mismatch");
         return 1;
     }
-    let bodies = match template.as_ref().map(|dir| catalogue_support(dir)).transpose() {
+    let bodies = match template
+        .as_ref()
+        .map(|dir| catalogue_support(dir))
+        .transpose()
+    {
         Ok(bodies) => bodies.flatten(),
-        Err(error) => { eprintln!("worldd: fork: {error}"); return 1; }
+        Err(error) => {
+            eprintln!("worldd: fork: {error}");
+            return 1;
+        }
     };
     let result = match &pins {
         Some(pins) => fork_with_kinds(&from, &to, req, pins),
@@ -193,7 +212,8 @@ mod tests {
     use std::collections::BTreeMap;
     #[test]
     fn catalogue_support_rejects_tampering_and_legacy_does_not_copy_it() {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../.local")
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../.local")
             .join(format!("b15-fork-catalogue-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let bytes = br#"{"format":"souls/bodies/1","bodies":[]}"#;
@@ -205,10 +225,16 @@ mod tests {
         std::fs::write(dir.join("boot"), encode(&Value::Map(boot.clone())).unwrap()).unwrap();
         assert_eq!(catalogue_support(&dir).unwrap(), Some(bytes.to_vec()));
         std::fs::write(dir.join("bodies.json"), b"{}").unwrap();
-        assert_eq!(catalogue_support(&dir).unwrap_err(), "template-bodies-mismatch");
+        assert_eq!(
+            catalogue_support(&dir).unwrap_err(),
+            "template-bodies-mismatch"
+        );
         boot.insert(7, Value::Bytes(vec![0; 31]));
         std::fs::write(dir.join("boot"), encode(&Value::Map(boot)).unwrap()).unwrap();
-        assert_eq!(catalogue_support(&dir).unwrap_err(), "template-bodies-invalid");
+        assert_eq!(
+            catalogue_support(&dir).unwrap_err(),
+            "template-bodies-invalid"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

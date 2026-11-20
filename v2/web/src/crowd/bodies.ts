@@ -144,7 +144,7 @@ export class CrowdBodies {
     c.x[i] = x; c.y[i] = y; c.z[i] = z;
     c.blend[i] = Math.min(1, this.speed[i] / FULL_WALK);
     const model = c.models[c.model[i]];
-    c.rateB[i] = model.walkSpeed ? this.speed[i] / model.walkSpeed / model.clips[c.clipB[i]].seconds : Math.max(0.3, this.speed[i] / WALK_STRIDE);
+    c.rateB[i] = model.fixedWalk ? 1 / model.clips[c.clipB[i]].seconds : model.walkSpeed ? this.speed[i] / model.walkSpeed / model.clips[c.clipB[i]].seconds : Math.max(0.3, this.speed[i] / WALK_STRIDE);
   }
 
   private select(i: number, model: number): void {

@@ -8,7 +8,7 @@ import { CREATURE_IDS } from '../../../mars/viewer/engine/bodies/creatures.ts';
 import { bodyAssetFiles } from '../../web/body-assets.ts';
 import { decodeMesh } from '../../web/src/crowd/lod.ts';
 import { decodeBaked } from '../../web/src/crowd/bake.ts';
-import { pinnedScan } from './presets.ts';
+import { pinnedScan, legacyBody, legacyDefaults } from './presets.ts';
 const repo = resolve(import.meta.dirname, '../../..');
 
 test('all released presets have measured admitted classes, exact resources and independently hashed models', () => {
@@ -16,8 +16,10 @@ test('all released presets have measured admitted classes, exact resources and i
   const files = new Map(bodyAssetFiles(out).map((file) => [file.path, file.bytes]));
   const catalogue = JSON.parse(files.get('bodies.json')!.toString('utf8'));
   assert.deepEqual(catalogue.bodies.map((b: { preset: string }) => b.preset).sort(), [...FLOATER_MODELS.map((m) => m.id), 'pip', 'monster', 'ghost', 'centaur', ...CREATURE_IDS].sort());
+  assert.deepEqual(catalogue.legacyDefaults, legacyDefaults);
   const radii: Record<string, number> = { small: 200, standard: 280, large: 500, giant: 1300 };
   for (const body of catalogue.bodies) {
+    assert.deepEqual(body.legacy, [legacyBody(body.preset)], 'released BODY-v1 fields stay exact');
     const entry = JSON.parse(files.get(body.entry)!.toString('utf8')), kind = files.get(body.entry.replace(/\.json$/, '.diag'))!;
     assert.equal(createHash('sha256').update(kind).digest('hex'), body.hash);
     assert.ok(body.height > 0 && body.hover >= 0 && body.size in radii);

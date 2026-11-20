@@ -105,3 +105,186 @@ fn v13c_a1_the_import_records_every_soul_and_world_under_its_owner() {
         assert!(owned.iter().any(|(g, _)| *g == want), "{acct} owns {want}");
     }
 }
+
+#[test]
+fn b15_mapped_released_births() {
+    use serde_json::{Value, json};
+    let dir =
+        Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("b15-mapped-{}", std::process::id()));
+    assert!(!dir.exists(), "every attempt retains a fresh fixture");
+    std::fs::create_dir_all(dir.join("set/worlds")).unwrap();
+    backup(&dir.join("set"));
+    let prepared = std::env::var_os("B15_BODY_ASSETS").map(PathBuf::from);
+    assert!(
+        std::env::var_os("B15_REQUIRE_PREPARED").is_none() || prepared.is_some(),
+        "the prepared caller requires real input"
+    );
+    let catalogue = if let Some(prepared) = &prepared {
+        std::fs::read(prepared.join("bodies.json")).unwrap()
+    } else {
+        serde_json::to_vec(&json!({"format":"souls/bodies/1", "legacyDefaults":[null,{"family":"humanoid"},{"family":"humanoid","type":"humanoid"},{"family":"humanoid","model":"humanoid2-0000000000000000","params":{}}], "bodies":[
+          {"preset":"duck","hash":"11".repeat(32),"size":"small","height":900,"hover":0,"legacy":[{"family":"floater","type":"creature","model":"duck","radius":0.33,"hoverHeight":0.54}]},
+          {"preset":"test-scan","hash":"22".repeat(32),"size":"standard","height":1750,"hover":0,"legacy":[{"family":"floater","type":"ceramic","model":"test-scan","modelUrl":"/world-assets/littlemartians/characters/test-scan.glb","avatar":{"kind":"body","modelUrl":"/world-assets/littlemartians/characters/test-scan.glb","bodyType":"ceramic"},"radius":0.35,"hoverHeight":1.45}]}
+        ]})).unwrap()
+    };
+    let catalogue_path = dir.join("bodies.json");
+    std::fs::write(&catalogue_path, &catalogue).unwrap();
+    let data: Value = serde_json::from_slice(&catalogue).unwrap();
+    let entries = data["bodies"].as_array().unwrap();
+    if prepared.is_some() {
+        assert_eq!(entries.len(), 20);
+    }
+    let set_body = |body: Value| {
+        let db = Connection::open(dir.join("set/worlds/garden.db")).unwrap();
+        db.execute("DELETE FROM snapshots", []).unwrap();
+        db.execute(
+            "INSERT INTO snapshots VALUES ('garden',1,?1)",
+            [json!({"entities":{"s1":{"body":body}}}).to_string()],
+        )
+        .unwrap();
+    };
+    let mut choices = entries
+        .iter()
+        .flat_map(|e| {
+            e["legacy"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(move |body| (body.clone(), e["hash"].as_str().map(str::to_owned)))
+        })
+        .collect::<Vec<_>>();
+    choices.extend(
+        data["legacyDefaults"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|body| (body.clone(), None)),
+    );
+    for (i, (body, expected)) in choices.iter().enumerate() {
+        set_body(body.clone());
+        let out = dir.join(format!("choice-{i}"));
+        assert!(
+            import_accounts::import_with_bodies(&dir.join("set"), &[], &out, Some(&catalogue_path))
+                .unwrap()
+                .clean()
+        );
+        let births: Value =
+            serde_json::from_slice(&std::fs::read(out.join("births/garden.json")).unwrap())
+                .unwrap();
+        let db = Connection::open(out.join("accounts.sqlite")).unwrap();
+        let soul: String = db
+            .query_row(
+                "SELECT soul FROM imported_souls_v1 WHERE old_soul='s1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let birth = births["births"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["soul"] == soul)
+            .unwrap();
+        assert_eq!(
+            birth.get("body").and_then(Value::as_str),
+            expected.as_deref()
+        );
+        let look: String = db
+            .query_row("SELECT look FROM souls_v1 WHERE soul=?1", [soul], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            look,
+            replica::encode::to_hex(
+                ring::digest::digest(&ring::digest::SHA256, body.to_string().as_bytes()).as_ref()
+            )
+        );
+    }
+    let with_url = entries
+        .iter()
+        .find(|e| e["legacy"][0].get("modelUrl").is_some())
+        .unwrap();
+    let mut alias = with_url["legacy"][0].clone();
+    let url = alias.get_mut("modelUrl").unwrap();
+    *url = Value::String(format!("/w/garden{}", url.as_str().unwrap()));
+    if let Some(url) = alias.get_mut("avatar").and_then(|v| v.get_mut("modelUrl")) {
+        *url = Value::String(format!("/w/garden{}", url.as_str().unwrap()));
+    }
+    set_body(alias.clone());
+    assert!(
+        import_accounts::import_with_bodies(
+            &dir.join("set"),
+            &[],
+            &dir.join("alias"),
+            Some(&catalogue_path)
+        )
+        .unwrap()
+        .clean()
+    );
+    alias["modelUrl"] = Value::String(
+        alias["modelUrl"]
+            .as_str()
+            .unwrap()
+            .replace("/w/garden/", "/w/foreign/"),
+    );
+    for (i, body) in [
+        alias,
+        json!({"family":"humanoid","model":"unknown-custom"}),
+        json!({}),
+        json!({"family":"humanoid","model":"humanoid2-0000000000000000","params":{"height":2}}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        set_body(body);
+        let out = dir.join(format!("refused-{i}"));
+        assert!(
+            import_accounts::import_with_bodies(&dir.join("set"), &[], &out, Some(&catalogue_path))
+                .is_err()
+        );
+        assert!(!out.exists(), "refused mapping writes nothing");
+    }
+    set_body(entries[0]["legacy"][0].clone());
+    let out =
+        std::env::var_os("B15_IMPORT_OUTPUT").map_or_else(|| dir.join("stable"), PathBuf::from);
+    assert!(!out.exists(), "the caller supplies a fresh private output");
+    let a = import_accounts::import_with_bodies(&dir.join("set"), &[], &out, Some(&catalogue_path))
+        .unwrap();
+    let b = import_accounts::import_with_bodies(&dir.join("set"), &[], &out, Some(&catalogue_path))
+        .unwrap();
+    assert!(a.clean() && b.clean());
+    assert_eq!(a.hash, b.hash);
+    let mut contradictory = data.clone();
+    contradictory["bodies"][1]["legacy"] = contradictory["bodies"][0]["legacy"].clone();
+    std::fs::write(&catalogue_path, contradictory.to_string()).unwrap();
+    let out = dir.join("contradictory");
+    assert!(
+        import_accounts::import_with_bodies(&dir.join("set"), &[], &out, Some(&catalogue_path))
+            .unwrap_err()
+            .contains("contradictory")
+    );
+    assert!(!out.exists());
+}
+
+#[test]
+fn b15_missing_catalogue_cli_refuses_before_output() {
+    let out = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("b15-cli-refused-{}", std::process::id()));
+    assert!(!out.exists());
+    for tail in [vec!["--bodies"], vec!["--bodies", "--json"]] {
+        let result = std::process::Command::new(env!("CARGO_BIN_EXE_import-accounts"))
+            .args(["not-a-backup", "--out"])
+            .arg(&out)
+            .args(tail)
+            .output()
+            .unwrap();
+        assert_eq!(result.status.code(), Some(2));
+        assert!(
+            String::from_utf8(result.stderr)
+                .unwrap()
+                .starts_with("usage: import-accounts")
+        );
+        assert!(!out.exists());
+    }
+}
