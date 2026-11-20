@@ -1,12 +1,39 @@
 // The operator binds the old registry identity to one canonical v2 route. The canonical flag is the only switch.
-import { existsSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { isAbsolute } from 'node:path';
-import { readWorldRoutes } from '../../v2/tools/origin/world-routes.mjs';
-import { answer } from '../../v2/client/served/serve.mjs';
+import { isAbsolute, join } from 'node:path';
 import { worldIdOf } from './registry.mjs';
 
 const files = new Set(['/v1/config', '/eden.mjs', '/skill.md', '/creator.md', '/instructions.md', '/llms.txt', '/replica.js', '/replica_bg.wasm']);
+const types = { 'eden.mjs': 'text/javascript; charset=utf-8', 'replica.js': 'text/javascript; charset=utf-8', 'replica_bg.wasm': 'application/wasm',
+  'skill.md': 'text/markdown; charset=utf-8', 'creator.md': 'text/markdown; charset=utf-8', 'instructions.md': 'text/markdown; charset=utf-8' };
+// Installed artifacts and operator activation are data. The old runtime never imports or evaluates v2 code.
+function readBounded(file, maximum) {
+  const fd = openSync(file, 'r');
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > maximum) throw Error('cutover.data-invalid');
+    const bytes = Buffer.alloc(stat.size);
+    for (let at = 0; at < bytes.length;) {
+      const n = readSync(fd, bytes, at, bytes.length - at, at);
+      if (!n) throw Error('cutover.data-changed');
+      at += n;
+    }
+    if (readSync(fd, Buffer.alloc(1), 0, 1, bytes.length)) throw Error('cutover.data-changed');
+    return bytes;
+  } finally { closeSync(fd); }
+}
+function answer(dir, path) {
+  if (!files.has(path)) return null;
+  try {
+    if (path === '/v1/config') {
+      const soulClient = JSON.parse(readBounded(join(dir, 'soul-client.json'), 64 * 1024));
+      return { status: 200, type: 'application/json', body: Buffer.from(JSON.stringify({ soulClient })) };
+    }
+    const name = path === '/llms.txt' ? 'instructions.md' : path.slice(1);
+    return { status: 200, type: types[name], body: readBounded(join(dir, name), 32 * 1024 * 1024) };
+  } catch { return null; }
+}
 const unavailable = () => Object.assign(Error('cutover.activation-unavailable'), { code: 'cutover.activation-unavailable' });
 export const bindingId = ({ oldWorldId, canonicalSlug, routesFile, clientDir }) => createHash('sha256').update(JSON.stringify([oldWorldId, canonicalSlug, routesFile, clientDir])).digest('hex');
 
@@ -24,9 +51,12 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
   const { oldWorldId, canonicalSlug, routesFile, clientDir } = binding;
   const active = () => {
     try {
-      const route = readWorldRoutes(routesFile)[canonicalSlug];
-      if (!route) throw unavailable();
-      return route.canonical;
+      const value = JSON.parse(readBounded(routesFile, 32 * 1024 * 1024));
+      if (!value || value.schema !== 'souls/world-routes/1' || !value.worlds || typeof value.worlds !== 'object' || Array.isArray(value.worlds)
+          || !Object.hasOwn(value.worlds, canonicalSlug)) throw unavailable();
+      const route = value.worlds[canonicalSlug];
+      if (!route || typeof route !== 'object' || Array.isArray(route) || (route.canonical !== undefined && typeof route.canonical !== 'boolean')) throw unavailable();
+      return route.canonical === true;
     } catch { throw unavailable(); }
   };
   const bound = (w) => !!w && worldIdOf(w) === oldWorldId;

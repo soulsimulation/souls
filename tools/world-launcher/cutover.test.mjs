@@ -5,12 +5,16 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { openLauncher } from './launcher.mjs';
 import { bindingId, cutoverFence } from './cutover.mjs';
-import { updateWorldRoute } from '../../v2/tools/ops/proxy/route-config.mjs';
-import { servedBy } from '../../v2/client/src/upgrade/served.mjs';
 import { testPort } from '../../apps/server/test/test-port.ts';
 
 const scratch = new URL('../../.local/', import.meta.url);
 mkdirSync(scratch, { recursive: true });
+// This test owns only its isolated fixture bytes; production activation writers remain in their own runtime.
+const activate = (file) => {
+  const data = JSON.parse(readFileSync(file));
+  data.worlds.eden.canonical = true;
+  writeFileSync(file, JSON.stringify(data));
+};
 
 test('configured binding damage refuses startup; absent initial configuration is disabled', () => {
   assert.equal(cutoverFence({ file: '/etc/souls/cutover-binding.json' }), null);
@@ -43,7 +47,7 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
   const prepared = await (await fetch(base + '/__sim/op/cutover')).json();
   assert.equal(prepared.configured, true); assert.equal(prepared.active, false);
   assert.equal(Object.hasOwn(prepared, 'routesFile'), false);
-  await updateWorldRoute(routesFile, 'eden', { canonical: true });
+  activate(routesFile);
   const before = readFileSync(hits, 'utf8');
   for (const path of ['/w/eden/v1/edge/act', '/w/eden-2026/v1/god/edit', '/worlds/w/eden-2026/v1/edge/act', '/worlds/__sim/worlds/eden-2026/unlisted']) {
     const r = await post(path); assert.equal(r.status, 409, path);
@@ -57,12 +61,20 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
   assert.equal((await post('/w/other/v1/edge/act')).status, 200, 'unrelated world still acts');
   writeFileSync(routesFile, '{damaged');
   const damaged = await post('/w/eden/v1/edge/act'); assert.equal(damaged.status, 503); assert.equal((await damaged.json()).code, 'cutover.activation-unavailable');
+  for (const value of [null, { schema: 'wrong', worlds: {} }, { schema: 'souls/world-routes/1', worlds: [] },
+    { schema: 'souls/world-routes/1', worlds: {} }, { schema: 'souls/world-routes/1', worlds: { eden: [] } },
+    { schema: 'souls/world-routes/1', worlds: { eden: { canonical: 'true' } } }]) {
+    writeFileSync(routesFile, JSON.stringify(value));
+    const r = await post('/w/eden/v1/edge/act'); assert.equal(r.status, 503); assert.equal((await r.json()).code, 'cutover.activation-unavailable');
+  }
   assert.equal((await post('/w/other/v1/edge/act')).status, 200, 'unrelated world never loads damaged Eden activation');
   writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { gateway: 'http://127.0.0.1:7312', stream: '/s/eden/', canonical: false } } }));
   assert.equal((await post('/w/eden-2026/v1/edge/act')).status, 200, 'rollback restores actual old act path');
   const old = await fetch(base + '/w/eden-2026/v1/config');
   assert.equal(old.headers.get('x-souls-engine'), 'old');
-  await assert.rejects(servedBy(base + '/w/eden-2026'), { code: 'world.previous-engine', message: /upgrade --rollback/ });
+  assert.equal((await old.json()).worldId, 'eden-1', 'rollback returns the actual old world config with its engine header');
+  writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: {}, unrelated: 'not this reader\'s route' } }));
+  assert.equal((await post('/w/eden/v1/edge/act')).status, 200, 'omitted canonical defaults false; old guard does not route or validate unrelated placements');
 });
 
 test('a mutation waiting for actual child boot is fenced again after activation changes', async t => {
@@ -80,7 +92,7 @@ test('a mutation waiting for actual child boot is fenced again after activation 
   t.after(async () => { await launcher.close(); rmSync(dir, { recursive: true, force: true }); });
   const pending = fetch(`http://127.0.0.1:${P}/w/eden/v1/edge/act`, { method: 'POST', headers: { authorization: 'Bearer sim_s_soul1_secret' }, body: '{}' });
   await Promise.race([booting, pending.then(r => { throw Error(`request answered ${r.status} before child boot`); })]);
-  await updateWorldRoute(routesFile, 'eden', { canonical: true });
+  activate(routesFile);
   const r = await pending;
   assert.equal(r.status, 409); assert.equal((await r.json()).code, 'world.new-engine');
   assert.doesNotMatch(readFileSync(hits, 'utf8'), /\/v1\/edge\/act/, 'only startup health probes reached the old process');

@@ -79,7 +79,8 @@ decides only which of them the public name sends Eden's page to.
   O19's design. The actual old launcher resolves aliases and refuses Eden's mutations with `world.new-engine`
   and `node eden.mjs upgrade` guidance before forwarding, checking again after asynchronous waits. Explicit eyes
   gaze requests are mutations too; ordinary views and existing read-only sockets keep running. Active old client
-  config/file requests use the installed v2 served-answer helper without redirect. On rollback, the real old config
+  config/file requests consume the installed manifest and client files as bounded data without redirect or importing
+  v2 code into the old runtime. On rollback, the real old config
   carries `x-souls-engine: old`; the v2 upgrade command gives `world.previous-engine` and
   `node eden.mjs upgrade --rollback` guidance before considering the older manifest. R18 restores the kept client,
   local memory and old ownership records without copying world state.
