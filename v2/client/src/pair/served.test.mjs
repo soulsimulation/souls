@@ -81,8 +81,8 @@ test('A2: pairing to worldd serve writes the history it advertises, and history 
     '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
   const gateway = `ws://${m[1]}/v2/ws`;
 
-  // One origin: the world's folder under w/<name>/, the store under s/, and the directory's two pairing calls, which
-  // hand over the seeded Soul's token once asked (the owner's approval stands in).
+  // One origin: the world's public folder and the directory's two pairing calls. Raw Store paths are not served.
+  // Pairing hands over the seeded Soul's token once asked (the owner's approval stands in).
   const token = readFileSync(join(world, 'souls.tokens'), 'utf8').split('\n')[0];
   const file = (root, rest) => {
     const p = normalize(join(root, decodeURIComponent(rest)));
@@ -94,8 +94,7 @@ test('A2: pairing to worldd serve writes the history it advertises, and history 
     req.on('end', () => {
       if (req.url === '/v1/pair/request') return res.end(JSON.stringify({ code: 'BCDF-GHJK', link: 'x', interval: 0 }));
       if (req.url === '/v1/pair/poll') return res.end(JSON.stringify({ token, grant: token.split('.')[0] }));
-      const p = req.url.startsWith('/w/eden/') ? file(world, req.url.slice('/w/eden/'.length))
-        : req.url.startsWith('/s/') ? file(bucket, req.url.slice(3)) : null;
+      const p = req.url.startsWith('/w/eden/') ? file(world, req.url.slice('/w/eden/'.length)) : null;
       try {
         if (p && statSync(p).isFile()) return res.end(readFileSync(p));
       } catch { /* not there */ }
@@ -109,12 +108,12 @@ test('A2: pairing to worldd serve writes the history it advertises, and history 
   // Pairing writes the history address from the world's advert, with no hand edit.
   const home = join(dir, '.souls');
   const paired = await pair({ home, directory, world: 'eden', gateway, device: 'd', label: 'r16b', unit: 1, sleep: async () => {} });
-  const history = `${directory}/s/h/${name}/${lineage}/`;
+  const history = `${directory}/w/eden/history/`;
   assert.equal(paired.history, history);
   assert.equal(JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')).worlds.eden.history, history);
 
-  // The world advertises it: views/world.json names the archive's folder, relative to the world's.
-  assert.equal(JSON.parse(readFileSync(join(world, 'views/world.json'), 'utf8')).history, `../../s/h/${name}/${lineage}/`);
+  // The advert names only the mirrored public history, relative to the world's folder.
+  assert.equal(JSON.parse(readFileSync(join(world, 'views/world.json'), 'utf8')).history, 'history/');
 
   // Scripted acts: the Soul walks to the hall and to the building, as a harness sends them.
   daemon = runtimeOf(home, paired.soul);
