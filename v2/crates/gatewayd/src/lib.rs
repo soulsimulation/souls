@@ -378,11 +378,31 @@ impl Gateway {
         let held = hub.grants.entry(key.clone()).or_default();
         self.answered(held, &key, &frame);
         held.kept.push(at, frame.clone());
-        if let Some((_, tx)) = &held.session
-            && tx.try_send(frame).is_err()
-        {
-            held.session = None;
-            (self.log)("a socket's outbound queue was full; it was let go and may resume");
+        let trace = world_link::delivery_trace(&frame);
+        if let Some((_, tx)) = &held.session {
+            match tx.try_send(frame) {
+                Ok(()) => {
+                    if let Some(t) = &trace {
+                        t.at("gateway-channel", "queued");
+                    }
+                }
+                Err(e) => {
+                    if let Some(t) = &trace {
+                        t.at(
+                            "gateway-channel",
+                            if matches!(e, tokio::sync::mpsc::error::TrySendError::Full(_)) {
+                                "full"
+                            } else {
+                                "closed"
+                            },
+                        );
+                    }
+                    held.session = None;
+                    (self.log)("a socket's outbound queue was full; it was let go and may resume");
+                }
+            }
+        } else if let Some(t) = &trace {
+            t.at("gateway-channel", "no-session");
         }
     }
 }
