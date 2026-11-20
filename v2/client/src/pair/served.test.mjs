@@ -67,12 +67,25 @@ after(async () => {
 });
 
 test('A2: pairing to worldd serve writes the history it advertises, and history --at <place> answers after scripted acts', async () => {
-  const observed = { stage: 'setup', archiverStops: [], http: {}, answers: [], lastHistory: null };
+  const observed = { stage: 'setup', archiverStops: [], storeConditions: [], http: {}, answers: [], lastHistory: null };
   const named = (s) => typeof s === 'string' && /^(?:archive|history|bundle|store|view|header|precondition|immutable|io)(?:[-.][a-z0-9]+)*$/.test(s) && s.length <= 64 ? s : 'other';
   const child = (text) => {
     for (const m of text.matchAll(/worldd: the archiver (?:stopped, the world goes on: ([a-z][a-z0-9.-]*)|panicked, the world goes on)/g)) {
       const code = m[1] ? named(m[1]) : 'panicked';
       if (observed.archiverStops.length < 8 && !observed.archiverStops.includes(code)) observed.archiverStops.push(code);
+    }
+    // Existing Store refusal details remain private; retain only closed categories and condition relationships.
+    for (const m of text.matchAll(/worldd: the archiver stopped, the world goes on: precondition-failed: ([^\n]{1,4096}): asked (Absent|Is\("([a-f0-9]{64})"\)), the folder holds (None|Some\("([a-f0-9]{64})"\))/g)) {
+      const category = /(?:^|\/)archive\/day\/-?\d+$/.test(m[1]) ? 'archive-day'
+        : /(?:^|\/)archive\/obj\/[a-f0-9-]+$/.test(m[1]) ? 'archive-object'
+          : /(?:^|\/)archive\/head$/.test(m[1]) ? 'archive-head'
+            : /(?:^|\/)bundles\/-?\d+\/index$/.test(m[1]) ? 'bundle-index'
+              : /(?:^|\/)bundles\/-?\d+\/[a-f0-9-]+$/.test(m[1]) ? 'public-bundle'
+                : /(?:^|\/)history\/everyone\/events\/-?\d+(?:\/\d+)?$/.test(m[1]) ? 'event-index'
+                  : /(?:^|\/)history\/everyone\/counts\/(?:day|year)\/-?\d+$/.test(m[1]) ? 'counts' : 'other';
+      const item = { category, requested: m[2] === 'Absent' ? 'absent' : 'exact',
+        current: m[4] === 'None' ? 'missing' : 'present', relation: m[3] && m[5] ? (m[3] === m[5] ? 'equal' : 'different') : 'n/a' };
+      if (observed.storeConditions.length < 8 && !observed.storeConditions.some((old) => JSON.stringify(old) === JSON.stringify(item))) observed.storeConditions.push(item);
     }
   };
   const summary = (a) => ({ ok: a?.ok === true, code: named(a?.code), bytes: Buffer.byteLength(JSON.stringify(a ?? null)),
