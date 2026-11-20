@@ -31,6 +31,9 @@
 //!    audience, as a snapshot holds them (R3 rule 6), so the key must be the zone's root (`stream-start-node`); a node
 //!    in motion is refused as `stream-start-moving` (a fork has removed its bodies), and a link whose owning end is
 //!    not in the view is left out.
+//!    A checkpoint continuation uses [`Writer::resume`]: its exact recorded hand-offs are seeded canonically,
+//!    and its real-time observations are mapped through published and pending mapping records. The new-fork
+//!    moving-state guard remains unchanged. Transfer checkpoint state is explicitly refused until it has a seed.
 //! 9. **A subtree carried in goes with its arrive.** A view that did not hold an arrival's leave writes the subtree as
 //!    it was in flight, and where it lands, just before the arrive (T7 rule 4). The writer puts that record in the
 //!    part that holds the arrive (`replica::stream` rule 7), and its copy lands it as a reader does. A carried record
@@ -73,9 +76,9 @@ use replica::effects::{
 };
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::Id;
-use replica::pose::Pose;
+use replica::pose::{HandOff, Pose};
 use replica::stream::{self, HASH_EVERY, POINTER, Pointer, StreamPart};
-use replica::time::{Micros, TimeEffect};
+use replica::time::{Mapping, Micros, TimeEffect};
 use replica::views::{Carried, Key};
 use replica::world_model::{Audience, End};
 
@@ -83,6 +86,11 @@ use crate::views::{Delivery, Subscriber};
 use sim::text::Store;
 
 type R<T> = Result<T, Refusal>;
+
+enum Start {
+    Fork,
+    Resume(Option<Mapping>),
+}
 
 /// How long past a stretch's world time the writer waits for its last records before writing it (rule 11): records
 /// reach the writer once K4 has synced them, a little after the world time they carry.
@@ -141,6 +149,10 @@ pub struct Writer {
     /// K16's store, for the text file beside each part of a public view (rule 10).
     text: Option<Arc<Store>>,
     public: bool,
+    /// A resumed stream observes the supplied real clock through its recorded mappings.
+    mapped_clock: bool,
+    /// Observer-only provenance from a canonically validated durable head, when the checkpoint precedes it.
+    clock_seed: Option<Mapping>,
 }
 
 impl Writer {
@@ -174,6 +186,8 @@ impl Writer {
             written: Written::default(),
             text: None,
             public: key.audience == Audience::Everyone,
+            mapped_clock: false,
+            clock_seed: None,
         };
         w.pointer()?;
         Ok(w)
@@ -200,6 +214,57 @@ impl Writer {
         state: &State,
         text: Option<Arc<Store>>,
     ) -> R<Writer> {
+        Self::seed(root, header, key, anchor, state, text, Start::Fork)
+    }
+
+    /// A checkpoint continuation, including recorded motion. `anchor`'s first value is real time; the public
+    /// stream's anchor and subsequent idle observations are mapped into world time by the recorded timeline.
+    /// Unlike a new fork, this represents an existing body's exact canonical hand-off, not a new movement.
+    pub fn resume(
+        root: &Path,
+        header: &Header,
+        key: &Key,
+        anchor: (Micros, u64),
+        state: &State,
+    ) -> R<Writer> {
+        Self::seed(root, header, key, anchor, state, None, Start::Resume(None))
+    }
+
+    /// As [`Writer::resume`], when the authoritative checkpoint precedes its first mapping. The caller has
+    /// canonically applied the durable post-base part containing `mapping`; it seeds the observer only, never the
+    /// replica state. That part must still be replayed once at its original physical/effect position.
+    pub fn resume_with_mapping(
+        root: &Path,
+        header: &Header,
+        key: &Key,
+        anchor: (Micros, u64),
+        state: &State,
+        mapping: Mapping,
+    ) -> R<Writer> {
+        Self::seed(
+            root,
+            header,
+            key,
+            anchor,
+            state,
+            None,
+            Start::Resume(Some(mapping)),
+        )
+    }
+
+    fn seed(
+        root: &Path,
+        header: &Header,
+        key: &Key,
+        anchor: (Micros, u64),
+        state: &State,
+        text: Option<Arc<Store>>,
+        start: Start,
+    ) -> R<Writer> {
+        let (resume, clock_seed) = match start {
+            Start::Fork => (false, None),
+            Start::Resume(mapping) => (true, mapping),
+        };
         if key.node != state.root {
             return Err(fault(
                 "stream-start-node",
@@ -221,17 +286,21 @@ impl Writer {
             .filter_map(|(id, n)| depth(state, *id).map(|d| (d, *id, n)))
             .collect();
         viewed.sort_by_key(|(d, id, _)| (*d, *id));
-        if viewed.iter().any(|(_, _, n)| n.motion.is_some()) {
+        if !resume && viewed.iter().any(|(_, _, n)| n.motion.is_some()) {
             return Err(fault(
                 "stream-start-moving",
                 "a node of the view is in motion",
             ));
         }
+        if resume && (!state.in_flight.is_empty() || !state.arrived.is_empty()) {
+            return Err(fault(
+                "stream-start-transfer",
+                "a checkpoint with transfer state needs a canonical transfer seed",
+            ));
+        }
         let header = with_kinds(header, &top.kind, viewed.iter().map(|(_, _, n)| &n.kind))?;
-        let mut w = Writer::create(root, &header, key, anchor)?;
-        w.text = text;
 
-        let at = state
+        let mut at = state
             .time
             .iter()
             .rev()
@@ -242,6 +311,7 @@ impl Writer {
             .unwrap_or(0);
         let everyone = key.audience == Audience::Everyone;
         let mut changes = Vec::new();
+        let mut motions = Vec::new();
         if everyone {
             for (f, v) in &top.fields {
                 changes.push(Change::Set {
@@ -261,6 +331,32 @@ impl Writer {
             place.insert(1, Value::Array(frame));
             let pose = Pose::from_value(&Value::Map(place))
                 .map_err(|e| fault("stream-start-place", e.name()))?;
+            if let Some(Value::Map(m)) = &n.motion {
+                if m.len() != 4 || !(1..=4).all(|k| m.contains_key(&k)) {
+                    return Err(fault(
+                        "stream-start-motion",
+                        "a recorded motion has four fields",
+                    ));
+                }
+                let handoff = Value::Map(
+                    [
+                        (1, id.to_value()),
+                        (2, m[&1].clone()),
+                        (3, m[&4].clone()),
+                        (4, m[&4].clone()),
+                        (5, pose.to_value()),
+                        (6, m[&2].clone()),
+                        (7, m[&3].clone()),
+                    ]
+                    .into(),
+                );
+                let handoff = HandOff::from_value(&handoff)
+                    .map_err(|e| fault("stream-start-motion", e.name()))?;
+                at = at.max(handoff.at);
+                motions.push(Change::Motion(handoff));
+            } else if n.motion.is_some() {
+                return Err(fault("stream-start-motion", "a recorded motion is a map"));
+            }
             changes.push(Change::Create {
                 node: *id,
                 kind: n.kind.clone(),
@@ -269,6 +365,7 @@ impl Writer {
                 fields: n.fields.clone(),
             });
         }
+        changes.extend(motions);
         let made =
             |e: &Id| viewed.iter().any(|(_, id, _)| id == e) || (everyone && *e == state.root);
         for (id, l) in &state.links {
@@ -320,6 +417,16 @@ impl Writer {
                 format!("{k} entries of state below sequence {}", state.next),
             )
         })?;
+        // Validate every projected pose and motion, and the mapped anchor, before publishing any output.
+        let anchor = if resume {
+            (mapped_now(&state.time, clock_seed, anchor.0)?, anchor.1)
+        } else {
+            anchor
+        };
+        let mut w = Writer::create(root, &header, key, anchor)?;
+        w.text = text;
+        w.mapped_clock = resume;
+        w.clock_seed = clock_seed;
         if seed.is_empty() {
             // The root alone: the first part declares the sequences before the fork (rule 7).
             return Ok(w);
@@ -485,6 +592,53 @@ impl Writer {
         }
     }
 
+    /// Includes mappings already accepted by the tier but not yet cut into a published part. A slowdown in the
+    /// pending stretch must govern that stretch's settlement; the old published mapping cannot advance quiet time.
+    fn observed_now(&self, real: Micros) -> R<Micros> {
+        let mut mapping = mapping_at(self.copy.tree().time(), real)
+            .or_else(|| self.clock_seed.filter(|m| m.real_us <= real));
+        for value in &self.pending {
+            if let Value::Map(record) = value
+                && let Some(Value::Array(effects)) = record.get(&10)
+            {
+                for value in effects {
+                    let effect = TimeEffect::from_value(value)
+                        .map_err(|e| fault("stream-clock", e.name()))?;
+                    if effect.to_value() != *value {
+                        return Err(fault("stream-clock", "a noncanonical time effect"));
+                    }
+                    if let TimeEffect::Mapping(m) = effect
+                        && m.real_us <= real
+                    {
+                        mapping = Some(m);
+                    }
+                }
+            }
+        }
+        mapping
+            .ok_or_else(|| fault("stream-clock", "no mapping at the observed real time"))?
+            .world_at(real)
+            .map_err(|e| fault("stream-clock", e.name()))
+    }
+
+    fn idle_observed(&mut self, now: Micros) -> R<()> {
+        if !self.mapped_clock {
+            return self.idle(now);
+        }
+        if self.lead.is_some() {
+            return Ok(());
+        }
+        let settled = self.observed_now(now)?.saturating_sub(SETTLE_US);
+        if let Some(window) = self.window {
+            if (window + 1) * stream::PERIOD_US > settled {
+                return Ok(());
+            }
+            self.cut()?;
+        }
+        // cut() validates and applies the pending mapping; observe again before any quiet publication.
+        self.idle(self.observed_now(now)?)
+    }
+
     fn pointer(&self) -> R<()> {
         let p = Pointer {
             newest: self.written.parts.checked_sub(1),
@@ -588,6 +742,22 @@ impl Writer {
     }
 }
 
+fn mapping_at(time: &[TimeEffect], real: Micros) -> Option<Mapping> {
+    time.iter().rev().find_map(|t| match t {
+        TimeEffect::Mapping(m) if m.real_us <= real => Some(*m),
+        _ => None,
+    })
+}
+
+fn mapped_now(time: &[TimeEffect], seed: Option<Mapping>, real: Micros) -> R<Micros> {
+    let mapping = mapping_at(time, real)
+        .or_else(|| seed.filter(|m| m.real_us <= real))
+        .ok_or_else(|| fault("stream-clock", "no mapping at the observed real time"))?;
+    mapping
+        .world_at(real)
+        .map_err(|e| fault("stream-clock", e.name()))
+}
+
 /// How far `id` is below the root, or none when it is not in the state's tree.
 fn depth(state: &State, id: Id) -> Option<usize> {
     let mut at = id;
@@ -651,7 +821,7 @@ pub fn follow(
                 None if stop.load(Ordering::Relaxed) => break,
                 None => {}
             }
-            writer.idle(now())?;
+            writer.idle_observed(now())?;
         }
         writer.flush()?;
         Ok(writer)

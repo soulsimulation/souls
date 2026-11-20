@@ -98,12 +98,13 @@ use replica::activity::{ActivityKind, Role};
 use replica::apply::Replica;
 use replica::bodies::{Class, Family, Resource, Want};
 use replica::edit::World as Editing;
-use replica::effects::{Effect, Refusal, fixture_bytes};
+use replica::effects::{Effect, Header, Refusal, fixture_bytes};
 use replica::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use replica::ids::{Id, Scope, sha256};
 use replica::pose::{Frame, Vec3};
 use replica::rules::json::{self, Value as Json};
 use replica::stream;
+use replica::time::{Mapping, TimeEffect};
 use replica::views::{Key, Level, Redactions};
 use replica::world_model::{Audience, Kind, parse_kinds, plain};
 use sim::links::Doors;
@@ -1052,7 +1053,8 @@ fn serve(args: &[String]) -> R<()> {
     let store = log.close();
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
-    let (initial, base_record) = if let Some(header) = stored_header {
+    let restored_stream = stored_header.is_some();
+    let (initial, base_record, stream_mapping) = if let Some(header) = stored_header {
         let restored = sim::checkpoint::restore(&dir.join("checkpoints"))
             .map_err(refusal)?
             .ok_or("served-fork-checkpoint-missing")?;
@@ -1068,10 +1070,26 @@ fn serve(args: &[String]) -> R<()> {
             restored.root.version.sequence,
         );
         let mut live = initial.frozen();
-        for bytes in found.after(record) {
+        let needs_mapping = !initial
+            .tree()
+            .time()
+            .iter()
+            .any(|t| matches!(t, TimeEffect::Mapping(_)));
+        let mut observer = None;
+        let observed_real = answers::now();
+        for (offset, bytes) in found.after(record).iter().enumerate() {
             if !recorder::is_input(bytes) {
-                live.apply(&replica::effects::Part::read(bytes).map_err(refusal)?)
-                    .map_err(refusal)?;
+                let part = replica::effects::Part::read(bytes).map_err(refusal)?;
+                live.apply(&part).map_err(refusal)?;
+                // Only a fully validated durable part may provide an observer before the checkpoint's first clock.
+                if needs_mapping && observer.is_none() {
+                    observer = first_stream_mapping(
+                        &part,
+                        &header,
+                        record.max(found.first) + offset as u64,
+                        observed_real,
+                    );
+                }
             }
         }
         built.header = header.clone();
@@ -1082,9 +1100,13 @@ fn serve(args: &[String]) -> R<()> {
             .town
             .copy()
             .map_err(|e| format!("the fork's planner: {e}"))?;
-        (initial, record)
+        (initial, record, observer)
     } else {
-        (Replica::start(built.header.stored()).map_err(refusal)?, 0)
+        (
+            Replica::start(built.header.stored()).map_err(refusal)?,
+            0,
+            None,
+        )
     };
     let (places, things, all, left, moved) = places(&mut built.town, &kinds);
     println!(
@@ -1237,7 +1259,7 @@ fn serve(args: &[String]) -> R<()> {
         crate::watchdog::Real::start(),
         crate::watchdog::LIMIT_MS,
     );
-    // The stream: a tier of its own from the empty world, every record from 0, then each the loop syncs.
+    // The stream's tier and writer start at the same checkpoint, then receive only records after its base.
     let views = dir.join("views");
     let _ = std::fs::remove_dir_all(&views);
     let key = Key {
@@ -1245,10 +1267,11 @@ fn serve(args: &[String]) -> R<()> {
         level: Level::Full,
         audience: Audience::Everyone,
     };
+    let stream_start = initial.tree().to_state();
     let tier = Arc::new(
         Tier::start(
             built.header.clone(),
-            initial.tree().to_state(),
+            stream_start.clone(),
             Redactions::new([]),
             world.durable,
         )
@@ -1256,8 +1279,21 @@ fn serve(args: &[String]) -> R<()> {
     );
     let sub = tier.subscribe(vec![key], BOUND);
     let now = answers::now();
-    let writer =
-        Writer::create(&views, &built.header, &key, (now, (now / 1000) as u64)).map_err(refusal)?;
+    if let Some(seed) = stream_mapping {
+        println!(
+            "stream: initial mapping from durable record {} effect {}",
+            seed.record, seed.sequence
+        );
+    }
+    let writer = stream_writer(
+        &views,
+        &built.header,
+        &key,
+        &stream_start,
+        restored_stream,
+        now,
+        stream_mapping,
+    )?;
     // The history the world advertises (R16b): the archive's when it runs, as the origin serves the store.
     let history = match off.as_ref().and_then(|o| o.archive.as_ref()) {
         Some(_) => format!("../../s/h/{name}/{}/", to_hex(&built.header.lineage.0)),
@@ -1269,11 +1305,8 @@ fn serve(args: &[String]) -> R<()> {
     );
     view_out::write_whole(&views.join("world.json"), pointer.as_bytes()).map_err(refusal)?;
     let writing = view_out::follow(writer, sub, Arc::new(AtomicBool::new(false)), answers::now);
-    for (k, bytes) in found.records.into_iter().enumerate() {
-        if found.first + k as u64 >= base_record && !recorder::is_input(&bytes) {
-            tier.offer(found.first + k as u64, bytes);
-        }
-    }
+    replay_stream(&tier, &found, base_record);
+    drop(found);
     let fed = Arc::clone(&tier);
     std::thread::Builder::new()
         .name("synced".into())
@@ -1307,9 +1340,469 @@ fn serve(args: &[String]) -> R<()> {
     Ok(())
 }
 
+fn stream_writer(
+    views: &Path,
+    header: &Header,
+    key: &Key,
+    initial: &replica::effects::State,
+    restored: bool,
+    real: i64,
+    mapping: Option<StreamMapping>,
+) -> Result<Writer, String> {
+    let anchor = (real, (real / 1000) as u64);
+    if restored {
+        match mapping {
+            Some(seed) => {
+                Writer::resume_with_mapping(views, header, key, anchor, initial, seed.mapping)
+            }
+            None => Writer::resume(views, header, key, anchor, initial),
+        }
+        .map_err(refusal)
+    } else {
+        Writer::create(views, header, key, anchor).map_err(refusal)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct StreamMapping {
+    mapping: Mapping,
+    record: u64,
+    sequence: u64,
+}
+
+/// Called only after the existing live-copy replay has validated this whole canonical part.
+fn first_stream_mapping(
+    part: &replica::effects::Part,
+    header: &Header,
+    record: u64,
+    real: i64,
+) -> Option<StreamMapping> {
+    for effect in &part.effects {
+        if effect.envelope.node == header.zone
+            && effect.envelope.audience == Audience::Everyone
+            && let replica::effects::Body::Time(time) = &effect.body
+        {
+            for t in time {
+                if let TimeEffect::Mapping(mapping) = t
+                    && mapping.real_us <= real
+                {
+                    return Some(StreamMapping {
+                        mapping: *mapping,
+                        record,
+                        sequence: effect.envelope.sequence,
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
+    for (k, bytes) in found.records.iter().enumerate() {
+        let record = found.first + k as u64;
+        if record >= base_record && !recorder::is_input(bytes) {
+            tier.offer(record, bytes.clone());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The actual served bootstrap and physical replay boundary, from a filtered fork's checkpoint after a join.
+    #[test]
+    fn w3d_served_fork_checkpoint_and_restart_feed_a_fresh_stream_reader() {
+        use replica::effects::{
+            Actor, Body, Cause, Change, ChangeRec, Envelope, FIXTURE_HEADER, Part, Rest, TimerRec,
+        };
+        use replica::ids::{Hash, Purpose, Version};
+        use replica::pose::{Pose, Quat, Support};
+        use replica::stream::Player;
+        use replica::tree::Tree;
+        use sim::checkpoint::fork::{Request, fork_with_kinds};
+        use sim::checkpoint::{Blobs, Checkpoints, restore};
+        use std::sync::atomic::Ordering;
+
+        let header = Header::read(&fixture_bytes(FIXTURE_HEADER).unwrap()).unwrap();
+        let root_kind = header
+            .kinds
+            .iter()
+            .find(|k| k.as_str().starts_with("souls:place@"))
+            .unwrap()
+            .clone();
+        let body_kind = header
+            .kinds
+            .iter()
+            .find(|k| k.as_str().starts_with("souls:body@"))
+            .unwrap()
+            .clone();
+        let mut parent = Tree::start(header.zone, root_kind);
+        let id = |counter| Id::new(Scope([0x77; 16]), counter).unwrap();
+        let pose = Pose {
+            frame: Frame {
+                node: header.zone,
+                slot: None,
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: Support::Surface {
+                surface: header.zone,
+                height: 0,
+            },
+        };
+        let effect = |sequence, at, node, body| {
+            Effect {
+                envelope: Envelope {
+                    sequence,
+                    at,
+                    cause: Cause::World,
+                    actor: Actor::World,
+                    audience: Audience::Everyone,
+                    node,
+                },
+                body,
+                events: None,
+                rest: Rest::new(),
+            }
+            .to_value()
+        };
+        let changes = |items: Vec<Change>| {
+            Body::Changes(
+                items
+                    .into_iter()
+                    .map(|change| ChangeRec {
+                        change,
+                        rest: Rest::new(),
+                    })
+                    .collect(),
+            )
+        };
+        let part = |h: &Header, records: Vec<Value>| {
+            Part::read(
+                &encode(&Value::Map(
+                    [
+                        (1, Value::Bytes(h.hash().to_bytes())),
+                        (2, Value::Array(records)),
+                    ]
+                    .into(),
+                ))
+                .unwrap(),
+            )
+            .unwrap()
+        };
+        // Enough real state changes for the normal fork seed's existing sequence allocation.
+        let originals: Vec<Value> = (0..6)
+            .map(|s| {
+                effect(
+                    s,
+                    0,
+                    header.zone,
+                    changes(vec![Change::Set {
+                        node: header.zone,
+                        field: 20,
+                        to: Value::Uint(s),
+                        by: None,
+                    }]),
+                )
+            })
+            .collect();
+        let imported = part(&header, originals);
+        parent.apply(&header, &imported).unwrap();
+        let d = std::env::temp_dir().join(format!("w3d-served-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let mut checkpoints =
+            Checkpoints::open(&d.join("parent"), 1 << 20, Blobs::default()).unwrap();
+        let version = Version {
+            lineage: header.lineage,
+            zone: header.zone,
+            epoch: header.epoch,
+            sequence: parent.next(),
+        };
+        checkpoints
+            .take(&mut parent, version, 1, b"parent seed")
+            .unwrap();
+        checkpoints.wait().unwrap();
+        let real = 1_000_000_000_000;
+        let mut forked = fork_with_kinds(
+            &d.join("parent"),
+            &d.join("fork"),
+            Request {
+                through: id(99),
+                scope: Scope([0xf3; 16]),
+                seed: vec![0xf3; 32],
+                real_us: real,
+                build: Hash::of(Purpose::Fixture, b"w3d served").to_bytes(),
+                every: 1 << 20,
+            },
+            std::slice::from_ref(&body_kind),
+        )
+        .unwrap();
+        // K6 seals its first checkpoint before recording the fork's initial mapping in physical record 0.
+        // The observer can use that validated durable mapping, but the reader must receive it through replay.
+        let first = restore(&d.join("fork/ckpt")).unwrap().unwrap();
+        assert_eq!(first.root.record, 0);
+        assert!(first.tree.time().is_empty());
+        let first_sequence = first.tree.next();
+        let first_state = first.tree.to_state();
+        let mut validated = Replica::restored(forked.header.clone(), first.tree, first_sequence);
+        let head = Part::read(&forked.head).unwrap();
+        validated.apply(&head).unwrap();
+        let observer = first_stream_mapping(&head, &forked.header, 0, real + 1_000_000).unwrap();
+        assert_eq!((observer.record, observer.sequence), (0, first_sequence));
+        assert_eq!(observer.mapping.world_us, 0);
+        assert_eq!(observer.mapping.real_us, real);
+        let first_found = sim::log::recover(&std::fs::read(d.join("fork/log")).unwrap()).unwrap();
+        assert_eq!(first_found.records, vec![forked.head.clone()]);
+        let key = Key {
+            node: forked.header.zone,
+            level: Level::Full,
+            audience: Audience::Everyone,
+        };
+        let first_tier = Tier::start(
+            forked.header.clone(),
+            first_state.clone(),
+            Redactions::default(),
+            forked.log.durable_mark(),
+        )
+        .unwrap();
+        let first_sub = first_tier.subscribe(vec![key], BOUND);
+        let first_views = d.join("first-views");
+        let first_writer = stream_writer(
+            &first_views,
+            &forked.header,
+            &key,
+            &first_state,
+            true,
+            real + 1_000_000,
+            Some(observer),
+        )
+        .unwrap();
+        let first_stop = Arc::new(AtomicBool::new(false));
+        let first_following =
+            view_out::follow(first_writer, first_sub, first_stop.clone(), move || {
+                real + 1_000_000
+            });
+        replay_stream(&first_tier, &first_found, 0);
+        let first_stats = first_tier.close();
+        assert!(first_stats.fault.is_none(), "{:?}", first_stats.fault);
+        first_stop.store(true, Ordering::Relaxed);
+        let first_writer = first_following.join().unwrap().unwrap();
+        assert_eq!(
+            first_writer.written().parts,
+            2,
+            "checkpoint then the original mapping exactly once"
+        );
+        let first_pointer = stream::Pointer::read(
+            &std::fs::read(first_writer.dir().join(stream::POINTER)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(first_pointer.anchor_world, 1_000_000);
+        let first_header = first_views.join(format!(
+            "{}/{}-{}/{}/headers/{}",
+            to_hex(&forked.header.lineage.0),
+            to_hex(&forked.header.zone.scope().0),
+            forked.header.zone.counter(),
+            forked.header.epoch,
+            to_hex(&first_pointer.header)
+        ));
+        let mut first_player = Player::start(&std::fs::read(first_header).unwrap()).unwrap();
+        for number in 0..first_writer.written().parts {
+            let played = first_player
+                .play(&std::fs::read(first_writer.dir().join(number.to_string())).unwrap())
+                .unwrap();
+            if let Some(hash) = played.hash {
+                assert!(hash);
+            }
+        }
+        assert_eq!(
+            first_player.replica().tree().to_state(),
+            forked.tree.to_state()
+        );
+        assert_eq!(
+            first_player.replica().tree().time(),
+            &[TimeEffect::Mapping(observer.mapping)]
+        );
+        let body = id(1);
+        let soul = id(2);
+        let timer = Id::new(Scope([0xe6; 16]), 0).unwrap();
+        let sequence = forked.tree.next();
+        let joined = part(
+            &forked.header,
+            vec![
+                effect(
+                    sequence,
+                    2_000_000,
+                    header.zone,
+                    changes(vec![
+                        Change::Create {
+                            node: body,
+                            kind: body_kind,
+                            pose,
+                            audience: Audience::Everyone,
+                            fields: Default::default(),
+                        },
+                        Change::Link {
+                            link: id(3),
+                            ty: Name::new("souls:body-of").unwrap(),
+                            ends: [body, soul],
+                            owner: replica::world_model::End::First,
+                            audience: Audience::Everyone,
+                        },
+                    ]),
+                ),
+                effect(
+                    sequence + 1,
+                    2_000_000,
+                    header.zone,
+                    Body::Timers(vec![TimerRec::Set {
+                        timer,
+                        due: 6_000_000,
+                        name: Name::new("souls:light").unwrap(),
+                    }]),
+                ),
+            ],
+        );
+        forked.tree.apply(&forked.header, &joined).unwrap();
+        let record = forked.log.append(joined.stored().to_vec()).unwrap();
+        forked.log.wait_durable(record + 1).unwrap();
+        let base = record + 1;
+        let version = Version {
+            lineage: forked.header.lineage,
+            zone: forked.header.zone,
+            epoch: forked.header.epoch,
+            sequence: forked.tree.next(),
+        };
+        forked
+            .checkpoints
+            .take(&mut forked.tree, version, base, b"joined checkpoint")
+            .unwrap();
+        forked.checkpoints.wait().unwrap();
+        let checkpoint = restore(&d.join("fork/ckpt")).unwrap().unwrap();
+        assert_eq!(checkpoint.root.record, base);
+        assert!(checkpoint.tree.timers().contains_key(&timer));
+        let next = checkpoint.tree.next();
+        let after = part(
+            &forked.header,
+            vec![effect(
+                next,
+                6_000_000,
+                header.zone,
+                Body::Timers(vec![
+                    TimerRec::Clear { timer },
+                    TimerRec::Set {
+                        timer: id(4),
+                        due: 9_000_000,
+                        name: Name::new("souls:light").unwrap(),
+                    },
+                ]),
+            )],
+        );
+        forked.tree.apply(&forked.header, &after).unwrap();
+        forked.log.append(after.stored().to_vec()).unwrap();
+        let storage = forked.log.close();
+        let (log, found) = Log::open(storage, EPOCH).unwrap();
+        assert_eq!(
+            found.after(base).len(),
+            1,
+            "only one post-checkpoint durable record"
+        );
+        let initial = checkpoint.tree.to_state();
+        let tier = Tier::start(
+            forked.header.clone(),
+            initial.clone(),
+            Redactions::default(),
+            log.durable_mark(),
+        )
+        .unwrap();
+        let sub = tier.subscribe(vec![key], BOUND);
+        let views = d.join("views");
+        let writer = stream_writer(
+            &views,
+            &forked.header,
+            &key,
+            &initial,
+            true,
+            real + 7_000_000,
+            None,
+        )
+        .unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let following = view_out::follow(writer, sub, stop.clone(), move || real + 7_000_000);
+        replay_stream(&tier, &found, base);
+        let stats = tier.close();
+        assert!(stats.fault.is_none(), "{:?}", stats.fault);
+        stop.store(true, Ordering::Relaxed);
+        let writer = following.join().unwrap().unwrap();
+        assert_eq!(
+            writer.written().parts,
+            2,
+            "checkpoint seed then exactly one post-base record"
+        );
+        let pointer =
+            stream::Pointer::read(&std::fs::read(writer.dir().join(stream::POINTER)).unwrap())
+                .unwrap();
+        assert_eq!(pointer.newest, Some(1));
+        assert_eq!(pointer.anchor_world, 7_000_000);
+        // The writer may add missing checkpoint kind pins using its existing seed contract; the pointer names it.
+        let header_path = views.join(format!(
+            "{}/{}-{}/{}/headers/{}",
+            to_hex(&forked.header.lineage.0),
+            to_hex(&forked.header.zone.scope().0),
+            forked.header.zone.counter(),
+            forked.header.epoch,
+            to_hex(&pointer.header)
+        ));
+        let mut player = Player::start(&std::fs::read(header_path).unwrap()).unwrap();
+        for number in 0..writer.written().parts {
+            let played = player
+                .play(&std::fs::read(writer.dir().join(number.to_string())).unwrap())
+                .unwrap();
+            if let Some(hash) = played.hash {
+                assert!(hash);
+            }
+        }
+        assert_eq!(player.replica().tree().to_state(), forked.tree.to_state());
+        assert!(player.replica().tree().to_state().nodes.contains_key(&body));
+        assert!(!player.replica().tree().timers().contains_key(&timer));
+        // Ordinary non-checkpoint creation still starts empty and consumes its complete import once.
+        let empty = Replica::start(header.stored()).unwrap();
+        let mut seeded = stream_writer(
+            &d.join("seeded"),
+            &header,
+            &Key {
+                node: header.zone,
+                ..key
+            },
+            &empty.tree().to_state(),
+            false,
+            real,
+            None,
+        )
+        .unwrap();
+        assert_eq!(seeded.written().parts, 0);
+        seeded
+            .frame(
+                &encode(&Value::Map(
+                    [(
+                        8,
+                        Value::Array(imported.effects.iter().map(Effect::to_value).collect()),
+                    )]
+                    .into(),
+                ))
+                .unwrap(),
+            )
+            .unwrap();
+        seeded.flush().unwrap();
+        let mut ordinary = Player::start(header.stored()).unwrap();
+        ordinary
+            .play(&std::fs::read(seeded.dir().join("0")).unwrap())
+            .unwrap();
+        assert_eq!(ordinary.replica().tree().to_state(), parent.to_state());
+        drop(log.close());
+        std::fs::remove_dir_all(d).unwrap();
+    }
 
     #[test]
     fn creator_export_preserves_pins_and_names_the_boot_body_admission() {

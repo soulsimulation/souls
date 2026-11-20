@@ -665,6 +665,276 @@ fn a_fork_streams_from_its_head_and_a_fresh_reader_holds_the_live_state() {
     let _ = fs::remove_dir_all(&d);
 }
 
+/// W3d: a checkpoint is an existing world, not a new motionless fork. Its canonical public seed must carry the
+/// recorded hand-off, exact slot, pending timer and mappings, while a pending slowdown governs quiet publication.
+#[test]
+fn w3d_checkpoint_motion_timers_privacy_and_pending_mapping_play_canonically() {
+    use replica::effects::TimerRec;
+    use replica::ids::Version;
+    use replica::pose::{HandOff, Owner};
+    use replica::time::Mapping;
+    use replica::tree::Tree;
+    use sim::checkpoint::{Blobs, Checkpoints, restore};
+
+    let h = header();
+    let root_kind = h
+        .kinds
+        .iter()
+        .find(|k| k.as_str().starts_with("souls:place@"))
+        .unwrap()
+        .clone();
+    let mut tree = Tree::start(h.zone, root_kind);
+    let n = ids();
+    let private = Audience::Of(n[0]);
+    let real = 1_000_000_000_000;
+    let timer = Id::new(Scope([0xe6; 16]), 0).unwrap();
+    let private_timer = Id::new(Scope([0xe7; 16]), 0).unwrap();
+    let public_link = Id::new(Scope([0xe8; 16]), 0).unwrap();
+    let private_link = Id::new(Scope([0xe8; 16]), 1).unwrap();
+    let seated = Id::new(Scope([0x71; 16]), 3).unwrap();
+    let mut child = create(&h, n[1]);
+    let Change::Create { pose, .. } = &mut child else {
+        unreachable!()
+    };
+    pose.frame = Frame {
+        node: n[0],
+        slot: None,
+    };
+    pose.support = Support::Surface {
+        surface: n[0],
+        height: 0,
+    };
+    let recorded = HandOff {
+        node: n[1],
+        at: 3_000_000,
+        from: Owner::Mover,
+        to: Owner::Mover,
+        pose: *pose,
+        linear: Vec3::new(123, 0, 456),
+        angular: Vec3::new(0, 789, 0),
+    };
+    let mut slotted = create(&h, seated);
+    let Change::Create { pose, .. } = &mut slotted else {
+        unreachable!()
+    };
+    pose.frame = Frame {
+        node: n[0],
+        slot: Some(7),
+    };
+    pose.support = Support::Slot;
+    let mut hidden = create(&h, n[2]);
+    let Change::Create {
+        audience, fields, ..
+    } = &mut hidden
+    else {
+        unreachable!()
+    };
+    *audience = private;
+    fields.insert(
+        77,
+        Value::Text(Name::new("private:never-published").unwrap()),
+    );
+    let body = |sequence, at, node, audience, body| {
+        Effect {
+            envelope: Envelope {
+                sequence,
+                at,
+                cause: Cause::World,
+                actor: Actor::World,
+                audience,
+                node,
+            },
+            body,
+            events: None,
+            rest: Rest::new(),
+        }
+        .to_value()
+    };
+    let mut hidden_entry = entry(3, 0, h.zone, hidden);
+    let Value::Map(m) = &mut hidden_entry else {
+        unreachable!()
+    };
+    m.insert(
+        5,
+        Value::Map([(1, Value::Uint(2)), (2, n[0].to_value())].into()),
+    );
+    let mapping = TimeEffect::Mapping(Mapping::new(0, real, 1, 1).unwrap());
+    let initial = vec![
+        entry(0, 0, h.zone, create(&h, n[0])),
+        entry(1, 0, n[0], child),
+        entry(2, 0, n[0], slotted),
+        hidden_entry,
+        entry(4, 3_000_000, n[1], Change::Motion(recorded)),
+        body(
+            5,
+            3_000_000,
+            h.zone,
+            Audience::Everyone,
+            Body::Time(vec![mapping]),
+        ),
+        body(
+            6,
+            3_000_000,
+            n[1],
+            Audience::Everyone,
+            Body::Timers(vec![TimerRec::Set {
+                timer,
+                due: 10_000_000,
+                name: Name::new("souls:light").unwrap(),
+            }]),
+        ),
+        body(
+            7,
+            3_000_000,
+            n[2],
+            private,
+            Body::Timers(vec![TimerRec::Set {
+                timer: private_timer,
+                due: 10_000_000,
+                name: Name::new("private:never-published").unwrap(),
+            }]),
+        ),
+        entry(
+            8,
+            3_000_000,
+            n[0],
+            Change::Link {
+                link: public_link,
+                ty: Name::new("souls:near").unwrap(),
+                ends: [n[0], n[1]],
+                owner: End::First,
+                audience: Audience::Everyone,
+            },
+        ),
+        body(
+            9,
+            3_000_000,
+            n[2],
+            private,
+            Body::Changes(vec![ChangeRec {
+                change: Change::Link {
+                    link: private_link,
+                    ty: Name::new("private:never-published").unwrap(),
+                    ends: [n[2], n[1]],
+                    owner: End::First,
+                    audience: private,
+                },
+                rest: Rest::new(),
+            }]),
+        ),
+    ];
+    tree.apply(&h, &part_of(&h, initial)).unwrap();
+    let d = scratch("w3d-resume");
+    let mut checkpoints =
+        Checkpoints::open(&d.join("checkpoints"), 1 << 20, Blobs::default()).unwrap();
+    let version = Version {
+        lineage: h.lineage,
+        zone: h.zone,
+        epoch: h.epoch,
+        sequence: tree.next(),
+    };
+    checkpoints
+        .take(&mut tree, version, 4, b"checkpoint fixture")
+        .unwrap();
+    checkpoints.wait().unwrap();
+    let restored = restore(&d.join("checkpoints")).unwrap().unwrap();
+    assert_eq!(restored.root.record, 4);
+    let state = restored.tree.to_state();
+    let key = key(&h);
+    assert!(matches!(
+        Writer::fork(&d.join("strict-fork"), &h, &key, (0, 0), &state),
+        Err(Refusal {
+            name: "stream-start-moving",
+            ..
+        })
+    ));
+    assert!(
+        !d.join("strict-fork").exists(),
+        "the fork guard remains before publication"
+    );
+    let mut writer = Writer::resume(
+        &d.join("views"),
+        &h,
+        &key,
+        (real + 5_000_000, 1_000_005_000),
+        &state,
+    )
+    .unwrap();
+    assert_eq!(writer.anchor, (5_000_000, 1_000_005_000));
+    let state_copy = writer.copy.tree().to_state();
+    assert_eq!(
+        state_copy.nodes[&n[1]], state.nodes[&n[1]],
+        "exact non-slot frame/pose/nonzero hand-off"
+    );
+    assert_eq!(state_copy.nodes[&seated], state.nodes[&seated]);
+    assert_eq!(state_copy.nodes[&seated].slot, Some(7));
+    assert_eq!(state_copy.timers[&timer], state.timers[&timer]);
+    assert!(!state_copy.nodes.contains_key(&n[2]));
+    assert!(!state_copy.timers.contains_key(&private_timer));
+    assert_eq!(state_copy.links[&public_link], state.links[&public_link]);
+    assert!(!state_copy.links.contains_key(&private_link));
+    assert_eq!(state_copy.time, state.time);
+
+    let slower = TimeEffect::Mapping(Mapping::new(5_000_000, real + 5_000_000, 1, 2).unwrap());
+    let changes = vec![
+        body(
+            10,
+            5_000_000,
+            n[1],
+            Audience::Everyone,
+            Body::Timers(vec![TimerRec::Clear { timer }]),
+        ),
+        body(
+            11,
+            5_000_000,
+            h.zone,
+            Audience::Everyone,
+            Body::Time(vec![slower]),
+        ),
+    ];
+    tree.apply(&h, &part_of(&h, changes.clone())).unwrap();
+    writer.frame(&frame(changes)).unwrap();
+    writer.idle_observed(real + 6_400_000).unwrap();
+    assert_eq!(
+        writer.written().parts,
+        1,
+        "pending slowdown has not settled window5; old mapping would cut it"
+    );
+    assert_eq!(writer.quiet_until, None, "no old-mapping future quiet time");
+    writer.idle_observed(real + 8_000_000).unwrap();
+    assert_eq!(writer.written().parts, 2);
+    assert_eq!(writer.quiet_until, Some(6_250_000));
+    assert_eq!(writer.copy.tree().time(), tree.time());
+
+    let hb = fs::read(d.join("views").join(stream::header_path(&writer.header))).unwrap();
+    let mut player = Player::start(&hb).unwrap();
+    for number in 0..writer.written().parts {
+        let bytes = fs::read(writer.dir().join(number.to_string())).unwrap();
+        let result = player.play(&bytes).unwrap();
+        if let Some(hash) = result.hash {
+            assert!(hash);
+        }
+    }
+    let played = player.replica().tree().to_state();
+    assert_eq!(played.nodes[&n[1]], state.nodes[&n[1]]);
+    assert_eq!(played.nodes[&seated], state.nodes[&seated]);
+    assert_eq!(played.nodes[&seated].slot, Some(7));
+    assert!(!played.nodes.contains_key(&n[2]));
+    assert!(!played.timers.contains_key(&timer));
+    assert!(!played.timers.contains_key(&private_timer));
+    let public = |tree: &Tree| {
+        tree.state_hashes_whole()
+            .unwrap()
+            .into_iter()
+            .find(|(audience, _)| *audience == Audience::Everyone)
+            .unwrap()
+            .1
+    };
+    assert_eq!(public(player.replica().tree()), public(&tree));
+    assert_eq!(player.replica().version(), tree.next());
+    fs::remove_dir_all(d).unwrap();
+}
+
 /// V5b (#3460) A1 and A3: told the world's time, a writer with nothing to write marks its pointer quiet up to world-now
 /// at least once a second and writes no empty part; the stretch of a burst after a still while is written once its time
 /// has passed, within the page's lag, and the marks resume after it.
