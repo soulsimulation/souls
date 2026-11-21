@@ -97,6 +97,23 @@ test('A1: the layer hides a building\'s roof, upper storey and its furniture whi
   assert.deepEqual([shown('hall').every(Boolean), shown('up'), shown('down')], [true, [true], [true]], 'outside again: all shown');
 });
 
+test('hover: pick never lands on furniture a building\'s interior view hides', () => {
+  const l = new ThingLayer({ index: indexOf({ kinds: [], things: { e_hall: 'hall', e_up: 'chair', e_down: 'chair' } }), fetch: () => new Promise(() => {}) });
+  const at = (x: number, y: number, z: number) => new THREE.Matrix4().makeTranslation(x, y, z);
+  const seat = new THREE.Matrix4().makeScale(0.5, 0.9, 0.5);
+  l.set('hall', 'e_hall', at(100, 0, 50), null);
+  l.set('up', 'e_up', at(101, 3.1, 50), seat); // a chair on the first floor
+  l.set('down', 'e_down', at(101, 0.1, 50), seat); // and one on the ground floor
+  l.arrive('hall', building());
+  const east = new THREE.Vector3(0, 0, 1);
+  const pick = (y: number) => l.pick(new THREE.Vector3(101, y, 45), east)?.id ?? null;
+  assert.deepEqual([pick(3.5), pick(0.5)], ['up', 'down'], 'outside: both chairs');
+  l.interior(new THREE.Vector3(100.5, 1.6, 50.5));
+  assert.deepEqual([pick(3.5), pick(0.5)], [null, 'down'], 'inside: the first floor\'s chair is hidden, so not picked');
+  l.interior(new THREE.Vector3(130, 1.6, 50));
+  assert.equal(pick(3.5), 'up', 'outside again: picked again');
+});
+
 test('A2: the lit windows\' room and glass shaders are today\'s, byte for byte, and switch on by today\'s curve', () => {
   const sha = (s: string) => createHash('sha256').update(s).digest('hex');
   assert.equal(sha(EDEN_ROOM_GLSL), TODAY.roomGlsl);
