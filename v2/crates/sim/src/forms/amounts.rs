@@ -337,20 +337,28 @@ impl Cx<'_> {
         }
     }
 
-    /// Field `field`'s limit on `node`'s kind: by its full name, or, for a kind written without its hash, the one
-    /// revision loaded of that `namespace:name`.
+    /// Field `field`'s limit on `node`'s kind: by its full name, or, when that revision does not declare it (a kind
+    /// written without its hash, or an imported world's kind whose fields its entry declares, #3715), the one revision
+    /// loaded of that `namespace:name` that does.
     fn limit(&self, node: Id, field: u64) -> R<Limit> {
         let kind = self.view.kind(node);
         let by_plain = |k: &str| {
-            let mut same = self.limits.iter().filter(|(n, _)| plain(n) == plain(k));
+            let mut same = self
+                .limits
+                .iter()
+                .filter(|(n, fs)| plain(n) == plain(k) && fs.contains_key(&field));
             match (same.next(), same.next()) {
-                (Some((_, fs)), None) => Some(fs),
+                (Some((_, fs)), None) => fs.get(&field),
                 _ => None,
             }
         };
         kind.as_ref()
-            .and_then(|k| self.limits.get(k.as_str()).or_else(|| by_plain(k.as_str())))
-            .and_then(|fs| fs.get(&field))
+            .and_then(|k| {
+                self.limits
+                    .get(k.as_str())
+                    .and_then(|fs| fs.get(&field))
+                    .or_else(|| by_plain(k.as_str()))
+            })
             .copied()
             .ok_or_else(|| Refusal {
                 name: "field-unknown",
