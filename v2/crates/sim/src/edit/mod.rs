@@ -655,6 +655,107 @@ mod doorway_lowering_tests {
     use replica::edit::{DOOR_GEOMETRY, DoorGeometry, Edit};
     use replica::effects::Actor;
 
+    /// #3728: a link operation lowers to the link, its row appended to the owner's field and the door naming it, in
+    /// one part that passes its canonical reader; nothing else (no wall is cut).
+    #[test]
+    fn a_link_lowers_to_its_link_its_row_and_its_door() {
+        let im = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
+        let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
+        let door = im.nodes["door-building-to-b"];
+        let leaf = im.tree.node(im.tree.handle(door).unwrap()).unwrap();
+        let old = replica::effects::read_id(&leaf.fields()[&F_OPEN_DOOR_LINK]).unwrap();
+        let (ty, [from, to], owner, _) = im.tree.link(old).unwrap();
+        let owner_rows = |tree: &replica::tree::Tree| match tree
+            .node(tree.handle(from).unwrap())
+            .unwrap()
+            .fields()
+            .get(&F_DOORWAYS)
+            .cloned()
+        {
+            Some(Value::Array(rows)) => rows,
+            _ => Vec::new(),
+        };
+        let row = owner_rows(&im.tree)
+            .into_iter()
+            .find_map(|r| match r {
+                Value::Array(r) if r.first() == Some(&old.to_value()) => Some(r[1..].to_vec()),
+                _ => None,
+            })
+            .expect("the doorway's row at its owner");
+        let checked = Checked {
+            edit: Edit {
+                intent: Id::new(Scope([0xec; 16]), 1).unwrap(),
+                actor: Actor::Creator(Id::new(Scope([0xed; 16]), 1).unwrap()),
+                planned: 0,
+                ops: vec![Op::Link {
+                    name: 1,
+                    ty: ty.clone(),
+                    ends: [Ref::Node(from), Ref::Node(to)],
+                    owner,
+                    field: F_DOORWAYS,
+                    row: row.clone(),
+                    door: Some(Ref::Node(door)),
+                }],
+            },
+            reads: Vec::new(),
+            parents: Vec::new(),
+            geometry: BTreeMap::new(),
+        };
+        let link = Id::new(Scope([0xee; 16]), 1).unwrap();
+        let lowered = effects(&im.tree, 0, &checked, &BTreeMap::from([(1, link)]), 0);
+        let bytes = encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(header.hash().to_bytes())),
+            (
+                2,
+                Value::Array(lowered.iter().map(Effect::to_value).collect()),
+            ),
+        ])))
+        .unwrap();
+        let part = Part::read(&bytes).expect("the lowered link's part passes its canonical reader");
+        let mut want = owner_rows(&im.tree);
+        want.push(Value::Array(
+            std::iter::once(link.to_value()).chain(row).collect(),
+        ));
+        let mut seen = Vec::new();
+        for effect in &part.effects {
+            let Body::Changes(changes) = &effect.body else {
+                continue;
+            };
+            for c in changes {
+                match &c.change {
+                    Change::Link { link: id, ends, .. } => {
+                        assert_eq!((*id, *ends, effect.envelope.node), (link, [from, to], from));
+                        seen.push("link");
+                    }
+                    Change::Set {
+                        node,
+                        field: F_DOORWAYS,
+                        to: Value::Array(rows),
+                        ..
+                    } => {
+                        assert_eq!(
+                            (*node, rows),
+                            (from, &want),
+                            "the row is appended, the others kept"
+                        );
+                        seen.push("row");
+                    }
+                    Change::Set {
+                        node,
+                        field: F_OPEN_DOOR_LINK,
+                        to: v,
+                        ..
+                    } => {
+                        assert_eq!((*node, v), (door, &link.to_value()));
+                        seen.push("door");
+                    }
+                    other => panic!("a link changes nothing else: {other:?}"),
+                }
+            }
+        }
+        assert_eq!(seen, ["link", "row", "door"]);
+    }
+
     #[test]
     fn g1f_lowered_doorway_part_uses_the_importers_qualified_row_label() {
         assert_eq!(DOOR_GEOMETRY, 29, "field 28 belongs to terrain parameters");
