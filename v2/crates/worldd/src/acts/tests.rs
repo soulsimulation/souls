@@ -447,14 +447,11 @@ fn a_gateway_walk_is_watched_against_its_legs_end_not_its_granted_place() {
         class: replica::bodies::Class::Locomotion,
         slot: None,
     };
-    b.add_body(
-        replica::bodies::Family {
-            name: Name::new("souls:humanoid").unwrap(),
-            resources: vec![legs("souls:leg-left"), legs("souls:leg-right")],
-        },
-        start,
-    )
-    .unwrap();
+    let family = replica::bodies::Family {
+        name: Name::new("souls:humanoid").unwrap(),
+        resources: vec![legs("souls:leg-left"), legs("souls:leg-right")],
+    };
+    b.add_body(family.clone(), start).unwrap();
     b.runner.start(id, Box::new(Holds)).unwrap();
     b.runner
         .granted
@@ -485,8 +482,10 @@ fn a_gateway_walk_is_watched_against_its_legs_end_not_its_granted_place() {
             0,
             p.z + (c[1] - p.z) * go / d.max(1),
         );
+        // Stood there by hand: the test is the watch's, not the mover's.
         let moved = place(&b.town, next);
-        b.runner.controller.regrounded(id, Some(moved)).unwrap();
+        b.runner.controller.remove(id);
+        b.runner.controller.add(family.clone(), moved).unwrap();
     }
     panic!("it never reached its leg's end");
 }
