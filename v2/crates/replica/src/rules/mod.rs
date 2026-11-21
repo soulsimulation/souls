@@ -140,9 +140,11 @@ fn js_eq(a: Option<&Value>, b: Option<&Value>) -> bool {
 
 /// A flag is stored as 0 or 1; an entry may still write `true` or `false`.
 fn flag(def: Option<&Value>, v: Option<&Value>) -> Option<Value> {
-    let is_bool = has(def, "type").and_then(Value::str) == Some("bool");
+    let ty = has(def, "type").and_then(Value::str);
     match v {
-        Some(Value::Bool(b)) if is_bool => Some(Value::Int(i128::from(*b))),
+        Some(Value::Bool(b)) if ty == Some("bool") => Some(Value::Int(i128::from(*b))),
+        // A text field cleared (set to null) holds no words, `{}`: it reads as null, as its default does.
+        Some(Value::Obj(o)) if ty == Some("text") && o.is_empty() => Some(Value::Null),
         other => other.cloned(),
     }
 }

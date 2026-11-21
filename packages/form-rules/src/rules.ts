@@ -177,7 +177,11 @@ const whole = (v: unknown): v is number => Number.isSafeInteger(v);
 /** A whole number as a safe integer or a big integer (a timed value beyond 2^53, SA-F5a). */
 const int = (v: unknown): v is number | bigint => whole(v) || typeof v === 'bigint';
 /** A flag is stored as 0 or 1 (Engine v2's encoding has no booleans); an entry may still write true or false. */
-const flag = (def: { type?: string }, v: unknown): unknown => (def.type === 'bool' && typeof v === 'boolean' ? Number(v) : v);
+// A text field cleared (set to null) holds no words, `{}`: it reads as null, as its default does (replica `flag`).
+const flag = (def: { type?: string }, v: unknown): unknown =>
+  def.type === 'bool' && typeof v === 'boolean' ? Number(v)
+    : def.type === 'text' && v !== null && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0 ? null
+    : v;
 
 /** Who may see a state field: the container's audience when the kind is closed and names it, else the field's own. */
 const audienceOf = (entry: Entry | undefined, field: string, def = entry?.state?.[field]): Audience =>
