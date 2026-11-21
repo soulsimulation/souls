@@ -24,6 +24,8 @@ import { F, bodiesUnder, changedCells, expand, heightAt } from './terrain.mjs';
 /** A body's radius and margin on the open ground (`sim::ground::HUMAN_RADIUS + MARGIN`), µm: the world's own. */
 export const BODY_REACH_UM = 350_000;
 const TILE_SIZE = 24;
+/** The most operations one edit carries (`replica::edit::OPS_MOST`). */
+const OPS_MOST = 256;
 
 const no = (code, detail) => ({ ok: false, code, detail });
 const num = (v) => (typeof v === 'bigint' ? Number(v) : v);
@@ -215,5 +217,8 @@ export function landOps(copy, a) {
     return no('edit.terrain-under-soul', under.map((b) => `${b.id} stands at (${Number(b.position[0]) / 1e6}, ${Number(b.position[2]) / 1e6}) m, where the ground changes`).join('; '));
   }
   const moved = out.ops.filter((o) => o.op === 'move').length;
+  if (out.ops.length > OPS_MOST) {
+    return no('land.too-many-things', `this landform would move ${moved} things resting on the ground; one edit moves at most ${OPS_MOST - 2}: shape a smaller area`);
+  }
   return { ops: out.ops, says: `${made.says}: ${out.patched} tile(s) change${moved ? `, ${moved} resting thing(s) moved with the ground` : ''}` };
 }

@@ -723,7 +723,8 @@ pub fn wire_edit(
         reflex: false,
     };
     let bytes = encode(&intent.to_value()).map_err(js)?;
-    crate::intent_decode::decode(&bytes).map_err(js)?;
+    // A creator's edit over the frame limit goes by the gateway's creator route (#3695), read as the world reads it.
+    crate::intent_decode::decode_bulk(&bytes).map_err(js)?;
     Ok(bytes)
 }
 

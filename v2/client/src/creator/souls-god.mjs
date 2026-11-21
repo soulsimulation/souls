@@ -71,6 +71,7 @@ export const FIX = {
   'edit.terrain-under-building': 'a building stands where the ground would change: shape the land clear of it',
   'edit.terrain-unsettled': 'a thing resting there was not moved with the ground: describe again and send the land verb again',
   'land.flag': 'see the usage: souls-god.mjs with no arguments',
+  'land.too-many-things': 'shape a smaller area, or one with fewer things on it',
   'land.no-water': 'name a pond, lake or river\'s id from describe',
   'land.nothing': 'shape the land on the world\'s ground',
   'land.smooth': 'use flatten',
