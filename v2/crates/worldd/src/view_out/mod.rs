@@ -1531,6 +1531,9 @@ impl<S: ObjectStore> PublicWriter<S> {
         )));
         self.words_of(all)
     }
+    fn words(&self, value: &Value) -> R<Vec<u8>> {
+        self.words_of(replica::audience::references(value))
+    }
     fn words_of(&self, refs: std::collections::BTreeSet<Id>) -> R<Vec<u8>> {
         let words = if let Some(store) = &self.text {
             refs.into_iter()
