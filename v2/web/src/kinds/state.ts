@@ -22,6 +22,7 @@ export function fieldsOf(f: Map<number, unknown>): Fields | undefined {
   for (const [k, v] of f) {
     let x: Int | string | Timed | undefined;
     if (whole(v)) x = int(v);
+    else if (typeof v === 'boolean') x = v ? 1 : 0; // a bool as the encoding may carry it
     else if (typeof v === 'string') x = v;
     else if (Array.isArray(v) && v.length === 3 && v.every(whole)) x = { value: int(v[0]), per_s: int(v[1]), set_us: int(v[2]) };
     if (x !== undefined) (out ??= {})[k] = x;
