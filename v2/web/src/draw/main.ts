@@ -25,6 +25,7 @@ import { WorldSky } from '../sky/sky.ts';
 import { tickWater } from '../water/water.ts';
 import { installNightLighting, nightPools, paintNightSources, setNightStrength } from './night.ts';
 import { installCapture } from '../capture/capture.ts';
+import { pageFx } from '../fx/page.ts';
 import { mountFullscreen, startWakeLock } from './screen.ts';
 
 installNightLighting(); // V19b: the lamps' night pools, before any lit material compiles
@@ -82,10 +83,11 @@ const world = new WorldView();
 scene.add(world.group);
 const clock = new PlaybackClock();
 const things = pageThings(scene, world, new URLSearchParams(location.search));
+const fx = pageFx(scene, world, things, q, quality.tier === 'phone'); // C8: flames, fountain water and steam
 const souls = pageSouls(canvas, world, new URLSearchParams(location.search)); // W4: chips, status, speech, a Soul's page
 const director = new CameraDirector(cam, canvas, world, souls, new URLSearchParams(location.search), moment !== null); // V20: broadcast, follow, find
 const hover = new WorldHover(canvas, () => cam.camera, { world, things: () => things.layer, name: (id) => souls.copy.souls.get(id)?.name ?? null, chipShown: (id) => souls.placed.some((p) => p.id === id) }); scene.add(hover.ring); // N-V20
-Object.assign(globalThis, { v2: { renderer, scene, sky, cam, director, world, things, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
+Object.assign(globalThis, { v2: { renderer, scene, sky, cam, director, world, things, fx, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 installCapture(globalThis as any, q, document); // G10: `shoot` names a place, Soul or thing and the camera goes there
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
 loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
@@ -118,6 +120,7 @@ const live = (address: string) => new StreamSource(address).start({
     world.apply(s.nodes, s.removed, []);
     sky.apply(s.nodes);
     things.apply(s.nodes, s.removed);
+    fx?.apply(s.nodes, s.removed);
     sound.part(s.nodes, s.removed, [], []);
     souls.snapshot(s.nodes, s.removed);
   },
@@ -125,6 +128,7 @@ const live = (address: string) => new StreamSource(address).start({
     world.apply(p.nodes, p.removed, p.samples);
     sky.apply(p.nodes, p);
     things.apply(p.nodes, p.removed);
+    fx?.apply(p.nodes, p.removed);
     sound.part(p.nodes, p.removed, p.samples, p.happened ?? []);
     souls.apply(p);
     director.part(p);
@@ -144,7 +148,7 @@ async function resolveWorld(name: string, root: string, get = fetch): Promise<{ 
   return { stream: new URL(j.stream.replace(/\/?$/, '/'), base).href, history: new URL(j.history ?? 'history/', base).href };
 }
 let history = moment && new HistoryPage(moment, cam, {
-  apply: (n, r, s, h) => (world.apply(n, r, s), sky.apply(n), things.apply(n, r), sound.part(n, r, s, h ?? [])), live, root: () => [...world.nodes.values()].find((n) => !n.parent)?.id ?? null,
+  apply: (n, r, s, h) => (world.apply(n, r, s), sky.apply(n), things.apply(n, r), fx?.apply(n, r), sound.part(n, r, s, h ?? [])), live, root: () => [...world.nodes.values()].find((n) => !n.parent)?.id ?? null,
   frame: (id) => (world.nodes.has(id) ? world.frame(id) : null),
 });
 if (history) (framed = true), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, history, clock } });
@@ -191,8 +195,9 @@ renderer.setAnimationLoop((now) => {
   director.update(Math.min(100, dt), t);
   sun.position.copy(sun.target.position).addScaledVector(sky.update(t ?? 0, cam.camera), 400);
   tickWater((t ?? 0) / 1e6);
+  fx?.update(t === null ? null : t / 1e6, cam.camera.position);
   setNightStrength(sky.state.daylight);
-  const pools = frames++ % 60 === 0 && things.layer ? nightPools(world, things.layer.opts.index) : null; // the lamps, once a second
+  const pools = frames++ % 60 === 0 && things.layer ? nightPools(world, things.layer.opts.index, (id) => fx?.lit(id) ?? true) : null; // the lamps, once a second
   if (pools) paintNightSources(pools.sources, pools.bounds);
   const ck = near?.clock ?? clock;
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
