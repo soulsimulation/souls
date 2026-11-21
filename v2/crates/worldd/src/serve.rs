@@ -344,11 +344,12 @@ fn with_punts(facts: &str) -> R<String> {
                 sim::courses::Shape::ThereAndBack => 2,
                 sim::courses::Shape::Once => 3,
             };
-            let seat = |n: i64, id: &str, x: i64| {
+            // A rider's place: what the import reads of a slot (its number, point, yaw and capacity). What a body does
+            // there comes from the punt's entry, not from here.
+            let place = |n: i64, id: &str, x: i64| {
                 obj(vec![
                     ("n", int(n)),
                     ("id", Json::s(id)),
-                    ("kind", Json::s("seat")),
                     ("at", Json::Arr(vec![int(x), int(360), int(0)])),
                     ("yaw", int(180_000)),
                     ("capacity", int(1)),
@@ -365,7 +366,7 @@ fn with_punts(facts: &str) -> R<String> {
                 ("name", Json::Str(format!("rowing-punt-{}", k + 1))),
                 (
                     "slots",
-                    Json::Arr(vec![seat(1, "rider_a", -650), seat(2, "rider_b", 650)]),
+                    Json::Arr(vec![place(1, "rider_a", -650), place(2, "rider_b", 650)]),
                 ),
                 (
                     "course",
