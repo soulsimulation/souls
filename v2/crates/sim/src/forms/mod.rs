@@ -576,6 +576,22 @@ impl Forms {
             .collect()
     }
 
+    /// Each body's run whose step in progress is a walk to a named point (C34, #3599): the step's number, the node the
+    /// point is the node's own (the run's, or a thing argument's) and the point's name, so the world can resolve a
+    /// building's named area onto its own room and floor before the walk is planned.
+    pub fn walks(&self) -> BTreeMap<Id, (usize, Id, Name)> {
+        self.runs
+            .values()
+            .filter_map(|fr| match fr.runner.step()? {
+                Step::WalkTo { point, on, .. } => Some((
+                    fr.body,
+                    (fr.runner.at()?, on.unwrap_or(fr.node), point.clone()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The number of the step in progress of `body`'s run.
     pub fn at(&self, body: Id) -> Option<usize> {
         let run = self.by_body.get(&body)?;
