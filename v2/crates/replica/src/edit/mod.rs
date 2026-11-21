@@ -121,6 +121,42 @@ pub enum Op {
         row: Vec<Value>,
         door: Option<Ref>,
     },
+    /// Rows into a node's array field (#3728: a creator's land edit sends only the terrain tiles it changes): each
+    /// row replaces the row whose first two values are its own, or is added after the rest. The field holds rows
+    /// already (an array of arrays of at least two values each); the result is a set of the whole field.
+    Rows {
+        node: Ref,
+        field: u64,
+        rows: Vec<Value>,
+    },
+}
+
+/// The field `now` with `rows` merged in, as [`Op::Rows`] says; `None` when `now` is not an array of rows or a row has
+/// fewer than two values.
+pub fn merged_rows(now: Option<&Value>, rows: &[Value]) -> Option<Value> {
+    let key = |r: &Value| match r {
+        Value::Array(r) if r.len() >= 2 => crate::encode::encode(&Value::Array(r[..2].to_vec())).ok(),
+        _ => None,
+    };
+    let Some(Value::Array(now)) = now else {
+        return None;
+    };
+    let mut out = now.clone();
+    let mut at = BTreeMap::new();
+    for (i, r) in out.iter().enumerate() {
+        at.insert(key(r)?, i);
+    }
+    for r in rows {
+        let k = key(r)?;
+        match at.get(&k) {
+            Some(&i) => out[i] = r.clone(),
+            None => {
+                at.insert(k, out.len());
+                out.push(r.clone());
+            }
+        }
+    }
+    Some(Value::Array(out))
 }
 
 /// The most values a link's row carries.
@@ -444,6 +480,28 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                         doorways.remove(node);
                     }
                 }
+            }
+            Op::Rows { node, field, rows } => {
+                if *field == DOOR_GEOMETRY || *field == 7 {
+                    return refuse(
+                        here,
+                        "edit.rows",
+                        "a door's link and owned geometry are not rows",
+                    );
+                }
+                named(*node)?;
+                let Some(to) = merged_rows(value(*node, *field).as_ref(), rows) else {
+                    return refuse(
+                        here,
+                        "edit.rows",
+                        "rows go into a field of rows, each at least two values",
+                    );
+                };
+                if let Ref::Node(id) = node {
+                    reads.push((i, *id));
+                }
+                fields.insert((*node, *field), to);
+                changed.insert(*node);
             }
             Op::Link {
                 name,

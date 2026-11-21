@@ -550,6 +550,19 @@ fn effects(
                 };
                 (n, audience(*node), change)
             }
+            Op::Rows { node, field: on, rows } => {
+                // #3728: the field with the rows merged in, as one set (`replica::edit::merged_rows`).
+                let n = id(*node);
+                let to = replica::edit::merged_rows(Some(&field(tree, &fields, n, *on)), rows)
+                    .ok_or_else(|| refused("edit.rows", "rows go into a field of rows"))?;
+                let change = Change::Set {
+                    node: n,
+                    field: *on,
+                    to,
+                    by: None,
+                };
+                (n, audience(*node), change)
+            }
             Op::Remove { node } => {
                 let n = id(*node);
                 use crate::ground::scene::{DOORWAY, F_DOORWAYS, F_OPEN_DOOR_LINK};

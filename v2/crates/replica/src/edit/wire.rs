@@ -196,6 +196,12 @@ fn op(o: &Op) -> Value {
             m.extend(door.map(|d| (8, node(d))));
             map(m)
         }
+        Op::Rows { node: n, field, rows } => map(vec![
+            (1, Value::Uint(7)),
+            (2, node(*n)),
+            (3, Value::Uint(*field)),
+            (4, Value::Array(rows.clone())),
+        ]),
     }
 }
 
@@ -315,8 +321,19 @@ fn read_op(v: &Value) -> R<Op> {
                 door: m.get(&8).map(|d| read_node(Some(d))).transpose()?,
             })
         }
+        7 => {
+            only(&[1, 2, 3, 4], "rows")?;
+            let Some(Value::Array(rows)) = m.get(&4) else {
+                return Err("rows are an array".into());
+            };
+            Ok(Op::Rows {
+                node: read_node(m.get(&2))?,
+                field: uint(m.get(&3), "the rows' field")?,
+                rows: rows.clone(),
+            })
+        }
         n => Err(format!(
-            "operation kind {n}: 1 place, 2 move, 3 set, 4 remove, 5 doorway, 6 link"
+            "operation kind {n}: 1 place, 2 move, 3 set, 4 remove, 5 doorway, 6 link, 7 rows"
         )),
     }
 }
