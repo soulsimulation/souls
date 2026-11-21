@@ -1036,6 +1036,9 @@ pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: 
     .unwrap_or_default()
 }
 
+/// The backstop refusal of an intent holding a text that is not a name (#3765).
+const TEXT_NOT_A_NAME: &str = "intent.text-not-a-name";
+
 /// An answered intent as its row logs it. The writer runs the reader's check (#3765): an intent holding a text that
 /// is not a name, which every intake refuses first, is logged as its encoded bytes, never as a text the log's reader
 /// refuses, and named.
@@ -1352,13 +1355,11 @@ impl Clock {
         }
         let mut value = intent.to_value();
         keep_arg_names(&mut value);
-        // Every text the intent would be logged with must be a name the log's reader takes (#3765): a malformed word
-        // (an act's `sit_down:undefined`, a form argument, an edit's or a set-down's) is refused here, logged without
-        // its intent. Words are bytes (T8), so none is a text.
-        if replica::effects::not_a_name(&value).is_some() {
-            let a = self.refusal(actor, sequence, "intent.text-not-a-name");
-            return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
-        }
+        // Every text the intent would be logged with must be a name the log's reader takes (#3765). A malformed word
+        // (an act's `sit_down:undefined`, a form argument, an edit's or a set-down's) is a backstop: the intent's own
+        // checks keep their names, and one that passes them all is refused `intent.text-not-a-name` where it would be
+        // taken, before anything is written, logged without its intent. Words are bytes (T8), so none is a text.
+        let unnamed = replica::effects::not_a_name(&value).is_some();
         let form = words::form(&intent);
         // A turn into an activity is its members' alone: refused before its words are kept when the speaker is not one.
         let mut members = BTreeSet::new();
@@ -1403,6 +1404,10 @@ impl Clock {
         if let (Actor::Soul(soul), true) =
             (actor, intent.verb.as_str() == LEAVE && self.life.is_some())
         {
+            if unnamed {
+                let a = self.refusal(actor, sequence, TEXT_NOT_A_NAME);
+                return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+            }
             return self.leave(
                 soul,
                 id,
@@ -1423,6 +1428,10 @@ impl Clock {
                 Err(e) => Some(Err(e)),
             };
             if let Some(entry) = entry {
+                if unnamed && entry.is_ok() {
+                    let a = self.refusal(actor, sequence, TEXT_NOT_A_NAME);
+                    return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+                }
                 let reason = match entry {
                     Ok(e) => self.write(e).err().map(|r| r.name),
                     Err(r) => Some(r),
@@ -1453,6 +1462,10 @@ impl Clock {
                     detail: String::new(),
                 })
                 .and_then(|body| match self.bodies.as_mut() {
+                    Some(_) if unnamed => Err(Refusal {
+                        name: TEXT_NOT_A_NAME,
+                        detail: String::new(),
+                    }),
                     Some(b) => crate::orders::accept(b, &intent, body, id, now),
                     None => Err(Refusal {
                         name: "orders-off",
@@ -1574,6 +1587,10 @@ impl Clock {
         } else {
             acts::Args::default()
         };
+        if unnamed {
+            let a = self.refusal(actor, sequence, TEXT_NOT_A_NAME);
+            return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+        }
         let body = match &taken {
             Taken::Form(a) => a.body,
             Taken::Move(m) => m.body,
