@@ -531,6 +531,16 @@ fn spot_of(o: &json::Value) -> Result<Spot, String> {
     })
 }
 
+/// An id written as text, `<32 hex scope>-<counter>`.
+fn id_text(t: &str) -> Option<Id> {
+    let (scope, n) = t.split_once('-')?;
+    if scope.len() != 32 || !n.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let scope: [u8; 16] = from_hex(scope).ok()?.try_into().ok()?;
+    Id::new(Scope(scope), n.parse().ok()?)
+}
+
 fn field_value(v: &json::Value) -> Result<Value, String> {
     match v {
         json::Value::Int(n) if *n >= 0 => u64::try_from(*n)
@@ -540,6 +550,10 @@ fn field_value(v: &json::Value) -> Result<Value, String> {
             .map(Value::Nint)
             .map_err(|e| e.to_string()),
         json::Value::Bool(b) => Ok(Value::Uint(u64::from(*b))),
+        // #3700: an id as text (`<32 hex>-<counter>`, a Soul's to own a thing) is written as an id.
+        json::Value::Str(t) if id_text(t).is_some() => Ok(id_text(t)
+            .unwrap_or_else(|| unreachable!("checked"))
+            .to_value()),
         json::Value::Str(t) => Name::new(t)
             .map(Value::Text)
             .ok_or_else(|| format!("{t:?} is not a name (ASCII, at most 64)")),

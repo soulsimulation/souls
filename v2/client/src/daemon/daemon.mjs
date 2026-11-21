@@ -725,6 +725,16 @@ function fullKind(kinds, k) {
   if (hit.length === 1) return hit[0];
   throw Object.assign(new Error(`${s}: ${hit.length ? 'ambiguous; copy a full pinned name from describe' : `not pinned; describe lists ${Object.keys(kinds).join(', ')}`}`), { code: 'edit.kind-unknown' });
 }
+/** #3700: a node's owner and access marks (replica `who_may::F_OWNER` 97, `F_ACCESS` 98), when it carries either. */
+function marksOf(row) {
+  const pairs = JSON.parse(row.own).find(([k]) => Number(k) === 6)?.[1] ?? [];
+  const get = (n) => pairs.find(([k]) => Number(k) === n)?.[1];
+  const owner = get(97), access = get(98);
+  if (owner === undefined && access === undefined) return {};
+  const who = Array.isArray(owner) ? `${owner[0]}-${owner[1]}` : owner === 0 ? 'none' : owner;
+  return { marks: { ...(owner !== undefined ? { owner: who } : {}), ...(access !== undefined ? { access: Number(access) } : {}) } };
+}
+
 /** The batch as replica's `ops_of` reads it: kinds by full name, positions in µm (a creator writes mm). */
 function batchOf(ops, claim) {
   if (!Array.isArray(ops) || ops.length === 0) throw Object.assign(new Error('ops: a list of operations'), { code: 'edit.batch' });
@@ -1018,7 +1028,7 @@ async function answer(req) {
       return answer({ op: 'act', acts: actWords(offer, req.args ?? []), ...(req.for !== undefined ? { for: req.for } : {}) });
     }
     case 'describe': return closing({ ok: true }, (rows) => ({
-      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...(r.text ? { text: r.text } : {}) })),
+      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...(r.text ? { text: r.text } : {}), ...marksOf(r) })),
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
     }));
     case 'check': {

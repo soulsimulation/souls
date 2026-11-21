@@ -11,6 +11,8 @@
 //!   `d:market`, `title:market-quarter`, `p:a`, `use:bakery`, `road:main`); the creator's command adds the prefixes. At most [`DISTRICTS_MOST`] plans, [`PLOTS_MOST`] plots and
 //!   [`ROADS_MOST`] roads a plan, [`ROAD_POINTS_MOST`] points a road (today's limits). A malformed plan is refused
 //!   `edit.district-malformed`.
+//! - **Zones** ([`F_ZONES`], #3700): today's land-use areas, `[[zone:<name>, use:<use>, [x, z, ...]], ...]`, else
+//!   `edit.zone-malformed`.
 //! - **Claims** ([`F_CLAIMS`]): `[[id, part, x0, z0, x1, z1], ...]` (`c:house`, `part:roof`), at most [`CLAIMS_MOST`], none overlapping,
 //!   else `edit.claim-malformed`. Releasing a claim is setting the field without it.
 //!
@@ -228,6 +230,66 @@ pub fn read_districts(v: &Value) -> Result<(), String> {
     Ok(())
 }
 
+/// The root's field holding the land-use zones (#3700): `[[name, use, [x, z, x, z, ...]], ...]`, a name `zone:<x>`,
+/// a use one of [`USES`] as `use:<use>`, an outline of 3 to [`ZONE_POINTS_MOST`] points in mm, at most [`ZONES_MOST`].
+pub const F_ZONES: u64 = 92;
+pub const ZONES_MOST: usize = 64;
+pub const ZONE_POINTS_MOST: usize = 64;
+/// Today's land uses.
+pub const USES: [&str; 7] = [
+    "residential",
+    "commercial",
+    "park",
+    "farm",
+    "civic",
+    "industrial",
+    "wild",
+];
+
+/// Checks a field value as zones.
+pub fn read_zones(v: &Value) -> Result<(), String> {
+    names_only(v)?;
+    let mut seen = BTreeSet::new();
+    for z in list(v, "zones", ZONES_MOST)? {
+        let Value::Array(z) = z else {
+            return Err("a zone is [name, use, [x, z, ...]]".into());
+        };
+        let [n, u, outline] = z.as_slice() else {
+            return Err("a zone is [name, use, [x, z, ...]]".into());
+        };
+        let n = name(n, "a zone's name")?;
+        if !n.as_str().starts_with("zone:") || !seen.insert(n.clone()) {
+            return Err(format!(
+                "{} is not zone:<name>, or is named twice",
+                n.as_str()
+            ));
+        }
+        let u = name(u, "a zone's use")?;
+        if !u
+            .as_str()
+            .strip_prefix("use:")
+            .is_some_and(|x| USES.contains(&x))
+        {
+            return Err(format!(
+                "{} is not one of use:{}",
+                u.as_str(),
+                USES.join("|use:")
+            ));
+        }
+        let pts = list(outline, "outline coordinates", ZONE_POINTS_MOST * 2)?;
+        if pts.len() < 6 || pts.len() % 2 != 0 {
+            return Err(format!(
+                "zone {}: an outline is at least three x, z points",
+                n.as_str()
+            ));
+        }
+        for p in pts {
+            near(p)?;
+        }
+    }
+    Ok(())
+}
+
 /// The live claims on a copy: those its root holds.
 pub fn live(copy: &Replica) -> Vec<Claim> {
     let tree = copy.tree();
@@ -261,6 +323,7 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
             let (bad, why) = match *field {
                 F_CLAIMS => ("edit.claim-malformed", read_claims(to).err()),
                 F_DISTRICTS => ("edit.district-malformed", read_districts(to).err()),
+                F_ZONES => ("edit.zone-malformed", read_zones(to).err()),
                 _ => continue,
             };
             if let Some(why) = why {

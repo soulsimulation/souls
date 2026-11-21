@@ -886,3 +886,176 @@ fn a1_a2_plans_and_claims_are_checked_before_they_are_recorded() {
     assert_eq!(r.name, "edit.claim-malformed");
     w.close();
 }
+
+// --- #3700: owner and access marks, and land-use zones ---------------------------------------------------------------
+
+#[test]
+fn a1_a_private_mark_is_its_owners_alone_and_passes_down_to_what_is_inside() {
+    use replica::who_may::{F_ACCESS, F_OWNER};
+    let mut w = W::new();
+    let (room, cr, _) = w.furnish();
+    let owner = Id::new(Scope([0x50; 16]), 7).expect("an id");
+    let other = Id::new(Scope([0x50; 16]), 8).expect("an id");
+    let entry =
+        replica::rules::json::parse(r#"{"forms": {"open": {"who": "anyone"}}}"#).expect("JSON");
+    let may = |w: &W, body: Id, node: Id| {
+        sim::forms::may(
+            w.live.tree(),
+            &BTreeMap::new(),
+            &|_| None,
+            body,
+            node,
+            &entry,
+            "open",
+        )
+    };
+    // Unmarked: anyone may, as before.
+    assert!(may(&w, other, cr).is_ok());
+    // The room is the owner's and private: the crate in it is too.
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![
+            Op::Set {
+                node: Ref::Node(room),
+                field: F_OWNER,
+                to: owner.to_value(),
+            },
+            Op::Set {
+                node: Ref::Node(room),
+                field: F_ACCESS,
+                to: Value::Uint(2),
+            },
+        ],
+    )
+    .expect("marked");
+    assert!(may(&w, owner, cr).is_ok(), "the owner may");
+    let r = may(&w, other, cr).expect_err("private");
+    assert_eq!(r.name, "object.private");
+    assert!(r.detail.contains("private"), "{}", r.detail);
+    // Its own public mark wins over the room's.
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![Op::Set {
+            node: Ref::Node(cr),
+            field: F_ACCESS,
+            to: Value::Uint(1),
+        }],
+    )
+    .expect("public");
+    assert!(may(&w, other, cr).is_ok());
+    // The god's private thing refuses every Soul; a group has no members.
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![
+            Op::Set {
+                node: Ref::Node(cr),
+                field: F_ACCESS,
+                to: Value::Uint(2),
+            },
+            Op::Set {
+                node: Ref::Node(cr),
+                field: F_OWNER,
+                to: text("owner:god"),
+            },
+        ],
+    )
+    .expect("the god's");
+    assert_eq!(
+        may(&w, owner, cr).expect_err("private").name,
+        "object.private"
+    );
+    // Marks that do not read are refused, and nothing is written.
+    let v = w.live.version();
+    let log = w.log_hash();
+    for (field, to) in [
+        (F_ACCESS, Value::Uint(3)),
+        (F_OWNER, text("souls:bob")),
+        (F_OWNER, Value::Uint(4)),
+    ] {
+        let r = w
+            .edit(
+                w.creator(),
+                v,
+                vec![Op::Set {
+                    node: Ref::Node(cr),
+                    field,
+                    to,
+                }],
+            )
+            .expect_err("malformed");
+        assert_eq!((r.op, r.name), (Some(0), "edit.owner-malformed"), "{r:?}");
+    }
+    assert_eq!(w.log_hash(), log);
+    // None again: anyone may.
+    w.edit(
+        w.creator(),
+        v,
+        vec![
+            Op::Set {
+                node: Ref::Node(cr),
+                field: F_ACCESS,
+                to: Value::Uint(0),
+            },
+            Op::Set {
+                node: Ref::Node(cr),
+                field: F_OWNER,
+                to: Value::Uint(0),
+            },
+            Op::Set {
+                node: Ref::Node(room),
+                field: F_ACCESS,
+                to: Value::Uint(0),
+            },
+        ],
+    )
+    .expect("cleared");
+    assert!(may(&w, other, cr).is_ok());
+    w.close();
+}
+
+#[test]
+fn a2_zones_are_named_land_uses_with_an_outline() {
+    use replica::edit::claims::F_ZONES;
+    let mut w = W::new();
+    let zone = |n: &str, u: &str, pts: &[i64]| {
+        Value::Array(vec![
+            text(n),
+            text(u),
+            Value::Array(pts.iter().map(|p| mm(*p)).collect()),
+        ])
+    };
+    let square = [0, 0, 10_000, 0, 10_000, 10_000];
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![set_root(
+            w.root,
+            F_ZONES,
+            Value::Array(vec![zone("zone:market", "use:commercial", &square)]),
+        )],
+    )
+    .expect("zoned");
+    let v = w.live.version();
+    for bad in [
+        zone("zone:market", "use:casino", &square),
+        zone("market", "use:park", &square),
+        zone("zone:park", "use:park", &[0, 0, 5, 5]),
+    ] {
+        let r = w
+            .edit(
+                w.creator(),
+                v,
+                vec![set_root(w.root, F_ZONES, Value::Array(vec![bad]))],
+            )
+            .expect_err("malformed");
+        assert_eq!(r.name, "edit.zone-malformed", "{r:?}");
+    }
+    w.close();
+}
