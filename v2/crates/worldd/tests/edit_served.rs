@@ -3,9 +3,10 @@
 //!
 //! - **A1** (N2's test world): the store's list row and name record name the creator; `serve` prints it at the start.
 //!   Another creator's edit is refused `edit.not-the-creator`; the named creator's commits.
-//! - **A2, A3** (seeded Eden, `--ignored`: needs the exported Eden facts file): 21 Souls stand in a row on the open
-//!   ground, 20 of them walking. A wall where the 21st stands is refused `edit.would-bury`; once it has walked away,
+//! - **A2, A3** (seeded Eden, `--ignored`: needs the exported Eden facts file): 21 Souls in a row on the open
+//!   ground, 20 of them walking; the 21st walks to its place first, since no Soul stands until it acts (C3). A wall where the 21st stands is refused `edit.would-bury`; once it has walked away,
 //!   the same wall commits. Each edit's answer is timed through the gateway, beside the 20 walkers.
+//! - **#3923** (N2's test world, in CI): the same refusal for a Soul that has acted, standing where its walk ended.
 
 // A real process and a real gateway on the real clock: the waits and the times are real time.
 #![allow(clippy::disallowed_methods)]
@@ -1244,14 +1245,21 @@ async fn g1e_a2_a3_eden_buildsafe_refuses_a_wall_on_a_soul_and_answers_fast() {
     let mut ws = sign_in(&url, &tokens[0]).await;
     let mut theirs = sign_in(&url, &tokens[1]).await;
 
-    // The 20 walkers set off north, 8 m each; the 21st stands at the row's east end.
+    // No Soul stands in a world until it acts (C3, #3367): the 21st walks to the row's east end first, which births
+    // its body there; then the 20 walkers set off north, 8 m each.
     let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let stander = w.souls[20];
+    let (sx, sz) = ((x0 + 40) * M, z0 * M);
+    walk(&mut souls, &w, stander, 1, sx, sz);
+    let got = socket_answer(&mut souls);
+    assert_eq!(got.kind, 1, "the 21st Soul's walk to its place ends: {got:?}");
     for (k, &body) in w.souls.iter().enumerate().take(20) {
         let x = (x0 + 2 * k as i64) * M;
         walk(&mut souls, &w, body, 1, x, (z0 + 8) * M);
     }
-    let stander = w.souls[20];
-    let (sx, sz) = ((x0 + 40) * M, z0 * M);
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // The path an edit takes without G2's guard, for comparison: another creator's edits, refused by the checker
@@ -1325,11 +1333,8 @@ async fn g1e_a2_a3_eden_buildsafe_refuses_a_wall_on_a_soul_and_answers_fast() {
     );
 
     // The 21st walks away north; then the same wall commits.
-    walk(&mut souls, &w, stander, 1, sx, sz + 6 * M);
+    walk(&mut souls, &w, stander, 2, sx, sz + 6 * M);
     // Walks answer at their ends: all 21, the 21st's among them.
-    souls
-        .set_read_timeout(Some(Duration::from_secs(60)))
-        .unwrap();
     for _ in 0..21 {
         let got = socket_answer(&mut souls);
         assert_eq!(got.kind, 1, "a walk ends: {got:?}");
