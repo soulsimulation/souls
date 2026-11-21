@@ -5,6 +5,8 @@
 // It also writes the world's `history` into config.json, from what the world advertises (R16b, #3480): its
 // `views/world.json` (`--advert`, else `<directory>/w/<world>/views/world.json`, where the origin serves a placed
 // world), whose `history` is relative to the world's folder. No advert, no `history`; the pairing still succeeds.
+// Then it fetches the world's kind entries into `<home>/kinds/` from the gateway (#3760, `refreshEntries`), which
+// the daemon does again at each sign-in, so a restarted or changed world's kinds reach the client's own checks.
 //
 //   node v2/client/src/pair/pair.mjs --directory <origin> --world <key> --gateway <ws url> --device <name>
 //        --label <agent label> [--soul <grant> | --creator <creator grant>] [--force] [--advert <url of world.json>]
@@ -13,7 +15,7 @@
 //   The home is SOULS_HOME, else the nearest .souls, else ./.souls.
 
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,6 +55,54 @@ export async function advertisedHistory(advert, { within = 5000 } = {}) {
   } catch {
     return null;
   }
+}
+
+/** The gateway's entries address from its socket address: `ws(s)://…/v2/ws` is `http(s)://…/v2/entries`. */
+export function entriesOf(gateway) {
+  const u = new URL(gateway);
+  u.protocol = u.protocol === 'wss:' ? 'https:' : u.protocol === 'ws:' ? 'http:' : u.protocol;
+  u.pathname = u.pathname.replace(/\/v2\/ws$/, '') + '/v2/entries';
+  u.search = ''; u.hash = '';
+  return u.href;
+}
+
+/**
+ * The world's kind entries (#3760): fetched from the gateway's `GET /v2/entries` with the Soul's token, sent with the
+ * tag of the last copy kept (`<home>/kinds/.entries-<world>.json`), so an unchanged world sends nothing. Each entry is
+ * written as `<home>/kinds/<kind, : as .>.json`, where the checks read them (`check/state.mjs` `kindsIn`), and an
+ * entry this world sent before and no longer does is removed. Resolves to `{entries, changed}`; rejects on a refusal.
+ */
+export async function refreshEntries({ home, world, gateway, token, within = 30000 }) {
+  const dir = join(home, 'kinds'), mark = join(dir, `.entries-${encodeURIComponent(world)}.json`);
+  let held = {};
+  try { held = JSON.parse(readFileSync(mark, 'utf8')); } catch { /* none kept yet */ }
+  if (!(held.files ?? []).every((f) => existsSync(join(dir, f)))) held = { files: held.files }; // a file gone: fetch all
+  const r = await fetch(entriesOf(gateway), {
+    headers: { authorization: `Bearer ${token}`, ...(held.etag ? { 'if-none-match': held.etag } : {}) },
+    signal: AbortSignal.timeout(within),
+  });
+  if (r.status === 304) return { entries: held.files?.length ?? 0, changed: false };
+  if (!r.ok) {
+    let code = `entries-${r.status}`;
+    try { code = (await r.json()).refused ?? code; } catch { /* not JSON */ }
+    throw new Refused(code, `the gateway answered ${r.status} for the world's entries`);
+  }
+  const list = await r.json();
+  if (!Array.isArray(list)) throw new Refused('entries-answer', 'the entries are not a list');
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const files = [];
+  for (const e of list) {
+    if (e?.format !== 'souls-entry/1' || typeof e.kind !== 'string' || !/^[\w.:@-]+$/.test(e.kind)) continue;
+    const f = `${e.kind.replaceAll(':', '.')}.json`;
+    writeFileSync(join(dir, `${f}.tmp`), JSON.stringify(e));
+    renameSync(join(dir, `${f}.tmp`), join(dir, f));
+    files.push(f);
+  }
+  const now = new Set(files);
+  for (const f of held.files ?? []) if (!now.has(f) && /^[\w.@-]+\.json$/.test(f)) rmSync(join(dir, f), { force: true });
+  writeFileSync(`${mark}.tmp`, JSON.stringify({ etag: r.headers.get('etag'), files }) + '\n');
+  renameSync(`${mark}.tmp`, mark);
+  return { entries: files.length, changed: true };
 }
 
 /**
@@ -106,9 +156,12 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     creds.souls = { ...creds.souls, [id]: { ...creds.souls?.[id], [world]: { token: got.token } } };
     writePrivate(credFile, creds);
     // R19: the folder's guide names who lives here now. The Soul is paired whether or not the guide could be written.
+    // #3760: the world's kinds, so the client's own checks know them; the Soul is paired whether or not they came.
+    let entries;
+    try { entries = (await refreshEntries({ home, world, gateway, token: got.token })).entries; } catch (e) { entries = { failed: e.code ?? 'entries-unreachable' }; }
     let guide;
     try { guide = writeGuide(home); } catch (e) { guide = { failed: String(e.message ?? e).slice(0, 120) }; }
-    return { soul: id, grant: got.grant, history, guide };
+    return { soul: id, grant: got.grant, history, entries, guide };
   }
 }
 
