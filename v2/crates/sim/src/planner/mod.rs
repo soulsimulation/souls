@@ -253,7 +253,9 @@ impl Planner {
                                 let to = view.stand_near(floor, at, reach, Some(&q.body)).or_else(
                                     || (floor == crate::walk::node_of(&q.body)).then_some(at),
                                 )?;
-                                view.plan(&q.body, floor, to).ok()
+                                let r = view.plan(&q.body, floor, to);
+                                if std::env::var_os("DBG_PLAN").is_some() { eprintln!("DBG planner to {to:?} reach {reach} -> {:?}", r.as_ref().map(|l| l.len()).map_err(|e| e.name.clone())); }
+                                r.ok()
                             })
                             .unwrap_or_default();
                         FormResult::Walk(legs)
