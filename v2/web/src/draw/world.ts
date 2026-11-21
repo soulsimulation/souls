@@ -10,6 +10,7 @@ import { BANKS, DECKS, DRAPES, WATER, GroundCover, drapeMesh, drapeName, turfMat
 import { asWater } from '../water/water.ts';
 import { CoursePlace, type CourseAt } from './course.ts';
 import { backdropMesh, type Backdrop } from './backdrop.ts';
+import type { GroundTile } from './lod.ts';
 
 const UM = 1e-6, MM = 1e-3;
 export const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway']);
@@ -112,6 +113,9 @@ export class WorldView {
   /** Bodies as V6's crowd once its body files have loaded; capsules until then. */
   private crowdBodies: CrowdBodies | null = null;
   private terrainDone = false;
+  /** The ground as one mesh and where each tile is in it (#3785: lod.ts draws it in sectors with distance levels). */
+  terrainMesh: THREE.Mesh | null = null;
+  readonly terrainTiles: GroundTile[] = [];
   /** The drawn ground's tiles, for `heightAt`. */
   private ground: { side: number; tiles: Map<string, { n: number; k: number; h: DataView }> } | null = null;
   /** C12 (#3683): the far backdrop beyond the ground's edge. */
@@ -254,6 +258,7 @@ export class WorldView {
     const side = (ground.tileSize ?? 64_000) * MM;
     let ext: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
     const tiles: THREE.BufferGeometry[] = [];
+    let vertexStart = 0, indexStart = 0;
     this.ground = { side, tiles: new Map() };
     const list = (ground.tiles ?? []).map(([tx, tz, heights, classes]) => {
       const n = Math.round(Math.sqrt(classes.length));
@@ -289,6 +294,8 @@ export class WorldView {
       g.setIndex(index);
       g.computeVertexNormals();
       tiles.push(g); // V8: one draw for the ground, not one a tile (Eden has 256)
+      this.terrainTiles.push({ tx, tz, vertexStart, vertexCount: (m + 1) * (m + 1), indexStart, indexCount: index.length });
+      (vertexStart += (m + 1) * (m + 1)), (indexStart += index.length);
       ext = [Math.min(ext[0], tx * side), Math.min(ext[1], tz * side), Math.max(ext[2], (tx + 1) * side), Math.max(ext[3], (tz + 1) * side)];
     }
     if (tiles.length) {
@@ -297,6 +304,7 @@ export class WorldView {
       mesh.receiveShadow = true;
       mesh.name = 'terrain';
       this.group.add(mesh);
+      this.terrainMesh = mesh;
     }
     if (Number.isFinite(ext[0])) {
       this.extent = ext;

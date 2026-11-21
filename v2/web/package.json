@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "cborg": "6.2.1",
+    "meshoptimizer": "1.1.1",
     "three": "0.187.0",
     "tone": "15.1.22"
   },

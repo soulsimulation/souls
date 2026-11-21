@@ -13,7 +13,8 @@ import { SocketSource, chooseFollow, exchange, type Session } from '../source/so
 import { browserSession, localTestSignIn } from '../source/signin.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
 import { WorldHover } from '../crowd/hover.ts';
-import { browserQuality } from './quality-tier.ts';
+import { browserQuality, pageMeshLod } from './quality-tier.ts';
+import { GroundLod, workerLevels, type Levels } from './lod.ts';
 import { WorldView } from './world.ts';
 import { support } from './support.ts';
 import { pageThings } from '../things/page.ts';
@@ -199,6 +200,19 @@ else if (worldName && !addressError) resolveWorld(worldName, new URLSearchParams
 );
 else card.fail(status.textContent = addressError || 'no stream: open this page with ?stream=<the stream directory> or ?world=<name>');
 
+// #3785: the ground drawn in sectors, simplified at a distance, once it has arrived (levels built in a worker).
+const meshLod = pageMeshLod();
+let groundLevels: Promise<Levels | null> | null = null, groundLod: GroundLod | null = null;
+function groundLodFrame(): void {
+  if (!meshLod) return;
+  if (!groundLod && world.terrainMesh) {
+    groundLevels ??= workerLevels(() => new Worker(new URL('./lod.worker.ts', import.meta.url), { type: 'module' }));
+    groundLod = new GroundLod(world.terrainMesh, world.terrainTiles, meshLod, (input) => groundLevels!.then((l) => (l ? l(input) : [])));
+    Object.assign((globalThis as any).v2, { groundLod });
+  }
+  groundLod?.update(cam.camera, canvas.clientHeight);
+}
+
 const secs = (us: number) => (us / 1e6).toFixed(2);
 const clockText = (us: number) => {
   const s = Math.floor(us / 1e6);
@@ -241,6 +255,7 @@ renderer.setAnimationLoop((now) => {
       if (at) cam.look(at, 0.6, -0.6, 55);
     }
   }
+  groundLodFrame();
   renderer.render(scene, cam.camera);
   shot.frame(t !== null && world.nodes.size > 0 && sky.recordAt(t) !== null && (things.layer?.settled ?? true)); // a world with no Souls draws no bodies, and is still ready
   if (!arrived && t !== null && world.nodes.size > 0) (arrived = true), card.reach('drawn');
