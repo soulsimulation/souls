@@ -501,10 +501,28 @@ fn i3837_a_compacted_world_restarts_with_the_state_of_a_full_replay() {
     let d = scratch("i3837");
     let (dir, body, root, ground) = seeded(&d);
     let socket = d.join("s");
-    // A second name for the log as written: compaction renames a new file over `log`, and this one keeps the bytes
-    // before the cut (they are the same bytes at the same offsets in both).
-    let keep = d.join("log.keep");
-    std::fs::hard_link(dir.join("log"), &keep).unwrap();
+    // A second name for each file the log has been: a compaction renames a new file over `log`, and the one before
+    // keeps the bytes before its cut (the same bytes at the same offsets in both).
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let keeper = {
+        let (stop, log, d) = (stop.clone(), dir.join("log"), d.clone());
+        std::thread::spawn(move || {
+            use std::os::unix::fs::MetadataExt;
+            let mut kept: Vec<(u64, PathBuf)> = Vec::new();
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                if let Ok(m) = std::fs::metadata(&log)
+                    && kept.last().is_none_or(|(ino, _)| *ino != m.ino())
+                {
+                    let name = d.join(format!("log.keep{}", kept.len()));
+                    if std::fs::hard_link(&log, &name).is_ok() {
+                        kept.push((m.ino(), name));
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            kept
+        })
+    };
     let w = serve_with(&dir, &socket, &["--compact-after".as_ref(), "1".as_ref()]);
     w.line("worldd: started at tick");
     let mut s = connect(&socket);
@@ -524,10 +542,25 @@ fn i3837_a_compacted_world_restarts_with_the_state_of_a_full_replay() {
     walk(&mut s, body, root.scope(), ground, 100, -37, 33);
     assert_eq!(answer(&mut s).0, 1);
     std::thread::sleep(Duration::from_millis(500));
+    let all = w.all.clone();
     w.kill();
-
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    let kept = keeper.join().unwrap();
+    let mut cuts: Vec<u64> = all
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|l| l.strip_prefix("log: compacted, kept from record "))
+        .filter_map(|l| l.split("(byte ").nth(1)?.trim_end_matches(')').parse().ok())
+        .collect();
     let log = dir.join("log");
     let cut = sim::log::compact::read_cut(&log).unwrap().expect("a cut file");
+    // The last compaction may have finished after the last look that printed one.
+    if kept.len() == cuts.len() + 2 {
+        cuts.push(cut.at.offset);
+    }
+    assert_eq!(kept.len(), cuts.len() + 1, "a file for each compaction: {cuts:?}");
+
     assert!(cut.at.record > 0);
     let before = last_state(&log);
     let (l, found) = Log::open(FileStore::open(&log).unwrap(), 1).unwrap();
@@ -545,12 +578,15 @@ fn i3837_a_compacted_world_restarts_with_the_state_of_a_full_replay() {
         );
     }
 
-    // The same log uncompacted: the kept bytes before the cut, the compacted file's from it.
+    // The same log uncompacted: each file the log has been, from its cut to the next.
     let full = d.join("full");
     copy_tree(&dir, &full);
-    let mut bytes = std::fs::read(&keep).unwrap();
-    bytes.truncate(cut.at.offset as usize);
-    bytes.extend_from_slice(&std::fs::read(&log).unwrap()[cut.at.offset as usize..]);
+    let mut bytes = Vec::new();
+    for (i, (_, path)) in kept.iter().enumerate() {
+        let b = std::fs::read(path).unwrap();
+        let end = cuts.get(i).map_or(b.len(), |&c| c as usize);
+        bytes.extend_from_slice(&b[bytes.len()..end]);
+    }
     std::fs::write(full.join("log"), bytes).unwrap();
     std::fs::remove_file(full.join("log.cut")).unwrap();
     std::fs::remove_dir_all(full.join("checkpoints")).unwrap();
