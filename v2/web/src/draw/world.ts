@@ -16,7 +16,7 @@ export const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'e
 const plain = (kind: string) => kind.split('@')[0];
 /** A body: one with a motion sample, or a body kind standing still since it joined (no motion published yet). */
 const BODY = /(^|:)(body|soul)$/;
-const isBody = (n: NodeRec) => n.at !== null || BODY.test(plain(n.kind));
+export const isBody = (n: NodeRec) => n.at !== null || BODY.test(plain(n.kind));
 /** Terrain vertices kept per tile side: every one, so what stands on the ground meets the ground as drawn (an 8 m
  *  grid left things on hills up to metres above it). */
 const TERRAIN_STEP = 1;
@@ -121,6 +121,8 @@ export class WorldView {
   extent: [number, number, number, number] | null = null;
   /** False when V8's thing layer draws the things instead of these boxes. */
   drawThings = true;
+  /** #3871: things drawn from their kind's entry (kinds/layer.ts), which get no box. */
+  private elsewhere = new Set<string>();
   /** #3603: the replica's `courseAt` once the page has loaded it; until then a course node stands where it was placed. */
   courseAt: CourseAt | null = null;
   /** Called once, when the first node with a course arrives (the page loads `courseAt` then). */
@@ -176,6 +178,7 @@ export class WorldView {
     for (const id of removed) {
       this.nodes.delete(id);
       this.courses.delete(id);
+      this.elsewhere.delete(id);
       if (this.tracks.delete(id)) this.bodyIds = this.bodyIds.filter((b) => b !== id);
       else this.thingsDirty = this.coverDirty = true;
     }
@@ -386,8 +389,16 @@ export class WorldView {
     });
   }
 
-  /** A thing's boxes in its own frame, with their tags: its solids, or a half-metre box when it has none. */
+  /** #3871: the thing is drawn from its kind's entry now, so its box goes. */
+  drawnElsewhere(id: string): void {
+    this.elsewhere.add(id);
+    this.thingsDirty = true;
+  }
+
+  /** A thing's boxes in its own frame, with their tags: its solids, or a half-metre box when it has none (none when it
+   *  is drawn elsewhere). */
   private boxesOf(n: NodeRec): [THREE.Matrix4, number][] {
+    if (this.elsewhere.has(n.id)) return [];
     const s = (n.scale ?? 1_000_000) / 1_000_000;
     const solids = n.solids?.length ? n.solids : [[0, 0, 250, 250, 0, 0, 500, 0, 0]];
     return solids.map(([cx, cz, hx, hz, yaw, y0, y1, tag]) => [new THREE.Matrix4().compose(
