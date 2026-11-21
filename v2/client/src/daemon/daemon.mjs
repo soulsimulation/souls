@@ -123,6 +123,7 @@ import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { calendarOf, worldDue } from '../schedule/world.mjs';
+import { refreshEntries } from '../pair/pair.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -382,6 +383,13 @@ function syncAnswer(sock, n, refused, bytes) {
   current();
 }
 
+/** #3760: at each sign-in, the world's kind entries into `<home>/kinds/` (an unchanged world answers 304). */
+function refreshKinds() {
+  refreshEntries({ home, world: seat.world, gateway: seat.gateway, token: seat.token })
+    .then((r) => { if (r.changed) log(`kinds: ${r.entries} entries from the world`); })
+    .catch((e) => log(`kinds: not fetched (${e.code ?? 'unreachable'})`));
+}
+
 function connect() {
   counts.connects++;
   let step = 'hello', ended = false;
@@ -411,6 +419,7 @@ function connect() {
         if (a === 'stream.resumed') counts.resumed++;
         if (a === 'stream.cannot-resume') counts.cannotResume++;
         log(`signed in: ${a}`);
+        refreshKinds();
         step = 'stream';
         clearTimeout(deadline);
         if (a === 'stream.resumed' && !copy.empty()) { followWanted = true; current(); }
