@@ -262,7 +262,8 @@ fn mooring(w: &Water, terrain: Option<&Terrain>, clear: &impl Fn(Vec3) -> bool) 
 
 /// Today's shelf search (L1): a water whose long sides all have shallows wider than a plank, at most 200 m by 200 m:
 /// every home on a 0.5 m lattice where the hull floats, nearest the water's middle first, its plank's dry end in any
-/// of 32 directions at 3.1, 2.8, 2.5 or 2.2 m; at most 400 loops tried.
+/// of 32 directions 3.1 m out (today also tries 2.8, 2.5 and 2.2 m; the punt's kind has its plank at 3.1 m, as the
+/// shore search's punts have it); at most 400 loops tried.
 fn shelf(
     w: &Water,
     floats: &impl Fn(Vec3) -> bool,
@@ -305,7 +306,7 @@ fn shelf(
             let (c, s) = turn32(k);
             let (d, t) = ([c, s], [-s, c]);
             let n = [-c, -s];
-            for out in [3_100_000i64, 2_800_000, 2_500_000, 2_200_000] {
+            for out in [3_100_000i64] {
                 let at = |o: i64, along: i64| {
                     [
                         home.x + ppm(o, d[0]) + ppm(along, t[0]),
