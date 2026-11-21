@@ -53,28 +53,31 @@ test('the page Track draws a served Soul at changing positions from the real pub
     (globalThis as { self?: unknown }).self = selfBefore;
   }
   assert.deepEqual(errors, []);
-  // Every sample the parts carried, into each body's Track as the page adds them (`draw/world.ts`).
-  const tracks = new Map<string, Track>(), walked = new Map<string, number[]>();
+  // Every sample the parts carried for each body, in order, as `draw/world.ts` adds them to its Track; a sample in
+  // another frame starts the Track again (a transfer), so the body's longest stretch in one frame is read back.
+  const runs = new Map<string, { frame: string; samples: [number, [number, number, number]][] }[]>();
   for (const p of parts) {
     for (const [id, parent, slot, at, x, y, z] of p.samples) {
-      const t = tracks.get(id) ?? tracks.set(id, new Track()).get(id)!;
-      t.add(at, [x, y, z], `${parent}/${slot}`);
-      if (slot === null) (walked.get(id) ?? walked.set(id, []).get(id)!).push(at);
+      const frame = `${parent}/${slot}`;
+      const r = runs.get(id) ?? runs.set(id, []).get(id)!;
+      if (r.at(-1)?.frame !== frame) r.push({ frame, samples: [] });
+      r.at(-1)!.samples.push([at, [x, y, z]]);
     }
   }
-  const [body, times] = [...walked].sort((a, b) => b[1].length - a[1].length)[0] ?? [];
-  assert.ok(body, `the parts carry a body's samples (${parts.length} parts)`);
-  // Replay the walk as the page would: a fresh Track fed in order, read at five times across the walk.
+  const [body, run] = [...runs]
+    .map(([id, r]) => [id, r.reduce((a, b) => (b.samples.length > a.samples.length ? b : a))] as const)
+    .sort((a, b) => b[1].samples.length - a[1].samples.length)[0] ?? [];
+  assert.ok(body && run, `the parts carry a body's samples (${parts.length} parts)`);
+  // A fresh Track fed that stretch, as the page feeds it, read at five times across it.
   const t = new Track();
-  const on: [number, [number, number, number]][] = [];
-  for (const p of parts) for (const [id, parent, slot, at, x, y, z] of p.samples) if (id === body && slot === null) { t.add(at, [x, y, z], `${parent}/${slot}`); on.push([at, [x, y, z]]); }
-  const [t0, t1] = [times[0], times[Math.min(times.length - 1, Math.floor(times.length / 2))]];
+  for (const [at, pos] of run.samples) t.add(at, pos, run.frame);
+  const [t0, t1] = [run.samples[0][0], run.samples.at(-1)![0]];
   const seen = new Set<string>();
   for (let k = 0; k <= 4; k++) {
     const pos = t.at(t0 + ((t1 - t0) * k) / 4);
     assert.ok(pos);
     seen.add(pos.map((v) => Math.round(v / 1000)).join(','));
   }
-  console.log(`${parts.length} parts; body ${body}: ${times.length} samples on a floor; Track positions at five times: ${[...seen].join(' | ')} (mm)`);
+  console.log(`${parts.length} parts; body ${body}: ${run.samples.length} samples in frame ${run.frame} over ${((t1 - t0) / 1e6).toFixed(1)} s; Track positions at five times: ${[...seen].join(' | ')} (mm)`);
   assert.ok(seen.size >= 3, 'the Track places the body at changing positions');
 });
