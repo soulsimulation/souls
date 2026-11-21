@@ -72,7 +72,9 @@ test('the dock and the Soul page show a thread as text, live; opening it frames 
     append(...c: El[]) { this.children.push(...c); }
     replaceChildren(...c: El[]) { this.children = c; }
     after() {}
-    addEventListener() {}
+    hidden = false;
+    listeners: Record<string, (() => void)[]> = {};
+    addEventListener(type: string, f: () => void) { (this.listeners[type] ??= []).push(f); }
     getContext() {
       return { font: '', fillStyle: '', textBaseline: 'top', measureText: (s: string) => ({ width: s.length * 4 }), fillText() {}, fillRect() {}, clearRect() {}, setTransform() {}, beginPath() {}, moveTo() {}, lineTo() {}, fill() {} };
     }
@@ -121,7 +123,35 @@ test('the dock and the Soul page show a thread as text, live; opening it frames 
   souls.draw(9e6, camera);
   assert.equal(dock.style.display, 'flex');
   assert.equal(dock.children.find((c) => c.tag === 'ol')!.children.length, 3);
+  // #3777: scrolled up, new lines are counted on a `N new` button; pressing it, or scrolling to the bottom, jumps
+  // to the newest and clears the count.
+  const list = dock.children.find((c) => c.tag === 'ol')!, more = dock.children.at(-1)!;
+  assert.equal(more.tag, 'button', 'the jump is a button: keyboard reachable');
+  assert.ok(more.hidden, 'no count while following');
+  Object.assign(list, { scrollHeight: 600, clientHeight: 100, scrollTop: 0 }); // the reader scrolled up
+  souls.apply(part(5, [said('b.2', 9.2e6, 'One')]));
+  souls.draw(9.25e6, camera);
+  assert.ok(!more.hidden);
+  assert.equal(more.textContent, '1 new line ↓');
+  assert.equal(list.scrollTop, 0, 'the dock stays where the reader is');
+  souls.apply(part(6, [said('a.1', 9.3e6, 'Two'), said('b.2', 9.31e6, 'Three')]));
+  souls.draw(9.35e6, camera);
+  souls.draw(9.36e6, camera); // drawn again with nothing new: the count holds
+  assert.equal(more.textContent, '3 new lines ↓');
+  more.onclick!();
+  assert.equal(list.scrollTop, 600, 'the jump goes to the newest line');
+  assert.ok(more.hidden, 'and clears the count');
+  list.scrollTop = 0;
+  souls.apply(part(7, [said('a.1', 9.4e6, 'Four')]));
+  souls.draw(9.45e6, camera);
+  assert.equal(more.textContent, '1 new line ↓');
+  list.scrollTop = 500; // scrolled to the bottom by hand
+  for (const f of list.listeners.scroll ?? []) f();
+  assert.ok(more.hidden, 'reaching the bottom clears the count');
+  souls.apply(part(8, [said('b.2', 9.5e6, 'Five')]));
+  souls.draw(9.55e6, camera);
+  assert.ok(more.hidden, 'following again: no count');
   souls.converse(null);
-  souls.draw(9.1e6, camera);
+  souls.draw(9.6e6, camera);
   assert.equal(dock.style.display, 'none');
 });
