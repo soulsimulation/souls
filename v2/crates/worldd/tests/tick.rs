@@ -1073,12 +1073,7 @@ fn malformed_words_are_refused_and_the_world_restarts() {
 fn a_cancel_naming_an_open_walk_stops_it_where_it_stands_and_replays() {
     let walker = pairs()[0].0;
     let cancel = |sequence: u64, replaces: u64| {
-        let mut i = Intent::from_value(
-            &decode(&intent(walker, sequence, "souls:cancel", None, None))
-                .unwrap()
-                .value,
-        )
-        .unwrap();
+        let mut i = Intent::read(&intent(walker, sequence, "souls:cancel", None, None)).unwrap();
         i.replaces = Some(replaces);
         encode(&i.to_value()).unwrap()
     };
