@@ -41,8 +41,14 @@ export type NodeRec = {
   description?: string | null;
   /** Exact recorded body-kind hash (field32); absent is the stated default. */
   body?: string;
+  /** A named place's (or room's, or thing's) public name: import-eden's field 4, by its hash, with the words from the
+   *  text files' `[hash, words]` rows (#3574); null while unknown. */
+  placeName?: string | null;
   /** The world node's day, night and weather fields (E6; V19, `sky/record.ts`). */
   sky?: SkyFields;
+  /** A moving node's course (field 80, `replica::schedule::F_COURSE`), its value's canonical bytes, for the replica's
+   *  `courseAt` (#3603). */
+  course?: Uint8Array;
 };
 
 /** Where the world is: its newest part's end, world time against wall time, and the world time up to which a still
@@ -55,7 +61,9 @@ export type SampleRec = [string, string, number | null, number, number, number, 
 
 /** One `souls:said` event (V1b): the speaker's body, world time µs, length µs, reach mm, its words' reference and the
  * words from the part's text file (null when the file does not hold them, e.g. removed). */
-export type SaidRec = { speaker: string; at: number; length: number; reach: number; ref: string; words: string | null };
+export type SaidRec = { speaker: string; at: number; length: number; reach: number; ref: string; words: string | null; private?: Private };
+/** A private turn's public record (`souls:said-privately`, #3775): the conversation and its members; never words. */
+export type Private = { conversation: string; members: string[] };
 
 /** What one part changed, in the order played; `samples` is every motion sample in it, in entry order; `said` every
  * utterance in it (V1b). */

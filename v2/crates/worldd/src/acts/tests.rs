@@ -374,6 +374,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         toward: &toward,
         asked: RefCell::new(BTreeMap::new()),
         context: BTreeMap::from([(id, (intent, 0, 0))]),
+        walks: BTreeMap::new(),
         planning: &planning,
         map: Arc::clone(&map),
     };
@@ -507,5 +508,93 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
     assert_eq!(
         merged.forms[&key].generation, 9,
         "an older batch cannot replace a newer result"
+    );
+}
+
+/// C34 (#3599) A1: a walk to a building's named area is planned on the building's own room and floor: the area
+/// named as an upstairs room (`r1a`) resolves onto that room's floor at the room's height, whatever height the point
+/// gives; an area that names no room of a building with more than one floor has no way there; a point its entry does
+/// not list as an area, or a walk at another step, is planned as before.
+#[test]
+fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let (ground, building) = (imported.nodes["ground"], imported.nodes["building"]);
+    let floor1 = imported.nodes["building/floor-1"];
+    let tree = &imported.tree;
+    let b = tree.node(tree.handle(building).unwrap()).unwrap();
+    let place = b.place().unwrap();
+    let room_y = tree
+        .node(tree.handle(imported.nodes["building/r1a"]).unwrap())
+        .unwrap()
+        .place()
+        .unwrap()
+        .position
+        .y;
+    let kind = plain(b.kind()).to_owned();
+    let area = |y: i128| {
+        Json::Obj(vec![(
+            "at_mm".into(),
+            Json::Arr(vec![Json::Int(0), Json::Int(y), Json::Int(0)]),
+        )])
+    };
+    let kinds = Json::Obj(vec![(
+        kind,
+        Json::Obj(vec![(
+            "areas".into(),
+            Json::Obj(vec![
+                ("r1a".into(), area(100)),
+                ("attic".into(), area(9_000)),
+            ]),
+        )]),
+    )]);
+    let id = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let toward = BTreeMap::new();
+    let planning = RefCell::new(Planning::default());
+    let sight = |point: &str| Sight {
+        bodies: BTreeMap::new(),
+        carrying: BTreeSet::new(),
+        tree,
+        split: None,
+        builds: BTreeMap::new(),
+        kind: Name::new("souls:body").unwrap(),
+        kinds: &kinds,
+        toward: &toward,
+        asked: RefCell::new(BTreeMap::new()),
+        context: BTreeMap::new(),
+        walks: BTreeMap::from([(id, (2, building, Name::new(point).unwrap()))]),
+        planning: &planning,
+        map: Arc::new(Versions::default()),
+    };
+    // A point 1 m along the building's own x, 0.1 m up, in the ground's frame.
+    let local = Vec3::new(1_000_000, 100_000, 0);
+    let at = place
+        .position
+        .plus(place.orientation.rotate(local).unwrap())
+        .unwrap();
+    let (floor, on) = sight("r1a")
+        .area_floor(id, 2, ground, at)
+        .expect("an area of a building")
+        .expect("its room's floor");
+    assert_eq!(floor, floor1, "the upstairs room's floor");
+    assert_eq!(on.y, room_y, "at the room's height, not the point's");
+    assert!(
+        (on.x - local.x).abs() <= 2 && on.z.abs() <= 2,
+        "the point in the building's frame: {on:?}"
+    );
+    assert_eq!(
+        sight("attic").area_floor(id, 2, ground, at),
+        Some(None),
+        "no room or only floor: no way"
+    );
+    assert_eq!(
+        sight("door").area_floor(id, 2, ground, at),
+        None,
+        "not an area: as before"
+    );
+    assert_eq!(
+        sight("r1a").area_floor(id, 3, ground, at),
+        None,
+        "another step: as before"
     );
 }

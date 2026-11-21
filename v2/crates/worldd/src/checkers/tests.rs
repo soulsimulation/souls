@@ -83,6 +83,7 @@ fn a3_checks_run_off_the_clock_thread() {
 }
 
 #[test]
+#[cfg(debug_assertions)] // the guard is a debug_assert: a release build never panics (as worldd/tests/tick.rs)
 #[should_panic(expected = "ran on the clock thread")]
 fn a3_a_check_on_the_clock_thread_fails() {
     let w = World::build(1, 1, 0);

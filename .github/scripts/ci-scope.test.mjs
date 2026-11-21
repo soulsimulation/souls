@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, ciRunsAt, deferredOnly, deferredReceipt, greenAtHead, greenCommand, lightOnly, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
+import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, V2_LEGS, WINDOW_LABELS, changedFiles, ciRunsAt, deferredOnly, deferredReceipt, greenAtHead, greenCommand, lightOnly, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
 import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 
 const names = files => jobsFor(files).include.map(j => j.name);
+
+/** The parallel legs of a kind split by test-legs.mjs (launcher-0 ...), in matrix order. */
+const LEGS = kind => JOBS.filter(j => j.kind === kind).map(j => j.name);
 
 test('docs and plain tools changes run no job', () => {
   assert.deepEqual(names(['README.md', 'docs/TESTING.md', 'tools/playtest/x.mjs']), []);
@@ -27,7 +30,7 @@ test('web changes run the typecheck/build and the web unit suite', () => {
 
 test('launcher and client-cli changes run their own unit tests', () => {
   const launcher = names(['tools/world-launcher/launcher.mjs']);
-  assert.ok(launcher.includes('launcher'), launcher.join());
+  assert.deepEqual(launcher.filter(n => n.startsWith('launcher')), ['launcher-0', 'launcher-1', 'launcher-2'], launcher.join());
   assert.ok(!launcher.includes('web') && !launcher.includes('client-cli'));
   assert.deepEqual(names(['tools/client-eval/eval.mjs']), ['client-cli']);
   assert.deepEqual(names(['tools/edge-skill/soul.mjs']), [], '#1754: no job runs the legacy client');
@@ -70,7 +73,7 @@ test('the types-web job, which runs the bundle comparison, covers what can move 
 
 test('routing: the server shards and the long legs go to CI_HEAVY_RUNNER; the short legs, native and smoke stay hosted', () => {
   const heavy = JOBS.filter(j => j.heavy).map(j => j.name).sort();
-  assert.deepEqual(heavy, ['launcher', 'packages', ...JOBS.filter(j => j.kind === 'server').map(j => j.name), 'soul-actions'].sort());
+  assert.deepEqual(heavy, [...LEGS('launcher'), 'packages', ...JOBS.filter(j => j.kind === 'server').map(j => j.name), ...LEGS('soul-actions')].sort());
   for (const job of JOBS) assert.deepEqual(runnerFor(job, '["self-hosted","souls-heavy"]'), job.heavy ? ['self-hosted', 'souls-heavy'] : 'ubuntu-latest', job.name);
   assert.equal(runnerFor(JOBS.find(j => j.kind === 'native'), '["self-hosted","souls-heavy"]'), 'ubuntu-latest');
   assert.equal(runnerFor(JOBS.find(j => j.kind === 'server'), 'souls-ci'), 'souls-ci');
@@ -97,10 +100,10 @@ test('ci.yml: qualify runs-on reads the matrix flag, and smoke stays hosted (#11
 });
 
 test('the soul-actions job runs on its own paths, full scope included, and on nothing else (#1061)', () => {
-  for (const f of ['tools/soul-actions/shared-crew.test.mjs', 'apps/server/src/edge/ledger/together.ts', 'apps/server/test/native-owner-fixture.ts', 'packages/world-compiler/src/model.ts', 'packages/engine-mars/src/x.ts']) assert.ok(names([f]).includes('soul-actions'), f);
-  for (const f of ['apps/web/src/App.tsx', 'docs/testing.md', 'tools/world-launcher/launcher.mjs', 'packages/edge-cli/x.ts']) assert.ok(!names([f]).includes('soul-actions'), f);
-  assert.ok(names(['pnpm-lock.yaml']).includes('soul-actions'));
-  assert.ok(!('paths' in jobsFor(['tools/soul-actions/x.test.mjs']).include.find(j => j.name === 'soul-actions')));
+  for (const f of ['tools/soul-actions/shared-crew.test.mjs', 'apps/server/src/edge/ledger/together.ts', 'apps/server/test/native-owner-fixture.ts', 'packages/world-compiler/src/model.ts', 'packages/engine-mars/src/x.ts']) assert.deepEqual(names([f]).filter(n => n.startsWith('soul-actions')), LEGS('soul-actions'), f);
+  for (const f of ['apps/web/src/App.tsx', 'docs/testing.md', 'tools/world-launcher/launcher.mjs', 'packages/edge-cli/x.ts']) assert.ok(!names([f]).some(n => n.startsWith('soul-actions')), f);
+  assert.ok(names(['pnpm-lock.yaml']).includes('soul-actions-0'));
+  assert.ok(!('paths' in jobsFor(['tools/soul-actions/x.test.mjs']).include.find(j => j.name === 'soul-actions-0')));
 });
 
 test('the soul-tools job runs on its own paths, full scope included, and on nothing else (#1111)', () => {
@@ -110,14 +113,16 @@ test('the soul-tools job runs on its own paths, full scope included, and on noth
   assert.ok(!('paths' in jobsFor(['tools/soul-trace/x.test.mjs']).include.find(j => j.name === 'soul-tools')));
 });
 
-test('a v2/-only change runs the v2 job alone, scope none; v2 runs on nothing else (K15, #2637)', () => {
+const V2_NAMES = ['v2-rust', 'v2-sim', 'v2-worldd', 'v2-wasm', 'v2-client'];
+test('a v2/-only change runs the v2 legs alone, scope none; v2 runs on nothing else (K15, #2637)', () => {
   for (const files of [['v2/x.rs'], ['v2/crates/seed/src/lib.rs', 'v2/docs/TRUNK.md', 'v2/Cargo.lock']]) {
-    assert.deepEqual(names(files), ['v2'], files.join());
+    assert.deepEqual(names(files), V2_NAMES, files.join());
+    assert.deepEqual(jobsFor(files).include.map(j => j.leg), V2_LEGS);
     assert.equal(jobsFor(files).scope, 'none');
     assert.equal(smokeFor(files), false);
   }
-  for (const f of ['apps/server/src/world.ts', 'apps/web/src/App.tsx', 'docs/testing.md', 'tools/v2/x.mjs']) assert.ok(!names([f]).includes('v2'), f);
-  assert.ok(names(['pnpm-lock.yaml']).includes('v2'), 'full scope includes it');
+  for (const f of ['apps/server/src/world.ts', 'apps/web/src/App.tsx', 'docs/testing.md', 'tools/v2/x.mjs']) assert.ok(!names([f]).some(n => n.startsWith('v2')), f);
+  for (const n of V2_NAMES) assert.ok(names(['pnpm-lock.yaml']).includes(n), `full scope includes ${n}`);
   assert.ok(!('paths' in jobsFor(['v2/x.rs']).include[0]));
 });
 
@@ -125,7 +130,8 @@ test('ci.yml: the v2 job skips the pnpm install and runs v2/tools/ci.sh on the p
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   const qualify = /^  qualify:[\s\S]*?(?=^  \S)/m.exec(workflow)?.[0] ?? '';
   assert.match(qualify, /if: matrix\.kind != 'v2'\n\s+run: pnpm install --frozen-lockfile/);
-  assert.match(qualify, /^\s+v2\)\n.*\n\s+bash v2\/tools\/ci\.sh$/m);
+  assert.match(qualify, /^\s+v2\)\n.*\n\s+bash v2\/tools\/ci\.sh "\$V2_LEG"$/m);
+  assert.match(qualify, /V2_LEG: \$\{\{ matrix\.leg \}\}/);
   assert.match(qualify, /rust-toolchain\.toml/);
   assert.match(qualify, /key: v2-cargo-.*hashFiles\('v2\/rust-toolchain\.toml', 'v2\/Cargo\.lock'\)/);
 });
@@ -259,7 +265,7 @@ const HEAVY = JOBS.filter(j => j.heavy).map(j => j.name);
 const SERVER = ['--files', 'apps/server/src/world.ts'];
 
 test('heavy legs: pull_request, merge_group and push runs select none; the daily, manual and requested runs select them', () => {
-  assert.deepEqual(HEAVY, ['packages', 'launcher', ...Array.from({ length: JOBS.filter(j => j.kind === 'server').length }, (_, i) => `server-${i}`), 'soul-actions']);
+  assert.deepEqual(HEAVY, ['packages', ...LEGS('launcher'), ...Array.from({ length: JOBS.filter(j => j.kind === 'server').length }, (_, i) => `server-${i}`), ...LEGS('soul-actions')]);
   for (const event of ['pull_request', 'merge_group', 'push']) {
     assert.deepEqual(lightOnly(JOBS, event).daily, HEAVY, event);
     assert.equal(lightOnly(JOBS, event).include.some(j => j.heavy), false, event);
@@ -281,7 +287,7 @@ test('heavy legs: pull_request, merge_group and push runs select none; the daily
   }
   // a change whose paths pick only heavy legs has nothing of its own to run, so it is never deferred
   const only = run('--files', 'tools/soul-actions/a.test.mjs', '--event', 'pull_request', '--draft', 'true', '--labels', '[]');
-  assert.deepEqual([only.matrix, only.daily, only.deferred], [[], ['soul-actions'], 'false']);
+  assert.deepEqual([only.matrix, only.daily, only.deferred], [[], LEGS('soul-actions'), 'false']);
   assert.deepEqual(run('--files', 'tools/soul-actions/a.test.mjs', '--event', 'merge_group').matrix, []);
 });
 
@@ -363,7 +369,7 @@ test('ci.yml: the window reaches the scope step, and a deferred run fails ci-ok'
 // Low-risk paths (Gene, 17 Nov): a change confined to entry, content, form-rules, docs or changelog fragments runs no
 // server, smoke (e2e), walk (packages) or bundle (types-web) job; it keeps repo (always), the entry tests and the
 // form-rules tests (soul-tools).
-const SKIPPED = JOBS.filter(j => j.kind === 'server' || ['latency', 'packages', 'types-web', 'launcher', 'native', 'client-cli', 'soul-actions'].includes(j.name)).map(j => j.name);
+const SKIPPED = JOBS.filter(j => j.kind === 'server' || ['latency', 'packages', 'types-web', 'launcher', 'native', 'client-cli', 'soul-actions'].includes(j.kind)).map(j => j.name);
 const LOW = ['tools/entry/check.mjs', 'content/kinds/seating/bench.json', 'content/asks/a.json', 'content/moves/a.json', 'packages/form-rules/cases/kettle.json', 'docs/testing.md', 'changes/a-fragment.md', 'README.md'];
 
 test('low-risk: a diff confined to the allowlist runs soul-tools only: no server, smoke, walk or bundle job', () => {
@@ -446,7 +452,7 @@ const receiptStep = (name, conclusion = 'success') => ({ name, status: 'complete
 const aggregateName = 'Run echo "scope=$SCOPE repo=$REPO qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED green_at_head=$GREEN"';
 const receiptJob = (id, name, conclusion = 'success', steps = [receiptStep('Run assigned checks')]) => ({ run_id: id, head_sha: RECEIPT_SHA, name, status: 'completed', conclusion, steps });
 const deferredJobs = id => ({ total_count: 5, jobs: [receiptJob(id, 'scope'), receiptJob(id, 'repo'), receiptJob(id, 'matrix.name', 'skipped', []), receiptJob(id, 'smoke', 'skipped', []), receiptJob(id, 'ci-ok', 'failure', [receiptStep('Set up job'), receiptStep('Full CI deferred', 'failure'), receiptStep(aggregateName, 'skipped'), receiptStep('Complete job')])] });
-const qualifiedJobs = id => ({ total_count: 4, jobs: ['scope', 'repo', 'ci-ok', 'v2'].map(name => receiptJob(id, name)) });
+const qualifiedJobs = id => ({ total_count: 4, jobs: ['scope', 'repo', 'ci-ok', 'v2-rust'].map(name => receiptJob(id, name)) });
 
 test('deferred receipt: only verified closed-window siblings can precede an actual exact-head qualification', () => {
   const runs = [receiptRun(3), receiptRun(2), receiptRun(1, 'success')];
@@ -467,7 +473,7 @@ test('deferred receipt: missing, mixed, genuine failure or mismatched job eviden
   const variants = [
     e => e.jobs[0].conclusion = 'failure',
     e => e.jobs[1].steps.push(receiptStep('unexpected failure', 'failure')),
-    e => e.jobs[2] = receiptJob(2, 'v2', 'failure'),
+    e => e.jobs[2] = receiptJob(2, 'v2-rust', 'failure'),
     e => e.jobs[3].steps.push(receiptStep('unexpected work')),
     e => e.jobs[4].steps[1].name = 'actual qualification failed',
     e => e.jobs[4].steps[2].conclusion = 'failure',

@@ -215,6 +215,26 @@ struct OpenCut {
 }
 
 impl Basis {
+    /// Whether `other` is this very basis (the same shared handles, #3743), not merely an equal one: a rebuild on
+    /// either gives the same ground with the same piece numbers.
+    pub fn same(&self, other: &Basis) -> bool {
+        self.size == other.size
+            && Arc::ptr_eq(&self.layout, &other.layout)
+            && Arc::ptr_eq(&self.floors, &other.floors)
+            && Arc::ptr_eq(&self.flags, &other.flags)
+            && Arc::ptr_eq(&self.open, &other.open)
+            && self.index.same(&other.index)
+            && Arc::ptr_eq(&self.known, &other.known)
+            && Arc::ptr_eq(&self.reach, &other.reach)
+            && Arc::ptr_eq(&self.joined, &other.joined)
+            && self.classes.len() == other.classes.len()
+            && self
+                .classes
+                .iter()
+                .zip(&other.classes)
+                .all(|((a, x), (b, y))| a == b && x.same(y))
+    }
+
     /// Reconstructs only the requested immutable surface off-clock, preserving its actual live piece numbers.
     pub fn surface(&self, size: Size, node: Id, ground: Id) -> Result<Surface, Refusal> {
         crate::commit::off_clock();
@@ -324,8 +344,15 @@ impl Rebuilt {
     /// Two independently mutable installations of one checked rebuild. Immutable basis handles stay shared;
     /// all mutable geometry and route storage is copied here, before either installation reaches the clock.
     pub fn into_pair(self) -> (Self, Self) {
+        let other = self.copy();
+        (self, other)
+    }
+
+    /// One more independently mutable installation of this rebuild (#3743: the edit checker's town takes the third),
+    /// copied as [`Rebuilt::into_pair`] copies: immutable basis handles shared, mutable geometry copied.
+    pub fn copy(&self) -> Self {
         crate::commit::off_clock();
-        let other = Self {
+        Self {
             touched: self.touched.clone(),
             versions: self.versions.clone(),
             fresh: self.fresh.clone(),
@@ -333,8 +360,7 @@ impl Rebuilt {
             after: self.after.clone(),
             before_layout: Arc::clone(&self.before_layout),
             why: self.why,
-        };
-        (self, other)
+        }
     }
 
     pub fn affects(&self, basis: &crate::controller::BuildBasis, ground: Id) -> bool {
@@ -1389,6 +1415,79 @@ impl Town {
         copy.prepare_classes(self.classes.keys().copied())?;
         copy.body_classes.clone_from(&self.body_classes);
         Ok(copy)
+    }
+
+    /// A copy of this town by memory copy, as it stands (#3743): the edit checker's own town, seeded at boot from the
+    /// town the boot already built instead of assembled again. Its ground, classes and versions are this town's;
+    /// its tree is a frozen copy and its door writer its own. No walker, line, plan or spot table is copied.
+    pub fn duplicate(&self) -> Town {
+        let d = &self.doors;
+        Town {
+            tree: self.tree.frozen(),
+            classes: self.classes.clone(),
+            body_classes: self.body_classes.clone(),
+            ground: self.ground,
+            map: self.map.clone(),
+            surfaces: self.surfaces.clone(),
+            buildings: self.buildings.clone(),
+            link_at: self.link_at.clone(),
+            doors: Doors::new(d.header.clone(), d.rules.clone(), d.next),
+            turns: Some(Turns::new()),
+            spots: Spots::new(),
+            meter: None,
+            spent: Cell::new(Spent::default()),
+            lines: Vec::new(),
+            scratches: vec![ClassScratch::default()],
+            crossings: BTreeMap::new(),
+            versions: self.versions.clone(),
+            basis: self.basis.clone(),
+            square_pieces: self.square_pieces.clone(),
+            planned: BTreeMap::new(),
+            planned_squares: BTreeMap::new(),
+            stale: BTreeMap::new(),
+        }
+    }
+
+    /// A town on `tree` and its planner's copy (K18b, #3175), with the ground assembled once (#3672): the planner
+    /// gets a clone of the assembled ground instead of a second assembly. Equal to [`Town::new`] then
+    /// [`Town::copy`]: assembly reads only the tree, the ground and fresh versions, all the same for both.
+    pub fn with_planner(tree: Tree, ground: Id, doors: Doors) -> Result<(Town, Town), String> {
+        let frozen = tree.frozen();
+        let planner_doors = Doors::new(doors.header.clone(), doors.rules.clone(), doors.next);
+        let town = Town::new(tree, ground, doors)?;
+        let (map, surfaces, buildings, basis, square_pieces) = (
+            town.map.clone(),
+            town.surfaces.clone(),
+            town.buildings.clone(),
+            town.basis.clone(),
+            town.square_pieces.clone(),
+        );
+        let link_at = town.link_at.clone();
+        let planner = Town {
+            tree: frozen,
+            classes: BTreeMap::new(),
+            body_classes: BTreeMap::new(),
+            ground,
+            map,
+            surfaces,
+            buildings,
+            link_at,
+            doors: planner_doors,
+            turns: Some(Turns::new()),
+            spots: Spots::new(),
+            meter: None,
+            spent: Cell::new(Spent::default()),
+            lines: Vec::new(),
+            scratches: vec![ClassScratch::default()],
+            crossings: BTreeMap::new(),
+            versions: Versions::default(),
+            basis,
+            square_pieces,
+            planned: BTreeMap::new(),
+            planned_squares: BTreeMap::new(),
+            stale: BTreeMap::new(),
+        };
+        Ok((town, planner))
     }
 
     /// The line from where `body` stands toward `to` on its node ([`View::search`], the planning call): the planner's

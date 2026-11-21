@@ -90,6 +90,7 @@ fn toggle(body: Id, thing: Id, sequence: u64) -> Vec<u8> {
         }],
         replaces: None,
         body: None,
+        reflex: false,
     };
     encode(&i.to_value()).expect("an intent")
 }

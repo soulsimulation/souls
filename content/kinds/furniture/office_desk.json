@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:office_desk",
   "owner": "thing",
-  "state": { "computer_on": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "state": { "computer_on": { "n": 28, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
   "points": {
     "user": { "role": "stand", "at_mm": [-100, 0, 1050], "yaw_mdeg": 180000 },
     "power": { "role": "contact", "at_mm": [-100, 1080, -150] }

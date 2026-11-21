@@ -42,7 +42,7 @@
           "receipt": "rc1",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "t1", "field": "reclined", "n": 1, "to": 1 }],
+            "changes": [{ "change": "set", "node": "t1", "field": "reclined", "n": 28, "to": 1 }],
             "events": [{ "event": "eden:leaned_back", "node": "t1", "changes": [0] }],
             "timers": []
           }
@@ -57,7 +57,7 @@
           "receipt": "rc3",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "t1", "field": "reclined", "n": 1, "to": 0 }],
+            "changes": [{ "change": "set", "node": "t1", "field": "reclined", "n": 28, "to": 0 }],
             "events": [{ "event": "eden:sat_up", "node": "t1", "changes": [0] }],
             "timers": []
           }

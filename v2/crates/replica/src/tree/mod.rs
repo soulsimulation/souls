@@ -1776,6 +1776,12 @@ impl Tree {
 
     /// The tree in T6's fixture form, so that its `souls/fixture/1` hash can be compared with the harness's
     /// (`effects.md` rule 11). Links are written once; the indexes are derived and appear nowhere.
+    /// One live node as [`Tree::to_state`] holds it (#3799): what a reader of one row needs, without the whole state.
+    pub fn node_state_of(&self, id: Id) -> Option<NodeState> {
+        let slot = self.live(id).ok()?;
+        Some(self.node_state(&self.nodes[slot as usize]))
+    }
+
     pub fn to_state(&self) -> State {
         let nodes = self
             .nodes

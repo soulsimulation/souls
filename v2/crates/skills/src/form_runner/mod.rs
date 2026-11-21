@@ -79,7 +79,10 @@
 //!   `set` with a `rate` writes a timed field's three numbers ([`Effect::Timed`]); a link has its kind's `most`; a
 //!   set's value is checked against its field (`out-of-range`, `not-allowed`) and an enum's value is written as a
 //!   name in the kind's namespace; a `reparent` no step carries is a take or a put of a thing, or the actor staying
-//!   `here` ([`Effect::Here`]). A body goes into a slot only by a `sit` or `lie` step (`body-moves-by-step`).
+//!   `here` ([`Effect::Here`]). A body goes into a seat only by a `sit` or `lie` step (`body-moves-by-step`).
+//! - **Standing slots** (C33, #3598). A `reparent` of the actor into a slot that admits a body and names no posture is
+//!   the body's hand-off into it on its feet, through the same seat hand-off as a sit ([`Step::Sit`] with `stand`,
+//!   added after the form's steps); a `reparent` of the actor `here` with no `rise` hands it out by a rise first.
 //!
 //! Not here: who may (F6), stages of long forms (F11), a thing made or set down where there is no slot (E4).
 
@@ -122,8 +125,10 @@ pub enum Step {
     /// A pause of a fixed length, µs.
     Wait(Micros),
     /// Sit, or lie, in slot `slot` of the node (C17): B3's seat taken by B2's sit or lie move, as the gateway's sit
-    /// takes it. It lies when the slot's posture is `lie` or the step is a `lie`.
-    Sit { slot: u64, lie: bool },
+    /// takes it. It lies when the slot's posture is `lie` or the step is a `lie`. With `stand`, the body is handed
+    /// into a standing slot on its feet by the same hand-off (C33, #3598): no form writes this step, the binding adds
+    /// it for a form's `reparent` of the actor into a standing slot ([`bind_with`]).
+    Sit { slot: u64, lie: bool, stand: bool },
     /// Rise (C25, #3496): out of the body's seat by B3's rise, onto its stand point; up from a ground posture a
     /// `settle` took; nothing for a body already standing, as today's `stand` is. The form's `reparent` of the actor
     /// to `here` is the rise's own hand-off.
@@ -310,13 +315,19 @@ pub fn bind(entry: &Value, form: &str) -> Result<Vec<Step>, Refusal> {
 /// Binds form `form` of the kind `entry` into its steps, all or none, with its act's arguments `args` (F14): a step's
 /// point (`walk_to.point`, a move's `at`) is a declared name or an argument ([`Step`]); a move with no `at` aims at the
 /// node with the move's own contact. A form with no steps binds to none: its effects land at once (C25, #3496).
+///
+/// Standing slots (C33, #3598): a form's `reparent` of the actor into a standing slot ([`standing`]) that no `sit`
+/// or `lie` step carries is the body's hand-off into that slot on its feet, a [`Step::Sit`] with `stand` after the
+/// form's own steps; a `reparent` of the actor `here` with no `rise` step is a [`Step::Rise`] before them, so a body
+/// in a slot is handed out by B3's rise (at once for a body standing free). Into a seat (a slot with a posture) it
+/// stays refused `body-moves-by-step` ([`bind_effects_args`]).
 /// Refused: `form-unknown`, `step-unknown`, `step-malformed`, `point-unknown`, `arg-missing`.
 pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Refusal> {
     let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
         return refuse("form-unknown", form);
     };
     let steps = f.get("steps").and_then(Value::arr).unwrap_or(&[]);
-    steps
+    let mut bound = steps
         .iter()
         .map(|s| {
             let kind = text(s.get("step"), "step")?;
@@ -359,6 +370,7 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                     Ok(Step::Sit {
                         slot,
                         lie: kind == "lie" || posture == Some("lie"),
+                        stand: false,
                     })
                 }
                 "move" | "take" | "put" => {
@@ -394,7 +406,126 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                 k => refuse("step-unknown", k),
             }
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    approach_in_areas(entry, &mut bound)?;
+    if let Some((_, slot)) = stand_in(entry, f, args)? {
+        bound.push(Step::Sit {
+            slot,
+            lie: false,
+            stand: true,
+        });
+    }
+    if rises_out(f) {
+        bound.insert(0, Step::Rise);
+    }
+    Ok(bound)
+}
+
+/// An area is a place to be in, not a point to act from (C34, #3599): a move at a point of the thing right after a walk
+/// to one of its areas first walks, within that area, to that point (the planner stops within reach of it), as
+/// today's game walks to the stand point nearest the hand's point before it acts. The added walk keeps the area's name,
+/// so the world plans it on the area's own room and floor, and aims at the move's point.
+fn approach_in_areas(entry: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal> {
+    let is_area = |n: &Name| entry.get("areas").and_then(|a| a.get(n.as_str())).is_some();
+    let mut k = 1;
+    while k < bound.len() {
+        if let (
+            Step::WalkTo {
+                point: area,
+                on: None,
+                ..
+            },
+            Step::Move {
+                at: Some(p),
+                on: None,
+                ..
+            },
+        ) = (&bound[k - 1], &bound[k])
+            && is_area(area)
+            && area != p
+        {
+            // The point across the floor, at the area's height: the floor is the area's.
+            let (to, floor) = (point(entry, p.as_str())?, point(entry, area.as_str())?);
+            let step = Step::WalkTo {
+                point: area.clone(),
+                at: Vec3::new(to.x, floor.y, to.z),
+                on: None,
+            };
+            bound.insert(k, step);
+            k += 1;
+        }
+        k += 1;
+    }
+    Ok(())
+}
+
+/// Whether slot `slot` of the kind `entry` is a standing slot (C33, #3598): it admits a body and names no posture
+/// (a phone box's inside, a pool table's side, a balloon's basket).
+fn standing(entry: &Value, slot: &str) -> bool {
+    entry
+        .get("slots")
+        .and_then(|ss| ss.get(slot))
+        .is_some_and(|d| {
+            d.get("admits").and_then(Value::str) == Some("body") && d.get("posture").is_none()
+        })
+}
+
+/// Form `f`'s `reparent` of the actor into a standing slot that no `sit` or `lie` step carries (C33, #3598): the
+/// effect's index and the slot's number. A slot named through an argument is read from `args` (`arg-missing` without
+/// it). `None` for any other form, a seat among them.
+fn stand_in(entry: &Value, f: &Value, args: &Args) -> Result<Option<(usize, u64)>, Refusal> {
+    let effects = f.get("effects").and_then(Value::arr).unwrap_or(&[]);
+    let steps = f.get("steps").and_then(Value::arr).unwrap_or(&[]);
+    for (i, e) in effects.iter().enumerate() {
+        let Some(into) = e.get("into") else { continue };
+        if e.get("change").and_then(Value::str) != Some("reparent")
+            || e.get("what").and_then(Value::str) != Some("actor")
+            || into.str() == Some("here")
+        {
+            continue;
+        }
+        let carried = steps.iter().any(|s| {
+            matches!(s.get("step").and_then(Value::str), Some("sit" | "lie"))
+                && s.get("slot") == Some(into)
+        });
+        if carried {
+            continue;
+        }
+        let named = match into.get("arg").and_then(Value::str) {
+            Some(a) => match args.get(a) {
+                Some(Arg::Name(n)) => n.as_str(),
+                Some(_) => {
+                    return refuse("effect-malformed", format!("argument {a} is not a slot"));
+                }
+                None => return refuse("arg-missing", a),
+            },
+            None => match into.str() {
+                Some(n) => n,
+                None => continue,
+            },
+        };
+        if standing(entry, named) {
+            return Ok(Some((i, slot_n(entry, named)?)));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether form `f` hands the actor out of its slot (C33, #3598): it reparents the actor `here` and has no `rise`,
+/// `sit` or `lie` step of its own.
+fn rises_out(f: &Value) -> bool {
+    let effects = f.get("effects").and_then(Value::arr).unwrap_or(&[]);
+    let steps = f.get("steps").and_then(Value::arr).unwrap_or(&[]);
+    effects.iter().any(|e| {
+        e.get("change").and_then(Value::str) == Some("reparent")
+            && e.get("what").and_then(Value::str) == Some("actor")
+            && e.get("into").and_then(Value::str) == Some("here")
+    }) && !steps.iter().any(|s| {
+        matches!(
+            s.get("step").and_then(Value::str),
+            Some("rise" | "sit" | "lie")
+        )
+    })
 }
 
 /// Turns the points bound `steps` walk to by `q`, the orientation of the node the form is done at (C13, #3440): an
@@ -709,7 +840,8 @@ pub fn bind_effects_in(
 /// form's `reparent` effect into the same place names (the actor's hand, or that slot), else the node itself; that
 /// `reparent` is the step's transfer, bound once (C12, #3427). A `reparent` no take, put, sit or lie carries is bound
 /// alone (C24): a thing into the hand or a slot as a take or a put, the actor `here` as [`Effect::Here`]; the actor
-/// into a slot is refused `body-moves-by-step`.
+/// into a standing slot is carried by the hand-off [`bind_with`] adds (C33, #3598), into a seat refused
+/// `body-moves-by-step`.
 pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<Effect>, Refusal> {
     let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
         return refuse("form-unknown", form);
@@ -737,6 +869,10 @@ pub fn bind_effects_args(entry: &Value, form: &str, args: &Args) -> Result<Vec<E
         && let Some(i) = reparent(&Value::Str("here".into()))
         && effects[i].get("what").and_then(Value::str) == Some("actor")
     {
+        carried.push(i);
+    }
+    // So is a standing slot's (C33, #3598): the hand-off [`bind_with`] adds after the form's steps.
+    if let Some((i, _)) = stand_in(entry, f, args)? {
         carried.push(i);
     }
     let mut what = |s: &Value, into: &Value| match (s.get("what"), reparent(into)) {
@@ -1203,8 +1339,14 @@ pub enum Next {
         at: Option<Name>,
     },
     /// Take the seat in slot `slot` of `node` by B2's sit (or lie) move through B3's seats, as the gateway's sit
-    /// does (C17), then wake the runner with [`Woke::Contact`] at the hand-off and [`Woke::Moved`] at its end.
-    Sit { node: Id, slot: u64, lie: bool },
+    /// does (C17), then wake the runner with [`Woke::Contact`] at the hand-off and [`Woke::Moved`] at its end. With
+    /// `stand`, a standing slot taken on the body's feet (C33, #3598).
+    Sit {
+        node: Id,
+        slot: u64,
+        lie: bool,
+        stand: bool,
+    },
     /// Rise (C25): out of the body's seat by B3's rise, or up from a ground posture, then wake the runner with
     /// [`Woke::Moved`]; at once `done` for a body standing.
     Rise,
@@ -1364,13 +1506,14 @@ impl Runner {
                     at,
                 }
             }
-            Step::Sit { slot, lie } => {
+            Step::Sit { slot, lie, stand } => {
                 self.timer =
                     Some(host.set_timer(self.limits.step_move, name("souls:form-deadline")));
                 Next::Sit {
                     node: self.node,
                     slot,
                     lie,
+                    stand,
                 }
             }
             Step::Hand => {

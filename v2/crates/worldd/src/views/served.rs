@@ -306,6 +306,7 @@ mod tests {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         encode(&i.to_value()).unwrap()
     }
@@ -423,6 +424,7 @@ mod tests {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         encode(&i.to_value()).unwrap()
     }

@@ -9,7 +9,8 @@
 //! Operations in a row with the same writer and audience share one effect.
 //!
 //! The safety rule (G2's [`safety`], wired by #3280): [`plan`] runs off the clock after the check, writing the
-//! would-be part on the copy (placed nodes under provisional ids, [`PROVISIONAL`]) and handing it to
+//! would-be part on the copy (placed nodes under provisional ids, [`PROVISIONAL`], or, from the edit checker, the ids
+//! its commit will mint, [`plan_classes`]) and handing it to
 //! [`safety::guard`]. [`commit`] takes the plan and the bodies as they stand on its tick, and refuses the edit by the
 //! first unsafe body's name ([`safety::Guard::judge`], lookups only) before it mints or writes anything.
 //!
@@ -22,18 +23,20 @@ pub mod undo;
 pub mod weather;
 
 use crate::commit::{off_clock, write_guarded};
+use crate::ground::Versions;
 use crate::structure::Structure;
+use crate::walk::town::{Basis, Rebuilt};
 use replica::apply::Replica;
 use replica::edit::{Checked, Op, Ref, Refused, confirm};
 use replica::effects::{Body, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest};
-use replica::encode::{Value, encode};
+use replica::encode::{Name, Value, encode};
 use replica::ids::{Id, Minter, Scope};
 use replica::kinds::sizes::Size;
 use replica::pose::Frame;
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::Audience;
-use safety::{Guard, Known, Who, guard, guard_on};
+use safety::{Guard, Known, Who, guard, guard_kept, guard_on};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -54,6 +57,44 @@ pub struct Planned {
     guard: Guard,
     classes: BTreeMap<Size, Guard>,
     terrain: Option<terrain::Guard>,
+    map: Option<PlannedMap>,
+}
+
+/// The ground the guard built for a planned part on the checker's town (#3743), kept for the map preparation: it
+/// installs this instead of building the same ground again when the part, its open ground, versions and basis are
+/// the ones it prepares from ([`PlannedMap::reuse`]).
+pub struct PlannedMap {
+    part: Part,
+    ground: Id,
+    versions: Versions,
+    basis: Basis,
+    rebuilt: Rebuilt,
+}
+
+impl PlannedMap {
+    /// The kept ground, when it is the ground `part` leaves on `ground` with `versions` and the very `basis` (shared
+    /// handles, [`Basis::same`]): the same part byte for byte, so the same ids. Otherwise none, and the caller builds it.
+    pub fn reuse(
+        self,
+        part: &Part,
+        ground: Id,
+        versions: &Versions,
+        basis: &Basis,
+    ) -> Option<Rebuilt> {
+        let bytes = |p: &Part| encode(&p.to_value()).ok();
+        (self.ground == ground
+            && self.versions == *versions
+            && self.basis.same(basis)
+            && bytes(&self.part).is_some_and(|b| Some(b) == bytes(part)))
+        .then_some(self.rebuilt)
+    }
+}
+
+impl Planned {
+    /// The ground the guard built, taken out to be reused or dropped off the clock (#3743).
+    pub fn take_map(&mut self) -> Option<PlannedMap> {
+        self.map.take()
+    }
 }
 
 fn refused(name: &'static str, detail: impl Into<String>) -> Refused {
@@ -67,29 +108,36 @@ fn refused(name: &'static str, detail: impl Into<String>) -> Refused {
 /// Off the clock thread, after `replica::edit::check` on the same copy: the safety rule's guard for the part the edit
 /// would commit (see the module's notes). `ground` is the zone's open ground, none in a zone without one.
 pub fn plan(checked: Checked, copy: &Replica, ground: Option<Id>) -> Result<Planned, Refused> {
-    plan_with(checked, copy, ground, |part| {
-        guard(copy.tree(), copy.header(), ground, part)
+    plan_with(checked, copy, ground, Minter::new(PROVISIONAL), |part| {
+        Ok((guard(copy.tree(), copy.header(), ground, part)?, None))
     })
 }
 
 /// [`plan`] in a zone with a town (G2b, #3488): the guard cuts only what the edit can affect ([`safety::guard_on`]).
 /// `known` is the town as it stood at the copy's version.
 pub fn plan_on(checked: Checked, copy: &Replica, known: &Known) -> Result<Planned, Refused> {
-    plan_with(checked, copy, Some(known.ground), |part| {
-        guard_on(copy.tree(), copy.header(), part, known)
-    })
+    plan_with(
+        checked,
+        copy,
+        Some(known.ground),
+        Minter::new(PROVISIONAL),
+        |part| Ok((guard_on(copy.tree(), copy.header(), part, known)?, None)),
+    )
 }
 
-/// The same guarded plan, preparing every active non-default footprint off-clock.
+/// The same guarded plan, preparing every active non-default footprint off-clock. `names` is a copy of the minter
+/// the commit will mint with (#3743), so the planned part has the ids the committed one will; on a town, the ground
+/// the guard built is kept in the plan ([`Planned::take_map`]).
 pub fn plan_classes(
     checked: Checked,
     copy: &Replica,
     ground: Option<Id>,
     known: Option<&Known<'_>>,
     sizes: impl IntoIterator<Item = Size>,
+    names: Minter,
 ) -> Result<Planned, Refused> {
     let mut classes = BTreeMap::new();
-    let planned = plan_with(checked, copy, ground, |part| {
+    let planned = plan_with(checked, copy, ground, names, |part| {
         for size in sizes {
             if size != Size::Standard && !classes.contains_key(&size) {
                 classes.insert(
@@ -99,8 +147,18 @@ pub fn plan_classes(
             }
         }
         match known {
-            Some(k) => guard_on(copy.tree(), copy.header(), part, k),
-            None => guard(copy.tree(), copy.header(), ground, part),
+            Some(k) => {
+                let (g, rebuilt) = guard_kept(copy.tree(), copy.header(), part, k)?;
+                let map = PlannedMap {
+                    part: part.clone(),
+                    ground: k.ground,
+                    versions: k.versions.clone(),
+                    basis: k.basis.clone(),
+                    rebuilt,
+                };
+                Ok((g, Some(map)))
+            }
+            None => Ok((guard(copy.tree(), copy.header(), ground, part)?, None)),
         }
     })?;
     Ok(Planned { classes, ..planned })
@@ -110,10 +168,10 @@ fn plan_with(
     checked: Checked,
     copy: &Replica,
     ground: Option<Id>,
-    guard: impl FnOnce(&Part) -> Result<Guard, String>,
+    mut minter: Minter,
+    guard: impl FnOnce(&Part) -> Result<(Guard, Option<PlannedMap>), String>,
 ) -> Result<Planned, Refused> {
     off_clock();
-    let mut minter = Minter::new(PROVISIONAL);
     let names = names(&checked, &mut minter)?;
     let effects = effects(copy.tree(), copy.version(), &checked, &names, 0);
     let bytes = encode(&Value::Map(BTreeMap::from([
@@ -126,12 +184,13 @@ fn plan_with(
     .map_err(|e| refused("encoding", e.to_string()))?;
     let part = Part::read(&bytes).map_err(|r| refused(r.name, r.detail))?;
     let terrain = terrain::guard(copy.tree(), copy.header(), ground, &checked, &part)?;
-    let guard = guard(&part).map_err(|e| refused("edit.unchecked", e))?;
+    let (guard, map) = guard(&part).map_err(|e| refused("edit.unchecked", e))?;
     Ok(Planned {
         checked,
         guard,
         classes: BTreeMap::new(),
         terrain,
+        map,
     })
 }
 
@@ -139,7 +198,7 @@ fn plan_with(
 fn names(checked: &Checked, minter: &mut Minter) -> Result<BTreeMap<u64, Id>, Refused> {
     let mut names = BTreeMap::new();
     for op in &checked.edit.ops {
-        if let Op::Place { name, .. } = op {
+        if let Op::Place { name, .. } | Op::Doorway { name, .. } = op {
             let id = minter
                 .mint()
                 .map_err(|e| refused("edit.ids-exhausted", e.to_string()))?;
@@ -266,14 +325,120 @@ fn effects(
     };
     let audience = |r: Ref| match r {
         Ref::New(n) => audiences[&n],
-        Ref::Node(id) => tree
-            .handle(id)
-            .and_then(|h| tree.node(h))
-            .map_or(Audience::Everyone, |n| n.audience()),
+        Ref::Node(id) => names
+            .iter()
+            .find_map(|(name, minted)| {
+                (*minted == id)
+                    .then(|| audiences.get(name))
+                    .flatten()
+                    .copied()
+            })
+            .or_else(|| {
+                tree.handle(id)
+                    .and_then(|h| tree.node(h))
+                    .map(|n| n.audience())
+            })
+            .unwrap_or(Audience::Everyone),
     };
     let mut frames: BTreeMap<Id, (Id, Option<u64>)> = BTreeMap::new();
+    let mut fields: BTreeMap<(Id, u64), Value> = BTreeMap::new();
+    let mut linked: BTreeMap<Id, [Id; 2]> = BTreeMap::new();
     let mut groups: Vec<(Id, Audience, Vec<Change>)> = Vec::new();
-    for op in &edit.ops {
+    for (index, op) in edit.ops.iter().enumerate() {
+        if let Some(geometry) = checked.geometry.get(&index) {
+            let wall = id(geometry.wall);
+            fields.insert(
+                (wall, crate::ground::scene::F_SOLIDS),
+                geometry.solids.clone(),
+            );
+            groups.push((
+                wall,
+                audience(geometry.wall),
+                vec![Change::Set {
+                    node: wall,
+                    field: crate::ground::scene::F_SOLIDS,
+                    to: geometry.solids.clone(),
+                    by: None,
+                }],
+            ));
+        }
+        if let Op::Doorway {
+            name,
+            door,
+            from,
+            to,
+            at: [x, z],
+            yaw,
+            width,
+            height,
+            wall,
+            closed,
+            open,
+        } = op
+        {
+            use crate::ground::scene::{DOORWAY, F_DOORWAYS, F_OPEN_DOOR_LINK};
+            let (owner_audience, leaf_audience) = (audience(*from), audience(*door));
+            let (from, to, door, link) = (id(*from), id(*to), id(*door), names[name]);
+            let mut rows_list = match field(tree, &fields, from, F_DOORWAYS) {
+                Value::Array(rows) => rows,
+                _ => Vec::new(),
+            };
+            rows_list.push(Value::Array(vec![
+                link.to_value(),
+                Value::Text(Name::new("eden:door").unwrap()),
+                int(*x),
+                int(*z),
+                int(*yaw),
+                int(*width),
+                int(*height),
+            ]));
+            let rows = Value::Array(rows_list);
+            fields.insert((from, F_DOORWAYS), rows.clone());
+            fields.insert((door, F_OPEN_DOOR_LINK), link.to_value());
+            linked.insert(link, [from, to]);
+            groups.push((
+                from,
+                owner_audience,
+                vec![
+                    Change::Link {
+                        link,
+                        ty: Name::new(DOORWAY).unwrap(),
+                        ends: [from, to],
+                        owner: replica::world_model::End::First,
+                        audience: owner_audience,
+                    },
+                    Change::Set {
+                        node: from,
+                        field: F_DOORWAYS,
+                        to: rows,
+                        by: None,
+                    },
+                ],
+            ));
+            groups.push((
+                door,
+                leaf_audience,
+                vec![
+                    Change::Set {
+                        node: door,
+                        field: F_OPEN_DOOR_LINK,
+                        to: link.to_value(),
+                        by: None,
+                    },
+                    Change::Set {
+                        node: door,
+                        field: replica::edit::DOOR_GEOMETRY,
+                        to: Value::Array(vec![
+                            id(*wall).to_value(),
+                            Value::Array(closed.clone()),
+                            Value::Array(open.clone()),
+                        ]),
+                        by: None,
+                    },
+                ],
+            ));
+            continue;
+        }
         let (writer, seen_by, change) = match op {
             Op::Place {
                 name,
@@ -323,9 +488,54 @@ fn effects(
             }
             Op::Remove { node } => {
                 let n = id(*node);
+                use crate::ground::scene::{DOORWAY, F_DOORWAYS, F_OPEN_DOOR_LINK};
+                if let Ok(link) =
+                    replica::effects::read_id(&field(tree, &fields, n, F_OPEN_DOOR_LINK))
+                {
+                    let ends = linked.get(&link).copied().or_else(|| {
+                        tree.link(link)
+                            .filter(|(ty, ..)| ty.as_str() == DOORWAY)
+                            .map(|(_, ends, ..)| ends)
+                    });
+                    if let Some([owner, _]) = ends {
+                        let mut rows = field(tree, &fields, owner, F_DOORWAYS);
+                        if let Value::Array(ref mut rows_list) = rows {
+                            rows_list.retain(|r| !matches!(r, Value::Array(r) if r.first() == Some(&link.to_value())));
+                        }
+                        fields.insert((owner, F_DOORWAYS), rows.clone());
+                        groups.push((
+                            owner,
+                            audience(Ref::Node(owner)),
+                            vec![
+                                Change::Unlink { link },
+                                Change::Set {
+                                    node: owner,
+                                    field: F_DOORWAYS,
+                                    to: rows,
+                                    by: None,
+                                },
+                            ],
+                        ));
+                        linked.remove(&link);
+                    }
+                }
                 (n, audience(*node), Change::Remove { node: n })
             }
+            Op::Doorway { .. } => unreachable!("handled above"),
         };
+        match &change {
+            Change::Create {
+                node,
+                fields: added,
+                ..
+            } => fields.extend(added.iter().map(|(k, v)| ((*node, *k), v.clone()))),
+            Change::Set {
+                node, field, to, ..
+            } => {
+                fields.insert((*node, *field), to.clone());
+            }
+            _ => {}
+        }
         match groups.last_mut() {
             Some((w, a, changes)) if *w == writer && *a == seen_by => changes.push(change),
             _ => groups.push((writer, seen_by, vec![change])),
@@ -356,4 +566,139 @@ fn effects(
             rest: Rest::new(),
         })
         .collect()
+}
+
+fn field(tree: &Tree, staged: &BTreeMap<(Id, u64), Value>, node: Id, key: u64) -> Value {
+    staged
+        .get(&(node, key))
+        .cloned()
+        .or_else(|| {
+            tree.handle(node)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| n.fields().get(&key).cloned())
+        })
+        .unwrap_or_else(|| Value::Array(Vec::new()))
+}
+
+fn int(n: i64) -> Value {
+    u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
+}
+
+#[cfg(test)]
+mod doorway_lowering_tests {
+    use super::*;
+    use crate::ground::scene::{F_DOORWAYS, F_OPEN_DOOR_LINK, F_SOLIDS};
+    use replica::edit::{DOOR_GEOMETRY, DoorGeometry, Edit};
+    use replica::effects::Actor;
+
+    #[test]
+    fn g1f_lowered_doorway_part_uses_the_importers_qualified_row_label() {
+        assert_eq!(DOOR_GEOMETRY, 29, "field 28 belongs to terrain parameters");
+        let im = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
+        let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
+        let door = im.nodes["door-building-to-b"];
+        let leaf = im.tree.node(im.tree.handle(door).unwrap()).unwrap();
+        let old_link = replica::effects::read_id(&leaf.fields()[&F_OPEN_DOOR_LINK]).unwrap();
+        let (_, [from, to], ..) = im.tree.link(old_link).unwrap();
+        let wall = im.nodes["building"];
+        let solids = im
+            .tree
+            .node(im.tree.handle(wall).unwrap())
+            .unwrap()
+            .fields()[&F_SOLIDS]
+            .clone();
+        let Value::Array(rows) = &solids else {
+            panic!("solid rows")
+        };
+        // Codec regression only: the served test separately proves authored geometry, admission and BUILDSAFE.
+        let checked = Checked {
+            edit: Edit {
+                intent: Id::new(Scope([0xec; 16]), 1).unwrap(),
+                actor: Actor::Creator(Id::new(Scope([0xed; 16]), 1).unwrap()),
+                planned: 0,
+                ops: vec![Op::Doorway {
+                    name: 1,
+                    door: Ref::Node(door),
+                    from: Ref::Node(from),
+                    to: Ref::Node(to),
+                    at: [1000, -550],
+                    yaw: 0,
+                    width: 1200,
+                    height: 2100,
+                    wall: Ref::Node(wall),
+                    closed: vec![rows[0].clone()],
+                    open: vec![rows[1].clone()],
+                }],
+            },
+            reads: Vec::new(),
+            parents: Vec::new(),
+            geometry: BTreeMap::from([(
+                0,
+                DoorGeometry {
+                    wall: Ref::Node(wall),
+                    solids: solids.clone(),
+                },
+            )]),
+        };
+        let link = Id::new(Scope([0xee; 16]), 1).unwrap();
+        let lowered = effects(&im.tree, 0, &checked, &BTreeMap::from([(1, link)]), 0);
+        let bytes = encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(header.hash().to_bytes())),
+            (
+                2,
+                Value::Array(lowered.iter().map(Effect::to_value).collect()),
+            ),
+        ])))
+        .unwrap();
+        let part = Part::read(&bytes)
+            .expect("the actual lowered doorway Part must pass its canonical reader");
+        let mut saw = (false, false, false, false);
+        for effect in &part.effects {
+            let Body::Changes(changes) = &effect.body else {
+                continue;
+            };
+            for change in changes {
+                match &change.change {
+                    Change::Link { link: id, ends, .. } => {
+                        assert_eq!((*id, *ends), (link, [from, to]));
+                        saw.0 = true;
+                    }
+                    Change::Set {
+                        node,
+                        field: F_DOORWAYS,
+                        to: Value::Array(rows),
+                        ..
+                    } if *node == from => {
+                        let Value::Array(row) = rows.last().unwrap() else {
+                            panic!("doorway row")
+                        };
+                        assert_eq!(row[0], link.to_value());
+                        assert_eq!(row[1], Value::Text(Name::new("eden:door").unwrap()));
+                        saw.1 = true;
+                    }
+                    Change::Set {
+                        node,
+                        field: F_OPEN_DOOR_LINK,
+                        to,
+                        ..
+                    } if *node == door => {
+                        assert_eq!(*to, link.to_value());
+                        saw.2 = true;
+                    }
+                    Change::Set {
+                        node,
+                        field: DOOR_GEOMETRY,
+                        ..
+                    } if *node == door => {
+                        saw.3 = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(saw, (true, true, true, true));
+        println!(
+            "G1f lowered Part canonical reader PASS; qualified eden:door row, exact link endpoints, leaf backlink and owned geometry present"
+        );
+    }
 }

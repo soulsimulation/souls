@@ -42,7 +42,7 @@
                 "change": "set",
                 "node": "sg1",
                 "field": "back_left",
-                "n": 1,
+                "n": 28,
                 "to": "along"
               }
             ],
@@ -91,7 +91,7 @@
                 "change": "set",
                 "node": "sg1",
                 "field": "back_left",
-                "n": 1,
+                "n": 28,
                 "to": "across"
               }
             ],
@@ -124,7 +124,7 @@
                 "change": "set",
                 "node": "sg1",
                 "field": "back_right",
-                "n": 2,
+                "n": 29,
                 "to": "along"
               }
             ],
@@ -157,7 +157,7 @@
                 "change": "set",
                 "node": "sg1",
                 "field": "back_right",
-                "n": 2,
+                "n": 29,
                 "to": "across"
               }
             ],
@@ -190,7 +190,7 @@
                 "change": "set",
                 "node": "sg1",
                 "field": "front_left",
-                "n": 3,
+                "n": 30,
                 "to": "along"
               }
             ],
@@ -223,7 +223,7 @@
                 "change": "set",
                 "node": "sg1",
                 "field": "front_left",
-                "n": 3,
+                "n": 30,
                 "to": "across"
               }
             ],
@@ -256,7 +256,7 @@
                 "change": "set",
                 "node": "sg1",
                 "field": "front_right",
-                "n": 4,
+                "n": 31,
                 "to": "along"
               }
             ],
@@ -289,7 +289,7 @@
                 "change": "set",
                 "node": "sg1",
                 "field": "front_right",
-                "n": 4,
+                "n": 31,
                 "to": "across"
               }
             ],
@@ -318,28 +318,28 @@
                 "change": "set",
                 "node": "sg1",
                 "field": "back_left",
-                "n": 1,
+                "n": 28,
                 "to": "smooth"
               },
               {
                 "change": "set",
                 "node": "sg1",
                 "field": "back_right",
-                "n": 2,
+                "n": 29,
                 "to": "smooth"
               },
               {
                 "change": "set",
                 "node": "sg1",
                 "field": "front_left",
-                "n": 3,
+                "n": 30,
                 "to": "smooth"
               },
               {
                 "change": "set",
                 "node": "sg1",
                 "field": "front_right",
-                "n": 4,
+                "n": 31,
                 "to": "smooth"
               }
             ],

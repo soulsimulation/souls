@@ -9,10 +9,10 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import { buildCreature } from '../../../../mars/viewer/app/engine-view/creatures.ts';
-import { floaterPose } from '../../../../mars/viewer/engine/bodies/pose.ts';
-import type { BodyMotion } from '../../../../mars/viewer/engine/bodies/motion.ts';
-import { CREATURES, type CreatureId } from '../../../../mars/viewer/engine/bodies/creatures.ts';
+import { buildCreature } from './creature/rig.ts';
+import { floaterPose } from './creature/pose.ts';
+import type { BodyMotion } from './creature/motion.ts';
+import { CREATURES, type CreatureId } from './creature/species.ts';
 import { cluster, decodeMesh, type LodMesh } from './lod.ts';
 
 export const BAKE_FPS = 30;

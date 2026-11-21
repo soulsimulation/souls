@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "title": {
-      "n": 1,
+      "n": 28,
       "type": "text",
       "default": null,
       "audience": {
@@ -12,7 +12,7 @@
       }
     },
     "page_1": {
-      "n": 2,
+      "n": 29,
       "type": "text",
       "default": null,
       "audience": {
@@ -20,7 +20,7 @@
       }
     },
     "page_2": {
-      "n": 3,
+      "n": 30,
       "type": "text",
       "default": null,
       "audience": {
@@ -28,7 +28,7 @@
       }
     },
     "page_3": {
-      "n": 4,
+      "n": 31,
       "type": "text",
       "default": null,
       "audience": {
@@ -36,7 +36,7 @@
       }
     },
     "stage": {
-      "n": 5,
+      "n": 32,
       "type": "enum",
       "values": [
         "draft",
@@ -48,7 +48,7 @@
       }
     },
     "binding": {
-      "n": 6,
+      "n": 33,
       "type": "int",
       "unit": "count",
       "default": 1,

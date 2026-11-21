@@ -209,6 +209,7 @@ fn intent(body: Id, sequence: u64, verb: &str, target: Option<Id>, point: Option
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     encode(&i.to_value()).unwrap()
 }
@@ -889,4 +890,305 @@ fn k18b_a_free_running_world_with_its_planner_replays_in_lockstep() {
         "the replay ends in the same state"
     );
     assert_eq!(h1, h2, "and writes the same effects");
+}
+
+/// #3764: the world records a reflex's marker with its intent, in the answer row the log keeps and a replay feeds back
+/// (`script`), and an agent's act unmarked: what the idle and wind-down rule (B16) reads with `Intent::agent_act`.
+#[test]
+fn reflex_a1_the_log_keeps_a_reflex_marked_and_an_agents_act_unmarked() {
+    let p = pairs();
+    let (switcher, lamp) = (p[1].0, p[1].1);
+    let store = Mem::with(Vec::new());
+    let w = start(store.clone(), false);
+    let on = at(&w, 2, intent(switcher, 1, "r2:switch_on", Some(lamp), None));
+    let mut reflex = Intent::read(&intent(switcher, 2, "r2:switch_off", Some(lamp), None)).unwrap();
+    reflex.reflex = true;
+    let off = at(&w, 40, encode(&reflex.to_value()).unwrap());
+    run_to(&w, 80);
+    answer(&on).expect("the agent's switch_on lands");
+    answer(&off).expect("the reflex's switch_off lands");
+    w.stop();
+    let kept: Vec<Intent> = script(&bytes(&store))
+        .into_iter()
+        .map(|(_, b)| Intent::read(&b).unwrap())
+        .collect();
+    let marks: Vec<_> = kept
+        .iter()
+        .map(|i| (i.sequence, i.reflex, i.agent_act()))
+        .collect();
+    println!("reflex: (sequence, reflex, agent act) as the log keeps them: {marks:?}");
+    assert_eq!(marks, [(1, false, true), (2, true, false)]);
+}
+
+/// #3765: an intent with `params` (its field 4) set.
+fn intent_params(
+    body: Id,
+    sequence: u64,
+    verb: &str,
+    target: Option<Id>,
+    params: Vec<(u64, Value)>,
+) -> Vec<u8> {
+    let Value::Map(mut m) = decode(&intent(body, sequence, verb, target, None))
+        .unwrap()
+        .value
+    else {
+        panic!("an intent")
+    };
+    m.insert(4, Value::Map(params.into_iter().collect()));
+    encode(&Value::Map(m)).unwrap()
+}
+
+/// #3765 A4: malformed words of each kind (an act's verb, a say's, form arguments, an edit's, a set-down's) are
+/// refused by name at intake; the world keeps running, every record it wrote reads back and it restarts cleanly.
+#[test]
+fn malformed_words_are_refused_and_the_world_restarts() {
+    let p = pairs();
+    let (body, lamp) = (p[1].0, p[1].1);
+    let text = |s: &str| Value::Text(name(s));
+    let arg = |k: &str, v: Value| Value::Array(vec![Value::Bytes(k.as_bytes().to_vec()), v]);
+    let words = Value::Map(BTreeMap::from([(23, Value::Bytes(b"hello".to_vec()))]));
+    // Each with the name it is refused by. An intent's own checks keep their names (#3765 ruling): the Saturn act
+    // `sit_down:undefined` is no form here, and its row logs the intent as bytes; a text that passes every check
+    // is refused `intent.text-not-a-name` before anything is written.
+    let malformed = [
+        // As on Saturn, with no node: its own refusal, the row logging the intent as bytes.
+        (
+            intent(body, 1, "sit_down:undefined", None, None),
+            "intent.not-a-form-on-a-node",
+        ),
+        // On a node it passes every intake check: the backstop.
+        (
+            intent(body, 2, "sit_down:undefined", Some(chair()), None),
+            "intent.text-not-a-name",
+        ),
+        (
+            intent_params(
+                body,
+                3,
+                "speech:say",
+                None,
+                vec![(1, words), (2, text("Loud:Voice"))],
+            ),
+            "intent.text-not-a-name",
+        ),
+        (
+            intent_params(
+                body,
+                4,
+                "r2:switch_on",
+                Some(lamp),
+                vec![(1, Value::Array(vec![arg("thing", text("lamp:Main_1"))]))],
+            ),
+            "intent.text-not-a-name",
+        ),
+        (
+            intent_params(body, 5, "souls:edit", None, vec![(1, text("eden:Chair"))]),
+            "edit-not-a-batch",
+        ),
+        (
+            intent_params(
+                body,
+                6,
+                "hands:set-down",
+                None,
+                vec![(1, text("place:on_floor:x"))],
+            ),
+            "setdown-off",
+        ),
+        // A part that is not UTF-8 stays `arg-malformed`, though its value `top` is no name either.
+        (
+            intent_params(
+                body,
+                7,
+                "r2:switch_on",
+                Some(lamp),
+                vec![(
+                    1,
+                    Value::Array(vec![Value::Array(vec![
+                        Value::Bytes(vec![0xff]),
+                        text("top"),
+                    ])]),
+                )],
+            ),
+            "arg-malformed",
+        ),
+    ];
+    let store = Mem::with(Vec::new());
+    let w = start(store.clone(), false);
+    let (asked, expected): (Vec<_>, Vec<_>) = malformed
+        .into_iter()
+        .enumerate()
+        .map(|(k, (b, why))| (at(&w, 2 + k as i64, b), why.to_owned()))
+        .unzip();
+    let switch = at(&w, 10, intent(body, 8, "r2:switch_on", Some(lamp), None));
+    let ran = run_to(&w, 60);
+    let reasons: Vec<String> = asked
+        .iter()
+        .enumerate()
+        .map(|(k, rx)| {
+            // Refused (2), or unread (5) as the edit is when its batch is no batch: by name either way.
+            let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+            let Value::Map(m) = decode(&frame).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Map(a)) = m.get(&2) else {
+                panic!("an answer")
+            };
+            match (a.get(&3), a.get(&4)) {
+                (Some(Value::Uint(2 | 5)), Some(Value::Text(t))) => t.as_str().to_owned(),
+                other => panic!("malformed word {k} answered {other:?}"),
+            }
+        })
+        .collect();
+    assert_eq!(reasons, expected, "each malformed word is refused by name");
+    assert!(
+        answer(&switch).is_ok(),
+        "the world goes on: a later act lands"
+    );
+    assert!(ran.tick >= 60, "the clock ran on");
+    let log = bytes(&store);
+    for r in recover(&log)
+        .unwrap()
+        .records
+        .iter()
+        .filter(|r| !recorder::is_input(r))
+    {
+        Part::read(r).expect("every record the world wrote reads back");
+    }
+    let before = last_state(&log);
+    let k = start(Mem::with(log), false);
+    let restarted = run_to(&k, 0);
+    assert_eq!(
+        restarted.state.to_vec(),
+        before,
+        "it restarts with its last state"
+    );
+}
+
+/// #3705 (today's `stop`): a `souls:cancel` naming the Soul's own open walk stops it mid-route in the tick it is taken:
+/// the walk is refused `act.stopped`, its `souls:move-ended` says `act.stopped`, the body stays where it stopped, and
+/// the cancel has a receipt. The recorder's inputs fed back write the same effects and end in the same state, and the
+/// log restarted has its last state.
+#[test]
+fn a_cancel_naming_an_open_walk_stops_it_where_it_stands_and_replays() {
+    let walker = pairs()[0].0;
+    let cancel = |sequence: u64, replaces: u64| {
+        let i = Intent {
+            actor: Actor::Soul(walker),
+            verb: name("souls:cancel"),
+            target: None,
+            parameters: BTreeMap::new(),
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: 0,
+            }
+            .to_value(),
+            expiry: 1_000_000_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: Some(replaces),
+            body: None,
+            reflex: false,
+        };
+        encode(&i.to_value()).unwrap()
+    };
+    let store = Mem::with(Vec::new());
+    let w = start(store.clone(), false);
+    let walk = at(&w, 2, intent(walker, 1, "eden:walk", Some(chair()), None));
+    let stop = at(&w, 20, cancel(2, 1));
+    let end = run_to(&w, 120);
+    assert_eq!(
+        answer(&walk),
+        Err("act.stopped".into()),
+        "the walk ends by the stop's name"
+    );
+    assert!(answer(&stop).is_ok(), "the cancel has a receipt");
+    w.stop();
+    let log = bytes(&store);
+
+    // The walk's end, by name, and where the body is from then on.
+    let mut ended_at = None;
+    let mut positions: Vec<(usize, Vec3)> = Vec::new();
+    for (k, r) in recover(&log)
+        .unwrap()
+        .records
+        .iter()
+        .filter(|r| !recorder::is_input(r))
+        .enumerate()
+    {
+        let part = Part::read(r).unwrap();
+        for e in &part.effects {
+            for ev in e.events.iter().flatten() {
+                if ev.name.as_str() == answers::MOVE_ENDED {
+                    let how = match ev.fields.get(&2) {
+                        Some(Value::Bytes(b)) => String::from_utf8(b.clone()).unwrap(),
+                        other => panic!("a name: {other:?}"),
+                    };
+                    assert_eq!(how, answers::STOPPED);
+                    ended_at = Some(k);
+                }
+            }
+        }
+        if let Some(Value::Array(rows)) = part.rest.get(&answers::BODIES) {
+            for (b, p, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                if b == walker {
+                    positions.push((k, p.position));
+                }
+            }
+        }
+    }
+    let k = ended_at.expect("souls:move-ended act.stopped is written");
+    let stopped = positions
+        .iter()
+        .rev()
+        .find(|(n, _)| *n <= k)
+        .expect("a position by the stop")
+        .1;
+    let start_at = Vec3::new(-40_000_000, 0, 30_000_000);
+    assert!(
+        (stopped.x - start_at.x).abs() > 300_000 && (stopped.x - (-36_000_000)).abs() > 300_000,
+        "stopped mid-route: {stopped:?}"
+    );
+    for (n, p) in positions.iter().filter(|(n, _)| *n > k) {
+        assert_eq!(*p, stopped, "the body moved after its stop, at record {n}");
+    }
+    println!("#3705: stopped at {stopped:?} um in record {k}; end {end:?}");
+
+    // Replay: the recorder's inputs, the cancels with them, give the same effects and state.
+    let inputs = script(&log);
+    assert_eq!(
+        inputs.len(),
+        2,
+        "the walk and the cancel that stopped it are recorded"
+    );
+    let again = Mem::with(Vec::new());
+    let r = start(again.clone(), false);
+    let answers: Vec<_> = inputs.iter().map(|(t, b)| at(&r, *t, b.clone())).collect();
+    let replayed = run_to(&r, 120);
+    assert_eq!(answer(&answers[0]), Err("act.stopped".into()));
+    assert!(answer(&answers[1]).is_ok());
+    r.stop();
+    assert_eq!(
+        recorder::effect_hash(&recover(&log).unwrap().records),
+        recorder::effect_hash(&recover(&bytes(&again)).unwrap().records),
+        "the replay writes the same effects"
+    );
+    assert_eq!(replayed.state, end.state, "and ends in the same state");
+    // Restart: the log as written, started again, has its last state.
+    let before = last_state(&log);
+    let k = start(Mem::with(log), false);
+    let restarted = run_to(&k, 0);
+    assert_eq!(
+        restarted.state.to_vec(),
+        before,
+        "the restart has the last state"
+    );
+    // Stopped already: a second cancel of it names nothing open, and is refused as before.
+    let none = at(&k, restarted.tick + 1, cancel(3, 1));
+    run_to(&k, restarted.tick + 3);
+    assert_eq!(answer(&none), Err("order-not-open".into()));
+    k.stop();
 }

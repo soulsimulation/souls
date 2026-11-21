@@ -51,7 +51,9 @@
 //! seat (a sofa's three, a bed's two; C19, #3457), its point carried up the tree onto the floor a body stands on.
 //! It prints `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor;
 //! <moved> stand points moved to clear ground`. A stand point a body cannot stand on is moved to the nearest clear ground
-//! within a form's reach (C15's rule), so a rise sets the body down where it can stand.
+//! within a form's reach (C15's rule), so a rise sets the body down where it can stand. So is one in a doorway's
+//! clearance, where the spot tables never stop a walker (a bed beside its room's door): moved to the nearest place out
+//! of it, no nearer the seat, so a walk to the seat ends within the sit's or the lie's reach.
 //!
 //! **Off the machine** (O3b, #3458), when `--store <store>`, `$WORLDD_STORE` or the directory's `$DIRECTORY_STORE_URL`
 //! names a store (O3c, #3529: the offsite bucket, `s3:https://<host>/<bucket>[/<prefix>]` with its keys in `AWS_*`, or
@@ -131,6 +133,17 @@ type R<T> = Result<T, String>;
 
 /// The log's epoch.
 const EPOCH: u64 = 1;
+
+/// When `serve` began (#3672): its start-up stages print their elapsed time from here. Unset outside `serve`, so
+/// `seed` and template checks print nothing.
+static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// One start-up stage's elapsed-time stamp (#3672), only while `serve` starts.
+fn stamp(stage: &str) {
+    if let Some(t) = STARTED.get() {
+        println!("start-up: {stage} at {} ms", t.elapsed().as_millis());
+    }
+}
 /// K5's checkpoint interval: one each 8 MiB of log (the bench constant, as `worldd fork`).
 const EVERY: u64 = 8 << 20;
 /// The stream writer's queue in the tier: deliveries it may fall behind by before it is handed a snapshot.
@@ -186,13 +199,11 @@ fn io(path: &Path) -> impl Fn(std::io::Error) -> String + '_ {
     move |e| format!("{}: {e}", path.display())
 }
 
-/// What a loader's facts file gives a world: its header, its import part, its walkers' town and ground.
+/// What a loader's facts file gives a world: its header, its import part and its ground. Its walkers' town is built
+/// by `serve` from the world as its log leaves it, once (#3672).
 struct Built {
     header: replica::effects::Header,
     part: Vec<u8>,
-    town: Town,
-    /// The planner's copy of the town (K18b), built with it before the clock and its watchdog start.
-    planner: Town,
     ground: Id,
     root: Id,
     /// The world's rules (T2), for the engine's own acts (C2).
@@ -201,6 +212,8 @@ struct Built {
     kinds_text: String,
     /// A Soul's body kind, its full name (C3).
     body_kind: String,
+    /// The importer’s existing immutable name dictionary, shared once with the off-clock sync worker.
+    public_names: Arc<worldd::views::names::PublicNames>,
     /// The activity kinds the engine runs (C30): the conversation's, then the entries'.
     activities: Vec<ActivityKind>,
 }
@@ -272,10 +285,140 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
 }
 
 /// Loads a facts file (N1's or X6's) as the world as built, with the activity kinds of `entries` (C30).
+/// The facts with today's rowing punts added (#3603): one moored on each standing water that has room
+/// (`sim::courses::punts`), a thing of kind `core:rowing_punt` at its home, turned with its plank toward the bank, on its
+/// own loop (its course). The same facts give the same punts, so a seed and every serve of the world agree.
+fn with_punts(facts: &str) -> R<String> {
+    let im = import_eden::load(facts)?;
+    let Some(&ground) = im.nodes.get("ground") else {
+        return Ok(facts.to_owned());
+    };
+    // Planks and exits only where a body can stand on the ground as the walk cuts it (C15's `stand_near`).
+    let (waters, terrain) = sim::courses::punts::waters_of(&im.tree, ground)?;
+    let root = *im.nodes.get("world").ok_or("the facts have no world")?;
+    let header = import_eden::header(root, &im.rules)?;
+    let next = im.tree.to_state().next;
+    let mut town = Town::new(im.tree, ground, Doors::new(header, im.rules, next))
+        .map_err(|e| format!("the town: {e:?}"))?;
+    let view = town.view();
+    let moorings = sim::courses::punts::moorings(&waters, terrain.as_ref(), |p| {
+        view.stand_near(ground, p, 0, None).is_some()
+    });
+    if moorings.is_empty() {
+        return Ok(facts.to_owned());
+    }
+    let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
+    let Json::Obj(top) = &mut f else {
+        return Err("the facts are not an object".into());
+    };
+    let int = |n: i64| Json::Int(i128::from(n));
+    let obj =
+        |kv: Vec<(&str, Json)>| Json::Obj(kv.into_iter().map(|(k, v)| (k.to_owned(), v)).collect());
+    let kind = obj(vec![
+        ("ref", Json::s(PUNT_REF)),
+        ("hash", Json::s(&to_hex(&sha256(b"souls/rowing-punt/1")))),
+        ("name", Json::s("core:rowing_punt")),
+        ("form", Json::s("point")),
+        ("layer", Json::s("solid")),
+        ("door", Json::Bool(false)),
+        ("mesh", Json::Bool(false)),
+        ("slots", int(2)),
+    ]);
+    let things: Vec<Json> = moorings
+        .iter()
+        .enumerate()
+        .map(|(k, m)| {
+            // The plank (the kind's +x) toward the bank, `-out`: a yaw turns +x to (cos, -sin). Whole degrees, so no
+            // platform's last bit changes it.
+            let (ox, oz) = (m.out[0] as f64, m.out[1] as f64);
+            let yaw = (oz.atan2(-ox).to_degrees().round() as i64).rem_euclid(360) * 1000;
+            println!(
+                "punt: rowing-punt-{} on {} at {:.3},{:.3} m, plank at {:.3},{:.3} m, loop {} us from {} us",
+                k + 1,
+                replica::world_model::show(m.water),
+                m.home.x as f64 / 1e6,
+                m.home.z as f64 / 1e6,
+                m.door.x as f64 / 1e6,
+                m.door.z as f64 / 1e6,
+                m.course.load().map_or(0, |t| t.period),
+                m.course.t0
+            );
+            let mm = |v: i64| int(v / 1000);
+            let pose = Json::Arr(vec![mm(m.home.x), mm(m.home.y), mm(m.home.z), int(yaw)]);
+            let stations = m
+                .course
+                .stations
+                .iter()
+                .map(|s| Json::Arr(vec![int(s.at.x), int(s.at.y), int(s.at.z), int(s.dwell)]))
+                .collect();
+            let shape = match m.course.shape {
+                sim::courses::Shape::Loop => 1,
+                sim::courses::Shape::ThereAndBack => 2,
+                sim::courses::Shape::Once => 3,
+            };
+            // A rider's place: what the import reads of a slot (its number, point, yaw and capacity). What a body does
+            // there comes from the punt's entry, not from here.
+            let place = |n: i64, id: &str, x: i64| {
+                obj(vec![
+                    ("n", int(n)),
+                    ("id", Json::s(id)),
+                    ("at", Json::Arr(vec![int(x), int(360), int(0)])),
+                    ("yaw", int(180_000)),
+                    ("capacity", int(1)),
+                ])
+            };
+            obj(vec![
+                ("id", Json::Str(format!("e_punt{k}"))),
+                ("def", Json::s(PUNT_REF)),
+                ("ref", Json::s(PUNT_REF)),
+                ("parent", Json::Null),
+                ("pose", pose.clone()),
+                ("world", pose),
+                ("scale_ppm", int(1_000_000)),
+                ("name", Json::Str(format!("rowing-punt-{}", k + 1))),
+                (
+                    "slots",
+                    Json::Arr(vec![place(1, "rider_a", -650), place(2, "rider_b", 650)]),
+                ),
+                (
+                    "course",
+                    obj(vec![
+                        ("stations", Json::Arr(stations)),
+                        ("shape", int(shape)),
+                        ("speed", int(m.course.speed)),
+                        ("t0", int(m.course.t0)),
+                        ("within", int(m.course.within)),
+                    ]),
+                ),
+            ])
+        })
+        .collect();
+    for (key, add) in [("kinds", vec![kind]), ("things", things)] {
+        match top.iter_mut().find(|(k, _)| k == key) {
+            Some((_, Json::Arr(a))) => a.extend(add),
+            _ => return Err(format!("the facts have no '{key}' list")),
+        }
+    }
+    Ok(f.to_json())
+}
+
+/// The rowing punt's def (#3603): today's `rowing-punt`, a kind the world adds.
+const PUNT_REF: &str = "core-rowing-punt@1";
+
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
+    let facts = &with_punts(facts)?;
     let mut im = import_eden::load(facts)?;
+    stamp("facts");
+    for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
+        println!(
+            "punt: rowing-punt-{} is {}",
+            k + 1,
+            replica::world_model::show(id)
+        );
+    }
     let mut activities = vec![conversation()?];
     activities.extend(activity_kinds(entries)?);
+    stamp("activities");
     for a in &activities {
         im.rules.kinds.insert(
             a.name.as_str().to_owned(),
@@ -346,23 +489,16 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
         .into(),
     ))
     .map_err(|e| e.to_string())?;
-    let next = im.tree.to_state().next;
-    let rules = im.rules.clone();
-    let doors = Doors::new(header.clone(), im.rules, next);
-    let town = Town::new(im.tree, ground, doors).map_err(|e| format!("the town: {e:?}"))?;
-    let planner = town
-        .copy()
-        .map_err(|e| format!("the planner's town: {e:?}"))?;
+    let rules = im.rules;
     Ok(Built {
         header,
         part,
-        town,
-        planner,
         ground,
         root,
         rules,
         kinds_text,
         body_kind,
+        public_names: Arc::new(im.texts),
         activities,
     })
 }
@@ -382,12 +518,11 @@ fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(
         built.rules.clone(),
         live.tree().next(),
     );
-    let town = Town::new(live.tree().frozen(), built.ground, doors)
+    stamp("log applied");
+    let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
         .map_err(|e| format!("the recovered town: {e}"))?;
-    let planner = town
-        .copy()
-        .map_err(|e| format!("the recovered planner: {e}"))?;
-    Ok((town, planner))
+    stamp("town and planner");
+    Ok(towns)
 }
 
 /// Public, data-only serving support. Only the seed's facts, flattened public entries and optional moves are
@@ -729,11 +864,13 @@ fn souls(meta: &Json) -> R<Vec<(Id, i64, i64)>> {
 /// The seats the world's entries `kinds` declare on its things ([`import_eden::body_slots`]), each placed on the floor a
 /// body stands on: its point and facing there, and its stand point in the slot's frame. A stand point a body cannot
 /// stand on (under a table, against a wall) is moved to the nearest place within a form's reach of it where a body
-/// can (C15's rule, `skills::form_runner::REACH`), so a rise always sets the body down on clear ground. Returns the
+/// can (C15's rule, `skills::form_runner::REACH`), so a rise always sets the body down on clear ground; one in a
+/// doorway's clearance is moved out of it ([`out_of_passage`]), so the gateway's walk to the seat ends at it. Returns the
 /// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
 /// floor above the thing) and the stand points moved.
 fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize, usize) {
     let (found, all) = import_eden::body_slots(&town.tree, kinds);
+    let (buildings, ground) = (town.buildings.clone(), town.ground);
     let view = town.view();
     let (mut out, mut moved) = (Vec::new(), 0);
     for s in &found {
@@ -755,9 +892,19 @@ fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, us
         let stand = place.stand().map(|p| Vec3::new(p.x, point.y - s.at.y, p.z));
         let [w, x, y, z] = facing.parts();
         let back = replica::pose::Quat::new(w, -x, -y, -z);
-        if let (Ok(stand), Ok(back)) = (stand, back)
-            && view.stand_near(floor, stand, 1, None).is_none()
-            && let Some(clear) = view.stand_near(floor, stand, skills::form_runner::REACH, None)
+        // A stand point in a doorway's clearance is one the spot tables never give a walker (N9): a walk to it ends
+        // a ring out, beyond the sit's reach, so it is moved out of the doorway as a blocked one is moved clear.
+        let passage = |p: Vec3| sim::walk::town::in_passage(&buildings, &[], ground, floor, p);
+        let clear = stand.ok().and_then(|stand| {
+            if view.stand_near(floor, stand, 1, None).is_none() {
+                view.stand_near(floor, stand, skills::form_runner::REACH, None)
+            } else if passage(stand) {
+                out_of_passage(&view, floor, stand, point, &passage)
+            } else {
+                None
+            }
+        });
+        if let (Some(clear), Ok(back)) = (clear, back)
             && let Ok(d) = back.rotate(Vec3::new(clear.x - point.x, 0, clear.z - point.z))
         {
             place.place.stand = [d.x, d.z];
@@ -769,6 +916,44 @@ fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, us
     let mut things: Vec<Id> = out.iter().map(|p| p.thing).collect();
     things.dedup();
     (out, things.len(), all, left, moved)
+}
+
+/// The nearest place to `at` (µm, `floor`'s frame) within [`skills::form_runner::REACH`] where a body may stand, that
+/// is out of every doorway and stair (`passage`) and no nearer the slot's point `slot_at` than `at` is (so not into the
+/// thing: a bed's mattress is not a solid), on [`sim::spots::within`]'s rings; `None` when none is.
+fn out_of_passage(
+    view: &sim::walk::town::View<'_>,
+    floor: Id,
+    at: Vec3,
+    slot_at: Vec3,
+    passage: &dyn Fn(Vec3) -> bool,
+) -> Option<Vec3> {
+    let pitch = sim::spots::REACH_PITCH;
+    let mut best: Option<(i64, Vec3)> = None;
+    for ring in 1..=skills::form_runner::REACH / pitch {
+        let n = 6_283 * ring / 1_000;
+        for k in 0..n {
+            let Ok(off) = replica::pose::Quat::from_yaw_mdeg(k * 360_000 / n)
+                .and_then(|q| q.rotate(Vec3::new(0, 0, ring * pitch)))
+            else {
+                continue;
+            };
+            let Some(p) =
+                view.stand_near(floor, Vec3::new(at.x + off.x, at.y, at.z + off.z), 1, None)
+            else {
+                continue;
+            };
+            let gap = sim::spots::flat(p, at);
+            let out = sim::spots::flat(p, slot_at) >= sim::spots::flat(at, slot_at);
+            if out && !passage(p) && best.is_none_or(|b| gap < b.0) {
+                best = Some((gap, p));
+            }
+        }
+        if best.is_some() {
+            break;
+        }
+    }
+    best.map(|b| b.1)
 }
 
 /// Original B15 birth choice reader: only admitted exact hashes enter the canonical body.
@@ -903,7 +1088,7 @@ fn imported_births(
 fn bodies(
     town: Town,
     planner: Town,
-    _ground: Id,
+    ground: Id,
     placed: &Placed,
     places: Vec<PlaceAt>,
     builds: &std::collections::BTreeMap<Id, replica::kinds::sizes::Build>,
@@ -955,9 +1140,27 @@ fn bodies(
         let moved = surface.place_built(*id, Frame { node, slot: None }, point, facing, build)?;
         at.push((moved, build));
     }
+    // The things on a course (today's punts, #3603): their seats are boarded and left only at their home stop.
+    let mut moving = Vec::new();
+    if let Some(gh) = town.tree.handle(ground) {
+        for &c in town.tree.children(gh).unwrap_or(&[]) {
+            if let Some(n) = town.tree.node(c)
+                && let Some(course) = n
+                    .fields()
+                    .get(&replica::schedule::F_COURSE)
+                    .and_then(replica::schedule::course::Course::read)
+            {
+                moving.push((n.id(), course));
+            }
+        }
+    }
     let mut b = Bodies::with_planner(town, planner, 50_000)?;
     for s in places {
         b.add_place(s)?;
+    }
+    for (thing, course) in moving {
+        let home = course.stations.first().map_or(Vec3::ZERO, |s| s.at);
+        b.slots.moving(thing, &course, home)?;
     }
 
     for (a, build) in at {
@@ -1231,13 +1434,16 @@ fn report<T: Send + 'static>(what: &'static str, h: std::thread::JoinHandle<Resu
 /// V3's archiver on a thread of its own: each part as it comes, and the day's bundle index written again each time a
 /// bundle closes, so a running world's bundles are found before its day ends. The open day's event index and counts
 /// (V4) are written as they stand at most each [`VIEWS_EVERY`] while new parts come, so R16's `history` reads a
-/// running world's day (R16b, #3480).
+/// running world's day (R16b, #3480). `open` runs first, on the same thread: a fork's archive re-derives its public
+/// history from its base, which takes a full-Eden world tens of seconds, and the world serves meanwhile; parts wait
+/// in `rx` in order (#3746).
 fn archiving(
-    mut a: Archiver<Again>,
+    open: impl FnOnce() -> Result<Archiver<Again>, Refusal> + Send + 'static,
     rx: Receiver<(u64, Vec<u8>)>,
     text: Arc<sim::text::Store>,
 ) -> std::thread::JoinHandle<Result<(), Refusal>> {
     std::thread::spawn(move || {
+        let mut a = open()?;
         let mut indexed = a.shelf.writes.bundles;
         let (mut fresh, mut viewed) = (false, std::time::Instant::now());
         loop {
@@ -1265,9 +1471,7 @@ fn archiving(
                 indexed = a.shelf.writes.bundles;
             }
             if fresh && viewed.elapsed() >= VIEWS_EVERY {
-                if a.is_based() {
-                    a.publish_open()?;
-                }
+                a.publish_open()?;
                 for (k, v) in a.open_views()? {
                     a.shelf.put_view(&k, &v)?;
                 }
@@ -1491,18 +1695,26 @@ fn off_machine(
         header: built.header.stored().to_vec(),
     };
     let archive = if let Some(base) = fork_base {
-        let mut a =
-            Archiver::open_based_with_redactions(again.clone(), "", &base, text.redactions())
-                .map_err(refusal)?;
-        archive_bridge(&store, &mut a, &built.header, first).map_err(refusal)?;
+        // The opened archive's base is this one: `fork_archive_base` read the stored head's base, as the open does.
         based = true;
-        archive_base = a.source_base();
-        again
-            .put("header", built.header.stored(), When::Absent)
-            .map_err(refusal)?;
-        again.restore_public().map_err(refusal)?;
+        archive_base = base.record;
+        let (store, header, words) = (store.clone(), built.header.clone(), Arc::clone(&text));
+        let open = move || {
+            let mut a =
+                Archiver::open_based_with_redactions(again.clone(), "", &base, words.redactions())?;
+            archive_bridge(&store, &mut a, &header, first)?;
+            if a.source_base() != base.record {
+                return Err(Refusal {
+                    name: "archive-base-mismatch",
+                    detail: "opened archive base differs".into(),
+                });
+            }
+            again.put("header", header.stored(), When::Absent)?;
+            again.restore_public()?;
+            Ok(a)
+        };
         let (tx, rx) = channel();
-        report("the archiver", archiving(a, rx, Arc::clone(&text)));
+        report("the archiver", archiving(open, rx, Arc::clone(&text)));
         Some(tx)
     } else if let Some(kind) = built
         .header
@@ -1517,7 +1729,10 @@ fn off_machine(
         let a = Archiver::open(again.clone(), "", &built.header, zone, kind).map_err(refusal)?;
         again.restore_public().map_err(refusal)?;
         let (tx, rx) = channel();
-        report("the archiver", archiving(a, rx, Arc::clone(&text)));
+        report(
+            "the archiver",
+            archiving(move || Ok(a), rx, Arc::clone(&text)),
+        );
         Some(tx)
     } else {
         None
@@ -1594,6 +1809,8 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn serve(args: &[String]) -> R<()> {
+    let _ = STARTED.set(std::time::Instant::now());
+    stamp("launch");
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
         "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] \
          [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
@@ -1619,6 +1836,7 @@ fn serve(args: &[String]) -> R<()> {
     if dir.join("entries").is_dir() {
         entries(&dir.join("entries"), &mut kinds)?;
     }
+    stamp("entries");
     let built = build(
         &std::fs::read_to_string(&facts).map_err(io(&facts))?,
         &kinds,
@@ -1672,10 +1890,12 @@ fn serve(args: &[String]) -> R<()> {
     let log_path = dir.join("log");
     let (log, found) =
         Log::open(FileStore::open(&log_path).map_err(refusal)?, EPOCH).map_err(refusal)?;
+    // Shared with the public stream's thread, which reads it after the world has started (#3746).
+    let found = Arc::new(found);
     let store = log.close();
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
-    let (initial, base_record, stream_mapping, checkpoint) = if let Some(header) = stored_header {
+    let started = if let Some(header) = stored_header {
         let restored = sim::checkpoint::restore(&dir.join("checkpoints"))
             .map_err(refusal)?
             .ok_or("served-fork-checkpoint-missing")?;
@@ -1684,6 +1904,7 @@ fn serve(args: &[String]) -> R<()> {
         {
             return Err("served-fork-checkpoint-mismatch".into());
         }
+        stamp("checkpoint restore");
         let record = restored.root.record;
         let checkpoint = view_out::capture_checkpoint(
             &dir.join("checkpoints").join(format!("ckpt-{record:020}")),
@@ -1718,31 +1939,27 @@ fn serve(args: &[String]) -> R<()> {
                 }
             }
         }
+        stamp("log applied");
         built.header = header.clone();
         let doors = Doors::new(header, built.rules.clone(), live.tree().next());
-        built.town = Town::new(live.tree().frozen(), built.ground, doors)
+        let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
             .map_err(|e| format!("the fork's town: {e}"))?;
-        built.planner = built
-            .town
-            .copy()
-            .map_err(|e| format!("the fork's planner: {e}"))?;
-        (initial, record, observer, Some(checkpoint))
+        stamp("town and planner");
+        (initial, record, observer, Some(checkpoint), towns)
     } else {
         let initial = Replica::start(built.header.stored()).map_err(refusal)?;
-        let (town, planner) = recovered_towns(&built, &initial, &found.records)?;
-        built.town = town;
-        built.planner = planner;
-        (initial, 0, None, None)
+        let towns = recovered_towns(&built, &initial, &found.records)?;
+        (initial, 0, None, None, towns)
     };
-    built
-        .town
+    let (initial, base_record, stream_mapping, checkpoint, (mut town, mut planner)) = started;
+    town.prepare_classes(catalogue.classes())
+        .map_err(|e| format!("body-classes: {e}"))?;
+    planner
         .prepare_classes(catalogue.classes())
         .map_err(|e| format!("body-classes: {e}"))?;
-    built
-        .planner
-        .prepare_classes(catalogue.classes())
-        .map_err(|e| format!("body-classes: {e}"))?;
-    let (places, things, all, left, moved) = places(&mut built.town, &kinds);
+    stamp("body classes");
+    let (places, things, all, left, moved) = places(&mut town, &kinds);
+    stamp("places to sit placed");
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
          moved to clear ground",
@@ -1794,6 +2011,7 @@ fn serve(args: &[String]) -> R<()> {
     let (tx, synced) = channel();
     imported_births(&dir, initial.header(), &catalogue, &mut born)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
+    cfg.public_names = Arc::clone(&built.public_names);
     let every = arg(args, "--checkpoint-every").map_or(Ok(EVERY), |n| {
         n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
     })?;
@@ -1851,7 +2069,7 @@ fn serve(args: &[String]) -> R<()> {
     let kinds_path = dir.join("world.kinds");
     std::fs::write(&kinds_path, &built.kinds_text).map_err(io(&kinds_path))?;
 
-    let (town, planner, ground) = (built.town, built.planner, built.ground);
+    let ground = built.ground;
 
     // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
     let int = |v: &Json| match v {
@@ -1872,7 +2090,9 @@ fn serve(args: &[String]) -> R<()> {
     });
     cfg.wear = Some(answers::Wearing { catalogue, born });
     cfg.built_bodies = Some(Box::new(move |placed: &Placed, builds| {
-        bodies(town, planner, ground, placed, places.clone(), builds)
+        let b = bodies(town, planner, ground, placed, places.clone(), builds);
+        stamp("places to sit registered");
+        b
     }));
     // Capture and validate the public source before answers starts its K5 writer: normal pruning may remove an
     // eligible older checkpoint. The engine still starts from its newest restored state and unchanged clock.
@@ -1904,13 +2124,27 @@ fn serve(args: &[String]) -> R<()> {
         record: base_record,
         checkpoint,
         text: cfg_text,
+        names: Some(Arc::clone(&built.public_names)),
         clock_seed: stream_mapping.map(|s| s.mapping),
-        history: Some(&found),
+        history: Some(&*found),
     };
     public_start
         .earlier_legacy_checkpoint(&dir.join("checkpoints"))
         .map_err(refusal)?;
+    // The source is chosen; the public stream opens on its own thread below, from these parts.
+    let view_out::PublicStart {
+        key,
+        initial: stream_initial,
+        record: stream_record,
+        checkpoint: stream_checkpoint,
+        text: stream_text,
+        names: stream_names,
+        clock_seed: stream_clock,
+        ..
+    } = public_start;
+    stamp("before replay");
     let world = answers::start(initial.frozen(), rules, store, cfg).map_err(refusal)?;
+    stamp("replay");
     println!(
         "restart: checkpoint {:?}, {} records read, {} applied",
         world.restart.checkpoint, world.restart.read, world.restart.applied
@@ -1935,14 +2169,16 @@ fn serve(args: &[String]) -> R<()> {
         crate::watchdog::Real::start(),
         crate::watchdog::LIMIT_MS,
     );
-    let mut writer = view_out::PublicWriter::open(public_start, stream_store).map_err(refusal)?;
-    // Both the pointer and placement bootstrap resolve the existing strict public history export.
-    let history = "history/";
-    let pointer = format!(
-        "{{\"stream\":\"views/{}/\",\"history\":\"{history}\"}}\n",
-        stream::dir(&built.header, &key)
-    );
-    view_out::write_whole(&views.join("world.json"), pointer.as_bytes()).map_err(refusal)?;
+    let views_dir = views.clone();
+    // "Listening" means servable: the public pointer (views/world.json) and the stream it names are there (#3746). A
+    // restart already has them from its last run (the same header and key, so the same pointer); a fresh world waits
+    // for the stream's first flush, which on a fresh world has no history to replay.
+    let pointer_path = views.join("world.json");
+    let fresh = !pointer_path.exists();
+    let (ready_tx, ready_rx) = channel::<()>();
+    let stream_header = built.header.clone();
+    let stream_found = Arc::clone(&found);
+    // The history page's Back to live (#3661): the public stream this world serves now, written before listening.
     public_history_live(
         &dir,
         meta.get("name")
@@ -1951,15 +2187,6 @@ fn serve(args: &[String]) -> R<()> {
         &built.header,
         &key,
     )?;
-    // Physical cursor includes input records; public effect versions are independently validated by the observer.
-    writer.bridge_to(found.first).map_err(refusal)?;
-    for (offset, bytes) in found.records.iter().enumerate() {
-        let record = found.first + offset as u64;
-        if record >= writer.source_cursor() {
-            writer.push(record, bytes).map_err(refusal)?;
-        }
-    }
-    writer.flush().map_err(refusal)?;
     drop(found);
     let (stream_tx, stream_rx) = channel::<(u64, Vec<u8>)>();
     // Shipping/archive delivery remains independent of a stopped public observer.
@@ -1974,15 +2201,56 @@ fn serve(args: &[String]) -> R<()> {
             }
         })
         .map_err(|e| e.to_string())?;
+    // The public stream recovers its history on its own thread, as it already follows the world there: on a restarted
+    // full-Eden fork that replay takes seconds, and the world serves meanwhile; records wait in `stream_rx` (#3746).
     std::thread::Builder::new()
         .name("public-stream".into())
         .spawn(move || {
             let result = (|| -> Result<(), Refusal> {
+                let start = view_out::PublicStart {
+                    root: &views_dir,
+                    header: &stream_header,
+                    key,
+                    initial: stream_initial,
+                    record: stream_record,
+                    checkpoint: stream_checkpoint,
+                    text: stream_text,
+                    names: stream_names,
+                    clock_seed: stream_clock,
+                    history: Some(&*stream_found),
+                };
+                let mut writer = view_out::PublicWriter::open(start, stream_store)?;
+                // Both the pointer and placement bootstrap resolve the existing strict public history export.
+                let history = "history/";
+                let pointer = format!(
+                    "{{\"stream\":\"views/{}/\",\"history\":\"{history}\"}}\n",
+                    stream::dir(&stream_header, &key)
+                );
+                view_out::write_whole(&views_dir.join("world.json"), pointer.as_bytes())?;
+                // Physical cursor includes input records; public effect versions are independently validated by the
+                // observer.
+                writer.bridge_to(stream_found.first)?;
+                for (offset, bytes) in stream_found.records.iter().enumerate() {
+                    let record = stream_found.first + offset as u64;
+                    if record >= writer.source_cursor() {
+                        writer.push(record, bytes)?;
+                    }
+                }
+                writer.flush()?;
+                stamp("public stream");
+                let _ = ready_tx.send(());
+                drop(stream_found);
                 loop {
                     match stream_rx.recv_timeout(std::time::Duration::from_millis(20)) {
                         Ok((record, bytes)) => {
                             if record >= writer.source_cursor() {
                                 writer.push(record, &bytes)?;
+                            }
+                            // What is already waiting first: a writer behind would cut a part a record (#3799).
+                            while let Ok((record, bytes)) = stream_rx.try_recv() {
+                                if record >= writer.source_cursor() {
+                                    writer.push(record, &bytes)?;
+                                }
                             }
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
@@ -2002,8 +2270,26 @@ fn serve(args: &[String]) -> R<()> {
             }
         })
         .map_err(|e| e.to_string())?;
+    if fresh && ready_rx.recv().is_err() {
+        return Err(
+            "public-stream: stopped before its first flush; the world is not servable".into(),
+        );
+    }
+    // ... and the clock runs: its first tick is done, after it reports the state this start resumes from (`worldd:
+    // started at tick`). The public stream no longer holds the start-up path, so without this a restart could say
+    // listening before the clock had started.
+    while world.beat.read().0 < 0 {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    if !pointer_path.is_file() {
+        return Err(format!(
+            "public-pointer-missing: {}",
+            pointer_path.display()
+        ));
+    }
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).map_err(io(&socket))?;
+    stamp("listening");
     println!("listening {}", socket.display());
     crate::ready();
     for stream in listener.incoming().flatten() {
@@ -2264,8 +2550,10 @@ mod tests {
         let building = imported.nodes["building"];
         let floor = imported.nodes["building/floor-1"];
         let built = build(&facts.text, &[]).unwrap();
-        assert!(built.town.surfaces.contains_key(&floor));
         let initial = Replica::start(built.header.stored()).unwrap();
+        let (before, _) =
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+        assert!(before.surfaces.contains_key(&floor));
         let mut live = initial.frozen();
         live.apply(&replica::effects::Part::read(&built.part).unwrap())
             .unwrap();
@@ -2918,6 +3206,50 @@ mod tests {
         assert_eq!(ordinary.replica().tree().to_state(), parent.to_state());
         drop(log.close());
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// #3672: the planner `Town::with_planner` clones answers every query as `Town::copy`'s second assembly does.
+    #[test]
+    fn planner_clone_answers_as_the_assembled_copy() {
+        let facts = testworld::generate(1, 0).unwrap();
+        let built = build(&facts.text, &[]).unwrap();
+        let initial = Replica::start(built.header.stored()).unwrap();
+        let (mut town, mut planner) =
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+        let mut copy = town.copy().unwrap();
+        for t in [&mut town, &mut planner, &mut copy] {
+            t.prepare_classes([replica::kinds::sizes::Size::Large])
+                .unwrap();
+        }
+        assert_eq!(planner.tree.to_state(), copy.tree.to_state());
+        let floors: Vec<Id> = copy.surfaces.keys().copied().collect();
+        assert!(
+            floors.len() > 1,
+            "the test world has floors besides the ground"
+        );
+        assert_eq!(planner.surfaces.keys().copied().collect::<Vec<_>>(), floors);
+        let ask = |t: &mut Town| {
+            let view = t.view();
+            let mut out = Vec::new();
+            for &node in &floors {
+                for x in (-30_000..=30_000).step_by(2_500) {
+                    for z in (-30_000..=30_000).step_by(2_500) {
+                        let at = Vec3::new(x, 0, z);
+                        out.push(format!(
+                            "{:?} {:?} {:?}",
+                            view.on_floor(node, at),
+                            view.stand_near(node, at, 1, None),
+                            view.stand_near(node, at, skills::form_runner::REACH, None)
+                        ));
+                    }
+                }
+            }
+            out
+        };
+        let (cloned, assembled) = (ask(&mut planner), ask(&mut copy));
+        assert!(cloned.iter().any(|a| !a.contains("None None")));
+        assert_eq!(cloned, assembled);
+        assert_eq!(ask(&mut town), assembled);
     }
 
     #[test]

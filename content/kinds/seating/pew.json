@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:pew",
   "owner": "thing",
-  "state": { "kneeler_down": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "state": { "kneeler_down": { "n": 28, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
   "points": {
     "seat_1_front": { "role": "stand", "at_mm": [-750, 0, 682], "yaw_mdeg": 180000 },
     "seat_2_front": { "role": "stand", "at_mm": [0, 0, 682], "yaw_mdeg": 180000 },

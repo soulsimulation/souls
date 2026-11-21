@@ -20,8 +20,8 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "set", "node": "t1", "field": "water", "n": 1, "to": 999998300, "by": -1700 },
-              { "change": "set", "node": "k1", "field": "water", "n": 1, "to": 1700, "by": 1700 }
+              { "change": "set", "node": "t1", "field": "water", "n": 28, "to": 999998300, "by": -1700 },
+              { "change": "set", "node": "k1", "field": "water", "n": 28, "to": 1700, "by": 1700 }
             ],
             "events": [{ "event": "eden:filled", "node": "k1", "changes": [0, 1] }]
           }

@@ -7,6 +7,8 @@ import type { NodeRec } from '../source/source.ts';
 import { STRUCTURE, type WorldView } from '../draw/world.ts';
 import { fetchIndex } from './models.ts';
 import { ThingLayer } from './things.ts';
+import { setWindowLife } from './windows.ts';
+import { civil, localAt, type SkyRecord } from '../sky/record.ts';
 
 const MM = 1e-3;
 
@@ -36,12 +38,24 @@ export function solidBoxes(n: NodeRec, ground: ((x: number, z: number) => number
   ));
 }
 
-export type PageThings = { layer: ThingLayer | null; apply(nodes: NodeRec[], removed: string[]): void; update(eye: THREE.Vector3): void };
+export type PageThings = {
+  layer: ThingLayer | null; apply(nodes: NodeRec[], removed: string[]): void; update(eye: THREE.Vector3): void;
+  /** #3603: moves what rides a course to where the world view has it at the drawn time; call after `world.draw`. */
+  follow(): void;
+  /** C10: the world time drawn and the sky's record then, for the lit windows' share by local hour (today's
+   *  `setWindowLife`); until it is called, today's 0.6 of the rooms are lit at night. */
+  night(t: number | null, record: SkyRecord | null): void;
+};
+
+/** The windows' life at world time `t` (µs): the local hour on the world's clock, and seconds for the rooms' people. */
+export function windowLife(t: number | null, record: SkyRecord | null): void {
+  setWindowLife(t !== null && record ? civil(localAt(record, t)).hour : null, Math.max(0, t ?? 0) / 1e6);
+}
 
 /** The page's things, from its parameters; none (the world view's boxes stay) when no `models` root is given. */
 export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams): PageThings {
   const root = params.get('models');
-  const none: PageThings = { layer: null, apply() {}, update() {} };
+  const none: PageThings = { layer: null, apply() {}, update() {}, follow() {}, night: windowLife };
   if (!root) return none;
   world.drawThings = false;
   if (params.get('things') === '0') return none;
@@ -64,11 +78,18 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
     update(eye) {
       layer?.update(eye);
     },
+    follow() {
+      if (!layer) return;
+      const s = new THREE.Vector3();
+      for (const id of world.moving()) layer.move(id, world.frame(id).clone().scale(s.setScalar((world.nodes.get(id)?.scale ?? 1_000_000) / 1_000_000)));
+    },
+    night: windowLife,
   };
   fetchIndex(base.href).then((index) => {
     const copies = Number(params.get('copies') ?? 1);
     layer = new ThingLayer({
       index, copies,
+      hideRoofs: params.has('hideRoofs') && params.get('hideRoofs') !== '0', cut: params.has('cut') ? Number(params.get('cut')) : null,
       fetch: (h) => fetch(new URL(`worlds/models/${h}.glb`, base)).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status))))),
     });
     out.layer = layer;

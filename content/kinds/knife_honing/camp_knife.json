@@ -3,7 +3,7 @@
   "kind": "eden:camp_knife",
   "owner": "thing",
   "state": {
-    "honings": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+    "honings": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [-70, 12, 0] }

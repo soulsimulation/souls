@@ -13,6 +13,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
+import { BRIEF_MOST } from '../brief/brief.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
@@ -160,4 +161,73 @@ test('A4, A5: a mailbox message reaches the agent, its act closes it with the ou
     assert.ok(!text.includes(words) && !text.includes('again'), `${f} holds a message's words`);
   }
   assert.ok(readFileSync(join(dir, 'world', 'arrivals.txt'), 'utf8').trim().split('\n').length >= 2, 'the acts reached the world');
+});
+
+test('C15 (#3685): pending lists what is open and what arrived; ack answers with no act, done or failed', async () => {
+  await ask({ op: 'wait', seconds: 0 }); // what came before, taken
+  const read = (id) => waitFor(async () => { const r = await mailbox('read', { id }); return r.state !== 'open' && r; });
+  const listedWith = (id) => waitFor(async () => { const p = await ask({ op: 'pending', list: true }); return p.open.some((m) => m.id === id) && p; });
+  // A3: the listing holds the message still open, and what arrived since the last read, once.
+  const q = await mailbox('put', { soul: GRANT, text: 'what time is it?' });
+  const first = await listedWith(q.id);
+  assert.equal(first.ok, true);
+  assert.deepEqual(first.open.find((m) => m.id === q.id).text, 'what time is it?');
+  assert.ok(first.events.some((e) => e.kind === 'mail' && e.id === q.id), 'the arrival is listed');
+  assert.match(first.next, /ack <its id>/);
+  const second = await ask({ op: 'pending', list: true });
+  assert.ok(second.open.some((m) => m.id === q.id), 'still open: listed again');
+  assert.ok(!second.events.some((e) => e.kind === 'mail'), 'the arrival was read: not again');
+  // #3781: with no --close, a reply is an interim note: the message stays open, in the directory and the listing.
+  const note = await ask({ op: 'ack', id: q.id, reply: 'one moment' });
+  assert.deepEqual([note.ok, note.open, note.closed], [true, true, undefined], JSON.stringify(note));
+  await sleep(1200); // past a mailbox read
+  assert.equal((await mailbox('read', { id: q.id })).state, 'open', 'a note leaves it open');
+  assert.ok((await ask({ op: 'pending', list: true })).open.some((m) => m.id === q.id), 'still listed');
+  // A1: a reply-only ack with --close done answers it with no act, and closes it done.
+  assert.equal((await ask({ op: 'ack', id: 'm_0000000000000000', reply: 'hi' })).code, 'mail-not-found');
+  assert.equal((await ask({ op: 'ack', id: q.id, reply: '   ' })).code, 'ack-reply');
+  assert.equal((await ask({ op: 'ack', id: q.id, reply: 'hi', close: 'maybe' })).code, 'ack-close');
+  const sentBefore = (await ask({ op: 'status' })).sent;
+  const a = await ask({ op: 'ack', id: q.id, reply: 'Noon,   by the tower clock', close: 'done' });
+  assert.deepEqual([a.ok, a.acked, a.reply, a.closed], [true, q.id, 'Noon, by the tower clock', 'done']);
+  const done = await read(q.id);
+  assert.deepEqual([done.state, done.outcome], ['done', 'replied']);
+  assert.equal((await ask({ op: 'status' })).sent, sentBefore, 'no act was sent');
+  assert.ok(!(await ask({ op: 'pending', list: true })).open.some((m) => m.id === q.id), 'closed: no longer listed');
+  // A2: --close failed closes it failed: a no.
+  const no = await mailbox('put', { soul: GRANT, text: 'jump in the lake' });
+  await listedWith(no.id);
+  assert.equal((await ask({ op: 'ack', id: no.id, reply: 'No: the lake is out of reach.', close: 'failed' })).closed, 'failed');
+  const failed = await read(no.id);
+  assert.deepEqual([failed.state, failed.outcome], ['failed', 'replied']);
+  // While an act serves a message, a reply with no --close is a note (#3781); the act's outcome closes it.
+  const lamp = await mailbox('put', { soul: GRANT, text: 'the lamp off, please' });
+  await listedWith(lamp.id);
+  assert.equal((await ask({ op: 'act', verb: 'r2:switch_off', target: LAMP, for: lamp.id })).ok, true);
+  const rides = await ask({ op: 'ack', id: lamp.id, reply: 'switching it off' });
+  // The act's answer may already have closed it (a lamp answers within milliseconds): then there is nothing to answer.
+  assert.ok(rides.open || rides.code === 'mail-not-found', JSON.stringify(rides));
+  const byAct = await read(lamp.id);
+  assert.notEqual(byAct.outcome, 'replied', 'closed once, by its act');
+});
+
+test('#3782: pending carries the brief look gives, after the messages and arrivals, within the brief\'s own limit', async () => {
+  await ask({ op: 'wait', seconds: 0 }); // what came before, taken
+  const m = await mailbox('put', { soul: GRANT, text: 'where are you?' });
+  const p = await waitFor(async () => { const r = await ask({ op: 'pending', list: true }); return r.open.some((o) => o.id === m.id) && r; });
+  const look = await ask({ op: 'look' });
+  assert.ok(p.brief, JSON.stringify(p));
+  // The same brief: the room, what is in it, the places around it and the bodies, as `look` has them.
+  for (const k of ['room', 'here', 'outward', 'bodies']) assert.deepEqual(p.brief[k], look[k], k);
+  assert.equal(p.brief.changed, undefined, 'the answer\'s own changed block closes it, as look\'s does');
+  const keys = Object.keys(p);
+  assert.ok(keys.indexOf('open') < keys.indexOf('brief') && keys.indexOf('events') < keys.indexOf('brief'), keys.join(' '));
+  const bytes = (v) => Buffer.byteLength(JSON.stringify(v));
+  assert.ok(bytes(p.brief) <= BRIEF_MOST, `brief ${bytes(p.brief)} bytes`);
+  // Today's pending is its fields plus the brief under its budget: without the messages and arrivals themselves, the
+  // answer is the brief and at most 600 bytes of fields.
+  const { open, events, ...rest } = p;
+  report.pendingBytes = { brief: bytes(p.brief), rest: bytes(rest), whole: bytes(p) };
+  assert.ok(bytes(rest) <= BRIEF_MOST + 600, JSON.stringify(report.pendingBytes));
+  await ask({ op: 'ack', id: m.id, reply: 'here', close: 'done' });
 });

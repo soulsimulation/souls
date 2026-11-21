@@ -3,7 +3,7 @@
   "kind": "eden:mendable_tent",
   "owner": "thing",
   "state": {
-    "condition": { "n": 1, "type": "enum", "values": ["whole", "torn"], "default": "whole", "audience": { "rule": "everyone" } }
+    "condition": { "n": 28, "type": "enum", "values": ["whole", "torn"], "default": "whole", "audience": { "rule": "everyone" } }
   },
   "points": {
     "work": { "role": "stand", "at_mm": [0, 0, 1900], "yaw_mdeg": 180000 },

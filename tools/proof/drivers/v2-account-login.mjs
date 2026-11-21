@@ -56,7 +56,7 @@ function frame(socket){return new Promise((ok,fail)=>{
 async function authenticate(token){
   const s=owned,socket=new WebSocket(s.recipe.gatewayURL);socket.binaryType='arraybuffer';s.sockets.add(socket);socket.addEventListener('close',()=>s.sockets.delete(socket),{once:true});
   await new Promise((ok,fail)=>{const signal=s.signal,clean=()=>{clearTimeout(timer);signal.removeEventListener('abort',abort);};const abort=()=>{clean();socket.close();fail(signal.reason);};const timer=setTimeout(()=>{clean();socket.close();fail(Error('account-proof.socket-open-timeout'));},5000);socket.onopen=()=>{clean();ok();};socket.onerror=()=>{clean();fail(Error('account-proof.socket-open'));};signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();});
-  let answer=frame(socket);socket.send(s.cbor.encode(new Map([[1,1],[2,new Uint8Array()]])));await answer;
+  let answer=frame(socket);socket.send(s.cbor.encode(new Map([[1,2],[2,new Uint8Array()]])));await answer;
   answer=frame(socket);socket.send(s.cbor.encode(new Map([[1,token]])));const code=s.cbor.decode(new Uint8Array(await answer),{useMaps:true}).get(4);
   return {socket,code};
 }

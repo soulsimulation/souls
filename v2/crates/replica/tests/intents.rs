@@ -32,6 +32,7 @@ fn a1_golden_envelopes_for_every_kind_of_intent() {
         ("cancel", Kind::Cancel),
         ("replace", Kind::Act),
         ("edit", Kind::Edit),
+        ("reflex", Kind::Act),
     ];
     for (name, kind) in want {
         let (bytes, i) = intent(name);
@@ -263,6 +264,7 @@ fn g1b_an_edit_reads_to_its_batch_and_other_answers_keep_their_bytes() {
             Op::Move { .. } => "move",
             Op::Set { .. } => "set",
             Op::Remove { .. } => "remove",
+            Op::Doorway { .. } => "doorway",
         })
         .collect();
     println!(
@@ -305,6 +307,41 @@ fn g1b_an_edit_reads_to_its_batch_and_other_answers_keep_their_bytes() {
     assert_eq!(keys(&refused), [1, 2, 3, 4, 5]);
 }
 
+#[test]
+fn g1f_doorway_wire_roundtrip_keeps_owned_geometry_under_strict_i2() {
+    use replica::edit::wire::{parameters, read};
+    use replica::edit::{Op, Ref};
+    use replica::ids::{Id, Scope};
+    let node = |n| Ref::Node(Id::new(Scope([0xdd; 16]), n).unwrap());
+    let row = |n| Value::Array(vec![Value::Uint(n); 9]);
+    let ops = vec![Op::Doorway {
+        name: 7,
+        door: node(1),
+        from: node(2),
+        to: node(3),
+        at: [-500, 0],
+        yaw: 90000,
+        width: 1200,
+        height: 2100,
+        wall: node(4),
+        closed: vec![row(1)],
+        open: vec![row(2), row(3)],
+    }];
+    let (_, mut i) = intent("edit");
+    i.parameters = parameters(&ops);
+    let bytes = encode(&i.to_value()).unwrap();
+    let decoded = replica::intent_decode::decode(&bytes).unwrap();
+    assert_eq!(read(&decoded.parameters).unwrap(), ops);
+    let Value::Array(batch) = i.parameters.get_mut(&1).unwrap() else {
+        panic!("batch")
+    };
+    let Value::Map(op) = &mut batch[0] else {
+        panic!("operation")
+    };
+    op.insert(11, Value::Uint(0));
+    assert!(replica::intent_decode::decode(&encode(&i.to_value()).unwrap()).is_err());
+}
+
 /// The checker artifact itself (rule 13): when CI has built it (`CHECKER_WASM`, the `checker-artifact` step of
 /// `v2/tools/ci.sh`), it loads by its own hash. Without the variable this test says so and checks nothing.
 #[test]
@@ -318,4 +355,33 @@ fn the_built_checker_artifact_loads_by_its_hash() {
     let r = Checker::load(&bytes, &want).map(|c| to_hex(&c.build));
     println!("{} bytes: {r:?}", bytes.len());
     assert!(r.is_ok(), "{r:?}");
+}
+
+/// #3764: a reflex is marked (field 12 is 1) and an agent's act is not; a reflex is not its agent acting, and a
+/// marker other than 1 is refused.
+#[test]
+fn reflex_a1_a_reflex_is_marked_and_an_agents_act_is_not() {
+    let (act_bytes, act) = intent("act");
+    let (reflex_bytes, reflex) = intent("reflex");
+    assert!(!act.reflex && act.agent_act(), "an agent's act: unmarked");
+    assert!(reflex.reflex && !reflex.agent_act(), "a reflex: marked");
+    // The same act but for the marker, which is the envelope's last field: `12: 1`, two bytes, and one more field.
+    assert_eq!(reflex_bytes[0], act_bytes[0] + 1);
+    assert_eq!(&reflex_bytes[1..reflex_bytes.len() - 2], &act_bytes[1..]);
+    assert_eq!(&reflex_bytes[reflex_bytes.len() - 2..], &[0x0c, 0x01]);
+    let mut unmarked = reflex.clone();
+    unmarked.reflex = false;
+    assert_eq!(unmarked, act);
+    // Only `1` marks a reflex: `12: 0` and `12: 2` are not records.
+    for bad in [0x00, 0x02] {
+        let mut b = reflex_bytes.clone();
+        *b.last_mut().expect("a byte") = bad;
+        let r = Intent::read(&b).expect_err("refused");
+        assert_eq!(r.name, "intent-not-a-record", "12: {bad}");
+    }
+    println!(
+        "reflex: {} (an agent's act: {})",
+        to_hex(&reflex_bytes),
+        to_hex(&act_bytes)
+    );
 }

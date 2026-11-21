@@ -71,7 +71,7 @@ async function wear(page, row, check) {
   check('live-' + row.preset, answer.answer === 1 && state.hash === row.hash && state.model === row.model && state.materials > 0 && (!row.textured || state.maps > 0) && elapsed <= 2000, JSON.stringify({ elapsedMs: elapsed, model: state.model, materials: state.materials, maps: state.maps }));
   await page.screenshot({ path: join(owned.paths.dir, `model-${row.preset}.png`) }); return state;
 }
-export default async function ({ page, base, arm, fixture, check }) {
+export default async function ({ page, base, arm, fixture, check, expectHttp }) {
   await page.waitForFunction(() => [...(globalThis.v2?.world?.nodes?.values() ?? [])].some(n => n.kind.split('@')[0] === 'souls:body'), null, { timeout: 10000 });
   const body = await page.evaluate(() => [...globalThis.v2.world.nodes.values()].find(n => n.kind.split('@')[0] === 'souls:body').id);
   const follow = new URL(page.url()); follow.searchParams.set('follow', body); await page.goto(follow.href);
@@ -91,6 +91,11 @@ export default async function ({ page, base, arm, fixture, check }) {
   const nextSecond = Math.ceil((await command(['status'])).worldUs / 1e6) + 1;
   if (nextSecond <= oldSecond || nextSecond - oldSecond > 8) fail('history-moment-distance');
   await liveAt(nextSecond);
+  // The world publishes its open history window every 5 s; wait two of those so the wear is in the published bundle.
+  await delay(11000, owned.signal);
+  // At the live edge the history worker asks for the next day's index to find the next bundle's start; none exists yet.
+  for (const day of new Set([oldSecond, nextSecond].map(second => Math.floor(second / 86400) + 1)))
+    expectHttp(`/s/h/${owned.recipe.world}/${owned.recipe.lineage}/bundles/${String(day).padStart(8, '0')}/index`, 404, 'next day index at the live edge');
   const history = new URL(page.url()); history.hash = new URLSearchParams({ w: owned.recipe.world, l: owned.recipe.lineage, t: String(nextSecond * 1e6) }).toString();
   await page.goto(history.href); await page.reload(); await page.waitForFunction(() => typeof globalThis.v2?.history?.opened.hash === 'string', null, { timeout: 8000 }); await drawn(page, next.hash); await snapshot(page); await page.getByRole('button', { name: 'pause', exact: true }).click(); check('history-new-hash', (await drawn(page, next.hash)).hash === next.hash);
   for (let i = 0; i < nextSecond - oldSecond; i++) { await snapshot(page); await page.getByRole('slider').focus(); await Promise.all([page.waitForEvent('domcontentloaded'), page.getByRole('slider').press('ArrowLeft')]); }
