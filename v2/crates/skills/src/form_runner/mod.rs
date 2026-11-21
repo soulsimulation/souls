@@ -1317,6 +1317,81 @@ pub fn hatch_words(
         .collect()
 }
 
+/// A whole number as a value.
+fn int_value(n: i64) -> encode::Value {
+    match u64::try_from(n) {
+        Ok(u) => encode::Value::Uint(u),
+        Err(_) => encode::Value::Nint(n.unsigned_abs() - 1),
+    }
+}
+
+/// A field's default, from its definition in the entry, as the value it would hold: a whole number or bool, an
+/// enum's value by name, a list's records. Anything else is `hatch-read-not-a-number`.
+fn default_value(entry: &Value, def: &Value, d: &Value) -> Result<encode::Value, Refusal> {
+    let not = || Refusal {
+        name: "hatch-read-not-a-number",
+        detail: "a hatch reads whole numbers, enums, lists and records of them".into(),
+    };
+    Ok(match d {
+        Value::Int(n) => int_value(i64::try_from(*n).map_err(|_| not())?),
+        Value::Bool(b) => encode::Value::Uint(u64::from(*b)),
+        Value::Str(v) => {
+            encode::Value::Text(Name::new(&format!("{}:{v}", namespace(entry))).ok_or_else(not)?)
+        }
+        Value::Arr(rs) => {
+            let of = def.get("of").and_then(Value::obj).unwrap_or(&[]);
+            encode::Value::Array(
+                rs.iter()
+                    .map(|r| {
+                        (1u64..)
+                            .zip(of)
+                            .map(|(k, (part, pd))| {
+                                Ok((k, default_value(entry, pd, r.get(part).ok_or_else(not)?)?))
+                            })
+                            .collect::<Result<BTreeMap<_, _>, Refusal>>()
+                            .map(encode::Value::Map)
+                    })
+                    .collect::<Result<_, _>>()?,
+            )
+        }
+        _ => return Err(not()),
+    })
+}
+
+/// The values of a hatch's declared reads, in order, for `run_hatch`: a field's from `fields` (the node's, by number),
+/// else its default; an argument's from `args`, a whole number (`arg-missing` when the act gave none,
+/// `hatch-read-not-a-number` for any other).
+pub fn hatch_reads(
+    entry: &Value,
+    hatch: &Hatch,
+    fields: &BTreeMap<u64, encode::Value>,
+    args: &Args,
+) -> Result<Vec<encode::Value>, Refusal> {
+    hatch
+        .reads
+        .iter()
+        .map(|r| match r {
+            Read::Field(n) => match fields.get(n) {
+                Some(v) => Ok(v.clone()),
+                None => {
+                    let Some((name, def)) = field_def(entry, *n) else {
+                        return refuse("field-unknown", n.to_string());
+                    };
+                    match def.get("default") {
+                        Some(d) => default_value(entry, def, d),
+                        None => refuse("field-unknown", name.to_owned()),
+                    }
+                }
+            },
+            Read::Argument(a) => match args.get(a.as_str()) {
+                Some(Arg::Int(n)) => Ok(int_value(*n)),
+                Some(_) => refuse("hatch-read-not-a-number", a.as_str().to_owned()),
+                None => refuse("arg-missing", a.as_str().to_owned()),
+            },
+        })
+        .collect()
+}
+
 /// One plain value from a hatch's word, by its definition: an int or duration within its bounds, a bool 0 or 1, an
 /// enum's value by its place. Anything else is `hatch-answer-malformed`.
 fn plain_value(entry: &Value, name: &str, def: &Value, w: i64) -> Result<encode::Value, Refusal> {
