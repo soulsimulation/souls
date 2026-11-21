@@ -812,7 +812,7 @@ fn a_600_m_walk_across_eden_ends_done() {
         let v = (m * 1e6) as i64;
         u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
     };
-    let to = Value::Array(vec![um(-373.333), um(-0.55), um(474.666)]);
+    let to = Value::Array(vec![um(-373.333), um(0.0), um(474.666)]);
     let t0 = answers::now();
     let walked = soul.act_within(
         "eden:walk",
