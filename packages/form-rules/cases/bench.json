@@ -40,11 +40,11 @@
       "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "detail": { "node": "s1", "slot": "right" }, "fix": null }
     },
     {
-      "name": "sit_without_a_seat_argument",
+      "name": "sit_without_a_seat_argument_takes_a_free_seat",
       "act": { "this": "s1", "form": "sit" },
-      "state": { "actor": "b1", "nodes": { "s1": { "kind": "eden:bench" }, "b1": { "hands": {} } } },
+      "state": { "actor": "b1", "nodes": { "s1": { "kind": "eden:bench", "slots": { "left": ["b2"] } }, "b1": { "hands": {} }, "b2": { "hands": {} } } },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "no", "reason": "bad_input", "need": 0, "detail": { "what": "argument_missing", "arg": "seat" }, "fix": null }
+      "expect": { "verdict": "yes", "read": [["s1/slot/right", 0]] }
     },
     {
       "name": "sit_no_such_seat",

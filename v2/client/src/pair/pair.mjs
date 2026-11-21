@@ -161,7 +161,8 @@ export async function pair({ home, directory, world, gateway, device, label, sou
     try { entries = (await refreshEntries({ home, world, gateway, token: got.token })).entries; } catch (e) { entries = { failed: e.code ?? 'entries-unreachable' }; }
     let guide;
     try { guide = writeGuide(home); } catch (e) { guide = { failed: String(e.message ?? e).slice(0, 120) }; }
-    return { soul: id, grant: got.grant, history, entries, guide };
+    // #3702: the world's welcome, shown to the Soul as it arrives.
+    return { soul: id, grant: got.grant, history, entries, guide, ...(typeof got.welcome === 'string' ? { welcome: got.welcome } : {}) };
   }
 }
 

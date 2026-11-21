@@ -59,6 +59,7 @@ use replica::effects::{Actor, Body, Effect, Refusal, TimerRec};
 use replica::encode::Name;
 use replica::host::{Answer, Ask, F_CROSSING, Seen};
 use replica::ids::{Id, Minter, Scope};
+use replica::intents::{Intent as WireIntent, Target};
 use replica::kinds::sizes::Build;
 use replica::moves::{Effector, Move};
 use replica::pose::Vec3;
@@ -172,6 +173,29 @@ impl Walk {
         let here = [me.pose.position.x, me.pose.position.z];
         (due, self.watch.seen(self.body, here, aim, to, now))
     }
+}
+
+/// Whether slot argument `key` of form `f` is the body's own place: a `select` of free slots that a `sit` or `lie` step
+/// takes, or that an effect reparents the actor into (#3802).
+fn selects_body_slot(f: &Json, key: &str) -> bool {
+    let arg = |v: Option<&Json>| v.and_then(|v| v.get("arg")).and_then(Json::str) == Some(key);
+    let take = f.get("takes").and_then(|t| t.get(key));
+    let selects = take.and_then(|t| t.get("type")).and_then(Json::str) == Some("slot")
+        && take
+            .and_then(|t| t.get("select"))
+            .and_then(|s| s.get("of"))
+            .and_then(Json::str)
+            == Some("free_slots");
+    let steps = f.get("steps").and_then(Json::arr).unwrap_or(&[]);
+    let effects = f.get("effects").and_then(Json::arr).unwrap_or(&[]);
+    selects
+        && (steps.iter().any(|s| {
+            matches!(s.get("step").and_then(Json::str), Some("sit" | "lie")) && arg(s.get("slot"))
+        }) || effects.iter().any(|e| {
+            e.get("change").and_then(Json::str) == Some("reparent")
+                && e.get("what").and_then(Json::str) == Some("actor")
+                && arg(e.get("into"))
+        }))
 }
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
@@ -418,6 +442,7 @@ impl Geometry for Sight<'_> {
         match q {
             Ask::Toward { to, .. } => {
                 let me = self.bodies.get(&body)?;
+                let waiting = std::cell::Cell::new(false);
                 let [x, z] = match &self.split {
                     Some(_) => self.with_view(body, |v| {
                         let step = self.context.get(&body)?.2;
@@ -450,6 +475,7 @@ impl Geometry for Sight<'_> {
                         }
                         // Waiting for the existing planner is not evidence that a physical walk stalled.
                         if !pending.is_empty() {
+                            waiting.set(true);
                             return Some([me.pose.position.x, me.pose.position.z]);
                         }
                         Some(corner)
@@ -458,9 +484,12 @@ impl Geometry for Sight<'_> {
                 };
                 let y = if [x, z] == [to.x, to.z] { to.y } else { 0 };
                 let here = [me.pose.position.x, me.pose.position.z];
-                self.asked
-                    .borrow_mut()
-                    .insert(body, (sim::walk::node_of(me), here, [x, z], [to.x, to.z]));
+                // A tick spent waiting for the planner is no tick of walking: the stall watch starts again (C21).
+                if !waiting.get() {
+                    self.asked
+                        .borrow_mut()
+                        .insert(body, (sim::walk::node_of(me), here, [x, z], [to.x, to.z]));
+                }
                 Some(Answer::Point(Vec3::new(x, y, z)))
             }
             Ask::Near { .. } => Some(Answer::Near(Vec::new())),
@@ -758,6 +787,56 @@ fn plain(kind: &Name) -> &str {
     k.split_once('@').map_or(k, |(p, _)| p)
 }
 
+/// The declared nearest-free seat form (#3573): `sit` taking one slot of this thing's free slots nearest me, walked to and
+/// then sat in. Its slot is bound by the form runner's pick (#3802); this only recognises the shape, so a bare fixture
+/// sit is routed through the form's own approach.
+fn fixture_seat<'a>(entry: &'a Json, form: &str) -> Option<&'a str> {
+    if form != "sit" {
+        return None;
+    }
+    let f = entry.get("forms")?.get(form)?;
+    let [(arg, take)] = f.get("takes")?.obj()? else {
+        return None;
+    };
+    let select = take.get("select")?;
+    if take.get("type")?.str()? != "slot"
+        || select.obj()?.len() != 5
+        || select.get("of")?.str()? != "free_slots"
+        || select.get("in")?.str()? != "this"
+        || select.get("anchor")?.str()? != "me"
+        || select.get("order")?.str()? != "nearest"
+        || !matches!(select.get("rank"), Some(Json::Int(1)))
+    {
+        return None;
+    }
+    let [walk, sit] = f.get("steps")?.arr()? else {
+        return None;
+    };
+    (walk.get("step")?.str()? == "walk_to"
+        && walk.get("point")?.get("arg")?.str()? == arg
+        && sit.get("step")?.str()? == "sit"
+        && sit.get("slot")?.get("arg")?.str()? == arg)
+        .then_some(arg.as_str())
+}
+
+impl Acts {
+    /// A bare fixture sit uses its actual entry's approach; explicit arguments and selectors keep their path.
+    pub(crate) fn fixture_sit(&self, tree: &Tree, intent: &WireIntent) -> bool {
+        if intent.parameters.contains_key(&1)
+            || !matches!(intent.verb.as_str().split_once(':'), Some((ns, "sit")) if ns != "souls")
+        {
+            return false;
+        }
+        let Some(Target::Node(node)) = &intent.target else {
+            return false;
+        };
+        tree.handle(*node)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| self.kinds.get(plain(n.kind())))
+            .is_some_and(|entry| fixture_seat(entry, "sit").is_some())
+    }
+}
+
 impl Acts {
     /// No forms yet, over the world's entries by kind and the moves' library ([`library`]), in the zone `header`
     /// names, minting ids of `scope`: F4's amounts read the entries' fields (`Forms::kinds`), and a take or a put writes under the zone.
@@ -934,6 +1013,50 @@ impl Acts {
                 first.get_or_insert(refusal("arg-ambiguous", key));
                 continue;
             }
+            // A body's slot the caller left out, which the form selects from the thing's free slots, is the free one
+            // whose stand point is nearest the body (C19's pick); a thing with none free is refused by name (#3802).
+            // One the caller named that another body holds is refused `place-taken`, also before any walk.
+            let (mut picked, mut none_free, mut taken) = (false, None, None);
+            if let (Some(b), Some(f)) = (
+                bodies.as_deref().filter(|b| b.slots.place(*node).is_some()),
+                entry.get("forms").and_then(|f| f.get(form)),
+            ) {
+                let names = entry.get("slots").and_then(Json::obj).unwrap_or(&[]);
+                for (key, _) in f.get("takes").and_then(Json::obj).unwrap_or(&[]) {
+                    if !selects_body_slot(f, key) {
+                        continue;
+                    }
+                    if let Some(skills::form_runner::Arg::Name(n)) = all.get(key) {
+                        let slot = names.iter().position(|(m, _)| m == n).map(|i| i as u64 + 1);
+                        if slot
+                            .and_then(|s| b.slots.holder_in(*node, s))
+                            .is_some_and(|h| h != body)
+                        {
+                            taken = Some(n.clone());
+                        }
+                        continue;
+                    }
+                    if all.contains_key(key) {
+                        continue;
+                    }
+                    let free = b.slots.free(&b.runner.controller, body, *node);
+                    match free.and_then(|s| names.get(usize::try_from(s).ok()?.checked_sub(1)?)) {
+                        Some((n, _)) => {
+                            all.insert(key.clone(), skills::form_runner::Arg::Name(n.clone()));
+                            picked = true;
+                        }
+                        None => none_free = Some(key.clone()),
+                    }
+                }
+            }
+            if let Some(name) = taken {
+                first.get_or_insert(refusal("place-taken", name));
+                continue;
+            }
+            if let Some(key) = none_free {
+                first.get_or_insert(refusal(sim::commit::bind::NONE_FREE, key));
+                continue;
+            }
             let incompatible = entry
                 .get("forms")
                 .and_then(|f| f.get(form))
@@ -984,7 +1107,11 @@ impl Acts {
             }
             let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
             let r = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
-                if args.things.is_empty() && args.slots.is_empty() && args.values.is_empty() {
+                if !picked
+                    && args.things.is_empty()
+                    && args.slots.is_empty()
+                    && args.values.is_empty()
+                {
                     return forms.commit(
                         w,
                         &audiences,

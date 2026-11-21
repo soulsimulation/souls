@@ -3,7 +3,7 @@
   "kind": "eden:campfire",
   "owner": "thing",
   "state": {
-    "lit": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+    "lit": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
   },
   "points": {
     "logs": { "role": "contact", "at_mm": [0, 250, 0] },

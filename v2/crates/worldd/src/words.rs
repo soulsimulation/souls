@@ -14,7 +14,8 @@
 //!   (`replica::speech`), and a `shout` the same at a raised voice's reach ([`SHOUT_REACH_MM`]); a `whisper` (target: the listener's body) is the same event in an entry of the listener's
 //!   audience, its one hearer the listener; a `say` into an activity is that event in an entry of the activity's
 //!   audience, its hearers the members' bodies, and is refused `not-a-member` before its words are kept when the
-//!   speaker's body is not one ([`members`]); a `describe` sets the body's public name ([`NAME`], parameter 1) and
+//!   speaker's body is not one ([`members`]), and its public record beside it ([`public_record`], #3775: who spoke,
+//!   when and among whom, never the words); a `describe` sets the body's public name ([`NAME`], parameter 1) and
 //!   one-line description ([`DESCRIPTION`], parameter 2) as references on its node, as a Soul does when it joins.
 //!
 //! Not here: who else hears ordinary talk (the bodies' interest sets, `sim::speech`, need the controller's index, so a
@@ -28,7 +29,7 @@ use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, 
 use replica::encode::Value;
 use replica::ids::{Id, Minter, Scope, sha256};
 use replica::intents::{Intent, Target};
-use replica::speech::{RATE, SHORTEST, Said};
+use replica::speech::{RATE, SAID, SHORTEST, Said};
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::Audience;
@@ -249,6 +250,26 @@ pub fn entry(
         }
         Form::Other => return None,
     })
+}
+
+/// The public entry the world writes beside `entry`, the entry of an intent of `form`: for a turn into an activity, its
+/// record without words (`sim::speech::private_record`, #3775); none for any other form.
+pub fn public_record(form: Form, entry: &Effect) -> Option<Effect> {
+    let Form::Members(activity) = form else {
+        return None;
+    };
+    let ev = entry
+        .events
+        .iter()
+        .flatten()
+        .find(|e| e.name.as_str() == SAID)?;
+    let said = Said::read(&ev.to_value(), entry.envelope.audience).ok()?;
+    Some(sim::speech::private_record(
+        entry.envelope,
+        entry.envelope.node,
+        activity,
+        &said,
+    ))
 }
 
 /// The envelope of an entry an intent writes: at the world's next sequence `sequence`, world time `at`.

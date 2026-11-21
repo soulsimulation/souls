@@ -10,7 +10,8 @@
 //! The owner's box (W10, #2802): a page's view socket puts a message for a grant its view token holds
 //! ([`on_view_text`]; a Soul's, or a world's creator's), and every view socket whose token holds that grant is told,
 //! as text frames, when the agent's socket was given it, each intent the agent sent while it was open with the phase
-//! of its answer (I4's own: the envelope gains no field), and the agent's close. No other socket is told anything.
+//! of its answer (I4's own: the envelope gains no field), the agent's interim notes (#3781) and its close. No other
+//! socket is told anything.
 //! Nothing here makes an agent act.
 
 use std::sync::Arc;
@@ -105,12 +106,15 @@ pub async fn run(gw: Arc<Gateway>) {
 /// it, and ignores anything else). Once the directory closed the message, the close goes to the view sockets that
 /// watch that grant (W10) as the agent sent it.
 pub fn on_text(gw: &Arc<Gateway>, grant: Grant, text: &str) {
-    let Some((_, path)) = PASSED.iter().find(|(p, _)| text.starts_with(p)) else {
-        return;
-    };
     if text.len() > CLOSE_MOST {
         return;
     }
+    if text.starts_with("{\"note\"") {
+        return note(gw, &grant, text);
+    }
+    let Some((_, path)) = PASSED.iter().find(|(p, _)| text.starts_with(p)) else {
+        return;
+    };
     let (gw, soul, body) = (gw.clone(), grant.to_text(), text.to_owned());
     tokio::spawn(async move {
         let Some(mb) = gw.mailbox.get() else {
@@ -125,6 +129,30 @@ pub fn on_text(gw: &Arc<Gateway>, grant: Grant, text: &str) {
             None => (gw.log)("a mailbox frame was not taken by the directory"),
         }
     });
+}
+
+/// An agent's interim note on an open message (#3781): `{"note":{"id":"<id>","reply":".."}}`, told as it was sent to
+/// the view sockets that watch `grant`, while the message is one given to that grant and still open. It goes nowhere
+/// else: the directory is not told, and the message stays open.
+fn note(gw: &Gateway, grant: &Grant, text: &str) {
+    let Some((id, _)) = text
+        .strip_prefix("{\"note\":{\"id\":\"")
+        .and_then(|t| t.split_once('"'))
+    else {
+        return;
+    };
+    let key = grant.key();
+    let open = id_like(id)
+        && gw
+            .hub
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .grants
+            .get(&key)
+            .is_some_and(|held| held.mailed.contains(id));
+    if open {
+        gw.tell_watchers(&key, text.to_owned());
+    }
 }
 
 /// The longest message a page puts, in bytes (the directory's `TEXT_MOST`).

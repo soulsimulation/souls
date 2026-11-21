@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:big_wheel",
   "owner": "thing",
-  "state": {"under_way":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "state": {"under_way":{"n":28,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
   "points": {
     "boarding": {"role":"stand","at_mm":[-2000,0,2400],"yaw_mdeg":90000},
     "alighting": {"role":"stand","at_mm":[2000,0,0],"yaw_mdeg":-90000}

@@ -54,6 +54,8 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `redo` | the newest undo done again, with the same ids; a new edit clears it |
 | `<edit verb> ... --build <name> --step <name>` | one step of a build: the world keeps that batch under the build's name |
 | `undo --build <name>` | the whole build undone, step by step, while its steps are your newest edits |
+| `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
+| `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
 
 A kind may be written as its bare name (`room`) when only one kind has that name, or as `namespace:name`.
 

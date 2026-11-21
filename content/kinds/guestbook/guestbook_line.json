@@ -3,7 +3,7 @@
   "kind": "eden:guestbook_line",
   "owner": "thing",
   "state": {
-    "words": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+    "words": { "n": 28, "type": "text", "default": null, "audience": { "rule": "everyone" } }
   },
   "links": {
     "signer": { "n": 1, "from": "soul", "most": 1, "most_per": 1, "per": "parent", "audience": { "rule": "everyone" } }

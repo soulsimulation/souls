@@ -329,7 +329,8 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
 /// may be one id per verb, split by spaces; `args`, the first verb's thing arguments as `name=<id>` split by spaces, is
 /// parameter 1 as C2's `[[name, id], ...]`. E26 (#3329): `params`, a JSON object of numbered parameters for an engine
 /// act (`activity:offer`): a whole number, a name, an id (`<scope hex>-<counter>`), or a list of those. `reflex`, when
-/// true, marks it as sent by the client on its own standing consent, not by its agent (field 12, #3764).
+/// true, marks it as sent by the client on its own standing consent, not by its agent (field 12, #3764). `replaces`, an
+/// earlier sequence of the same Soul, is field 10: what a `souls:cancel` ends (#3705).
 #[wasm_bindgen(js_name = wireIntent)]
 // JS calls it with positional arguments; the words came last (C4, #3368), then the arguments (C10, #3414).
 #[allow(clippy::too_many_arguments)]
@@ -345,6 +346,7 @@ pub fn wire_intent(
     args: Option<String>,
     params: Option<String>,
     reflex: Option<bool>,
+    replaces: Option<u64>,
 ) -> Result<Vec<u8>, JsError> {
     let node = |t: &str| -> Result<Option<Target>, JsError> {
         Ok(match t {
@@ -470,7 +472,8 @@ pub fn wire_intent(
         expiry: i64::try_from(expiry).map_err(|_| JsError::new("expiry-too-far"))?,
         resources: Vec::new(),
         fallbacks,
-        replaces: None,
+        // A cancel names the earlier sequence it ends (#3705, the daemon's `stop`).
+        replaces,
         body: None,
         reflex: reflex.unwrap_or(false),
     };
