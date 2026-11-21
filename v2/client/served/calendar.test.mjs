@@ -90,9 +90,10 @@ async function world() {
 
 test('#3703: a Soul announces from the notice board; another reads it in whatson, comes, and takes it back', { timeout: 400_000 }, async () => {
   const t0 = Date.now(), stage = (s) => console.log(`calendar: ${s} at ${((Date.now() - t0) / 1000).toFixed(1)} s`);
-  // CALENDAR_FACTS=<Eden's facts> serves full Eden with every entry in content/kinds instead (the A5 walk).
+  // CALENDAR_FACTS=<Eden's facts> serves full Eden with every entry in content/kinds instead (the A5 walk); CALENDAR_AT
+  // (`<x m>,<z m>`) is where the Souls join, CALENDAR_BOARD the words that find the board to use.
   const w = process.env.CALENDAR_FACTS ? { facts: process.env.CALENDAR_FACTS, entries: content } : await world(), folder = join(dir, 'world');
-  const seeded = await run(bin('worldd'), ['seed', '--facts', w.facts, '--dir', folder, '--souls', '0', '--at', '0,0', '--entries', w.entries]);
+  const seeded = await run(bin('worldd'), ['seed', '--facts', w.facts, '--dir', folder, '--souls', '0', '--at', process.env.CALENDAR_AT ?? '0,0', '--entries', w.entries]);
   assert.equal(seeded.code, 0, seeded.out);
   const served = run(bin('worldd'), ['serve', '--dir', folder], /listening /);
   await served;
@@ -138,7 +139,7 @@ test('#3703: a Soul announces from the notice board; another reads it in whatson
   stage(`joined: ${A.body}, ${B.body}`);
 
   // A announces. The board is in A's copy; the add answers at once and its outcome arrives in wait.
-  const board = await waitFor('the board in A\'s copy', async () => (await A.cli('find', 'notice', 'board', '--limit', '20')).found?.find((r) => r.kind?.startsWith('eden:notice_board')));
+  const board = await waitFor('the board in A\'s copy', async () => (await A.cli('find', ...(process.env.CALENDAR_BOARD ?? 'notice board').split(' '), '--limit', '20')).found?.find((r) => r.kind?.startsWith('eden:notice_board')));
   console.log('board:', JSON.stringify(board));
   const add = await A.cli('calendar', 'add', 'Bread at the oven', '--place', board.id, '--in', '30', '--for', '60', 'bring a loaf');
   console.log('calendar add:', JSON.stringify(add));
