@@ -413,7 +413,7 @@ impl replica::host::Skill for Holds {
     }
 
     fn step(&mut self, _: &mut dyn replica::host::Host) -> replica::host::Progress {
-        replica::host::Progress::Running
+        replica::host::Progress::Going
     }
 }
 
