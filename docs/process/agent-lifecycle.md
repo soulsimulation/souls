@@ -19,14 +19,14 @@ outcome without routine milestone pauses, and get Gene's approval for substantia
 goal for sustained execution or a durable checkpoint when unavailable; neither changes proof or approval requirements.
 
 Under a coordinator's agenda, work is cut into **task issues** ([template](../../.github/ISSUE_TEMPLATE/task.yml)).
-The coordinator writes each one before dispatch: at most five acceptance items, the files it may touch, what is not
-in it, a ceiling of 1 to 4 agent-hours and a stop rule. One lane works one task and stops. The ceiling is a limit,
-not a target. A defect found on the way is fixed in the same pull request, listed under "Also fixed", when the fix is
+The coordinator writes each one before dispatch: at most five acceptance items, the files it expects to touch (not a
+permission list), what is not in it, an estimate in agent-hours and a stop rule. One lane works one task and stops.
+The estimate is not a limit: the lane reports when stuck or about 2× over and continues unless told to stop. A defect found on the way is fixed in the same pull request, listed under "Also fixed", when the fix is
 small (about 30 minutes or 50 lines), keeps the tier and stays in the area; otherwise it gets its own small pull
 request, with no issue. An issue is filed only for work that will not start today, needs Gene's decision or is larger
 than about 2 hours. With each release the coordinator posts a table of the
-tasks merged since the last one: ceiling, hours taken, and how each ended (done, stopped at the ceiling, stopped on
-scope).
+tasks merged since the last one: estimate, hours taken, and how each ended (done, reported over the estimate,
+stopped on scope).
 
 ## 2. Branch
 
@@ -72,7 +72,9 @@ from the template:
   context a Soul sees for absent, distant and nearby objects), known limits.
 - **Docs touched**, and the **changelog**.
 
-`node tools/proof/acceptance.mjs check` validates the checklist and `proof.json` locally. The `journal` skill walks an
+The required minimum is the issue link, a one-line summary and the CI run link (the proof bot adds it); everything
+else here is a fuller journal entry, welcome and advisory ([PR body](agent-workflow.md#pr-body)).
+`node tools/proof/acceptance.mjs check` reports the checklist and `proof.json` locally. The `journal` skill walks an
 agent through one milestone; the `epic` skill runs a bounded tranche with review stops only when requested. Add a
 fragment in
 [`changes/`](../../changes/README.md) for anything users notice, or the `no-changelog` label. A change in behaviour
@@ -90,7 +92,8 @@ walks and the full gate stay with the release. Server and launcher test files ta
 `apps/server/test/test-port.ts`, so they can run beside other jobs and local processes on one host. Server discovery includes every nested `.test.ts` under
 `apps/server/src`; two deterministic shards plus the dedicated latency job cover that inventory exactly once.
 The `proof-check` bot keeps one comment
-up to date with the tier, the proof that tier needs, and which acceptance boxes have evidence. The `claude-review`
+up to date with the tier, the CI run at the head, and its advice on the journal entry; `proof-ok` itself fails only
+on the [required minimum](agent-workflow.md#pr-body). The `claude-review`
 workflow is the default reviewer on every push, including whether the evidence supports each acceptance claim.
 An independent provider fallback follows the same [review contract and required checks](agent-workflow.md#review),
 with its source, reviewer and findings recorded explicitly. `@claude` in a PR review answers
