@@ -322,6 +322,20 @@ impl Store for S3 {
         etag(&res, key)
     }
 
+    /// DeleteObject; a key that is not there is no refusal.
+    fn delete(&self, key: &str) -> R<()> {
+        let path = self.path(key);
+        let mut req = self.agent.delete(format!("{}{path}", self.endpoint));
+        for (k, v) in self.sign("DELETE", &path, b"") {
+            req = req.header(k, v);
+        }
+        let res = req.call().or_else(|e| unreachable(key, e))?;
+        match res.status().as_u16() {
+            404 => Ok(()),
+            code => status(code, key),
+        }
+    }
+
     /// ListObjectsV2 under the store's prefix and `prefix`, page by page; the keys without the store's prefix.
     fn list(&self, prefix: &str) -> R<Vec<String>> {
         let path = format!("/{}", encode(&self.bucket));
