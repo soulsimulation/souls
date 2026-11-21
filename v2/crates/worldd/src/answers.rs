@@ -453,7 +453,8 @@ pub struct Config {
     /// The longest an act stays open, from its arrival, when its expiry is later.
     pub deadline: Micros,
     pub checkers: usize,
-    /// `<actor hex> <sequence>` appended for each fresh intent, in the order taken (I1's restart bench).
+    /// `<actor hex> <sequence>` appended for each fresh intent, in the order taken (I1's restart bench); ` reflex`
+    /// follows when the Soul's client sent it on its own (#3764).
     pub arrivals: Option<File>,
     /// Makes the world's bodies, on the clock thread, for move intents (I4b, #3156); without them a move is refused
     /// `intent.not-a-form-on-a-node`.
@@ -1333,7 +1334,9 @@ impl Clock {
         if let Some(f) = self.arrivals.as_mut() {
             // One write per line, unbuffered, so a killed world leaves every line it took.
             let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
-            let _ = f.write_all(format!("{hex} {sequence}\n").as_bytes());
+            // A reflex (#3764) is named: its Soul's client sent it, not its agent.
+            let reflex = if intent.reflex { " reflex" } else { "" };
+            let _ = f.write_all(format!("{hex} {sequence}{reflex}\n").as_bytes());
         }
         let mut value = intent.to_value();
         keep_arg_names(&mut value);
@@ -1808,6 +1811,7 @@ impl Clock {
                 fallbacks: Vec::new(),
                 replaces: None,
                 body: None,
+                reflex: false,
             };
             // Only a Soul with a body here (its link after a restart included); the directory never births one.
             if self.unborn(&intent).is_some() {
@@ -4134,6 +4138,7 @@ mod tests {
             }],
             replaces: None,
             body: None,
+            reflex: false,
         }
     }
 
@@ -4508,6 +4513,7 @@ mod tests {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         let place = Op::Place {
             name: 1,
