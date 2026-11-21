@@ -232,6 +232,13 @@ impl Stage {
                 (_, Cbor::Uint(u)) => J::Int(i128::from(*u)),
                 (_, Cbor::Nint(n)) => J::Int(-1 - i128::from(*n)),
                 // An enum's value by name (F14), and words by their reference, as the case gave them.
+                // An enum's value is logged in the kind's namespace (C24, `eden:level1`); the case names it bare.
+                (Some("enum"), Cbor::Text(n)) => J::Str(
+                    n.as_str()
+                        .split_once(':')
+                        .map_or(n.as_str(), |(_, b)| b)
+                        .to_owned(),
+                ),
                 (_, Cbor::Text(n)) => J::Str(n.as_str().to_owned()),
                 (Some("text"), r) => replica::audience::reference(r)
                     .and_then(|id| self.words.get(&id))
@@ -634,9 +641,25 @@ impl Stage {
         self.due = DueList::new();
         self.moves = Moves::new();
         self.forms = Forms::recover(&self.log, self.now);
+        self.amounts();
         self.look();
         self.flush();
         obj(vec![])
+    }
+
+    /// The kinds' amount fields for F4's `by` sets (`Forms::kinds`), as worldd's `Acts::new` loads them.
+    fn amounts(&mut self) {
+        let mut loaded = replica::kinds::Kinds::default();
+        for (_, entry) in self.kinds.obj().unwrap_or(&[]) {
+            let mut e = entry.clone();
+            if let J::Obj(o) = &mut e {
+                o.retain(|(k, _)| k != "forms");
+            }
+            if let Ok(text) = replica::kinds::entry::entry_to_kind(&e.to_json()) {
+                loaded.load(&[("entry", text.as_str())]);
+            }
+        }
+        self.forms.kinds(&loaded);
     }
 
     fn handle(&mut self, q: &J) -> J {
@@ -656,6 +679,7 @@ impl Stage {
                 for (k, r) in &self.refused {
                     eprintln!("refused at import: {k}: {} ({})", r.name, r.detail);
                 }
+                self.amounts();
                 obj(vec![])
             }
             "place" => self.place(&s("kind")),
