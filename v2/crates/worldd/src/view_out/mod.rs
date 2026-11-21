@@ -1632,6 +1632,10 @@ impl<S: ObjectStore> PublicWriter<S> {
     pub fn source_cursor(&self) -> u64 {
         self.cursor
     }
+    /// Records `..durable_cursor()` are in published parts: a reopen needs the log from here on (#3837).
+    pub fn durable_cursor(&self) -> u64 {
+        self.chunk_start
+    }
     /// A newest-only O3 restore may begin after the observer's last publication. Recover the intervening actual
     /// immutable pieces through the existing takeover-aware reader; never jump to a newer checkpoint's state.
     pub fn bridge_to(&mut self, target: u64) -> R<()> {
