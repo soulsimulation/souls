@@ -14,21 +14,25 @@ import { modelFx, type ModelFx } from './model.ts';
 import { cupSteam, kettleSteam, setSteam, steam, type SteamKind } from './steam.ts';
 import { fallingWaterSheets, fountainJets, fountainPlan } from './water-jets.ts';
 import { tickFx } from './clock.ts';
+import { givesLight, nightStrength } from '../draw/night.ts';
+import { Halos, type HaloSource } from './halos.ts';
+import { Lighthouse } from './lighthouse.ts';
 
 /** A thing's state as the effects read it. `lit`: a fire burns (from `litAt`, world s, it catches over IGNITE s);
  *  `on`: a fountain runs; `heatedAt`: a kettle was switched on; `pouredAt`: a cup was poured (world s). */
 export type FxState = { lit?: boolean; litAt?: number; on?: boolean; heatedAt?: number; pouredAt?: number };
-export type FxKind = 'fire' | 'fountain' | 'kettle' | 'cup';
+export type FxKind = 'fire' | 'fountain' | 'kettle' | 'cup' | 'light' | 'lighthouse';
 
 const FIRE_WORDS = /(^|[^a-z])(fire|campfire|bonfire|firepit|fire-pit|fire-bowl|torch|brazier|hearth|fireplace|candle|candelabra|candlestick|forge|kiln|furnace|flame|lantern)/;
 /** What a kind may draw, by its name and its state table (V17's `models.json`): flames are confirmed by the model. */
 export function fxKind(kind: string, states?: Record<string, string[]>): FxKind | null {
   const k = kind.split('@')[0].toLowerCase(), name = k.slice(k.indexOf(':') + 1);
+  if (/(^|[_-])lighthouse$/.test(name)) return 'lighthouse'; // the tower, not its painted bands
   if (/fountain/.test(name)) return /drinking/.test(name) ? null : 'fountain';
   if (/(^|[_-])kettle($|[_-])/.test(name)) return 'kettle';
   if (/(^|[_-])(cup|mug|teacup|tea-cup)($|[_-])/.test(name) && !/pack/.test(name)) return 'cup';
   if (states?.lit || FIRE_WORDS.test(name)) return 'fire';
-  return null;
+  return givesLight(states) ? 'light' : null;
 }
 
 /** Reach (m) of each fire detail level by size class, today's `REACH`: [flames, embers and smoke]. */
@@ -56,7 +60,20 @@ type Mounted = { fire: Fire; kind: FireKind; level: -1 | 0 | 1 | 2 };
 type Entry = {
   id: string; kind: FxKind; origin: string; hash: string; model: ModelFx | null; root: THREE.Group | null;
   fires: Mounted[]; burning?: boolean; steam: THREE.Points | null; water: THREE.Object3D[]; state: FxState;
+  /** A lighthouse's beams, and the halo a light gives: a fire's or a lamp's, by its kind's name as its pool is (A2, #3724). */
+  beam?: Lighthouse; glow: 'fire' | 'lamp';
 };
+
+/** Which lights glow as fires: the night pools' rule (`draw/night.ts`). */
+const GLOW_FIRE = /fire|hearth|brazier|campfire|torch/;
+/** Today's lantern room: up 0.83 of the lighthouse's height (`world-env.ts`, of its box; here of its model's top). */
+export const LANTERN_UP = 0.83;
+/** A light's halo as today's god world places it (`world-env.ts`): a fire's at its foot (the halo kind lifts it 0.55 m),
+ *  a lamp's at its head. Today's lamp is 3.4 s m tall with its head 0.2 m below its top, so `s` is the model's height
+ *  (`top`, world m) over 3.4: today's 3.4 m street lamp is scale 1, its glow 3.2 m up. */
+export function haloOf(kind: 'fire' | 'lamp', foot: THREE.Vector3, top: number): HaloSource {
+  return kind === 'fire' ? [foot.x, foot.y, foot.z, 'fire', 1] : [foot.x, foot.y, foot.z, 'lamp', Math.max(0.15, (top - foot.y) / 3.4)];
+}
 export type FxOptions = {
   /** The thing's frame (the thing layer's: its node's frame, scaled). */
   frame(id: string): THREE.Matrix4 | null;
@@ -77,13 +94,17 @@ export class FxLayer {
   private readonly models = new Map<string, ModelFx | null | Promise<void>>();
   private readonly at = new THREE.Vector3();
   /** Fires mounted and near the camera now, for the inspector and the proof. */
-  stats = { fires: 0, near: 0, steaming: 0, fountains: 0 };
+  stats = { fires: 0, near: 0, steaming: 0, fountains: 0, lights: 0, lighthouses: 0 };
   /** The world time (s) of the last frame, to set a state from now (`state(id, { heatedAt: fx.time })`). */
   time = 0;
   readonly opts: FxOptions;
+  /** Every lit light's glow at night, today's `halos` (A2, #3724). */
+  readonly halos = new Halos(2048);
+  private frames = 0;
   constructor(opts: FxOptions) {
     this.opts = opts;
     this.group.name = 'effects';
+    this.group.add(this.halos.mesh);
   }
 
   /** Follows the parts the page plays: things that may draw an effect come and go. */
@@ -104,7 +125,7 @@ export class FxLayer {
     const old = this.things.get(n.id);
     if (old && old.hash === hash && old.kind === kind) return;
     if (old) this.remove(n.id);
-    if (hash && kind) this.things.set(n.id, { id: n.id, kind, origin: n.origin!, hash, model: null, root: null, fires: [], steam: null, water: [], state: {} });
+    if (hash && kind) this.things.set(n.id, { id: n.id, kind, origin: n.origin!, hash, model: null, root: null, fires: [], steam: null, water: [], state: {}, glow: GLOW_FIRE.test(n.kind) ? 'fire' : 'lamp' });
   }
 
   /** Sets a thing's state (merged); a fire lit now catches from `litAt`. */
@@ -123,6 +144,7 @@ export class FxLayer {
     if (!e) return;
     this.things.delete(id);
     if (e.burning) this.opts.standIns?.(id, true);
+    e.beam?.dispose();
     if (e.root) this.group.remove(e.root);
     for (const f of e.fires) f.fire.dispose();
     for (const o of [e.steam, ...e.water]) if (o) ((o as THREE.Mesh).material as THREE.Material).dispose();
@@ -136,7 +158,8 @@ export class FxLayer {
     tickFx(this.opts.reducedMotion ? 7.3 : now);
     const index = this.opts.index();
     if (!index) return;
-    const s = { fires: 0, near: 0, steaming: 0, fountains: 0 };
+    const s = { fires: 0, near: 0, steaming: 0, fountains: 0, lights: 0, lighthouses: 0 };
+    const night = nightStrength(), halos: HaloSource[] | null = this.frames++ % 30 === 0 ? [] : null;
     if (this.pending.size) {
       for (const n of this.pending.values()) this.consider(n, index);
       this.pending.clear();
@@ -149,11 +172,17 @@ export class FxLayer {
         e.model = m instanceof Promise || m === undefined ? null : m;
         if (m === undefined) { this.load(e.hash); continue; }
         if (m === null || m instanceof Promise) { if (m === null) this.things.delete(e.id); continue; }
-        if (!this.mount(e, m)) { this.things.delete(e.id); continue; }
+        if (!this.mount(e, m, frame)) { this.things.delete(e.id); continue; }
       }
       const root = e.root!;
       root.matrix.copy(frame);
       root.matrixWorldNeedsUpdate = true;
+      if (e.beam) (s.lighthouses++, e.beam.update(this.opts.reducedMotion ? 0 : now, night, 0));
+      if (halos && (e.kind === 'fire' || e.kind === 'light') && e.state.lit !== false) {
+        const foot = new THREE.Vector3().setFromMatrixPosition(frame), top = new THREE.Vector3(0, e.model?.top ?? 0, 0).applyMatrix4(frame).y;
+        halos.push(haloOf(e.glow, foot, top));
+        s.lights++;
+      }
       const d = this.at.setFromMatrixPosition(frame).distanceTo(eye);
       if (e.kind === 'fire') {
         const strength = fireStrength(e.state, now);
@@ -182,7 +211,9 @@ export class FxLayer {
         if (e.steam.visible) s.steaming++;
       }
     }
-    this.stats = s;
+    if (halos) this.halos.setSources(halos);
+    this.halos.update(this.opts.reducedMotion ? 0 : now, night);
+    this.stats = halos ? s : { ...s, lights: this.stats.lights };
   }
 
   private load(hash: string): void {
@@ -194,11 +225,18 @@ export class FxLayer {
   }
 
   /** Builds a thing's effects in its model's frame; false when its model has none of them. */
-  private mount(e: Entry, m: ModelFx): boolean {
+  private mount(e: Entry, m: ModelFx, frame: THREE.Matrix4): boolean {
     const root = new THREE.Group(), cheap = this.opts.phone;
     root.name = `effects ${e.id}`;
     root.matrixAutoUpdate = false;
-    if (e.kind === 'fire') {
+    e.model = m;
+    if (e.kind === 'lighthouse') {
+      // today's beams sweep in world metres from the lantern; they are not scaled or turned with the tower
+      e.beam = new Lighthouse(new THREE.Vector3(0, m.top * LANTERN_UP, 0).applyMatrix4(frame));
+      this.group.add(e.beam.group);
+    } else if (e.kind === 'light') {
+      // a glow only: no mesh of its own
+    } else if (e.kind === 'fire') {
       let i = 0;
       for (const part of m.flames) {
         const pivot = new THREE.Group();
@@ -213,7 +251,7 @@ export class FxLayer {
         }
         root.add(pivot);
       }
-      if (!e.fires.length) return false;
+      if (!e.fires.length) e.kind = 'light'; // a light with no flame clusters still glows
     } else if (e.kind === 'fountain') {
       const plan = fountainPlan(m.discs, m.top);
       if (!plan) return false;
