@@ -27,6 +27,8 @@ export type BakedModel = {
   parents: Int16Array;
   joints: Float32Array;
   clips: BakedClip[];
+  /** Per bone, 1 above the hips (the abdomen and every bone below it), else 0: what a gesture over a posture moves. */
+  upper: Float32Array;
   /** What the source held, for the premise count: triangles and materials per body. */
   triangles: number[];
   materials: number;
@@ -116,6 +118,31 @@ export function inPlace(clip: THREE.AnimationClip, skeleton: THREE.Skeleton): TH
   return c;
 }
 
+/** Clips made here from another (#3741): today's procedural gestures with no library clip, as a base clip's first frame
+ *  with world-space turns on named bones (radians about the body's sideways axis, so positive leans forward) on a
+ *  half sine over the clip. `Bow`: `activity-poses.ts`'s bow, the back 0.55 rad over three bones and the head 0.2. */
+export const MADE: Readonly<Record<string, { base: string; seconds: number; turns: [string, number][] }>> = {
+  Bow: { base: 'Idle', seconds: 1, turns: [['Abdomen', 0.15], ['Torso', 0.2], ['Chest', 0.2], ['Neck', 0.2]] },
+};
+
+const _q = new THREE.Quaternion(), _r = new THREE.Quaternion(), _x = new THREE.Vector3(1, 0, 0);
+
+/** Turns `bones` by `made`'s turns at `k` (0..1) of their full lean, each about the world x axis at its own joint. */
+function turn(made: (typeof MADE)[string], bones: THREE.Bone[], k: number, root: THREE.Object3D, rest: Map<THREE.Bone, THREE.Quaternion>): void {
+  for (const [name, rad] of made.turns) {
+    const b = bones.find((x) => x.name === name);
+    if (!b) continue;
+    // From the base clip's own rotation each frame: a bone the clip does not animate keeps no turn from the last.
+    if (!rest.has(b)) rest.set(b, b.quaternion.clone());
+    b.quaternion.copy(rest.get(b)!);
+    root.updateMatrixWorld(true);
+    b.getWorldQuaternion(_q);
+    _r.setFromAxisAngle(_x, rad * k);
+    // local' = local × (world⁻¹ × turn × world): the bone turned in the world about its own joint.
+    b.quaternion.multiply(_q.clone().invert().multiply(_r).multiply(_q));
+  }
+}
+
 export function bakeModel(name: string, gltf: GLTF, animations: THREE.AnimationClip[], clipNames: string[], simple?: LodMesh): BakedModel {
   const { mesh, skeleton, materials } = merge(gltf);
   const bones = skeleton.bones.length;
@@ -124,16 +151,20 @@ export function bakeModel(name: string, gltf: GLTF, animations: THREE.AnimationC
   const rows: Float32Array[] = [];
   const m = new THREE.Matrix4();
   for (const want of clipNames) {
-    const src = THREE.AnimationClip.findByName(animations, want);
+    const made = THREE.AnimationClip.findByName(animations, want) ? undefined : MADE[want];
+    const src = THREE.AnimationClip.findByName(animations, made ? made.base : want);
     if (!src) throw new Error(`${name}: no clip ${want}`);
     const clip = inPlace(src, skeleton);
-    const frames = Math.max(2, Math.round(clip.duration * BAKE_FPS));
-    clips.push({ name: want, start: rows.length, frames, seconds: clip.duration });
+    const seconds = made ? made.seconds : clip.duration;
+    const frames = Math.max(2, Math.round(seconds * BAKE_FPS));
+    clips.push({ name: want, start: rows.length, frames, seconds });
     mixer.stopAllAction();
     const action = mixer.clipAction(clip);
     action.play();
+    const rest = new Map<THREE.Bone, THREE.Quaternion>();
     for (let f = 0; f < frames; f++) {
-      mixer.setTime((f / frames) * clip.duration);
+      mixer.setTime(made ? 0 : (f / frames) * clip.duration);
+      if (made) turn(made, skeleton.bones, Math.sin((Math.PI * f) / (frames - 1)), gltf.scene, rest);
       gltf.scene.updateMatrixWorld(true);
       const row = new Float32Array(bones * 12);
       skeleton.bones.forEach((b, i) => {
@@ -143,6 +174,7 @@ export function bakeModel(name: string, gltf: GLTF, animations: THREE.AnimationC
       });
       rows.push(row);
     }
+    for (const [b, q] of rest) b.quaternion.copy(q);
     action.stop();
     mixer.uncacheClip(clip);
   }
@@ -156,8 +188,10 @@ export function bakeModel(name: string, gltf: GLTF, animations: THREE.AnimationC
   for (let i = 1; i < mesh.position.length; i += 3) (lo = Math.min(lo, mesh.position[i])), (hi = Math.max(hi, mesh.position[i]));
   const joints = new Float32Array(bones * 3);
   skeleton.boneInverses.forEach((b, i) => joints.set(new THREE.Vector3().setFromMatrixPosition(m.copy(b).invert()).toArray(), i * 3));
+  const above = (b: THREE.Object3D | null): boolean => !!b && (b.name === 'Abdomen' || above(b.parent));
+  const upper = Float32Array.from(skeleton.bones, (b) => (above(b) ? 1 : 0));
   return {
-    name, lods: levels.map(geometry), bake, bones, clips, materials, joints,
+    name, lods: levels.map(geometry), bake, bones, clips, materials, joints, upper,
     names: skeleton.bones.map((b) => b.name), parents: Int16Array.from(skeleton.bones, (b) => skeleton.bones.indexOf(b.parent as THREE.Bone)),
     triangles: levels.map((l) => l.index.length / 3), height: hi - lo,
   };

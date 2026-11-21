@@ -33,7 +33,7 @@ test('clustering merges the vertices of a cell, drops collapsed triangles and ke
 
 const model = (name: string): BakedModel => ({
   name, lods: [0, 1, 2].map(() => new THREE.BoxGeometry()), bones: 2, materials: 1, triangles: [12, 12, 12], height: 1.8,
-  names: ['a', 'b'], parents: Int16Array.of(-1, 0), joints: new Float32Array(6),
+  names: ['a', 'b'], parents: Int16Array.of(-1, 0), joints: new Float32Array(6), upper: Float32Array.of(0, 1),
   bake: new THREE.DataTexture(new Float32Array(2 * 3 * 4 * 4), 6, 4, THREE.RGBAFormat, THREE.FloatType),
   clips: [{ name: 'Idle', start: 0, frames: 2, seconds: 2 }, { name: 'Walk', start: 2, frames: 2, seconds: 1 }],
 });

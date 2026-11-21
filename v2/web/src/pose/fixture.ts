@@ -53,8 +53,9 @@ export function held(name: string, seconds: number, bone: string, deg: number, a
   return new THREE.AnimationClip(name, seconds, [quats(bone, [0, seconds], [deg, deg], axis)]);
 }
 
-/** The body, baked as the crowd bakes a body file, with `extra` clips after the three. */
-export function model(extra: THREE.AnimationClip[] = []): BakedModel {
+/** The body, baked as the crowd bakes a body file, with `extra` clips after the three, then clips made at bake time
+ * by name (`made`, `../crowd/bake.ts`'s MADE). */
+export function model(extra: THREE.AnimationClip[] = [], made: string[] = []): BakedModel {
   const scene = new THREE.Group();
   const bones = new Map<string, THREE.Bone>();
   for (const [name, parent, at] of BONES) {
@@ -81,7 +82,7 @@ export function model(extra: THREE.AnimationClip[] = []): BakedModel {
   scene.add(mesh);
   mesh.bind(new THREE.Skeleton(list));
   const all = [...clips(), ...extra];
-  return bakeModel('fixture', { scene } as GLTF, all, all.map((c) => c.name));
+  return bakeModel('fixture', { scene } as GLTF, all, [...all.map((c) => c.name), ...made]);
 }
 
 const S = 1_000_000;

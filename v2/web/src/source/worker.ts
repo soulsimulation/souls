@@ -5,7 +5,7 @@
 // ...]`, the public audience's, written by V1's writer beside the part), kept by reference across parts.
 import init, { StreamPlayer, readPointer } from 'replica';
 import { decode, encode } from 'cborg';
-import { publicSoul, type NodeRec, type PartRec, type Pointer, type SaidRec, type SnapshotRec } from './source.ts';
+import { publicSoul, type MoveRec, type RunEndRec, type NodeRec, type PartRec, type Pointer, type SaidRec, type SnapshotRec } from './source.ts';
 import { happenedInPart } from '../sound/record.ts';
 import { skyFields } from '../sky/record.ts';
 
@@ -34,6 +34,7 @@ const refOf = (v: unknown): string | null => {
   return id ? key(id) : null;
 };
 const SAID = 'souls:said';
+const MOVED = 'souls:form-move', RUN_ENDED = 'souls:form-ended';
 const NAME = 30;
 const DESCRIPTION = 31;
 
@@ -65,6 +66,15 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   const sky = skyFields(f); // V19: the world node's day, night and weather
   if (sky) rec.sky = sky;
   return rec;
+}
+
+/** B2's move record (`replica::moves::MoveRecord::to_value`, its texts as bytes): `{1: body, 2: move, 5: target, 7: start,
+ * 8: [phase end, ...]}`. */
+function moveRec(m: Map<number, unknown>): MoveRec {
+  const ends = (m.get(8) as unknown[]).map(num), raw = m.get(2), start = num(m.get(7));
+  const name = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : raw;
+  if (typeof name !== 'string' || !ends.length || !Number.isFinite(start)) throw new Error('not a move record');
+  return { body: key(m.get(1) as IdValue), name, start, ends, target: m.has(5) ? key(m.get(5) as IdValue) : null };
 }
 
 type StreamPointer = Pointer & { header: string; baseline?: string; generation?: string; legacyVersion?: number; legacyNext?: number; legacyHash?: string };
@@ -164,8 +174,16 @@ async function run(stream: URL) {
     let happened: PartRec['happened'] = [];
     try { happened = happenedInPart(bytes); } catch { /* sound observes only a successfully played part */ }
     const events = decode(player.events(), { useMaps: true }) as Map<number, unknown>[];
-    const said: SaidRec[] = [];
+    const said: SaidRec[] = [], moves: MoveRec[] = [], runEnds: RunEndRec[] = [];
     for (const e of events) {
+      if (e.get(1) === MOVED || e.get(1) === RUN_ENDED) {
+        const f = e.get(2) as Map<number, unknown>;
+        try {
+          if (e.get(1) === RUN_ENDED) runEnds.push({ body: key(f.get(2) as IdValue), at: num(e.get(4)), how: text.decode(f.get(3) as Uint8Array) });
+          else moves.push(moveRec(f.get(3) as Map<number, unknown>));
+        } catch { /* a record the page cannot read is not drawn */ }
+        continue;
+      }
       if (e.get(1) !== SAID) continue;
       const f = e.get(2) as Map<number, unknown>, ref = refOf(f.get(1));
       if (ref) said.push({ speaker: key(e.get(3) as IdValue), at: num(e.get(4)), length: num(f.get(4)), reach: num(f.get(2)), ref, words: null });
@@ -174,7 +192,7 @@ async function run(stream: URL) {
     if (refs.some(r => !words.has(r))) await readText(`${n}.text`, p);
     for (const x of said) x.words = words.get(x.ref) ?? null;
     resolveWords(nodes);
-    observe(nodes, removed, samples, { number: played.number, from: played.from, to: played.to, hash: played.hash, said, happened });
+    observe(nodes, removed, samples, { number: played.number, from: played.from, to: played.to, hash: played.hash, said, happened, moves, runEnds });
     return true;
   };
   const tell = () => {
