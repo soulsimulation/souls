@@ -546,7 +546,8 @@ function fire(event) {
   firedKeys.add(key);
   if (firedKeys.size > FIRED_KEYS_KEPT) firedKeys.delete(firedKeys.values().next().value);
   for (const { intent } of reflexes.onEvent(event, Date.now())) {
-    sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor });
+    // Marked as a reflex (#3764): sent on the Soul's standing consent, it is not its agent acting.
+    sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor, reflex: true });
   }
 }
 
@@ -735,12 +736,15 @@ function actsOf(words) {
   return out;
 }
 
-/** Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in). */
-function sendIntent(ranked, { target, words, args, params, basis, expiry }) {
+/**
+ * Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in).
+ * `reflex` marks an R9 reflex's intent (#3764); an agent's never is.
+ */
+function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex = false }) {
   state.sequence++;
   const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
     basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words, args,
-    params ? JSON.stringify(params) : undefined);
+    params ? JSON.stringify(params) : undefined, reflex);
   save();
   const sequence = state.sequence, sent = signedIn;
   if (ranked[0] === 'life:join') joinsOf.add(sequence);

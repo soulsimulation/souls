@@ -303,6 +303,7 @@ fn edit_intent(actor: Actor, sequence: u64, planned: u64, ops: &[Op]) -> Vec<u8>
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     encode(&i.to_value()).unwrap()
 }
@@ -611,6 +612,7 @@ fn walk(out: &mut std::os::unix::net::UnixStream, ground: Id, i: u64) {
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     let bytes = encode(&i.to_value()).unwrap();
     out.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
