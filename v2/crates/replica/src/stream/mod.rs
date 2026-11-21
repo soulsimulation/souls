@@ -61,6 +61,15 @@
 //!     A normal restart recovers the same generation, cursor and exact public bytes from the existing private
 //!     Store; a newer ordinary checkpoint never replaces that generation's source. Missing/corrupt source is a
 //!     named refusal, never a quiet pointer or a ready stream. No epoch, core transfer or retention policy changes.
+//! 11. **Generations roll over** (#3825). Every `SOULS_STREAM_GENERATION_PARTS` parts (600 by default) the public
+//!     writer closes its generation: the next baseline is the public state at that moment, at the same source cursor,
+//!     so its digest is the old generation's last. The pointer then names the new generation (field8) with field9's
+//!     handoff for the old one and field10, the old generation's id. A new viewer installs only the newest baseline;
+//!     a live viewer on the generation field10 names drains it to field9's part count, checks the version and
+//!     digest, and installs the new baseline, so it crosses with no gap. A viewer further behind starts again from
+//!     the newest baseline. The boundary is a part count and each rollover is in the recovery chain, so a restart
+//!     publishes the same bytes. The current and previous generations are always kept; older ones are removed once
+//!     their last write is `SOULS_STREAM_PRUNE_GRACE_S` (600) seconds old. World time and the tick are untouched.
 
 pub mod lz;
 pub mod public;
