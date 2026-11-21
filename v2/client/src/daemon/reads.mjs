@@ -145,5 +145,19 @@ export function context(rows, words = '', { cursor = 0 } = {}) {
 }
 
 /** The ops a batch may run: reads alone, so a batch never sends anything. */
-export const BATCH_READS = new Set(['status', 'look', 'find', 'inspect', 'query', 'catalog', 'context', 'history', 'prayers', 'stats', 'receipt', 'events', 'converse']);
+export const BATCH_READS = new Set([
+  'catalog',
+  'context',
+  'converse',
+  'events',
+  'find',
+  'history',
+  'inspect',
+  'look',
+  'prayers',
+  'query',
+  'receipt',
+  'stats',
+  'status',
+]);
 export const BATCH_MOST = 12;

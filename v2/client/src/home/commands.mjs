@@ -10,7 +10,17 @@ import { localId, pair } from '../pair/pair.mjs';
 import { pairAddress } from '../pair/address.mjs';
 import { accountCommand, accountList, accountPair, hasAccount } from '../account/account.mjs';
 
-export const HOME_COMMANDS = ['list', 'default', 'export', 'import', 'adopt', 'doctor', 'login', 'accounts', 'logout'];
+export const HOME_COMMANDS = [
+  'accounts',
+  'adopt',
+  'default',
+  'doctor',
+  'export',
+  'import',
+  'list',
+  'login',
+  'logout',
+];
 const ID = /^s_[A-Za-z0-9_-]+$/;
 const GRANT = /^soul-[0-9a-f]{32}-\d+$/;
 const VOLATILE = new Set(['runtime/daemon.lock', 'runtime/daemon.sock', 'runtime/daemon.log']);
