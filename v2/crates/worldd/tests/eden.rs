@@ -2903,10 +2903,11 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     assert!(d < 1.5, "out at the plank: {d:.2} m from it");
 }
 
-/// Each body's last logged frame, height and stance in the world's log in `dir`: `(node, slot, y µm, stance)`.
-fn last_stances(
-    dir: &Path,
-) -> BTreeMap<Id, (Id, Option<u64>, i64, Option<sim::controller::Stance>)> {
+/// A body's logged frame, height and stance: `(node, slot, y µm, stance)`.
+type Stood = (Id, Option<u64>, i64, Option<sim::controller::Stance>);
+
+/// Each body's last logged frame, height and stance in the world's log in `dir`.
+fn last_stances(dir: &Path) -> BTreeMap<Id, Stood> {
     let bytes = std::fs::read(dir.join("log")).unwrap();
     let mut out = BTreeMap::new();
     for r in sim::log::recover(&bytes).unwrap().records {
@@ -2945,7 +2946,7 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
     for n in 2..=41 {
         souls.push(join(&dir, n, lineage));
     }
-    let on_stage = |dir: &Path| -> Vec<(Id, Option<u64>, i64, Option<Stance>)> {
+    let on_stage = |dir: &Path| -> Vec<Stood> {
         let mut v: Vec<_> = last_stances(dir)
             .into_iter()
             .filter(|(_, f)| f.0 == stage)
@@ -2977,7 +2978,7 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
         up.expect("stepped up onto a free spot");
     }
     println!("38 more stepped up in {:?}", started.elapsed());
-    let off = |dir: &Path| -> Vec<(Id, (Id, Option<u64>, i64, Option<Stance>))> {
+    let off = |dir: &Path| -> Vec<(Id, Stood)> {
         last_stances(dir)
             .into_iter()
             .filter(|(_, f)| f.0 != stage)
