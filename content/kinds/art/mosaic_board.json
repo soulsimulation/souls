@@ -245,15 +245,7 @@
       "starts": "act",
       "takes": {
         "thing": {
-          "type": "thing",
-          "select": {
-            "of": "things",
-            "in": "this",
-            "anchor": "me",
-            "order": "nearest",
-            "rank": 1,
-            "kind": "eden:mosaic_tile"
-          }
+          "type": "thing"
         }
       },
       "needs": [
