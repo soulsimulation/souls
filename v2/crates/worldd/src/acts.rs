@@ -529,23 +529,22 @@ impl Geometry for Sight<'_> {
         };
         // An approach to a move's point (#3688): a point of a thing on a building with floors (an inner door) is on
         // the building's floor nearest its height, so the walk goes in to it; on the floor the body stands on, it is
-        // aimed short of the point, on the body's side.
-        let (node, at) = if self.approaches.contains(&body) {
+        // aimed short of the point, on the body's side, and stops within what is left of the reach of the point.
+        let (node, at, reach) = if self.approaches.contains(&body) {
             let (node, at) = self.floor_of(node, at).unwrap_or((node, at));
             self.with_view(body, |v| {
                 let (floor, p, _) = v.on_floor(node, at)?;
                 (floor == sim::walk::node_of(me)).then(|| {
                     let short = skills::form_runner::APPROACH_SHORT;
-                    (
-                        floor,
-                        skills::form_runner::short_of(p, me.pose.position, short),
-                    )
+                    let aim = skills::form_runner::short_of(p, me.pose.position, short);
+                    let moved = flat([aim.x, aim.z], [p.x, p.z]);
+                    (floor, aim, reach.saturating_sub(moved).max(0))
                 })
             })
             .flatten()
-            .unwrap_or((node, at))
+            .unwrap_or((node, at, reach))
         } else {
-            (node, at)
+            (node, at, reach)
         };
         let mut planning = self.planning.borrow_mut();
         match planning.ask(key, *me, FormQuery::Walk { node, at, reach }, &self.map) {
