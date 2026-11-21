@@ -10,6 +10,8 @@
 //   souls-god.mjs move <id> --at x,y,z [--slot n]                                     to another spot, same parent
 //   souls-god.mjs set <id> <field> <value>       one numbered field: an integer, true, false or a name
 //   souls-god.mjs remove <id>                    it and everything in it
+//   souls-god.mjs hours <id> --open 07:00-15:00 [--open 09:00-13:00@sat,sun ...] | --closed
+//                                                its opening hours, the whole schedule at once (field 81, E7)
 //   souls-god.mjs batch '<json list>'            several at once, all or none: [{"op":"place","name":1,...}, ...]; a
 //                                                later op names an earlier place by its "name" number
 //   souls-god.mjs weather [--kind clear|cloudy|rain|wind|fog|storm] [--clouds 0..1] [--rain 0..1] [--wind 0..1]
@@ -68,6 +70,7 @@ import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, readSeat, soulsWithTokens, worldsOf } from '../home/home.mjs';
 import { answer as libraryAnswer, libraryOf } from './catalog.mjs';
 import { worldOf } from '../cli/souls.mjs';
+import { F_HOURS, hoursRows } from '../schedule/hours.mjs';
 
 export const VERBS = [
   'access',
@@ -77,6 +80,7 @@ export const VERBS = [
   'check',
   'describe',
   'find',
+  'hours',
   'land',
   'layers',
   'move',
@@ -166,6 +170,7 @@ export const FIX = {
   'zone.unknown': 'layers lists the zones',
   'secret.off': 'secret places are off, as on soul.game today: every place is on every Soul\'s map',
   'which-creator': 'name one with --creator',
+  'hours.malformed': 'hours <id> --open HH:MM-HH:MM[@sat,sun|@mon-fri] (repeat --open), or --closed',
   'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
   'welcome-too-long': 'at most 500 characters',
   'welcome-not-text': 'plain words and line breaks only',
@@ -206,6 +211,13 @@ export function opsOf(verb, words, { related = false } = {}) {
   if (verb === 'set') {
     if (args.length !== 3 || !/^\d+$/.test(args[1])) throw usage('set <id> <field number> <value>');
     return [{ op: 'set', node: node(args[0]), field: Number(args[1]), value: valueOf(args[2]) }];
+  }
+  if (verb === 'hours') {
+    const closed = args.indexOf('--closed');
+    if (closed >= 0) args.splice(closed, 1);
+    const open = takeAll(args, '--open');
+    if (args.length !== 1 || (closed >= 0) === (open.length > 0)) throw usage('hours <id> --open HH:MM-HH:MM[@days] ... | --closed');
+    return [{ op: 'set', node: node(args[0]), field: F_HOURS, value: hoursRows(open) }];
   }
   if (verb === 'remove') {
     if (!args[0]) throw usage('remove <id>');

@@ -120,6 +120,9 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(opsOf('set', ['aa-3', '1', 'true']), [{ op: 'set', node: 'aa-3', field: 1, value: true }]);
   assert.deepEqual(requestOf(['check', 'remove', 'aa-3']).req, { op: 'check', ops: [{ op: 'remove', node: 'aa-3' }] });
   assert.throws(() => opsOf('move', ['aa-3']), /move <id> --at/);
+  assert.deepEqual(opsOf('hours', ['aa-3', '--open', '09:00-13:00@sat,sun']), [{ op: 'set', node: 'aa-3', field: 81, value: [[2, 96, 9 * 3_600_000_000, 13 * 3_600_000_000]] }]);
+  assert.deepEqual(opsOf('hours', ['aa-3', '--closed']), [{ op: 'set', node: 'aa-3', field: 81, value: [] }]);
+  assert.throws(() => opsOf('hours', ['aa-3']), /hours <id> --open/);
   // #3695: the world's verbs go to the daemon as words; it makes their sets on the world node from its copy.
   assert.deepEqual(requestOf(['weather', '--kind', 'storm', '--minutes', '30']).req, { op: 'edit', world: { verb: 'weather', kind: 'storm', minutes: '30' } });
   assert.deepEqual(requestOf(['check', 'strike', '12,-4']).req, { op: 'check', world: { verb: 'strike', at: '12,-4' } });
@@ -196,6 +199,12 @@ test('a creator describes, checks on its copy alone, and builds a room with a th
   const d2 = await god('describe');
   assert.equal(d2.nodes.find((n) => n.id === lampId)?.parent, roomId, 'the copy holds the new thing in the new room');
   assert.equal((await god('move', lampId, '--at', '2000,0,1000')).ok, true);
+  // #3699: the room's opening hours, published as E7's field and read back from the copy as written.
+  const hours = await god('hours', roomId, '--open', '09:00-17:00@mon-fri', '--open', '10:00-14:00@sat,sun');
+  assert.equal(hours.ok, true, JSON.stringify(hours));
+  const d3 = await god('describe');
+  assert.deepEqual(d3.nodes.find((n) => n.id === roomId)?.hours, ['09:00-17:00@mon,tue,wed,thu,fri', '10:00-14:00@sat,sun']);
+  assert.equal((await god('hours', roomId, '--open', '9-5')).code, 'hours.malformed');
   assert.equal((await god('remove', lampId)).ok, true);
   // What is gone is refused on the copy, before anything is sent.
   const gone = await god('set', lampId, '1', '1');

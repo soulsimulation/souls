@@ -7,6 +7,7 @@
 // maps and the simple values; this reader takes those and nothing else.
 
 import { createHash } from 'node:crypto';
+import { F_HOURS, hoursText } from '../schedule/hours.mjs';
 
 const SIMPLE = { 20: false, 21: true, 22: null };
 
@@ -143,7 +144,9 @@ export function rowsOf(copy) {
     const of = (m.get(9) ?? []).map(([, l]) => l).find((l) => l instanceof Map && plainKind(l.get(1)) === 'souls:body-of');
     // #3603: a thing on a course (replica's F_COURSE, field 80) moves by itself; a rider in it may steer it.
     const moving = fields.has(F_COURSE) || fields.has(BigInt(F_COURSE));
-    rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), own: d.own });
+    // #3699: a place's opening hours (replica's F_HOURS, field 81), as its creator wrote them.
+    const hours = hoursText(fields.get(F_HOURS) ?? fields.get(BigInt(F_HOURS)));
+    rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), ...(hours ? { hours } : {}), own: d.own });
     for (const c of children) todo.push([c, [...path, name]]);
   }
   return rows;
