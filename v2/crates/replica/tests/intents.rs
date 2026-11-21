@@ -385,3 +385,65 @@ fn reflex_a1_a_reflex_is_marked_and_an_agents_act_is_not() {
         to_hex(&act_bytes)
     );
 }
+
+/// #3695: over the frame limit, only a creator's edit is read (a landform's ground tiles), up to `BULK_MOST`; the same
+/// bytes from a Soul, or a creator's edit over `BULK_MOST`, are `intent-too-large`.
+#[test]
+fn a_creators_bulk_edit_is_read_over_the_frame_limit_and_nothing_else_is() {
+    use replica::edit::wire::{VERB, parameters};
+    use replica::edit::{Op, Ref};
+    use replica::effects::Actor;
+    use replica::encode::Name;
+    use replica::ids::{Id, Scope, Version};
+    use replica::intents::BULK_MOST;
+    let ground = Id::new(Scope([0x0a; 16]), 3).expect("an id");
+    let edit = |actor: Actor, bytes: usize| {
+        let ops = [Op::Set {
+            node: Ref::Node(ground),
+            field: 25,
+            to: Value::Array(vec![Value::Bytes(vec![7; bytes])]),
+        }];
+        let i = Intent {
+            actor,
+            verb: Name::new(VERB).expect("a name"),
+            target: None,
+            parameters: parameters(&ops),
+            sequence: 1,
+            basis: Version {
+                lineage: Scope([0x0a; 16]),
+                zone: Id::new(Scope([0x0a; 16]), 0).expect("an id"),
+                epoch: 1,
+                sequence: 1,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        encode(&i.to_value()).expect("bytes")
+    };
+    let creator = Actor::Creator(Id::new(Scope([0xc0; 16]), 1).expect("an id"));
+    let soul = Actor::Soul(Id::new(Scope([0x50; 16]), 1).expect("an id"));
+    let tiles = edit(creator, 64 << 10);
+    assert!(tiles.len() as u64 > INTENT_MOST);
+    let read = Intent::read(&tiles).expect("a creator's bulk edit is read");
+    assert_eq!(read.actor, creator);
+    let r = Intent::read(&edit(soul, 64 << 10)).map_err(|r| r.name);
+    assert_eq!(r.err(), Some("intent-too-large"), "a Soul's is not");
+    let over = edit(creator, usize::try_from(BULK_MOST).expect("small"));
+    assert_eq!(
+        Intent::read(&over).map_err(|r| r.name).err(),
+        Some("intent-too-large")
+    );
+    // The gateway's creator route reads it the same way; its socket keeps the frame limit.
+    assert!(replica::intent_decode::decode_bulk(&tiles).is_ok());
+    assert_eq!(
+        replica::intent_decode::decode(&tiles)
+            .map_err(|r| r.name)
+            .err(),
+        Some("intent.too-large")
+    );
+}

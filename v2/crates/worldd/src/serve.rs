@@ -724,6 +724,44 @@ fn entries(dir: &Path, out: &mut Vec<(String, Json)>) -> R<()> {
     Ok(())
 }
 
+/// The code hatches' modules a world ships (#3713): every `.wasm` file in `dir`, in name order, each checked as
+/// `replica::hatch` loads a module (refused by name, so a bad module stops the boot, not an act).
+fn hatches(dir: &Path) -> R<Vec<Vec<u8>>> {
+    let mut out = Vec::new();
+    if !dir.is_dir() {
+        return Ok(out);
+    }
+    let mut paths = Vec::new();
+    wasm_files(dir, &mut paths)?;
+    for p in paths {
+        let bytes = std::fs::read(&p).map_err(io(&p))?;
+        let mut named = vec![replica::ids::SHA2_256, 32];
+        named.extend(sha256(&bytes));
+        replica::hatch::Loaded::load(&bytes, &named)
+            .map_err(|r| format!("{}: {}: {}", p.display(), r.name, r.detail))?;
+        out.push(bytes);
+    }
+    println!("hatches: {} modules", out.len());
+    Ok(out)
+}
+
+/// Every `.wasm` file under `dir`, sorted.
+fn wasm_files(dir: &Path, out: &mut Vec<PathBuf>) -> R<()> {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(io(dir))?
+        .filter_map(|e| Some(e.ok()?.path()))
+        .collect();
+    paths.sort();
+    for p in paths {
+        if p.is_dir() {
+            wasm_files(&p, out)?;
+        } else if p.extension().is_some_and(|x| x == "wasm") {
+            out.push(p);
+        }
+    }
+    Ok(())
+}
+
 fn humanoid() -> R<Family> {
     let n = |s: &str| Name::new(s).ok_or_else(|| format!("a name: {s}"));
     let leg = |s: &str| -> R<Resource> {
@@ -836,6 +874,22 @@ fn seed_in(args: &[String]) -> R<String> {
             std::fs::write(&p, v.to_json()).map_err(io(&p))?;
         }
         println!("entries: {}", found.len());
+        // The code hatches' modules shipped beside the entries (#3713), each kept under the hash it is named by.
+        let mut modules = Vec::new();
+        if let Some(e) = arg(args, "--entries") {
+            wasm_files(Path::new(e), &mut modules)?;
+        }
+        if !modules.is_empty() {
+            std::fs::create_dir_all(dir.join("hatches")).map_err(io(&dir))?;
+        }
+        for m in &modules {
+            let bytes = std::fs::read(m).map_err(io(m))?;
+            let p = dir
+                .join("hatches")
+                .join(format!("1220{}.wasm", to_hex(&sha256(&bytes))));
+            std::fs::write(&p, &bytes).map_err(io(&p))?;
+        }
+        println!("hatches: {}", modules.len());
     }
     // The Souls: ids of a scope of their own (not the tree's minter's), a token each.
     let name = instance(built.root);
@@ -2204,6 +2258,7 @@ fn serve(args: &[String]) -> R<()> {
     cfg.synced = Some(tx);
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.header.lineage));
+    cfg.hatches = hatches(&dir.join("hatches"))?;
     // The engine's own acts (C2) and the activities they run (C30).
     cfg.engine = Some((built.rules.clone(), built.activities.clone()));
     // With a directory, its authoritative creator (including none) is always used; static metadata is only the

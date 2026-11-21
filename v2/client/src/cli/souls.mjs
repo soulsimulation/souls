@@ -82,6 +82,14 @@
 //   souls.mjs schedule [list] | schedule remove <id>   the entries and what became of each
 //   souls.mjs upgrade [--rollback]            brings today's client's Souls across, one owner approval each (R18); with
 //                                             --rollback, today's client again
+//   souls.mjs query '<json list>' [--budget <bytes>]   several reads of the copy in one call, each answered in turn
+//                                             (#3704): {"find":"<words>"}, {"place":"<id>","depth":1..3}, {"kind":"<k>"},
+//                                             {"in":"<id>"}; asks the world nothing
+//   souls.mjs batch '<json list>'             several read commands in one call: [{"look":{}},{"find":"library"},
+//                                             {"inspect":"<id>"}]; a write in it is refused, not sent (#3704)
+//   souls.mjs catalog                         the kinds in the copy, how many of each, and their offers where known
+//   souls.mjs context [<words>] [--cursor n]  the named places and things, with the world's text for them (#3704)
+//   souls.mjs views <name> [<name>...] [--out f.png]   reference pictures: each drawn here as shoot draws it (#3704)
 //   any of them [--soul <id>]                 which Soul, when the home has more than one
 //
 // The home is SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG.
@@ -102,12 +110,53 @@ import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount } from '../account/account.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
-export const OPS = ['status', 'pair', 'look', 'find', 'act', 'inspect', 'object', 'can', 'say', 'shout', 'whisper', 'converse', 'lie', 'wear', 'pray', 'prayers', 'now', 'wait', 'history', 'stats', 'pending', 'ack', 'stop', 'quit', 'receipt', 'events', 'conversations', 'whatson', 'calendar'];
+export const OPS = [
+  'ack',
+  'act',
+  'batch',
+  'calendar',
+  'can',
+  'catalog',
+  'context',
+  'conversations',
+  'converse',
+  'events',
+  'find',
+  'history',
+  'inspect',
+  'lie',
+  'look',
+  'now',
+  'object',
+  'pair',
+  'pending',
+  'pray',
+  'prayers',
+  'query',
+  'quit',
+  'receipt',
+  'say',
+  'shout',
+  'stats',
+  'status',
+  'stop',
+  'wait',
+  'wear',
+  'whatson',
+  'whisper',
+];
 /** #3705: today's names, kept: `stop` ends your act (the daemon's op `halt`), `quit` ends the daemon (its op `stop`). */
 const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse' };
 const CALENDAR_USAGE = 'calendar | calendar add "<title>" --place <placeId> --in <minutes> --for <minutes> ["description"] | calendar interest|not-coming <id>';
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
-export const LOCAL = ['digest', 'consolidate', 'schedule', 'help', 'memory', 'remember'];
+export const LOCAL = [
+  'consolidate',
+  'digest',
+  'help',
+  'memory',
+  'remember',
+  'schedule',
+];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /**
@@ -157,7 +206,7 @@ export function requestOf(argv) {
   const asking = args.includes('history');
   // #3703: whatson's and calendar's own flags are theirs alone (`remember --place` is another command's).
   const own = ['whatson', 'calendar'].includes(args[0]) ? ['--hours', '--place', '--in'] : [];
-  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for', '--close', '--to', '--gesture', ...own]) {
+  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for', '--close', '--to', '--gesture', '--budget', '--cursor', ...own]) {
     const k = args.indexOf(name);
     if (k >= 0) { opts[name.slice(2)] = args[k + 1]; args.splice(k, 2); }
     if (name === '--missed' && opts.missed === 'late') { opts.missed = `late ${args[k]}`; args.splice(k, 1); }
@@ -182,6 +231,23 @@ export function requestOf(argv) {
     if (!/^\d+$/.test(opts.since)) return { refused: 'events-since', detail: 'events [--since <cursor>]: the cursor an earlier events answer printed' };
     req.since = Number(opts.since);
   }
+  // #3704: today's reads from the copy, several in one call.
+  if (op === 'query' || op === 'batch') {
+    let list = null;
+    try { list = JSON.parse(rest.join(' ')); } catch { /* answered below */ }
+    if (!Array.isArray(list)) return { refused: `${op}-form`, detail: op === 'query' ? `query '[{"find":"library"},{"place":"<id>","depth":2},{"kind":"<kind>"}]' [--budget <bytes>]` : `batch '[{"look":{}},{"find":"library"},{"inspect":"<id>"}]'` };
+    if (op === 'query') { req.questions = list; if (opts.budget !== undefined) req.budget = Number(opts.budget); }
+    else {
+      // Each item is a command and its arguments, as on the command line: {"find":"library"} is `find library`.
+      req.reads = list.map((item) => {
+        const [name, arg] = item && typeof item === 'object' && Object.keys(item).length === 1 ? Object.entries(item)[0] : [null];
+        const args = arg == null || (typeof arg === 'object' && !Array.isArray(arg)) ? [] : Array.isArray(arg) ? arg.map(String) : [String(arg)];
+        const r = name === 'batch' ? null : requestOf([name, ...args]);
+        return r?.req ?? { op: name, refused: r?.refused ?? 'batch-item' };
+      });
+    }
+  }
+  if (op === 'context') { req.words = rest.join(' '); if (opts.cursor !== undefined) req.cursor = Number(opts.cursor); }
   if (op === 'find') { req.words = rest.join(' '); if (opts.limit) req.limit = Number(opts.limit); }
   if (op === 'act' || op === 'can') req.acts = rest;
   if ((op === 'act' || op === 'object') && opts.for !== undefined) req.for = opts.for;
@@ -257,6 +323,22 @@ const shq = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
  * served: `pending --check` gates a headless turn, which starts only when a message or a wake waits. The turn uses
  * the harness's own login.
  */
+/**
+ * #3704 (today's `views <ref>... [--out f]`): one picture per name, at most six, each drawn by `shoot` (the public
+ * stream, in this machine's browser; with no browser, its words). With several and `--out f.png`, f-1.png, f-2.png...
+ */
+export async function runViews(args, shootOne) {
+  const k = args.indexOf('--out'), out = k >= 0 ? args[k + 1] : undefined;
+  const names = args.filter((a, i) => !(k >= 0 && (i === k || i === k + 1)) && !a.startsWith('--'));
+  if (!names.length || names.length > 6 || (k >= 0 && !out)) return { ok: false, code: 'views-form', detail: 'views <name> [<name>...] [--out f.png]: one to six places, things or Souls, by name' };
+  const file = (i) => (!out ? [] : ['--out', names.length === 1 ? out : out.replace(/(\.[a-z]+)?$/i, (ext) => `-${i + 1}${ext || '.png'}`)]);
+  const views = [];
+  for (const [i, name] of names.entries()) {
+    try { views.push({ name, ...(await shootOne([name, ...file(i)])) }); } catch (e) { views.push({ name, ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }); }
+  }
+  return { ok: views.some((v) => v.ok !== false), views, source: 'drawn here from the public stream, as a visitor sees it' };
+}
+
 function help(home, named, topic) {
   if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
   if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake'), { code: 'help-topics' });
@@ -305,6 +387,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (process.argv[2] === 'shoot') { // G10: drawn here, in a browser, from the public stream; no daemon unless it must use words
       const souls = soulsWithTokens(home), ask = souls.length === 1 ? (r) => call(home, souls[0], r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
       out(await runShoot(process.argv.slice(3), { home, env: process.env, ask }));
+      process.exit(0);
+    }
+    if (process.argv[2] === 'views') { // #3704: today's reference pictures, each drawn here as shoot draws it
+      const souls = soulsWithTokens(home), ask = souls.length === 1 ? (r) => call(home, souls[0], r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
+      out(await runViews(process.argv.slice(3), (args) => runShoot(args, { home, env: process.env, ask })));
       process.exit(0);
     }
     if (process.argv[2] === 'view' || process.argv[2] === 'map') { // #3687: today's view, read in the same browser
