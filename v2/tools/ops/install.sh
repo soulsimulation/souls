@@ -180,8 +180,14 @@ install_all() {
       chown -R root:root "$2.install"; find "$2.install" -type d -exec chmod 755 {} +; find "$2.install" -type f -exec chmod 644 {} +
       mv "$2.install" "$2"' _ "$from/client" "$LIB/client"
   fi
-  ensure_dir "$DATA" 750 "$ACCOUNT" "$ACCOUNT" "tree $DATA"
+  # 751: today's launcher (simworlds, no Souls group) reaches the route file its cut-over fence reads
+  # (/etc/souls/cutover-binding.json `routesFile`, v2/docs/cutover.md); it can list nothing here, and every store
+  # below stays 750.
+  ensure_dir "$DATA" 751 "$ACCOUNT" "$ACCOUNT" "tree $DATA"
   for p in worlds directory views; do ensure_dir "$DATA/$p" 750 "$ACCOUNT" "$ACCOUNT"; done
+  # The world route file (placement, the cut-over and the origin write or read it): Souls-owned, so a root-run
+  # cut-over write never leaves a folder the placement child cannot lock.
+  ensure_dir "$DATA/routes" 755 "$ACCOUNT" "$ACCOUNT"
   ensure_dir "$DATA/worlds/directory" 750 "$ACCOUNT" "$ACCOUNT"
   ensure_dir "$DATA/worlds/worlds" 750 "$ACCOUNT" "$ACCOUNT"
   ensure_dir "$DATA/directory/placement-backup" 750 "$ACCOUNT" "$ACCOUNT"

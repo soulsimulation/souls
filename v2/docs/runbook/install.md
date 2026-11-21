@@ -13,6 +13,7 @@ sends to these programs once the owner places its site file. Routing between the
 | The viewers' origin (`origin.mjs`, `cache.mjs`) and the page's files (V5) | `/usr/local/lib/souls/origin/`, `/usr/local/lib/souls/web/` | root, 644 |
 | The served client (R17: `eden.mjs`, the skills, the daemon's library, `soul-client.json`), at the version its skill declares; placed only when absent, so release-v2's move replaces it and a later install never puts an older one back. Today's launcher's cut-over fence checks it (`clientDir`) | `/usr/local/lib/souls/client/` | root, 644 |
 | Data: worlds, the directory's store, the view tier's stream files | `/var/lib/souls/{worlds,directory,views}` | souls, 750 |
+| The world route file, which today's launcher's cut-over fence also reads (the parent `/var/lib/souls` is 751) | `/var/lib/souls/routes/worlds.json` | souls, 755 |
 | The directory's arguments, written once, never overwritten | `/etc/souls/directory.args` | root:souls, 640 |
 | Secrets, `KEY=value`, written once (empty), never overwritten | `/etc/souls/secrets.env` | root, 600 |
 | What the install made (its record; see below) | `/etc/souls/install.state` | root, 644 |

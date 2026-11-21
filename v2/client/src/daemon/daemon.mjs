@@ -51,6 +51,11 @@
 //     {"op":"event","event":{...}}                    an event as R9's matcher takes it, until frames carry them
 //     {"op":"pending"}                                R20's (#3328) check for a scheduler: `due` when a message is
 //                                                     open or wakes can be handed now; it sends and takes nothing
+//     {"op":"pending","list":true}                    C15's (#3685): the open messages, and what arrived since the
+//                                                     last read (taken, as `wait 0` takes it), with no wait
+//     {"op":"ack","id":"<message id>","reply":"..","close":"done|failed"}   C15's: a reply that answers the message
+//                                                     with no act, closing it (`done` unless `close` says `failed`); with
+//                                                     no `close` while an act serves it, the reply rides on that close
 //   and G11's (#3335), prayers, the mailbox's other direction: a request goes to the gateway as a text frame and the
 //   directory's reply comes back on the socket (`n` matches them); an answer to this Soul's prayer arrives as a
 //   `prayer-answered` event, which wakes a `wait`, its words quoted as data. A creator's daemon lists and answers:
@@ -208,6 +213,7 @@ if (state.wake) Object.assign(wakes, { budget: state.wake.budget, delivered: sta
 const saveWakes = () => { state.wake = { budget: wakes.budget, delivered: wakes.delivered }; save(); };
 const mail = new Map(); // R13: the owner's open messages given to this daemon, by id
 const serving = new Map(); // sequence → the message its act serves
+const replyOf = new Map(); // C15: a message's reply, sent with its close
 const closes = []; // closes not yet sent, for the next sign-in
 const copy = new wire.Copy(); // its scope, by hash (R5b)
 // A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
@@ -349,10 +355,16 @@ function onPrayerText(f) {
   return true;
 }
 
-/** R13: the message `id` closed with its act's outcome, now or at the next sign-in. */
+/**
+ * R13: the message `id` closed with its act's outcome, now or at the next sign-in. A reply (C15) rides on the close:
+ * the directory reads only id, state and outcome, and the gateway passes the close to the owner's page as it is.
+ */
 function closeMail(id, state, outcome) {
-  const line = JSON.stringify({ close: { id, state, outcome } });
+  const reply = replyOf.get(id);
+  const line = JSON.stringify({ close: { id, state, outcome, ...(reply ? { reply } : {}) } });
   mail.delete(id);
+  replyOf.delete(id);
+  for (const [s, m] of serving) if (m === id) serving.delete(s); // closed once: a later answer closes nothing
   log(`message ${id} closed ${state} (${outcome})`);
   if (ws && signedIn) ws.send(line); else closes.push(line);
 }
@@ -463,7 +475,6 @@ function connect() {
         if (movesOf.has(s) && Number(c) !== 3) { state.seated = seatedAfter(movesOf.get(s), Number(c), state.seated ?? null); movesOf.delete(s); }
         if (serving.has(s) && Number(c) !== 3) {
           closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
-          serving.delete(s);
         }
       }
       save();
@@ -627,7 +638,8 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now']);
+const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
 const nothingYet = () => !events.some((e) => e.kind !== 'synced');
@@ -758,7 +770,31 @@ async function answer(req) {
       const until = Date.now() + Math.min(Number(req.within ?? 4000), 10_000);
       while (!signedIn && Date.now() < until) await sleep(50);
       while (signedIn && mail.size === 0 && Date.now() - signedInAt < MAILBOX_FIRST_MS && Date.now() < until) await sleep(50);
-      return { ok: true, due: mail.size > 0 || wakes.due(Date.now()), mail: mail.size, connected: signedIn };
+      if (!req.list) return { ok: true, due: mail.size > 0 || wakes.due(Date.now()), mail: mail.size, connected: signedIn };
+      // C15 (#3685): the listing a turn starts from. Every message still open (one an act serves says so), and what
+      // arrived since the last read, taken as `wait 0` takes it, with the wakes the budget lets through now.
+      const handed = wakes.deliver(Date.now());
+      if (handed.length) saveWakes();
+      const got = events.splice(0), served = new Set(serving.values());
+      heardSince.length = 0;
+      const open = [...mail.values()].map((m) => ({ id: m.id, text: String(m.text), at: m.at, ...(served.has(m.id) ? { serving: true } : {}) }));
+      const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
+      return closing({ ok: true, connected: signedIn, open, events: got, ...said, ...(handed.length ? { wakes: handed } : {}),
+        ...(open.length ? { next: 'serve each open message: act <act> --for <its id>, or answer it: ack <its id> "<reply>" [--close failed]' } : {}) },
+      (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)) }), { now: true });
+    }
+    case 'ack': {
+      // C15 (#3685): an answer to the owner's message with no act: a reply, and the close (`done`, or `failed` for a no).
+      const id = String(req.id ?? ''), reply = String(req.reply ?? '').replace(/\s+/g, ' ').trim(), close = req.close ?? null;
+      if (close !== null && close !== 'done' && close !== 'failed') return { ok: false, code: 'ack-close', detail: '--close done|failed' };
+      if (!reply || [...reply].length > REPLY_MOST) return { ok: false, code: 'ack-reply', detail: `ack <message id> "<reply>": 1 to ${REPLY_MOST} characters` };
+      if (!mail.has(id)) return { ok: false, code: 'mail-not-found', detail: 'ack names an open message this daemon was given: pending lists them' };
+      replyOf.set(id, reply);
+      if (close === null && [...serving.values()].includes(id)) {
+        return { ok: true, acked: id, reply, closes: 'with the act that serves it: its outcome, your reply beside it' };
+      }
+      closeMail(id, close ?? 'done', 'replied');
+      return { ok: true, acked: id, reply, closed: close ?? 'done', sent: signedIn, ...ageNow() };
     }
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
@@ -988,7 +1024,11 @@ const server = createServer((c) => {
       const line = buf.slice(0, k);
       buf = buf.slice(k + 1);
       let op = 'unread';
-      Promise.resolve().then(() => { const req = JSON.parse(line); op = OPS.has(req.op) ? req.op : 'unknown'; return answer(req); })
+      Promise.resolve().then(() => {
+        const req = JSON.parse(line);
+        op = !OPS.has(req.op) ? 'unknown' : req.op === 'pending' && req.list ? 'pending-list' : req.op; // a listing is the agent's
+        return answer(req);
+      })
         .catch((e) => ({ ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }))
         .then((out) => {
           // R20: a scheduler's check is not the agent: it takes nothing an answer to the agent would carry.
