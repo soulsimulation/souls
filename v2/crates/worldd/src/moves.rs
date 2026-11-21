@@ -81,16 +81,16 @@ pub const CONTENT: [(&str, &str); 27] = [
         include_str!("../../../../content/moves/slump.json"),
     ),
     (
+        "steer",
+        include_str!("../../../../content/moves/steer.json"),
+    ),
+    (
         "stretch",
         include_str!("../../../../content/moves/stretch.json"),
     ),
     (
         "strike",
         include_str!("../../../../content/moves/strike.json"),
-    ),
-    (
-        "steer",
-        include_str!("../../../../content/moves/steer.json"),
     ),
     (
         "stroke",
