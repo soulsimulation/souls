@@ -625,6 +625,8 @@ fn ships_history_across_three_kills(d: &Path, spec: &str, env: &[(&str, &str)]) 
             .and_then(|r| r.split(' ').next()?.parse().ok())
             .unwrap_or_else(|| panic!("{shipping}"));
         froms.push(from);
+        // The records the start hands the shipper wait from here; the kill comes before they seal.
+        let handed = Instant::now();
         w.line("listening");
         let mut s = connect(&socket);
         for k in 0..1 + usize::from(again) {
@@ -636,7 +638,13 @@ fn ships_history_across_three_kills(d: &Path, spec: &str, env: &[(&str, &str)]) 
             walk(&mut s, body, root.scope(), ground, seq, x, 30);
             assert_eq!(answer(&mut s).0, 1, "the walk ends in a receipt");
         }
-        std::thread::sleep(Duration::from_millis(1_500));
+        // 1.5 s for the walk's records to reach the disk, but never past 8 s after the start handed its records over
+        // (a piece seals at about 9 s): a start that replays a longer public stream (#3799) is still killed mid-shipping.
+        let last = if again { Instant::now() } else { handed };
+        let seal = last + Duration::from_millis(8_000);
+        std::thread::sleep(
+            Duration::from_millis(1_500).min(seal.saturating_duration_since(Instant::now())),
+        );
         let landed = history(&bucket, root).len();
         printed.push(w.all.clone());
         w.kill();

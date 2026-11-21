@@ -772,7 +772,7 @@ fn copy_dir(from: &Path, to: &Path) {
         let t = to.join(p.file_name().unwrap());
         if p.is_dir() {
             copy_dir(&p, &t);
-        } else {
+        } else if p.is_file() {
             std::fs::copy(&p, &t).unwrap();
         }
     }
@@ -1848,6 +1848,497 @@ fn c21_the_sandpit_walk_arrives_or_ends_blocked() {
         Err(how) => assert!(how == "walk.blocked", "ended {how}"),
     }
     assert!(ticks <= 100, "ended within 5 s of its last progress");
+}
+
+/// Every motion sample the served world's public stream holds, part by part, read by the normal public reader from
+/// the files `worldd serve` wrote under `views/` (the stream `views/world.json` names): `(part, sample)`.
+fn public_samples(dir: &Path) -> Vec<(u64, replica::pose::HandOff)> {
+    use replica::stream::{Pointer, public::PublicPlayer};
+    let world = replica::rules::json::parse(
+        &std::fs::read_to_string(dir.join("views/world.json")).unwrap(),
+    )
+    .unwrap();
+    let stream = dir.join(world.get("stream").and_then(|v| v.str()).unwrap());
+    let pointer = Pointer::read(&std::fs::read(stream.join("pointer")).unwrap()).unwrap();
+    let headers = stream.ancestors().nth(3).unwrap().join("headers");
+    let header = std::fs::read(headers.join(replica::encode::to_hex(&pointer.header))).unwrap();
+    let Value::Map(fields) = decode(&std::fs::read(stream.join("pointer")).unwrap())
+        .unwrap()
+        .value
+    else {
+        panic!("the pointer is a map")
+    };
+    let Some(Value::Bytes(generation)) = fields.get(&8) else {
+        panic!("a public stream's pointer names its baseline")
+    };
+    let parts = stream.join("g").join(replica::encode::to_hex(generation));
+    let baseline = std::fs::read(parts.join("baseline")).unwrap();
+    let mut player = PublicPlayer::start(&header, &baseline).expect("the public reader");
+    let mut out = Vec::new();
+    for n in 0..=pointer.newest.expect("a published part") {
+        let bytes = std::fs::read(parts.join(n.to_string())).expect("a published part");
+        player
+            .play(&bytes)
+            .expect("the public reader plays the part");
+        out.extend(player.samples().iter().map(|h| (n, *h)));
+    }
+    out
+}
+
+/// #3799 A4: a Soul on a served Eden walks to the sage armchair, sits and rises through the gateway; the public
+/// stream `worldd serve` wrote carries its body's motion: samples that grow in number, positions that change over
+/// time while it walks, the hand-off into the seat's slot and the one out of it, read by the normal public reader.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+// A real process on the real clock: its waits and rates are real time.
+#[allow(clippy::disallowed_methods)]
+fn i3799_a4_the_public_stream_carries_a_soul_walking_sitting_and_rising() {
+    use replica::pose::Owner;
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let armchair = im.nodes["e_1f3666fe"];
+    let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "m3799", im.nodes["world"].scope());
+    let walked = soul.act("eden:walk", Some(armchair), BTreeMap::new());
+    let sat = soul.act("eden:sit", Some(armchair), BTreeMap::new());
+    let rose = soul.act("eden:rise", None, BTreeMap::new());
+    println!("walk {walked:?}, sit {sat:?}, rise {rose:?}");
+    // A bed's slot (#3791's lying bodies): the beds of the houses west of the library, nearest first (today's ids),
+    // the first one the Soul can walk to and lie in.
+    let (mut bed, mut to_bed, mut lay) = (armchair, Err(String::new()), Err(String::new()));
+    for b in ["e_9857eaa7", "e_09de188a", "e_6487ccc5", "e_c57cbb07"] {
+        bed = im.nodes[b];
+        to_bed = soul.act("eden:walk", Some(bed), BTreeMap::new());
+        lay = soul.act("eden:lie", Some(bed), BTreeMap::new());
+        println!("bed {b}: walk {to_bed:?}, lie {lay:?}");
+        if lay.is_ok() {
+            break;
+        }
+    }
+    let up = soul.act("eden:rise", None, BTreeMap::new());
+    println!("rise from the bed {up:?}");
+    // The stream is cut every half second of world time; wait (at most 60 s) for the rise's hand-off to be published,
+    // and say how long it took after the rise's answer.
+    let rose_at = std::time::Instant::now();
+    let mut samples = public_samples(&dir);
+    let rises = 1 + usize::from(lay.is_ok());
+    let risen = |s: &[(u64, replica::pose::HandOff)]| {
+        s.iter().filter(|(_, h)| h.from == Owner::Slot).count() >= rises
+    };
+    while !risen(&samples) && rose_at.elapsed() < Duration::from_secs(60) {
+        std::thread::sleep(Duration::from_millis(250));
+        samples = public_samples(&dir);
+    }
+    println!(
+        "the rise's hand-off on the public stream {:.2} s after its answer",
+        rose_at.elapsed().as_secs_f64()
+    );
+    drop(served);
+    // The page's Track test plays this stream (`v2/web/src/clock/stream-track.test.ts`, V2_STREAM_DIR).
+    if let Ok(keep) = std::env::var("V2_KEEP_STREAM") {
+        copy_dir(&dir.join("views"), Path::new(&keep));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    walked.expect("walked to the armchair");
+    sat.expect("sat in it");
+    rose.expect("rose from it");
+    to_bed.expect("walked to a bed");
+    let bodies: std::collections::BTreeSet<Id> = samples.iter().map(|(_, h)| h.node).collect();
+    println!(
+        "{} public samples in {} parts, of {} bodies",
+        samples.len(),
+        samples
+            .iter()
+            .map(|s| s.0)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        bodies.len()
+    );
+    assert_eq!(bodies.len(), 1, "the one Soul's body");
+    let walking: Vec<&replica::pose::HandOff> = samples
+        .iter()
+        .map(|(_, h)| h)
+        .filter(|h| h.to == Owner::Mover && h.from == Owner::Mover)
+        .collect();
+    let at: Vec<i64> = samples.iter().map(|(_, h)| h.at).collect();
+    assert!(at.windows(2).all(|w| w[0] <= w[1]), "in world time order");
+    let mut places: Vec<(i64, i64)> = walking
+        .iter()
+        .map(|h| (h.pose.position.x, h.pose.position.z))
+        .collect();
+    places.dedup();
+    println!(
+        "walking: {} samples at {} places, first {:?} last {:?} (µm)",
+        walking.len(),
+        places.len(),
+        places.first(),
+        places.last()
+    );
+    assert!(walking.len() >= 10, "a walk of metres is many samples");
+    assert!(places.len() >= 10, "the body is seen at changing positions");
+    let into = samples
+        .iter()
+        .position(|(_, h)| h.to == Owner::Slot && h.pose.frame.node == armchair);
+    let out = samples
+        .iter()
+        .position(|(_, h)| h.from == Owner::Slot && h.to == Owner::Mover);
+    println!(
+        "into the seat: {:?}; out of it: {:?}",
+        into.map(|i| samples[i].1),
+        out.map(|i| samples[i].1)
+    );
+    let (into, out) = (
+        into.expect("the hand-off into the seat's slot"),
+        out.expect("the hand-off out of it"),
+    );
+    assert!(
+        samples[into].1.pose.frame.slot.is_some(),
+        "in a slot of the armchair"
+    );
+    assert!(into < out, "seated, then risen");
+    assert_ne!(
+        samples[out].1.pose.frame.node, armchair,
+        "standing on a floor again"
+    );
+    // The bed: the body's node changes parent into the bed's slot (a sample's frame is its node's parent), at the
+    // slot's place, with the hand-off; then out of it onto a floor, where it stands somewhere new. Today every Eden
+    // bed tried refuses the gateway's lie `out-of-reach` (not this change): then only the walk to it is checked.
+    if lay.is_err() {
+        println!("no bed took the lie ({lay:?}); the bed's hand-offs are not checked");
+        return;
+    }
+    up.expect("rose from the bed");
+    let lie = samples
+        .iter()
+        .position(|(_, h)| h.to == Owner::Slot && h.pose.frame.node == bed)
+        .expect("the hand-off into the bed's slot");
+    let got_up = samples
+        .iter()
+        .skip(lie)
+        .position(|(_, h)| h.from == Owner::Slot && h.to == Owner::Mover)
+        .map(|i| i + lie)
+        .expect("the hand-off out of the bed");
+    println!(
+        "into the bed: {:?}; out of it: {:?}",
+        samples[lie].1, samples[got_up].1
+    );
+    assert!(
+        samples[lie].1.pose.frame.slot.is_some(),
+        "in a slot of the bed"
+    );
+    assert!(out < lie, "the armchair, then the bed");
+    assert_ne!(samples[got_up].1.pose.frame.node, bed, "on a floor again");
+    assert_ne!(
+        samples[got_up].1.pose.position, samples[out].1.pose.position,
+        "standing somewhere new"
+    );
+}
+
+/// #3799 A5: full Eden served with `V2_WALKERS` (200) joined Souls, each walking back and forth on the open ground
+/// through the gateway for `V2_SECONDS` (60), while a reader follows the public stream as the page does (the pointer,
+/// then each new part played by the normal public reader, the same code the page runs as WASM). Prints parts written
+/// a second against parts played a second, the reader's lag behind the newest part, and the samples it saw.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+// A real process on the real clock: its waits and rates are real time.
+#[allow(clippy::disallowed_methods)]
+fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
+    use replica::stream::{Pointer, public::PublicPlayer};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::time::Instant;
+    let n: u64 = std::env::var("V2_WALKERS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(200);
+    // A warm-up first (the joins' parts, each written whole), then the measured walking.
+    let warmup = Duration::from_secs(
+        std::env::var("V2_WARMUP")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60),
+    );
+    let secs: u64 = std::env::var("V2_SECONDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60);
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (lineage, ground) = (im.nodes["world"].scope(), im.nodes["ground"]);
+    let (served, first, dir) = serve(&facts, "74.0,-1.0", "m3799a5", lineage);
+    drop(first);
+    let stop = Arc::new(AtomicBool::new(false));
+    let (walks, refused) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+    let joined = Instant::now();
+    let mut souls: Vec<Client> = (2..n + 2).map(|i| join(&dir, i, lineage)).collect();
+    println!(
+        "{n} Souls joined in {:.1} s",
+        joined.elapsed().as_secs_f64()
+    );
+    // The reader: from the pointer, each part as it is published.
+    let reader = {
+        let (dir, stop) = (dir.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let world = replica::rules::json::parse(
+                &std::fs::read_to_string(dir.join("views/world.json")).unwrap(),
+            )
+            .unwrap();
+            let stream = dir.join(world.get("stream").and_then(|v| v.str()).unwrap());
+            let (mut player, mut generation, mut next) = (None, Vec::new(), 0u64);
+            let (mut played, mut samples, mut lags, mut busy) =
+                (0u64, 0usize, Vec::new(), Duration::ZERO);
+            let (start, mut first_newest, mut last_newest) = (Instant::now(), None, 0u64);
+            // Writer lag: world time now less the newest published part's end, µs, while measuring.
+            let mut behind: Vec<i64> = Vec::new();
+            // The same during the warm-up (the joins just made): (seconds since the walkers started, µs behind).
+            let mut warming: Vec<(f64, i64)> = Vec::new();
+            let mut measuring: Option<Instant> = None;
+            while !stop.load(Ordering::Relaxed) {
+                if measuring.is_none() && start.elapsed() >= warmup {
+                    measuring = Some(Instant::now());
+                    (played, samples, busy, first_newest) = (0, 0, Duration::ZERO, None);
+                    lags.clear();
+                }
+                let Ok(bytes) = std::fs::read(stream.join("pointer")) else {
+                    continue;
+                };
+                let Ok(pointer) = Pointer::read(&bytes) else {
+                    continue;
+                };
+                let Value::Map(fields) = decode(&bytes).unwrap().value else {
+                    continue;
+                };
+                let Some(Value::Bytes(g)) = fields.get(&8) else {
+                    continue;
+                };
+                let parts = stream.join("g").join(replica::encode::to_hex(g));
+                if *g != generation {
+                    let headers = stream.ancestors().nth(3).unwrap().join("headers");
+                    let header =
+                        std::fs::read(headers.join(replica::encode::to_hex(&pointer.header)))
+                            .unwrap();
+                    let baseline = std::fs::read(parts.join("baseline")).unwrap();
+                    player =
+                        Some(PublicPlayer::start(&header, &baseline).expect("the public reader"));
+                    generation = g.clone();
+                    next = 0;
+                }
+                let newest = pointer.newest.unwrap_or(0);
+                let lag = answers::now() - pointer.newest_to.unwrap_or(0);
+                if measuring.is_some() {
+                    first_newest.get_or_insert(newest);
+                    behind.push(lag);
+                } else {
+                    warming.push((start.elapsed().as_secs_f64(), lag));
+                }
+                last_newest = newest;
+                let p = player.as_mut().unwrap();
+                while next <= newest {
+                    let t = Instant::now();
+                    let bytes =
+                        std::fs::read(parts.join(next.to_string())).expect("a published part");
+                    p.play(&bytes).expect("the public reader plays the part");
+                    busy += t.elapsed();
+                    samples += p.samples().len();
+                    played += 1;
+                    next += 1;
+                }
+                if measuring.is_some() {
+                    lags.push(newest + 1 - next);
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            let wall = measuring.map_or(1.0, |m| m.elapsed().as_secs_f64());
+            let most = warming.iter().map(|w| w.1).max().unwrap_or(0);
+            let caught = warming
+                .iter()
+                .rposition(|w| w.1 > 1_000_000)
+                .and_then(|i| warming.get(i + 1))
+                .map(|w| w.0);
+            println!(
+                "after the joins: the writer at most {:.2} s behind world time, within 1 s again {:?} s after the \
+                 walkers started",
+                most as f64 / 1e6,
+                caught
+            );
+            println!(
+                "the writer behind world time while measuring: most {:.2} s, last {:.2} s",
+                behind.iter().max().copied().unwrap_or(0) as f64 / 1e6,
+                behind.last().copied().unwrap_or(0) as f64 / 1e6
+            );
+            let written = last_newest - first_newest.unwrap_or(0);
+            (
+                written as f64 / wall,
+                played as f64 / wall,
+                played,
+                samples,
+                busy,
+                lags.iter().max().copied(),
+            )
+        })
+    };
+    let walkers: Vec<_> = souls
+        .drain(..)
+        .enumerate()
+        .map(|(i, mut soul)| {
+            let (stop, walks, refused) = (stop.clone(), walks.clone(), refused.clone());
+            std::thread::spawn(move || {
+                // Back and forth between two points 8 m apart on a ring around the births.
+                let a = i as f64 * 0.7;
+                let (cx, cz) = (74.0 + 6.0 * a.cos(), -1.0 + 6.0 * a.sin());
+                let mut leg = 0;
+                while !stop.load(Ordering::Relaxed) {
+                    let x = cx + if leg % 2 == 0 { 4.0 } else { -4.0 };
+                    let um = |m: f64| {
+                        let v = (m * 1e6) as i64;
+                        u64::try_from(v)
+                            .map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
+                    };
+                    let to = Value::Array(vec![um(x), um(0.0), um(cz)]);
+                    match soul.act("eden:walk", Some(ground), BTreeMap::from([(1, to)])) {
+                        Ok(_) => walks.fetch_add(1, Ordering::Relaxed),
+                        Err(_) => refused.fetch_add(1, Ordering::Relaxed),
+                    };
+                    leg += 1;
+                }
+            })
+        })
+        .collect();
+    std::thread::sleep(warmup + Duration::from_secs(secs));
+    stop.store(true, Ordering::Relaxed);
+    let (written, played_rate, played, samples, busy, lag) = reader.join().unwrap();
+    for w in walkers {
+        let _ = w.join();
+    }
+    drop(served);
+    // The recorded world, for the public writer's byte-for-byte regression (V2_RECORDED_WORLD).
+    if let Ok(keep) = std::env::var("V2_KEEP_WORLD") {
+        let _ = std::fs::remove_dir_all(&keep);
+        copy_dir(&dir, Path::new(&keep));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    println!(
+        "A5: {n} walkers, {secs} s measured after {} s: walks done {}, refused {}; public parts written {written:.2}/s, played \
+         {played_rate:.2}/s ({played} parts, {samples} motion samples, {:.1} ms reading in all); the reader's most \
+         parts behind the newest: {lag:?}",
+        warmup.as_secs(),
+        walks.load(Ordering::Relaxed),
+        refused.load(Ordering::Relaxed),
+        busy.as_secs_f64() * 1e3
+    );
+    assert!(samples > 0, "the stream carries motion");
+    assert!(lag.unwrap_or(0) <= 2, "the reader keeps up");
+}
+
+/// Every file of a served world's public stream that a reader fetches by name and that never changes: the headers,
+/// each generation's baseline and its numbered parts and words. The pointer and the recovery store are left out.
+fn stream_files(views: &Path) -> BTreeMap<String, Vec<u8>> {
+    fn walk(root: &Path, d: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
+        for e in std::fs::read_dir(d).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(root, &p, out);
+                continue;
+            }
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            let stem = name.trim_end_matches(".text");
+            let keep = stem == "baseline"
+                || stem.chars().all(|c| c.is_ascii_digit())
+                || p.parent().is_some_and(|q| q.ends_with("headers"));
+            if keep && !name.ends_with(".tmp") {
+                let rel = p.strip_prefix(root).unwrap().to_string_lossy().into_owned();
+                out.insert(rel, std::fs::read(&p).unwrap());
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(views, views, &mut out);
+    out
+}
+
+/// #3799: the public writer cuts a part that only moves nodes by their rows, and any other whole; the stream is the
+/// same, byte for byte, as when every part is worked out whole (`SOULS_STREAM_WHOLE`). A recorded world
+/// (`V2_RECORDED_WORLD`, e.g. kept by the A5 run with `V2_KEEP_WORLD`) is served twice from copies with no stream: the
+/// stream is written again from the whole log at start-up, once each way; the two are compared file by file, and
+/// the time each start-up took to write it is printed.
+#[test]
+#[ignore = "needs a recorded world (V2_RECORDED_WORLD) and a built worldd (see the module doc)"]
+fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
+    let recorded = PathBuf::from(std::env::var("V2_RECORDED_WORLD").expect("V2_RECORDED_WORLD"));
+    let mut runs = Vec::new();
+    for (tag, whole) in [("rows", false), ("whole", true)] {
+        let dir = std::env::temp_dir().join(format!("m3799r-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        copy_dir(&recorded, &dir);
+        for gone in ["views", ".stream-recovery-store", "gateway.sock"] {
+            let p = dir.join(gone);
+            let _ = std::fs::remove_dir_all(&p);
+            let _ = std::fs::remove_file(&p);
+        }
+        let mut c = Command::new(env!("CARGO_BIN_EXE_worldd"));
+        c.args(["serve", "--dir"])
+            .arg(&dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        if whole {
+            c.env("SOULS_STREAM_WHOLE", "1");
+        }
+        let mut child = c.spawn().unwrap();
+        let mut out = BufReader::new(child.stdout.take().unwrap());
+        let (mut line, mut before, mut written) = (String::new(), None, None);
+        while out.read_line(&mut line).unwrap() > 0 {
+            let ms = |l: &str| -> Option<u64> {
+                l.trim()
+                    .strip_suffix(" ms")?
+                    .rsplit(' ')
+                    .next()?
+                    .parse()
+                    .ok()
+            };
+            if line.starts_with("start-up: replay at") {
+                before = ms(&line);
+            }
+            if line.starts_with("start-up: public stream") {
+                written = ms(&line);
+                break;
+            }
+            line.clear();
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        let files = stream_files(&dir.join("views"));
+        let _ = std::fs::remove_dir_all(&dir);
+        let parts = files
+            .keys()
+            .filter(|k| {
+                k.rsplit('/')
+                    .next()
+                    .is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
+            })
+            .count();
+        let ms = written.unwrap_or(0).saturating_sub(before.unwrap_or(0));
+        println!(
+            "{tag}: {parts} parts written from the log at start-up in about {ms} ms ({:.1} ms a part)",
+            ms as f64 / parts.max(1) as f64
+        );
+        assert!(written.is_some(), "{tag}: the start-up wrote its stream");
+        runs.push(files);
+    }
+    let (rows, whole) = (&runs[0], &runs[1]);
+    let both: Vec<&String> = rows.keys().filter(|k| whole.contains_key(*k)).collect();
+    let differ: Vec<&&String> = both.iter().filter(|k| rows[**k] != whole[**k]).collect();
+    println!(
+        "{} files in both, {} differ; {} only by rows, {} only whole",
+        both.len(),
+        differ.len(),
+        rows.len() - both.len(),
+        whole.len() - both.len()
+    );
+    assert!(both.len() > 100, "a recorded world of many parts");
+    assert!(
+        differ.is_empty(),
+        "byte for byte: {:?}",
+        &differ[..differ.len().min(5)]
+    );
 }
 
 /// C34 (#3599) A2: a building's named area resolves onto its own room and floor. Born outside, a Soul climbs a

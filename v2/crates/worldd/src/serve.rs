@@ -2143,6 +2143,12 @@ fn serve(args: &[String]) -> R<()> {
                             if record >= writer.source_cursor() {
                                 writer.push(record, &bytes)?;
                             }
+                            // What is already waiting first: a writer behind would cut a part a record (#3799).
+                            while let Ok((record, bytes)) = stream_rx.try_recv() {
+                                if record >= writer.source_cursor() {
+                                    writer.push(record, &bytes)?;
+                                }
+                            }
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                             writer.flush()?;

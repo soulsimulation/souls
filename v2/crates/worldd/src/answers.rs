@@ -77,7 +77,8 @@
 //!    [`crate::loose`]); a move's phase timers fire;
 //! 2. skills step through the host, each one unit in K11's wrapper (K13a, T9b/T9c; a panic ends that skill only);
 //! 3. the controller steps the bodies (B1), moves and seats included (B2, B3); each utterance a step started is
-//!    written with its hearers (`sim::speech::heard`, B11, #3369);
+//!    written with its hearers (`sim::speech::heard`, B11, #3369); each body's motion is written on its node, world-caused,
+//!    at each hand-off and every 200 ms while it moves ([`crate::bodies::Bodies::motion`], #3799);
 //! 4. committed acts: the checks that came back are committed (I3, I4), then the checked edits (G1b, `sim::edit`;
 //!    each counts as outstanding, so lockstep waits for it as for an act), and new moves start (I4b); what they made
 //!    loose gets its end, and what they made kept loses it (F10b, [`crate::loose`]);
@@ -172,6 +173,83 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 type R<T> = Result<T, Refusal>;
+
+/// The entries of `samples` (#3799), numbered from `first`: per body, its leave and its arrive at its new parent when
+/// its frame changed (the transfer named from the leave's own number, which a zone gives once), then its sample.
+fn motion_effects(
+    header: &replica::effects::Header,
+    first: u64,
+    samples: &[bodies::Sample],
+) -> Vec<Effect> {
+    let h = replica::ids::sha256(
+        format!(
+            "souls/worldd/motion/{}",
+            replica::world_model::show(header.zone)
+        )
+        .as_bytes(),
+    );
+    let mut scope = [0u8; 16];
+    scope.copy_from_slice(&h[..16]);
+    let entry = |node: Id, s: &bodies::Sample, body: Body| Effect {
+        envelope: Envelope {
+            sequence: 0,
+            at: s.handoff.at,
+            cause: Cause::World,
+            actor: Actor::World,
+            audience: s.audience,
+            node,
+        },
+        body,
+        events: None,
+        rest: Rest::new(),
+    };
+    let mut out = Vec::new();
+    for s in samples {
+        let node = s.handoff.node;
+        if let Some(pose) = s.to
+            && let Some(transfer) = Id::new(Scope(scope), first + out.len() as u64)
+        {
+            out.push(entry(
+                node,
+                s,
+                Body::Transfer(TransferRec::Leave {
+                    transfer,
+                    node,
+                    lineage: header.lineage,
+                    zone: header.zone,
+                    pose,
+                }),
+            ));
+            out.push(entry(
+                pose.frame.node,
+                s,
+                Body::Transfer(TransferRec::Arrive {
+                    transfer,
+                    carried: Vec::new(),
+                }),
+            ));
+        }
+        // A sample at rest (a stop, a seat taken, a still body set somewhere new) leaves the node still where it is: the
+        // same frame and pose again as a reparent, so the tree holds it as a still node's place (its record's pose, R5)
+        // and not as a motion that never ends.
+        let mut changes = vec![ChangeRec {
+            change: Change::Motion(s.handoff),
+            rest: Rest::new(),
+        }];
+        if s.handoff.linear == Vec3::ZERO {
+            changes.push(ChangeRec {
+                change: Change::Reparent {
+                    node,
+                    from: s.handoff.pose.frame,
+                    pose: s.handoff.pose,
+                },
+                rest: Rest::new(),
+            });
+        }
+        out.push(entry(node, s, Body::Changes(changes)));
+    }
+    out
+}
 
 fn recs_of(changes: Vec<Change>) -> Vec<ChangeRec> {
     changes
@@ -2711,6 +2789,13 @@ impl Clock {
     /// Writes the world's own entries (its utterances, its sky), each envelope's sequence set in turn, as one part
     /// applied to the world and logged with the tick. A part the world refuses is not written, and is named.
     fn write_own(&mut self, effects: Vec<Effect>, what: &str) {
+        if let Err(r) = self.try_own(effects) {
+            eprintln!("worldd: {what} was not written: {r}");
+        }
+    }
+
+    /// [`Clock::write_own`], the refusal handed back.
+    fn try_own(&mut self, effects: Vec<Effect>) -> R<()> {
         let first = self.replica.version();
         let effects: Vec<Value> = effects
             .into_iter()
@@ -2731,13 +2816,40 @@ impl Clock {
             })
             .and_then(|b| Part::read(&b))
             .and_then(|p| self.replica.apply(&p).map(|()| p));
-        match part {
-            Ok(p) => {
-                self.unsealed = true;
-                self.effects.extend(p.effects.iter().cloned());
-                self.parts.push(Arc::new(p));
+        let p = part?;
+        self.unsealed = true;
+        self.effects.extend(p.effects.iter().cloned());
+        self.parts.push(Arc::new(p));
+        Ok(())
+    }
+
+    /// The bodies' motion on their nodes, at step 3 (#3799): each sample [`Bodies::motion`] gives, world-caused, in the node's
+    /// audience, after a change of parent (T1's leave and arrive inside the zone) when its frame changed. One part for
+    /// the tick; when the world refuses it, each body's in a part of its own, a refused one named.
+    fn write_motion(&mut self) {
+        let Some(b) = self.bodies.as_mut() else {
+            return;
+        };
+        let samples = b.motion(self.replica.tree());
+        if samples.is_empty() {
+            return;
+        }
+        let all = motion_effects(self.replica.header(), self.replica.version(), &samples);
+        if self.try_own(all).is_ok() {
+            return;
+        }
+        for s in samples {
+            let one = motion_effects(
+                self.replica.header(),
+                self.replica.version(),
+                std::slice::from_ref(&s),
+            );
+            if let Err(r) = self.try_own(one) {
+                eprintln!(
+                    "worldd: {}'s motion was not written: {r}",
+                    replica::world_model::show(s.handoff.node)
+                );
             }
-            Err(r) => eprintln!("worldd: {what} was not written: {r}"),
         }
     }
 
@@ -3281,8 +3393,9 @@ impl Clock {
         // 1. Loose things' ends due in this tick, each at its due time (F10b, #3476).
         self.fire_loose(now);
         at[3] = mark();
-        // 1-3. The bodies' own timers, skills through the host, the controller.
+        // 1-3. The bodies' own timers, skills through the host, the controller; then their motion on their nodes.
         self.step_bodies(now);
+        self.write_motion();
         at[4] = mark();
         // 4. Committed acts: the checks back since the last tick, then the moves taken.
         for (mut act, checks) in std::mem::take(&mut self.checked) {
