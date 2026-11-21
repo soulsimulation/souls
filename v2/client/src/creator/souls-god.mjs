@@ -46,7 +46,26 @@ import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
 import { kitEntry } from './kit.mjs';
 
-export const VERBS = ['pair', 'describe', 'define', 'define-kit', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'land', 'check', 'status', 'stop', 'welcome', 'visitors'];
+export const VERBS = [
+  'batch',
+  'check',
+  'define',
+  'define-kit',
+  'describe',
+  'land',
+  'move',
+  'pair',
+  'place',
+  'remove',
+  'set',
+  'sky',
+  'status',
+  'stop',
+  'strike',
+  'visitors',
+  'weather',
+  'welcome',
+];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
 export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');

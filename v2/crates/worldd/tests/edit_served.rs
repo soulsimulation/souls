@@ -3,9 +3,10 @@
 //!
 //! - **A1** (N2's test world): the store's list row and name record name the creator; `serve` prints it at the start.
 //!   Another creator's edit is refused `edit.not-the-creator`; the named creator's commits.
-//! - **A2, A3** (seeded Eden, `--ignored`: needs the exported Eden facts file): 21 Souls stand in a row on the open
-//!   ground, 20 of them walking. A wall where the 21st stands is refused `edit.would-bury`; once it has walked away,
+//! - **A2, A3** (seeded Eden, `--ignored`: needs the exported Eden facts file): 21 Souls in a row on the open
+//!   ground, 20 of them walking; the 21st walks to its place first, since no Soul stands until it acts (C3). A wall where the 21st stands is refused `edit.would-bury`; once it has walked away,
 //!   the same wall commits. Each edit's answer is timed through the gateway, beside the 20 walkers.
+//! - **#3923** (N2's test world, in CI): the same refusal for a Soul that has acted, standing where its walk ended.
 
 // A real process and a real gateway on the real clock: the waits and the times are real time.
 #![allow(clippy::disallowed_methods)]
@@ -975,6 +976,17 @@ fn socket_answer(s: &mut UnixStream) -> Got {
     read_answer(&decode(&frame).expect("a frame").value)
 }
 
+/// The next answer on the world's socket that ends an intent: a walk long enough to run past its tick is first
+/// answered accepted (kind 3), then at its end.
+fn socket_end(s: &mut UnixStream) -> Got {
+    loop {
+        let got = socket_answer(s);
+        if got.kind != 3 {
+            return got;
+        }
+    }
+}
+
 fn connect_socket(socket: &Path) -> UnixStream {
     let end = Instant::now() + Duration::from_secs(60);
     loop {
@@ -1141,6 +1153,40 @@ async fn g7b_standalone_metadata_creator_still_edits_without_a_directory() {
     );
 }
 
+/// #3923: BUILDSAFE on a served world, in CI (N2's test world, no Eden facts): a wall where a Soul stands, once its
+/// first act has born it, is refused `edit.would-bury` by the record's creator, and the same wall beside it commits.
+#[tokio::test(flavor = "multi_thread")]
+async fn g1e_buildsafe_refuses_a_wall_on_a_standing_soul_on_the_test_world() {
+    let d = scratch("g1e-buildsafe");
+    let w = seed(&d, &testworld::generate(1, 0).unwrap().text, 1, (-40, 30));
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc0);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    s.line("listening ", 60);
+    // No Soul stands in a world until it acts (C3): the Soul's walk births its body and ends where it stands.
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (sx, sz) = (-37 * M, 30 * M);
+    walk(&mut souls, &w, w.souls[0], 1, sx, sz);
+    let got = socket_end(&mut souls);
+    assert_eq!(got.kind, 1, "the Soul's walk ends: {got:?}");
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 1, 0, wall(&w, sx, sz))).await;
+    println!("a wall where the Soul stands: {got:?}");
+    assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, got.version, wall(&w, -30 * M, 30 * M)),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "a wall where no Soul stands commits: {got:?}");
+}
+
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'
 /// places east of the row (x0 + 44 to x0 + 50 m), all on the open ground.
 fn clear_row(text: &str) -> (i64, i64) {
@@ -1206,14 +1252,24 @@ async fn g1e_a2_a3_eden_buildsafe_refuses_a_wall_on_a_soul_and_answers_fast() {
     let mut ws = sign_in(&url, &tokens[0]).await;
     let mut theirs = sign_in(&url, &tokens[1]).await;
 
-    // The 20 walkers set off north, 8 m each; the 21st stands at the row's east end.
+    // No Soul stands in a world until it acts (C3, #3367): the 21st walks to the row's east end first, which births
+    // its body there; then the 20 walkers set off north, 8 m each.
     let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let stander = w.souls[20];
+    let (sx, sz) = ((x0 + 40) * M, z0 * M);
+    walk(&mut souls, &w, stander, 1, sx, sz);
+    let got = socket_end(&mut souls);
+    assert_eq!(
+        got.kind, 1,
+        "the 21st Soul's walk to its place ends: {got:?}"
+    );
     for (k, &body) in w.souls.iter().enumerate().take(20) {
         let x = (x0 + 2 * k as i64) * M;
         walk(&mut souls, &w, body, 1, x, (z0 + 8) * M);
     }
-    let stander = w.souls[20];
-    let (sx, sz) = ((x0 + 40) * M, z0 * M);
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // The path an edit takes without G2's guard, for comparison: another creator's edits, refused by the checker
@@ -1287,13 +1343,10 @@ async fn g1e_a2_a3_eden_buildsafe_refuses_a_wall_on_a_soul_and_answers_fast() {
     );
 
     // The 21st walks away north; then the same wall commits.
-    walk(&mut souls, &w, stander, 1, sx, sz + 6 * M);
+    walk(&mut souls, &w, stander, 2, sx, sz + 6 * M);
     // Walks answer at their ends: all 21, the 21st's among them.
-    souls
-        .set_read_timeout(Some(Duration::from_secs(60)))
-        .unwrap();
     for _ in 0..21 {
-        let got = socket_answer(&mut souls);
+        let got = socket_end(&mut souls);
         assert_eq!(got.kind, 1, "a walk ends: {got:?}");
     }
     sequence += 1;
@@ -1453,6 +1506,23 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
 #[path = "edit_served/k18d.rs"]
 mod k18d;
 
+/// The kind names of the content entries (`souls-entry/1`) under `dir`, read as `worldd seed --entries` reads them.
+fn entry_kinds(dir: &Path) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(entry_kinds(&p));
+        } else if p.extension().is_some_and(|x| x == "json")
+            && let Ok(v) = json::parse(&std::fs::read_to_string(&p).unwrap_or_default())
+            && let Some(k) = v.get("kind").and_then(json::Value::str)
+        {
+            out.insert(k.to_owned());
+        }
+    }
+    out
+}
+
 /// #3697: a creator's own kind stands as its record's bounds say, through the one loader. A hedge defined by the
 /// creator, placed across a Soul's way, commits; the Soul's real walk past it ends at its goal; on the served log
 /// (replayed whole) the hedge holds its solids and the committed ground has no room for a body inside it. Placed where a Soul
@@ -1464,7 +1534,9 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     let text = std::fs::read_to_string(std::env::var("EDEN_FACTS").expect("EDEN_FACTS")).unwrap();
     let (x0, z0) = clear_row(&text);
     let d = scratch("k3697");
-    let w = seed(&d, &text, 2, (x0, z0));
+    // With today's content entries, so a boot thing's forms run beside the creator's (gap 2).
+    let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let w = seed_entries(&d, &text, 2, (x0, z0), Some(&entries));
     let bucket = d.join("bucket");
     let (c, creator) = creator(0xc0);
     record(&bucket, &w, c);
@@ -1479,15 +1551,9 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
         .set_read_timeout(Some(Duration::from_secs(60)))
         .unwrap();
     // Since C3 a seeded Soul has a body only once it acts: each walks to where it stands, and its end is read.
-    let end = |s: &mut UnixStream| loop {
-        let got = socket_answer(s);
-        if got.kind != 3 {
-            return got;
-        }
-    };
     for (k, &body) in w.souls.iter().enumerate() {
         walk(&mut souls, &w, body, 1, (x0 + 2 * k as i64) * M, z0 * M);
-        let got = end(&mut souls);
+        let got = socket_end(&mut souls);
         assert_eq!(got.kind, 1, "Soul {k} stands: {got:?}");
     }
     let at = |x: i64, z: i64, parent: Id| Spot {
@@ -1552,7 +1618,7 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     assert_eq!(got.kind, 1, "the hedge across the way commits: {got:?}");
     let version = got.version;
     walk(&mut souls, &w, w.souls[1], 2, wx, goal);
-    let got = end(&mut souls);
+    let got = socket_end(&mut souls);
     println!("the second Soul's walk past the hedge: {got:?}");
     assert_eq!(got.kind, 1, "the walk ends at its goal: {got:?}");
 
@@ -1606,6 +1672,113 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     .await;
     println!("a creator's hedge where a Soul stands: {got:?}");
     assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
+
+    // Gap 2: a Soul runs a form the creator's kind defines, as it runs a content entry's, through the one loader.
+    let bell = r#"{"format":"souls-entry/1","kind":"garden:bell","owner":"thing","state":{"rung":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},"geometry":{"bounds_mm":[300,400,300]},"forms":{"ring":{"who":"anyone","starts":"act","needs":[{"need":"state","field":"rung","is":false}],"effects":[{"change":"set","field":"rung","to":true,"event":"rang"}]}},"text":{"name":"bell"}}"#;
+    let bell_full = defined::read(bell.as_bytes(), &|_| false).unwrap().full;
+    let define_bell = Op::Place {
+        name: 1,
+        kind: Name::new(&defined::kind().0).unwrap(),
+        parent: Ref::Node(w.root),
+        at: at(0, 0, w.root),
+        audience: Audience::Everyone,
+        fields: BTreeMap::from([(defined::ENTRY, Value::Bytes(bell.as_bytes().to_vec()))]),
+    };
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 5, version, define_bell)).await;
+    assert_eq!(got.kind, 1, "the bell's definition commits: {got:?}");
+    let (bx, bz) = ((x0 - 1) * M, z0 * M);
+    let place_bell = Op::Place {
+        name: 1,
+        kind: Name::new(&bell_full).unwrap(),
+        parent: Ref::Node(w.ground),
+        at: Spot {
+            position: Vec3::new(bx, height(bx, bz), bz),
+            ..at(bx, bz, w.ground)
+        },
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 6, got.version, place_bell),
+    )
+    .await;
+    assert_eq!(
+        got.kind, 1,
+        "the bell is placed beside the first Soul: {got:?}"
+    );
+    let bell_id = got.names[&1];
+    let act = |s: &mut UnixStream, sequence: u64, verb: &str, target: Id| {
+        let i = Intent {
+            actor: Actor::Soul(w.souls[0]),
+            verb: Name::new(verb).unwrap(),
+            target: Some(Target::Node(target)),
+            parameters: BTreeMap::new(),
+            sequence,
+            basis: basis(w.root.scope(), 0),
+            expiry: answers::now() + 120_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let bytes = encode(&i.to_value()).unwrap();
+        s.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        s.write_all(&bytes).unwrap();
+    };
+    act(&mut souls, 2, "eden:ring", bell_id);
+    let rang = socket_end(&mut souls);
+    println!("the first Soul rings the creator's bell: {rang:?}");
+    assert_eq!(rang.kind, 1, "the form runs to its receipt: {rang:?}");
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let rung = t
+        .node(t.handle(bell_id).unwrap())
+        .unwrap()
+        .fields()
+        .get(&1)
+        .cloned();
+    println!("the bell's field rung on the served log: {rung:?}");
+    assert!(
+        matches!(rung, Some(Value::Uint(1))),
+        "the form's effect set the field: {rung:?}"
+    );
+    // Refused by name exactly as a content kind's form is: a form the kind has not (on the bell and on a boot thing),
+    // and the bell's own form whose need no longer holds.
+    let kinds = entry_kinds(&entries);
+    let mut todo = vec![t.root()];
+    let mut boot = None;
+    while let (None, Some(h)) = (boot, todo.pop()) {
+        let n = t.node(h).unwrap();
+        // A thing that stays put: one on a course (a punt) is refused first for where it is.
+        if kinds.contains(import_eden::entry_name(n.kind().as_str(), n.fields()))
+            && !n.fields().contains_key(&replica::schedule::F_COURSE)
+        {
+            boot = Some(n.id());
+        }
+        todo.extend(t.children(h).unwrap_or_default().iter().copied());
+    }
+    let boot = boot.expect("a boot thing with a content entry");
+    act(&mut souls, 3, "eden:toll", bell_id);
+    let creator_no = socket_end(&mut souls);
+    act(&mut souls, 4, "eden:toll", boot);
+    let boot_no = socket_end(&mut souls);
+    act(&mut souls, 5, "eden:ring", bell_id);
+    let again = socket_end(&mut souls);
+    println!(
+        "refused: toll on the bell {creator_no:?}; toll on a boot thing {boot_no:?}; ring again {again:?}"
+    );
+    assert_eq!(creator_no.kind, 2);
+    assert_eq!(
+        (creator_no.kind, creator_no.reason.as_str()),
+        (boot_no.kind, boot_no.reason.as_str()),
+        "an unknown form is refused by the same name"
+    );
+    // The form runner's path checks no form's `needs` for any kind, content or creator's (the Soul's own check
+    // stops it before it is sent, as the client test shows): the same answer as a content form's.
+    assert_eq!(again.kind, 1, "{again:?}");
 
     drop(s);
 }

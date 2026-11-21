@@ -97,7 +97,9 @@ the root, which `describe` shows), and from then on you place it like any other 
   `not_carried`.
 - **A record** says what a thing is and does: the `souls-entry/1` format of the world's own kinds (`kind`, `owner`,
   `state`, `points`, `slots`, `geometry` with `bounds_mm` and `parts`, `forms`, `text`). Whole numbers only: mm,
-  millidegrees and permille. Its `forms` must pass the same checks the world's own kinds pass.
+  millidegrees and permille. Its `forms` must pass the same checks the world's own kinds pass. Souls then use them
+  as they use the world's own: `inspect <id>` lists each form as an offer, `act <form>:<id>` runs it, and a wrong
+  act is refused by the same name.
 - **Your namespace:** any namespace that is not `souls`, `eden` or one the world's own kinds use (`kind.namespace`).
 - **Revisions:** a changed record is a new revision with a new full name; what you placed from the old one keeps it.
   `place` by `namespace:name` works while one revision exists; with several, copy the full name from `describe`.

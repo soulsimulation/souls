@@ -254,12 +254,9 @@ pub fn defines(tree: &Tree, full: &Name) -> bool {
     })
 }
 
-/// The rules of `full`, a kind defined in `tree` (or `souls:kind` itself), by the loader; `None` for any other. Reads
-/// the root's children and the one record that names it.
-pub fn kind_named(tree: &Tree, full: &str) -> Option<Kind> {
-    if is_definition(full) {
-        return Some(kind().1.clone());
-    }
+/// The definition a `souls:kind` node at the root of `tree` holds for `full`, by the loader; `None` for any other.
+/// Reads the root's children and the one record that names it.
+pub fn defined_named(tree: &Tree, full: &str) -> Option<Defined> {
     let root = tree.root();
     let n = tree
         .children(root)?
@@ -269,10 +266,26 @@ pub fn kind_named(tree: &Tree, full: &str) -> Option<Kind> {
     let Some(Value::Bytes(b)) = n.fields().get(&ENTRY) else {
         return None;
     };
-    read(b, &|_| false)
-        .ok()
-        .filter(|d| d.full == full)
-        .map(|d| d.kind)
+    stored(b, full)
+}
+
+/// A record as a `souls:kind` node stores it, read again: its definition when its bytes still define `full`.
+pub fn stored(bytes: &[u8], full: &str) -> Option<Defined> {
+    read(bytes, &|_| false).ok().filter(|d| d.full == full)
+}
+
+/// The rules of `full`, a kind defined in `tree` (or `souls:kind` itself), by the loader; `None` for any other.
+pub fn kind_named(tree: &Tree, full: &str) -> Option<Kind> {
+    if is_definition(full) {
+        return Some(kind().1.clone());
+    }
+    defined_named(tree, full).map(|d| d.kind)
+}
+
+/// The record (`souls-entry/1`, forms included) of `full`, a kind defined in `tree`: what the form runner reads for a
+/// thing of a creator's kind, as it reads a content entry for a boot kind (#3697 gap 2).
+pub fn entry_named(tree: &Tree, full: &str) -> Option<Json> {
+    defined_named(tree, full).map(|d| d.entry)
 }
 
 /// The loader: the kinds a world's `souls:kind` nodes define, with `souls:kind` itself, by full name. A node whose

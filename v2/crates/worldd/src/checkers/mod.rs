@@ -170,6 +170,28 @@ fn plain_kind(record: &Cbor) -> Option<&str> {
     Some(k.as_str().split_once('@').map_or(k.as_str(), |(p, _)| p))
 }
 
+/// The record of the creator's kind (#3697) a thing of full kind `record`'s is: held by the `souls:kind` node at its
+/// zone's root that names that kind, read by the one loader (`replica::kinds::defined`); `None` for any other kind.
+fn defined_entry(r: &impl Read, this: Id, record: &Cbor) -> Option<Value> {
+    use replica::kinds::defined;
+    let Some(Cbor::Text(full)) = field(record, 2) else {
+        return None;
+    };
+    let root = *r.path(this)?.last()?;
+    r.children(root, Some(defined::kind().0.as_str()))?
+        .into_iter()
+        .find_map(|d| {
+            let n = r.node(d)?;
+            let f = field(&n, 6)?;
+            match (field(f, defined::NAME), field(f, defined::ENTRY)) {
+                (Some(Cbor::Text(name)), Some(Cbor::Bytes(b))) if name == full => {
+                    defined::stored(b, full.as_str()).map(|d| d.entry)
+                }
+                _ => None,
+            }
+        })
+}
+
 /// The thing as the rules read it: `{kind, fields}`, fields named by the kind's state numbers.
 fn thing(record: &Cbor, entry: &Value) -> Value {
     let kind = plain_kind(record).unwrap_or("");
@@ -231,7 +253,15 @@ fn candidate(copy: &impl Read, rules: &Rules, body: Id, c: &Candidate) -> Checke
     let (Some(this), Some(actor)) = (this, actor) else {
         return no("no_such_node", r);
     };
-    let Some(entry) = plain_kind(&this).and_then(|k| rules.kinds.get(k)) else {
+    // A content entry by its plain name, else a creator's kind the world defines (#3697), by the one loader.
+    let own = match plain_kind(&this) {
+        Some(k) if rules.kinds.get(k).is_none() => {
+            defined_entry(&r, c.this, &this).map(|e| Value::Obj(vec![(k.to_owned(), e)]))
+        }
+        _ => None,
+    };
+    let kinds = own.as_ref().unwrap_or(&rules.kinds);
+    let Some(entry) = plain_kind(&this).and_then(|k| kinds.get(k)) else {
         return no("no_such_kind", r);
     };
     let (this_id, body_id) = (show(c.this), show(body));
@@ -255,7 +285,7 @@ fn candidate(copy: &impl Read, rules: &Rules, body: Id, c: &Candidate) -> Checke
         ("moves".into(), rules.moves.clone()),
     ]);
     let asker = Value::Obj(vec![("sees".into(), Value::s("all"))]);
-    let verdict = decide_parts(Some(&rules.kinds), Some(&act), Some(&state), Some(&asker));
+    let verdict = decide_parts(Some(kinds), Some(&act), Some(&state), Some(&asker));
     match verdict.get("verdict").and_then(Value::str) {
         Some("yes") => match prepare(c.this, entry, &c.form) {
             Ok(changes) => Checked {

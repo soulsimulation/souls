@@ -143,7 +143,7 @@ import { ageOf } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
-import { kindsIn, stateOf } from '../check/state.mjs';
+import { kindsHeld, stateOf } from '../check/state.mjs';
 import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
@@ -727,7 +727,7 @@ async function ageAfter({ now = false } = {}) {
 
 /** R2's verdict on each candidate, on the copy as it is now (R8). */
 function verdicts(candidates) {
-  const kinds = kindsIn(join(home, 'kinds')), state = stateOf(copy, kinds, ME);
+  const kinds = kindsHeld(join(home, 'kinds'), copy), state = stateOf(copy, kinds, ME);
   return candidates.map((c) => judge(wire.rules_decide, c, { kinds, state, asker: { sees: [] } }));
 }
 
@@ -737,7 +737,46 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['query', 'catalog', 'context', 'batch', 'status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object', 'whatson', 'calendar']);
+const OPS = new Set([
+  'ack',
+  'act',
+  'answer',
+  'batch',
+  'calendar',
+  'can',
+  'catalog',
+  'check',
+  'context',
+  'converse',
+  'describe',
+  'edit',
+  'event',
+  'events',
+  'find',
+  'halt',
+  'history',
+  'inspect',
+  'lie',
+  'look',
+  'now',
+  'object',
+  'pending',
+  'pray',
+  'prayers',
+  'query',
+  'read',
+  'receipt',
+  'reflex',
+  'say',
+  'stats',
+  'status',
+  'stop',
+  'wait',
+  'wake',
+  'wear',
+  'whatson',
+  'whisper',
+]);
 const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
@@ -815,7 +854,7 @@ function towardOf(req) {
   const found = exact.length ? exact : souls.filter((r) => r.name.toLowerCase() === lower);
   if (found.length === 0) return { code: 'say-to-unknown', detail: `no Soul called ${want} in the copy: find "${want}" or look` };
   if (found.length > 1) return { code: 'say-to-ambiguous', detail: `${found.length} Souls are called ${want}: use the id (${found.map((r) => r.id).join(', ')})` };
-  const them = found[0], forms = kindsIn(join(home, 'kinds'))[me?.kind]?.forms ?? {};
+  const them = found[0], forms = kindsHeld(join(home, 'kinds'), copy)[me?.kind]?.forms ?? {};
   const takes = (f) => Object.keys(forms[f]?.takes ?? {});
   const gestures = Object.entries(forms).filter(([, f]) => f.steps?.length && f.steps.every((x) => x.step === 'move') && Object.keys(f.takes ?? {}).every((k) => k === 'toward'));
   const g = req.gesture === undefined ? null : String(req.gesture);
@@ -852,13 +891,13 @@ function actsOf(words) {
       // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`); #3712: a form's
       // `text` argument is words, sent as T8's `{23: words}` for the world's text store, never logged as they are.
       if (arg) {
-        kinds ??= kindsIn(join(home, 'kinds'));
+        kinds ??= kindsHeld(join(home, 'kinds'), copy);
         rows ??= rowsOf(copy);
         const take = kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
         args[arg[1]] = take?.type === 'text' ? { 23: arg[2] } : /^-?\d{1,15}$/.test(arg[2]) ? Number(arg[2]) : arg[2];
         continue;
       }
-      kinds ??= kindsIn(join(home, 'kinds'));
+      kinds ??= kindsHeld(join(home, 'kinds'), copy);
       rows ??= rowsOf(copy);
       const takes = Object.entries(kinds[rows.get(c.this)?.entry ?? rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
       const name = takes.map(([n, t]) => t?.type === 'thing' && n).find((n) => n && !(n in args));
@@ -1005,7 +1044,7 @@ async function answer(req) {
       if (moveForm(intent?.verb)) {
         // C14: a move is checked as the world checks it, on the copy and the body's last known posture.
         const age = await ageAfter();
-        const nodes = stateOf(copy, kindsIn(join(home, 'kinds')), ME).nodes;
+        const nodes = stateOf(copy, kindsHeld(join(home, 'kinds'), copy), ME).nodes;
         const v = moveVerdict(wire.move_check, intent, { nodes, seated: state.seated ?? null });
         return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
       }
@@ -1080,7 +1119,7 @@ async function answer(req) {
     case 'whatson': case 'calendar': return calendar(req);
     // #3704 (today's `query`, `catalog`, `context` and `batch`): reads from the copy, asking the world nothing.
     case 'query': { const q = query(rowsOf(copy), req.questions, { budget: req.budget }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
-    case 'catalog': return closing(catalog(rowsOf(copy), kindsIn(join(home, 'kinds'))), null, { now: true });
+    case 'catalog': return closing(catalog(rowsOf(copy), kindsHeld(join(home, 'kinds'), copy)), null, { now: true });
     case 'context': return closing(context(rowsOf(copy), req.words ?? '', { cursor: req.cursor }), null, { now: true });
     case 'batch': {
       // Several reads in one call, each answered as it would be alone, in order; a write in it is refused, not sent.
@@ -1237,7 +1276,7 @@ function thingOf(id) {
   if (!row) {
     return { ok: false, code: 'inspect.unknown-id', detail: `${id ?? '(none)'} is not an id this Soul's copy holds; ids come from look and find`, did_you_mean: nearestIds(rows.values(), id) };
   }
-  const kinds = kindsIn(join(home, 'kinds')), entry = kinds[row.entry ?? row.kind];
+  const kinds = kindsHeld(join(home, 'kinds'), copy), entry = kinds[row.entry ?? row.kind];
   return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
 }
 
@@ -1268,7 +1307,7 @@ function inspect(req) {
  * and `add` are the items' own forms (`show_interest`, `drop_interest`, `post`), sent through `act`.
  */
 async function calendar(req) {
-  const kinds = kindsIn(join(home, 'kinds')), clock = clockOf(copy), cal = calendarOf(copy), nowMs = Date.now();
+  const kinds = kindsHeld(join(home, 'kinds'), copy), clock = clockOf(copy), cal = calendarOf(copy), nowMs = Date.now();
   const view = (rows) => ({ rows, me: ME, clock, cal, nowMs });
   if (req.op === 'whatson') {
     const hours = Number(req.hours ?? 3);
