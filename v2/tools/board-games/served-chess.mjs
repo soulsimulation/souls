@@ -123,7 +123,7 @@ try {
     const r = await s.cli('object', id, name, ...args);
     assert.equal(r.ok, true, `${s.label} ${name}: ${JSON.stringify(r)}`);
     const a = await answered(s, r.sequence);
-    say(`${s.label} ${name} ${args.join(' ')}: ${a.answer === 1 ? 'receipt' : `refused ${a.reason}`}`);
+    say(`${s.label} ${name} ${args.join(' ')}: ${a.answer === 1 ? 'receipt' : `refused ${a.reason} ${JSON.stringify(a)}`}`);
     return a;
   }
 
