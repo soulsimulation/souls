@@ -170,7 +170,7 @@ function material(colour: string, glow: number): THREE.MeshStandardMaterial {
   const k = `${colour}|${glow}`;
   let m = materials.get(k);
   if (!m) {
-    m = new THREE.MeshStandardMaterial({ color: colour, roughness: 0.85, metalness: 0, vertexColors: true });
+    m = new THREE.MeshStandardMaterial({ color: colour, roughness: 0.85, metalness: 0, vertexColors: true, side: THREE.DoubleSide }); // a lathe's or a ring's inside shows
     if (glow > 0) (m.emissive.set(colour), (m.emissiveIntensity = glow / 1000));
     materials.set(k, m);
   }
