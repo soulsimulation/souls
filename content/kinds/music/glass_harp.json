@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "reservoir": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "g",
       "default": 300,
@@ -15,7 +15,7 @@
       }
     },
     "glass_1": {
-      "n": 2,
+      "n": 29,
       "type": "int",
       "unit": "g",
       "default": 0,
@@ -26,7 +26,7 @@
       }
     },
     "glass_2": {
-      "n": 3,
+      "n": 30,
       "type": "int",
       "unit": "g",
       "default": 100,
@@ -37,7 +37,7 @@
       }
     },
     "glass_3": {
-      "n": 4,
+      "n": 31,
       "type": "int",
       "unit": "g",
       "default": 200,
@@ -48,7 +48,7 @@
       }
     },
     "strikes": {
-      "n": 5,
+      "n": 32,
       "type": "int",
       "unit": "count",
       "default": 0,

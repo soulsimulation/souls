@@ -3,7 +3,7 @@
   "kind": "eden:lantern_oil_station",
   "owner": "thing",
   "state": {
-    "oil": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+    "oil": { "n": 28, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
   },
   "points": {
     "stand": { "role": "stand", "at_mm": [0, 0, 800], "yaw_mdeg": 180000 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The thin command (Engine v2 R7, #2701): any harness reaches a Soul's daemon (R6) through it. It passes its
 // arguments to the daemon's socket and prints the answer, as JSON; it loads no WASM and holds no copy. The first
-// command starts the daemon. Every answer but status's and stop's ends with `at` and `changed`.
+// command starts the daemon. Every answer but status's and quit's ends with `at` and `changed`.
 //
 //   souls.mjs status                          the daemon: connected, cursor, intents sent and answered
 //   souls.mjs look                            the brief: my room, cards outward, what changed, the age
@@ -40,15 +40,23 @@
 //                                             default, at most seven, five lines, the rest counted (R16); --as <id>
 //                                             names which Soul asks, when the home has more than one
 //   souls.mjs stats                           per achieved intent: commands, bytes printed, first-send result (R10)
-//   souls.mjs stop                            ends the daemon
+//   souls.mjs stop [<sequence>]               ends your own act where it stands, as today (#3705): a walk stops now, a
+//                                             sit, a lie or a rise finishes, a standing order ends. The newest act
+//                                             still going unless a sequence is named
+//   souls.mjs quit                            ends the daemon (the next command starts it again)
+//   souls.mjs receipt [<sequence>]            an intent's receipt: its verbs and every answer it had (the newest sent
+//                                             by default); `act` prints the sequence (#3705)
+//   souls.mjs events [--since <cursor>]       the events after a cursor (each has `n`; the answer's `cursor` is the
+//                                             newest), without taking them from `wait` (#3705)
+//   souls.mjs conversations                   the conversations in the copy (converse list)
 //   souls.mjs pending                         the owner's messages still open, and what arrived since the last read
 //                                             (C15): mail, words heard, answers, and the wakes due now; no wait
 //   souls.mjs pending --check                 for a scheduler (R20): prints nothing, exits 0 when a message or a wake
 //                                             waits, 1 when not (2 on a failure); starts the daemon, sends nothing
 //   souls.mjs ack <message id> "<reply>" [--close done|failed]   answers an owner's message with no act (C15): the
-//                                             reply shows on the owner's page and closes it, done unless --close
-//                                             failed (a no). With no --close while an act serves it, the reply rides
-//                                             on that act's close
+//                                             reply shows on the owner's page; --close done|failed closes it (failed:
+//                                             a no). With no --close it is an interim note and the message stays open
+//                                             for a later act --for it or ack --close (#3781, as today)
 //   souls.mjs help schedule-wake              the scheduler line that serves a message while no chat is open (R20)
 //   act ... --for <message id>                the act serves that owner's message; its outcome closes it (R13)
 //   souls.mjs shoot <place|soul|thing> [--eyes] [--page <url>] [--out f.png]   a picture drawn here from the public
@@ -91,7 +99,9 @@ import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount } from '../account/account.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
-export const OPS = ['status', 'pair', 'look', 'find', 'act', 'inspect', 'object', 'can', 'say', 'shout', 'whisper', 'converse', 'lie', 'wear', 'pray', 'prayers', 'now', 'wait', 'history', 'stats', 'pending', 'ack', 'stop'];
+export const OPS = ['status', 'pair', 'look', 'find', 'act', 'inspect', 'object', 'can', 'say', 'shout', 'whisper', 'converse', 'lie', 'wear', 'pray', 'prayers', 'now', 'wait', 'history', 'stats', 'pending', 'ack', 'stop', 'quit', 'receipt', 'events', 'conversations'];
+/** #3705: today's names, kept: `stop` ends your act (the daemon's op `halt`), `quit` ends the daemon (its op `stop`). */
+const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse' };
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = ['digest', 'consolidate', 'schedule', 'help', 'memory', 'remember'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -156,7 +166,16 @@ export function requestOf(argv) {
   if (op === 'memory' || op === 'remember') return { local: op, soul: opts.soul, args: rest };
   if (LOCAL.includes(op)) return { local: op, soul: opts.soul, since: opts.since ?? null, refs: rest.includes('--refs'), force: rest.includes('--force') };
   if (!OPS.includes(op)) return { refused: 'unknown-command', detail: `one of ${OPS.join(', ')}` };
-  const req = { op };
+  const req = { op: RENAMED[op] ?? op };
+  if (op === 'conversations') req.do = 'list';
+  if ((op === 'stop' || op === 'receipt') && rest[0] !== undefined) {
+    if (!/^\d+$/.test(rest[0])) return { refused: `${op}-sequence`, detail: `${op} [<sequence>]: the number act printed as sequence` };
+    req.sequence = Number(rest[0]);
+  }
+  if (op === 'events' && opts.since !== undefined) {
+    if (!/^\d+$/.test(opts.since)) return { refused: 'events-since', detail: 'events [--since <cursor>]: the cursor an earlier events answer printed' };
+    req.since = Number(opts.since);
+  }
   if (op === 'find') { req.words = rest.join(' '); if (opts.limit) req.limit = Number(opts.limit); }
   if (op === 'act' || op === 'can') req.acts = rest;
   if ((op === 'act' || op === 'object') && opts.for !== undefined) req.for = opts.for;
@@ -230,7 +249,7 @@ function help(home, named, topic) {
   if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake | safety | account'), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;
-  const prompt = `Work in the folder ${folder}. Run: ${cli} pending. For each message under open, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, or for an answer or a no, ${cli} ack <its id> "<reply>" [--close failed], as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
+  const prompt = `Work in the folder ${folder}. Run: ${cli} pending. For each message under open, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, or for an answer or a no, ${cli} ack <its id> "<reply>" --close done|failed, as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
   const check = `cd ${shq(folder)} && ${shq(process.execPath)} ${shq(script)}${sel} pending --check`;
   return {
     ok: true, topic, folder, prompt,

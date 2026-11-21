@@ -174,6 +174,29 @@ impl Walk {
     }
 }
 
+/// Whether slot argument `key` of form `f` is the body's own place: a `select` of free slots that a `sit` or `lie` step
+/// takes, or that an effect reparents the actor into (#3802).
+fn selects_body_slot(f: &Json, key: &str) -> bool {
+    let arg = |v: Option<&Json>| v.and_then(|v| v.get("arg")).and_then(Json::str) == Some(key);
+    let take = f.get("takes").and_then(|t| t.get(key));
+    let selects = take.and_then(|t| t.get("type")).and_then(Json::str) == Some("slot")
+        && take
+            .and_then(|t| t.get("select"))
+            .and_then(|s| s.get("of"))
+            .and_then(Json::str)
+            == Some("free_slots");
+    let steps = f.get("steps").and_then(Json::arr).unwrap_or(&[]);
+    let effects = f.get("effects").and_then(Json::arr).unwrap_or(&[]);
+    selects
+        && (steps.iter().any(|s| {
+            matches!(s.get("step").and_then(Json::str), Some("sit" | "lie")) && arg(s.get("slot"))
+        }) || effects.iter().any(|e| {
+            e.get("change").and_then(Json::str) == Some("reparent")
+                && e.get("what").and_then(Json::str) == Some("actor")
+                && arg(e.get("into"))
+        }))
+}
+
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
         name,
@@ -934,6 +957,50 @@ impl Acts {
                 first.get_or_insert(refusal("arg-ambiguous", key));
                 continue;
             }
+            // A body's slot the caller left out, which the form selects from the thing's free slots, is the free one
+            // whose stand point is nearest the body (C19's pick); a thing with none free is refused by name (#3802).
+            // One the caller named that another body holds is refused `place-taken`, also before any walk.
+            let (mut picked, mut none_free, mut taken) = (false, None, None);
+            if let (Some(b), Some(f)) = (
+                bodies.as_deref().filter(|b| b.slots.place(*node).is_some()),
+                entry.get("forms").and_then(|f| f.get(form)),
+            ) {
+                let names = entry.get("slots").and_then(Json::obj).unwrap_or(&[]);
+                for (key, _) in f.get("takes").and_then(Json::obj).unwrap_or(&[]) {
+                    if !selects_body_slot(f, key) {
+                        continue;
+                    }
+                    if let Some(skills::form_runner::Arg::Name(n)) = all.get(key) {
+                        let slot = names.iter().position(|(m, _)| m == n).map(|i| i as u64 + 1);
+                        if slot
+                            .and_then(|s| b.slots.holder_in(*node, s))
+                            .is_some_and(|h| h != body)
+                        {
+                            taken = Some(n.clone());
+                        }
+                        continue;
+                    }
+                    if all.contains_key(key) {
+                        continue;
+                    }
+                    let free = b.slots.free(&b.runner.controller, body, *node);
+                    match free.and_then(|s| names.get(usize::try_from(s).ok()?.checked_sub(1)?)) {
+                        Some((n, _)) => {
+                            all.insert(key.clone(), skills::form_runner::Arg::Name(n.clone()));
+                            picked = true;
+                        }
+                        None => none_free = Some(key.clone()),
+                    }
+                }
+            }
+            if let Some(name) = taken {
+                first.get_or_insert(refusal("place-taken", name));
+                continue;
+            }
+            if let Some(key) = none_free {
+                first.get_or_insert(refusal(sim::commit::bind::NONE_FREE, key));
+                continue;
+            }
             let incompatible = entry
                 .get("forms")
                 .and_then(|f| f.get(form))
@@ -984,7 +1051,11 @@ impl Acts {
             }
             let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
             let r = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
-                if args.things.is_empty() && args.slots.is_empty() && args.values.is_empty() {
+                if !picked
+                    && args.things.is_empty()
+                    && args.slots.is_empty()
+                    && args.values.is_empty()
+                {
                     return forms.commit(
                         w,
                         &audiences,

@@ -16,7 +16,7 @@
       "asker": { "sees": ["public"] },
       "expect": {
         "verdict": "yes",
-        "read": [["k1/field/2", false], ["k1/field/1", 1700], ["b1/effector_mm", [-60, 40, 400]], ["move/press/reach_mm", 600]]
+        "read": [["k1/field/29", false], ["k1/field/28", 1700], ["b1/effector_mm", [-60, 40, 400]], ["move/press/reach_mm", 600]]
       }
     },
     {
@@ -87,7 +87,7 @@
         }
       },
       "asker": { "sees": "all" },
-      "expect": { "verdict": "yes", "read": [["k1/field/2", true], ["k1/field/3", 100000]] }
+      "expect": { "verdict": "yes", "read": [["k1/field/29", true], ["k1/field/30", 100000]] }
     },
     {
       "name": "boiled_not_heating_fixed_by_switch_on",
@@ -114,7 +114,7 @@
         }
       },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "yes", "read": [["b1/hand/left", null], ["b1/hand/right", "k1"], ["k1/field/1", 1700]] }
+      "expect": { "verdict": "yes", "read": [["b1/hand/left", null], ["b1/hand/right", "k1"], ["k1/field/28", 1700]] }
     },
     {
       "name": "pour_not_held",
@@ -156,7 +156,7 @@
         }
       },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "yes", "read": [["b1/hand/left", "k1"], ["b1/hand/right", null], ["k1/field/1", 0]] }
+      "expect": { "verdict": "yes", "read": [["b1/hand/left", "k1"], ["b1/hand/right", null], ["k1/field/28", 0]] }
     },
     {
       "name": "fill_not_held",

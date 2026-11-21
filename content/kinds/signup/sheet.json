@@ -3,10 +3,10 @@
   "kind": "eden:signup_sheet",
   "owner": "thing",
   "state": {
-    "open": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } },
-    "title": { "n": 2, "type": "text", "default": null, "audience": { "rule": "everyone" } },
+    "open": { "n": 28, "type": "bool", "default": true, "audience": { "rule": "everyone" } },
+    "title": { "n": 29, "type": "text", "default": null, "audience": { "rule": "everyone" } },
     "notes": {
-      "n": 3, "type": "list", "most": 12, "key": "id", "default": [],
+      "n": 30, "type": "list", "most": 12, "key": "id", "default": [],
       "of": { "id": { "type": "int", "unit": "count" }, "kind": { "type": "enum", "values": ["note", "question"] } },
       "audience": { "rule": "linked", "link": "organizer" }
     }

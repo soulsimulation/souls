@@ -13,7 +13,7 @@
 // with the WASM replica), from the world's `views/world.json` as the page resolves a placed world.
 //
 //   (a) the public stream carries both bodies, the said sentence and not the whisper's words (in no part and in no
-//       public file), a `souls:form-move` for the wave, and body motion: changing positions on the walk and a slot
+//       public file), a private conversation's turn as who spoke, when and among whom, never its words (#3775), a `souls:form-move` for the wave, and body motion: changing positions on the walk and a slot
 //       hand-off on the sit;
 //   (b) A's copy holds the world's kind entries after pairing, and `can wave:<A's body>` answers yes;
 //   (c) the malformed word is refused by name, and the world then restarts cleanly on the same folder;
@@ -247,6 +247,21 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
       return s.seen.find((e) => e.sequence === sequence);
     }, ms);
   }
+  /** The first event of `s`'s daemon that `pred` holds of; answers read on the way are kept for `answered`. */
+  async function event(s, what, pred, ms = 30_000) {
+    s.seen ??= [], s.other ??= [];
+    return waitFor(what, async () => {
+      for (const e of (await request(s.rt.socket, { op: 'read' })).events) (e.kind === 'answer' ? s.seen : s.other).push(e);
+      return s.other.find(pred);
+    }, ms);
+  }
+  /** Sends a CLI command and waits for the world's answer to each intent it sent. */
+  async function sent(s, ...words) {
+    const r = await s.cli(...words);
+    assert.equal(r.ok, true, `${s.label} ${words.join(' ')}: ${JSON.stringify(r)}`);
+    const seqs = Array.isArray(r.sent) ? r.sent.map((x) => x.sequence) : [r.sequence];
+    return Promise.all(seqs.map((q) => answered(s, q)));
+  }
   async function act(s, ...words) {
     const r = await s.cli('act', ...words);
     assert.equal(r.ok, true, `${s.label} act ${words.join(' ')}: ${JSON.stringify(r)}`);
@@ -285,6 +300,16 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const can = await A.cli('can', `wave:${meA}`);
   await pending(3772, '(b) `can wave:<me>` answers yes from the copy', () => assert.equal(can.can ?? can.answer ?? can.verdict, 'yes', JSON.stringify(can)));
 
+  // #3775: a private conversation. A offers B one where they stand (a seat admits no conversation), B accepts and
+  // takes a private turn.
+  const hidden = 'the boat leaves at the second bell';
+  const offer = await sent(A, 'converse', 'start', meB);
+  assert.ok(offer.every(accepted), `the offer lands: ${JSON.stringify(offer)}`);
+  const invite = await event(B, "B's invitation", (e) => e.kind === 'conversation' && e.what === 'invited');
+  assert.ok((await sent(B, 'converse', 'accept', invite.conversation)).every(accepted), 'the accept lands');
+  assert.ok((await sent(B, 'converse', 'say', invite.conversation, hidden, '--private')).every(accepted), 'the private turn lands');
+  stage('private turn answered');
+
   // The acts. A walks to the bench and sits on it.
   const bench = (await A.cli('find', 'bench')).found.find((r) => r.kind?.startsWith('eden:bench'));
   assert.ok(bench, 'the bench is found by its words');
@@ -319,9 +344,18 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   assert.ok(heard, '(a) the said sentence reached the page');
   assert.equal(heard.speaker, pageKey(meA), '(a) said by A\'s body');
   assert.ok(!v1.parts.some((p) => (p.said ?? []).some((s) => s.words?.includes('third stone'))), '(a) the whisper is in no part the page played');
+  // #3775: the private turn reaches the page as its record: B spoke, among A and B, with no words.
+  const record = await waitFor('the private turn\'s record in the public stream', () => v1.parts.flatMap((p) => p.said ?? []).find((s) => s.private) || v1.errors.length, 20_000);
+  assert.deepEqual(v1.errors, []);
+  assert.equal(record.speaker, pageKey(meB), '#3775: said by B');
+  assert.equal(record.private.conversation, pageKey(invite.conversation), '#3775: in the conversation');
+  assert.deepEqual([...record.private.members].sort(), [pageKey(meA), pageKey(meB)].sort(), '#3775: among A and B');
+  assert.equal(record.words, null, '#3775: no words');
+  assert.ok(!v1.parts.some((p) => (p.said ?? []).some((s) => s.words?.includes('second bell'))), '#3775: the private words are in no part the page played');
   const publicFiles = (root) => existsSync(root) ? readdirSync(root, { recursive: true }).map((f) => join(root, f)).filter((f) => statSync(f).isFile()) : [];
   for (const f of [...publicFiles(join(world, 'views')), ...publicFiles(join(world, 'history'))]) {
     assert.ok(!readFileSync(f).includes(Buffer.from('third stone')), `(a) the whisper's words are in no public file: ${f.slice(world.length)}`);
+    assert.ok(!readFileSync(f).includes(Buffer.from('second bell')), `#3775: the private words are in no public file: ${f.slice(world.length)}`);
   }
 
   // (a) The wave's move record, from the body's family.
