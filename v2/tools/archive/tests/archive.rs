@@ -1432,7 +1432,12 @@ fn w3755_rows_equal_the_whole_state_reference_on_flights_links_timers_and_remove
             .unwrap()
             .clone()
     };
-    let one = |change| Body::Changes(vec![ChangeRec { change, rest: Default::default() }]);
+    let one = |change| {
+        Body::Changes(vec![ChangeRec {
+            change,
+            rest: Default::default(),
+        }])
+    };
     let make = |node, kind, pose, audience| Change::Create {
         node,
         kind,
@@ -1458,31 +1463,85 @@ fn w3755_rows_equal_the_whole_state_reference_on_flights_links_timers_and_remove
             angular: Vec3::ZERO,
         }))
     };
-    let [container, child, slotted, walker, inner, outer, timer, away, gone] =
-        std::array::from_fn(|_| fork.minter.mint().unwrap());
-    let [far, toward, second, settled] =
-        std::array::from_fn(|_| fork.minter.mint().unwrap());
+    let [
+        container,
+        child,
+        slotted,
+        walker,
+        inner,
+        outer,
+        timer,
+        away,
+        gone,
+    ] = std::array::from_fn(|_| fork.minter.mint().unwrap());
+    let [far, toward, second, settled] = std::array::from_fn(|_| fork.minter.mint().unwrap());
     let everyone = Audience::Everyone;
     let hidden = Audience::Of(private);
     let at = 60_000_000;
-    let make_private = one(make(container, kind("souls:body@"), script::world::pose(room, None, 0), hidden));
+    let make_private = one(make(
+        container,
+        kind("souls:body@"),
+        script::world::pose(room, None, 0),
+        hidden,
+    ));
     w3c_fork_effect(&mut fork, at, room, hidden, make_private);
     let children = Body::Changes(
         [
-            make(child, kind("souls:cup@"), script::world::pose(container, None, 2), everyone),
-            make(slotted, kind("souls:cup@"), script::world::pose(container, Some(2), 0), everyone),
+            make(
+                child,
+                kind("souls:cup@"),
+                script::world::pose(container, None, 2),
+                everyone,
+            ),
+            make(
+                slotted,
+                kind("souls:cup@"),
+                script::world::pose(container, Some(2), 0),
+                everyone,
+            ),
         ]
-        .map(|change| ChangeRec { change, rest: Default::default() })
+        .map(|change| ChangeRec {
+            change,
+            rest: Default::default(),
+        })
         .into(),
     );
     w3c_fork_effect(&mut fork, at, container, everyone, children);
-    w3c_fork_effect(&mut fork, at, child, everyone, one(link(inner, [child, slotted])));
-    let make_walker = one(make(walker, kind("souls:body@"), script::world::pose(room, None, 1), everyone));
+    w3c_fork_effect(
+        &mut fork,
+        at,
+        child,
+        everyone,
+        one(link(inner, [child, slotted])),
+    );
+    let make_walker = one(make(
+        walker,
+        kind("souls:body@"),
+        script::world::pose(room, None, 1),
+        everyone,
+    ));
     w3c_fork_effect(&mut fork, at, room, everyone, make_walker);
-    w3c_fork_effect(&mut fork, at, walker, everyone, one(link(outer, [walker, container])));
-    let make_far = one(make(far, kind("souls:body@"), script::world::pose(room, None, 3), hidden));
+    w3c_fork_effect(
+        &mut fork,
+        at,
+        walker,
+        everyone,
+        one(link(outer, [walker, container])),
+    );
+    let make_far = one(make(
+        far,
+        kind("souls:body@"),
+        script::world::pose(room, None, 3),
+        hidden,
+    ));
     w3c_fork_effect(&mut fork, at, room, hidden, make_far);
-    w3c_fork_effect(&mut fork, at, walker, everyone, one(link(toward, [walker, far])));
+    w3c_fork_effect(
+        &mut fork,
+        at,
+        walker,
+        everyone,
+        one(link(toward, [walker, far])),
+    );
     let set = Body::Timers(
         [timer, second]
             .map(|timer| TimerRec::Set {
@@ -1520,15 +1579,50 @@ fn w3755_rows_equal_the_whole_state_reference_on_flights_links_timers_and_remove
         (63_000_000, walker, everyone, set_field),
         (64_000_000, container, hidden, leave(away, container, 0)),
         (65_000_000, far, hidden, leave(settled, far, 3)),
-        (66_000_000, room, hidden, Body::Transfer(TransferRec::Settle { transfer: settled })),
+        (
+            66_000_000,
+            room,
+            hidden,
+            Body::Transfer(TransferRec::Settle { transfer: settled }),
+        ),
         (119_500_000, room, hidden, returned),
-        (125_000_000, walker, everyone, motion(walker, 125_000_000, 4)),
-        (126_000_000, walker, everyone, one(Change::Unlink { link: outer })),
+        (
+            125_000_000,
+            walker,
+            everyone,
+            motion(walker, 125_000_000, 4),
+        ),
+        (
+            126_000_000,
+            walker,
+            everyone,
+            one(Change::Unlink { link: outer }),
+        ),
         (127_000_000, walker, everyone, clear),
-        (128_000_000, slotted, everyone, one(Change::Remove { node: slotted })),
+        (
+            128_000_000,
+            slotted,
+            everyone,
+            one(Change::Remove { node: slotted }),
+        ),
         (190_000_000, walker, everyone, leave(gone, walker, 5)),
-        (191_000_000, room, everyone, Body::Transfer(TransferRec::Settle { transfer: gone })),
-        (250_000_000, child, everyone, one(Change::Set { node: child, field: 98, to: Value::Uint(1), by: None })),
+        (
+            191_000_000,
+            room,
+            everyone,
+            Body::Transfer(TransferRec::Settle { transfer: gone }),
+        ),
+        (
+            250_000_000,
+            child,
+            everyone,
+            one(Change::Set {
+                node: child,
+                field: 98,
+                to: Value::Uint(1),
+                by: None,
+            }),
+        ),
     ];
     let records: Vec<Vec<u8>> = script
         .into_iter()
@@ -1545,14 +1639,26 @@ fn w3755_rows_equal_the_whole_state_reference_on_flights_links_timers_and_remove
         }
         a.flush().unwrap();
         let f = fetch(&store, PREFIX).unwrap();
-        arms.push((bytes(stored_bundles(&store, PREFIX, &f).unwrap()), bytes(rebuild_bundles(&f).unwrap())));
+        arms.push((
+            bytes(stored_bundles(&store, PREFIX, &f).unwrap()),
+            bytes(rebuild_bundles(&f).unwrap()),
+        ));
     }
     archive::whole_state_reference(false);
     let (whole, rows) = (&arms[0], &arms[1]);
     assert!(whole.0.len() >= 3, "several windows: {}", whole.0.len());
-    assert_eq!(whole.0, whole.1, "the reference made again equals itself stored");
-    assert_eq!(rows.0, whole.0, "row by row, live, equals the whole-state reference");
-    assert_eq!(rows.1, whole.0, "row by row, made again, equals the whole-state reference");
+    assert_eq!(
+        whole.0, whole.1,
+        "the reference made again equals itself stored"
+    );
+    assert_eq!(
+        rows.0, whole.0,
+        "row by row, live, equals the whole-state reference"
+    );
+    assert_eq!(
+        rows.1, whole.0,
+        "row by row, made again, equals the whole-state reference"
+    );
 }
 
 /// #3755's regression on a recorded full-Eden fork: `ARCHIVE_EDEN` names a copy of a served world's store folder
@@ -1561,6 +1667,7 @@ fn w3755_rows_equal_the_whole_state_reference_on_flights_links_timers_and_remove
 /// archive open's time and whether the bundles stored live are the same bytes. Run on Saturn, `--ignored`.
 #[test]
 #[ignore = "needs a recorded full-Eden store folder in ARCHIVE_EDEN"]
+#[allow(clippy::disallowed_methods)] // A measurement: it times the bundlers on the wall clock (K7 allows tools to).
 fn w3755_full_eden_bundles_row_by_row_equal_the_whole_state_reference() {
     use directoryd::directory::folder::Folder;
     use std::time::Instant;
@@ -1607,7 +1714,11 @@ fn w3755_full_eden_bundles_row_by_row_equal_the_whole_state_reference() {
              record past the start; archive open {:.3} s",
             records,
             base.record,
-            if whole { "whole-state reference" } else { "row by row" },
+            if whole {
+                "whole-state reference"
+            } else {
+                "row by row"
+            },
             b.len(),
             took.as_secs_f64(),
             (took.as_secs_f64() - from_base) * 1000.0 / records.max(1) as f64,

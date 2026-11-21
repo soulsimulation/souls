@@ -1716,10 +1716,7 @@ impl State {
             (3, pairs(&self.links, link_value)),
         ]);
         if !self.in_flight.is_empty() {
-            m.insert(
-                4,
-                pairs(&self.in_flight, flight_value),
-            );
+            m.insert(4, pairs(&self.in_flight, flight_value));
         }
         if !self.arrived.is_empty() {
             m.insert(
@@ -1728,10 +1725,7 @@ impl State {
             );
         }
         if !self.timers.is_empty() {
-            m.insert(
-                6,
-                pairs(&self.timers, timer_value),
-            );
+            m.insert(6, pairs(&self.timers, timer_value));
         }
         if !self.time.is_empty() {
             m.insert(

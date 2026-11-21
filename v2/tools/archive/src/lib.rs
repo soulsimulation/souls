@@ -1610,9 +1610,8 @@ impl Projection {
             .chain(timers.iter().map(|t| (6, *t)));
         let mut out = Vec::new();
         for key in keys {
-            let row = row(after, key).map(|v| {
-                Value::Array(vec![key.1.to_value(), redactions.scrub(v)])
-            });
+            let row =
+                row(after, key).map(|v| Value::Array(vec![key.1.to_value(), redactions.scrub(v)]));
             if self.get(key) != row.as_ref() {
                 out.push((key, row));
             }
@@ -1635,8 +1634,16 @@ fn row(state: &State, (field, id): (u64, Id)) -> Option<Value> {
             .or_else(|| state.nodes.get(i))
             .map(|n| n.audience)
     };
-    let ends = |l: &LinkState| l.ends.iter().all(|i| audience(i).is_none_or(public_audience));
-    let root_public = |f: &Flight| f.nodes.get(&f.root).is_some_and(|n| public_audience(n.audience));
+    let ends = |l: &LinkState| {
+        l.ends
+            .iter()
+            .all(|i| audience(i).is_none_or(public_audience))
+    };
+    let root_public = |f: &Flight| {
+        f.nodes
+            .get(&f.root)
+            .is_some_and(|n| public_audience(n.audience))
+    };
     let flying_link = |f: &Flight, l: &LinkState| {
         public_audience(l.audience)
             && f.nodes
@@ -1655,18 +1662,22 @@ fn row(state: &State, (field, id): (u64, Id)) -> Option<Value> {
             .get(&id)
             .filter(|l| public_audience(l.audience) && ends(l))
             .map(link_value),
-        4 => state.in_flight.get(&id).filter(|f| root_public(f)).map(|f| {
-            let mut f = f.clone();
-            f.nodes.retain(|_, n| public_audience(n.audience));
-            let kept: Vec<Id> = f
-                .links
-                .iter()
-                .filter(|(_, l)| flying_link(&f, l))
-                .map(|(i, _)| *i)
-                .collect();
-            f.links.retain(|i, _| kept.contains(i));
-            flight_value(&f)
-        }),
+        4 => state
+            .in_flight
+            .get(&id)
+            .filter(|f| root_public(f))
+            .map(|f| {
+                let mut f = f.clone();
+                f.nodes.retain(|_, n| public_audience(n.audience));
+                let kept: Vec<Id> = f
+                    .links
+                    .iter()
+                    .filter(|(_, l)| flying_link(&f, l))
+                    .map(|(i, _)| *i)
+                    .collect();
+                f.links.retain(|i, _| kept.contains(i));
+                flight_value(&f)
+            }),
         6 => state
             .timers
             .get(&id)
@@ -1675,7 +1686,12 @@ fn row(state: &State, (field, id): (u64, Id)) -> Option<Value> {
                     .nodes
                     .get(&t.node)
                     .into_iter()
-                    .chain(state.in_flight.values().filter_map(|f| f.nodes.get(&t.node)))
+                    .chain(
+                        state
+                            .in_flight
+                            .values()
+                            .filter_map(|f| f.nodes.get(&t.node)),
+                    )
                     .any(|n| public_audience(n.audience))
             })
             .map(timer_value),
