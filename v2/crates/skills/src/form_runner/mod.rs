@@ -150,6 +150,10 @@ pub const REACH: i64 = replica::moves::REACH_MOST + 600_000;
 /// ([`crate::route::AT_GOAL`]), so the seat is in reach where the walk stops.
 pub const SIT_REACH: i64 = 600_000 - crate::route::AT_GOAL;
 
+/// How far from a seat's stand point on water (a boat's side afloat) the bank a body boards from may be, µm: today's
+/// game boards a boat within 3.2 m (`packages/engine-mars`). The world moves such a stand point to the bank.
+pub const BOARD: i64 = 3_200_000;
+
 /// An argument of a Soul's act, as the world hands it to the forms (F14, #3384): a name from the kind's own lists (a
 /// `part`, `slot`, `field` or `value` argument), a thing by its id (`thing`), words kept by their reference (`text`:
 /// T8, K16's store holds the words and the intent carries `{21: id}`), or a whole number (`count`, `duration`).
@@ -1421,6 +1425,12 @@ impl Runner {
         } else {
             self.steps.get(self.at)
         }
+    }
+
+    /// The step after the one in progress, if the run has not ended and there is one.
+    pub fn next_step(&self) -> Option<&Step> {
+        self.step()?;
+        self.steps.get(self.at + 1)
     }
 
     /// The number of the step in progress, if the run has not ended.

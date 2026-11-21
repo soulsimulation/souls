@@ -2415,6 +2415,16 @@ impl<'a> View<'a> {
         Ok(c)
     }
 
+    /// Whether `at` (µm, `node`'s frame) is on water: no body may stand there on its feet, but one wading or swimming
+    /// may (a hull's side afloat).
+    pub fn on_water(&self, node: Id, at: Vec3) -> bool {
+        self.map.spot(node, at).is_none()
+            && self
+                .map
+                .spot_for(node, at, crate::routes::WADE | crate::routes::SWIM)
+                .is_some()
+    }
+
     /// Where a body may stand within `reach` of `at` (µm, `node`'s frame) to act there, for `from` (C15, #3447):
     /// [`crate::spots::within`] over this town's ground.
     pub fn stand_near(&self, node: Id, at: Vec3, reach: i64, from: Option<&Body>) -> Option<Vec3> {
