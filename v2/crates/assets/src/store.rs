@@ -181,6 +181,12 @@ impl Store {
         self.records.get(&reference)
     }
 
+    /// The bytes kept for `reference` whatever its state, to keep them on disk (#3697): never to serve.
+    pub fn kept(&self, reference: Id) -> Option<&[u8]> {
+        let r = self.records.get(&reference)?;
+        (r.state != State::Removed).then(|| self.blobs.get(&r.hash).map(Vec::as_slice))?
+    }
+
     /// The bytes a viewer may be sent for `reference`: only an allowed upload's.
     pub fn served(&self, reference: Id) -> Option<&[u8]> {
         let r = self.records.get(&reference)?;

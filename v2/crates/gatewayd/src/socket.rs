@@ -68,7 +68,7 @@ const SEND_MOST: usize = FRAME_MOST + 64;
 const SIGN_IN_WITHIN: Duration = Duration::from_secs(10);
 
 /// The gateway's HTTP routes: the agents' socket, the creator's session exchange (W5, `creator.rs`), the world's
-/// entries (`entries.rs`) and a creator's bulk edits (#3695, `bulk.rs`).
+/// entries (`entries.rs`), a creator's bulk edits (#3695, `bulk.rs`) and uploads (#3697, `uploads.rs`).
 pub fn router(gw: Arc<Gateway>) -> Router {
     Router::new()
         .route(PATH, get(upgrade))
@@ -78,6 +78,11 @@ pub fn router(gw: Arc<Gateway>) -> Router {
             crate::bulk::PATH,
             post(crate::bulk::submit).layer(crate::bulk::limit()),
         )
+        .route(
+            crate::uploads::PATH,
+            post(crate::uploads::upload).layer(crate::uploads::limit()),
+        )
+        .route(crate::uploads::SERVE, get(crate::uploads::serve))
         .with_state(gw)
 }
 

@@ -65,6 +65,7 @@ pub mod resume;
 pub mod socket;
 pub mod times;
 pub mod token;
+pub mod uploads;
 pub mod views;
 pub mod world_link;
 
@@ -121,6 +122,8 @@ pub struct Gateway {
     pub entries: std::sync::OnceLock<entries::Entries>,
     /// A creator's bulk edits' counts (#3695, `bulk.rs`).
     pub bulk: bulk::Gauge,
+    /// A creator's uploads (`--uploads`, #3697, `uploads.rs`); unset, the routes answer 404.
+    pub uploads: std::sync::OnceLock<uploads::Uploads>,
     /// Set once when the gateway stops: every signed-in socket closes with [`RESTART`].
     pub closing: tokio::sync::watch::Sender<bool>,
     hub: Mutex<Hub>,
@@ -205,6 +208,7 @@ impl Gateway {
             exchange: std::sync::OnceLock::new(),
             entries: std::sync::OnceLock::new(),
             bulk: bulk::Gauge::default(),
+            uploads: std::sync::OnceLock::new(),
             closing: tokio::sync::watch::channel(false).0,
             hub: Mutex::new(Hub::default()),
             watchers: Mutex::new(BTreeMap::new()),
