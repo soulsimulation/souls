@@ -8,7 +8,9 @@
 //! directory signs view tokens with, V13b) a page signs in with a view token for a view socket. With `--mailbox
 //! <directory addr:port> --mailbox-key <file>`, the owner's messages reach their Souls' sockets (R13, `mailbox.rs`).
 //! With `--creator <32 hex>-<n> --directory <addr:port>`, a page signed in as that creator exchanges its session for a
-//! short token (W5, `creator.rs`).
+//! short token (W5, `creator.rs`). With `--entries <dir>` (the world's `<world>/entries`) a signed-in client fetches
+//! the world's kind entries at `GET /v2/entries` (#3760, `entries.rs`); a folder that is unreadable or holds no
+//! entry stops it at start. Without the flag it says so on stderr and clients get no kinds.
 //!
 //! On SIGTERM or SIGINT it stops accepting, closes every signed-in socket with 1012 and exits within [`DRAIN`]
 //! (O16, #2809; `v2/docs/runbook/gateway-upgrade.md`).
@@ -56,7 +58,7 @@ async fn main() {
         arg("--build"),
     ) else {
         eprintln!(
-            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>] [--views <path>] [--view-key <file>] [--mailbox <addr:port> --mailbox-key <file>] [--creator <32 hex>-<n> --directory <addr:port>]"
+            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>] [--views <path>] [--view-key <file>] [--mailbox <addr:port> --mailbox-key <file>] [--creator <32 hex>-<n> --directory <addr:port>] [--entries <dir>]"
         );
         std::process::exit(2);
     };
@@ -123,6 +125,25 @@ async fn main() {
             directory,
             authority_required: args.iter().any(|a| a == "--creator-authority-required"),
         });
+    }
+    match arg("--entries") {
+        Some(dir) => match gatewayd::entries::Entries::open(std::path::Path::new(&dir)) {
+            Ok(e) => {
+                (gw.log)(&format!(
+                    "entries: {} served at {}",
+                    e.current().count,
+                    gatewayd::entries::PATH
+                ));
+                let _ = gw.entries.set(e);
+            }
+            Err(why) => {
+                eprintln!("gatewayd: --entries cannot be served: {why}");
+                std::process::exit(2);
+            }
+        },
+        None => eprintln!(
+            "gatewayd: no --entries: paired clients get none of the world's kinds (#3760)"
+        ),
     }
     let views = arg("--views").map_or_else(
         || PathBuf::from(&world).with_extension("views"),

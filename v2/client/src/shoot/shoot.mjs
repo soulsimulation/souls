@@ -82,7 +82,7 @@ export function findPlaywright(roots) {
   }
   return null;
 }
-function globalNodeModules() {
+export function globalNodeModules() {
   try { return execFileSync('npm', ['root', '-g'], { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; }
 }
 
@@ -120,13 +120,7 @@ async function launch(pw, profile, size) {
  */
 export async function shoot(o, { page: address, out, profile, roots = [], pw = findPlaywright([...roots, globalNodeModules()]) }) {
   const started = Date.now();
-  if (!pw) throw fail('no-browser', NO_BROWSER);
-  mkdirSync(profile, { recursive: true, mode: 0o700 });
-  const { ctx, page } = await launch(pw, profile, o.size);
-  try {
-    await page.goto(anonymous(address), { waitUntil: 'domcontentloaded', timeout: READY_MS });
-    await page.waitForFunction(() => globalThis.v2?.capture?.ready(), null, { timeout: READY_MS, polling: 100 })
-      .catch(() => { throw fail('page-not-drawing', `the page drew no world within ${READY_MS / 1000} s`); });
+  return withWorld({ address, profile, size: o.size, pw }, async (page) => {
     const aimed = await page.evaluate(([n, e]) => globalThis.v2.capture.aim(n, e), [o.name, o.eyes]);
     if (!aimed) {
       const known = await page.evaluate(() => globalThis.v2.capture.where().slice(0, 12).map((s) => s.name));
@@ -134,13 +128,38 @@ export async function shoot(o, { page: address, out, profile, roots = [], pw = f
     }
     if (o.eyes && aimed.spot.role !== 'soul') throw fail('eyes-are-a-souls', `${aimed.spot.name} is a ${aimed.spot.role}: --eyes takes a Soul`);
     // A few frames for the camera's move to draw, then the camera again (a body moves) and the picture.
-    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 400)))));
+    await settle(page);
     const again = await page.evaluate(([n, e]) => globalThis.v2.capture.aim(n, e), [o.name, o.eyes]);
-    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-    const at = await page.evaluate(() => globalThis.v2.director.t ?? null);
-    const jpeg = /\.jpe?g$/i.test(out);
-    await page.screenshot({ path: out, type: jpeg ? 'jpeg' : 'png', ...(jpeg ? { quality: 85 } : {}) });
+    const at = await picture(page, out);
     return { ok: true, picture: out, spot: aimed.spot, camera: (again ?? aimed).aim, at, eyes: o.eyes, ms: Date.now() - started };
+  });
+}
+
+/** A few frames and a moment, for a camera's move to draw. */
+export const settle = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 400)))));
+
+/** One more frame, then the page as `out` (.png, or .jpg at quality 85); answers the world time drawn. */
+export async function picture(page, out) {
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const at = await page.evaluate(() => globalThis.v2.director.t ?? null);
+  const jpeg = /\.jpe?g$/i.test(out);
+  await page.screenshot({ path: out, type: jpeg ? 'jpeg' : 'png', ...(jpeg ? { quality: 85 } : {}) });
+  return at;
+}
+
+/**
+ * The page at `address`, anonymous, in the headless browser on `profile`, once it has drawn the world: `f(page)`'s
+ * answer, the browser closed after. `shoot` and `view` (#3687) both look through it.
+ */
+export async function withWorld({ address, profile, size, pw }, f) {
+  if (!pw) throw fail('no-browser', NO_BROWSER);
+  mkdirSync(profile, { recursive: true, mode: 0o700 });
+  const { ctx, page } = await launch(pw, profile, size);
+  try {
+    await page.goto(anonymous(address), { waitUntil: 'domcontentloaded', timeout: READY_MS });
+    await page.waitForFunction(() => globalThis.v2?.capture?.ready(), null, { timeout: READY_MS, polling: 100 })
+      .catch(() => { throw fail('page-not-drawing', `the page drew no world within ${READY_MS / 1000} s`); });
+    return await f(page);
   } finally {
     await ctx.close().catch(() => {});
   }

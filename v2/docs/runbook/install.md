@@ -9,9 +9,11 @@ sends to these programs once the owner places its site file. Routing between the
 | What | Where | Owner, mode |
 |---|---|---|
 | The unprivileged user and group | `souls`, no shell, no home of its own | system user |
-| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-accounts` (X11), `import-world` (X6) | `/usr/local/lib/souls/` | root, 755 |
+| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-accounts` (X11), `import-world` (X6), `publish-template` (G9's `templates`, renamed because `/usr/local/lib/souls/templates` is W3b's catalogue, built on the machine from Eden's facts) | `/usr/local/lib/souls/` | root, 755 |
 | The viewers' origin (`origin.mjs`, `cache.mjs`) and the page's files (V5) | `/usr/local/lib/souls/origin/`, `/usr/local/lib/souls/web/` | root, 644 |
+| The served client (R17: `eden.mjs`, the skills, the daemon's library, `soul-client.json`), at the version its skill declares; placed only when absent, so release-v2's move replaces it and a later install never puts an older one back. Today's launcher's cut-over fence checks it (`clientDir`) | `/usr/local/lib/souls/client/` | root, 644 |
 | Data: worlds, the directory's store, the view tier's stream files | `/var/lib/souls/{worlds,directory,views}` | souls, 750 |
+| The world route file, which today's launcher's cut-over fence also reads (the parent `/var/lib/souls` is 751) | `/var/lib/souls/routes/worlds.json` | souls, 755 |
 | The directory's arguments, written once, never overwritten | `/etc/souls/directory.args` | root:souls, 640 |
 | Secrets, `KEY=value`, written once (empty), never overwritten | `/etc/souls/secrets.env` | root, 600 |
 | What the install made (its record; see below) | `/etc/souls/install.state` | root, 644 |
@@ -25,7 +27,9 @@ gets, and all of it when today's is idle; neither system's world time is throttl
 runs with `NoNewPrivileges`, `ProtectSystem=strict` (writing only under `/var/lib/souls`), `ProtectHome` and
 `PrivateTmp`. Units read the secrets file as root before they drop to `souls`. The directory
 and the origin listen on loopback only (ports 7310 and 7320); each world's gateway gets its port from its own
-`/etc/souls/gateway-<world>.env`, written when the world is placed (X5).
+`/etc/souls/gateway-<world>.env`, written when the world is placed (X5). That file also names the world's kind
+entries (`--entries <world>/entries`), which the gateway serves to the world's paired clients at `/v2/entries` (#3760);
+a gateway whose entries folder is missing or empty refuses to start.
 
 **Does it fit beside today's system?** Production: 8 cores, 30.6 GB of memory, about 173 GB of disk free. Today's
 worlds use 6.3 GB, and their unit may use at most 26 GB (O14, `v2/docs/machines.md`). With the new system's 3 GB
@@ -162,6 +166,14 @@ Package the **existing public Eden template**, with serving support made by the 
 worldd seed --facts <approved-public-facts> --entries <existing-public-entries> --souls 0 --dir <support>
 templates <approved-public-facts> <catalogue> --support <support>
 bash v2/tools/ops/install.sh bundle <out> <binaries> <page> <catalogue>
+```
+
+The catalogue is built from Eden's facts (X6's export of a backup), which are not in the repository, so
+`install-v2.yml` bundles none. On the machine, with the installed programs of the same build, as root after X6:
+
+```sh
+/usr/local/lib/souls/worldd seed --facts <facts> --entries <existing-public-entries> --souls 0 --dir <support>
+/usr/local/lib/souls/publish-template <facts> /usr/local/lib/souls/templates --support <support>
 ```
 
 Only allowlisted facts, public entry/move data, entry coordinates and exact runtime pin/hash metadata are packaged.

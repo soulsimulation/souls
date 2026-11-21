@@ -74,6 +74,10 @@
 //!   through [`Slots::fire`] so its contact hands the body into the slot, and the move's end wakes the run. A walk's
 //!   crossings are kept for the caller to carry ([`Forms::crossings`], `crate::host::carry`), so a form walks
 //!   indoors across doors and stairs.
+//! - **Standing slots** (C33, #3598). A form's hand-off into a standing slot (a phone box's inside, a pool table's
+//!   side, a balloon's basket) takes the slot through the same [`Slots`] table, on the body's feet: B2's rise move,
+//!   held in the standing stance. A full slot is refused `place-taken`, a slot the world has not placed
+//!   `place-unknown`, and the body stays where it stood.
 //!
 //! - **A run's deadline** (C20, #3469). A run's longest time is its steps' own ([`span`]): each walk's, move's or
 //!   sit's deadline as the runner sets it, each pause's length, and room for the tick that wakes each. A run is due
@@ -1162,8 +1166,19 @@ impl Forms {
                 }
                 Err(r) => self.wake(w, run, Woke::Walked(Progress::Failed(name(r.name))), now),
             },
-            Next::Sit { node, slot, lie } => {
-                let mv = name(if lie { "souls:lie" } else { "souls:sit" });
+            // A standing slot (C33, #3598) is taken by the same hand-off on the body's feet: B2's rise move (the body
+            // stays upright; its contact hands it into the slot) held in the standing stance.
+            Next::Sit {
+                node,
+                slot,
+                lie,
+                stand,
+            } => {
+                let mv = name(match (stand, lie) {
+                    (true, _) => "souls:rise",
+                    (false, true) => "souls:lie",
+                    (false, false) => "souls:sit",
+                });
                 let (Some(found), Some(places)) =
                     (w.library.iter().find(|m| m.name == mv), w.places.as_mut())
                 else {
@@ -1179,10 +1194,10 @@ impl Forms {
                     thing: node,
                     slot: Some(slot),
                     mv: found,
-                    stance: if lie {
-                        crate::controller::Stance::Lie
-                    } else {
-                        crate::controller::Stance::Sit
+                    stance: match (stand, lie) {
+                        (true, _) => crate::controller::Stance::Stand,
+                        (false, true) => crate::controller::Stance::Lie,
+                        (false, false) => crate::controller::Stance::Sit,
                     },
                 };
                 let taken = places
