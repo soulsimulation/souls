@@ -325,13 +325,17 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const apple = (await waitFor("the apple on the shelf in B's copy", async () => (await apples(B)).at(0))).id;
   const shelf = (await A.cli('find', 'shelf')).found.find((r) => r.kind?.startsWith('eden:swap_shelf'));
   assert.ok(shelf, 'the shelf is found by its words');
-  const took = await act(A, `take:${shelf.id}`, `thing=${apple}`);
-  assert.ok(accepted(took.answer), `A takes the apple from the shelf: ${JSON.stringify(took.answer)}`);
+  // #3914: the take names no thing; the shelf's selector (things in this shelf, nearest me) binds the apple.
+  const took = await act(A, `take:${shelf.id}`);
+  assert.ok(accepted(took.answer), `A takes the apple from the shelf with no argument: ${JSON.stringify(took.answer)}`);
   const stump = (await A.cli('find', 'stump')).found.find((r) => r.kind?.startsWith('eden:hollow_stump'));
   assert.ok(stump, 'the stump is found by its words');
   // B stands by the stump while A hides the apple, so A's entries are in B's interest.
   const toStump = await act(B, stump.id);
   assert.ok(accepted(toStump.answer), `B walks to the stump: ${JSON.stringify(toStump.answer)}`);
+  // #3914: a search of the empty stump, within reach of it, is refused by name, not `arg-missing`.
+  const emptySearch = await act(B, `search:${stump.id}`);
+  assert.equal(emptySearch.answer.reason, 'thing.none-selected', `B's search of the empty stump: ${JSON.stringify(emptySearch.answer)}`);
   await request(B.rt.socket, { op: 'read' });
   const hid = await act(A, `hide:${stump.id}`, `thing=${apple}`);
   assert.ok(accepted(hid.answer), `A hides the apple in the stump: ${JSON.stringify(hid.answer)}`);
@@ -349,6 +353,11 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   assert.equal((await stumpIn(B))?.holds, undefined, "(e) B's copy does not count what the stump holds");
   assert.equal((await stumpIn(A))?.holds, 1, "(e) A's copy counts the apple in the stump");
   stage('hidden apple withheld from the seeker');
+  // #3914 A2: B searches the stump with no argument and finds what is hidden: the apple is in B's hand, in B's copy.
+  const found = await act(B, `search:${stump.id}`);
+  assert.ok(accepted(found.answer), `B's search finds the apple: ${JSON.stringify(found.answer)}`);
+  await waitFor("the found apple in B's copy", async () => (await apples(B)).find((r) => r.id === apple), 20_000);
+  stage('the seeker searched and found the apple');
   // (e) The fridge's apple: in no copy, until B opens the fridge; then in B's, and still not in A's.
   const fridge = (await B.cli('find', 'fridge')).found.find((r) => r.kind?.startsWith('eden:fridge'));
   assert.ok(fridge, 'the fridge is found by its words');
@@ -408,10 +417,15 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   assert.deepEqual([...record.private.members].sort(), [pageKey(meA), pageKey(meB)].sort(), '#3775: among A and B');
   assert.equal(record.words, null, '#3775: no words');
   assert.ok(!v1.parts.some((p) => (p.said ?? []).some((s) => s.words?.includes('second bell'))), '#3775: the private words are in no part the page played');
-  const publicFiles = (root) => existsSync(root) ? readdirSync(root, { recursive: true }).map((f) => join(root, f)).filter((f) => statSync(f).isFile()) : [];
+  // A writer's temporary file (`pointer.tmp`) may be renamed into place between the listing and the read: what it held
+  // is then read under its final name, which the listing also holds.
+  const gone = (f) => { try { return statSync(f).isFile() ? readFileSync(f) : null; } catch (e) { if (e.code === 'ENOENT') return null; throw e; } };
+  const publicFiles = (root) => existsSync(root) ? readdirSync(root, { recursive: true }).map((f) => join(root, f)) : [];
   for (const f of [...publicFiles(join(world, 'views')), ...publicFiles(join(world, 'history'))]) {
-    assert.ok(!readFileSync(f).includes(Buffer.from('third stone')), `(a) the whisper's words are in no public file: ${f.slice(world.length)}`);
-    assert.ok(!readFileSync(f).includes(Buffer.from('second bell')), `#3775: the private words are in no public file: ${f.slice(world.length)}`);
+    const bytes = gone(f);
+    if (!bytes) continue;
+    assert.ok(!bytes.includes(Buffer.from('third stone')), `(a) the whisper's words are in no public file: ${f.slice(world.length)}`);
+    assert.ok(!bytes.includes(Buffer.from('second bell')), `#3775: the private words are in no public file: ${f.slice(world.length)}`);
   }
 
   // (a) The wave's move record, from the body's family.
