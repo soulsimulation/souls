@@ -2,7 +2,7 @@
 // whether an agent is connected; a picture goes to the directory as base64url.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { agoText, base64url, cardLine, nameText, nowText, readNow, whereText, type Mine } from './mine.ts';
+import { agoText, base64url, cardLine, nameText, nowDims, nowText, readNow, whereText, type Mine } from './mine.ts';
 
 const row = (extra: Partial<Mine> = {}): Mine => ({ soul: 'soul-0123456789abcdef0123456789abcdef-0', device: null, world: null, name: null, description: null, picture: null, retire_asked: false, ...extra });
 
@@ -39,4 +39,11 @@ test('C14: the status line is read by grant, public and with nothing but its tex
   assert.equal(agoText(1000, 1000_000 + 12 * 60_000), '12 min ago');
   assert.equal(agoText(1000, 1000_000 + 3 * 3600_000), '3 h ago');
   assert.equal(agoText(1000, 1000_000 + 3 * 86400_000), '3 d ago');
+});
+
+test('#3784: the status line dims while the Soul is asleep or a zombie, never while awake', () => {
+  for (const s of ['asleep', 'zombie']) assert.equal(nowDims(s), true, s);
+  for (const s of ['speaking', 'seated', 'walking', 'standing', 'idle', 'awake', null, undefined]) assert.equal(nowDims(s), false, String(s));
+  // The line itself stays plain text: dimming is a style, the words are the same.
+  assert.equal(nowText({ text: '<b>Asleep</b>', at: 1000 }, 1000_000), '“<b>Asleep</b>” · just now');
 });

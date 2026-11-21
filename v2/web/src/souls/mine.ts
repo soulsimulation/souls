@@ -55,6 +55,12 @@ export function agoText(at: number, nowMs = Date.now()): string {
   return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
 }
 
+/** Whether the status line is dimmed, as today's card dims it (`soul-now-dim`, #3784): while the Soul is asleep or a
+ *  zombie, from the body's word the world publishes (`souls:zombie`, `souls:asleep`); awake or idle, it is not. */
+export const nowDims = (word: string | null | undefined) => word === 'asleep' || word === 'zombie';
+/** The dimmed line's look, today's `.soul-now-dim`: a little smaller, in today's dark-theme dim grey. */
+export const DIM_STYLE = { color: '#8b8b82', fontSize: '13.5px' } as const;
+
 /** The status line as shown: the agent's words quoted, then how long ago. */
 export const nowText = (n: NowLine, nowMs = Date.now()) => `“${n.text}” · ${agoText(n.at, nowMs)}`;
 
