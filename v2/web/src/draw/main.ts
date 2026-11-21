@@ -11,6 +11,7 @@ import { localAddresses, worldAddress } from '../source/address.ts';
 import { SocketSource, chooseFollow, exchange, type Session } from '../source/socket.ts';
 import { browserSession, localTestSignIn } from '../source/signin.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
+import { Gestures } from '../crowd/gestures.ts';
 import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
 import { support } from './support.ts';
@@ -86,7 +87,8 @@ const director = new CameraDirector(cam, canvas, world, souls, new URLSearchPara
 Object.assign(globalThis, { v2: { renderer, scene, sky, cam, director, world, things, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 installCapture(globalThis as any, q, document); // G10: `shoot` names a place, Soul or thing and the camera goes there
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
-loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
+const gestures = new Gestures(); // #3741: the stream's move records, drawn as gestures over the posture
+loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').then((c) => world.attach(new CrowdBodies(c, gestures)), (e) => console.warn('bodies stay capsules:', e));
 
 // V21: the world heard, from the same parts and history the picture plays.
 const where = (id: string, local?: [number, number, number]) => (world.nodes.has(id) ? (local ? new THREE.Vector3(...local).multiplyScalar(1e-6) : new THREE.Vector3()).applyMatrix4(world.frame(id)).toArray() : null);
@@ -125,6 +127,7 @@ const live = (address: string) => new StreamSource(address).start({
     things.apply(p.nodes, p.removed);
     sound.part(p.nodes, p.removed, p.samples, p.happened ?? []);
     souls.apply(p);
+    gestures.apply(p);
     director.part(p);
     newestTo = p.to;
     played++;
