@@ -1236,8 +1236,9 @@ async function putUp({ first, body, words, start, end }) {
     for (const until = Date.now() + CALENDAR_STEP_MS; Date.now() < until;) {
       await Promise.race([refresh(), sleep(2000)]);
       const items = calendarItems(copy, kinds), rows = rowsOf(copy), got = done(items, rows);
-      if (got) return got;
       const e = sequence === null ? null : endingOf(sequence);
+      // Its effect is in the copy, and its act has ended (the body's next act would be refused `form-running`).
+      if (got && (sequence === null || e?.done)) return got;
       if (e?.refused) throw Object.assign(new Error(`${name}: ${e.reason}`), { step: name });
       if (e?.done) ended ??= Date.now();
       if (ended !== null && Date.now() - ended > 8000) throw Object.assign(new Error(`${name}: ended ${e.reason ?? 'without its effect'}`), { step: name });
