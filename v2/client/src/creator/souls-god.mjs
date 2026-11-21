@@ -10,6 +10,8 @@
 //   souls-god.mjs move <id> --at x,y,z [--slot n]                                     to another spot, same parent
 //   souls-god.mjs set <id> <field> <value>       one numbered field: an integer, true, false or a name
 //   souls-god.mjs remove <id>                    it and everything in it
+//   souls-god.mjs hours <id> --open 07:00-15:00 [--open 09:00-13:00@sat,sun ...] | --closed
+//                                                its opening hours, the whole schedule at once (field 81, E7)
 //   souls-god.mjs batch '<json list>'            several at once, all or none: [{"op":"place","name":1,...}, ...]; a
 //                                                later op names an earlier place by its "name" number
 //   souls-god.mjs check <any of the four, or batch> ...   the same, checked on the copy only; nothing is sent
@@ -27,8 +29,9 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
+import { F_HOURS, hoursRows } from '../schedule/hours.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'status', 'stop'];
+export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'hours', 'batch', 'check', 'status', 'stop'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
@@ -48,6 +51,7 @@ export const FIX = {
   'edit.no-copy': 'the daemon has no copy yet: run status until connected is true',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'which-creator': 'name one with --creator',
+  'hours.malformed': 'hours <id> --open HH:MM-HH:MM[@sat,sun|@mon-fri] (repeat --open), or --closed',
 };
 
 const usage = (detail) => Object.assign(new Error(detail), { code: 'usage' });
@@ -82,6 +86,13 @@ export function opsOf(verb, words) {
   if (verb === 'set') {
     if (args.length !== 3 || !/^\d+$/.test(args[1])) throw usage('set <id> <field number> <value>');
     return [{ op: 'set', node: node(args[0]), field: Number(args[1]), value: valueOf(args[2]) }];
+  }
+  if (verb === 'hours') {
+    const closed = args.indexOf('--closed');
+    if (closed >= 0) args.splice(closed, 1);
+    const open = takeAll(args, '--open');
+    if (args.length !== 1 || (closed >= 0) === (open.length > 0)) throw usage('hours <id> --open HH:MM-HH:MM[@days] ... | --closed');
+    return [{ op: 'set', node: node(args[0]), field: F_HOURS, value: hoursRows(open) }];
   }
   if (verb === 'remove') {
     if (!args[0]) throw usage('remove <id>');
