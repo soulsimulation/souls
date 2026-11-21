@@ -120,6 +120,8 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(opsOf('set', ['aa-3', '1', 'true']), [{ op: 'set', node: 'aa-3', field: 1, value: true }]);
   assert.deepEqual(requestOf(['check', 'remove', 'aa-3']).req, { op: 'check', ops: [{ op: 'remove', node: 'aa-3' }] });
   assert.throws(() => opsOf('move', ['aa-3']), /move <id> --at/);
+  assert.deepEqual(requestOf(['free', '10x8', '--near', 'plaza']), { space: 'free', args: ['10x8', '--near', 'plaza'], creator: undefined });
+  assert.throws(() => requestOf(['clear', 'plaza']), (e) => e.code === 'usage');
 });
 
 test('a creator describes, checks on its copy alone, and builds a room with a thing in it', async () => {

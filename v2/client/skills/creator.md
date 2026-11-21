@@ -47,6 +47,7 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `batch '<json list>'` | several operations at once: all happen, or none |
 | `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
 | `describe` | what is there, and what each kind admits |
+| `where <x,z or name>` · `clear <x,z or name> --size WxD` · `free WxD --near <x,z or name>` | the room, areas and nearest things at a spot; whether a footprint there is free; the nearest free one. World metres, read from the page drawn here |
 
 A kind may be written as its bare name (`room`) when only one kind has that name, or as `namespace:name`.
 
