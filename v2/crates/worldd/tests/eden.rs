@@ -2971,7 +2971,10 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
         up.expect("stepped up onto a free spot");
     }
     println!("38 more stepped up in {:?}", started.elapsed());
-    let before = last_stances(&dir)[&souls[40].1];
+    let off = |dir: &Path| -> Vec<(Id, (Id, Option<u64>, i64, Option<Stance>))> {
+        last_stances(dir).into_iter().filter(|(_, f)| f.0 != stage).collect()
+    };
+    let before = off(&dir);
     let full = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
     println!("Soul 41: step up onto the full stage {full:?}");
     let all = on_stage(&dir);
@@ -2979,11 +2982,7 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
     assert_eq!(slots, (1..=40).map(Some).collect::<Vec<_>>(), "40 spots, one each");
     assert!(all.iter().all(|f| f.3 == Some(Stance::Stand)), "all standing");
     assert_eq!(full, Err("place-taken".to_owned()), "a full stage refuses by name");
-    assert_eq!(
-        last_stances(&dir)[&souls[40].1],
-        before,
-        "the refused Soul stays where it stood"
-    );
+    assert_eq!(off(&dir), before, "the refused Soul stays where it stood");
 
     // Stopped and served again on the same folder (K18c): the 40 come back standing in their spots.
     drop(served);
@@ -3012,20 +3011,21 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
     let up = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
     println!("after the restart, Soul 41: step up {up:?}");
     let after = on_stage(&dir);
-    let first_after = last_stances(&dir)[&souls[0].1];
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(again, Err("place-taken".to_owned()), "still full");
     down.expect("Soul 1 steps down");
     up.expect("Soul 41 steps up into the freed spot");
-    assert_ne!(first_after.0, stage, "Soul 1 off the stage: {first_after:?}");
     assert_eq!(after.len(), 40, "the stage full again: {after:?}");
     assert!(
         after.iter().all(|f| f.3 == Some(Stance::Stand)),
         "all standing after the restart: {after:?}"
     );
-    assert!(
-        after.iter().any(|f| f.0 == souls[40].1) && after.iter().any(|f| f.0 == souls[1].1),
-        "Soul 41 took the freed spot; Soul 2 kept its own"
-    );
+    // One body left and one came: every other body kept its own spot over the restart.
+    let kept = after.iter().filter(|f| all.contains(f)).count();
+    assert_eq!(kept, 39, "39 kept their spots: {after:?}");
+    let left: Vec<_> = all.iter().filter(|f| !after.iter().any(|a| a.0 == f.0)).collect();
+    let came: Vec<_> = after.iter().filter(|f| !all.iter().any(|a| a.0 == f.0)).collect();
+    assert_eq!((left.len(), came.len()), (1, 1), "one stepped down, one up");
+    assert_eq!(left[0].1, came[0].1, "the 41st took the freed spot");
 }
