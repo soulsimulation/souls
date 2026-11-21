@@ -31,7 +31,7 @@ async function get(url: URL): Promise<Uint8Array | null> {
 
 function readPtr(bytes: Uint8Array): StreamPointer {
   const p = JSON.parse(readPointer(bytes));
-  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header, ...(p.baseline ? { baseline: p.baseline, generation: p.generation } : {}), ...(p.legacyHash ? { legacyVersion: p.legacyVersion, legacyNext: p.legacyNext, legacyHash: p.legacyHash } : {}) };
+  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header, ...(p.baseline ? { baseline: p.baseline, generation: p.generation } : {}), ...(p.legacyHash ? { legacyVersion: p.legacyVersion, legacyNext: p.legacyNext, legacyHash: p.legacyHash } : {}), ...(p.handoffFrom ? { handoffFrom: p.handoffFrom } : {}) };
 }
 
 /** The reference in a `{21: id}` value, as the page keys it, or null. */
@@ -81,7 +81,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   return rec;
 }
 
-type StreamPointer = Pointer & { header: string; baseline?: string; generation?: string; legacyVersion?: number; legacyNext?: number; legacyHash?: string };
+type StreamPointer = Pointer & { header: string; baseline?: string; generation?: string; legacyVersion?: number; legacyNext?: number; legacyHash?: string; handoffFrom?: string };
 
 async function run(stream: URL) {
   await init();
@@ -243,11 +243,22 @@ async function run(stream: URL) {
       const b = await get(new URL('pointer', stream));
       const latest = b ? readPtr(b) as StreamPointer : ptr;
       if (latest.generation !== active) {
-        if (active !== undefined || latest.legacyNext === undefined || latest.legacyVersion === undefined || !latest.legacyHash) throw new Error('stream-generation-gap');
-        // Drain exactly the old published bytes, even when its public terminal lies within a source Part.
-        while (Number(player.next()) < latest.legacyNext) if (!(await playOne(ptr))) return;
-        if (version !== latest.legacyVersion || player.publicHash() !== latest.legacyHash) throw new Error('stream-handoff-state');
-        await install(latest);
+        // #3825: the handoff names the generation it closes (none for the legacy stream). A viewer on it drains it and
+        // crosses over; one further behind starts again from the newest baseline, as a new viewer does.
+        const handoff = latest.legacyNext !== undefined && latest.legacyVersion !== undefined && !!latest.legacyHash && latest.handoffFrom === active;
+        if (handoff) {
+          // Drain exactly the old published bytes, even when its public terminal lies within a source Part. All of
+          // them were written before the pointer named the next generation, so a missing one has been pruned.
+          let drained = true;
+          while (drained && Number(player.next()) < latest.legacyNext!) drained = await playOne(ptr);
+          if (drained && (version !== latest.legacyVersion || player.publicHash() !== latest.legacyHash)) throw new Error('stream-handoff-state');
+          if (!drained && active === undefined) return;
+          // A live viewer on a generation holds the state the new baseline holds (the digest just checked): it goes on
+          // in the new generation without fetching that baseline, and nothing on the page moves.
+          if (drained && active !== undefined) { player.cross(latest.generation!, latest.legacyHash!); active = latest.generation; }
+          else await install(latest);
+        } else if (!latest.generation) throw new Error('stream-generation-gap');
+        else await install(latest);
       }
       ptr = latest;
       tell();

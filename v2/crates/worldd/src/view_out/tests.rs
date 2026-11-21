@@ -3167,3 +3167,195 @@ fn i3822_deferred_parts_make_the_checked_state_and_a_wrong_one_is_refused_once_v
         "public-stream-record"
     );
 }
+
+/// #3825: a run of `records` records, one part each, generations of 3 parts, with the writer reopened from the Store
+/// after each record listed in `restarts`. Returns every generation's files, the pointer's generation fields and the
+/// generations named in the order they began.
+#[allow(clippy::type_complexity)]
+fn i3825_run(
+    tag: &str,
+    records: u64,
+    restarts: &[u64],
+    grace: Duration,
+) -> (
+    BTreeMap<String, Vec<(String, Vec<u8>)>>,
+    BTreeMap<u64, Value>,
+    Vec<String>,
+) {
+    let h = header();
+    let d = scratch(&format!("i3825-{tag}"));
+    let views = d.join("views");
+    let store = directoryd::directory::store::Memory::default();
+    let open = || {
+        let mut w = PublicWriter::open(
+            PublicStart {
+                names: None,
+                root: &views,
+                header: &h,
+                key: key(&h),
+                initial: Replica::start(h.stored()).unwrap(),
+                record: 0,
+                checkpoint: None,
+                text: None,
+                clock_seed: None,
+                history: None,
+            },
+            &store,
+        )
+        .unwrap();
+        w.generation_parts = 3;
+        w.prune_grace = grace;
+        w
+    };
+    let body = Id::new(Scope([72; 16]), 1).unwrap();
+    let mut out = open();
+    let mut began = vec![replica::encode::to_hex(&replica::ids::sha256(
+        &out.baseline,
+    ))];
+    for r in 0..records {
+        let effect = if r == 0 {
+            w3e_create(&h, 0, body, h.zone, Audience::Everyone)
+        } else {
+            w3e_effect(
+                r,
+                body,
+                Audience::Everyone,
+                Body::Changes(vec![ChangeRec {
+                    change: set(body, 40, Value::Uint(r)),
+                    rest: Rest::new(),
+                }]),
+            )
+        };
+        out.push(r, &w3e_packet(&h, vec![effect])).unwrap();
+        out.flush().unwrap();
+        let g = replica::encode::to_hex(&replica::ids::sha256(&out.baseline));
+        if began.last() != Some(&g) {
+            began.push(g);
+        }
+        if restarts.contains(&r) {
+            drop(out);
+            out = open();
+        }
+    }
+    let mut gens = BTreeMap::new();
+    for e in fs::read_dir(views.join(stream::dir(&h, &key(&h))).join("g")).unwrap() {
+        let e = e.unwrap();
+        gens.insert(e.file_name().into_string().unwrap(), files(&e.path()));
+    }
+    let pointer =
+        object_map(&fs::read(views.join(stream::dir(&h, &key(&h))).join(POINTER)).unwrap())
+            .unwrap()
+            .into_iter()
+            .filter(|(k, _)| [1, 8, 9, 10].contains(k))
+            .collect();
+    (gens, pointer, began)
+}
+
+/// #3825 A1, A3, A4: the public writer closes a generation every 3 parts and starts the next from a baseline of the
+/// public state then, naming the old one and its end in the pointer; a viewer that played the old generation to its
+/// end holds the state the new baseline holds (the same digest), and plays on from it with no gap. Generations before
+/// the previous one are pruned after the grace, never the previous one. A writer reopened from the Store after every
+/// record, across each rollover, writes the same bytes and pointer as one never stopped.
+#[test]
+fn i3825_generations_roll_over_prune_after_the_grace_and_restart_with_the_same_bytes() {
+    let (gens, pointer, began) = i3825_run("straight", 11, &[], Duration::from_secs(3600));
+    // 11 parts: generations of 3, 3, 3 and 2 parts.
+    assert_eq!(began.len(), 4, "a new generation every 3 parts");
+    assert_eq!(gens.len(), 4, "nothing pruned inside the grace");
+    for (i, g) in began.iter().enumerate() {
+        let names: Vec<&str> = gens[g].iter().map(|(n, _)| n.as_str()).collect();
+        let parts = if i == 3 { 2 } else { 3 };
+        let mut want = vec!["baseline".to_owned(), "baseline.text".to_owned()];
+        for n in 0..parts {
+            want.push(n.to_string());
+            want.push(format!("{n}.text"));
+        }
+        want.sort();
+        assert_eq!(
+            names, want,
+            "generation {i} holds its baseline and its parts"
+        );
+    }
+    // The pointer names the newest generation, its newest part, and the handoff from the one before.
+    let hex = |v: &Value| match v {
+        Value::Bytes(b) => replica::encode::to_hex(b),
+        _ => panic!("bytes"),
+    };
+    assert_eq!(hex(&pointer[&8]), began[3]);
+    assert_eq!(hex(&pointer[&10]), began[2]);
+    assert_eq!(pointer[&1], Value::Uint(1));
+    let Value::Array(handoff) = &pointer[&9] else {
+        panic!("a handoff")
+    };
+    assert_eq!(
+        handoff[1],
+        Value::Uint(3),
+        "the old generation ends after its 3 parts"
+    );
+    // A live viewer crosses every generation: it drains the old one, its version and digest are the handoff's, and
+    // the new baseline's digest is the same; it then plays the new generation's parts from there.
+    let h = header();
+    let bytes = |g: &str, n: &str| {
+        gens[g]
+            .iter()
+            .find(|(name, _)| name == n)
+            .unwrap()
+            .1
+            .clone()
+    };
+    let mut live = PublicPlayer::start(h.stored(), &bytes(&began[0], "baseline")).unwrap();
+    for (i, g) in began.iter().enumerate() {
+        if i > 0 {
+            let next = PublicPlayer::start(h.stored(), &bytes(g, "baseline")).unwrap();
+            assert_eq!(
+                next.hash().unwrap(),
+                live.hash().unwrap(),
+                "no gap at generation {i}"
+            );
+            assert_eq!(next.version(), live.version());
+            assert_eq!(next.record(), live.record());
+            // A live viewer goes on without the new baseline; a wrong digest is refused.
+            let id = replica::encode::from_hex(g).unwrap();
+            let digest = live.hash().unwrap();
+            assert_eq!(
+                live.cross(&id, &[0; 32]).unwrap_err().name,
+                "stream-handoff-state"
+            );
+            live.cross(&id, &digest).unwrap();
+        }
+        let parts = if i == 3 { 2 } else { 3 };
+        for n in 0..parts {
+            live.play(&bytes(g, &n.to_string())).unwrap();
+        }
+    }
+    assert_eq!(
+        handoff[0],
+        Value::Uint(
+            PublicPlayer::start(h.stored(), &bytes(&began[3], "baseline"))
+                .unwrap()
+                .version()
+        )
+    );
+    // A writer reopened from the Store after every record, rollovers included, writes the same files and pointer.
+    let (again, pointer_again, began_again) = i3825_run(
+        "restarted",
+        11,
+        &(0..11).collect::<Vec<_>>(),
+        Duration::from_secs(3600),
+    );
+    assert_eq!(began_again, began);
+    assert_eq!(again, gens, "a restart publishes the same bytes");
+    assert_eq!(pointer_again, pointer);
+    // With no grace, only the current and the previous generation stay.
+    let (pruned, _, _) = i3825_run("pruned", 11, &[], Duration::ZERO);
+    assert_eq!(
+        pruned.keys().collect::<Vec<_>>(),
+        {
+            let mut kept = vec![&began[2], &began[3]];
+            kept.sort();
+            kept
+        },
+        "the previous generation is kept, older ones pruned"
+    );
+    assert_eq!(pruned[&began[3]], gens[&began[3]]);
+}

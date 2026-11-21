@@ -173,6 +173,13 @@ fn serve_entries(
         lines.push(std::mem::take(&mut line));
     }
     print!("serve: {line}");
+    // The world's stdout stays read (#3825): with the pipe closed, its first line after start-up (a watchdog's stall
+    // report) panicked the thread that wrote it.
+    std::thread::spawn(move || {
+        for l in out.lines().map_while(Result::ok) {
+            println!("worldd: {l}");
+        }
+    });
     let s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(90))).unwrap();
     let mut soul = Client(s, Id::new(Scope([0xc1; 16]), 1).unwrap(), 0, lineage);
@@ -2083,10 +2090,11 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
             )
             .unwrap();
             let stream = dir.join(world.get("stream").and_then(|v| v.str()).unwrap());
-            let (mut player, mut generation, mut next) = (None, Vec::new(), 0u64);
+            let (mut player, mut generation, mut next) = (None::<PublicPlayer>, Vec::new(), 0u64);
+            let mut crossed = 0u64;
             let (mut played, mut samples, mut lags, mut busy) =
                 (0u64, 0usize, Vec::new(), Duration::ZERO);
-            let (start, mut first_newest, mut last_newest) = (Instant::now(), None, 0u64);
+            let start = Instant::now();
             // Writer lag: world time now less the newest published part's end, µs, while measuring.
             let mut behind: Vec<i64> = Vec::new();
             // The same during the warm-up (the joins just made): (seconds since the walkers started, µs behind).
@@ -2095,7 +2103,7 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
             while !stop.load(Ordering::Relaxed) {
                 if measuring.is_none() && start.elapsed() >= warmup {
                     measuring = Some(Instant::now());
-                    (played, samples, busy, first_newest) = (0, 0, Duration::ZERO, None);
+                    (played, samples, busy) = (0, 0, Duration::ZERO);
                     lags.clear();
                 }
                 let Ok(bytes) = std::fs::read(stream.join("pointer")) else {
@@ -2112,25 +2120,62 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
                 };
                 let parts = stream.join("g").join(replica::encode::to_hex(g));
                 if *g != generation {
+                    // #3825: a live reader on the generation the handoff closes drains it to its end, where its state
+                    // is the new baseline's (the same digest), and crosses with no gap.
+                    if let (Some(p), Some(Value::Array(h)), Some(Value::Bytes(from))) =
+                        (player.as_mut(), fields.get(&9), fields.get(&10))
+                        && *from == generation
+                    {
+                        let old = stream.join("g").join(replica::encode::to_hex(from));
+                        let [Value::Uint(_), Value::Uint(end), Value::Bytes(digest)] = h.as_slice()
+                        else {
+                            panic!("a handoff")
+                        };
+                        while next < *end {
+                            let bytes = std::fs::read(old.join(next.to_string()))
+                                .expect("the old generation's part");
+                            p.play(&bytes)
+                                .expect("the public reader drains the old generation");
+                            samples += p.samples().len();
+                            next += 1;
+                        }
+                        assert_eq!(
+                            p.hash().unwrap(),
+                            *digest,
+                            "the old generation ends at the handoff"
+                        );
+                        crossed += 1;
+                    }
                     let headers = stream.ancestors().nth(3).unwrap().join("headers");
                     let header =
                         std::fs::read(headers.join(replica::encode::to_hex(&pointer.header)))
                             .unwrap();
                     let baseline = std::fs::read(parts.join("baseline")).unwrap();
-                    player =
-                        Some(PublicPlayer::start(&header, &baseline).expect("the public reader"));
+                    let fresh = PublicPlayer::start(&header, &baseline).expect("the public reader");
+                    if let Some(p) = &player
+                        && next > 0
+                    {
+                        assert_eq!(
+                            fresh.hash().unwrap(),
+                            p.hash().unwrap(),
+                            "no gap at the crossing"
+                        );
+                    }
+                    player = Some(fresh);
                     generation = g.clone();
                     next = 0;
                 }
-                let newest = pointer.newest.unwrap_or(0);
+                // A generation just begun has no part yet.
+                let Some(newest) = pointer.newest else {
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                };
                 let lag = answers::now() - pointer.newest_to.unwrap_or(0);
                 if measuring.is_some() {
-                    first_newest.get_or_insert(newest);
                     behind.push(lag);
                 } else {
                     warming.push((start.elapsed().as_secs_f64(), lag));
                 }
-                last_newest = newest;
                 let p = player.as_mut().unwrap();
                 while next <= newest {
                     let t = Instant::now();
@@ -2165,7 +2210,11 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
                 behind.iter().max().copied().unwrap_or(0) as f64 / 1e6,
                 behind.last().copied().unwrap_or(0) as f64 / 1e6
             );
-            let written = last_newest - first_newest.unwrap_or(0);
+            // Parts are numbered within a generation (#3825): those written while measuring are those played then,
+            // and those left to play at the end, less those left at the start.
+            let written = (played + lags.last().copied().unwrap_or(0))
+                .saturating_sub(lags.first().copied().unwrap_or(0));
+            println!("generations crossed by the live reader: {crossed}");
             (
                 written as f64 / wall,
                 played as f64 / wall,
@@ -2259,7 +2308,8 @@ fn stream_files(views: &Path) -> BTreeMap<String, Vec<u8>> {
 /// same, byte for byte, as when every part is worked out whole (`SOULS_STREAM_WHOLE`). A recorded world
 /// (`V2_RECORDED_WORLD`, e.g. kept by the A5 run with `V2_KEEP_WORLD`) is served twice from copies with no stream: the
 /// stream is written again from the whole log at start-up, once each way; the two are compared file by file, and
-/// the time each start-up took to write it is printed.
+/// the time each start-up took to write it is printed. Both runs roll the stream over to a new generation every
+/// `V2_GENERATION_PARTS` (100) parts (#3825), so the rollovers' baselines are compared too.
 #[test]
 #[ignore = "needs a recorded world (V2_RECORDED_WORLD) and a built worldd (see the module doc)"]
 fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
@@ -2282,6 +2332,12 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
         if whole {
             c.env("SOULS_STREAM_WHOLE", "1");
         }
+        c.env(
+            "SOULS_STREAM_GENERATION_PARTS",
+            std::env::var("V2_GENERATION_PARTS").unwrap_or_else(|_| "100".into()),
+        );
+        // Nothing pruned while the start-up writes, however long it takes: both runs keep every generation.
+        c.env("SOULS_STREAM_PRUNE_GRACE_S", "86400");
         let mut child = c.spawn().unwrap();
         let mut out = BufReader::new(child.stdout.take().unwrap());
         let (mut line, mut before, mut written) = (String::new(), None, None);
@@ -2334,6 +2390,12 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
         whole.len() - both.len()
     );
     assert!(both.len() > 100, "a recorded world of many parts");
+    let generations: std::collections::BTreeSet<&str> = rows
+        .keys()
+        .filter_map(|k| k.split("/g/").nth(1)?.split('/').next())
+        .collect();
+    println!("{} generations", generations.len());
+    assert!(generations.len() > 1, "the stream rolled over (#3825)");
     assert!(
         differ.is_empty(),
         "byte for byte: {:?}",
