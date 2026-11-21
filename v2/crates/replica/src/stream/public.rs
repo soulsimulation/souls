@@ -870,6 +870,19 @@ impl PublicPlayer {
     pub fn play_deferred(&mut self, bytes_: &[u8]) -> R<Played> {
         self.play_digest(bytes_, false)
     }
+    /// Continues on the stream's next generation (#3825) without fetching its baseline, which holds this very
+    /// state: the handoff's `digest` must be this state's (worked out now if parts were played deferred). The new
+    /// generation's parts are then bound to `generation`, its baseline's SHA-256, and numbered from 0; the first one's
+    /// prior digest is this state's, so a wrong generation or state is still refused at the first part.
+    pub fn cross(&mut self, generation: &[u8], digest: &[u8]) -> R<()> {
+        self.verify()?;
+        if generation.len() != 32 || self.digest != digest {
+            return refuse("stream-handoff-state", "the handoff is not of this state");
+        }
+        self.baseline = generation.to_vec();
+        self.next = 0;
+        Ok(())
+    }
     /// Works out the state's digest when parts were played deferred since it was last worked out, and refuses the
     /// state (`stream-digest`) unless it is the digest the newest part claimed.
     pub fn verify(&mut self) -> R<()> {

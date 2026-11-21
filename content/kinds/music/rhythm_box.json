@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "kick_1": {
-      "n": 1,
+      "n": 28,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "hit",
@@ -13,7 +13,7 @@
       }
     },
     "kick_2": {
-      "n": 2,
+      "n": 29,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -22,7 +22,7 @@
       }
     },
     "kick_3": {
-      "n": 3,
+      "n": 30,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -31,7 +31,7 @@
       }
     },
     "kick_4": {
-      "n": 4,
+      "n": 31,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -40,7 +40,7 @@
       }
     },
     "kick_5": {
-      "n": 5,
+      "n": 32,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "hit",
@@ -49,7 +49,7 @@
       }
     },
     "kick_6": {
-      "n": 6,
+      "n": 33,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -58,7 +58,7 @@
       }
     },
     "kick_7": {
-      "n": 7,
+      "n": 34,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -67,7 +67,7 @@
       }
     },
     "kick_8": {
-      "n": 8,
+      "n": 35,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -76,7 +76,7 @@
       }
     },
     "snare_1": {
-      "n": 9,
+      "n": 36,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -85,7 +85,7 @@
       }
     },
     "snare_2": {
-      "n": 10,
+      "n": 37,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -94,7 +94,7 @@
       }
     },
     "snare_3": {
-      "n": 11,
+      "n": 38,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "hit",
@@ -103,7 +103,7 @@
       }
     },
     "snare_4": {
-      "n": 12,
+      "n": 39,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -112,7 +112,7 @@
       }
     },
     "snare_5": {
-      "n": 13,
+      "n": 40,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -121,7 +121,7 @@
       }
     },
     "snare_6": {
-      "n": 14,
+      "n": 41,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -130,7 +130,7 @@
       }
     },
     "snare_7": {
-      "n": 15,
+      "n": 42,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "hit",
@@ -139,7 +139,7 @@
       }
     },
     "snare_8": {
-      "n": 16,
+      "n": 43,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -148,7 +148,7 @@
       }
     },
     "hat_1": {
-      "n": 17,
+      "n": 44,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "hit",
@@ -157,7 +157,7 @@
       }
     },
     "hat_2": {
-      "n": 18,
+      "n": 45,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -166,7 +166,7 @@
       }
     },
     "hat_3": {
-      "n": 19,
+      "n": 46,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "hit",
@@ -175,7 +175,7 @@
       }
     },
     "hat_4": {
-      "n": 20,
+      "n": 47,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -184,7 +184,7 @@
       }
     },
     "hat_5": {
-      "n": 21,
+      "n": 48,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "hit",
@@ -193,7 +193,7 @@
       }
     },
     "hat_6": {
-      "n": 22,
+      "n": 49,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -202,7 +202,7 @@
       }
     },
     "hat_7": {
-      "n": 23,
+      "n": 50,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "hit",
@@ -211,7 +211,7 @@
       }
     },
     "hat_8": {
-      "n": 24,
+      "n": 51,
       "type": "enum",
       "values": ["rest", "hit"],
       "default": "rest",
@@ -220,7 +220,7 @@
       }
     },
     "tempo": {
-      "n": 25,
+      "n": 52,
       "type": "enum",
       "values": ["bpm_60", "bpm_90", "bpm_120"],
       "default": "bpm_90",
@@ -229,7 +229,7 @@
       }
     },
     "playing": {
-      "n": 26,
+      "n": 53,
       "type": "bool",
       "default": false,
       "audience": {

@@ -3,8 +3,8 @@
   "kind": "eden:oil_lantern",
   "owner": "thing",
   "state": {
-    "oil": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } },
-    "lit": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+    "oil": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } },
+    "lit": { "n": 29, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [0, 300, 0] },

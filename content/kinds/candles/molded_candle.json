@@ -3,8 +3,8 @@
   "kind": "eden:molded_candle",
   "owner": "thing",
   "state": {
-    "shape": { "n": 1, "type": "enum", "values": ["pillar", "taper"], "default": "pillar", "audience": { "rule": "everyone" } },
-    "colour": { "n": 2, "type": "enum", "values": ["red", "blue", "ivory"], "default": "ivory", "audience": { "rule": "everyone" } }
+    "shape": { "n": 28, "type": "enum", "values": ["pillar", "taper"], "default": "pillar", "audience": { "rule": "everyone" } },
+    "colour": { "n": 29, "type": "enum", "values": ["red", "blue", "ivory"], "default": "ivory", "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [0, 50, 0] }

@@ -3,7 +3,7 @@
   "kind": "eden:pitcher",
   "owner": "thing",
   "state": {
-    "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 1000, "audience": { "rule": "everyone" } }
+    "water": { "n": 28, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 1000, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [-135, 150, 0] },
