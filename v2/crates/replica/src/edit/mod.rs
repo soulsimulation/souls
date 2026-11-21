@@ -709,10 +709,10 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
         let mut stack = vec![tree.root()];
         let mut users = Vec::new();
         while let Some(h) = stack.pop() {
-            if let Some(n) = tree.node(h) {
-                if n.kind().as_str() == full {
-                    users.push(Ref::Node(n.id()));
-                }
+            if let Some(n) = tree.node(h)
+                && n.kind().as_str() == full
+            {
+                users.push(Ref::Node(n.id()));
             }
             stack.extend(tree.children(h).unwrap_or(&[]).iter().copied());
         }
