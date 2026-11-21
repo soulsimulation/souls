@@ -230,6 +230,8 @@ const KEY: &str = "souls:effect";
 /// A run's start and its end: fields 1 the run, 2 the body, and on the end 3 the ending's name.
 const STARTED: &str = "souls:form-started";
 const ENDED: &str = "souls:form-ended";
+/// The event of the entry that records a run's move as it starts (B2's record, field 3): observed by viewers only.
+const MOVED: &str = "souls:form-move";
 /// The reservation's link type: from the body to the thing.
 pub(crate) const RESERVES: &str = "souls:reserves";
 
@@ -1278,7 +1280,15 @@ impl Forms {
                     node,
                     now,
                 ) {
-                    Ok(n) => fr.mv = Some(n),
+                    Ok(n) => {
+                        fr.mv = Some(n);
+                        // The move's record (B2) for viewers: the page draws a gesture from it (#3741).
+                        if let Some(r) = w.moves.record(n) {
+                            let o = Open { run, body, node: fr.node, intent: fr.intent.id, actor: fr.intent.actor, link: None };
+                            let fields = BTreeMap::from([(1, Value::Uint(run)), (2, body.to_value()), (3, r.to_value())]);
+                            self.out.push(entry(&o, now, Vec::new(), name(MOVED), fields));
+                        }
+                    }
                     Err(r) => self.wake(w, run, Woke::Moved(name(r.name)), now),
                 }
             }
