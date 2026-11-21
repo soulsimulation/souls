@@ -155,11 +155,12 @@ test('A1, A2: can answers from the local check; a walk to a named thing and a si
   assert.equal(q.ok, true, JSON.stringify(q));
   assert.equal(q.answers[0].found[0].id, room);
   assert.ok(q.answers[1].inside.length > 0 && q.answers[2].found.some((r) => r.id === room), JSON.stringify(q.answers));
-  // #3851: near the Soul's own body, from the poses the copy holds; a near the copy cannot place is answered by name.
-  const near = souls(home, ['query', JSON.stringify([{ find: 'room', near: 'me', within: 1000 }, { kind: bare0().kind, near: room, within: 0 }, { find: 'room', near: 'nowhere at all' }])]);
+  // #3851: near a node, from the poses the copy holds; a near the copy cannot place is answered by name.
+  const child = q.answers[1].inside[0];
+  const near = souls(home, ['query', JSON.stringify([{ find: child.name, near: room, within: 1000 }, { kind: bare0().kind, near: room, within: 1000 }, { find: 'room', near: 'nowhere at all' }])]);
   assert.equal(near.ok, true, JSON.stringify(near));
-  const there = near.answers[0].found?.find((r) => r.id === room);
-  assert.ok(there && Number.isFinite(there.metres) && near.answers[0].near.within === 1000, JSON.stringify(near.answers[0]));
+  const there = near.answers[0].found?.find((r) => r.id === child.id);
+  assert.ok(there && Number.isFinite(there.metres) && near.answers[0].near.id === room, JSON.stringify(near.answers[0]));
   assert.ok(!near.answers[1].found.some((r) => r.id === room), 'the anchor itself is not near itself');
   assert.equal(near.answers[2].code, 'query.unknown-near');
   const b = souls(home, ['batch', JSON.stringify([{ look: {} }, { find: 'room' }, { inspect: room }, { act: `sit:${chair}` }])]);
