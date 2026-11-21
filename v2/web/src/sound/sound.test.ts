@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { encode } from 'cborg';
 import { happenedIn, happenedInPart, unpack } from './record.ts';
-import { heardAt, KINDS, lastingOf, MAX_SHOTS, soundsOf, Steps, STRIDE, type Sounding } from './plan.ts';
+import { heardAt, KINDS, kindSounds, lastingOf, MAX_SHOTS, soundsOf, Steps, STRIDE, type Sounding } from './plan.ts';
 import { loadSettings, saveSettings } from './settings.ts';
 import { loop, LOOP_SECONDS, shot, SHOTS } from './synth.ts';
 import { lags } from './sound.ts';
@@ -85,6 +85,10 @@ test('far sources give way first: a crowd is the nearest few footsteps', () => {
 test('step 0: imported Eden\'s kinds that carry a sound', () => {
   assert.equal(Object.keys(KINDS).length, 16);
   assert.deepEqual(KINDS['core:fountain'].map((s) => s.kind), ['water', 'water', 'birds']);
+  // Full Eden's import names the same kinds `eden:` with a revision hash (#3690): they sound the same.
+  assert.deepEqual(kindSounds('eden:fountain@1220ab').map((s) => s.kind), ['water', 'water', 'birds']);
+  assert.equal(lastingOf('n1', 'eden:duck@1220cd', [0, 0, 0]).length, 1);
+  assert.deepEqual(kindSounds('eden:bench_seat@1220ef'), []);
 });
 
 test('A3: the switch is remembered', () => {

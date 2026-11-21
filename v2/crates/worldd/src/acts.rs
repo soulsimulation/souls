@@ -59,6 +59,7 @@ use replica::effects::{Actor, Body, Effect, Refusal, TimerRec};
 use replica::encode::Name;
 use replica::host::{Answer, Ask, F_CROSSING, Seen};
 use replica::ids::{Id, Minter, Scope};
+use replica::intents::{Intent as WireIntent, Target};
 use replica::kinds::sizes::Build;
 use replica::moves::{Effector, Move};
 use replica::pose::Vec3;
@@ -317,6 +318,9 @@ struct Sight<'a> {
     context: BTreeMap<Id, (Id, usize, usize)>,
     /// Each run's walk in progress to a named point: its step, the point's node and the point's name (C34, #3599).
     walks: BTreeMap<Id, (usize, Id, Name)>,
+    /// Each run's walk in progress right before a sit into a slot the places hold: its step, the seat's floor and its
+    /// stand point on that floor (moved clear at registration when the entry's point is blocked).
+    sit_walks: BTreeMap<Id, (usize, Id, Vec3)>,
     planning: &'a RefCell<Planning>,
     map: Arc<Versions>,
 }
@@ -391,7 +395,7 @@ impl Sight<'_> {
             return None;
         }
         self.kinds
-            .get(plain(n.kind()))?
+            .get(entry_of(&n))?
             .get("areas")?
             .get(point.as_str())?;
         let place = n.place()?;
@@ -441,6 +445,7 @@ impl Geometry for Sight<'_> {
         match q {
             Ask::Toward { to, .. } => {
                 let me = self.bodies.get(&body)?;
+                let waiting = std::cell::Cell::new(false);
                 let [x, z] = match &self.split {
                     Some(_) => self.with_view(body, |v| {
                         let step = self.context.get(&body)?.2;
@@ -473,6 +478,7 @@ impl Geometry for Sight<'_> {
                         }
                         // Waiting for the existing planner is not evidence that a physical walk stalled.
                         if !pending.is_empty() {
+                            waiting.set(true);
                             return Some([me.pose.position.x, me.pose.position.z]);
                         }
                         Some(corner)
@@ -481,9 +487,12 @@ impl Geometry for Sight<'_> {
                 };
                 let y = if [x, z] == [to.x, to.z] { to.y } else { 0 };
                 let here = [me.pose.position.x, me.pose.position.z];
-                self.asked
-                    .borrow_mut()
-                    .insert(body, (sim::walk::node_of(me), here, [x, z], [to.x, to.z]));
+                // A tick spent waiting for the planner is no tick of walking: the stall watch starts again (C21).
+                if !waiting.get() {
+                    self.asked
+                        .borrow_mut()
+                        .insert(body, (sim::walk::node_of(me), here, [x, z], [to.x, to.z]));
+                }
                 Some(Answer::Point(Vec3::new(x, y, z)))
             }
             Ask::Near { .. } => Some(Answer::Near(Vec::new())),
@@ -500,6 +509,11 @@ impl Geometry for Sight<'_> {
         };
         let Some(me) = self.bodies.get(&body) else {
             return WalkPlan::Legs(Vec::new());
+        };
+        // A walk before a sit goes to the seat's own stand point, the one its sit is measured from.
+        let (node, at) = match self.sit_walks.get(&body) {
+            Some(&(at_step, floor, stand)) if at_step == step => (floor, stand),
+            _ => (node, at),
         };
         let (node, at) = match self.area_floor(body, step, node, at) {
             Some(Some(on)) => on,
@@ -589,7 +603,7 @@ impl Sight<'_> {
     fn to_thing(&self, body: Id, floor: Id, from: Vec3, target: Id, point: &Name) -> Option<i64> {
         self.with_view(body, |view| {
             let n = self.tree.node(self.tree.handle(target)?)?;
-            let entry = self.kinds.get(plain(n.kind()))?;
+            let entry = self.kinds.get(entry_of(&n))?;
             // A body on one of the thing's own floors (inside a greenhouse, C34 #3599) is in the thing's frame: a floor
             // is placed at its building's origin. Carried up the tree, the point would land on the ground cut out under it.
             let own_floor = self
@@ -777,10 +791,65 @@ pub fn library() -> R<Vec<Move>> {
     crate::moves::library()
 }
 
+/// The name of a node's Soul Actions entry ([`import_eden::entry_name`]): the entry it names, else its kind's.
+fn entry_of<'a>(n: &'a replica::tree::NodeRef<'_>) -> &'a str {
+    import_eden::entry_name(n.kind().as_str(), n.fields())
+}
+
 /// The plain name (`namespace:name`) of a node's kind.
 fn plain(kind: &Name) -> &str {
     let k = kind.as_str();
     k.split_once('@').map_or(k, |(p, _)| p)
+}
+
+/// The declared nearest-free seat form (#3573): `sit` taking one slot of this thing's free slots nearest me, walked to and
+/// then sat in. Its slot is bound by the form runner's pick (#3802); this only recognises the shape, so a bare fixture
+/// sit is routed through the form's own approach.
+fn fixture_seat<'a>(entry: &'a Json, form: &str) -> Option<&'a str> {
+    if form != "sit" {
+        return None;
+    }
+    let f = entry.get("forms")?.get(form)?;
+    let [(arg, take)] = f.get("takes")?.obj()? else {
+        return None;
+    };
+    let select = take.get("select")?;
+    if take.get("type")?.str()? != "slot"
+        || select.obj()?.len() != 5
+        || select.get("of")?.str()? != "free_slots"
+        || select.get("in")?.str()? != "this"
+        || select.get("anchor")?.str()? != "me"
+        || select.get("order")?.str()? != "nearest"
+        || !matches!(select.get("rank"), Some(Json::Int(1)))
+    {
+        return None;
+    }
+    let [walk, sit] = f.get("steps")?.arr()? else {
+        return None;
+    };
+    (walk.get("step")?.str()? == "walk_to"
+        && walk.get("point")?.get("arg")?.str()? == arg
+        && sit.get("step")?.str()? == "sit"
+        && sit.get("slot")?.get("arg")?.str()? == arg)
+        .then_some(arg.as_str())
+}
+
+impl Acts {
+    /// A bare fixture sit uses its actual entry's approach; explicit arguments and selectors keep their path.
+    pub(crate) fn fixture_sit(&self, tree: &Tree, intent: &WireIntent) -> bool {
+        if intent.parameters.contains_key(&1)
+            || !matches!(intent.verb.as_str().split_once(':'), Some((ns, "sit")) if ns != "souls")
+        {
+            return false;
+        }
+        let Some(Target::Node(node)) = &intent.target else {
+            return false;
+        };
+        tree.handle(*node)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| self.kinds.get(plain(n.kind())))
+            .is_some_and(|entry| fixture_seat(entry, "sit").is_some())
+    }
 }
 
 impl Acts {
@@ -887,8 +956,17 @@ impl Acts {
         let context = self.forms.planning_context();
         let walks = self.forms.walks();
         self.planning.borrow_mut().keep(&context);
+        let mut sit_walks = BTreeMap::new();
         let (controller, split, slots, map, questions) = match bodies {
             Some(b) => {
+                for (body, (step, node, slot)) in self.forms.seat_walks() {
+                    if let Some(p) = b.slots.place_in(node, slot)
+                        && let Ok(stand) = p.stand()
+                    {
+                        let y = p.point.y - p.place.height;
+                        sit_walks.insert(body, (step, p.floor, Vec3::new(stand.x, y, stand.z)));
+                    }
+                }
                 self.planning
                     .borrow_mut()
                     .receive(std::mem::take(&mut b.form_answers));
@@ -935,6 +1013,7 @@ impl Acts {
             asked: RefCell::new(BTreeMap::new()),
             context,
             walks,
+            sit_walks,
             planning: &self.planning,
             map,
         };
@@ -980,7 +1059,7 @@ impl Acts {
             let kind = tree
                 .handle(*node)
                 .and_then(|h| tree.node(h))
-                .map(|n| plain(n.kind()).to_owned());
+                .map(|n| entry_of(&n).to_owned());
             // A thing already gone is refused by name here, never handed to the runner (F4's known gap).
             let Some(kind) = kind else {
                 first.get_or_insert(refusal("thing-missing", replica::world_model::show(*node)));
@@ -1263,7 +1342,7 @@ impl Acts {
         let entry = tree
             .handle(node)
             .and_then(|h| tree.node(h))
-            .and_then(|n| self.kinds.get(plain(n.kind())).cloned());
+            .and_then(|n| self.kinds.get(entry_of(&n)).cloned());
         let asked = match entry {
             None => Err(refusal("thing-missing", replica::world_model::show(node))),
             Some(entry) => {

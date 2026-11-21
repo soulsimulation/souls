@@ -160,9 +160,11 @@ fn position(record: &Cbor) -> Option<[i128; 3]> {
     v.try_into().ok()
 }
 
-/// The kind's plain name (`namespace:name`) of a node record.
+/// The plain name (`namespace:name`) of a node record's Soul Actions entry: the entry its field 27 names
+/// ([`import_eden::F_ENTRY`], from its world's map), else its kind's.
 fn plain_kind(record: &Cbor) -> Option<&str> {
-    let Cbor::Text(k) = field(record, 2)? else {
+    let named = field(record, 6).and_then(|f| field(f, import_eden::F_ENTRY));
+    let Some(Cbor::Text(k)) = named.or_else(|| field(record, 2)) else {
         return None;
     };
     Some(k.as_str().split_once('@').map_or(k.as_str(), |(p, _)| p))

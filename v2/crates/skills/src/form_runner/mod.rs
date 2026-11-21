@@ -1672,6 +1672,12 @@ impl Runner {
         }
     }
 
+    /// The step after the one in progress, if the run has not ended and there is one.
+    pub fn next_step(&self) -> Option<&Step> {
+        self.step()?;
+        self.steps.get(self.at + 1)
+    }
+
     /// The number of the step in progress, if the run has not ended.
     pub fn at(&self) -> Option<usize> {
         self.step().map(|_| self.at)
