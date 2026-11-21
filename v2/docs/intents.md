@@ -129,6 +129,14 @@ completed intent with the same form decoder as the gateway before sending it.
     receipt mapping each name to the id the world minted, or the refusal's name and the operation that failed. Code:
     `replica::edit::wire`. This adds a kind and two optional answer fields and changes no other kind's bytes
     (`goldens.txt`): additive, as the coordinator decided on #3362, so the protocol stays version 1.
+16. **A set-down is a form verb, `hands:set-down`** (E4's caller, #3604): its target is the thing the actor's body
+    holds, parameter 1 the placement word by its placements name under `place:` (`place:next_to`; here when
+    absent: a text in the log is a namespaced name), 2 the anchor's id for the words that need one, 3 the facing (a
+    node's id, or `place:to_wall`; as it was when absent). The world plans, builds and
+    judges it off the clock thread (E4's `sim::setdown` and G2's rule, on the edit checker's thread), then commits it
+    at a tick with lookups only (still in the same hand, its new parent still there, the bodies judged by the kept
+    guard) as one transfer under the intent: one receipt, or a refusal by name (`not-held`, `setdown.no-room`,
+    `edit.would-bury`, ...). Code: `worldd::setdown`; the daemon's `set-down` command sends it.
 
 **Step 0.** TRUNK's four orders are ranked fallbacks, a held stance, follow and standing in a queue: this page needs
 no fifth, and no field for a start time or a condition.

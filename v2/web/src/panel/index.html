@@ -45,6 +45,12 @@
         <div>Drag a thing to move it. Each release sends one edit.</div>
         <section id="prayers" aria-label="Prayers waiting for an answer"></section>
         <div id="warn"></div>
+        <section id="handoff" aria-label="Give this world to another account">
+          <h2>Give this world to another account</h2>
+          <form><label>Recipient account (optional)<input maxlength="48" autocomplete="off"></label><button type="submit">Offer this world</button></form>
+          <button type="button" data-cancel>Cancel offer</button>
+          <p role="status" aria-live="polite"></p>
+        </section>
         <div>Batches, newest first</div>
         <ol id="batches"></ol>
       </div>

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, ciRunsAt, deferredOnly, deferredReceipt, greenAtHead, greenCommand, lightOnly, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
+import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, V2_LEGS, WINDOW_LABELS, changedFiles, ciRunsAt, deferredOnly, deferredReceipt, greenAtHead, greenCommand, lightOnly, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
 import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 
 const names = files => jobsFor(files).include.map(j => j.name);
@@ -110,14 +110,16 @@ test('the soul-tools job runs on its own paths, full scope included, and on noth
   assert.ok(!('paths' in jobsFor(['tools/soul-trace/x.test.mjs']).include.find(j => j.name === 'soul-tools')));
 });
 
-test('a v2/-only change runs the v2 job alone, scope none; v2 runs on nothing else (K15, #2637)', () => {
+const V2_NAMES = ['v2-rust', 'v2-sim', 'v2-worldd', 'v2-wasm', 'v2-client'];
+test('a v2/-only change runs the v2 legs alone, scope none; v2 runs on nothing else (K15, #2637)', () => {
   for (const files of [['v2/x.rs'], ['v2/crates/seed/src/lib.rs', 'v2/docs/TRUNK.md', 'v2/Cargo.lock']]) {
-    assert.deepEqual(names(files), ['v2'], files.join());
+    assert.deepEqual(names(files), V2_NAMES, files.join());
+    assert.deepEqual(jobsFor(files).include.map(j => j.leg), V2_LEGS);
     assert.equal(jobsFor(files).scope, 'none');
     assert.equal(smokeFor(files), false);
   }
-  for (const f of ['apps/server/src/world.ts', 'apps/web/src/App.tsx', 'docs/testing.md', 'tools/v2/x.mjs']) assert.ok(!names([f]).includes('v2'), f);
-  assert.ok(names(['pnpm-lock.yaml']).includes('v2'), 'full scope includes it');
+  for (const f of ['apps/server/src/world.ts', 'apps/web/src/App.tsx', 'docs/testing.md', 'tools/v2/x.mjs']) assert.ok(!names([f]).some(n => n.startsWith('v2')), f);
+  for (const n of V2_NAMES) assert.ok(names(['pnpm-lock.yaml']).includes(n), `full scope includes ${n}`);
   assert.ok(!('paths' in jobsFor(['v2/x.rs']).include[0]));
 });
 
@@ -125,7 +127,8 @@ test('ci.yml: the v2 job skips the pnpm install and runs v2/tools/ci.sh on the p
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   const qualify = /^  qualify:[\s\S]*?(?=^  \S)/m.exec(workflow)?.[0] ?? '';
   assert.match(qualify, /if: matrix\.kind != 'v2'\n\s+run: pnpm install --frozen-lockfile/);
-  assert.match(qualify, /^\s+v2\)\n.*\n\s+bash v2\/tools\/ci\.sh$/m);
+  assert.match(qualify, /^\s+v2\)\n.*\n\s+bash v2\/tools\/ci\.sh "\$V2_LEG"$/m);
+  assert.match(qualify, /V2_LEG: \$\{\{ matrix\.leg \}\}/);
   assert.match(qualify, /rust-toolchain\.toml/);
   assert.match(qualify, /key: v2-cargo-.*hashFiles\('v2\/rust-toolchain\.toml', 'v2\/Cargo\.lock'\)/);
 });
@@ -446,7 +449,7 @@ const receiptStep = (name, conclusion = 'success') => ({ name, status: 'complete
 const aggregateName = 'Run echo "scope=$SCOPE repo=$REPO qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED green_at_head=$GREEN"';
 const receiptJob = (id, name, conclusion = 'success', steps = [receiptStep('Run assigned checks')]) => ({ run_id: id, head_sha: RECEIPT_SHA, name, status: 'completed', conclusion, steps });
 const deferredJobs = id => ({ total_count: 5, jobs: [receiptJob(id, 'scope'), receiptJob(id, 'repo'), receiptJob(id, 'matrix.name', 'skipped', []), receiptJob(id, 'smoke', 'skipped', []), receiptJob(id, 'ci-ok', 'failure', [receiptStep('Set up job'), receiptStep('Full CI deferred', 'failure'), receiptStep(aggregateName, 'skipped'), receiptStep('Complete job')])] });
-const qualifiedJobs = id => ({ total_count: 4, jobs: ['scope', 'repo', 'ci-ok', 'v2'].map(name => receiptJob(id, name)) });
+const qualifiedJobs = id => ({ total_count: 4, jobs: ['scope', 'repo', 'ci-ok', 'v2-rust'].map(name => receiptJob(id, name)) });
 
 test('deferred receipt: only verified closed-window siblings can precede an actual exact-head qualification', () => {
   const runs = [receiptRun(3), receiptRun(2), receiptRun(1, 'success')];
@@ -467,7 +470,7 @@ test('deferred receipt: missing, mixed, genuine failure or mismatched job eviden
   const variants = [
     e => e.jobs[0].conclusion = 'failure',
     e => e.jobs[1].steps.push(receiptStep('unexpected failure', 'failure')),
-    e => e.jobs[2] = receiptJob(2, 'v2', 'failure'),
+    e => e.jobs[2] = receiptJob(2, 'v2-rust', 'failure'),
     e => e.jobs[3].steps.push(receiptStep('unexpected work')),
     e => e.jobs[4].steps[1].name = 'actual qualification failed',
     e => e.jobs[4].steps[2].conclusion = 'failure',
