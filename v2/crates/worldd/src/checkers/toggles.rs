@@ -267,8 +267,8 @@ impl World {
         };
         // A rider born in it (a body changes its parent only by leaving and arriving, which this world does not run).
         let rider = self.id();
-        let seat = self.create(rider, "souls:body", punt, 0, &[]);
-        let part = self.part(vec![(self.root, create), (punt, seat)]);
+        let aboard = self.create(rider, "souls:body", punt, 0, &[]);
+        let part = self.part(vec![(self.root, create), (punt, aboard)]);
         self.replica
             .apply(&part)
             .unwrap_or_else(|e| panic!("the punt applies: {e}"));
