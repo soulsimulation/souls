@@ -64,7 +64,7 @@ pub const NEEDS: [&str; 14] = [
 ];
 
 /// The closed list of reasons a verdict of `no` names (`link_full` comes from working out effects, not a need).
-pub const REASONS: [&str; 17] = [
+pub const REASONS: [&str; 18] = [
     "field_differs",
     "slot_taken",
     "out_of_reach",
@@ -81,6 +81,7 @@ pub const REASONS: [&str; 17] = [
     "moves_by",
     "motion_unsaid",
     "needs_souls",
+    "none_selected",
     "bad_input",
 ];
 

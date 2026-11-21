@@ -1,0 +1,26 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:hollow_stump, a hiding place. A search names no thing: its selector (things in this stump, nearest me, first) chooses it as worldd does (#3914); an empty stump is refused none_selected.",
+  "cases": [
+    {
+      "name": "search_without_a_thing_finds_what_is_hidden",
+      "act": { "this": "st", "form": "search" },
+      "state": {
+        "actor": "b1",
+        "nodes": { "st": { "kind": "eden:hollow_stump", "slots": { "inside": ["ap"] } }, "ap": { "kind": "eden:apple" }, "b1": { "hands": { "right": null } } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "search_an_empty_stump_is_refused_none_selected",
+      "act": { "this": "st", "form": "search" },
+      "state": {
+        "actor": "b1",
+        "nodes": { "st": { "kind": "eden:hollow_stump", "slots": { "inside": [] } }, "b1": { "hands": { "right": null } } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "none_selected", "need": -1, "detail": { "node": "st", "arg": "thing" }, "fix": null }
+    }
+  ]
+}
