@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createOrigin } from '../../../tools/origin/origin.mjs';
+import { checkFeeds } from './news.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const CLI = join(v2, 'client/src/cli/souls.mjs');
@@ -50,7 +51,9 @@ test('A2: news prints the platform feed of the home\'s sites, then it is read; a
   assert.equal((await souls(home, 'news', 'today')).code, 'news-usage');
   // A new item: the next check fetches it, the next command mentions it once, and news prints it.
   appendFileSync(news, line({ id: 'f3', at: '2026-11-12T00:00:00.000Z', kind: 'release', title: 'Client 0.131', body: '' }));
-  assert.deepEqual((await souls(home, 'news', '--fetch')).checked, [base]);
+  // (A command's own detached check reaches HTTPS sites only; this loopback site is checked here as it would be.)
+  assert.deepEqual((await souls(home, 'news', '--fetch')).checked, [], 'not HTTPS');
+  assert.deepEqual(await checkFeeds(home, { force: true }), [base]);
   assert.deepEqual((await souls(home, 'list')).news, { unread: 1, then: 'news' });
   assert.equal((await souls(home, 'list')).news, undefined, 'once');
   assert.deepEqual((await souls(home, 'news')).items.map((i) => i.id), ['f3']);

@@ -25,8 +25,8 @@ export const feedDue = (c, now) => feedSites(c).filter((s) => { const f = c.feed
 const unreadOf = (f, mark = 'read') => (f?.items ?? []).filter((i) => num(i.id) > num(f[mark]));
 
 /** Asks each due site for the items after its cursor; a site that does not answer is tried again in 10 minutes. */
-export async function checkFeeds(home, { get = fetch, now = Date.now(), force = false } = {}) {
-  const due = update(home, (c) => { const d = force ? feedSites(c) : feedDue(c, now); for (const s of d) (c.feeds ??= {})[s] = { ...c.feeds[s], triedAt: now }; return d; });
+export async function checkFeeds(home, { get = fetch, now = Date.now(), force = false, secure = false } = {}) {
+  const due = update(home, (c) => { const d = (force ? feedSites(c) : feedDue(c, now)).filter((s) => !secure || s.startsWith('https:')); for (const s of d) (c.feeds ??= {})[s] = { ...c.feeds[s], triedAt: now }; return d; });
   const checked = [];
   for (const site of due) {
     try {
@@ -56,7 +56,8 @@ export async function checkFeeds(home, { get = fetch, now = Date.now(), force = 
 /** `news [--all]`: fetches what is due, then the unread items of every site, oldest first, all read now. */
 export async function newsCommand(home, args = [], io = {}) {
   if (args.length > 1 || (args.length && !['--all', '--fetch'].includes(args[0]))) throw Object.assign(new Error('news [--all]'), { code: 'news-usage' });
-  if (args[0] === '--fetch') return { ok: true, checked: await checkFeeds(home, { ...io, force: true }) };
+  // The detached check a command starts when news is due: sites on HTTPS only, as the released sites are.
+  if (args[0] === '--fetch') return { ok: true, checked: await checkFeeds(home, { ...io, secure: true }) };
   await checkFeeds(home, io);
   const items = update(home, (c) => {
     const out = [];

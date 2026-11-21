@@ -234,10 +234,10 @@ async function local({ local: op, soul: named, since, refs, force, ...asked }, h
   return { ok: true, soul, ...(await consolidateIn(home, soulDirOf(home, soul), { force })) };
 }
 
-/** #3708: when a site's news is due, one detached `news --fetch` checks it, at most every 5 minutes (as today). */
+/** #3708: when an HTTPS site's news is due, one detached `news --fetch` checks it, at most every 5 minutes (as today). */
 function fetchNewsLater(home) {
   try {
-    if (!feedDue(JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')), Date.now()).length) return;
+    if (!feedDue(JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')), Date.now()).some((s) => s.startsWith('https:'))) return;
     const mark = join(home, '.feed-check');
     try { if (Date.now() - statSync(mark).mtimeMs < 5 * 60_000) return; } catch { /* never started */ }
     writeFileSync(mark, '');
