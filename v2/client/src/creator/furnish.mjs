@@ -49,9 +49,11 @@ export function kindFor(def, kinds) {
   return Object.keys(kinds).find((k) => plain(k) === name) ?? null;
 }
 
-/** Whether `parent` (a full kind) admits `child` (a full kind), in its `slot` when given, as describe shows it. */
+/** Whether `parent` (a full kind) admits `child` (a full kind), in its `slot` when given, as describe shows it; yes
+ *  when the kinds' admissions are not known here (the world's check still judges it). */
 function admits(kinds, parent, child, slot) {
   const k = kinds[parent];
+  if (!k?.admits) return true;
   const list = slot === undefined ? k?.admits ?? [] : k?.slots?.[slot] ?? [];
   return list.some((a) => a === child || a === plain(child) || a === kinds[child]?.owner);
 }
@@ -60,9 +62,11 @@ function admits(kinds, parent, child, slot) {
  * The places that furnish `ref` (a building's id or one of its rooms') on `nodes` (an export of the copy), with
  * `kinds` (the pinned kinds, as describe shows them: full name → { owner, admits, slots }) and `entries` (kind
  * entries by plain kind, their `geometry.bounds_mm`). `style` overrides the building's. Gives { ops, placed, dropped,
- * notes, says } or a refusal by name.
+ * notes, says } or a refusal by name. Without `kinds`, the kinds the world already uses are its kinds, and their
+ * admissions are left to the world's check (a piece on another goes in its first slot).
  */
 export function furnishOps(nodes, ref, { style, kinds = {}, entries = {} } = {}) {
+  if (!Object.keys(kinds).length) kinds = Object.fromEntries(nodes.map((n) => [n.kind, {}]));
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const kids = new Map();
   for (const n of nodes) { if (!kids.has(n.parent)) kids.set(n.parent, []); kids.get(n.parent).push(n); }
@@ -150,7 +154,8 @@ export function furnishOps(nodes, ref, { style, kinds = {}, entries = {} } = {})
       const field = { 1: { hex: Buffer.from(name).toString('hex') } };
       if (it.on) {
         const host = named[it.on];
-        const slot = host ? Object.keys(kinds[host.kind]?.slots ?? {}).find((s) => admits(kinds, host.kind, kind, s)) : undefined;
+        const slots = kinds[host?.kind]?.admits ? Object.keys(kinds[host.kind].slots ?? {}) : ['1'];
+        const slot = host ? slots.find((s) => admits(kinds, host.kind, kind, s)) : undefined;
         if (!host) { dropped.push({ name, why: `no ${it.on} to put it on` }); continue; }
         if (slot === undefined) { dropped.push({ name, why: `${plain(host.kind)} has no slot for ${plain(kind)}` }); continue; }
         ops.push({ op: 'place', name: ops.length + 1, kind, in: host.name, slot: Number(slot), fields: field });

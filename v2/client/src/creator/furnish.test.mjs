@@ -59,3 +59,9 @@ test('a second furnish leaves what is there by today\'s name, and a piece standi
   assert.equal(furnishOps(house(false), `${S}-3`, { kinds, entries }).code, 'furnish.no-rooms');
   assert.equal(furnishOps(house(false), `${S}-2`, { kinds, entries, style: 'igloo' }).code, 'furnish.style');
 });
+
+test('with no kinds text here (a served creator\'s home), the kinds the world already uses are its kinds', () => {
+  const out = furnishOps(house(true), `${S}-2`, { entries });
+  assert.deepEqual(out.placed.map((p) => p.name), ['e_1/kitchen-chair-2', 'e_1/kitchen-stool']);
+  assert.ok(out.dropped.some((d) => d.name === 'e_1/kitchen-table' && /no kind/.test(d.why)));
+});
