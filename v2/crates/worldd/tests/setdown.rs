@@ -105,7 +105,16 @@ fn town() -> (Town, Id) {
         (6, Value::Array(Vec::new())),
         (7, Value::Array(Vec::new())),
     ]));
-    let header = Header::read(&encode(&v).unwrap()).unwrap();
+    town_with(Header::read(&encode(&v).unwrap()).unwrap())
+}
+
+/// N2's test world as a town under `header`: the world's own, for the bodies, so a part the world writes installs
+/// on their town (its header checked, G3).
+fn town_with(header: Header) -> (Town, Id) {
+    let w = testworld::generate(1, 0).expect("the test world");
+    let Import {
+        tree, rules, nodes, ..
+    } = import_eden::load(&w.text).expect("the test world loads");
     let next = tree.to_state().next;
     let ground = nodes["ground"];
     let town = Town::new(tree, ground, Doors::new(header, rules, next)).expect("the town");
@@ -349,7 +358,7 @@ fn world() -> Replica {
 
 /// The world's bodies: none; one seat, its stand point at the first birth's spot.
 fn bodies() -> Result<Bodies, replica::effects::Refusal> {
-    let (town, ground) = town();
+    let (town, ground) = town_with(world().header().clone());
     let mut b = Bodies::new(town, 50_000)?;
     let chair_def = decode(&fixture_bytes(CHAIR)?).unwrap();
     let s = first_spot();
