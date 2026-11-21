@@ -11,6 +11,7 @@ import { localAddresses, worldAddress } from '../source/address.ts';
 import { SocketSource, chooseFollow, exchange, type Session } from '../source/socket.ts';
 import { browserSession, localTestSignIn } from '../source/signin.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
+import { WorldHover } from '../crowd/hover.ts';
 import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
 import { support } from './support.ts';
@@ -82,6 +83,7 @@ const clock = new PlaybackClock();
 const things = pageThings(scene, world, new URLSearchParams(location.search));
 const souls = pageSouls(canvas, world, new URLSearchParams(location.search)); // W4: chips, status, speech, a Soul's page
 const director = new CameraDirector(cam, canvas, world, souls, new URLSearchParams(location.search), moment !== null); // V20: broadcast, follow, find
+const hover = new WorldHover(canvas, () => cam.camera, { world, things: () => things.layer, name: (id) => souls.copy.souls.get(id)?.name ?? null, chipShown: (id) => souls.placed.some((p) => p.id === id) }); scene.add(hover.ring); // N-V20
 Object.assign(globalThis, { v2: { renderer, scene, sky, cam, director, world, things, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 installCapture(globalThis as any, q, document); // G10: `shoot` names a place, Soul or thing and the camera goes there
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
@@ -193,6 +195,7 @@ renderer.setAnimationLoop((now) => {
   let drawn = 0;
   if (t !== null) {
     drawn = world.draw(t, cam.camera);
+    hover.update(now, t);
     if (!framed && drawn > 0) {
       framed = true;
       firstFrame();
