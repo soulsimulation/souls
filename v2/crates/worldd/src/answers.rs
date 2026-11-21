@@ -1785,8 +1785,8 @@ impl Clock {
                                     self.steps.insert(
                                         id,
                                         sim::edit::undo::Step {
-                                            build: build.as_str().to_owned(),
-                                            name: name.as_str().to_owned(),
+                                            build,
+                                            name,
                                         },
                                     );
                                 }

@@ -694,13 +694,12 @@ pub fn wire_edit_asked(
             .map_err(|_| JsError::new("scope-not-16-bytes"))?,
     );
     let id = Id::new(scope, counter).ok_or_else(|| JsError::new("id-counter-exhausted"))?;
-    let name = |t: &str| Name::new(t).ok_or_else(|| JsError::new("edit-step: a build or step name is a name"));
     let asked = match asked {
         "undo" => Asked::Undo,
         "redo" => Asked::Redo,
         "step" => Asked::Batch(
             ops_of(ops).map_err(|e| JsError::new(&format!("edit-batch: {e}")))?,
-            Some((name(build)?, name(step)?)),
+            Some((build.to_owned(), step.to_owned())),
         ),
         _ => return Err(JsError::new("edit-asked: undo, redo or step")),
     };

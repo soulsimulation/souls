@@ -1498,7 +1498,7 @@ async fn g4_undo_and_redo_on_the_wire_and_buildsafe_refuses_an_undo_onto_a_soul(
     assert_eq!((got.kind, got.reason.as_str()), (2, "undo.nothing-to-redo"));
 
     // A build's step: one wall, kept as step "shell" of build "hut".
-    let step = Some((Name::new("hut").unwrap(), Name::new("shell").unwrap()));
+    let step = Some(("hut".to_owned(), "the shell".to_owned()));
     let got = go(&mut ws, Asked::Batch(vec![wall(&w, -30 * M, 30 * M)], step)).await;
     assert_eq!(got.kind, 1, "the step commits: {got:?}");
     let placed = got.names[&1];

@@ -11,7 +11,8 @@
 //!   millimetres/millidegrees in the owning building's frame.
 //!
 //! An undo or a redo (G4) is the same verb with `{2: 1}` (undo) or `{2: 2}` (redo) and nothing else; a batch may carry
-//! its build's name and its step's (`{3: build, 4: step}`, both names) so the world keeps it as that build's step.
+//! its build's name and its step's (`{3: build, 4: step}`, both UTF-8 bytes, 1 to [`STEP_NAME_MOST`] each: words are
+//! bytes, T8) so the world keeps it as that build's step.
 //!
 //! A node is an id (`[scope, counter]`) or, for one placed earlier in the batch, its temporary name (an integer). A
 //! spot is `{1: position, 2: orientation, 3: support, 4: slot}` as T4's pose writes them, 4 left out when none.
@@ -36,12 +37,14 @@ pub const REDO_ONE: u64 = 2;
 /// A batch's build and step names (G4's builds with steps).
 pub const BUILD: u64 = 3;
 pub const STEP: u64 = 4;
+/// The longest build or step name, in bytes.
+pub const STEP_NAME_MOST: usize = 64;
 
 /// What an edit intent asks for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Asked {
     /// A batch, with its build's name and its step's when it is a build's step.
-    Batch(Vec<Op>, Option<(Name, Name)>),
+    Batch(Vec<Op>, Option<(String, String)>),
     Undo,
     Redo,
 }
@@ -320,8 +323,8 @@ pub fn parameters_of(asked: &Asked) -> BTreeMap<u64, Value> {
         Asked::Batch(ops, step) => {
             let mut p = parameters(ops);
             if let Some((b, s)) = step {
-                p.insert(BUILD, Value::Text(b.clone()));
-                p.insert(STEP, Value::Text(s.clone()));
+                p.insert(BUILD, Value::Bytes(b.clone().into_bytes()));
+                p.insert(STEP, Value::Bytes(s.clone().into_bytes()));
             }
             p
         }
@@ -337,6 +340,12 @@ pub fn read(parameters: &BTreeMap<u64, Value>) -> R<Vec<Op>> {
     }
 }
 
+fn step_name(b: &[u8]) -> Option<String> {
+    (!b.is_empty() && b.len() <= STEP_NAME_MOST)
+        .then(|| String::from_utf8(b.to_vec()).ok())
+        .flatten()
+}
+
 /// Reads what an edit intent's parameters ask for: `{2: 1}` an undo, `{2: 2}` a redo, else a batch
 /// (`{1: [...]}`, with `{3: build, 4: step}` both or neither).
 pub fn asked(parameters: &BTreeMap<u64, Value>) -> R<Asked> {
@@ -349,8 +358,11 @@ pub fn asked(parameters: &BTreeMap<u64, Value>) -> R<Asked> {
     }
     let step = match (parameters.get(&BUILD), parameters.get(&STEP)) {
         (None, None) => None,
-        (Some(Value::Text(b)), Some(Value::Text(s))) => Some((b.clone(), s.clone())),
-        _ => return Err("a build's step is {3: build, 4: step}, both names".into()),
+        (Some(Value::Bytes(b)), Some(Value::Bytes(s))) => match (step_name(b), step_name(s)) {
+            (Some(b), Some(s)) => Some((b, s)),
+            _ => return Err(format!("a build or step name is 1 to {STEP_NAME_MOST} bytes of UTF-8")),
+        },
+        _ => return Err("a build's step is {3: build, 4: step}, both bytes".into()),
     };
     let named = if step.is_some() { 3 } else { 1 };
     let (Some(Value::Array(a)), true) = (parameters.get(&OPS), parameters.len() == named) else {
