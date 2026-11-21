@@ -1297,8 +1297,12 @@ fn off_machine(
 fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
     let store = supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?;
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
-    let read = move || directory_creator_of(&store, &lineage, zone);
-    let creator = Arc::new(Creator::new(read().map_err(refusal)?));
+    let read = Arc::new(move || directory_creator_of(&store, &lineage, zone));
+    let admission = Arc::clone(&read);
+    let creator = Arc::new(Creator::with_reader(
+        read().map_err(refusal)?,
+        Arc::new(move || admission().ok().flatten()),
+    ));
     let say = |c: Option<Id>| c.map_or_else(|| "none".to_owned(), principal_text);
     println!("creator: {}", say(creator.get()));
     let watched = Arc::clone(&creator);

@@ -96,6 +96,10 @@ pub struct Card {
     pub former: Option<String>,
 }
 
+type OwnerReader = std::sync::Arc<
+    dyn Fn(&str) -> Result<crate::worlds::list::handoff::Ownership, String> + Send + Sync,
+>;
+
 pub struct Pairing {
     /// The page's origin, the start of the link a daemon prints.
     pub public_url: String,
@@ -103,6 +107,7 @@ pub struct Pairing {
     /// The gateway's tokens file, rewritten from the stored hashes after each pairing.
     tokens_file: Option<PathBuf>,
     authority_file: Option<PathBuf>,
+    owner_reader: std::sync::OnceLock<OwnerReader>,
     /// Per account, the times of its wrong short codes.
     guesses: Mutex<BTreeMap<String, Vec<u64>>>,
     /// Per secret hash, the last poll and the interval.
@@ -202,6 +207,7 @@ impl Pairing {
             db: Mutex::new(db),
             tokens_file,
             authority_file: std::env::var_os("DIRECTORYD_AUTHORITY_MAP").map(PathBuf::from),
+            owner_reader: std::sync::OnceLock::new(),
             guesses: Mutex::default(),
             polls: Mutex::default(),
         })
@@ -213,7 +219,7 @@ impl Pairing {
             .as_ref()
             .map(|path| {
                 let pairing = Pairing::open(path, c.gateway_tokens.clone(), &c.public_url)?;
-                {
+                if pairing.authority_file.is_none() {
                     let db = pairing.db.lock().expect("the store");
                     pairing
                         .write_tokens(&db)

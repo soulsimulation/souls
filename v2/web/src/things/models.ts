@@ -4,9 +4,12 @@
 // matrix in the model's frame each. The page admits no file of its own: what it draws is what the bake wrote.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { storeyOf, type Storey } from './interior.ts';
+import { isNightGlass, nightWindows } from './windows.ts';
 
-/** One drawn part of a model. `glow`: the parts a light's `on` (or `lit`) state brightens. */
-export type Part = { geometry: THREE.BufferGeometry; material: THREE.Material; matrix: THREE.Matrix4; key: string; glow: boolean };
+/** One drawn part of a model. `glow`: the parts a light's `on` (or `lit`) state brightens. `storey`: where a generated
+ *  building's part is (C10, `interior.ts`), so the interior view can hide its roof and upper storeys. */
+export type Part = { geometry: THREE.BufferGeometry; material: THREE.Material; matrix: THREE.Matrix4; key: string; glow: boolean; storey?: Storey };
 
 /** What the page needs of V17's `models.json`. */
 export type ModelIndex = {
@@ -35,11 +38,12 @@ const shared = new Map<string, THREE.Material>();
 function materialKey(m: THREE.Material): string {
   const s = m as THREE.MeshStandardMaterial;
   return [m.type, s.color?.getHexString(), s.roughness, s.metalness, s.emissive?.getHexString(), s.emissiveIntensity,
-    m.transparent, m.opacity, m.side, m.alphaTest, s.vertexColors].join('|');
+    m.transparent, m.opacity, m.side, m.alphaTest, s.vertexColors, isNightGlass(m)].join('|');
 }
 
-/** Every geometry in a batch has the same attributes and an index: position, normal and colour (three floats). */
-function plainGeometry(g: THREE.BufferGeometry): THREE.BufferGeometry {
+/** Every geometry in a batch has the same attributes and an index: position, normal and colour (three floats), and on
+ *  the building kit's window glass its pane (four floats, the bake's `_edenpane`; C10). */
+function plainGeometry(g: THREE.BufferGeometry, pane = false): THREE.BufferGeometry {
   const out = new THREE.BufferGeometry();
   const pos = g.getAttribute('position'), n = pos.count;
   out.setAttribute('position', new THREE.Float32BufferAttribute(Array.from({ length: n * 3 }, (_, i) => pos.getComponent(Math.floor(i / 3), i % 3)), 3));
@@ -47,6 +51,10 @@ function plainGeometry(g: THREE.BufferGeometry): THREE.BufferGeometry {
   out.setAttribute('normal', nor ? new THREE.Float32BufferAttribute(Array.from({ length: n * 3 }, (_, i) => nor.getComponent(Math.floor(i / 3), i % 3)), 3) : new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
   const col = g.getAttribute('color');
   out.setAttribute('color', new THREE.Float32BufferAttribute(col ? Array.from({ length: n * 3 }, (_, i) => col.getComponent(Math.floor(i / 3), i % 3)) : new Float32Array(n * 3).fill(1), 3));
+  if (pane) {
+    const p = g.getAttribute('_edenpane');
+    out.setAttribute('edenPane', new THREE.Float32BufferAttribute(p ? Array.from({ length: n * 4 }, (_, i) => p.getComponent(Math.floor(i / 4), i % 4)) : new Float32Array(n * 4), 4));
+  }
   out.setIndex(g.index ? Array.from(g.index.array) : Array.from({ length: n }, (_, i) => i));
   if (!nor) out.computeVertexNormals();
   return out;
@@ -63,11 +71,13 @@ export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMater
     if (!mesh.isMesh) return;
     let role = false;
     for (let p: THREE.Object3D | null = mesh; p; p = p.parent) if (glowRoles.includes(p.userData?.role)) role = true;
+    const storey = storeyOf(mesh) ?? undefined;
     for (const m of [mesh.material].flat()) {
       const k = materialKey(m);
       if (!shared.has(k)) {
         const s = m as THREE.MeshStandardMaterial;
         s.vertexColors = true;
+        if (isNightGlass(m)) nightWindows(m); // C10: rooms behind lit windows at night
         // A glowing material's light follows its instance's colour, so a light switched off stops glowing.
         if (s.emissive && s.emissive.getHex() !== 0) s.onBeforeCompile = (sh) => {
           sh.vertexShader = 'varying float vGlow;\n' + sh.vertexShader.replace('#include <color_vertex>',
@@ -80,7 +90,7 @@ export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMater
       const mat = shared.get(k)!;
       const s = mat as THREE.MeshStandardMaterial;
       const glow = role || (glowMaterials && ((s.emissive && s.emissive.getHex() !== 0) || mat.type === 'MeshBasicMaterial'));
-      parts.push({ geometry: plainGeometry(mesh.geometry), material: mat, matrix: mesh.matrixWorld.clone(), key: k, glow });
+      parts.push({ geometry: plainGeometry(mesh.geometry, isNightGlass(mat)), material: mat, matrix: mesh.matrixWorld.clone(), key: k, glow, ...(storey ? { storey } : {}) });
     }
   });
   return parts;
