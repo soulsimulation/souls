@@ -231,6 +231,7 @@ fn intent(actor: Actor, verb: &Name, sequence: u64) -> Vec<u8> {
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     encode(&i.to_value()).expect("an intent")
 }

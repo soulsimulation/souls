@@ -60,6 +60,7 @@ fn intent_to(grant: Grant, sequence: u64, verb: &str) -> Vec<u8> {
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     encode(&i.to_value()).unwrap()
 }

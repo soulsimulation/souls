@@ -209,6 +209,7 @@ fn intent(body: Id, sequence: u64, verb: &str, target: Option<Id>, point: Option
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     encode(&i.to_value()).unwrap()
 }

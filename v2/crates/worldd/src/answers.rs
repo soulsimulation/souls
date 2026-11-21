@@ -1802,6 +1802,7 @@ impl Clock {
                 fallbacks: Vec::new(),
                 replaces: None,
                 body: None,
+                reflex: false,
             };
             // Only a Soul with a body here (its link after a restart included); the directory never births one.
             if self.unborn(&intent).is_some() {
@@ -4120,6 +4121,7 @@ mod tests {
             }],
             replaces: None,
             body: None,
+            reflex: false,
         }
     }
 
@@ -4494,6 +4496,7 @@ mod tests {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         let place = Op::Place {
             name: 1,
