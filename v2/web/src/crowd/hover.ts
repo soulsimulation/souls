@@ -3,8 +3,11 @@
 // the ring and no tooltip (today's #1645: the chip already names it); one whose chip is not drawn (too far, crowded out,
 // `chips=0`) gets the tooltip. At most 30 picks a second, only while a mouse or pen rests over the view: touch never
 // hovers, and a drag clears it. Read-only: the pick reads the world view's bodies and the thing layer's boxes and
-// changes nothing drawn but the ring.
+// changes nothing drawn but the ring. Resting on the ground inside a named place (an area with a name and an outline)
+// shows a ring scaled to the place and its name, as today's `containingPlace` (#3779); a Soul or thing under the
+// pointer comes first.
 import * as THREE from 'three';
+import { placeWords } from '../places/places.ts';
 import { rayUnitBox, type ThingHit, type ThingLayer } from '../things/things.ts';
 import type { NodeRec } from '../source/source.ts';
 
@@ -23,6 +26,8 @@ export type HoverWorld = {
   nodes: Map<string, NodeRec>;
   tracks: Map<string, { at(t: number): [number, number, number] | null }>;
   frame(id: string | null): THREE.Matrix4;
+  /** The drawn ground's height at world `x`, `z` m, or null off it (`WorldView.heightAt`); 0 when absent. */
+  heightAt?(x: number, z: number): number | null;
 };
 export type HoverOptions = {
   world: HoverWorld;
@@ -33,7 +38,69 @@ export type HoverOptions = {
   /** Whether the Soul's name chip is drawn this frame. */
   chipShown: (id: string) => boolean;
 };
-export type HoverTarget = { kind: 'soul' | 'thing'; id: string; name: string; foot: THREE.Vector3; radius: number };
+export type HoverTarget = { kind: 'soul' | 'thing' | 'place'; id: string; name: string; foot: THREE.Vector3; radius: number; detail?: string };
+
+/** A named place for the hover: its outline `[x, z]` world m, and the height it stands at when raised off the ground
+ *  (an upper floor's room), else null. `detail` is its hours or events where the world publishes them. */
+export type HoverPlace = { id: string; name: string; outline: [number, number][]; level: number | null; detail?: string };
+/** A raised place claims only ground within this many metres of its height (today's `level` test). */
+export const LEVEL_M = 2;
+
+/** Today's rule (apps/web WorldHover `containingPlace`): of the places whose outline holds the point, and whose level is
+ *  within LEVEL_M of it when raised, the smallest, so the innermost place wins. */
+export function containingPlace(point: THREE.Vector3, places: Iterable<HoverPlace>): HoverPlace | null {
+  let best: HoverPlace | null = null, area = Infinity;
+  for (const place of places) {
+    if (place.level !== null && Math.abs(point.y - place.level) > LEVEL_M) continue;
+    const poly = place.outline;
+    let inside = false, size = 0;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [x, z] = poly[i], [a, b] = poly[j];
+      if (z > point.z !== b > point.z && point.x < ((a - x) * (point.z - z)) / (b - z) + x) inside = !inside;
+      size += (a + x) * (b - z);
+    }
+    if (inside && Math.abs(size) < area) (best = place), (area = Math.abs(size));
+  }
+  return best;
+}
+
+/** The world's named places, from the copy: every node with a public name and an outline. A place stands raised (an
+ *  upper floor) when its frame is more than LEVEL_M above the ground under its outline's middle. Kept per node record. */
+const placeCache = new WeakMap<NodeRec, HoverPlace>();
+export function* hoverPlaces(world: HoverWorld): Generator<HoverPlace> {
+  for (const n of world.nodes.values()) {
+    if (!n.placeName || !n.outline || n.outline.length < 3) continue;
+    let p = placeCache.get(n);
+    if (!p) {
+      const outline = n.outline.map(([x, z]) => [x * MM, z * MM] as [number, number]);
+      const cx = outline.reduce((s, q) => s + q[0], 0) / outline.length, cz = outline.reduce((s, q) => s + q[1], 0) / outline.length;
+      const y = new THREE.Vector3().applyMatrix4(world.frame(n.id)).y, ground = world.heightAt?.(cx, cz) ?? 0;
+      p = { id: n.id, name: placeWords(n.placeName), outline, level: y - ground > LEVEL_M ? y : null };
+      placeCache.set(n, p);
+    }
+    yield p;
+  }
+}
+
+/** Where a ray first meets the drawn ground (stepping out to 600 m, as today), or null when it looks up or misses. */
+export function groundAt(o: THREE.Vector3, d: THREE.Vector3, world: HoverWorld): THREE.Vector3 | null {
+  if (d.y >= -0.02) return null;
+  for (let k = 1; k < 600; k += Math.max(1, k * 0.025)) {
+    const p = o.clone().addScaledVector(d, k), h = world.heightAt?.(p.x, p.z) ?? 0;
+    if (p.y <= h) return (p.y = h), p;
+  }
+  return null;
+}
+
+/** The named place the ray's ground point lies in: a ring around its middle, scaled to it. */
+export function pickPlace(o: THREE.Vector3, d: THREE.Vector3, world: HoverWorld): HoverTarget | null {
+  const ground = groundAt(o, d, world);
+  const place = ground && containingPlace(ground, hoverPlaces(world));
+  if (!ground || !place) return null;
+  const mid = new THREE.Vector3(place.outline.reduce((s, q) => s + q[0], 0) / place.outline.length, ground.y, place.outline.reduce((s, q) => s + q[1], 0) / place.outline.length);
+  const radius = Math.max(8, ...place.outline.map(([x, z]) => Math.hypot(x - mid.x, z - mid.z)));
+  return { kind: 'place', id: place.id, name: place.name, foot: mid, radius, ...(place.detail ? { detail: place.detail } : {}) };
+}
 
 /** Where a ray (`o + k * d`, `d` unit) enters a standing cylinder on `foot`, or null. */
 export function rayBody(o: THREE.Vector3, d: THREE.Vector3, foot: THREE.Vector3, r = BODY_R, h = BODY_H): number | null {
@@ -67,9 +134,11 @@ export function thingName(n: NodeRec | undefined): string {
   return n.kind.split('@')[0].replace(/^.*:/, '').replace(/[-_]+/g, ' ').trim() || 'thing';
 }
 
-/** Today's tooltip text: the name, cut at 54 characters. */
-export function tooltipText(name: string): string {
-  return name.length > 54 ? name.slice(0, 53).trimEnd() + '…' : name;
+/** Today's tooltip text (`hoverTooltipText`): the name cut at 54 characters, and a place's hours or events after a
+ *  middle dot, cut at 76. */
+export function tooltipText(name: string, detail?: string): string {
+  const short = (s: string, max: number) => (s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s);
+  return short(name, 54) + (detail ? ` · ${short(detail, 76)}` : '');
 }
 
 /** Each solid of a thing as the world view draws it (its boxes, or half a metre with none), as unit-box frames
@@ -109,7 +178,7 @@ export function pickViewThing(origin: THREE.Vector3, dir: THREE.Vector3, world: 
   return { id: best.id, distance: near, foot: new THREE.Vector3().applyMatrix4(best.box), radius: Math.hypot(Math.hypot(e[0], e[1], e[2]), Math.hypot(e[8], e[9], e[10])) / 2 };
 }
 
-/** The nearest Soul or thing along a ray at world time `t`, within `far`. */
+/** The nearest Soul or thing along a ray at world time `t`, within `far`; else the named place on the ground under it. */
 export function pickAt(o: THREE.Vector3, d: THREE.Vector3, t: number, opts: HoverOptions, far = FAR): HoverTarget | null {
   const { world } = opts, foot = new THREE.Vector3();
   let soul: { id: string; k: number; foot: THREE.Vector3 } | null = null, near = far;
@@ -124,7 +193,7 @@ export function pickAt(o: THREE.Vector3, d: THREE.Vector3, t: number, opts: Hove
   const thing: ThingHit | null = layer ? layer.pick(o, d, near) : pickViewThing(o, d, world, near);
   if (thing) return { kind: 'thing', id: thing.id, name: thingName(world.nodes.get(thing.id)), foot: thing.foot, radius: thing.radius };
   if (soul) return { kind: 'soul', id: soul.id, name: opts.name(soul.id) ?? world.nodes.get(soul.id)?.name ?? 'a Soul', foot: soul.foot, radius: BODY_R };
-  return null;
+  return pickPlace(o, d, world);
 }
 
 export class WorldHover {
@@ -187,12 +256,12 @@ export class WorldHover {
     this.ring.visible = true;
     this.ring.position.copy(h.foot);
     this.ring.position.y += 0.05;
-    this.ring.scale.setScalar(h.kind === 'soul' ? 1 : Math.min(7, Math.max(1, (h.radius + 0.2) / 0.62)));
+    this.ring.scale.setScalar(h.kind === 'soul' ? 1 : h.kind === 'place' ? Math.min(7, h.radius * 0.25) : Math.min(7, Math.max(1, (h.radius + 0.2) / 0.62)));
     this.canvas.style.cursor = 'pointer';
     if (h.kind === 'soul' && this.opts.chipShown(h.id)) return void (this.tooltip.hidden = true);
     const p = this.pointer!;
-    this.tooltip.textContent = tooltipText(h.name);
-    this.tooltip.title = h.name;
+    this.tooltip.textContent = tooltipText(h.name, h.detail);
+    this.tooltip.title = h.name + (h.detail ? ` · ${h.detail}` : '');
     this.tooltip.style.left = `${Math.max(8, Math.min(innerWidth - 180, p.x + 12))}px`;
     this.tooltip.style.top = `${Math.max(8, p.y - 34)}px`;
     this.tooltip.hidden = false;
