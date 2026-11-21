@@ -1,0 +1,374 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:radio (from core-radio@2). Anyone switches it on and off at the power knob ('Turn on the radio', 'Turn off the radio'); while on, the tuning knob changes the station everyone nearby hears. The original's 'Change the radio station' cycles quiet piano, dance band and evening talk; here each station is its own form (tune_dance_band, ...), since the format has no set to the next value of a list. Tuning while off is refused, as the original's when-rule refused it, and names switch_on. The station is kept while it is off, as the original's.",
+ "cases": [
+  {
+   "name": "radio_switch_on_every_need_met",
+   "act": {
+    "this": "r1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:radio"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "radio_switch_on_when_on_names_switch_off",
+   "act": {
+    "this": "r1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:radio",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "switch_off"
+    }
+   }
+  },
+  {
+   "name": "radio_switch_off_every_need_met",
+   "act": {
+    "this": "r1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:radio",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "radio_switch_off_when_off_names_switch_on",
+   "act": {
+    "this": "r1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:radio"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "switch_on"
+    }
+   }
+  },
+  {
+   "name": "radio_tune_quiet_piano_every_need_met",
+   "act": {
+    "this": "r1",
+    "form": "tune_quiet_piano"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:radio",
+      "fields": {
+       "on": true,
+       "station": "dance_band"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "radio_tune_quiet_piano_when_off_names_switch_on",
+   "act": {
+    "this": "r1",
+    "form": "tune_quiet_piano"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:radio"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "switch_on"
+    }
+   }
+  },
+  {
+   "name": "radio_tune_dance_band_every_need_met",
+   "act": {
+    "this": "r1",
+    "form": "tune_dance_band"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:radio",
+      "fields": {
+       "on": true,
+       "station": "spoken_word"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "radio_tune_dance_band_when_off_names_switch_on",
+   "act": {
+    "this": "r1",
+    "form": "tune_dance_band"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:radio"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "switch_on"
+    }
+   }
+  },
+  {
+   "name": "radio_tune_spoken_word_every_need_met",
+   "act": {
+    "this": "r1",
+    "form": "tune_spoken_word"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:radio",
+      "fields": {
+       "on": true,
+       "station": "quiet_piano"
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "radio_tune_spoken_word_when_off_names_switch_on",
+   "act": {
+    "this": "r1",
+    "form": "tune_spoken_word"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:radio"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "switch_on"
+    }
+   }
+  }
+ ]
+}
