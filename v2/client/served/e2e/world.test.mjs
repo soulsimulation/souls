@@ -300,6 +300,16 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const can = await A.cli('can', `wave:${meA}`);
   await pending(3772, '(b) `can wave:<me>` answers yes from the copy', () => assert.equal(can.can ?? can.answer ?? can.verdict, 'yes', JSON.stringify(can)));
 
+  // #3775: a private conversation. A offers B one where they stand (a seat admits no conversation), B accepts and
+  // takes a private turn.
+  const hidden = 'the boat leaves at the second bell';
+  const offer = await sent(A, 'converse', 'start', meB);
+  assert.ok(offer.every(accepted), `the offer lands: ${JSON.stringify(offer)}`);
+  const invite = await event(B, "B's invitation", (e) => e.kind === 'conversation' && e.what === 'invited');
+  assert.ok((await sent(B, 'converse', 'accept', invite.conversation)).every(accepted), 'the accept lands');
+  assert.ok((await sent(B, 'converse', 'say', invite.conversation, hidden, '--private')).every(accepted), 'the private turn lands');
+  stage('private turn answered');
+
   // The acts. A walks to the bench and sits on it.
   const bench = (await A.cli('find', 'bench')).found.find((r) => r.kind?.startsWith('eden:bench'));
   assert.ok(bench, 'the bench is found by its words');
@@ -319,15 +329,6 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const whisperAnswer = await answered(A, whisper.sequence);
   assert.ok(accepted(sayAnswer) && accepted(whisperAnswer), `say ${JSON.stringify(sayAnswer)}, whisper ${JSON.stringify(whisperAnswer)}`);
   stage('acts answered');
-
-  // #3775: a private conversation. A offers B one, B accepts and takes a private turn.
-  const hidden = 'the boat leaves at the second bell';
-  const offer = await sent(A, 'converse', 'start', meB);
-  assert.ok(offer.every(accepted), `the offer lands: ${JSON.stringify(offer)}`);
-  const invite = await event(B, "B's invitation", (e) => e.kind === 'conversation' && e.what === 'invited');
-  assert.ok((await sent(B, 'converse', 'accept', invite.conversation)).every(accepted), 'the accept lands');
-  assert.ok((await sent(B, 'converse', 'say', invite.conversation, hidden, '--private')).every(accepted), 'the private turn lands');
-  stage('private turn answered');
 
   // (c) One malformed act word (#3765's): refused by name, and nothing the log's reader refuses is written.
   const bad = await A.cli('act', 'sit_down:undefined');
