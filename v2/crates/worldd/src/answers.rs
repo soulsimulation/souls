@@ -176,7 +176,7 @@ type R<T> = Result<T, Refusal>;
 
 /// The entries of `samples` (#3799), numbered from `first`: per body, its leave and its arrive at its new parent when
 /// its frame changed (the transfer named from the leave's own number, which a zone gives once), then its sample.
-fn motion_effects(header: &Header, first: u64, samples: &[bodies::Sample]) -> Vec<Effect> {
+fn motion_effects(header: &replica::effects::Header, first: u64, samples: &[bodies::Sample]) -> Vec<Effect> {
     let h = replica::ids::sha256(
         format!(
             "souls/worldd/motion/{}",
