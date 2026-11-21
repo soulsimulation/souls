@@ -136,7 +136,11 @@ jobs:
     runs-on: ${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || matrix.light && vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     # The recursive server inventory (about an hour of tests in all) runs in duration-balanced shards of ~10 minutes each.
     # a launcher leg passes in about 9 min on hosted runners; 40 fails a hung test file in time to keep the merge queue moving.
-    timeout-minutes: ${{ matrix.kind == 'server' && 45 || matrix.kind == 'launcher' && 40 || 60 }}
+    # Every other kind: about 2x the p95 of its green runs, and never under 1.5x the slowest (the 100 green runs before
+    # 21 Nov, job wall time in minutes, p95/max): native 15.0/17.8 -> 30; v2 10.0/29.6 (a cold cargo build) -> 45;
+    # soul-actions legs 14.5/15.5 -> 30; packages 9.2/9.3 and web 8.0/8.1 -> 20; types-web, client-cli, latency,
+    # docs-reference and soul-tools all under 2.3 -> 15, room for a cold install. Re-measure before tightening.
+    timeout-minutes: ${{ matrix.kind == 'server' && 45 || matrix.kind == 'launcher' && 40 || matrix.kind == 'v2' && 45 || matrix.kind == 'native' && 30 || matrix.kind == 'soul-actions' && 30 || matrix.kind == 'packages' && 20 || matrix.kind == 'web' && 20 || 15 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
@@ -441,6 +445,7 @@ jobs:
     runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     needs: [scope, repo, qualify, smoke]
     if: always()
+    timeout-minutes: 5
     steps:
       - name: Full CI deferred
         if: needs.scope.outputs.deferred == 'true'
