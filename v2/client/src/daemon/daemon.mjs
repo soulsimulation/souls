@@ -220,6 +220,8 @@ const copy = new wire.Copy(); // its scope, by hash (R5b)
 // A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
 // Eden-sized scope (10,000 records, 64 a request) takes about 160 round trips, over 10 s at 65 ms each (#3424).
 const SYNC_WITHIN = 10_000, SYNCS_KEPT = 8;
+// A subscription not granted by then no longer holds the follow back (a gateway that sends no grant).
+const GRANT_WITHIN = 2_000;
 const syncs = []; // the last syncs: kind, time and R5's counts
 let syncing = null, asked = 0; // the sync under way: its request's number, step, kind and start
 const publicNames = publicNameHydration(copy, () => ++asked, () => signedIn ? ws : null);
@@ -275,6 +277,20 @@ function hearing() {
   const [s, n] = body.split('-');
   ws.send(wire.wireSubscribe(unhex(s), BigInt(n), BigInt(HEARING_BUDGET)));
   ws.hearing = body;
+  // Items reach this socket only once the world's view tier has the subscription, which its grant says; a change
+  // before that comes in no item. So the follow waits for the grant, and the grant brings one.
+  const sock = ws;
+  clearTimeout(sock.granting);
+  sock.granting = setTimeout(() => { if (ws === sock) granted(); }, GRANT_WITHIN);
+}
+
+/** The hearing is granted (or refused, or its grant is overdue): the copy follows, from after it. */
+function granted() {
+  if (!ws) return;
+  clearTimeout(ws.granting);
+  ws.granting = null;
+  followWanted = true;
+  follow();
 }
 
 /**
@@ -283,7 +299,7 @@ function hearing() {
  */
 let followWanted = false;
 function follow() {
-  if (!followWanted || syncing || !ws || !signedIn) return;
+  if (!followWanted || syncing || !ws || !signedIn || ws.granting) return;
   followWanted = false;
   counts.follows++;
   startSync(ws, 'follow');
@@ -462,7 +478,7 @@ function connect() {
       }
       if (kind === 'sync') { syncAnswer(sock, Number(a), b, bytes); return; }
       if (kind === 'item') { onItem(bytes); return; }
-      if (kind === 'view-refused') { log(`hearing refused: ${a}`); note({ kind: 'hearing-refused', reason: a }); return; }
+      if (kind === 'view-refused') { log(`hearing refused: ${a}`); note({ kind: 'hearing-refused', reason: a }); granted(); return; }
       // The frames applied at the cursor's version (#3346): a refusal does not move the version, so on a resume the
       // gateway replays those at the cursor after the ones counted here, and none twice.
       if (b !== '-') { state.seen = b === state.cursor ? (state.seen ?? 1) + 1 : 1; state.cursor = b; }
@@ -504,6 +520,7 @@ function connect() {
     if (ended) return;
     ended = true;
     publicNames.cancel(sock);
+    clearTimeout(sock.granting);
     clearTimeout(deadline);
     if (ws === sock) {
       ws = null; signedIn = false;
@@ -529,7 +546,7 @@ function connect() {
  */
 function onItem(bytes) {
   const item = decode(decode(bytes).get(31)), kind = item.get(1);
-  if (kind === 5) viewGrants++;
+  if (kind === 5) { viewGrants++; granted(); }
   viewKinds.push(kind);
   if (viewKinds.length > 32) viewKinds.shift();
   const entry = wire.wireEntry(bytes);
