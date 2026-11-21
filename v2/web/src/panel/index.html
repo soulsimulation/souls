@@ -28,6 +28,8 @@
       #prayers input { flex: 1 1 100%; }
       #prayers .h { font-weight: 600; }
       .refused { color: #a33; }
+      #visitors textarea { width: 100%; box-sizing: border-box; font: inherit; }
+      #visitors ul { margin: 6px 0 0; padding-left: 18px; }
     </style>
   </head>
   <body>
@@ -45,6 +47,13 @@
         <div>Drag a thing to move it. Each release sends one edit.</div>
         <section id="prayers" aria-label="Prayers waiting for an answer"></section>
         <div id="warn"></div>
+        <section id="visitors" aria-label="Welcome and visitors">
+          <h2>Welcome and visitors</h2>
+          <form><label>The words a Soul is shown when it arrives<textarea rows="3"></textarea></label><button type="submit">Save welcome</button></form>
+          <button type="button" data-refresh>Show visitors</button>
+          <ul></ul>
+          <p role="status" aria-live="polite"></p>
+        </section>
         <section id="handoff" aria-label="Give this world to another account">
           <h2>Give this world to another account</h2>
           <form><label>Recipient account (optional)<input maxlength="48" autocomplete="off"></label><button type="submit">Offer this world</button></form>

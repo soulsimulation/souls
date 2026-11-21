@@ -12,11 +12,22 @@
 //   souls-god.mjs remove <id>                    it and everything in it
 //   souls-god.mjs batch '<json list>'            several at once, all or none: [{"op":"place","name":1,...}, ...]; a
 //                                                later op names an earlier place by its "name" number
-//   souls-god.mjs check <any of the four, or batch> ...   the same, checked on the copy only; nothing is sent
+//   souls-god.mjs weather [--kind clear|cloudy|rain|wind|fog|storm] [--clouds 0..1] [--rain 0..1] [--wind 0..1]
+//                         [--minutes 5..360]       the world's weather until then; E6's own weather resumes after
+//   souls-god.mjs sky --palette <name>           the sky's palette (today's names: clear-day, dusk, mars-desert, ...)
+//   souls-god.mjs strike <x,z | id>              lightning at a point (metres on the open ground) or on a place
+//   souls-god.mjs land <raise|lower|flatten|knoll|hill|mountain|plateau|terrace|valley|ditch|cliff|pond|lake> [flags]
+//   souls-god.mjs land water <id> --level m | --by m      the land and its water, as today's `land` (terrain/land.mjs):
+//                                                one edit; what rests on changed ground moves with it, and a Soul
+//                                                standing there refuses it (edit.terrain-under-soul)
+//   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs about <id> --title '<t>' [--alias '<a>' ...] | --set '{"title":..,"aliases":[..]}' | --clear
 //                                                a place's title and aliases (today's `about`), kept by the world as
 //                                                words for everyone; Souls' find matches either
 //   souls-god.mjs status | stop                  the daemon
+//   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
+//   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
+//                                                these two ask the world's directory, with the creator's token
 //   any of them [--creator <c_id>]               which creator, when the home holds more than one
 //
 // A refusal prints its code, the operation that failed (`op`, its place in the batch) and a fix. The home is
@@ -28,10 +39,30 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
-import { findHome, soulsWithTokens } from '../home/home.mjs';
+import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'status', 'stop', 'about'];
+export const VERBS = [
+  'about',
+  'batch',
+  'check',
+  'describe',
+  'land',
+  'move',
+  'pair',
+  'place',
+  'remove',
+  'set',
+  'sky',
+  'status',
+  'stop',
+  'strike',
+  'visitors',
+  'weather',
+  'welcome',
+];
+/** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
+export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
@@ -47,10 +78,35 @@ export const FIX = {
   'edit.too-many-operations': 'split the batch: at most 256 operations',
   'edit.too-many-nodes': 'remove less at once',
   'edit.batch': 'see the usage: souls-god.mjs with no arguments',
-  'edit.unanswered': 'the world did not answer within 10 s: describe to see whether it was done',
+  'edit.unanswered': 'the world did not answer in time (10 s, a land edit 120 s): describe to see whether it was done',
   'edit.no-copy': 'the daemon has no copy yet: run status until connected is true',
+  'edit.weather-level': 'levels are 0 to 1',
+  'edit.weather-ended': 'give --minutes from 5 to 360',
+  'edit.weather-partial': 'use the weather verb: it sets kind, clouds, rain, wind and end together',
+  'edit.weather-no-sky': 'this world has no sky to set',
+  'weather.kind-unknown': 'use clear, cloudy, rain, wind, fog or storm',
+  'weather.level': '--clouds, --rain and --wind are 0 to 1',
+  'weather.minutes': '--minutes is 5 to 360 world minutes',
+  'weather.nothing': 'give --kind, --clouds, --rain or --wind',
+  'sky.palette-unknown': 'run sky with no palette for the list',
+  'sky.sun-follows-time': 'leave out --sun: the sun follows world time',
+  'strike.where': 'strike x,z in metres, or an id describe lists',
+  'edit.terrain-under-soul': 'a Soul stands where the ground would change: shape the land elsewhere, or when it has moved',
+  'edit.terrain-under-building': 'a building stands where the ground would change: shape the land clear of it',
+  'edit.terrain-unsettled': 'a thing resting there was not moved with the ground: describe again and send the land verb again',
+  'land.flag': 'see the usage: souls-god.mjs with no arguments',
+  'land.too-many-things': 'shape a smaller area, or one with fewer things on it',
+  'land.no-water': 'name a pond, lake or river\'s id from describe',
+  'land.nothing': 'shape the land on the world\'s ground',
+  'land.smooth': 'use flatten',
+  'land.unavailable': 'run souls-god from a checkout with packages/ground and zod installed',
+  'strike.off-the-ground': 'strike somewhere on the world\'s ground',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'which-creator': 'name one with --creator',
+  'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
+  'welcome-too-long': 'at most 500 characters',
+  'welcome-not-text': 'plain words and line breaks only',
+  'token-refused': 'pair again with --creator <the world\'s creator grant>',
 };
 
 const usage = (detail) => Object.assign(new Error(detail), { code: 'usage' });
@@ -129,6 +185,25 @@ export function aboutOps(words) {
   return ops;
 }
 
+/** A world verb's words as the daemon reads them: `{ verb, ...flags }`, numbers as given. */
+export function worldVerbOf(verb, words) {
+  const args = [...words], out = { verb };
+  const flags = {
+    weather: ['kind', 'clouds', 'rain', 'wind', 'minutes'], sky: ['palette', 'sun'], strike: ['at'],
+    land: ['at', 'radius', 'amount', 'level', 'height', 'peak', 'path', 'area', 'rect', 'circle', 'edge', 'step', 'depth', 'width', 'side', 'face', 'steps', 'by'],
+  }[verb];
+  for (const f of flags) { const v = takeOpt(args, `--${f}`); if (v !== undefined) out[f] = v; }
+  if (verb === 'strike' && out.at === undefined && args[0] !== undefined) out.at = args.shift();
+  if (verb === 'land') {
+    if (!args[0]) throw usage('land <raise|lower|flatten|knoll|hill|mountain|plateau|terrace|valley|ditch|cliff|pond|lake|water> [flags]');
+    out.land = args.shift();
+    if (out.land === 'water' && args[0] !== undefined) out.ref = args.shift();
+    else if (out.at === undefined && args[0] !== undefined && /,/.test(args[0])) out.at = args.shift();
+  }
+  if (args.length) throw usage(`${verb}: unknown words ${args.join(' ')}`);
+  return out;
+}
+
 /** The daemon request the arguments make, and the creator named. */
 export function requestOf(argv) {
   const args = [...argv];
@@ -136,9 +211,33 @@ export function requestOf(argv) {
   const [verb = 'status', ...rest] = args;
   if (!VERBS.includes(verb)) throw Object.assign(new Error(`one of ${VERBS.join(', ')}`), { code: 'unknown-command' });
   if (verb === 'pair') return { pair: rest[0], creator };
+  if (verb === 'welcome') {
+    if (rest.length > 1) throw usage("welcome '<words>': quote the words as one argument");
+    return { directory: '/v1/worlds/welcome', body: { welcome: rest[0] ?? '' }, creator };
+  }
+  if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe') return { req: { op: verb }, creator };
+  if (verb === 'check' && WORLD_VERBS.includes(rest[0])) return { req: { op: 'check', world: worldVerbOf(rest[0], rest.slice(1)) }, creator };
   if (verb === 'check') return { req: { op: 'check', ops: opsOf(rest[0], rest.slice(1)) }, creator };
+  if (WORLD_VERBS.includes(verb)) return { req: { op: 'edit', world: worldVerbOf(verb, rest) }, creator };
   return { req: { op: 'edit', ops: opsOf(verb, rest) }, creator };
+}
+
+/**
+ * Asks the world's directory (#3702) as the creator: the seat's world and token from the home, sent as a Bearer to
+ * the directory the pairing kept. The token is never printed.
+ */
+async function askDirectory(home, creator, path, body) {
+  const seat = readSeat(home, creator);
+  let url;
+  try { url = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')).worlds?.[seat.world]?.url; } catch { /* below */ }
+  if (typeof url !== 'string') throw Object.assign(new Error(`no directory kept for ${seat.world}; pair again`), { code: 'no-directory' });
+  const r = await fetch(new URL(path, url), {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${seat.token}` },
+    body: JSON.stringify({ world: seat.world, ...body }), signal: AbortSignal.timeout(15_000),
+  });
+  const got = await r.json().catch(() => ({}));
+  return got.refused ? { ok: false, code: got.refused } : { ok: true, ...got };
 }
 
 /** An answer with its fix, when it is a refusal the table knows. */
@@ -172,7 +271,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
     const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
     if (!creator) throw Object.assign(new Error(`creators here: ${creators.join(', ') || 'none; pair first'}`), { code: 'which-creator' });
-    const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: 15_000 });
+    if (asked.directory) {
+      const said = await askDirectory(home, creator, asked.directory, asked.body);
+      out(withFix(said));
+      if (said.ok === false) process.exitCode = 1;
+      process.exit();
+    }
+    const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: asked.req.world?.verb === 'land' ? 130_000 : 15_000 });
     out(withFix(answer));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {
