@@ -1807,6 +1807,12 @@ fn serve(args: &[String]) -> R<()> {
         crate::watchdog::LIMIT_MS,
     );
     let views_dir = views.clone();
+    // "Listening" means servable: the public pointer (views/world.json) and the stream it names are there (#3746). A
+    // restart already has them from its last run (the same header and key, so the same pointer); a fresh world waits
+    // for the stream's first flush, which on a fresh world has no history to replay.
+    let pointer_path = views.join("world.json");
+    let fresh = !pointer_path.exists();
+    let (ready_tx, ready_rx) = channel::<()>();
     let stream_header = built.header.clone();
     let stream_found = Arc::clone(&found);
     drop(found);
@@ -1859,6 +1865,7 @@ fn serve(args: &[String]) -> R<()> {
                 }
                 writer.flush()?;
                 stamp("public stream");
+                let _ = ready_tx.send(());
                 drop(stream_found);
                 loop {
                     match stream_rx.recv_timeout(std::time::Duration::from_millis(20)) {
@@ -1884,6 +1891,12 @@ fn serve(args: &[String]) -> R<()> {
             }
         })
         .map_err(|e| e.to_string())?;
+    if fresh && ready_rx.recv().is_err() {
+        return Err("public-stream: stopped before its first flush; the world is not servable".into());
+    }
+    if !pointer_path.is_file() {
+        return Err(format!("public-pointer-missing: {}", pointer_path.display()));
+    }
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).map_err(io(&socket))?;
     stamp("listening");
