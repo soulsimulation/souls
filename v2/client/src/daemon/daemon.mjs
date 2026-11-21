@@ -23,6 +23,9 @@
 //     {"op":"say","words":".."}           words out loud, T8's `{23: words}` in parameter 1 (V1b, #3361)
 //     {"op":"whisper","to":"<id>","words":".."}  words to one listener's body alone
 //     {"op":"lie","this":"<id>"}          lie down on a bed (worldd's bodies, as a sit)
+//   and #3604's, sent once as `act` is: E4's set-down of a held thing, `word` one of the placements words (`here`
+//   when absent), `anchor` the thing it names, `facing` a node's id or `to_wall`:
+//     {"op":"set-down","this":"<id>","word":"here|next_to|on|..","anchor":"<id>","facing":"<id>|to_wall"}
 //   and C6's (#3390): once current on each socket it subscribes, over the gateway's view subscription (#3292), to its
 //   own body followed, and the world addresses to it each utterance that body hears, with the words it may read. Each
 //   is an event `{"kind":"heard","from":"<body id>","name":..,"words":..,"whisper":bool}`: it wakes a `wait`, is in
@@ -102,8 +105,9 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock } from '../brief/brief.mjs';
-import { changedBetween, decode, rowsOf, sequenceOf } from '../brief/copy.mjs';
+import { changedBetween, decode, rememberPublicNames, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
+import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
 import { ageOf } from './age.mjs';
@@ -204,6 +208,7 @@ const copy = new wire.Copy(); // its scope, by hash (R5b)
 const SYNC_WITHIN = 10_000, SYNCS_KEPT = 8;
 const syncs = []; // the last syncs: kind, time and R5's counts
 let syncing = null, asked = 0; // the sync under way: its request's number, step, kind and start
+const publicNames = publicNameHydration(copy, () => ++asked, () => signedIn ? ws : null);
 let wakers = []; // `wait`s waiting for something addressed to this Soul
 const note = (e) => {
   events.push(e);
@@ -345,10 +350,11 @@ function awaitAnswer(sock) {
 }
 
 function syncAnswer(sock, n, refused, bytes) {
+  if (publicNames.answer(sock, n, refused, bytes)) return;
   if (!syncing || n !== syncing.n) return; // an answer to a request since given up
   if (refused !== '-') throw new Error(`sync refused: ${refused}`);
   if (syncing.step === 'hashes') syncing.version = copy.onHashes(bytes);
-  else copy.onRecords(bytes);
+  else { copy.onRecords(bytes); rememberPublicNames(copy, bytes); }
   syncing.n = ++asked;
   const next = copy.next(BigInt(syncing.n));
   if (next.length > 0) { syncing.step = 'records'; awaitAnswer(sock); sock.send(next); return; }
@@ -455,6 +461,7 @@ function connect() {
   function closed(code) {
     if (ended) return;
     ended = true;
+    publicNames.cancel(sock);
     clearTimeout(deadline);
     if (ws === sock) {
       ws = null; signedIn = false;
@@ -719,7 +726,12 @@ async function answer(req) {
       delete b.changed; // the answer's own closes it
       return b;
     });
-    case 'find': return closing({ ok: true }, (rows) => find(rows.values(), req.words, { limit: Math.min(Number(req.limit ?? 8), 50) }));
+    case 'find': {
+      const deadline = performance.now() + REFRESH_WITHIN, age = await ageAfter();
+      const hydrated = age.stale ? { ok: true } : await publicNames.hydrate(ws, deadline);
+      if (!hydrated.ok) { age.stale = true; age.gap = { ms: 0, why: hydrated.reason }; }
+      return closing({ ok: true }, (rows) => find(rows.values(), req.words, { limit: Math.min(Number(req.limit ?? 8), 50) }), { age });
+    }
     case 'wait': {
       const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000, until = Date.now() + ms;
       // R13: the queued wakes are handed as one delivery when the budget allows; over it, they wait for it to.
@@ -777,6 +789,16 @@ async function answer(req) {
       if (req.for !== undefined) serving.set(sequence, req.for);
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
       return closing(out, null, age ? { age } : { now: true });
+    }
+    case 'set-down': {
+      // #3604: put the held thing down by E4's legal placement; checked off the world's clock, one receipt.
+      if (!ID.test(String(req.this ?? ''))) return { ok: false, code: 'set-down-names-a-thing', detail: 'set-down <id of the held thing> [word] [anchor id]' };
+      // A word or a facing is a namespaced name in the log (`place:here`); an id stays an id.
+      const word = (w) => (ID.test(w) || w.includes(':') ? w : `place:${w}`);
+      const params = { 1: word(String(req.word ?? 'here')), ...(req.anchor ? { 2: String(req.anchor) } : {}), ...(req.facing ? { 3: word(String(req.facing)) } : {}) };
+      const basis = shownVersion ?? state.cursor;
+      const { sequence, sent } = sendIntent(['hands:set-down'], { target: req.this, params, basis, expiry: req.expiry });
+      return closing({ ok: true, sequence, sent, verb: 'hands:set-down', basis: sequenceOf(basis) }, null, { now: true });
     }
     case 'say': case 'whisper': case 'lie': {
       const f = formOf(req);
