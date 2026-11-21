@@ -13,6 +13,9 @@
 //                                sends it once (now, or at the next sign-in)
 //     {"op":"read"}              gives and clears what happened since the last read (it never wakes the model)
 //     {"op":"stop"}              ends the process (the thin command's `quit`)
+//     {"op":"query","questions":[..],"budget":n}   #3704: several reads of the copy, each answered in turn (reads.mjs)
+//     {"op":"catalog"} | {"op":"context","words":"..","cursor":n}   #3704: the kinds in the copy; its named targets
+//     {"op":"batch","reads":[{"op":..},..]}       #3704: several read ops in one call, each answered as alone
 //     {"op":"halt","sequence":n}  #3705, the thin command's `stop`: a `souls:cancel` ending this Soul's own act (the
 //                                 newest still going, or `sequence`) where it stands
 //     {"op":"receipt","sequence":n}   #3705: that intent's receipt, as its answers came (the newest sent by default)
@@ -76,6 +79,10 @@
 //     {"op":"converse","do":"start","with":"<body id>","words":"..","private":bool}   the offer and the opening line
 //     {"op":"converse","do":"accept|decline|leave","conversation":"<id>"} | {"do":"say",...,"words":"..","private":bool}
 //     {"op":"converse","do":"list"}       the conversations in the copy
+//   and #3703's, today's calendar read from the calendar items the world publishes as things (`../schedule/world.mjs`):
+//     {"op":"whatson","hours":3}          what is on now or within that many real hours, and who is where
+//     {"op":"calendar","do":"list|interest|not-coming|add",...}   the items; interest/not-coming/add send the item's
+//                                         show_interest, drop_interest or post form through `act`
 //   and R16's (#2817), from the world's public history (`history` in its config) and the Soul's memory, the copy as
 //   it is (naming only), so it ends with `at` and not `changed`:
 //     {"op":"history","at":"<place>"} | {"thing":"<id>"} | {"soul":"<id or name>"}, "since"/"until": world µs
@@ -134,6 +141,7 @@ import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
 import { ageOf } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
+import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
 import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
@@ -142,10 +150,11 @@ import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { clockOf, worldNow } from '../clock/clock.mjs';
+import { worldOps } from '../creator/world.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
-import { calendarOf, worldDue } from '../schedule/world.mjs';
+import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, whatsOn, worldDue, worldTimeOf } from '../schedule/world.mjs';
 import { refreshEntries } from '../pair/pair.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
@@ -290,6 +299,31 @@ function send(bytes, sequence, ranked) {
   rankedOf.set(sequence, ranked);
   trace.write({ k: 'send', seq: sequence, ranked });
   ws.send(bytes);
+}
+
+/** The agents' socket's frame limit (`replica` `intent_limits.txt`); a creator's larger edit goes by `sendBulk`. */
+const INTENT_MOST = 4096;
+
+/** A creator's bulk edit (#3695) by the gateway's `POST /v2/creator-edit`: null when it was taken (its answer comes on
+ *  the socket), else the refusal's name. Its bytes are never logged. */
+async function sendBulk(bytes, sequence) {
+  state.unanswered.push(sequence);
+  save();
+  counts.sent++;
+  trace.write({ k: 'send', seq: sequence, ranked: 1, bulk: bytes.length });
+  const u = new URL(seat.gateway);
+  u.protocol = u.protocol === 'wss:' ? 'https:' : u.protocol === 'ws:' ? 'http:' : u.protocol;
+  u.pathname = u.pathname.replace(/\/v2\/ws$/, '') + '/v2/creator-edit';
+  u.search = ''; u.hash = '';
+  try {
+    const r = await fetch(u, { method: 'POST', headers: { authorization: `Bearer ${seat.token}`, 'content-type': 'application/cbor' }, body: bytes, signal: AbortSignal.timeout(EDIT_WITHIN) });
+    if (r.status === 202) return null;
+    let code = `edit.bulk-${r.status}`;
+    try { code = (await r.json()).refused ?? code; } catch { /* not JSON */ }
+    return code;
+  } catch {
+    return 'edit.bulk-unreachable';
+  }
 }
 
 /** Signed in and current: intents go now, and (once a socket) the subscription to what this Soul hears (C6). */
@@ -703,7 +737,46 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
+const OPS = new Set([
+  'ack',
+  'act',
+  'answer',
+  'batch',
+  'calendar',
+  'can',
+  'catalog',
+  'check',
+  'context',
+  'converse',
+  'describe',
+  'edit',
+  'event',
+  'events',
+  'find',
+  'halt',
+  'history',
+  'inspect',
+  'lie',
+  'look',
+  'now',
+  'object',
+  'pending',
+  'pray',
+  'prayers',
+  'query',
+  'read',
+  'receipt',
+  'reflex',
+  'say',
+  'stats',
+  'status',
+  'stop',
+  'wait',
+  'wake',
+  'wear',
+  'whatson',
+  'whisper',
+]);
 const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
@@ -711,6 +784,7 @@ const nothingYet = () => !events.some((e) => e.kind !== 'synced');
 
 // --- G7 (#2796): a creator's edits -------------------------------------------------------------------------------
 const EDIT_WITHIN = 10_000; // an edit's answer is awaited this long; past it, it stays unanswered in `status`
+const EDIT_BULK_WITHIN = 120_000; // a bulk edit's (#3695)
 /** The world's kinds text, which the creator's pairing or setup keeps in the home; empty when there is none. */
 const kindsText = () => { try { return readFileSync(join(home, 'kinds', `${seat.world}.kinds`), 'utf8'); } catch { return ''; } };
 /** The pinned kinds by full name, with what each admits; {} without a kinds text. */
@@ -727,7 +801,8 @@ function batchOf(ops) {
   if (!Array.isArray(ops) || ops.length === 0) throw Object.assign(new Error('ops: a list of operations'), { code: 'edit.batch' });
   const kinds = pinned();
   const um = (at) => (Array.isArray(at) ? at.map((n) => Math.round(Number(n) * 1000)) : undefined);
-  return JSON.stringify(ops.map((o) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}) })));
+  // #3695: a move that must land to the micrometre (a thing lifted with the ground) gives its position as `atUm`.
+  return JSON.stringify(ops.map(({ atUm, ...o }) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}), ...(atUm ? { at: atUm.map(Number) } : {}) })));
 }
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
@@ -798,11 +873,18 @@ function actsOf(words) {
       const c = out.at(-1), args = (c.args ??= {});
       // #3603: a carrier verb's point is in metres, a decimal allowed.
       if (arg && c.carrier) { c.args[arg[1]] = /^-?\d{1,7}(\.\d{1,6})?$/.test(arg[2]) ? Number(arg[2]) : arg[2]; continue; }
-      // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`).
-      if (arg) { args[arg[1]] = /^-?\d{1,15}$/.test(arg[2]) ? Number(arg[2]) : arg[2]; continue; }
+      // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`); #3712: a form's
+      // `text` argument is words, sent as T8's `{23: words}` for the world's text store, never logged as they are.
+      if (arg) {
+        kinds ??= kindsIn(join(home, 'kinds'));
+        rows ??= rowsOf(copy);
+        const take = kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
+        args[arg[1]] = take?.type === 'text' ? { 23: arg[2] } : /^-?\d{1,15}$/.test(arg[2]) ? Number(arg[2]) : arg[2];
+        continue;
+      }
       kinds ??= kindsIn(join(home, 'kinds'));
       rows ??= rowsOf(copy);
-      const takes = Object.entries(kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
+      const takes = Object.entries(kinds[rows.get(c.this)?.entry ?? rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
       const name = takes.map(([n, t]) => t?.type === 'thing' && n).find((n) => n && !(n in args));
       if (!name) throw Object.assign(new Error(`name it: ${c.form ?? c.verb} <name>=${w}`), { code: 'act-arg-unnamed' });
       args[name] = w;
@@ -832,6 +914,24 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex
   if (moveForm(ranked[0])) movesOf.set(sequence, moveForm(ranked[0]));
   if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
   return { sequence, sent };
+}
+
+/** World time now: the copy's clock mapping (E7b), else the machine's clock, as a world without a mapping runs on it
+ *  (`worldd::answers::now`). For the creator's weather end and strike time (#3695). */
+const worldNowOrReal = () => worldNow(clockOf(copy)) ?? Date.now() * 1000;
+
+/** The batch an edit or a check carries: its own ops, or a world verb's (#3695) made from the copy now. The land
+ *  verbs load today's ground model (`packages/ground`, zod) only when used. */
+async function worldBatch(req) {
+  if (!req.world) return { ops: req.ops };
+  if (req.world.verb === 'land') {
+    let land;
+    try { land = await import('../creator/terrain/land.mjs'); } catch (e) {
+      return { ok: false, code: 'land.unavailable', detail: `the land verbs need packages/ground and zod beside this client: ${String(e.message ?? e).slice(0, 160)}` };
+    }
+    return land.landOps(copy, req.world);
+  }
+  return worldOps(copy, req.world, worldNowOrReal());
 }
 
 async function answer(req) {
@@ -970,8 +1070,8 @@ async function answer(req) {
         if (req.for !== undefined) serving.set(sequence, req.for);
         return closing({ ok: true, sequence, sent, basis: sequenceOf(basis) }, null, { now: true });
       }
-      // A number goes as a number, so a form's arguments then go as parameter 1's pairs (#3686).
-      const pairs = Object.entries(keep[0].args ?? {}), counted = pairs.some(([, v]) => typeof v === 'number');
+      // A number or words go as they are, so a form's arguments then go as parameter 1's pairs (#3686, #3712).
+      const pairs = Object.entries(keep[0].args ?? {}), counted = pairs.some(([, v]) => typeof v !== 'string');
       const args = counted ? undefined : pairs.map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
       const params = counted ? { ...(req.params ?? {}), 1: pairs } : req.params;
       const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params, basis, expiry: req.expiry });
@@ -1001,6 +1101,24 @@ async function answer(req) {
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis), ...(toward ? { to: toward } : {}) }, null, { now: true });
     }
     case 'inspect': return inspect(req);
+    case 'whatson': case 'calendar': return calendar(req);
+    // #3704 (today's `query`, `catalog`, `context` and `batch`): reads from the copy, asking the world nothing.
+    case 'query': { const q = query(rowsOf(copy), req.questions, { budget: req.budget }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
+    case 'catalog': return closing(catalog(rowsOf(copy), kindsIn(join(home, 'kinds'))), null, { now: true });
+    case 'context': return closing(context(rowsOf(copy), req.words ?? '', { cursor: req.cursor }), null, { now: true });
+    case 'batch': {
+      // Several reads in one call, each answered as it would be alone, in order; a write in it is refused, not sent.
+      const reads = Array.isArray(req.reads) ? req.reads : [];
+      if (reads.length < 1 || reads.length > BATCH_MOST) return { ok: false, code: 'batch-form', detail: `batch '<json list>': 1 to ${BATCH_MOST} reads`, ...ageNow() };
+      const results = [];
+      for (const r of reads) {
+        const read = r && BATCH_READS.has(r.op) && (r.op !== 'converse' || r.do === 'list');
+        if (!read) { results.push({ op: r?.op ?? null, ok: false, code: 'batch-reads-only', detail: `a batch runs reads only: ${[...BATCH_READS].join(', ')}` }); continue; }
+        const { at: _a, changed: _c, ...one } = await answer(r);
+        results.push({ op: r.op, ...one });
+      }
+      return closing({ ok: true, results }, null, { now: true });
+    }
     case 'object': {
       // #3686: today's `object <id> [action]`: no action lists the offers (as inspect); an action is that offer sent
       // through `act` below, with its arguments, and nothing else.
@@ -1018,14 +1136,19 @@ async function answer(req) {
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
     }));
     case 'check': {
-      // On the copy as it is: no sync, no frame to the world (A4).
-      const v = JSON.parse(wire.editCheck(copy, batchOf(req.ops), kindsText()));
-      return closing({ ...v, local: true }, null, { now: true });
+      // On the copy as it is: no sync, no frame to the world (A4). A world verb (#3695) is made into its sets first.
+      const w = await worldBatch(req);
+      if (w.ok === false) return closing({ ...w, local: true }, null, { now: true });
+      const v = JSON.parse(wire.editCheck(copy, batchOf(w.ops), kindsText()));
+      return closing({ ...v, local: true, ...(w.says ? { would: w.says, ops: w.ops } : {}) }, null, { now: true });
     }
     case 'edit': {
       if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
-      const batch = batchOf(req.ops);
       const age = await ageAfter();
+      // #3695: weather, sky and strike are sets on the world node, made from the copy as it is now, after the sync.
+      const w = await worldBatch(req);
+      if (w.ok === false) return closing({ ...w, sent: false, local: true }, null, { age });
+      const batch = batchOf(w.ops);
       const v = JSON.parse(wire.editCheck(copy, batch, kindsText()));
       if (!v.ok) return closing({ ...v, sent: false, local: true }, null, { age });
       if (!copyVersion) return closing({ ok: false, code: 'edit.no-copy', sent: false, detail: 'no copy of the world yet' }, null, { age });
@@ -1034,16 +1157,27 @@ async function answer(req) {
       const bytes = wire.wireEdit(scope, seat.grant.counter, true, BigInt(state.sequence), unhex(copyVersion), batch);
       save();
       const sequence = state.sequence;
+      // A bulk edit (#3695, a landform: the open ground rebuilt off the clock for its walkers) is answered in under a
+      // minute on full Eden; its answer is awaited that long.
+      const within = bytes.length > INTENT_MOST ? EDIT_BULK_WITHIN : EDIT_WITHIN;
       const got = new Promise((ok) => {
-        const t = setTimeout(() => { editsWaiting.delete(sequence); ok(null); }, EDIT_WITHIN);
+        const t = setTimeout(() => { editsWaiting.delete(sequence); ok(null); }, within);
         editsWaiting.set(sequence, (a) => { clearTimeout(t); editsWaiting.delete(sequence); ok(a); });
       });
-      if (signedIn) send(bytes, sequence, 1); else queued.push({ bytes, sequence, ranked: 1 });
+      if (bytes.length > INTENT_MOST) {
+        // #3695: an edit over the agents' frame limit (a landform's tiles) goes by the gateway's creator route; its
+        // answer comes on this socket as any edit's does.
+        const r = await sendBulk(bytes, sequence);
+        if (r) { editsWaiting.get(sequence)?.(null); return closing({ ok: false, code: r, sequence, sent: false }, null, { now: true }); }
+      } else if (signedIn) send(bytes, sequence, 1); else queued.push({ bytes, sequence, ranked: 1 });
       const a = await got;
       if (!a) return closing({ ok: false, code: 'edit.unanswered', sequence, sent: true }, null, { now: true });
       const out = a.answer === 1
-        ? { ok: true, sequence, names: a.names ?? {} }
+        ? { ok: true, sequence, names: a.names ?? {}, ...(w.says ? { did: w.says } : {}) }
         : { ok: false, sequence, code: a.reason ?? 'edit.refused', ...(a.op !== undefined ? { op: a.op } : {}) };
+      // The world node is written by the world's own sky timers too: a world verb planned just before one is stale, and
+      // is made again from the copy brought current, once.
+      if (out.code === 'edit.stale' && req.world && !req.again) return answer({ ...req, again: true });
       return closing(out);
     }
     case 'pray': case 'answer': {
@@ -1127,7 +1261,7 @@ function thingOf(id) {
   if (!row) {
     return { ok: false, code: 'inspect.unknown-id', detail: `${id ?? '(none)'} is not an id this Soul's copy holds; ids come from look and find`, did_you_mean: nearestIds(rows.values(), id) };
   }
-  const kinds = kindsIn(join(home, 'kinds')), entry = kinds[row.kind];
+  const kinds = kindsIn(join(home, 'kinds')), entry = kinds[row.entry ?? row.kind];
   return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
 }
 
@@ -1151,6 +1285,44 @@ function inspect(req) {
     ...(entry ? {} : { note: 'its kind\'s entry is not on this machine: walking to it is all that is known here' }),
   }, null, { now: true });
 }
+
+/**
+ * #3703: today's `whatson` and `calendar`, from the calendar items the world publishes as things in the copy
+ * (`../schedule/world.mjs`). Reading asks the world nothing but to bring the copy current; `interest`, `not-coming`
+ * and `add` are the items' own forms (`show_interest`, `drop_interest`, `post`), sent through `act`.
+ */
+async function calendar(req) {
+  const kinds = kindsIn(join(home, 'kinds')), clock = clockOf(copy), cal = calendarOf(copy), nowMs = Date.now();
+  const view = (rows) => ({ rows, me: ME, clock, cal, nowMs });
+  if (req.op === 'whatson') {
+    const hours = Number(req.hours ?? 3);
+    if (!(hours > 0 && hours <= 168)) return { ok: false, code: 'whatson-usage', detail: 'whatson [--hours n]   (real hours, up to 168; default 3)' };
+    return closing({ ok: true }, (rows) => {
+      const t = worldTimeOf(cal, worldNow(clock));
+      return { ...(t ? { worldTime: t } : {}), ...whatsOn(calendarItems(copy, kinds), { ...view(rows), hours }), calendarNote: CALENDAR_NOTE, next: 'calendar interest <id>   (say you will come)' };
+    });
+  }
+  const does = req.do ?? 'list';
+  if (does === 'list') return closing({ ok: true }, (rows) => ({ ...calendarList(calendarItems(copy, kinds), view(rows)), calendarNote: CALENDAR_NOTE }));
+  const items = calendarItems(copy, kinds), rows = rowsOf(copy);
+  if (does === 'interest' || does === 'not-coming') {
+    const item = items.find((i) => i.id === req.this);
+    if (!item) return closing({ ok: false, code: 'calendar.not-an-item', detail: `${req.this ?? '(none)'} is not a calendar item in this Soul's copy; calendar lists them` }, null, { now: true });
+    return answer({ op: 'act', acts: [`${does === 'interest' ? 'show_interest' : 'drop_interest'}:${item.id}`], ...(req.for !== undefined ? { for: req.for } : {}) });
+  }
+  if (does !== 'add') return { ok: false, code: 'calendar-usage', detail: CALENDAR_USAGE };
+  const title = String(req.title ?? '').trim(), inMin = Number(req.in), forMin = Number(req.for_minutes);
+  if (!title || !req.place || !Number.isFinite(inMin) || inMin < 0 || !(forMin > 0)) return { ok: false, code: 'calendar-usage', detail: CALENDAR_USAGE };
+  if (!rows.has(String(req.place))) return closing({ ok: false, code: 'calendar.unknown-place', detail: `${req.place} is not an id this Soul's copy holds; find gives place ids`, did_you_mean: nearestIds(rows.values(), req.place) }, null, { now: true });
+  if (!clock) return closing({ ok: false, code: 'calendar.no-clock', detail: 'the world has published no clock in this copy yet' }, null, { now: true });
+  const blank = blankAt(items, rows, String(req.place));
+  if (!blank) return closing({ ok: false, code: 'calendar.no-blank', detail: `nothing at ${rows.get(String(req.place)).name} takes a calendar notice; calendar lists the blank ones and where they are` }, null, { now: true });
+  const words = req.description ? `${title} — ${req.description}` : title;
+  const start = worldNow(clock, (nowMs + inMin * 60_000) * 1000), end = worldNow(clock, (nowMs + (inMin + forMin) * 60_000) * 1000);
+  const out = await answer({ op: 'act', acts: [`post:${blank.id}`, `words=${words}`, `start=${start}`, `end=${end}`], ...(req.for !== undefined ? { for: req.for } : {}) });
+  return { ...out, item: blank.id };
+}
+const CALENDAR_USAGE = 'calendar | calendar add "<title>" --place <placeId> --in <minutes> --for <minutes> ["description"] | calendar interest|not-coming <id>';
 
 /**
  * E26 (#3329): a conversation's intents (`../converse/converse.mjs`), each sent once as `act`'s are, in order; their

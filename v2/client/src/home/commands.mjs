@@ -11,7 +11,19 @@ import { pairAddress } from '../pair/address.mjs';
 import { accountCommand, accountList, accountPair, connectedAccounts, hasAccount } from '../account/account.mjs';
 import { feedSites, newsCommand, unread } from './news.mjs';
 
-export const HOME_COMMANDS = ['list', 'default', 'export', 'import', 'adopt', 'doctor', 'login', 'accounts', 'logout', 'dashboard', 'news'];
+export const HOME_COMMANDS = [
+  'accounts',
+  'adopt',
+  'dashboard',
+  'default',
+  'doctor',
+  'export',
+  'import',
+  'list',
+  'login',
+  'logout',
+  'news',
+];
 const ID = /^s_[A-Za-z0-9_-]+$/;
 const GRANT = /^soul-[0-9a-f]{32}-\d+$/;
 const VOLATILE = new Set(['runtime/daemon.lock', 'runtime/daemon.sock', 'runtime/daemon.log']);
