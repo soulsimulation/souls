@@ -28,9 +28,9 @@ use crate::pose::Vec3;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The root's field holding the district plans.
-pub const F_DISTRICTS: u64 = 90;
+pub const F_DISTRICTS: u64 = 140;
 /// The root's field holding the live claims.
-pub const F_CLAIMS: u64 = 91;
+pub const F_CLAIMS: u64 = 141;
 pub const CLAIMS_MOST: usize = 8;
 pub const DISTRICTS_MOST: usize = 32;
 pub const PLOTS_MOST: usize = 48;
