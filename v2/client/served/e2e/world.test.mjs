@@ -330,7 +330,8 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const stump = (await A.cli('find', 'stump')).found.find((r) => r.kind?.startsWith('eden:hollow_stump'));
   assert.ok(stump, 'the stump is found by its words');
   // B stands by the stump while A hides the apple, so A's entries are in B's interest.
-  assert.ok(accepted((await act(B, stump.id)).answer), "B walks to the stump");
+  const toStump = await act(B, stump.id);
+  assert.ok(accepted(toStump.answer), `B walks to the stump: ${JSON.stringify(toStump.answer)}`);
   await request(B.rt.socket, { op: 'read' });
   const hid = await act(A, `hide:${stump.id}`, `thing=${apple}`);
   assert.ok(accepted(hid.answer), `A hides the apple in the stump: ${JSON.stringify(hid.answer)}`);
