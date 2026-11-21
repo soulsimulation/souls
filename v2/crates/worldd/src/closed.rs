@@ -110,8 +110,11 @@ impl Closed {
     }
 }
 
-/// A body's Soul by its `souls:body-of` link; any other id is its own.
+/// A body's Soul by its `souls:body-of` link; any other id (a Soul, which is no node of the tree) is its own.
 fn soul_of(tree: &Tree, id: Id) -> Id {
+    if tree.handle(id).is_none() {
+        return id;
+    }
     tree.links_at(id)
         .iter()
         .find(|e| plain(tree.ty(e).as_str()) == BODY_OF)
