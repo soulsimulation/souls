@@ -1232,14 +1232,16 @@ impl Acts {
             // is never a way to learn what a hiding place holds.
             if let Some(key) = none_selected {
                 let none = BTreeMap::<Id, BTreeSet<Id>>::new();
-                let named = sim::forms::may(tree, &none, &|_| None, body, *node, entry, form)
-                    .and_then(|()| {
-                        if within_reach(tree, entry, body, *node) {
-                            Err(refusal(NONE_SELECTED, key.clone()))
-                        } else {
-                            Err(refusal("out-of-reach", key.clone()))
-                        }
-                    });
+                let named: Result<(), Refusal> =
+                    sim::forms::may(tree, &none, &|_| None, body, *node, entry, form).and_then(
+                        |()| {
+                            if within_reach(tree, entry, body, *node) {
+                                Err(refusal(NONE_SELECTED, key.clone()))
+                            } else {
+                                Err(refusal("out-of-reach", key.clone()))
+                            }
+                        },
+                    );
                 if let Err(e) = named {
                     first.get_or_insert(e);
                 }
