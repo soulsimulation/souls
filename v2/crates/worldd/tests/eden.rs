@@ -2904,7 +2904,9 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
 }
 
 /// Each body's last logged frame, height and stance in the world's log in `dir`: `(node, slot, y µm, stance)`.
-fn last_stances(dir: &Path) -> BTreeMap<Id, (Id, Option<u64>, i64, Option<sim::controller::Stance>)> {
+fn last_stances(
+    dir: &Path,
+) -> BTreeMap<Id, (Id, Option<u64>, i64, Option<sim::controller::Stance>)> {
     let bytes = std::fs::read(dir.join("log")).unwrap();
     let mut out = BTreeMap::new();
     for r in sim::log::recover(&bytes).unwrap().records {
@@ -2961,7 +2963,8 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
     assert_eq!(two.len(), 2, "both on the stage");
     assert_ne!(two[0].1, two[1].1, "each on its own point");
     assert!(
-        two.iter().all(|f| f.1.is_some() && f.3 == Some(Stance::Stand)),
+        two.iter()
+            .all(|f| f.1.is_some() && f.3 == Some(Stance::Stand)),
         "each standing in a spot"
     );
     let started = std::time::Instant::now();
@@ -2972,16 +2975,30 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
     }
     println!("38 more stepped up in {:?}", started.elapsed());
     let off = |dir: &Path| -> Vec<(Id, (Id, Option<u64>, i64, Option<Stance>))> {
-        last_stances(dir).into_iter().filter(|(_, f)| f.0 != stage).collect()
+        last_stances(dir)
+            .into_iter()
+            .filter(|(_, f)| f.0 != stage)
+            .collect()
     };
     let before = off(&dir);
     let full = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
     println!("Soul 41: step up onto the full stage {full:?}");
     let all = on_stage(&dir);
     let slots: Vec<Option<u64>> = all.iter().map(|f| f.1).collect();
-    assert_eq!(slots, (1..=40).map(Some).collect::<Vec<_>>(), "40 spots, one each");
-    assert!(all.iter().all(|f| f.3 == Some(Stance::Stand)), "all standing");
-    assert_eq!(full, Err("place-taken".to_owned()), "a full stage refuses by name");
+    assert_eq!(
+        slots,
+        (1..=40).map(Some).collect::<Vec<_>>(),
+        "40 spots, one each"
+    );
+    assert!(
+        all.iter().all(|f| f.3 == Some(Stance::Stand)),
+        "all standing"
+    );
+    assert_eq!(
+        full,
+        Err("place-taken".to_owned()),
+        "a full stage refuses by name"
+    );
     assert_eq!(off(&dir), before, "the refused Soul stays where it stood");
 
     // Stopped and served again on the same folder (K18c): the 40 come back standing in their spots.
@@ -3024,8 +3041,14 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
     // One body left and one came: every other body kept its own spot over the restart.
     let kept = after.iter().filter(|f| all.contains(f)).count();
     assert_eq!(kept, 39, "39 kept their spots: {after:?}");
-    let left: Vec<_> = all.iter().filter(|f| !after.iter().any(|a| a.0 == f.0)).collect();
-    let came: Vec<_> = after.iter().filter(|f| !all.iter().any(|a| a.0 == f.0)).collect();
+    let left: Vec<_> = all
+        .iter()
+        .filter(|f| !after.iter().any(|a| a.0 == f.0))
+        .collect();
+    let came: Vec<_> = after
+        .iter()
+        .filter(|f| !all.iter().any(|a| a.0 == f.0))
+        .collect();
     assert_eq!((left.len(), came.len()), (1, 1), "one stepped down, one up");
     assert_eq!(left[0].1, came[0].1, "the 41st took the freed spot");
 }
