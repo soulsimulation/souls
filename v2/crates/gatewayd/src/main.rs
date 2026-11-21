@@ -129,7 +129,11 @@ async fn main() {
     match arg("--entries") {
         Some(dir) => match gatewayd::entries::Entries::open(std::path::Path::new(&dir)) {
             Ok(e) => {
-                (gw.log)(&format!("entries: {} served at {}", e.current().count, gatewayd::entries::PATH));
+                (gw.log)(&format!(
+                    "entries: {} served at {}",
+                    e.current().count,
+                    gatewayd::entries::PATH
+                ));
                 let _ = gw.entries.set(e);
             }
             Err(why) => {
@@ -137,7 +141,9 @@ async fn main() {
                 std::process::exit(2);
             }
         },
-        None => eprintln!("gatewayd: no --entries: paired clients get none of the world's kinds (#3760)"),
+        None => eprintln!(
+            "gatewayd: no --entries: paired clients get none of the world's kinds (#3760)"
+        ),
     }
     let views = arg("--views").map_or_else(
         || PathBuf::from(&world).with_extension("views"),

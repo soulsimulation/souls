@@ -166,18 +166,26 @@ pub async fn serve(State(gw): State<Arc<Gateway>>, headers: HeaderMap) -> Respon
         return refuse(StatusCode::UNAUTHORIZED, "token.refused");
     }
     let built = entries.current();
-    let tag = HeaderValue::from_str(&built.etag).unwrap_or_else(|_| HeaderValue::from_static("\"\""));
+    let tag =
+        HeaderValue::from_str(&built.etag).unwrap_or_else(|_| HeaderValue::from_static("\"\""));
     let cache = HeaderValue::from_static("private, no-cache");
     if headers
         .get(header::IF_NONE_MATCH)
         .is_some_and(|v| v.as_bytes() == built.etag.as_bytes())
     {
-        return (StatusCode::NOT_MODIFIED, [(header::ETAG, tag), (header::CACHE_CONTROL, cache)]).into_response();
+        return (
+            StatusCode::NOT_MODIFIED,
+            [(header::ETAG, tag), (header::CACHE_CONTROL, cache)],
+        )
+            .into_response();
     }
     (
         StatusCode::OK,
         [
-            (header::CONTENT_TYPE, HeaderValue::from_static("application/json")),
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            ),
             (header::CONTENT_ENCODING, HeaderValue::from_static("gzip")),
             (header::ETAG, tag),
             (header::CACHE_CONTROL, cache),
@@ -202,20 +210,37 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         assert!(Entries::open(&dir).is_err(), "an empty folder is refused");
-        std::fs::write(dir.join("a.json"), r#"{"format":"souls-entry/1","kind":"x:a"}"#).unwrap();
-        std::fs::write(dir.join("sub/b.json"), r#"{"format":"souls-entry/1","kind":"x:b"}"#).unwrap();
+        std::fs::write(
+            dir.join("a.json"),
+            r#"{"format":"souls-entry/1","kind":"x:a"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("sub/b.json"),
+            r#"{"format":"souls-entry/1","kind":"x:b"}"#,
+        )
+        .unwrap();
         std::fs::write(dir.join("c.json"), r#"{"format":"other"}"#).unwrap();
         let e = Entries::open(&dir).unwrap();
         let first = e.current();
         assert_eq!(first.count, 2);
-        let raw = miniz_oxide::inflate::decompress_to_vec(&first.gz[10..first.gz.len() - 8]).unwrap();
+        let raw =
+            miniz_oxide::inflate::decompress_to_vec(&first.gz[10..first.gz.len() - 8]).unwrap();
         assert_eq!(
             String::from_utf8(raw).unwrap(),
             r#"[{"format":"souls-entry/1","kind":"x:a"},{"format":"souls-entry/1","kind":"x:b"}]"#
         );
         assert_eq!(e.current().etag, first.etag, "unchanged: the same tag");
-        std::fs::write(dir.join("d.json"), r#"{"format":"souls-entry/1","kind":"x:d"}"#).unwrap();
-        assert_eq!(e.current().count, 3, "a new file is served without a restart");
+        std::fs::write(
+            dir.join("d.json"),
+            r#"{"format":"souls-entry/1","kind":"x:d"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            e.current().count,
+            3,
+            "a new file is served without a restart"
+        );
         assert_ne!(e.current().etag, first.etag);
         let _ = std::fs::remove_dir_all(&dir);
     }
