@@ -388,6 +388,11 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         planning.borrow().queued.contains_key(&line_key),
         "the obstructed corner is asked off-clock"
     );
+    // #3573: a far fixture sit on full Eden ended `walk.blocked` while its route was still being planned.
+    assert!(
+        !sight.asked.borrow().contains_key(&id),
+        "a tick waiting for the planner is no tick of stalled walking"
+    );
     let duplicated_line = answered.forms[&line_key].clone();
     planning.borrow_mut().receive(answered.forms);
     assert_eq!(
@@ -398,6 +403,10 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         panic!("the planned corner");
     };
     assert_ne!(corner, body.pose.position);
+    assert!(
+        sight.asked.borrow().contains_key(&id),
+        "a planned corner is watched for stalls"
+    );
     assert!(
         !planning.borrow().current.contains_key(&line_key),
         "a partial line result is consumed once"
