@@ -23,9 +23,10 @@
 
 use std::collections::BTreeMap;
 
-use replica::effects::{Actor, Audience, Body, Cause, Effect, Envelope, Event, Rest};
+use replica::effects::{Actor, Body, Cause, Effect, Envelope, Event, Rest};
 use replica::encode::{Name, Value};
 use replica::ids::Id;
+use replica::world_model::Audience;
 use replica::time::{MICROS_PER_SECOND, Micros};
 
 /// The rule's name, as today's.
@@ -218,6 +219,11 @@ fn pick(h: u64, n: i64) -> i64 {
     i64::try_from(h % u64::try_from(n.max(1)).unwrap_or(1)).unwrap_or(0)
 }
 
+/// `a / b` rounded up (b > 0).
+fn up(a: i64, b: i64) -> i64 {
+    a.div_euclid(b) + i64::from(a.rem_euclid(b) != 0)
+}
+
 fn d2(a: [i64; 2], b: [i64; 2]) -> i128 {
     let (x, z) = (i128::from(a[0] - b[0]), i128::from(a[1] - b[1]));
     x * x + z * z
@@ -338,11 +344,11 @@ impl WindDown {
             return Some(t.min(zombie_at));
         }
         if s.zombie.is_none() {
-            let n = (from - zombie_at).max(0).div_ceil(kn.leg_min.max(1));
+            let n = up((from - zombie_at).max(0), kn.leg_min.max(1));
             let t = zombie_at + n * kn.leg_min;
             return Some(if from >= stop_at { from.max(lie_at) } else { t.min(stop_at) });
         }
-        let look = from.div_ceil(LOOK) * LOOK;
+        let look = up(from, LOOK) * LOOK;
         Some(if from <= stop_at { look.min(stop_at) } else { look.max(lie_at) })
     }
 
@@ -468,7 +474,7 @@ impl WindDown {
         let a0 = usize::try_from(pick(mix(body, b's', 0, 0), 64)).unwrap_or(0);
         for k in 1..=self.knobs.spot_search_um / RING {
             // About one point every 1.5 m of the ring, at most 64.
-            let n = usize::try_from(((k * 62_832).div_ceil(10_000)).clamp(1, 64)).unwrap_or(64);
+            let n = usize::try_from(up(k * 62_832, 10_000).clamp(1, 64)).unwrap_or(64);
             for i in 0..n {
                 let p = ahead(at, a0 + i * 64 / n, k * RING);
                 if open(p) {
