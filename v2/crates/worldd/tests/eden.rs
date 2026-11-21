@@ -1965,3 +1965,149 @@ fn i3799_a4_the_public_stream_carries_a_soul_walking_sitting_and_rising() {
         "standing on a floor again"
     );
 }
+
+/// #3799 A5: full Eden served with `V2_WALKERS` (200) joined Souls, each walking back and forth on the open ground
+/// through the gateway for `V2_SECONDS` (60), while a reader follows the public stream as the page does (the pointer,
+/// then each new part played by the normal public reader, the same code the page runs as WASM). Prints parts written
+/// a second against parts played a second, the reader's lag behind the newest part, and the samples it saw.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
+    use replica::stream::{Pointer, public::PublicPlayer};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
+    let n: u64 = std::env::var("V2_WALKERS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(200);
+    let secs: u64 = std::env::var("V2_SECONDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60);
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (lineage, ground) = (im.nodes["world"].scope(), im.nodes["ground"]);
+    let (served, first, dir) = serve(&facts, "74.0,-1.0", "m3799a5", lineage);
+    drop(first);
+    let stop = Arc::new(AtomicBool::new(false));
+    let (walks, refused) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+    let joined = Instant::now();
+    let mut souls: Vec<Client> = (2..n + 2).map(|i| join(&dir, i, lineage)).collect();
+    println!(
+        "{n} Souls joined in {:.1} s",
+        joined.elapsed().as_secs_f64()
+    );
+    // The reader: from the pointer, each part as it is published.
+    let reader = {
+        let (dir, stop) = (dir.clone(), stop.clone());
+        std::thread::spawn(move || {
+            let world = replica::rules::json::parse(
+                &std::fs::read_to_string(dir.join("views/world.json")).unwrap(),
+            )
+            .unwrap();
+            let stream = dir.join(world.get("stream").and_then(|v| v.str()).unwrap());
+            let (mut player, mut generation, mut next) = (None, Vec::new(), 0u64);
+            let (mut played, mut samples, mut lags, mut busy) =
+                (0u64, 0usize, Vec::new(), Duration::ZERO);
+            let (start, mut first_newest, mut last_newest) = (Instant::now(), None, 0u64);
+            while !stop.load(Ordering::Relaxed) {
+                let Ok(bytes) = std::fs::read(stream.join("pointer")) else {
+                    continue;
+                };
+                let Ok(pointer) = Pointer::read(&bytes) else {
+                    continue;
+                };
+                let Value::Map(fields) = decode(&bytes).unwrap().value else {
+                    continue;
+                };
+                let Some(Value::Bytes(g)) = fields.get(&8) else {
+                    continue;
+                };
+                let parts = stream.join("g").join(replica::encode::to_hex(g));
+                if *g != generation {
+                    let headers = stream.ancestors().nth(3).unwrap().join("headers");
+                    let header =
+                        std::fs::read(headers.join(replica::encode::to_hex(&pointer.header)))
+                            .unwrap();
+                    let baseline = std::fs::read(parts.join("baseline")).unwrap();
+                    player =
+                        Some(PublicPlayer::start(&header, &baseline).expect("the public reader"));
+                    generation = g.clone();
+                    next = 0;
+                }
+                let newest = pointer.newest.unwrap_or(0);
+                first_newest.get_or_insert(newest);
+                last_newest = newest;
+                let p = player.as_mut().unwrap();
+                while next <= newest {
+                    let t = Instant::now();
+                    let bytes =
+                        std::fs::read(parts.join(next.to_string())).expect("a published part");
+                    p.play(&bytes).expect("the public reader plays the part");
+                    busy += t.elapsed();
+                    samples += p.samples().len();
+                    played += 1;
+                    next += 1;
+                }
+                lags.push(newest + 1 - next);
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            let wall = start.elapsed().as_secs_f64();
+            let written = last_newest - first_newest.unwrap_or(0);
+            (
+                written as f64 / wall,
+                played as f64 / wall,
+                played,
+                samples,
+                busy,
+                lags.iter().max().copied(),
+            )
+        })
+    };
+    let walkers: Vec<_> = souls
+        .drain(..)
+        .enumerate()
+        .map(|(i, mut soul)| {
+            let (stop, walks, refused) = (stop.clone(), walks.clone(), refused.clone());
+            std::thread::spawn(move || {
+                // Back and forth between two points 8 m apart on a ring around the births.
+                let a = i as f64 * 0.7;
+                let (cx, cz) = (74.0 + 6.0 * a.cos(), -1.0 + 6.0 * a.sin());
+                let mut leg = 0;
+                while !stop.load(Ordering::Relaxed) {
+                    let x = cx + if leg % 2 == 0 { 4.0 } else { -4.0 };
+                    let um = |m: f64| {
+                        let v = (m * 1e6) as i64;
+                        u64::try_from(v)
+                            .map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
+                    };
+                    let to = Value::Array(vec![um(x), um(0.0), um(cz)]);
+                    match soul.act("eden:walk", Some(ground), BTreeMap::from([(1, to)])) {
+                        Ok(_) => walks.fetch_add(1, Ordering::Relaxed),
+                        Err(_) => refused.fetch_add(1, Ordering::Relaxed),
+                    };
+                    leg += 1;
+                }
+            })
+        })
+        .collect();
+    std::thread::sleep(Duration::from_secs(secs));
+    stop.store(true, Ordering::Relaxed);
+    let (written, played_rate, played, samples, busy, lag) = reader.join().unwrap();
+    drop(served);
+    for w in walkers {
+        let _ = w.join();
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    println!(
+        "A5: {n} walkers, {secs} s: walks done {}, refused {}; public parts written {written:.2}/s, played \
+         {played_rate:.2}/s ({played} parts, {samples} motion samples, {:.1} ms reading in all); the reader's most \
+         parts behind the newest: {lag:?}",
+        walks.load(Ordering::Relaxed),
+        refused.load(Ordering::Relaxed),
+        busy.as_secs_f64() * 1e3
+    );
+    assert!(samples > 0, "the stream carries motion");
+    assert!(lag.unwrap_or(0) <= 2, "the reader keeps up");
+}
