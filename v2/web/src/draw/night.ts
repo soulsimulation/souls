@@ -125,14 +125,15 @@ export function paintNightSources(sources: readonly NightSource[], bounds: Night
 }
 
 const FIRE = /fire|hearth|brazier|campfire|torch/;
-/** The pools of every thing on the page that gives light, at its place on the ground; the map covers the world's ground. */
+/** The pools of every thing on the page that gives light (and is `lit`), at its place on the ground; the map covers the
+ *  world's ground. */
 export function nightPools(world: { nodes: Map<string, { id: string; kind: string; origin?: string }>; extent: [number, number, number, number] | null; frame(id: string): THREE.Matrix4; heightAt(x: number, z: number): number | null },
-  index: { things: Record<string, string>; states: Map<string, Record<string, string[]>> }): { sources: NightSource[]; bounds: NightBounds } | null {
+  index: { things: Record<string, string>; states: Map<string, Record<string, string[]>> }, lit: (id: string) => boolean = () => true): { sources: NightSource[]; bounds: NightBounds } | null {
   if (!world.extent) return null;
   const sources: NightSource[] = [], p = new THREE.Vector3();
   for (const n of world.nodes.values()) {
     const hash = n.origin && index.things[n.origin];
-    if (!hash || !givesLight(index.states.get(hash))) continue;
+    if (!hash || !givesLight(index.states.get(hash)) || !lit(n.id)) continue; // a fire put out casts no pool (C8)
     p.setFromMatrixPosition(world.frame(n.id));
     sources.push(lampPool(p.x, p.z, world.heightAt(p.x, p.z) ?? p.y, FIRE.test(n.kind)));
   }

@@ -199,6 +199,7 @@ pub struct Link {
 }
 
 /// The links of one building, with the patch of each of its floors, all in the building's frame.
+#[derive(Clone)]
 pub struct Building {
     pub thing: Id,
     pub links: Vec<Link>,

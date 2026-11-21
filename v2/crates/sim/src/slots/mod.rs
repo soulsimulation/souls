@@ -548,7 +548,7 @@ impl Slots {
         &mut self,
         c: &mut Controller,
         at: &PlaceAt,
-        floors: &BTreeMap<Id, Surface>,
+        floors: &dyn crate::mover::Floors,
         key: Key,
         now: Micros,
     ) -> Option<R<HandOff>> {
@@ -583,7 +583,7 @@ impl Slots {
         mint: &mut Minter,
         moves: &mut Moves,
         geo: &impl Reach,
-        floors: &BTreeMap<Id, Surface>,
+        floors: &dyn crate::mover::Floors,
         t: &Timer,
     ) -> Option<(Fired, Option<R<HandOff>>)> {
         let fired = moves.fire(c, due, mint, geo, t)?;
@@ -661,11 +661,19 @@ impl Slots {
         &self,
         c: &mut Controller,
         at: &PlaceAt,
-        floors: &BTreeMap<Id, Surface>,
+        floors: &dyn crate::mover::Floors,
         body: Id,
         driver: Driver,
         now: Micros,
     ) -> R<HandOff> {
+        let build = c.build(body).ok_or_else(|| Refusal {
+            name: "body-missing",
+            detail: show(body),
+        })?;
+        let floors = floors.for_build(build).ok_or_else(|| Refusal {
+            name: "body-class-unprepared",
+            detail: "no prepared support surfaces".into(),
+        })?;
         let Some(floor) = floors.get(&at.floor) else {
             return refuse("no-surface", show(at.floor));
         };
@@ -673,7 +681,7 @@ impl Slots {
             node: at.floor,
             slot: None,
         };
-        let placed = floor.place(body, frame, at.stand()?, at.facing)?;
+        let placed = floor.place_built(body, frame, at.stand()?, at.facing, build)?;
         c.stand(body, driver, placed, now)
     }
 }

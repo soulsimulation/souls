@@ -25,10 +25,14 @@ test('A3: lamps and fires paint today\'s light map, byte for byte', () => {
 test('A3: what gives light, and the pools at night only', () => {
   assert.ok(givesLight({ on: ['light'] }) && givesLight({ lit: ['flame'] }) && givesLight({ on: ['(glow materials)'] }));
   assert.ok(!givesLight({ on: ['screen'] }) && !givesLight({ open: ['door'] }) && !givesLight(undefined));
-  assert.deepEqual([1, 0.5, 0].map((d) => (setNightStrength(d), nightStrength())), TODAY.strength);
+  // Within 1e-12: Linux and macOS libm differ in the last digit (0.35355339059327373 against …738).
+  const strength = [1, 0.5, 0].map((d) => (setNightStrength(d), nightStrength()));
+  assert.equal(strength.length, TODAY.strength.length);
+  strength.forEach((v, i) => assert.ok(Math.abs(v - TODAY.strength[i]) < 1e-12, `strength ${i}: ${v} against ${TODAY.strength[i]}`));
   const lamp = { id: 'a', kind: 'core:street-lamp@1', origin: 'L1' }, bench = { id: 'b', kind: 'core:bench@1', origin: 'B1' };
   const at = new Map([['a', new THREE.Matrix4().makeTranslation(5, 0, -7)], ['b', new THREE.Matrix4()]]);
   const world = { nodes: new Map([['a', lamp], ['b', bench]]), extent: [-50, -50, 50, 50] as [number, number, number, number], frame: (id: string) => at.get(id)!, heightAt: () => 1.5 };
   const index = { things: { L1: 'h-lamp', B1: 'h-bench' }, states: new Map([['h-lamp', { on: ['light'] }]]) };
   assert.deepEqual(nightPools(world, index), { sources: [lampPool(5, -7, 1.5, false)], bounds: { x0: -50, z0: -50, x1: 50, z1: 50 } });
+  assert.deepEqual(nightPools(world, index, (id) => id !== 'a')?.sources, []); // C8: a light put out casts no pool
 });

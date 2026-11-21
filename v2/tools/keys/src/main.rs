@@ -308,6 +308,7 @@ impl Driver {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         let Ok(bytes) = encode(&intent.to_value()) else {
             return self.say("an intent did not encode");

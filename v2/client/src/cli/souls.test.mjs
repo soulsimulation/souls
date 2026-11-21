@@ -182,6 +182,15 @@ test('the daemon\'s log and state hold no token', () => {
   for (const f of [rtA.log, rtA.state]) assert.ok(!readFileSync(f, 'utf8').includes(a.token.split('.')[1]));
 });
 
+test('C15: ack and pending make their daemon requests', () => {
+  assert.deepEqual(requestOf(['ack', 'm_1', 'Noon,', 'by', 'the', 'clock']).req, { op: 'ack', id: 'm_1', reply: 'Noon, by the clock' });
+  assert.deepEqual(requestOf(['ack', 'm_1', 'No.', '--close', 'failed']).req, { op: 'ack', id: 'm_1', reply: 'No.', close: 'failed' });
+  assert.deepEqual(requestOf(['ack', 'm_1', 'Done', '--close', 'done', '--soul', A]), { req: { op: 'ack', id: 'm_1', reply: 'Done', close: 'done' }, soul: A });
+  assert.equal(requestOf(['ack', 'm_1', 'x', '--close', 'maybe']).refused, 'ack-close');
+  assert.deepEqual(requestOf(['pending']).req, { op: 'pending', list: true });
+  assert.deepEqual(requestOf(['pending', '--check']).req, { op: 'pending' });
+});
+
 test('C4: say, whisper and lie make their daemon requests', () => {
   assert.deepEqual(requestOf(['say', 'the', 'bread', 'is', 'warm']).req, { op: 'say', words: 'the bread is warm' });
   assert.deepEqual(requestOf(['whisper', LAMP_B, 'just', 'you']).req, { op: 'whisper', to: LAMP_B, words: 'just you' });
@@ -265,4 +274,13 @@ test('R16: history by thing, place and Soul through the daemon, each named from 
   const me = await ask(['--soul', 'me']);
   assert.deepEqual([me.about, me.found, me.lines[0]], ['me', 24, 'd1 23:00 arrived room 1']);
   assert.equal((await ask(['--soul', 'nobody'])).code, 'history-unknown');
+});
+
+test('C14: now sets the public line, alone or --clear clears it, and --now rides on another command', () => {
+  assert.deepEqual(requestOf(['now', 'Mending', 'the', 'nets']).req, { op: 'now', text: 'Mending the nets' });
+  assert.deepEqual(requestOf(['now']).req, { op: 'now', text: '' });
+  assert.deepEqual(requestOf(['now', '--clear']).req, { op: 'now', text: null });
+  assert.deepEqual(requestOf(['say', 'hello', '--now', 'Saying hello']), { req: { op: 'say', words: 'hello' }, soul: undefined, now: 'Saying hello' });
+  assert.equal(requestOf(['say', 'hello', '--now']).refused, 'now-usage');
+  assert.equal(requestOf(['memory', 'x', '--now', 'y']).now, undefined, 'a local command reaches no world');
 });
