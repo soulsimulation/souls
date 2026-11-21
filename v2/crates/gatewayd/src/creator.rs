@@ -23,7 +23,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::Gateway;
-use crate::token::{Grant, Token};
+use crate::token::{CreatorMark, Grant, Token};
 
 /// Where a page exchanges its session.
 pub const PATH: &str = "/v2/creator-token";
@@ -36,6 +36,7 @@ const ANSWER_MOST: u64 = 16 << 10;
 pub struct Exchange {
     pub creator: Id,
     pub directory: String,
+    pub authority_required: bool,
 }
 
 /// A principal as the directory writes it: `<scope hex>:<counter>`.
@@ -122,6 +123,44 @@ fn refuse(status: StatusCode, name: &str) -> Response {
     answer(status, format!("{{\"refused\":\"{name}\"}}"))
 }
 
+/// The current exact-world authority, including its monotonic generation.
+pub fn current_mark(gw: &Gateway) -> Option<CreatorMark> {
+    let ex = gw.exchange.get()?;
+    match gw.tokens_file.get() {
+        Some(source) => source
+            .creator(&gw.tokens, ex.creator, ex.authority_required)
+            .ok(),
+        None if !ex.authority_required => Some(CreatorMark {
+            generation: 0,
+            owner: Some(ex.creator),
+        }),
+        None => None,
+    }
+}
+
+/// Capture at sign-in; an idle socket cannot regain authority on an A → B → A handoff.
+pub fn session(gw: &Gateway, actor: Actor) -> Result<Option<CreatorMark>, &'static str> {
+    if gw.exchange.get().is_none() {
+        return Ok(None);
+    }
+    match actor {
+        Actor::Creator(id) => current_mark(gw)
+            .filter(|m| m.owner == Some(id))
+            .map(Some)
+            .ok_or(crate::token::REFUSED),
+        _ => Ok(None),
+    }
+}
+
+pub fn permits(gw: &Gateway, actor: Actor, captured: Option<CreatorMark>) -> bool {
+    match actor {
+        Actor::Creator(_) if gw.exchange.get().is_some() => {
+            captured.is_some() && session(gw, actor) == Ok(captured)
+        }
+        _ => true,
+    }
+}
+
 /// The exchange's route.
 pub async fn exchange(State(gw): State<Arc<Gateway>>, headers: HeaderMap) -> Response {
     let Some(ex) = gw.exchange.get() else {
@@ -141,19 +180,37 @@ pub async fn exchange(State(gw): State<Arc<Gateway>>, headers: HeaderMap) -> Res
         }
         Err(name) => return refuse(StatusCode::UNAUTHORIZED, name),
     };
-    if principal != principal_text(ex.creator) {
+    let Some(mark) = current_mark(&gw).filter(|m| m.owner.is_some()) else {
+        return refuse(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "creator-authority-unavailable",
+        );
+    };
+    let owner = mark.owner.expect("checked owner");
+    if principal != principal_text(owner) {
         (gw.log)("a session that is not the world's creator asked for its token; refused");
         return refuse(StatusCode::FORBIDDEN, "not-the-creator");
     }
-    let grant = Grant::Actor(Actor::Creator(ex.creator));
+    let grant = Grant::Actor(Actor::Creator(owner));
     let Ok(token) = Token::issue(grant) else {
         return refuse(StatusCode::SERVICE_UNAVAILABLE, "random-unavailable");
     };
     let hash = token.hash();
-    gw.tokens
+    let fallback = (!ex.authority_required).then_some(CreatorMark {
+        generation: 0,
+        owner: Some(ex.creator),
+    });
+    if !gw
+        .tokens
         .write()
         .unwrap_or_else(|e| e.into_inner())
-        .add(grant, hash);
+        .add_browser(grant, hash, mark, fallback)
+    {
+        return refuse(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "creator-authority-changing",
+        );
+    }
     let lapse = gw.clone();
     tokio::spawn(async move {
         tokio::time::sleep(LIFETIME).await;

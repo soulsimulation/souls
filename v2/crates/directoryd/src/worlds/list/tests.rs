@@ -353,3 +353,155 @@ fn w3b_pending_retry_survives_directory_restart_and_keeps_owned_identity() {
         Some(expected)
     );
 }
+
+#[test]
+fn w16_handoff_hash_only_named_expiry_pending_restart_and_round_trip() {
+    let store = Memory::default();
+    let gets = AtomicUsize::new(0);
+    let w = worlds(&store, &gets, Arc::new(AtomicUsize::new(0)));
+    w.create(&ask("w16", "garden", "First"), person(1), 0, 10 * DAY)
+        .unwrap();
+    let original = store
+        .get(&NameRecord::key("garden"))
+        .unwrap()
+        .unwrap()
+        .bytes;
+    let id = w.ownership("garden").unwrap();
+    assert_eq!(
+        w.offer_handoff("garden", person(3), None, 10 * DAY)
+            .unwrap_err()
+            .name,
+        "not-the-creator"
+    );
+    let expired = w
+        .offer_handoff("garden", person(1), None, 10 * DAY)
+        .unwrap();
+    assert_eq!(
+        w.begin_handoff(
+            "garden",
+            expired["code"].as_str().unwrap(),
+            "acct_next",
+            person(2),
+            17 * DAY
+        )
+        .unwrap_err()
+        .name,
+        "handoff-expired"
+    );
+    w.cancel_handoff("garden", person(1)).unwrap();
+    assert_eq!(
+        w.begin_handoff(
+            "garden",
+            expired["code"].as_str().unwrap(),
+            "acct_next",
+            person(2),
+            10 * DAY
+        )
+        .unwrap_err()
+        .name,
+        "handoff-unknown"
+    );
+    let offer = w
+        .offer_handoff("garden", person(1), Some("acct_next"), 10 * DAY)
+        .unwrap();
+    let code = offer["code"].as_str().unwrap();
+    let stored = store.get(KEY).unwrap().unwrap().bytes;
+    assert!(!String::from_utf8(stored).unwrap().contains(code));
+    let public = w.list().unwrap().to_string();
+    for secret in [code, "acct_next", "_handoff", "_creator_generation"] {
+        assert!(!public.contains(secret));
+    }
+    assert_eq!(
+        w.begin_handoff("garden", code, "acct_other", person(3), 10 * DAY)
+            .unwrap_err()
+            .name,
+        "handoff-not-for-you"
+    );
+    let pending = w
+        .begin_handoff("garden", code, "acct_next", person(2), 10 * DAY)
+        .unwrap();
+    assert_eq!(creator_of(&store, &id.lineage, id.zone).unwrap(), None);
+    assert_eq!(
+        w.creators().unwrap(),
+        vec![(to_hex(&id.lineage), String::new())]
+    );
+    assert_eq!(
+        w.settings("garden", person(1), None, None, None)
+            .unwrap_err()
+            .name,
+        "not-the-creator"
+    );
+    let cold_gets = AtomicUsize::new(0);
+    let cold = worlds(&store, &cold_gets, Arc::new(AtomicUsize::new(0)));
+    assert_eq!(
+        cold.begin_handoff("garden", code, "acct_next", person(2), 30 * DAY)
+            .unwrap(),
+        pending
+    );
+    assert_eq!(
+        cold.begin_handoff("garden", code, "acct_other", person(3), 30 * DAY)
+            .unwrap_err()
+            .name,
+        "handoff-pending"
+    );
+    cold.finish_handoff(&pending).unwrap();
+    assert_eq!(
+        creator_of(&store, &id.lineage, id.zone).unwrap(),
+        Some(person(2))
+    );
+    assert_eq!(cold.ownership("garden").unwrap().generation, 1);
+    assert!(
+        cold.settings("garden", person(2), Some(true), None, None)
+            .is_ok()
+    );
+    assert_eq!(
+        cold.begin_handoff("garden", code, "acct_next", person(2), 30 * DAY)
+            .unwrap_err()
+            .name,
+        "handoff-used"
+    );
+    let back = cold
+        .offer_handoff("garden", person(2), None, 30 * DAY)
+        .unwrap();
+    assert_eq!(
+        cold.begin_handoff(
+            "garden",
+            back["code"].as_str().unwrap(),
+            "acct_next",
+            person(2),
+            30 * DAY
+        )
+        .unwrap_err()
+        .name,
+        "handoff-already-owner"
+    );
+    let back = cold
+        .begin_handoff(
+            "garden",
+            back["code"].as_str().unwrap(),
+            "acct_first",
+            person(1),
+            30 * DAY,
+        )
+        .unwrap();
+    cold.finish_handoff(&back).unwrap();
+    assert_eq!(cold.ownership("garden").unwrap().generation, 2);
+    assert_eq!(
+        store
+            .get(&NameRecord::key("garden"))
+            .unwrap()
+            .unwrap()
+            .bytes,
+        original
+    );
+    let mut rows: Json = serde_json::from_slice(&store.get(KEY).unwrap().unwrap().bytes).unwrap();
+    rows["worlds"][0]["lineage"] = json!("ff".repeat(16));
+    let etag = store.get(KEY).unwrap().unwrap().etag;
+    store
+        .put(KEY, &serde_json::to_vec(&rows).unwrap(), When::Is(&etag))
+        .unwrap();
+    assert_eq!(
+        cold.ownership("garden").unwrap_err().name,
+        "handoff-authority-mismatch"
+    );
+}
