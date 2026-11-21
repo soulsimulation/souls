@@ -107,6 +107,10 @@ test('A2: an act carries each candidate\'s own target, and the first one\'s thin
   assert.equal(Buffer.from(name).toString(), 'tap');
   assert.equal(id(arg), c, 'the thing argument, by name, in parameter 1');
   assert.throws(() => wire.wireIntent(Buffer.from(s, 'hex'), 9001n, 'local:fill', 1n, new Uint8Array(), 10n ** 15n, a, undefined, 'tap'), /arg-not-name-and-id/);
+  // #3603: a steer's point, [x, z] µm, negative or not, as parameter 1.
+  const steer = decode(wire.wireIntent(Buffer.from(s, 'hex'), 9001n, 'carrier:steer', 2n, new Uint8Array(), 10n ** 15n, a, undefined, undefined, JSON.stringify({ 1: [-59800000, 250000] })));
+  assert.equal(steer.get(2), 'carrier:steer');
+  assert.deepEqual(steer.get(4).get(1).map(Number), [-59800000, 250000]);
 });
 
 test('A1, A2: can answers from the local check; a walk to a named thing and a sit on a chosen chair each end with their receipt', async () => {
@@ -161,6 +165,19 @@ test('A1, A2: can answers from the local check; a walk to a named thing and a si
   assert.equal(walkThere.ok, true, JSON.stringify(walkThere));
   assert.ok((await answerOf(rt, walkThere.sequence)).answer >= 1, 'object <id> walk went through act and was answered');
   rmSync(join(home, 'kinds'), { recursive: true });
+
+  // #3603: the engine's carrier verbs are sent as they are, never checked as forms; a point in metres goes as parameter
+  // 1, [x, z] µm; the world's refusal comes back by name (the room is not a carrier, and this Soul sits in nothing).
+  const halfPoint = souls(home, ['act', `carrier:steer:${room}`, 'x=4']);
+  assert.equal(halfPoint.code, 'steer-needs-a-point', JSON.stringify(halfPoint));
+  assert.equal(halfPoint.sent, false, 'a point half given sends nothing');
+  for (const words of [[`carrier:steer:${room}`, 'x=-59.8', 'z=0.25'], [`carrier:stop:${room}`], [`carrier:land:${room}`]]) {
+    const sent = souls(home, ['act', ...words]);
+    assert.equal(sent.ok, true, JSON.stringify(sent));
+    assert.equal(sent.dropped, undefined, 'not stopped by the local form check');
+    const got = await answerOf(rt, sent.sequence);
+    assert.ok(got.answer > 1 && typeof got.reason === 'string' && got.reason.length > 0, `refused by name: ${JSON.stringify(got)}`);
+  }
 
   const walk = souls(home, ['act', chair]);
   assert.equal(walk.ok, true, JSON.stringify(walk));

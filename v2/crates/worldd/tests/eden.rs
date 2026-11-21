@@ -2636,6 +2636,33 @@ fn course_sets(records: &[Vec<u8>], punt: Id) -> Vec<(i64, u64, usize)> {
     out
 }
 
+/// Where `punt` is now, x and z m in its parent's frame: its course in the world's own tree, read at the world's time.
+fn punt_place(dir: &Path, punt: Id) -> Option<(f64, f64)> {
+    let records = sim::log::recover(&std::fs::read(dir.join("log")).ok()?)
+        .ok()?
+        .records;
+    let mut course = None;
+    for r in &records {
+        let Ok(part) = Part::read(r) else { continue };
+        for e in part.effects {
+            if let Body::Changes(cs) = &e.body {
+                for c in cs {
+                    if let replica::effects::Change::Set {
+                        node, field, to, ..
+                    } = &c.change
+                        && *node == punt
+                        && *field == replica::schedule::F_COURSE
+                    {
+                        course = replica::schedule::course::Course::read(to);
+                    }
+                }
+            }
+        }
+    }
+    let (p, _) = course?.load().ok()?.at(answers::now()).ok()?;
+    Some((p.x as f64 / 1e6, p.z as f64 / 1e6))
+}
+
 /// The public stream's parts under `dir/views`, unpacked: each one's T6 part.
 fn public_parts(dir: &Path) -> Vec<Vec<u8>> {
     use replica::stream::{Pointer, StreamPart};
@@ -2663,7 +2690,9 @@ fn public_parts(dir: &Path) -> Vec<Vec<u8>> {
 }
 
 /// #3603: a Soul boards the commons pond's rowing punt at its plank in its boarding stop, rides its loop, steers it
-/// over the pond, lands it, and gets off at the plank, through the gateway. Before boarding a steer is refused
+/// over the pond, stops it there (it holds where it is), lands it by a point at its home (one across the pond is refused
+/// `no-landing-spot`), and gets off at the plank, through the gateway. A stop in its boarding stop is refused
+/// `not-aloft`. Before boarding a steer is refused
 /// `not-aboard`; on the water a rise is refused `boarding-frame-away` and the body stays seated; a steer with no point,
 /// or 2 km away, is refused by name. The log and the public stream carry the punt's courses (its loop, the steer, the
 /// way back, its loop again) and the rider in its seat.
@@ -2751,6 +2780,10 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     println!("board it by its own form: {boarded:?}");
     let seated_in = last_frames(&dir).into_values().find(|f| f.0 == punt);
     println!("the rider's frame: {seated_in:?}");
+    // Still in its boarding stop, a stop is refused: it has not left yet.
+    let early = (phase(answers::now()) < 28_000_000)
+        .then(|| soul.act("carrier:stop", Some(punt), BTreeMap::new()));
+    println!("stop in the boarding stop: {early:?}");
     // Ride the loop until the punt has left its stop.
     let p = phase(answers::now());
     if p < 32_000_000 {
@@ -2763,9 +2796,20 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     println!("steer with no point: {no_point:?}; 2 km away: {far:?}");
     let steered = soul.act("carrier:steer", Some(punt), point(-59.8, 0.0));
     println!("steer toward the pond's middle: {steered:?}");
-    std::thread::sleep(Duration::from_secs(15));
-    let landed = soul.act("carrier:land", Some(punt), BTreeMap::new());
-    println!("land: {landed:?}");
+    std::thread::sleep(Duration::from_secs(5));
+    // Stop: it holds where it is; the next 5 s it does not move.
+    let stopped = soul.act("carrier:stop", Some(punt), BTreeMap::new());
+    println!("stop: {stopped:?}");
+    std::thread::sleep(Duration::from_secs(1));
+    let held = (punt_place(&dir, punt), {
+        std::thread::sleep(Duration::from_secs(5));
+        punt_place(&dir, punt)
+    });
+    println!("the punt held at: {held:?}");
+    // Land at a point: by its home it rows back there; across the pond it is refused, as today's.
+    let away_land = soul.act("carrier:land", Some(punt), point(hx + 20.0, hz));
+    let landed = soul.act("carrier:land", Some(punt), point(hx + 1.0, hz));
+    println!("land 20 m from its home: {away_land:?}; land by its home: {landed:?}");
     // Rowed back along its wake and round the rest of its lap to its home: get off once it stands there.
     let mut off = Err(String::new());
     for _ in 0..80 {
@@ -2806,13 +2850,29 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     assert_eq!(no_point, Err("steer-needs-a-point".to_owned()));
     assert_eq!(far, Err("out-of-bounds".to_owned()));
     steered.expect("steered");
-    landed.expect("landed");
+    if let Some(early) = early {
+        assert_eq!(early, Err("not-aloft".to_owned()));
+    }
+    stopped.expect("stopped");
+    let (a, b) = held;
+    let (a, b) = (a.expect("the punt's place"), b.expect("the punt's place"));
+    assert!(
+        (a.0 - b.0).abs() < 0.01 && (a.1 - b.1).abs() < 0.01,
+        "held where it stopped: {a:?} then {b:?}"
+    );
+    assert_eq!(away_land, Err("no-landing-spot".to_owned()));
+    landed.expect("landed by its home");
     off.expect("rose at the plank");
     let (_, node, x, z) = stood.expect("a place");
     assert_eq!(node, im.nodes["ground"], "on the ground again");
     let d = ((x - px).powi(2) + (z - pz).powi(2)).sqrt();
     assert!(d < 1.5, "at the plank: {d:.2} m from it");
     let shapes: Vec<u64> = logged.iter().map(|c| c.1).collect();
-    assert_eq!(shapes, vec![3, 3, 1], "steered, landed, its own loop again");
+    assert_eq!(
+        shapes,
+        vec![3, 3, 3, 1],
+        "steered, stopped, landed, its own loop again"
+    );
+    assert_eq!(logged[1].2, 2, "the stop: one station, where it is, held");
     assert_eq!(streamed, logged, "the public stream carries every course");
 }

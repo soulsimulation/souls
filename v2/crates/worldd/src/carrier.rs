@@ -6,13 +6,19 @@
 //!   leg from where the punt is now, over water deep enough to float it, ending 3 m short of the first shore on the
 //!   way (`sim::courses::punts::reach`), rowed at 0.6 m/s.
 //! - **`carrier:land`**: back along its wake to where it left its own loop, round the rest of that lap, to its home.
+//!   A punt lets riders off only at its own bank: a land with a point (parameter 1, as a steer's) more than 6 m from
+//!   its home is refused `no-landing-spot`, as today's is.
+//! - **`carrier:stop`**: holds the punt where it is, refused `not-aloft` while it still stands at its own loop's
+//!   boarding stop.
+//! - **A hold runs out.** A steered punt standing where a steer or a stop left it, away from its home, rows back to it
+//!   by itself after 120 s with no new steer, as today's does ([`settle`]), so a rider is never left on the water.
 //! - **Written once.** Each is one entry on the punt: its course set to the new one, run once
 //!   ([`replica::schedule::course::Shape::Once`]) from now, and its steer ([`replica::schedule::F_STEER`]: who steers,
 //!   the loop it left and when, the wake). A replay or a restart reads the same course; [`restore`] hands each course
 //!   to the slots again. The punt's riders are carried because their frame is its slot; nothing is written per tick.
 //! - **Refusals** keep today's names: `not-aboard` (the body is not seated in it), `steered` (another rider still
 //!   aboard steers it), `out-of-bounds` (more than 1200 m from its home), `no-water-route` (no open water that way),
-//!   and `steer-needs-a-point` for a steer with no point. Nothing moves on a refusal.
+//!   `no-landing-spot`, `not-aloft`, and `steer-needs-a-point` for a steer with no point. Nothing moves on a refusal.
 //! - **Home again.** A steered punt standing at its home with nobody aboard takes up its own loop again from that
 //!   moment ([`settle`]), its boarding stop first: an entry of the world's.
 
@@ -46,7 +52,14 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
 pub enum Ask {
     Steer,
     Land,
+    Stop,
 }
+
+/// How long a steered punt holds where a steer or a stop left it before it rows home by itself, µs (today's
+/// `STEER_HOVER`).
+pub const HOLD: Micros = 120_000_000;
+/// How near its home a land's point must be, µm: a punt lets riders off only at its own bank (today's 6 m).
+pub const LAND_NEAR: i64 = 6_000_000;
 
 /// One entry on `node` of `changes`, caused by `cause`, acted by `actor`.
 fn entry(
@@ -161,18 +174,19 @@ pub fn act(
     }
     let placed = node.place().map_or(Vec3::ZERO, |p| p.position);
     let (here, _) = place_at(fields, placed, now);
+    let steered = steering.is_some();
     let mut s = steering.unwrap_or(Steer {
         by: body,
-        own: course,
+        own: course.clone(),
         left: now,
         wake: Vec::new(),
     });
     s.by = body;
     let home = s.home();
+    let far = |d: i64| i128::from(d) * i128::from(d);
     let next = match ask {
         Ask::Steer => {
             let to = point(params)?;
-            let far = |d: i64| i128::from(d) * i128::from(d);
             if far(to[0] - home.x) + far(to[1] - home.z) > far(STEER_RANGE) {
                 return Err(refusal(
                     "out-of-bounds",
@@ -200,7 +214,35 @@ pub fn act(
             s.wake.push(here);
             punts::once(here, &[at], now)?
         }
-        Ask::Land => punts::once(here, &punts::back(&s), now)?,
+        Ask::Land => {
+            if params.contains_key(&1) {
+                let to = point(params)?;
+                if far(to[0] - home.x) + far(to[1] - home.z) > far(LAND_NEAR) {
+                    return Err(refusal(
+                        "no-landing-spot",
+                        format!(
+                            "{} lets riders off only at its own bank; land with no point to row back there",
+                            show(punt)
+                        ),
+                    ));
+                }
+            }
+            punts::once(here, &punts::back(&s), now)?
+        }
+        Ask::Stop => {
+            let boarding = !steered
+                && course
+                    .load()
+                    .is_ok_and(|t| matches!(t.stopped(now), Ok(Some(st)) if st.station == 0));
+            if boarding {
+                return Err(refusal(
+                    "not-aloft",
+                    format!("{} has not left yet", show(punt)),
+                ));
+            }
+            s.wake.push(here);
+            punts::once(here, &[], now)?
+        }
     };
     let e = entry(
         live,
@@ -241,9 +283,33 @@ pub fn settle(
         };
         let home = s.home();
         let Ok(t) = course.load() else { continue };
-        let standing = matches!(t.stopped(now), Ok(Some(_)))
-            && t.at(now).is_ok_and(|(p, _)| p.x == home.x && p.z == home.z);
-        if !standing || !slots.holders(punt).is_empty() {
+        let stopped = matches!(t.stopped(now), Ok(Some(_)));
+        let at_home = t.at(now).is_ok_and(|(p, _)| p.x == home.x && p.z == home.z);
+        if stopped
+            && !at_home
+            && now >= course.t0.saturating_add(course.within).saturating_add(HOLD)
+        {
+            // The hold ran out: rowed home along its wake, its rider (if any) carried.
+            let (here, _) = t.at(now).unwrap_or((home, Vec3::ZERO));
+            let back = punts::once(here, &punts::back(&s), now).and_then(|c| {
+                let e = entry(
+                    live,
+                    punt,
+                    vec![set(punt, F_COURSE, c.to_value())],
+                    now,
+                    Cause::World,
+                    Actor::World,
+                )?;
+                slots.moving(punt, &c, home)?;
+                Ok(e)
+            });
+            match back {
+                Ok(e) => out.push(e),
+                Err(r) => eprintln!("worldd: {} holds where it is: {r}", show(punt)),
+            }
+            continue;
+        }
+        if !(stopped && at_home && slots.holders(punt).is_empty()) {
             continue;
         }
         let own = Course { t0: now, ..s.own };
