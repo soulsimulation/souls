@@ -130,6 +130,17 @@ impl Floors {
     }
 }
 
+// A closed stdout or stderr (a reader that went away) never stops the compactor, as `println!` would.
+fn say(line: std::fmt::Arguments<'_>) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stdout(), "{line}");
+}
+
+fn tell(line: std::fmt::Arguments<'_>) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stderr(), "{line}");
+}
+
 /// One look (rules 2 to 4): the cut to make now, if any.
 fn choose(samples: &VecDeque<At>, floor: u64, kept_from: u64, min_dead: u64) -> Option<At> {
     let i = samples.partition_point(|a| a.record <= floor);
@@ -150,15 +161,15 @@ pub fn spawn(log: PathBuf, durable: Durable, floors: Floors, min_dead: u64) {
                     pending = false;
                     match done {
                         Ok(c) => {
-                            println!(
+                            say(format_args!(
                                 "log: compacted, kept from record {} (byte {})",
                                 c.at.record, c.at.offset
-                            );
+                            ));
                             if let Some(Archive::Parts(p)) = &floors.archive {
                                 p.trim(c.at.record);
                             }
                         }
-                        Err(e) => eprintln!("worldd: the log was not compacted: {e}"),
+                        Err(e) => tell(format_args!("worldd: the log was not compacted: {e}")),
                     }
                 }
                 let now = durable.at();
@@ -177,7 +188,7 @@ pub fn spawn(log: PathBuf, durable: Durable, floors: Floors, min_dead: u64) {
                 let kept_from = match compact::read_cut(&log) {
                     Ok(c) => c.map_or(0, |c| c.at.offset),
                     Err(e) => {
-                        eprintln!("worldd: the log's cut: {e}");
+                        tell(format_args!("worldd: the log's cut: {e}"));
                         continue;
                     }
                 };
@@ -194,7 +205,7 @@ pub fn spawn(log: PathBuf, durable: Durable, floors: Floors, min_dead: u64) {
                         pending = true;
                     }
                     Ok(None) => {}
-                    Err(e) => eprintln!("worldd: the log was not compacted: {e}"),
+                    Err(e) => tell(format_args!("worldd: the log was not compacted: {e}")),
                 }
                 while samples.front().is_some_and(|a| a.record < at.record) {
                     samples.pop_front();
@@ -202,7 +213,7 @@ pub fn spawn(log: PathBuf, durable: Durable, floors: Floors, min_dead: u64) {
             }
         });
     if let Err(e) = started {
-        eprintln!("worldd: the log's compactor did not start: {e}");
+        tell(format_args!("worldd: the log's compactor did not start: {e}"));
     }
 }
 
