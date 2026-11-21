@@ -271,12 +271,12 @@ test('X11b: imported profiles reach the owner route and a real C3 public body', 
         const baseline=readFileSync(join(parts,'baseline'));
         assert.equal(createHash('sha256').update(baseline).digest('hex'),digest,'actual baseline matches the published generation');
         player=wire.StreamPlayer.fromBaseline(header,baseline);
-        for(const [ref,text]of decode(readFileSync(join(parts,'baseline.text'))))words.set(idText(ref),Buffer.from(text).toString('utf8'));
+        for(const [ref,text]of decode(readFileSync(join(parts,'baseline.text'))))if(!(ref instanceof Uint8Array))words.set(idText(ref),Buffer.from(text).toString('utf8'));
       }else player=new wire.StreamPlayer(header);
       try{
         for(let n=player.next();n<=pointer.get(1);n++){
           player.play(readFileSync(join(parts,String(n))));
-          for(const [ref,text]of decode(readFileSync(join(parts,`${n}.text`))))words.set(idText(ref),Buffer.from(text).toString('utf8'));
+          for(const [ref,text]of decode(readFileSync(join(parts,`${n}.text`))))if(!(ref instanceof Uint8Array))words.set(idText(ref),Buffer.from(text).toString('utf8'));
         }
         const links=decode(player.query(encode(new Map([[1,3],[2,soulId]]))));
         const of=links.find(l=>String(l[1]).split('@')[0]==='souls:body-of');
