@@ -46,7 +46,7 @@ use crate::ground::Versions;
 use crate::ground::scene::xform_to;
 use crate::links::Link;
 use crate::routes::{ALL, Map, Mask, Spot};
-use crate::walk::town::{Basis, Fresh, Town};
+use crate::walk::town::{Basis, Fresh, Rebuilt, Town};
 use replica::edit::{BURIES, CUTS_OFF, IN_USE, Unsafe, Use};
 use replica::effects::{Actor, Body, Change, Header, Part, TransferRec};
 use replica::ids::Id;
@@ -278,6 +278,17 @@ pub fn guard_on(
     part: &Part,
     known: &Known,
 ) -> Result<Guard, String> {
+    guard_kept(before, header, part, known).map(|(g, _)| g)
+}
+
+/// [`guard_on`], keeping the ground its rebuild built (#3743): the map preparation installs it instead of building
+/// the same ground again, when it is for the same part on the same basis.
+pub fn guard_kept(
+    before: &Tree,
+    header: &Header,
+    part: &Part,
+    known: &Known,
+) -> Result<(Guard, Rebuilt), String> {
     crate::commit::off_clock();
     let g = known.ground;
     let mut after = before.frozen();
@@ -298,7 +309,7 @@ pub fn guard_on(
         map.replace(b, &v);
     }
     let sides = Sides::of(before, header.zone, g, known.map.clone(), map);
-    Ok(Guard::of(before, part, Some(sides)))
+    Ok((Guard::of(before, part, Some(sides)), r))
 }
 
 impl Sides {

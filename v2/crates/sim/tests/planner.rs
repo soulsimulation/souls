@@ -216,3 +216,270 @@ fn route_metrics_belong_only_to_the_current_order_and_clear_on_end() {
     r.end_order(who);
     assert!(r.route_metrics(who, next).is_none());
 }
+
+/// K18d: one FIFO worker installs committed connectivity before later questions. Map controls are not batches;
+/// historical answers remain historical, and a merged current batch cannot relabel any old answer cache.
+#[test]
+fn k18d_committed_connectivity_and_mixed_batches_keep_exact_map_identity() {
+    use replica::effects::{
+        Actor, Body as EffectBody, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest,
+    };
+    use replica::encode::{Value, encode};
+    use replica::world_model::Audience;
+    use sim::host::{ReachQuestion, Wants};
+    use sim::planner::{FormKey, FormKind, FormQuery, FormQuestion};
+    use sim::walk::Mark;
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    let (mut town, nodes) = common::town(b"souls/k18d-map-test/1");
+    let ground = town.ground;
+    let (floor, at, _) = town
+        .view()
+        .on_floor(nodes["building/corridor"], Vec3::ZERO)
+        .expect("the corridor has a supporting floor");
+    let target = Target::new(floor, at);
+    let body = stand(
+        &town,
+        id(60_001),
+        ground,
+        Vec3::new(-40_000_000, 0, 30_000_000),
+    );
+    let order = id(60_002);
+    let old_map = Arc::new(town.versions.clone());
+    let key = FormKey {
+        body: body.id,
+        intent: order,
+        stage: 0,
+        step: 0,
+        kind: FormKind::Walk,
+    };
+    let old = Wants {
+        marks: Some(vec![Mark {
+            who: body.id,
+            node: ground,
+            at: body.pose.position,
+            waiting: None,
+            crossing: None,
+            staying: false,
+            spot: Some((target, order)),
+        }]),
+        places: vec![(body, target, order)],
+        lines: vec![(body, Vec3::new(-35_000_000, 0, 30_000_000))],
+        reach: vec![ReachQuestion {
+            body: body.id,
+            at: body.pose.position,
+            thing: id(60_003),
+            slot: 1,
+            order,
+            points: [body.pose.position; 2],
+        }],
+        form_map: Some(Arc::clone(&old_map)),
+        forms: vec![FormQuestion {
+            key,
+            generation: 1,
+            body,
+            query: FormQuery::Walk {
+                node: target.node,
+                at: target.point(),
+                reach: 0,
+            },
+        }],
+        ..Default::default()
+    };
+    let mut worker = Thread::spawn(Planner::new(town.copy().unwrap())).unwrap();
+    worker.send(old.clone());
+    let before = worker.take_n(1);
+    assert!(
+        before.places[&body.id].1.is_ok(),
+        "the original stair connection is reachable"
+    );
+    assert_eq!(
+        (before.lines.len(), before.reach.len(), before.forms.len()),
+        (1, 1, 1)
+    );
+
+    let effects: Vec<Effect> = [nodes["building/floor-0"], nodes["building/floor-1"]]
+        .into_iter()
+        .enumerate()
+        .map(|(k, node)| Effect {
+            envelope: Envelope {
+                sequence: town.doors.next + k as u64,
+                at: 0,
+                cause: Cause::Intent(id(60_004)),
+                actor: Actor::Creator(id(60_005)),
+                audience: Audience::Everyone,
+                node,
+            },
+            body: EffectBody::Changes(vec![ChangeRec {
+                change: Change::Set {
+                    node,
+                    field: import_eden::F_STAIRS,
+                    to: Value::Array(Vec::new()),
+                    by: None,
+                },
+                rest: Rest::new(),
+            }]),
+            events: None,
+            rest: Rest::new(),
+        })
+        .collect();
+    let part = Arc::new(
+        Part::read(
+            &encode(&Value::Map(BTreeMap::from([
+                (1, Value::Bytes(town.doors.header.hash().to_bytes())),
+                (
+                    2,
+                    Value::Array(effects.iter().map(Effect::to_value).collect()),
+                ),
+            ])))
+            .unwrap(),
+        )
+        .unwrap(),
+    );
+    let rebuild = || {
+        Town::rebuild(
+            town.tree.frozen(),
+            &town.doors.header,
+            ground,
+            &town.versions,
+            &town.basis(),
+            &part,
+        )
+        .unwrap()
+    };
+    let live = rebuild();
+    let remote = rebuild();
+    let refused_map = rebuild();
+    let invalid_map = rebuild();
+    let current = Arc::new(live.versions.clone());
+    assert_ne!(*current, *old_map);
+    worker.send(old.clone());
+    // A door can open after preparation. The staged tree transaction must preserve that independent state.
+    let door = nodes["door-building-narrow"];
+    let link = replica::effects::read_id(
+        &town
+            .tree
+            .node(town.tree.handle(door).unwrap())
+            .unwrap()
+            .fields()[&sim::ground::scene::F_OPEN_DOOR_LINK],
+    )
+    .unwrap();
+    town.doors
+        .ask(door, link, Cause::Intent(order), Actor::Soul(body.id));
+    town.doors.flush(&mut town.tree, 0).unwrap();
+    let before_tree = town.tree.to_state();
+    let before_versions = town.versions.clone();
+    let mut invalid = (*part).clone();
+    let EffectBody::Changes(changes) = &mut invalid.effects[0].body else {
+        unreachable!()
+    };
+    changes[0].change = Change::Set {
+        node: id(999_999),
+        field: 99,
+        to: Value::Uint(1),
+        by: None,
+    };
+    let invalid = Part::read(&encode(&invalid.to_value()).unwrap()).unwrap();
+    let called = std::cell::Cell::new(false);
+    sim::commit::mark_clock_thread();
+    assert!(
+        town.install_then(invalid_map, &invalid, || {
+            called.set(true);
+            Ok(())
+        })
+        .is_err()
+    );
+    assert!(
+        !called.get(),
+        "an invalid town part refuses before the live write"
+    );
+    assert_eq!(town.tree.to_state(), before_tree);
+    assert_eq!(town.versions, before_versions);
+    let refused = town
+        .install_then(refused_map, &part, || {
+            Err::<(), _>(replica::effects::Refusal {
+                name: "edit.stale",
+                detail: "injected live refusal".into(),
+            })
+        })
+        .unwrap_err();
+    assert_eq!(refused.name, "edit.stale");
+    assert_eq!(
+        town.tree.to_state(),
+        before_tree,
+        "a refused live write rolls back the town tree"
+    );
+    assert_eq!(town.versions, before_versions);
+    assert_eq!(
+        worker.pending(),
+        1,
+        "neither refusal installs the worker map"
+    );
+    town.install(live, &part).unwrap();
+    assert_eq!(
+        town.tree
+            .node(town.tree.handle(door).unwrap())
+            .unwrap()
+            .fields()[&sim::links::F_OPEN],
+        Value::Uint(1),
+        "a door opened after preparation remains open"
+    );
+    worker.install(Arc::clone(&old_map), remote, Arc::clone(&part));
+    assert_eq!(
+        worker.pending(),
+        1,
+        "a map control creates no recorded Planned batch"
+    );
+    let mut historical = worker.take_n(1);
+    assert!(historical.places[&body.id].1.is_ok());
+    historical.keep_map(&current);
+    assert!(
+        historical.places.is_empty()
+            && historical.lines.is_empty()
+            && historical.reach.is_empty()
+            && historical.forms.is_empty()
+    );
+
+    let mut fresh = old.clone();
+    fresh.form_map = Some(Arc::clone(&current));
+    fresh.forms[0].generation = 2;
+    worker.send(fresh.clone());
+    let now = worker.take_n(1);
+    assert_eq!(now.places[&body.id].1.as_ref().unwrap_err(), &"no-route");
+    assert!(Arc::ptr_eq(now.map.as_ref().unwrap(), &current));
+    assert_eq!(now.forms[&key].generation, 2);
+    assert!(
+        matches!(&now.forms[&key].result, sim::planner::FormResult::Walk(legs) if legs.is_empty())
+    );
+    assert_eq!(worker.pending(), 0);
+
+    // A historical batch already queued before a map change may be taken together with a current batch.
+    let mut combined = before;
+    let mut current_route_only = now;
+    current_route_only.lines.clear();
+    current_route_only.reach.clear();
+    current_route_only.forms.clear();
+    combined.merge(current_route_only);
+    assert!(Arc::ptr_eq(combined.map.as_ref().unwrap(), &current));
+    assert!(
+        combined.lines.is_empty() && combined.reach.is_empty() && combined.forms.is_empty(),
+        "old caches were discarded before adopting the new map stamp"
+    );
+    assert_eq!(
+        combined.places[&body.id].1.as_ref().unwrap_err(),
+        &"no-route"
+    );
+    let mut legacy = Planned::default();
+    legacy
+        .reach
+        .insert((body.id, id(60_003), 1, order), [999; 2]);
+    combined.merge(legacy);
+    assert!(
+        combined.reach.is_empty(),
+        "an unstamped answer cannot inherit the current map identity"
+    );
+    println!(
+        "K18d: committed stair removal => no-route; all four stale caches discarded; map controls add zero batches"
+    );
+}

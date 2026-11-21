@@ -7,7 +7,7 @@ import type { NodeRec } from '../source/source.ts';
 import { Follow, enters, inside, solidsNear } from './follow.ts';
 import { Flight, flightSeconds, shotOffset } from './flight.ts';
 import { Broadcast } from './broadcast.ts';
-import { findSoul } from './director.ts';
+import { findPlace, findSoul, placeAt } from './director.ts';
 
 const node = (id: string, kind: string, o: Partial<NodeRec> = {}): NodeRec => ({ id, kind, parent: null, slot: null, pos: [0, 0, 0], rot: [1 << 30, 0, 0, 0], at: null, ...o });
 const S = 1_000_000;
@@ -73,6 +73,22 @@ test('A4: a typed name finds its Soul: exactly, then the start of a name, then w
   assert.equal(findSoul(souls, 'ren'), '3');
   assert.equal(findSoul(souls, 'nobody'), null);
   assert.equal(findSoul(souls, ''), null);
+});
+
+test('#3574: a typed name finds a named place when no Soul has it, at the middle of its outline', () => {
+  const places = [node('t2', 'eden:zone', { placeName: 'Plaza' }), node('p1', 'eden:place', { placeName: 'land-west-lake', outline: [[0, 0], [1, 1]] }), node('p2', 'eden:place', { placeName: 'Plaza', outline: [[0, 0], [1, 1]] }), node('p3', 'eden:place'), node('b', 'souls:body')];
+  const souls = [{ id: 's1', name: 'Oriel' }];
+  const find = (typed: string) => findSoul(souls, typed) ?? findPlace(places, typed);
+  assert.equal(find('plaza'), 'p2', 'the area before the thing of the same name');
+  assert.equal(find(' LAKE '), 'p1');
+  assert.equal(find('west lake'), 'p1', 'a hyphen reads as a space');
+  assert.equal(find('west-lake'), 'p1');
+  assert.equal(find('ori'), 's1', 'a Soul still comes first');
+  assert.equal(find('nowhere'), null);
+  assert.equal(find(''), null);
+  const at = placeAt({ outline: [[0, 0], [4000, 0], [4000, 2000], [0, 2000]] }, 1.5)!;
+  assert.deepEqual([at.x, at.y, at.z], [2, 1.5, 1]);
+  assert.equal(placeAt({}, 0), null);
 });
 
 test('A5: ten minutes of broadcast with no input, never 10 s without a body to frame', () => {

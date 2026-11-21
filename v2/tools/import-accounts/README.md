@@ -54,3 +54,9 @@ its candidate without writing, checks the trusted world's live session, then ini
 fields only inside its final validated transaction. Existing names, descriptions (including empty edits), world
 aliases and retirement are preserved. Successful approval publishes saved words through W11b's existing world-bound
 Souls file; the ordinary C3 join still births the body. The directory never births one while listing or approving.
+
+### Released body placement
+
+For a release, use `import-accounts <backup> --out <output> --bodies <prepared-catalogue>`. The catalogue is the exact prepared `bodies.json`, including its public canonical legacy definitions. Mapped mode validates every owned live body before creating output; unknown/custom/edited bodies refuse rather than reset. The legacy library wrapper preserves its earlier reporting contract and does not prove preset placement. Historical private look hashes remain unchanged.
+
+Place each resulting `births/<world>.json` as that served world's private `births.json` before activation, together with the exact admitted catalogue. The loader checks the real header lineage/zone, catalogue SHA and unique admitted choices. This file is never public support or copied to a fork. Ordinary C3 creates an unborn imported Soul with its mapped hash and build; an existing body or a later recorded wear remains authoritative. No account token is copied and no birth is forced.
