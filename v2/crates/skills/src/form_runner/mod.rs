@@ -108,11 +108,14 @@ use crate::route::{Leg, Route};
 /// (`on`), whose place the runner reads when the step starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Step {
-    /// Walk to a point of the node (or of thing `on`), µm in its frame.
+    /// Walk to a point of the node (or of thing `on`), µm in its frame. An `approach` is the walk the binding adds
+    /// before a form's first move at a point ([`approach`]): when the world finds no way, the move is tried from where
+    /// the body stands.
     WalkTo {
         point: Name,
         at: Vec3,
         on: Option<Id>,
+        approach: bool,
     },
     /// A move by name toward a point of the node (or of thing `on`); with no point, the move's own contact.
     Move {
@@ -337,7 +340,12 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         return refuse("step-malformed", "walk_to.point: a name");
                     };
                     let (point, at, on) = aim(entry, p, args, "walk_to.point")?;
-                    Ok(Step::WalkTo { point, at, on })
+                    Ok(Step::WalkTo {
+                        point,
+                        at,
+                        on,
+                        approach: false,
+                    })
                 }
                 "take" | "put" if s.get("move").is_none() && s.get("at").is_none() => {
                     Ok(Step::Hand)
@@ -449,6 +457,7 @@ fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refus
             point: p.clone(),
             at: Vec3::new(to.x, 0, to.z),
             on: None,
+            approach: true,
         };
         bound.insert(k, step);
     }
@@ -484,6 +493,7 @@ fn approach_in_areas(entry: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal
                 point: area.clone(),
                 at: Vec3::new(to.x, floor.y, to.z),
                 on: None,
+                approach: false,
             };
             bound.insert(k, step);
             k += 1;
@@ -572,6 +582,7 @@ pub fn turn(steps: &mut [Step], q: Quat) -> Result<(), Refusal> {
             point,
             at,
             on: None,
+            ..
         } = s
         {
             *at = q.rotate(*at).map_err(|e| Refusal {
@@ -1484,7 +1495,9 @@ impl Runner {
             return self.end(host, name("done"));
         };
         match step {
-            Step::WalkTo { at, on, .. } => {
+            Step::WalkTo {
+                at, on, approach, ..
+            } => {
                 // A thing argument's place is read now, at the step's start (F14).
                 let Some(node) = host.read(on.unwrap_or(self.node)) else {
                     return self.end(host, name("node-gone"));
@@ -1512,6 +1525,11 @@ impl Runner {
                     replica::host::WalkPlan::Pending => {
                         self.planning = true;
                         return Next::Planning;
+                    }
+                    replica::host::WalkPlan::Legs(l) if l.is_empty() && approach => {
+                        // No way to the point: the move is tried from here, and judges its own reach.
+                        self.planning = false;
+                        return self.advance(host);
                     }
                     replica::host::WalkPlan::Legs(l) if l.is_empty() => {
                         return self.end(host, name("souls:no-way"));

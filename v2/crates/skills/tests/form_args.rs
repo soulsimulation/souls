@@ -137,7 +137,7 @@ fn a1_a_step_aims_at_a_name_argument_as_the_point_it_names() {
     let e = entry();
     let steps = bind_with(&e, "go", &args(&[("spot", Arg::Name("left".into()))])).expect("binds");
     println!("go with spot=left: {steps:?}");
-    assert!(matches!(&steps[..], [Step::WalkTo { point, at, on: None }]
+    assert!(matches!(&steps[..], [Step::WalkTo { point, at, on: None, .. }]
         if point.as_str() == "left" && *at == mm(-300, 500, 0)));
     // A slot is walked to at its stand point; a placed area at its place.
     let slot =
@@ -156,9 +156,11 @@ fn a1_a_step_aims_at_a_name_argument_as_the_point_it_names() {
         ]),
     )
     .expect("binds");
-    assert!(
-        matches!(&tap[..], [Step::Move { at: Some(at), on: None, .. }] if at.as_str() == "right")
-    );
+    // The move at the chosen point, after the walk to it the binding adds (#3688).
+    assert!(matches!(&tap[..], [
+        Step::WalkTo { point, approach: true, .. },
+        Step::Move { at: Some(at), on: None, .. },
+    ] if point.as_str() == "right" && at.as_str() == "right"));
     // Refused by name: a choice the kind does not declare, an argument not given, a thing where a name is wanted.
     let (name, detail) = refused(bind_with(
         &e,
