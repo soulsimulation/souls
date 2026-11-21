@@ -1889,6 +1889,8 @@ fn public_samples(dir: &Path) -> Vec<(u64, replica::pose::HandOff)> {
 /// time while it walks, the hand-off into the seat's slot and the one out of it, read by the normal public reader.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+// A real process on the real clock: its waits and rates are real time.
+#[allow(clippy::disallowed_methods)]
 fn i3799_a4_the_public_stream_carries_a_soul_walking_sitting_and_rising() {
     use replica::pose::Owner;
     let facts = facts_path();
@@ -1987,10 +1989,12 @@ fn i3799_a4_the_public_stream_carries_a_soul_walking_sitting_and_rising() {
 /// a second against parts played a second, the reader's lag behind the newest part, and the samples it saw.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+// A real process on the real clock: its waits and rates are real time.
+#[allow(clippy::disallowed_methods)]
 fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
     use replica::stream::{Pointer, public::PublicPlayer};
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::sync::{Arc, Mutex};
     use std::time::Instant;
     let n: u64 = std::env::var("V2_WALKERS")
         .ok()
