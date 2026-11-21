@@ -984,6 +984,53 @@ impl Acts {
         result
     }
 
+    /// Whether the words an act of form `verb` (`<namespace>:<form>`) on `node` carries are everyone's (#3712): the
+    /// node's entry has the form, and the form sets a field whose audience is everyone from one of its `text`
+    /// arguments (words written on a board for all to read). Words in any other act stay their sender's (T8).
+    pub fn public_words(&self, tree: &Tree, node: Id, verb: &str) -> bool {
+        let Some(form) = verb.split_once(':').map(|(_, f)| f) else {
+            return false;
+        };
+        let Some(entry) = tree
+            .handle(node)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| self.kinds.get(plain(n.kind())))
+        else {
+            return false;
+        };
+        let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
+            return false;
+        };
+        let text = |a: &str| {
+            f.get("takes")
+                .and_then(|t| t.get(a))
+                .and_then(|t| t.get("type"))
+                .and_then(Json::str)
+                == Some("text")
+        };
+        let everyone = |field: &str| {
+            entry
+                .get("state")
+                .and_then(|s| s.get(field))
+                .and_then(|d| d.get("audience"))
+                .and_then(|a| a.get("rule"))
+                .and_then(Json::str)
+                == Some("everyone")
+        };
+        f.get("effects")
+            .and_then(Json::arr)
+            .unwrap_or(&[])
+            .iter()
+            .any(|e| {
+                e.get("change").and_then(Json::str) == Some("set")
+                    && e.get("to")
+                        .and_then(|t| t.get("arg"))
+                        .and_then(Json::str)
+                        .is_some_and(text)
+                    && e.get("field").and_then(Json::str).is_some_and(everyone)
+            })
+    }
+
     /// Starts the act's first candidate that starts (`(node, form)` in rank order) for intent `intent` on `body`, or
     /// the first refusal. A resend of an intent whose run is going joins it; one whose effects are logged gets them.
     #[allow(clippy::too_many_arguments)]
