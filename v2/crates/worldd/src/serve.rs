@@ -1284,6 +1284,7 @@ fn off_machine(
         .map(|newest| fork_archive_base(&store, &prefix, dir, &built.header, newest, recovered))
         .transpose()
         .map_err(refusal)?;
+    stamp("P fork archive base");
     let machine = Name::new(machine).ok_or_else(|| format!("--machine {machine}: not a name"))?;
     let mut d = Directory::new(store.clone(), machine);
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
@@ -1301,6 +1302,7 @@ fn off_machine(
     let end = first + records.len() as u64;
     let claim = shipping::take_over(&mut d, &lineage, zone, first..end).map_err(refusal)?;
     let from = claim.takeover.from;
+    stamp("P take over");
     println!(
         "shipping: epoch {} from record {from} of {end}",
         claim.takeover.epoch
@@ -1318,6 +1320,7 @@ fn off_machine(
     .checkpoints(&dir.join("checkpoints"), shipping::CHECKPOINT_GAP_US);
     let (ship, _, h) = shipper.spawn();
     report("the shipper", h);
+    stamp("P shipper");
     let mut based = false;
     let mut archive_base = 0;
     let again = Again {
@@ -1332,13 +1335,16 @@ fn off_machine(
         let mut a =
             Archiver::open_based_with_redactions(again.clone(), "", &base, text.redactions())
                 .map_err(refusal)?;
+        stamp("P archiver open based");
         archive_bridge(&store, &mut a, &built.header, first).map_err(refusal)?;
+        stamp("P archive bridge");
         based = true;
         archive_base = a.source_base();
         again
             .put("header", built.header.stored(), When::Absent)
             .map_err(refusal)?;
         again.restore_public().map_err(refusal)?;
+        stamp("P restore public");
         let (tx, rx) = channel();
         report("the archiver", archiving(a, rx, Arc::clone(&text)));
         Some(tx)
@@ -1383,6 +1389,7 @@ fn off_machine(
             }
         }
     }
+    stamp("P off records sent");
     Ok(off)
 }
 
@@ -1608,6 +1615,7 @@ fn serve(args: &[String]) -> R<()> {
     )
     .map_err(|e| format!("the text store: {}", refusal(e)))?;
     let text = Arc::new(text);
+    stamp("P creator and text");
     let mut off = match &bucket {
         Some(spec) => {
             let machine = arg(args, "--machine")
@@ -1629,6 +1637,7 @@ fn serve(args: &[String]) -> R<()> {
         }
         None => None,
     };
+    stamp("P off machine");
     let (tx, synced) = channel();
     let mut cfg = Config::new(built.header.lineage, EPOCH);
     let every = arg(args, "--checkpoint-every").map_or(Ok(EVERY), |n| {
@@ -1649,12 +1658,14 @@ fn serve(args: &[String]) -> R<()> {
     // body, ownership and activity membership indexes before the answers thread can hand it any live part.
     let mut hub = worldd::views::subscription::Hub::with_words(text);
     hub.seed(initial.tree());
+    stamp("P hub seeded");
     let feed = worldd::views::served::start_with(hub).map_err(refusal)?;
     for bytes in found.after(base_record) {
         if !recorder::is_input(bytes) {
             feed.record(bytes.clone());
         }
     }
+    stamp("P feed recorded");
     cfg.served = Some(feed.clone());
     worldd::views::served::listen(feed, &socket.with_extension("views")).map_err(refusal)?;
     // O20's shipper for the world's own stores (its words, uploads and removal list), keyed by its lineage as O12's
@@ -1664,6 +1675,7 @@ fn serve(args: &[String]) -> R<()> {
     let strip = format!("worlds/{lineage}/");
     let backup = directoryd::backup::run("worldd", dir.clone(), stores, Default::default(), &strip)
         .map_err(|e| format!("refusing to start: {}", refusal(e)))?;
+    stamp("P backup");
     println!("{backup}");
     cfg.synced = Some(tx);
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
@@ -1687,6 +1699,7 @@ fn serve(args: &[String]) -> R<()> {
     }
     let kinds_path = dir.join("world.kinds");
     std::fs::write(&kinds_path, &built.kinds_text).map_err(io(&kinds_path))?;
+    stamp("P kinds written");
 
     let ground = built.ground;
 
@@ -1735,6 +1748,7 @@ fn serve(args: &[String]) -> R<()> {
             seed.record, seed.sequence
         );
     }
+    stamp("P stream store");
     let mut public_start = view_out::PublicStart {
         root: &views,
         header: &built.header,
