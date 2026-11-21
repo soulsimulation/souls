@@ -350,8 +350,53 @@ impl Measures {
                 "{sep}\"{name}\":{{\"items\":{items},\"oldest_us\":{oldest}}}"
             );
         }
-        o.push_str("}}\n");
+        o.push_str("},\"stalled\":");
+        STALLS.json(&mut o);
+        o.push_str("}\n");
         o
+    }
+}
+
+/// The clock's stalls (K7): no tick for the watchdog's soft limit, the world running on. One per process, written by
+/// the watchdog thread and read by `health.json`'s writer.
+pub struct Stalls {
+    /// ms without a tick in the stall under way; 0 while ticking.
+    now_ms: AtomicU64,
+    /// Stalls that ended, and the longest of them, ms.
+    count: AtomicU64,
+    longest_ms: AtomicU64,
+}
+
+/// This process's stalls.
+pub static STALLS: Stalls = Stalls { now_ms: AtomicU64::new(0), count: AtomicU64::new(0), longest_ms: AtomicU64::new(0) };
+
+impl Stalls {
+    /// A stall began, `ms` without a tick so far.
+    pub fn began(&self, ms: i64) {
+        self.now(ms);
+    }
+
+    /// The stall under way, `ms` without a tick so far.
+    pub fn now(&self, ms: i64) {
+        self.now_ms.store(u64::try_from(ms).unwrap_or(0), Ordering::Relaxed);
+    }
+
+    /// The stall ended after `ms`.
+    pub fn ended(&self, ms: i64) {
+        self.now_ms.store(0, Ordering::Relaxed);
+        self.count.fetch_add(1, Ordering::Relaxed);
+        self.longest_ms.fetch_max(u64::try_from(ms).unwrap_or(0), Ordering::Relaxed);
+    }
+
+    /// `{"now_ms":n,"ended":n,"longest_ms":n}`: `now_ms` over 0 while the world is stalled.
+    pub fn json(&self, o: &mut String) {
+        let _ = write!(
+            o,
+            "{{\"now_ms\":{},\"ended\":{},\"longest_ms\":{}}}",
+            self.now_ms.load(Ordering::Relaxed),
+            self.count.load(Ordering::Relaxed),
+            self.longest_ms.load(Ordering::Relaxed)
+        );
     }
 }
 
