@@ -1996,7 +1996,7 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
         );
         std::thread::sleep(Duration::from_micros(wait as u64));
     }
-    let boarded = soul.act("eden:row", Some(punt), BTreeMap::new());
+    let boarded = soul.act("eden:row", Some(punt), args(&[("seat", Value::Uint(1))]));
     println!("board it by its own form: {boarded:?}");
     let seated_in = last_frames(&dir).into_values().find(|f| f.0 == punt);
     println!("the rider's frame: {seated_in:?}");
