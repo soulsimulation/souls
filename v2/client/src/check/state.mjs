@@ -1,5 +1,5 @@
 // The daemon's copy as R2's form-rules input (Engine v2 R8, #2703): `{actor, nodes}` with each node's kind by its
-// plain name and its fields by the names its kind's entry gives their numbers. Only fields: the copy's records carry
+// plain name (its entry's, when it names one) and its fields by the names its kind's entry gives their numbers. Only fields: the copy's records carry
 // no pose, hands or the actor's moves, and links and slots are not read here yet, so only a field's `no` is a local
 // one (`SEEN_FIELDS`). A kind with no entry held gives a node with no fields, and its candidates are `unknown`.
 //
@@ -7,7 +7,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { decode, idText, plainKind } from '../brief/copy.mjs';
+import { decode, entryKind, idText } from '../brief/copy.mjs';
 
 /** The `souls-entry/1` entries in `dir`, by kind name; none if the folder is missing. Unreadable files are skipped. */
 export function kindsIn(dir) {
@@ -32,7 +32,7 @@ export function stateOf(copy, kinds, me) {
   while (todo.length) {
     const bytes = copy.record(todo.pop());
     if (!bytes) continue;
-    const m = decode(bytes), id = idText(m.get(1)), kind = plainKind(m.get(2));
+    const m = decode(bytes), id = idText(m.get(1)), kind = entryKind(m);
     const byN = Object.fromEntries(Object.entries(kinds[kind]?.state ?? {}).map(([name, def]) => [def.n, name]));
     const fields = {};
     const defs = kinds[kind]?.state ?? {};

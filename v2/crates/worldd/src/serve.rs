@@ -16,7 +16,8 @@
 //!   An entry whose `roles` name two or more roles is also an activity kind (C30, [`activity_kinds`]).
 //!   `moves.json`, when there, is each move's reach (`{<move>: {reach_mm}}`).
 //! - `log`: K4's log. Its first record is the import's part, every node and link the loader committed, so the log
-//!   holds the world from empty and a stream written from it draws the whole world.
+//!   holds the world from empty and a stream written from it draws the whole world. Once compacted (`compactor`,
+//!   #3837), the bytes before `log.cut` are a hole and the log is read from the cut.
 //! - `checkpoints/`: K5's, taken by K18c's rule; a start resumes from the newest that verifies.
 //! - `tokens`: the gateway's tokens file, `<grant> <sha-256 hex>` per Soul, never a token. `souls.tokens` (mode 0600)
 //!   holds the Souls' tokens themselves, for a local client; it is never copied off the machine.
@@ -25,12 +26,16 @@
 //!   `views/world.json`, `{"stream": "views/<its folder>/", "history": "history/"}`, both relative to the world's
 //!   folder, which the page reads for `?world=` and pairing for the Soul's `history` (R16b, #3480). With a store,
 //!   only public archive bundles/indexes are mirrored into `history/`; private bases/source remain in the Store.
+//!   `history/live` is mutable public navigation metadata binding the instance/lineage to that exact full public stream.
 //! - `gateway.sock`: the gateway's local socket (I1's framing, `answers::serve`), unless `--socket` or
 //!   `$WORLDD_SOCKET` names another (a placed world's: a socket's path is at most 108 bytes, and a world folder's
 //!   name is 67). `health.json`: O4's.
 //!
-//! **A start** reads the log through once (its records feed the stream from record 0), then hands it to K18's loop
-//! (`answers::start`), which restores the newest checkpoint and replays the records after it. It prints `worldd:
+//! **A start** reads the log through once from its cut (its records feed the stream from its own cursor), restores
+//! the newest checkpoint and builds the towns and the views' hub from it and the records after it (#3837), then hands
+//! the log to K18's loop (`answers::start`), which restores the same checkpoint and replays the same records. With no
+//! checkpoint the log is read and replayed from record 0; a compacted log with none that verifies is refused
+//! (`log-compacted-past-checkpoint`). It prints `worldd:
 //! started at tick <n> state <hash>`: after a SIGKILL that hash is the last logged tick's (K18's A3), bodies included.
 //! Each record the loop syncs comes back on [`answers::Config::synced`] and goes to the public observer, off the clock
 //! thread. No body stands on a first start; after it, each body the log has stands where the log last had it.
@@ -1224,6 +1229,46 @@ fn bodies(
 
 type Bucket = Shared<supervisor::bucket::Bucket>;
 
+/// Public navigation only: the same restored header/root as the live writer, beside the history export.
+fn public_history_live(dir: &Path, name: &str, header: &Header, key: &Key) -> R<()> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || !name
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
+        || key.node != header.zone
+        || key.level != Level::Full
+        || key.audience != Audience::Everyone
+    {
+        return Err("history-live-invalid".into());
+    }
+    let history = dir.join("history");
+    match std::fs::symlink_metadata(&history) {
+        Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {}
+        Ok(_) => return Err("history-live-export".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(&history).map_err(|_| "history-live-export")?;
+        }
+        Err(_) => return Err("history-live-export".into()),
+    }
+    for path in [history.join("live"), history.join("live.tmp")] {
+        match std::fs::symlink_metadata(path) {
+            Ok(m) if m.is_file() && !m.file_type().is_symlink() => {}
+            Ok(_) => return Err("history-live-export".into()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("history-live-export".into()),
+        }
+    }
+    let bytes = format!(
+        "{{\"format\":\"souls/history-live/1\",\"world\":\"{name}\",\"lineage\":\"{}\",\"stream\":\"../views/{}/\"}}\n",
+        to_hex(&header.lineage.0),
+        stream::dir(header, key)
+    );
+    view_out::write_whole(&history.join("live"), bytes.as_bytes())
+        .map_err(|_| "history-live-export".to_owned())
+}
+
 /// How often a running world's open event index is written, at most (R16b): a question sees acts this old.
 const VIEWS_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -1407,6 +1452,22 @@ struct Off {
     parts: u64,
     based: bool,
     archive_base: u64,
+    /// The log compactor's floors from here (#3837): the shipper's marks, and how far the archive has closed.
+    mark: shipping::Mark,
+    floor: Option<crate::compactor::Archive>,
+}
+
+impl Off {
+    /// A part for an archive that numbers parts (not a fork's): numbered, and its record kept for the compactor.
+    fn part(&mut self, record: u64, bytes: &[u8]) {
+        if let Some(a) = &self.archive {
+            if let Some(crate::compactor::Archive::Parts(p)) = &self.floor {
+                p.sent(record, self.parts);
+            }
+            let _ = a.send((self.parts, bytes.to_vec()));
+            self.parts += 1;
+        }
+    }
 }
 
 impl Off {
@@ -1428,8 +1489,7 @@ impl Off {
                     let _ = a.send((record, bytes.to_vec()));
                 }
             } else if !input {
-                let _ = a.send((self.parts, bytes.to_vec()));
-                self.parts += 1;
+                self.part(record, bytes);
             }
         }
     }
@@ -1454,9 +1514,13 @@ fn archiving(
     open: impl FnOnce() -> Result<Archiver<Again>, Refusal> + Send + 'static,
     rx: Receiver<(u64, Vec<u8>)>,
     text: Arc<sim::text::Store>,
+    closed: impl Fn(u64) + Send + 'static,
 ) -> std::thread::JoinHandle<Result<(), Refusal>> {
     std::thread::spawn(move || {
         let mut a = open()?;
+        // How far its closed objects reach, for the log's compactor (#3837).
+        let publish = |a: &Archiver<Again>| closed(a.durable_cursor());
+        publish(&a);
         let mut indexed = a.shelf.writes.bundles;
         let (mut fresh, mut viewed) = (false, std::time::Instant::now());
         loop {
@@ -1483,6 +1547,7 @@ fn archiving(
                 a.shelf.flush()?;
                 indexed = a.shelf.writes.bundles;
             }
+            publish(&a);
             if fresh && viewed.elapsed() >= VIEWS_EVERY {
                 a.publish_open()?;
                 for (k, v) in a.open_views()? {
@@ -1634,6 +1699,8 @@ fn fork_archive_base<S: Store>(
 /// Already captured recovery source and the same authoritative text Store, kept together at startup.
 struct SourceContext<'a> {
     recovered: &'a sim::log::Recovered,
+    /// The archive's first part number after the log's cut (the cut file's note; 0 for a log never compacted).
+    parts_from: u64,
     checkpoint: Option<&'a [u8]>,
     text: Arc<sim::text::Store>,
 }
@@ -1650,6 +1717,7 @@ fn off_machine(
 ) -> R<Off> {
     let SourceContext {
         recovered,
+        parts_from,
         checkpoint,
         text,
     } = source;
@@ -1695,7 +1763,7 @@ fn off_machine(
     )
     .map_err(refusal)?
     .checkpoints(&dir.join("checkpoints"), shipping::CHECKPOINT_GAP_US);
-    let (ship, _, h) = shipper.spawn();
+    let (ship, mark, h) = shipper.spawn();
     report("the shipper", h);
     let mut based = false;
     let mut archive_base = 0;
@@ -1707,6 +1775,7 @@ fn off_machine(
         public: dir.join("history"),
         header: built.header.stored().to_vec(),
     };
+    let mut archive_floor = None;
     let archive = if let Some(base) = fork_base {
         // The opened archive's base is this one: `fork_archive_base` read the stored head's base, as the open does.
         based = true;
@@ -1727,7 +1796,13 @@ fn off_machine(
             Ok(a)
         };
         let (tx, rx) = channel();
-        report("the archiver", archiving(open, rx, Arc::clone(&text)));
+        let closed = Arc::new(std::sync::atomic::AtomicU64::new(archive_base));
+        archive_floor = Some(crate::compactor::Archive::Records(Arc::clone(&closed)));
+        let publish = move |n| closed.store(n, std::sync::atomic::Ordering::Relaxed);
+        report(
+            "the archiver",
+            archiving(open, rx, Arc::clone(&text), publish),
+        );
         Some(tx)
     } else if let Some(kind) = built
         .header
@@ -1742,9 +1817,13 @@ fn off_machine(
         let a = Archiver::open(again.clone(), "", &built.header, zone, kind).map_err(refusal)?;
         again.restore_public().map_err(refusal)?;
         let (tx, rx) = channel();
+        let parts = Arc::new(crate::compactor::Parts::new(parts_from));
+        let reach = Arc::clone(&parts);
+        let publish = move |n| reach.durable.store(n, std::sync::atomic::Ordering::Relaxed);
+        archive_floor = Some(crate::compactor::Archive::Parts(parts));
         report(
             "the archiver",
-            archiving(move || Ok(a), rx, Arc::clone(&text)),
+            archiving(move || Ok(a), rx, Arc::clone(&text), publish),
         );
         Some(tx)
     } else {
@@ -1753,24 +1832,25 @@ fn off_machine(
     let mut off = Off {
         ship,
         archive,
-        parts: 0,
+        parts: parts_from,
         based,
         archive_base,
+        mark,
+        floor: archive_floor,
     };
     for (k, bytes) in records.iter().enumerate() {
         let record = first + k as u64;
         let input = recorder::is_input(bytes);
         if record >= from {
             off.take(record, bytes, input);
-        } else if let Some(a) = &off.archive {
-            if off.based {
-                if record >= off.archive_base {
-                    let _ = a.send((record, bytes.clone()));
-                }
-            } else if !input {
-                let _ = a.send((off.parts, bytes.clone()));
-                off.parts += 1;
+        } else if off.based {
+            if let Some(a) = &off.archive
+                && record >= off.archive_base
+            {
+                let _ = a.send((record, bytes.clone()));
             }
+        } else if !input {
+            off.part(record, bytes);
         }
     }
     Ok(off)
@@ -1807,9 +1887,10 @@ fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
     Ok(creator)
 }
 
-/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] [--machine
-/// <name>] [--rate <num>/<den>]`: runs the world until killed. A checkpoint is taken each `--checkpoint-every` bytes
-/// of log (default 8 MiB). The clock's rate is world µs per real µs (default 1/1); a start whose rate differs from the
+/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--compact-after <bytes>]
+/// [--store <store>] [--machine <name>] [--rate <num>/<den>]`: runs the world until killed. A checkpoint is taken each
+/// `--checkpoint-every` bytes of log (default 8 MiB); the log is compacted once every reader has passed at least
+/// `--compact-after` bytes of it (default 64 MiB, `compactor`). The clock's rate is world µs per real µs (default 1/1); a start whose rate differs from the
 /// last logged applies a new mapping, and the mapping in force is on the zone root for every copy (E7b, #3516).
 pub fn run(args: &[String]) -> i32 {
     match serve(args) {
@@ -1825,8 +1906,8 @@ fn serve(args: &[String]) -> R<()> {
     let _ = STARTED.set(std::time::Instant::now());
     stamp("launch");
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
-        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] \
-         [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
+        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] \
+         [--compact-after <bytes>] [--store <store>] [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
     )?);
     let socket = arg(args, "--socket")
         .map(PathBuf::from)
@@ -1958,13 +2039,58 @@ fn serve(args: &[String]) -> R<()> {
         let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
             .map_err(|e| format!("the fork's town: {e}"))?;
         stamp("town and planner");
-        (initial, record, observer, Some(checkpoint), towns)
+        let resumed = initial.frozen();
+        (
+            initial,
+            Some((resumed, record)),
+            observer,
+            Some(checkpoint),
+            towns,
+        )
     } else {
         let initial = Replica::start(built.header.stored()).map_err(refusal)?;
-        let towns = recovered_towns(&built, &initial, &found.records)?;
-        (initial, 0, None, None, towns)
+        // The newest checkpoint that verifies (K5) is where the engine resumes (`answers::start`), so the towns and
+        // the views' hub start from it too, with only the log after it applied: a restart's work follows the log
+        // since the last checkpoint, never the world's age (#3837). Without one, the log from record 0.
+        let restored = match dir.join("checkpoints") {
+            d if d.is_dir() => sim::checkpoint::restore(&d).map_err(refusal)?,
+            _ => None,
+        };
+        match restored {
+            Some(r) => {
+                if r.root.version.lineage != built.header.lineage
+                    || r.root.version.zone != built.header.zone
+                {
+                    return Err("checkpoint-world-mismatch".into());
+                }
+                if found.first > r.root.record {
+                    return Err(format!(
+                        "log-compacted-past-checkpoint: the log is kept from record {}, the checkpoint is at {}",
+                        found.first, r.root.record
+                    ));
+                }
+                stamp("checkpoint restore");
+                let record = r.root.record;
+                let at =
+                    Replica::restored(initial.header().clone(), r.tree, r.root.version.sequence);
+                let towns = recovered_towns(&built, &at, found.after(record))?;
+                (initial, Some((at, record)), None, None, towns)
+            }
+            None if found.first > 0 => {
+                return Err(format!(
+                    "log-compacted-past-checkpoint: the log is kept from record {} and no checkpoint verifies",
+                    found.first
+                ));
+            }
+            None => {
+                let towns = recovered_towns(&built, &initial, &found.records)?;
+                (initial, None, None, None, towns)
+            }
+        }
     };
-    let (initial, base_record, stream_mapping, checkpoint, (mut town, mut planner)) = started;
+    // `resumed` is the engine's starting point (a checkpoint's tree and record) when it differs from the stream's.
+    let (initial, resumed, stream_mapping, checkpoint, (mut town, mut planner)) = started;
+    let base_record = resumed.as_ref().map_or(0, |(_, r)| *r);
     town.prepare_classes(catalogue.classes())
         .map_err(|e| format!("body-classes: {e}"))?;
     planner
@@ -2014,6 +2140,9 @@ fn serve(args: &[String]) -> R<()> {
                 &dir,
                 SourceContext {
                     recovered: &found,
+                    parts_from: sim::log::compact::read_cut(&log_path)
+                        .map_err(refusal)?
+                        .map_or(0, |c| c.note),
                     checkpoint: checkpoint.as_deref(),
                     text: Arc::clone(&text),
                 },
@@ -2021,6 +2150,7 @@ fn serve(args: &[String]) -> R<()> {
         }
         None => None,
     };
+    let off_floors = off.as_ref().map(|o| (o.mark.clone(), o.floor.clone()));
     let (tx, synced) = channel();
     imported_births(&dir, initial.header(), &catalogue, &mut born)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
@@ -2029,6 +2159,10 @@ fn serve(args: &[String]) -> R<()> {
         n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
     })?;
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
+    let compact_after = arg(args, "--compact-after")
+        .map_or(Ok(crate::compactor::MIN_DEAD), |n| {
+            n.parse::<u64>().map_err(|_| "--compact-after <bytes>")
+        })?;
     cfg.health = Some(dir.join("health.json"));
     cfg.rate = Some(match arg(args, "--rate") {
         Some(r) => r
@@ -2042,7 +2176,7 @@ fn serve(args: &[String]) -> R<()> {
     // Gateway subscriptions have their own off-clock tier, apart from the filesystem stream below. Restore its
     // body, ownership and activity membership indexes before the answers thread can hand it any live part.
     let mut hub = worldd::views::subscription::Hub::with_words(text);
-    hub.seed(initial.tree());
+    hub.seed(resumed.as_ref().map_or(initial.tree(), |(at, _)| at.tree()));
     let feed = worldd::views::served::start_with(hub).map_err(refusal)?;
     for bytes in found.after(base_record) {
         if !recorder::is_input(bytes) {
@@ -2135,7 +2269,9 @@ fn serve(args: &[String]) -> R<()> {
         header: &built.header,
         key,
         initial: initial.frozen(),
-        record: base_record,
+        // A normal world's stream keeps its own source, the world as built and the log from its own cursor; only a
+        // fork's starts from the fork's checkpoint.
+        record: if checkpoint.is_some() { base_record } else { 0 },
         checkpoint,
         text: cfg_text,
         names: Some(Arc::clone(&built.public_names)),
@@ -2162,6 +2298,20 @@ fn serve(args: &[String]) -> R<()> {
     println!(
         "restart: checkpoint {:?}, {} records read, {} applied",
         world.restart.checkpoint, world.restart.read, world.restart.applied
+    );
+    // The log's compactor (#3837): the bytes every reader has passed go back to the disk.
+    let stream_floor = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let (shipped, archive_floor) = off_floors.map_or((None, None), |(m, a)| (Some(m), a));
+    crate::compactor::spawn(
+        log_path.clone(),
+        world.durable.clone(),
+        crate::compactor::Floors {
+            checkpoints: dir.join("checkpoints"),
+            stream: Arc::clone(&stream_floor),
+            shipped,
+            archive: archive_floor,
+        },
+        compact_after,
     );
     let door = world.door();
     // The directory's word on the Souls (W11b): its file read now, before any intent is served, and again on a change.
@@ -2192,6 +2342,15 @@ fn serve(args: &[String]) -> R<()> {
     let (ready_tx, ready_rx) = channel::<()>();
     let stream_header = built.header.clone();
     let stream_found = Arc::clone(&found);
+    // The history page's Back to live (#3661): the public stream this world serves now, written before listening.
+    public_history_live(
+        &dir,
+        meta.get("name")
+            .and_then(Json::str)
+            .ok_or("history-live-invalid")?,
+        &built.header,
+        &key,
+    )?;
     drop(found);
     let (stream_tx, stream_rx) = channel::<(u64, Vec<u8>)>();
     // Shipping/archive delivery remains independent of a stopped public observer.
@@ -2242,6 +2401,10 @@ fn serve(args: &[String]) -> R<()> {
                     }
                 }
                 writer.flush()?;
+                let published = |w: &view_out::PublicWriter<_>| {
+                    stream_floor.store(w.durable_cursor(), std::sync::atomic::Ordering::Relaxed)
+                };
+                published(&writer);
                 stamp("public stream");
                 let _ = ready_tx.send(());
                 drop(stream_found);
@@ -2265,6 +2428,7 @@ fn serve(args: &[String]) -> R<()> {
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     }
                     writer.idle(answers::now())?;
+                    published(&writer);
                 }
             })();
             if let Err(e) = result {
@@ -2376,6 +2540,68 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn v9b_public_history_live_binds_restored_header_and_refuses_unsafe_exports() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../.local")
+            .join(format!("v9b-history-live-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut header = archive::script::world(0, 0, None).header;
+        let key = Key {
+            node: header.zone,
+            level: Level::Full,
+            audience: Audience::Everyone,
+        };
+        public_history_live(&dir, "original-instance", &header, &key).unwrap();
+        let read = || std::fs::read_to_string(dir.join("history/live")).unwrap();
+        let first = read();
+        let locator = json::parse(&first).unwrap();
+        assert_eq!(
+            locator.get("world").and_then(Json::str),
+            Some("original-instance")
+        );
+        assert_eq!(
+            locator.get("lineage").and_then(Json::str),
+            Some(to_hex(&header.lineage.0).as_str())
+        );
+        let expected = format!("../views/{}/", stream::dir(&header, &key));
+        assert_eq!(
+            locator.get("stream").and_then(Json::str),
+            Some(expected.as_str())
+        );
+        assert!(expected.ends_with("/1/everyone/"));
+        public_history_live(&dir, "original-instance", &header, &key).unwrap();
+        assert_eq!(
+            read(),
+            first,
+            "same restored identity has stable navigation bytes"
+        );
+        header.epoch += 1;
+        header = Header::read(&encode(&header.to_value()).unwrap()).unwrap();
+        public_history_live(&dir, "restored-instance", &header, &key).unwrap();
+        let restored = read();
+        assert!(restored.contains(&stream::dir(&header, &key)));
+        assert!(!restored.contains("original-instance"));
+        assert!(public_history_live(&dir, "../foreign", &header, &key).is_err());
+        let private = Key {
+            audience: Audience::Of(header.zone),
+            ..key
+        };
+        assert!(public_history_live(&dir, "restored-instance", &header, &private).is_err());
+        assert_eq!(read(), restored);
+        std::fs::remove_file(dir.join("history/live")).unwrap();
+        std::os::unix::fs::symlink(dir.join("outside"), dir.join("history/live")).unwrap();
+        assert!(public_history_live(&dir, "restored-instance", &header, &key).is_err());
+        assert!(!dir.join("outside").exists());
+        std::fs::remove_file(dir.join("history/live")).unwrap();
+        std::fs::remove_dir(dir.join("history")).unwrap();
+        std::fs::create_dir(dir.join("outside")).unwrap();
+        std::os::unix::fs::symlink(dir.join("outside"), dir.join("history")).unwrap();
+        assert!(public_history_live(&dir, "restored-instance", &header, &key).is_err());
+        assert!(!dir.join("outside/live").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn public_boot_carries_only_a_valid_regular_catalogue() {
@@ -2611,6 +2837,8 @@ mod tests {
             parts: 0,
             based: true,
             archive_base: 4,
+            mark: shipping::Mark::default(),
+            floor: None,
         };
         for (record, bytes, is_input) in [
             (0, &part, false),
@@ -2635,6 +2863,8 @@ mod tests {
             parts: 0,
             based: false,
             archive_base: 4,
+            mark: shipping::Mark::default(),
+            floor: None,
         };
         for (record, bytes, is_input) in
             [(10, &input, true), (11, &part, false), (12, &part, false)]
