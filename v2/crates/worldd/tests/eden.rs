@@ -3207,10 +3207,13 @@ fn c25_a_cottages_inner_door_from_its_bedroom() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// A step of [`served_steps`]: today's id, the form, its thing arguments by today's id, the ending wanted.
+type Step<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)], &'a str);
+
 /// 0.131 parity L46 (#3715): one Soul, born at `at` (`x,z` m), does each `(today's id, form, thing arguments by
 /// today's id, ending)` in turn on a served full Eden, from wherever the one before left it. Printed; each ending that
 /// differs from the one wanted is returned.
-fn served_steps(at: &str, tag: &str, cases: &[(&str, &str, &[(&str, &str)], &str)]) -> Vec<String> {
+fn served_steps(at: &str, tag: &str, cases: &[Step]) -> Vec<String> {
     let facts = facts_path();
     let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
     let (served, mut soul, dir) = serve(&facts, at, tag, im.nodes["world"].scope());
