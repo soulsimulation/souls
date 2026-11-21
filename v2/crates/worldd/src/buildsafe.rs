@@ -655,3 +655,107 @@ mod class_snapshot_tests {
         assert_eq!(bodies.classes().get(&id), Some(&Size::Large));
     }
 }
+
+#[cfg(test)]
+mod checker_town_tests {
+    use super::*;
+    use replica::effects::{Actor, Body as EffectBody, Cause, Change, ChangeRec, Effect, Envelope, Rest};
+    use replica::encode::Value;
+    use replica::world_model::Audience;
+
+    /// A 1 m crate's box set as `node`'s only box, numbered `sequence`.
+    fn crate_box(header: &replica::effects::Header, node: Id, sequence: u64, h: u64) -> Part {
+        let row = [0u64, 0, 500, 500, 0, 0, h];
+        let change = Change::Set {
+            node,
+            field: import_eden::F_SOLIDS,
+            to: Value::Array(vec![Value::Array(row.iter().map(|&v| Value::Uint(v)).collect())]),
+            by: None,
+        };
+        let id = |c| Id::new(replica::ids::Scope([0x37; 16]), c).unwrap();
+        let e = Effect {
+            envelope: Envelope {
+                sequence,
+                at: 0,
+                cause: Cause::Intent(id(1)),
+                actor: Actor::Creator(id(2)),
+                audience: Audience::Everyone,
+                node,
+            },
+            body: EffectBody::Changes(vec![ChangeRec {
+                change,
+                rest: Rest::new(),
+            }]),
+            events: None,
+            rest: Rest::new(),
+        };
+        let bytes = encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(header.hash().to_bytes())),
+            (2, Value::Array(vec![e.to_value()])),
+        ])))
+        .unwrap();
+        Part::read(&bytes).unwrap()
+    }
+
+    /// #3743: every edit the clock thread hands off reaches the checker's town, including those taken while the
+    /// checker handled a Wear job or refused an edit (no town call between the takes); the first installs the ground
+    /// prepared for it, the second is rebuilt as G1e does.
+    #[test]
+    fn edits_taken_between_checks_still_reach_the_checkers_town() {
+        let facts = testworld::generate(1, 0).unwrap();
+        let imported = import_eden::load(&facts.text).unwrap();
+        let (root, ground) = (imported.nodes["world"], imported.nodes["ground"]);
+        let header = import_eden::header(root, &imported.rules).unwrap();
+        let next = imported.tree.to_state().next;
+        let t = &imported.tree;
+        let things: Vec<Id> = t
+            .children(t.handle(ground).unwrap())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|&c| t.node(c))
+            .filter(|n| n.fields().contains_key(&import_eden::F_SOLIDS))
+            .map(|n| n.id())
+            .take(2)
+            .collect();
+        assert_eq!(things.len(), 2, "two things with solids on the open ground");
+        let copy = Replica::restored(header.clone(), imported.tree.frozen(), next);
+        let town = Town::new(
+            imported.tree,
+            ground,
+            Doors::new(header.clone(), imported.rules.clone(), next),
+        )
+        .unwrap();
+        let mut checker = TownCopy::new(imported.rules.kinds.clone());
+        let moving = Moving::default();
+        moving.1.lock().unwrap().seed = Some((next, town.duplicate()));
+        checker.add(moving.take());
+
+        let first = crate_box(&header, things[0], next, 1_200);
+        let prepared = Town::rebuild(
+            town.tree.frozen(),
+            &header,
+            ground,
+            &town.versions,
+            &town.basis(),
+            &first,
+        )
+        .unwrap();
+        moving.committed(Arc::new(first), next + 1, Some(prepared));
+        // A Wear job or a refused edit: taken, no town call.
+        checker.add(moving.take());
+        let second = crate_box(&header, things[1], next + 1, 900);
+        moving.committed(Arc::new(second), next + 2, None);
+        checker.add(moving.take());
+
+        let built = checker.on(&copy, Some(ground), false).expect("the town");
+        for (thing, h) in [(things[0], 1_200u64), (things[1], 900)] {
+            let n = built.tree.node(built.tree.handle(thing).unwrap()).unwrap();
+            let solids = n.fields().get(&import_eden::F_SOLIDS).unwrap();
+            assert!(
+                format!("{solids:?}").contains(&h.to_string()),
+                "edit on {thing:?} reached the town: {solids:?}"
+            );
+        }
+        assert_eq!(checker.built.as_ref().map(|b| b.0), Some(next + 2));
+    }
+}
