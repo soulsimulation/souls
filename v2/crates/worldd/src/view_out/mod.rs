@@ -2216,6 +2216,8 @@ impl<S: ObjectStore> PublicWriter<S> {
 
         // Only the current generation's files are written again; older ones are on the disk or pruned (#3825).
         let current = chain.iter().rposition(|m| m.contains_key(&8)).unwrap_or(0);
+        let mut played = false;
+        let mut files = Vec::new();
         for (i, m) in chain.into_iter().enumerate() {
             if obj_bytes(&m, 1)? != self.seed {
                 return Err(fault("stream-recovery", "generation source changed"));
@@ -2227,6 +2229,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 }
                 if let Some(id) = m.get(&8) {
                     // A rollover (#3825): the same baseline worked out again from the same state.
+                    self.player.verify()?;
                     if obj_uint(&m, 4)? != self.player.next() {
                         return Err(fault("stream-recovery", "rollover part number"));
                     }
@@ -2260,22 +2263,29 @@ impl<S: ObjectStore> PublicWriter<S> {
                 return Err(fault("stream-recovery", "part number"));
             }
             let bytes = self.get(&obj_bytes(&m, 5)?)?;
-            self.player.play(&bytes)?;
-            if project(&self.header, &self.canonical.tree().to_state())? != *self.player.state() {
-                return Err(fault("stream-recovery", "canonical projection differs"));
-            }
+            self.player.play_deferred(&bytes)?;
+            played = true;
             let text = obj_bytes(&m, 6)?;
             if write {
-                immutable(&self.generation_dir().join(number.to_string()), &bytes)?;
+                files.push((number.to_string(), bytes.clone()));
             }
             if write && !text.is_empty() {
-                immutable(
-                    &self.generation_dir().join(format!("{number}.text")),
-                    &self.get(&text)?,
-                )?;
+                files.push((format!("{number}.text"), self.get(&text)?));
             }
             self.last_to = Some(StreamPart::read(&bytes)?.to);
             self.clear_pending();
+        }
+        // The parts' digests (#3822's deferred play) and the canonical copy's projection are checked once, for the
+        // state the parts make together, before any file is written again (#3833): a whole digest and a whole
+        // projection of a large world per part made a restart's time grow with the parts it reads.
+        self.player.verify()?;
+        if played
+            && project(&self.header, &self.canonical.tree().to_state())? != *self.player.state()
+        {
+            return Err(fault("stream-recovery", "canonical projection differs"));
+        }
+        for (name, bytes) in files {
+            immutable(&self.generation_dir().join(name), &bytes)?;
         }
         Ok(())
     }
