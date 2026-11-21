@@ -37,6 +37,8 @@
 //   act ... --for <message id>                the act serves that owner's message; its outcome closes it (R13)
 //   souls.mjs shoot <place|soul|thing> [--eyes] [--page <url>] [--out f.png]   a picture drawn here from the public
 //                                             stream (G10, shoot/shoot.mjs); with no browser, words and why
+//   souls.mjs view [--alt-only] [--out f.jpg] [--map]  |  map   this Soul's sight as words and its picture, or a map
+//                                             from overhead (#3687, view/view.mjs), drawn here in shoot's browser
 //   souls.mjs digest [--since <time>] [--refs]   the owner's update from the Soul's memory log (R14); no daemon
 //   souls.mjs consolidate [--force]           the owner's opt-in pass over the memory's journal (R14); no daemon
 //   souls.mjs memory <words...>               every memory line holding every word, `untrusted` when a world wrote it (R19)
@@ -65,6 +67,7 @@ import { chooseCommandSoul, chooseSoul, HOME_COMMANDS, homeCommand } from '../ho
 import { consolidateIn, digestOf, rememberIn, searchIn, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
 import { runShoot } from '../shoot/shoot.mjs';
+import { runView } from '../view/view.mjs';
 import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount } from '../account/account.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
@@ -209,6 +212,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (process.argv[2] === 'shoot') { // G10: drawn here, in a browser, from the public stream; no daemon unless it must use words
       const souls = soulsWithTokens(home), ask = souls.length === 1 ? (r) => call(home, souls[0], r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
       out(await runShoot(process.argv.slice(3), { home, env: process.env, ask }));
+      process.exit(0);
+    }
+    if (process.argv[2] === 'view' || process.argv[2] === 'map') { // #3687: today's view, read in the same browser
+      const souls = soulsWithTokens(home), soul = souls.length ? chooseSoul(home, named, souls) : null;
+      out(await runView(process.argv.slice(3), { home, env: process.env, map: process.argv[2] === 'map', ask: soul ? (r) => call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null }));
       process.exit(0);
     }
     if (refused && process.argv[2] !== 'upgrade') throw Object.assign(new Error(detail), { code: refused });
