@@ -28,7 +28,8 @@
       "audience": {"rule": "everyone"}
     },
     "castling": {"n": 32, "type": "int", "unit": "count", "default": 15, "min": 0, "max": 15, "audience": {"rule": "everyone"}},
-    "en_passant": {"n": 33, "type": "int", "unit": "count", "default": 64, "min": 0, "max": 64, "audience": {"rule": "everyone"}}
+    "en_passant": {"n": 33, "type": "int", "unit": "count", "default": 64, "min": 0, "max": 64, "audience": {"rule": "everyone"}},
+    "check": {"n": 34, "type": "bool", "default": false, "audience": {"rule": "everyone"}}
   },
   "links": {
     "white": {"n": 1, "from": "soul", "most": 1, "audience": {"rule": "everyone"}},
@@ -37,7 +38,9 @@
   "points": {
     "white_stand": {"role": "stand", "at_mm": [-500, 0, -580]},
     "black_stand": {"role": "stand", "at_mm": [500, 0, 580]},
-    "board": {"role": "contact", "at_mm": [0, 724, 0]}
+    "board": {"role": "contact", "at_mm": [0, 724, 0]},
+    "white_side": {"role": "contact", "at_mm": [0, 724, -245]},
+    "black_side": {"role": "contact", "at_mm": [0, 724, 245]}
   },
   "slots": {
     "white_seat": {"admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 460, -580], "stand": "white_stand"},
@@ -74,8 +77,10 @@
         {"need": "linked", "link": "black"}
       ],
       "steps": [],
+      "hatch": {"module": "prov-12206bd2c2d329bfe74c82e65e8d6fe7d75b6b93d6d884af8e1941047594b8a4d8da", "reads": [{"field": "phase"}, {"field": "pieces"}], "steps_most": 1000000, "answers": {"fields": ["pieces"]}, "why": "why_chess"},
       "effects": [
         {"change": "set", "field": "phase", "to": "playing", "event": "game_began"},
+        {"change": "set", "field": "check", "to": false, "event": "no_check"},
         {"change": "set", "field": "turn", "to": "white", "event": "white_to_move"},
         {"change": "set", "field": "winner", "to": "none", "event": "no_winner_yet"},
         {"change": "set", "field": "castling", "to": 15, "event": "castling_restored"},
@@ -87,9 +92,9 @@
       "starts": "act",
       "takes": {"from": {"type": "count"}, "to": {"type": "count"}, "promotion": {"type": "count"}},
       "needs": [{"need": "state", "field": "phase", "is": "playing"}, {"need": "state", "field": "turn", "is": "white"}],
-      "steps": [{"step": "move", "move": "slide", "at": "board"}],
+      "steps": [{"step": "move", "move": "slide", "at": "white_side"}],
       "hatch": {
-        "module": "prov-12200000000000000000000000000000000000000000000000000000000000000000",
+        "module": "prov-12206bd2c2d329bfe74c82e65e8d6fe7d75b6b93d6d884af8e1941047594b8a4d8da",
         "reads": [
           {"field": "pieces"},
           {"field": "turn"},
@@ -99,8 +104,8 @@
           {"arg": "to"},
           {"arg": "promotion"}
         ],
-        "steps_most": 20000,
-        "answers": "verdict",
+        "steps_most": 1000000,
+        "answers": {"fields": ["pieces", "turn", "en_passant", "castling", "phase", "winner", "check"]},
         "why": "why_chess"
       },
       "effects": [{"change": "set", "field": "turn", "to": "black", "event": "moved"}]
@@ -110,9 +115,9 @@
       "starts": "act",
       "takes": {"from": {"type": "count"}, "to": {"type": "count"}, "promotion": {"type": "count"}},
       "needs": [{"need": "state", "field": "phase", "is": "playing"}, {"need": "state", "field": "turn", "is": "black"}],
-      "steps": [{"step": "move", "move": "slide", "at": "board"}],
+      "steps": [{"step": "move", "move": "slide", "at": "black_side"}],
       "hatch": {
-        "module": "prov-12200000000000000000000000000000000000000000000000000000000000000000",
+        "module": "prov-12206bd2c2d329bfe74c82e65e8d6fe7d75b6b93d6d884af8e1941047594b8a4d8da",
         "reads": [
           {"field": "pieces"},
           {"field": "turn"},
@@ -122,8 +127,8 @@
           {"arg": "to"},
           {"arg": "promotion"}
         ],
-        "steps_most": 20000,
-        "answers": "verdict",
+        "steps_most": 1000000,
+        "answers": {"fields": ["pieces", "turn", "en_passant", "castling", "phase", "winner", "check"]},
         "why": "why_chess"
       },
       "effects": [{"change": "set", "field": "turn", "to": "white", "event": "moved"}]

@@ -598,6 +598,8 @@ pub struct Config {
     pub join: Option<Join>,
     /// Existing B15 recorded body catalogue and birth choices.
     pub wear: Option<Wearing>,
+    /// The code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713): its forms' hatches run in them.
+    pub hatches: Vec<Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -694,6 +696,7 @@ impl Config {
             engine: None,
             join: None,
             wear: None,
+            hatches: Vec::new(),
         }
     }
 }
@@ -4347,6 +4350,7 @@ pub fn start<S: Storage + 'static>(
     let sky = Heavens::of(&world, cfg.sky.take());
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
+    let hatches = std::mem::take(&mut cfg.hatches);
     let build = move || Clock {
         replica: world,
         publisher,
@@ -4381,7 +4385,12 @@ pub fn start<S: Storage + 'static>(
         set_down: Vec::new(),
         edited: Vec::new(),
         walkers,
-        forms: Acts::new(kinds, library, header, forms_scope),
+        forms: {
+            let mut acts = Acts::new(kinds, library, header, forms_scope);
+            // Checked at boot by `serve` (`Acts::hatches` refuses a module by name); a refused one is not loaded.
+            let _ = acts.hatches(&hatches);
+            acts
+        },
         forming: Vec::new(),
         engine: engine_parts
             .map(|(rules, kinds)| Engine::new(engine_header, rules, kinds, engine_scope)),
