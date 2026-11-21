@@ -1008,7 +1008,7 @@ impl Part {
             rest: r.0,
             stored: bytes.to_vec(),
         };
-        if let Some(t) = texts(&part.to_value()).into_iter().find(|t| !is_name(t)) {
+        if let Some(t) = not_a_name(&part.to_value()) {
             return refuse("text-not-a-name", t);
         }
         Ok(part)
@@ -1040,6 +1040,21 @@ impl Part {
         let bytes = encode(&p.to_value()).or_else(|e| refuse("encoding", e.to_string()))?;
         Part::read(&bytes)
     }
+}
+
+/// The first text in `v`, depth first, that is not a name (rule 10): what [`Part::read`] refuses as
+/// `text-not-a-name`. A writer runs this on anything it logs, so the log never holds what its reader refuses (#3765).
+pub fn not_a_name(v: &Value) -> Option<String> {
+    let mut stack = vec![v];
+    while let Some(v) = stack.pop() {
+        match v {
+            Value::Text(t) if !is_name(t.as_str()) => return Some(t.as_str().to_owned()),
+            Value::Array(a) => stack.extend(a.iter().rev()),
+            Value::Map(m) => stack.extend(m.values().rev()),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Every text item in a value, depth first. Each must be a name (rule 10).

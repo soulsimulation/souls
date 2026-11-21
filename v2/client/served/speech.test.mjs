@@ -137,15 +137,18 @@ test('served speech: joined nearby Souls hear say once and whisper stays with it
         if(!fin)fragment={opcode,parts:[payload],bytes:size};else if(opcode===2)delivered(payload);
       }
     };
-    const server=createServer(down=>{
-      const up=createConnection(Number(new URL(gateway).port),'127.0.0.1');connections++;sockets.add(down);sockets.add(up);
+    const server=createServer(down=>down.once('data',first=>{
+      const up=createConnection(Number(new URL(gateway).port),'127.0.0.1');up.write(first);
+      // The daemon's entries fetch at sign-in (#3760) is a plain HTTP exchange, not the observed transport.
+      if(first.subarray(0,15).toString('latin1')==='GET /v2/entries'){sockets.add(down);sockets.add(up);down.pipe(up);up.pipe(down);for(const socket of[down,up])socket.on('error',()=>{});return;}
+      connections++;sockets.add(down);sockets.add(up);
       down.pipe(up);up.pipe(down); // Forward original bytes even when an observer fails; teardown is owned elsewhere.
       if(connections!==1)fail(Error('unexpected daemon reconnection'));
       up.on('data',chunk=>{if(!failure)try{inspect(chunk);}catch(e){fail(e);}});
       for(const socket of[down,up]){socket.on('error',()=>{if(!closed)fail(Error('owned transport error'));});socket.on('close',()=>{sockets.delete(socket);if(!closed)fail(Error('owned transport closed'));});}
-    });
+    }));
     await new Promise((ok,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',ok);});
-    const o={items,references,gateway:`ws://127.0.0.1:${server.address().port}/v2/ws`,async snapshot(){if(failure)throw failure;const status=await request(s.rt.socket,{op:'status'});assert.equal(status.syncing,false);assert.equal(active,false);assert.deepEqual(JSON.parse(copy.roots()),status.roots,'mirror is the actual daemon canonical copy');return copy;},async close(){closed=true;for(const socket of sockets)socket.destroy();await new Promise((ok,fail)=>{const timer=setTimeout(()=>fail(Error('relay-close-timeout')),2000);server.close(e=>{clearTimeout(timer);e?fail(e):ok();});});copy.free();}};
+    const o={items,references,gateway:`ws://127.0.0.1:${server.address().port}/v2/ws`,async snapshot(){if(failure)throw failure;await until(async()=>!active&&(await request(s.rt.socket,{op:'status'})).syncing===false);if(failure)throw failure;const status=await request(s.rt.socket,{op:'status'});assert.equal(status.syncing,false);assert.equal(active,false);assert.deepEqual(JSON.parse(copy.roots()),status.roots,'mirror is the actual daemon canonical copy');return copy;},async close(){closed=true;for(const socket of sockets)socket.destroy();await new Promise((ok,fail)=>{const timer=setTimeout(()=>fail(Error('relay-close-timeout')),2000);server.close(e=>{clearTimeout(timer);e?fail(e):ok();});});copy.free();}};
     observers.push(o);return o;
   };
   for(const s of seats){

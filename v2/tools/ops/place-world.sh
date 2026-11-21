@@ -7,7 +7,9 @@
 # It writes, for the world <name> (its world.json's):
 #   /var/lib/souls/worlds/worlds/<name>/          the folder, copied (WORLDS_ROOT=/var/lib/souls/worlds, the unit's)
 #   /etc/souls/gateway-<name>.env                 GATEWAYD_ARGS for souls-gateway@<name>: its port, the world's
-#                                                 socket, its tokens file (the folder's `tokens`), its build, receipts
+#                                                 socket, its tokens file (the folder's `tokens`), its build, receipts,
+#                                                 and its kind entries (the folder's `entries`, served to its paired
+#                                                 clients at /v2/entries, #3760; gatewayd refuses to start without one)
 #   /etc/systemd/system/worldd@<name>.service.d/place.conf   WORLDD_SOCKET, the socket worldd serve binds
 #   /etc/systemd/system/multi-user.target.wants/{worldd,souls-gateway}@<name>.service   the instances, enabled
 #   /var/lib/souls/views/w/<name>/{views,history}  links the origin serves, so the page's ?world=<name> finds them
@@ -90,7 +92,7 @@ if [ "$DATA_ONLY" = 0 ]; then
   mkdir -p "$R/etc/souls" "$R$(dirname "$DROPIN")" "$R$WANTS"
   EXCHANGE=''; STORE=''
   if [ -n "$DIRECTORY" ]; then EXCHANGE=" --creator $CREATOR --directory $DIRECTORY --creator-authority-required"; STORE=$(printf '\nEnvironment=WORLDD_STORE=%s' "$DATA/worlds/directory"); fi
-  ENV_TEXT=$(printf 'GATEWAYD_ARGS=--listen 127.0.0.1:%s --world %s --tokens %s --build %s --receipts %s%s' "$PORT" "$SOCKET" "$WORLD/tokens" "$BUILD" "$WORLD/receipts" "$EXCHANGE")
+  ENV_TEXT=$(printf 'GATEWAYD_ARGS=--listen 127.0.0.1:%s --world %s --tokens %s --build %s --receipts %s --entries %s%s' "$PORT" "$SOCKET" "$WORLD/tokens" "$BUILD" "$WORLD/receipts" "$WORLD/entries" "$EXCHANGE")
   DROP_TEXT=$(printf '# Written by place-world.sh (C1, #3365).\n[Service]\nEnvironment=WORLDD_SOCKET=%s%s' "$SOCKET" "$STORE")
   if [ -e "$R$ENV" ]; then [ "$(cat "$R$ENV")" = "$ENV_TEXT" ] || die "gateway configuration differs"; else printf '%s\n' "$ENV_TEXT" > "$R$ENV"; fi
   if [ -e "$R$DROPIN" ]; then [ "$(cat "$R$DROPIN")" = "$DROP_TEXT" ] || die "world configuration differs"; else printf '%s\n' "$DROP_TEXT" > "$R$DROPIN"; fi

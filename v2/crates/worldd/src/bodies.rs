@@ -45,6 +45,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use replica::bodies::Family;
+use replica::bodies::{Class, SkillShape, Want};
+use replica::effects::Effect;
 use replica::effects::{Actor, Refusal, fixture_bytes};
 use replica::encode::{Name, Value, decode};
 use replica::host::Progress;
@@ -62,6 +64,7 @@ use replica::world_model::Audience;
 use sim::commit::bind::{Bound, Slot, bind};
 use sim::commit::spot;
 use sim::controller::Stance;
+use sim::controller::{Driver, Part};
 use sim::host::Runner;
 use sim::host::{Planned, ReachKey, ReachQuestion, Wants};
 use sim::life::{Born, Life, Retired, Standing};
@@ -74,6 +77,7 @@ use sim::spots::Target;
 use sim::timers::DueList;
 use sim::walk::town::Town;
 use skills::route::Route;
+use skills::wind_down::{self, Do, Ground, Order, Phase, WindDown};
 
 type R<T> = Result<T, Refusal>;
 
@@ -216,6 +220,14 @@ pub struct Bodies {
     /// The utterances started since the world last took them, each with its speaker, its record (hearers resolved
     /// when it started) and the world time it started: the world writes each.
     pub heard: Vec<(Id, Said, Micros)>,
+    /// The wind-down (B16, #2751): the one rule by which the world moves a body its agent did not order.
+    pub wind: WindDown,
+    /// Its records since the world last took them, cause and actor the world.
+    pub wind_log: Vec<Effect>,
+    /// The rule's own move going on each body, by its intent id.
+    wind_moves: BTreeMap<Id, Id>,
+    /// Each body the rule put to sleep on the ground: the driver holding it lying.
+    sleeping: BTreeMap<Id, Driver>,
 }
 
 /// Where the log last had each body: its pose, and its stance when that pose is in a seat's slot (K18, #3160;
@@ -285,13 +297,14 @@ fn turned(a: Vec3, b: Vec3) -> bool {
 }
 
 /// A body's row in a tick's part (K18's `answers::BODIES`): `[body, pose]`, or `[body, pose, stance]` in a seat
-/// (1 sit, 2 lie).
+/// (1 sit, 2 lie, 3 stand in a standing slot, #3598).
 pub fn row(body: Id, pose: &Pose, stance: Option<Stance>) -> Value {
     let mut r = vec![body.to_value(), pose.to_value()];
     match stance {
         Some(Stance::Sit) => r.push(Value::Uint(1)),
         Some(Stance::Lie) => r.push(Value::Uint(2)),
-        _ => {}
+        Some(Stance::Stand) => r.push(Value::Uint(3)),
+        None => {}
     }
     Value::Array(r)
 }
@@ -306,6 +319,7 @@ pub fn read_row(v: &Value) -> Option<(Id, Pose, Option<Stance>)> {
     let stance = match rest {
         [Value::Uint(1)] => Some(Stance::Sit),
         [Value::Uint(2)] => Some(Stance::Lie),
+        [Value::Uint(3)] => Some(Stance::Stand),
         _ => None,
     };
     Some((
@@ -370,6 +384,16 @@ impl Bodies {
             shown: BTreeMap::new(),
             hearing: Hearing::new(),
             heard: Vec::new(),
+            // A test world shortens the wind-down's clocks (seconds: wander, zombie, leg min, leg max, bound).
+            wind: WindDown::new(
+                std::env::var("WORLDD_WIND_DOWN")
+                    .ok()
+                    .and_then(|t| WindDown::knobs_from(&t))
+                    .unwrap_or(wind_down::KNOBS),
+            ),
+            wind_log: Vec::new(),
+            wind_moves: BTreeMap::new(),
+            sleeping: BTreeMap::new(),
         })
     }
 
@@ -559,7 +583,9 @@ impl Bodies {
             name: "body-class-unprepared",
             detail: "no prepared geometry".into(),
         })?;
+        let id = body.id;
         self.runner.controller.add_built(family, body, build)?;
+        self.wind.add(id, self.runner.now);
         self.town.set_class(body.id, build.size);
         Ok(())
     }
@@ -648,7 +674,7 @@ impl Bodies {
                 let b = c.body(id)?;
                 let stance = match b.pose.support {
                     Support::Slot => self.slots.stance(id),
-                    _ => None,
+                    _ => self.sleeping.contains_key(&id).then_some(Stance::Lie),
                 };
                 Some((id, (b.pose, stance)))
             })
@@ -1165,6 +1191,7 @@ impl Bodies {
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
             crate::orders::step(self, at);
+            self.wind_step(at);
             let planned = std::mem::take(&mut self.planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
             // Every body in a seat move, with its seat: its reach for the next tick's phase timers.
@@ -1250,7 +1277,11 @@ impl Bodies {
         standing: &impl Standing,
         family: &Family,
     ) -> Vec<Born> {
-        life.tick(now, &mut self.runner, &self.town.surfaces, standing, family)
+        let born = life.tick(now, &mut self.runner, &self.town.surfaces, standing, family);
+        for b in &born {
+            self.wind.add(b.body, now);
+        }
+        born
     }
 
     pub fn births_built(
@@ -1289,7 +1320,268 @@ impl Bodies {
         let open = self.live.remove(&r.body).map(|(intent, _)| intent);
         self.logged.remove(&r.body);
         self.shown.remove(&r.body);
+        self.wind.remove(r.body);
+        self.wind_moves.remove(&r.body);
+        self.sleeping.remove(&r.body);
         Ok((r, open))
+    }
+}
+
+/// The wind-down's view of the world (B16, #2751): the bodies as the controller holds them and the open ground.
+struct WindGround<'a> {
+    b: &'a Bodies,
+}
+
+/// How near another body a spot may be, µm: room to stand, and room to lie down.
+const ROOM: i64 = 800_000;
+const ROOM_LYING: i64 = 1_500_000;
+
+impl Ground for WindGround<'_> {
+    fn at(&self, body: Id) -> Option<[i64; 2]> {
+        let p = self.b.runner.controller.body(body)?.pose;
+        if !matches!(p.support, Support::Surface { .. }) || p.frame.slot.is_some() {
+            return None;
+        }
+        if p.frame.node == self.b.town.ground {
+            return Some([p.position.x, p.position.z]);
+        }
+        // On a building's floor: where that is on the open ground.
+        let place = self
+            .b
+            .town
+            .buildings
+            .iter()
+            .find(|bl| bl.floors.contains_key(&p.frame.node))?
+            .place;
+        let q = place.point(p.position).ok()?;
+        Some([q.x, q.z])
+    }
+
+    fn held(&self, body: Id) -> bool {
+        let c = &self.b.runner.controller;
+        self.b.orders.open(body).is_some()
+            || self.b.waiting.iter().any(|w| w.body == body)
+            || self
+                .b
+                .live
+                .get(&body)
+                .is_some_and(|(id, _)| self.b.wind_moves.get(&body) != Some(id))
+            || c.carried(body)
+            || c.carrying(body).is_some()
+    }
+
+    fn walking(&self, body: Id) -> bool {
+        self.b.wind_moves.get(&body).is_some_and(|id| {
+            self.b
+                .live
+                .get(&body)
+                .is_some_and(|(i, l)| i == id && matches!(l, Live::Walk))
+        })
+    }
+
+    fn aboard(&self, body: Id) -> bool {
+        self.b.runner.controller.body(body).is_some_and(|m| {
+            matches!(
+                m.pose.support,
+                Support::Track | Support::Volume { .. } | Support::None
+            )
+        })
+    }
+
+    fn clear(&self, p: [i64; 2], lying: bool) -> bool {
+        let room = if lying { ROOM_LYING } else { ROOM };
+        self.outdoors(p)
+            && self.b.runner.controller.bodies().all(|m| {
+                let q = m.pose.position;
+                m.pose.frame.node != self.b.town.ground
+                    || (i128::from(q.x - p[0])).pow(2) + (i128::from(q.z - p[1])).pow(2)
+                        >= i128::from(room).pow(2)
+            })
+    }
+
+    fn outdoors(&self, p: [i64; 2]) -> bool {
+        let ground = self.b.town.ground;
+        self.b.town.surfaces.get(&ground).is_some_and(|s| {
+            let frame = Frame {
+                node: ground,
+                slot: None,
+            };
+            s.place(
+                ground,
+                frame,
+                Vec3::new(p[0], 0, p[1]),
+                replica::pose::Quat::IDENTITY,
+            )
+            .is_ok()
+        })
+    }
+
+    fn centre(&self) -> [i64; 2] {
+        let mut n = 0i128;
+        let (mut x, mut z) = (0i128, 0i128);
+        for bl in &self.b.town.buildings {
+            x += i128::from(bl.place.pos.x);
+            z += i128::from(bl.place.pos.z);
+            n += 1;
+        }
+        if n == 0 {
+            return [0, 0];
+        }
+        [
+            i64::try_from(x / n).unwrap_or(0),
+            i64::try_from(z / n).unwrap_or(0),
+        ]
+    }
+}
+
+fn asleep_shape() -> SkillShape {
+    SkillShape {
+        name: Name::new("souls:asleep").unwrap_or_else(|| unreachable!("a literal name")),
+        claims: vec![Want::All(Class::Locomotion)],
+        blocks: vec![],
+        cancelled_by: vec![],
+    }
+}
+
+impl Bodies {
+    /// The wind-down's moves due at body time `at` (B16): each through the moves every intent takes (a rise, N7's
+    /// walk to a point on the open ground), or a lie where the body stands; each written as the world's record.
+    /// Nothing is read when nothing is due: a sleeping body costs no tick time.
+    fn wind_step(&mut self, at: Micros) {
+        if self.wind.next().is_none_or(|t| t > at) {
+            return;
+        }
+        let mut wind = std::mem::take(&mut self.wind);
+        let orders = wind.step(at, &WindGround { b: self });
+        self.wind = wind;
+        for o in orders {
+            self.wind_do(&o, at);
+        }
+    }
+
+    fn wind_do(&mut self, o: &Order, at: Micros) {
+        let body = o.body;
+        for d in &o.what {
+            match *d {
+                Do::Stop => {
+                    if let Some(id) = self.wind_moves.remove(&body) {
+                        self.cancel(id);
+                    }
+                }
+                Do::Stand => {
+                    self.wake_ground(body);
+                    if self.slots.held_by(body).is_some() {
+                        self.wind_move(body, Ask::Rise);
+                    }
+                }
+                Do::Walk([x, z]) => {
+                    let node = self.town.ground;
+                    self.wind_move(
+                        body,
+                        Ask::Walk {
+                            node,
+                            point: Some(Vec3::new(x, 0, z)),
+                        },
+                    );
+                }
+                Do::Lie => self.lie_ground(body),
+            }
+        }
+        if let Some(s) = self.wind.state(body) {
+            let e = wind_down::record(o, s, at, 0);
+            self.wind_log.push(e);
+        }
+    }
+
+    /// One move of the rule's, by the path every move intent takes ([`Bodies::start`]), under a fresh id.
+    fn wind_move(&mut self, body: Id, ask: Ask) {
+        let Ok(id) = self.mint.mint() else { return };
+        let started = self.start(vec![(
+            id,
+            Asked {
+                body,
+                actor: Actor::World,
+                ask,
+                fallbacks: Vec::new(),
+            },
+        )]);
+        if started.iter().all(|(_, r)| r.is_ok()) {
+            self.wind_moves.insert(body, id);
+        }
+    }
+
+    /// The body lies down where it stands on the ground and is held lying, with no end.
+    fn lie_ground(&mut self, body: Id) {
+        if self.sleeping.contains_key(&body) || self.slots.held_by(body).is_some() {
+            return;
+        }
+        let c = &mut self.runner.controller;
+        if let Ok(d) = c.claim(body, &asleep_shape()) {
+            if c.set(body, d, Part::Stance(Stance::Lie)).is_ok() {
+                self.sleeping.insert(body, d);
+                // Its row carries the lying stance from this tick.
+                self.logged.remove(&body);
+            } else {
+                let _ = c.release(body, d);
+            }
+        }
+    }
+
+    /// A body the rule held lying stands where it is.
+    fn wake_ground(&mut self, body: Id) {
+        if let Some(d) = self.sleeping.remove(&body) {
+            let _ = self.runner.controller.release(body, d);
+            self.logged.remove(&body);
+        }
+    }
+
+    /// Its agent acted at `now` (B16 A2): a body the rule held is let go on this tick, its walk stopped where it is and
+    /// its lie ended, so the act runs; the world writes that it woke.
+    pub fn agent_acted(&mut self, body: Id, now: Micros) {
+        if self.wind.acted(body, now).is_none() {
+            return;
+        }
+        if let Some(id) = self.wind_moves.remove(&body) {
+            self.cancel(id);
+        }
+        self.wake_ground(body);
+        if let Some(s) = self.wind.state(body) {
+            let o = Order {
+                body,
+                phase: Phase::Woken,
+                what: Vec::new(),
+            };
+            self.wind_log.push(wind_down::record(&o, s, now, 0));
+        }
+    }
+
+    /// Restart (B16): the rule rebuilt from the records and agent acts replayed (`body_of` names a Soul's body), every
+    /// body in the controller; a body asleep lies down again where it was.
+    /// A body `placed` has lying on the ground (only the rule lays one there) with no record since the checkpoint is
+    /// asleep.
+    pub fn wind_resume<'a>(
+        &mut self,
+        effects: impl IntoIterator<Item = &'a Effect>,
+        body_of: impl Fn(Id) -> Option<Id>,
+        placed: &Placed,
+        now: Micros,
+    ) {
+        let ids: Vec<Id> = self.runner.controller.ids().collect();
+        self.wind.resume(effects, body_of, ids.iter().copied(), now);
+        for (body, (pose, stance)) in placed {
+            if *stance == Some(Stance::Lie)
+                && matches!(pose.support, Support::Surface { .. })
+                && self.wind.state(*body).is_some_and(|s| s.wander.is_none())
+            {
+                self.wind
+                    .asleep(*body, [pose.position.x, pose.position.z], now);
+            }
+        }
+        for body in ids {
+            if self.wind.state(body).is_some_and(|s| s.slept) {
+                self.lie_ground(body);
+            }
+        }
     }
 }
 

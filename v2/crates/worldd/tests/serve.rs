@@ -253,6 +253,7 @@ fn send(
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     let bytes = encode(&intent.to_value()).expect("bytes");
     s.write_all(&(bytes.len() as u32).to_be_bytes())
@@ -949,6 +950,7 @@ fn c30_served_subscription_socket_replays_ownership_and_private_words() {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         let bytes = encode(&intent.to_value()).unwrap();
         s.write_all(&(bytes.len() as u32).to_be_bytes()).unwrap();

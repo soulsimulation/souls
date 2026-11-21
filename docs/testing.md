@@ -167,8 +167,8 @@ therefore **windowed**:
   tools-only PRs select no heavy jobs and are never deferred.
 - **The full battery runs daily at 06:23 UTC and before each release, not per change** (Gene, 18 Nov: startup mode,
   merge no slower than lanes implement). No `pull_request`, merge-group or push run runs the `qualify` legs that
-  `ci-scope.mjs` marks `heavy: true` (`packages`, which includes the walk, `launcher`, the server shards and
-  `soul-actions`), even inside the window. They run in the daily scheduled run on main (see CI on main below), in a
+  `ci-scope.mjs` marks `heavy: true` (`packages`, which includes the walk, the `launcher-*` legs, the server shards and
+  the `soul-actions-*` legs), even inside the window. They run in the daily scheduled run on main (see CI on main below), in a
   manual run, and in the remote gate before every release. On a PR, in the queue and on main, `ci-ok` passes when every
   job that ran passed: the light legs the paths pick (`types-web`, which includes the bundle check, `web`, `client-cli`,
   `native`, `latency`, `docs-reference`, `soul-tools`), the smoke, `scope` and `repo`. A change whose paths pick only
@@ -227,8 +227,12 @@ which runs everything before a release. Until 18 Nov a push covered by a full me
 `merge-group-covered` instead; `ci.yml` no longer has it, and readers accept the marker only on those older runs
 (`.github/scripts/ci-main.mjs`).
 
-**Soul Action tests.** `tools/soul-actions/*.test.mjs` runs as the CI job `soul-actions`, about 76 s measured on a
-loaded laptop. It is picked by its own paths (`tools/soul-actions`, `apps/server`, `packages/world-compiler`,
+**Soul Action tests.** `tools/soul-actions/*.test.mjs` runs in four parallel CI legs, `soul-actions-0` to `-3`, about
+10 minutes each on hosted runners (one file, `shared-bay.test.mjs`, has a leg to itself). The launcher's unit tests
+(V3-launcher-unit) run the same way in three legs, `launcher-0` to `-2`, each file one at a time as before.
+`.github/scripts/test-legs.mjs` splits each directory listing by the seconds per file measured on one hosted run
+(`test-leg-durations.json`); a missing or stale entry only unbalances the legs, never drops or repeats a file. The
+Soul Action job is picked by its own paths (`tools/soul-actions`, `apps/server`, `packages/world-compiler`,
 `packages/engine-*`) and by every full-scope run, but it is a `heavy: true` leg, so since 18 Nov it runs only in the
 daily run on main and in manual runs. It is not a gate step, so the remote gate doesn't run it, and the gate's suite
 tree and cached baseline don't change.
@@ -242,7 +246,11 @@ tree and cached baseline don't change.
 on the toolchain `v2/rust-toolchain.toml` pins, with a cargo cache keyed on that file and `v2/Cargo.lock` (every leg
 restores it; `v2-rust` saves it on a miss); they skip the pnpm install. `v2-rust` runs format, Clippy, the small checks
 and every package's tests but sim's and worldd's; `v2-sim` and `v2-worldd` run those two packages' tests; `v2-wasm` the
-WASM build against the native answers; `v2-client` the client and page tests against the built binaries. Together they
+WASM build against the native answers; `v2-client` the client and page tests against the built binaries, among them
+the served-world gate (`v2/client/served/e2e/world.test.mjs`): a served Eden slice, two paired Souls acting through
+the thin command, the page's worker on the public stream and the client's copy, across a restart. Its assertions that
+wait on an open fix run under a named `PENDING #<issue>` marker: printed while they fail, and failing the run once
+they pass, so the fix's PR removes the marker. Together they
 run exactly what `ci.sh` with no argument runs, and `ci-ok` needs each of them. They are picked by their own paths
 (`v2/`) and by every full-scope run. A change only under `v2/` runs those legs
 alone, has release-gate scope `none` (no walk, bundle, conformance or remote gate) and is T1, its docs included. The
@@ -251,7 +259,7 @@ strict tiers for the core (`v2/crates/sim`, `replica`, `skills` T3; `v2/web` T2)
 scanner always apply. Later tasks add their steps to a leg in `v2/tools/ci.sh`, not new jobs.
 
 **Self-hosted runners.** The `qualify` legs that `ci-scope.mjs` marks `heavy: true` (the server shards and the legs
-whose hosted median is over about 8 minutes: `packages`, `launcher`, `soul-actions`) run on the runners named by the
+whose hosted median is over about 8 minutes: `packages`, `launcher-*`, `soul-actions-*`) run on the runners named by the
 repository variable `CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`, or a JSON array of labels). Every
 other leg, and every leg while the variable is unset, runs on GitHub-hosted runners, so one run uses both pools at
 once. The browser `smoke` leg and the `native` leg always stay GitHub-hosted: `native` has a wall-clock budget that a
