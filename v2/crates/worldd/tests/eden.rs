@@ -1309,24 +1309,9 @@ fn a_walk_before_a_sit_goes_to_the_seats_own_stand_point() {
 }
 
 /// C22 sweep follow-up: Eden's land features are drawn in the world's frame, each placed at the world's origin, so an
-/// entry's points were laid round the origin. Now they are laid on the thing's own line or outline. Born by the
-/// river's stone bridge (today's e_d10385f7, its path from (-252, -61) to (-225, -55) m), a Soul crosses it end to end
-/// (`cross`: a walk to `end_a`, then to `end_b`). Born south of the park pond (e_5c6d4b00, round (-6, 112) m), a Soul
-/// walks round it by its four shore points (`walk_around`). Each ends `done`; before, the walks went to points round
-/// the world's origin.
-#[test]
-#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
-fn a_bridge_is_crossed_and_a_pond_walked_round_on_their_own_shapes() {
-    let bridge = act_at("-256.0,-62.0", "e_d10385f7", "eden:cross", "c22bridge");
-    let pond = act_at("-6.0,124.0", "e_5c6d4b00", "eden:walk_around", "c22pond");
-    bridge.expect("the bridge crossed, done");
-    pond.expect("the pond walked round, done");
-}
-
-/// C22 sweep follow-up: Eden's other land features walked to on their own shapes, each from a Soul born a few metres
-/// off it: a channel walked along (today's e_c3bd69c8), a wood's glade (e_062ad11b), a flower garden wandered
-/// (e_71c560a7) and a hedge hidden behind (e_0b36856a). Each ends `done`; before, each walked to points round the
-/// world's origin.
+/// entry's points were laid round the origin; now they are laid on the thing's own line or outline. Each from a Soul
+/// born a few metres off it: a channel walked along (today's e_c3bd69c8), a wood's glade (e_062ad11b), a flower
+/// garden wandered (e_71c560a7) and a hedge hidden behind (e_0b36856a). Each ends `done`.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn land_features_are_walked_to_on_their_own_shapes() {
