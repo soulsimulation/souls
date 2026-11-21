@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 const DRESSER: &str = "eden:dresser";
 const NOTE: &str = "test:private_note";
+/// The dresser entry's `open` field (`content/kinds`; clear of the import's field numbers, #1960).
+const DRESSER_OPEN: u64 = 28;
 fn dresser() -> Id {
     id(20)
 }
@@ -42,12 +44,12 @@ impl NamedRun {
         }
         r
     }
-    fn field(&self, node: Id) -> Value {
+    fn field(&self, node: Id, n: u64) -> Value {
         let r = self.replay();
         r.tree()
             .node(r.tree().handle(node).unwrap())
             .unwrap()
-            .fields()[&1]
+            .fields()[&n]
             .clone()
     }
 }
@@ -150,7 +152,7 @@ fn fixture() -> (NamedRun, Client) {
             DRESSER,
             Vec3::new(at1().x, 0, at1().z - 702_000),
             Audience::Everyone,
-            BTreeMap::from([(1, Value::Text(name("eden:shut")))]),
+            BTreeMap::from([(DRESSER_OPEN, Value::Text(name("eden:shut")))]),
         ),
         (
             note(),
@@ -317,7 +319,7 @@ fn named_args_dresser_part_and_private_text_through_gateway() {
             Err(reason.into())
         );
         assert_eq!(
-            run.field(dresser()),
+            run.field(dresser(), DRESSER_OPEN),
             Value::Text(name("eden:shut")),
             "refusal changes no drawer or different thing"
         );
@@ -331,7 +333,7 @@ fn named_args_dresser_part_and_private_text_through_gateway() {
         .expect("the real dresser's declared top part works");
     assert!(!receipt.is_empty());
     assert_eq!(
-        run.field(dresser()),
+        run.field(dresser(), DRESSER_OPEN),
         Value::Text(name("eden:top")),
         "durable state matches the requested part"
     );
@@ -355,7 +357,7 @@ fn named_args_dresser_part_and_private_text_through_gateway() {
         Err("arg-type".into())
     );
     assert_eq!(
-        run.field(note()),
+        run.field(note(), 1),
         Value::Map(BTreeMap::new()),
         "a refused text argument selects no thing"
     );
@@ -391,7 +393,7 @@ fn named_args_dresser_part_and_private_text_through_gateway() {
         )
         .expect("private words reach the existing typed binder");
     assert!(!receipt.is_empty());
-    let Value::Map(reference) = run.field(note()) else {
+    let Value::Map(reference) = run.field(note(), 1) else {
         panic!("a T8 reference")
     };
     let reference = replica::effects::read_id(&reference[&21]).unwrap();

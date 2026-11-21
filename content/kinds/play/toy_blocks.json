@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:toy_blocks",
   "owner": "thing",
-  "state": { "built": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "state": { "built": { "n": 28, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
   "points": {
     "by": { "role": "stand", "at_mm": [0, 0, 450], "yaw_mdeg": 180000 },
     "top": { "role": "contact", "at_mm": [0, 140, 0] }

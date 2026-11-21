@@ -3,7 +3,7 @@
   "kind": "eden:wooden_blank",
   "owner": "thing",
   "state": {
-    "carving": { "n": 1, "type": "enum", "values": ["blank", "leaf", "bird", "totem"], "default": "blank", "audience": { "rule": "everyone" } }
+    "carving": { "n": 28, "type": "enum", "values": ["blank", "leaf", "bird", "totem"], "default": "blank", "audience": { "rule": "everyone" } }
   },
   "links": {
     "carved_by": { "n": 1, "from": "soul", "most": 1, "audience": { "rule": "everyone" } }

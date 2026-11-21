@@ -56,7 +56,7 @@
         "change": "set",
         "node": "t1",
         "field": "carving",
-        "n": 1,
+        "n": 28,
         "to": "leaf"
        },
        {
@@ -171,7 +171,7 @@
         "change": "set",
         "node": "t1",
         "field": "carving",
-        "n": 1,
+        "n": 28,
         "to": "bird"
        },
        {
@@ -286,7 +286,7 @@
         "change": "set",
         "node": "t1",
         "field": "carving",
-        "n": 1,
+        "n": 28,
         "to": "totem"
        },
        {

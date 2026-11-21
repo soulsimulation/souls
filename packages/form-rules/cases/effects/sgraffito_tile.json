@@ -50,21 +50,21 @@
                 "change": "set",
                 "node": "g1",
                 "field": "coat",
-                "n": 1,
+                "n": 28,
                 "to": "red"
               },
               {
                 "change": "set",
                 "node": "g1",
                 "field": "portions",
-                "n": 2,
+                "n": 29,
                 "to": 2
               },
               {
                 "change": "set",
                 "node": "g1",
                 "field": "cuts",
-                "n": 3,
+                "n": 30,
                 "to": 0
               }
             ],
@@ -106,7 +106,7 @@
                 "change": "set",
                 "node": "g1",
                 "field": "cuts",
-                "n": 3,
+                "n": 30,
                 "to": 1
               }
             ],
@@ -134,7 +134,7 @@
                 "change": "set",
                 "node": "g1",
                 "field": "cuts",
-                "n": 3,
+                "n": 30,
                 "to": 2
               }
             ]
@@ -153,21 +153,21 @@
                 "change": "set",
                 "node": "g1",
                 "field": "coat",
-                "n": 1,
+                "n": 28,
                 "to": "blue"
               },
               {
                 "change": "set",
                 "node": "g1",
                 "field": "portions",
-                "n": 2,
+                "n": 29,
                 "to": 1
               },
               {
                 "change": "set",
                 "node": "g1",
                 "field": "cuts",
-                "n": 3,
+                "n": 30,
                 "to": 0
               }
             ]
@@ -186,21 +186,21 @@
                 "change": "set",
                 "node": "g1",
                 "field": "coat",
-                "n": 1,
+                "n": 28,
                 "to": "gold"
               },
               {
                 "change": "set",
                 "node": "g1",
                 "field": "portions",
-                "n": 2,
+                "n": 29,
                 "to": 0
               },
               {
                 "change": "set",
                 "node": "g1",
                 "field": "cuts",
-                "n": 3,
+                "n": 30,
                 "to": 0
               }
             ]
@@ -219,7 +219,7 @@
                 "change": "set",
                 "node": "g1",
                 "field": "cuts",
-                "n": 3,
+                "n": 30,
                 "to": 1
               }
             ]

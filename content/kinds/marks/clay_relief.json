@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "left": {
-      "n": 1,
+      "n": 28,
       "type": "enum",
       "values": [
         "level0",
@@ -19,7 +19,7 @@
       }
     },
     "middle": {
-      "n": 2,
+      "n": 29,
       "type": "enum",
       "values": [
         "level0",
@@ -34,7 +34,7 @@
       }
     },
     "right": {
-      "n": 3,
+      "n": 30,
       "type": "enum",
       "values": [
         "level0",

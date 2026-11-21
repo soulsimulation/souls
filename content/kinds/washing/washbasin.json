@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "water": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "g",
       "default": 1000000000,
@@ -14,7 +14,7 @@
       }
     },
     "running": {
-      "n": 2,
+      "n": 29,
       "type": "bool",
       "default": false,
       "audience": {

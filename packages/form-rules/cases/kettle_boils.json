@@ -14,7 +14,7 @@
         }
       },
       "asker": { "sees": "all" },
-      "expect": { "verdict": "yes", "read": [["k1/field/2", 1], ["k1/field/3", 100000]] }
+      "expect": { "verdict": "yes", "read": [["k1/field/29", 1], ["k1/field/30", 100000]] }
     },
     {
       "name": "switched_on_at_one_minute_not_boiled_a_microsecond_before",
