@@ -30,7 +30,7 @@ export const MISS = 'no-store';
 export function kindOf(path) {
   const name = basename(path);
   if (name.endsWith('.tmp')) return null;
-  if (name === 'pointer') return 'pointer';
+  if (name === 'pointer' || /(?:^|\/)history\/live$/.test(path)) return 'pointer';
   return 'immutable';
 }
 
