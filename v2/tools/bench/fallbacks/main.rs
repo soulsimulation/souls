@@ -213,6 +213,7 @@ impl Hall {
                 &mut w.mint,
                 &mut w.moves,
                 &InReach,
+                &w.floors,
                 &[req],
                 now,
             );
