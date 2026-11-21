@@ -67,12 +67,17 @@ const SEND_MOST: usize = FRAME_MOST + 64;
 /// How long a socket has to send its first frame and to sign in.
 const SIGN_IN_WITHIN: Duration = Duration::from_secs(10);
 
-/// The gateway's HTTP routes: the agents' socket, and the creator's session exchange (W5, `creator.rs`).
+/// The gateway's HTTP routes: the agents' socket, the creator's session exchange (W5, `creator.rs`), the world's
+/// entries (`entries.rs`) and a creator's bulk edits (#3695, `bulk.rs`).
 pub fn router(gw: Arc<Gateway>) -> Router {
     Router::new()
         .route(PATH, get(upgrade))
         .route(crate::creator::PATH, post(crate::creator::exchange))
         .route(crate::entries::PATH, get(crate::entries::serve))
+        .route(
+            crate::bulk::PATH,
+            post(crate::bulk::submit).layer(crate::bulk::limit()),
+        )
         .with_state(gw)
 }
 
@@ -562,7 +567,7 @@ fn take_intent(
 /// The wall clock, µs from the Unix epoch: an intent's expiry is world time, which is real time (T5).
 // The gateway's one wall-clock read: how long an intent has left (C8, #3396). The gateway is not the engine.
 #[allow(clippy::disallowed_methods)]
-fn unix_us() -> i64 {
+pub(crate) fn unix_us() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX))

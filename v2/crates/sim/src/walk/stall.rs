@@ -9,7 +9,8 @@
 //!   distance left through the corner aimed at (`|here - corner| + |corner - leg's end|`, never more than the way
 //!   left), or, while it aimed at one corner the whole window, the least distance to that corner. A walker going round
 //!   a building gains on its corner; one pushed against a thing or an edge, turning this way and that, gains on
-//!   neither. A new leg's end starts the watch again.
+//!   neither. A new leg's end starts the watch again. A tick aimed at its own place (standing for the planner's
+//!   line, the first tick or two of each leg) is no tick of walking and is not sampled (C22, #3485).
 //! - **The blocker** ([`blocker`]): the thing on the walker's ground whose solids are nearest it, within [`NEAR`],
 //!   or else the edge of the walked ground where it stands.
 //!
@@ -77,6 +78,12 @@ impl Watch {
         to: [i64; 2],
         now: Micros,
     ) -> bool {
+        // Aiming at its own place, the walk stands for its line (the planner answers a tick later): no corner, so no
+        // tick of walking. Its distance straight to `to` would be taken as the least left, and a route round something,
+        // longer than that by more than [`GAIN`], found stalled a [`WINDOW`] on, at full walking speed.
+        if aim == here {
+            return false;
+        }
         let t = self.walkers.entry(who).or_insert(Track {
             to,
             aimed: now,
@@ -340,5 +347,34 @@ mod tests {
         // A tick with no ask (waiting its turn) starts its watch again.
         w.keep(&BTreeSet::new());
         assert!(w.is_empty());
+    }
+
+    #[test]
+    fn c22_standing_for_its_line_then_going_round_is_progress() {
+        // Eden's tower (C22, #3485): the walk stands two ticks for its line, aiming at its own place, then goes 2.4 m
+        // to the side and on past the tower's wall at walking speed, its goal 5.7 m from where it began. Before, the
+        // standing ticks set the least left to 5.7 m, the route through the corner was longer, and the walk was found
+        // stalled 3 s after it began, still at full speed.
+        let (start, corner, goal) = ([0, 0], [2_400_000, 0], [0, 5_700_000]);
+        let mut w = Watch::new();
+        for t in 0..2u32 {
+            assert!(!w.seen(fixture(9), start, start, goal, Micros::from(t) * TICK));
+        }
+        for t in 2..36u32 {
+            let here = [i64::from(t - 2) * 70_000, 0];
+            assert!(!w.seen(fixture(9), here, corner, goal, Micros::from(t) * TICK));
+        }
+        for t in 36..100u32 {
+            let here = [2_380_000, i64::from(t - 36) * 70_000];
+            assert!(!w.seen(fixture(9), here, goal, goal, Micros::from(t) * TICK));
+        }
+        // Standing for its line, then pushed against something at once: still found, a window after its first aimed
+        // tick.
+        let mut w = Watch::new();
+        let found = (0..200u32).find(|&t| {
+            let aim = if t < 2 { start } else { corner };
+            w.seen(fixture(9), start, aim, goal, Micros::from(t) * TICK)
+        });
+        assert_eq!(found, Some(62));
     }
 }

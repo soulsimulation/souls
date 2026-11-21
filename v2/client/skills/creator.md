@@ -58,6 +58,9 @@ and cost nothing. They print JSON; add `--lines` for one line per kind.
 
 A kind may be written as its bare name (`room`) when only one kind has that name, or as `namespace:name`.
 
+These are all the verbs there are. If you know today's god command (`eden-god`), its undo, place by relation, land,
+weather, search of kinds and the others are not here yet; do not try them. `v2/docs/creator-verbs.md` maps each one.
+
 ### Batches
 
 A batch is a JSON list. Each operation is one of:

@@ -4,6 +4,7 @@
 
 import type { Happened } from '../sound/record.ts';
 import type { SkyFields } from '../sky/record.ts';
+import type { Fields } from '../kinds/state.ts';
 
 /** One node as the page needs it, read from R1's replica after a part. */
 export type NodeRec = {
@@ -49,6 +50,9 @@ export type NodeRec = {
   /** A moving node's course (field 80, `replica::schedule::F_COURSE`), its value's canonical bytes, for the replica's
    *  `courseAt` (#3603). */
   course?: Uint8Array;
+  /** Its plain fields by number (record key 6: whole numbers, texts, timed values), which hold its kind's state by each
+   *  state field's `n` (#3871, `kinds/state.ts`); absent when it has none. */
+  fields?: Fields;
 };
 
 /** Where the world is: its newest part's end, world time against wall time, and the world time up to which a still
