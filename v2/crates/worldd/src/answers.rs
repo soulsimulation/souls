@@ -4993,6 +4993,33 @@ mod tests {
     use sim::log::{Mem, recover};
     use std::sync::{Condvar, Mutex};
 
+    /// #3784: the frame of Souls' words names each by its grant, as the tokens file does, with its word.
+    #[test]
+    fn a3784_a_states_frame_names_each_soul_by_its_grant() {
+        let soul = Id::new(Scope([0x4d; 16]), 3);
+        let frame = states_frame(&[(soul, "asleep"), (soul, "awake")]);
+        let Value::Map(m) = decode(&frame).unwrap().value else {
+            panic!("a map")
+        };
+        let Some(Value::Array(rows)) = m.get(&STATES) else {
+            panic!("rows under STATES")
+        };
+        let grant = format!("soul-{}-3", "4d".repeat(16));
+        assert_eq!(
+            rows,
+            &vec![
+                Value::Array(vec![
+                    Value::Bytes(grant.clone().into_bytes()),
+                    Value::Text(Name::new("asleep").unwrap())
+                ]),
+                Value::Array(vec![
+                    Value::Bytes(grant.into_bytes()),
+                    Value::Text(Name::new("awake").unwrap())
+                ]),
+            ]
+        );
+    }
+
     const LINEAGE: Scope = Scope([9; 16]);
 
     /// A disk in memory whose sync waits while the test holds it.
