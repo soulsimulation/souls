@@ -449,7 +449,7 @@ const receiptStep = (name, conclusion = 'success') => ({ name, status: 'complete
 const aggregateName = 'Run echo "scope=$SCOPE repo=$REPO qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED green_at_head=$GREEN"';
 const receiptJob = (id, name, conclusion = 'success', steps = [receiptStep('Run assigned checks')]) => ({ run_id: id, head_sha: RECEIPT_SHA, name, status: 'completed', conclusion, steps });
 const deferredJobs = id => ({ total_count: 5, jobs: [receiptJob(id, 'scope'), receiptJob(id, 'repo'), receiptJob(id, 'matrix.name', 'skipped', []), receiptJob(id, 'smoke', 'skipped', []), receiptJob(id, 'ci-ok', 'failure', [receiptStep('Set up job'), receiptStep('Full CI deferred', 'failure'), receiptStep(aggregateName, 'skipped'), receiptStep('Complete job')])] });
-const qualifiedJobs = id => ({ total_count: 4, jobs: ['scope', 'repo', 'ci-ok', 'v2'].map(name => receiptJob(id, name)) });
+const qualifiedJobs = id => ({ total_count: 4, jobs: ['scope', 'repo', 'ci-ok', 'v2-rust'].map(name => receiptJob(id, name)) });
 
 test('deferred receipt: only verified closed-window siblings can precede an actual exact-head qualification', () => {
   const runs = [receiptRun(3), receiptRun(2), receiptRun(1, 'success')];
@@ -470,7 +470,7 @@ test('deferred receipt: missing, mixed, genuine failure or mismatched job eviden
   const variants = [
     e => e.jobs[0].conclusion = 'failure',
     e => e.jobs[1].steps.push(receiptStep('unexpected failure', 'failure')),
-    e => e.jobs[2] = receiptJob(2, 'v2', 'failure'),
+    e => e.jobs[2] = receiptJob(2, 'v2-rust', 'failure'),
     e => e.jobs[3].steps.push(receiptStep('unexpected work')),
     e => e.jobs[4].steps[1].name = 'actual qualification failed',
     e => e.jobs[4].steps[2].conclusion = 'failure',
