@@ -1220,6 +1220,20 @@ impl Acts {
         out
     }
 
+    /// Entries [`Acts::out`] handed back that the world refused to write: the timers they set come off the due list.
+    pub fn unwritten(&mut self, effects: &[Effect]) {
+        for e in effects {
+            let Body::Timers(ts) = &e.body else { continue };
+            for t in ts {
+                if let TimerRec::Set { timer, .. } = t
+                    && self.timers.remove(timer).is_some()
+                {
+                    let _ = self.due.clear(e.envelope.node, *timer);
+                }
+            }
+        }
+    }
+
     /// Runs that ended since the last call: each one's intent, its ending's name and, for [`BLOCKED`], what blocked
     /// its walk.
     pub fn ended(&mut self) -> Vec<(Id, String, Option<String>)> {
