@@ -35,7 +35,20 @@ export function stateOf(copy, kinds, me) {
     const m = decode(bytes), id = idText(m.get(1)), kind = entryKind(m);
     const byN = Object.fromEntries(Object.entries(kinds[kind]?.state ?? {}).map(([name, def]) => [def.n, name]));
     const fields = {};
-    if (m.get(6) instanceof Map) for (const [n, v] of m.get(6)) if (byN[n]) fields[byN[n]] = plain(v);
+    const defs = kinds[kind]?.state ?? {};
+    // An enum's value is held as its namespaced name (`eden:playing`); the entry's needs name it bare (#3713).
+    if (m.get(6) instanceof Map) {
+      for (const [n, v] of m.get(6)) {
+        if (!byN[n]) continue;
+        const def = defs[byN[n]];
+        fields[byN[n]] = def?.type === 'enum' && typeof v === 'string' ? v.slice(v.indexOf(':') + 1)
+          // A list's records by their fields' names, in the entry's `of` order (`{1: square, 2: piece}`).
+          : def?.type === 'list' && Array.isArray(v) ? v.map((r) => (r instanceof Map
+            ? Object.fromEntries(Object.keys(def.of ?? {}).map((k, i) => [k, plain(r.get(i + 1) ?? r.get(BigInt(i + 1)))]))
+            : plain(r)))
+          : plain(v);
+      }
+    }
     nodes[id] = { ...nodes[id], kind, ...(Object.keys(fields).length ? { fields } : {}) };
     for (const c of m.get(10) ?? []) todo.push(Buffer.from(c).toString('hex'));
   }
