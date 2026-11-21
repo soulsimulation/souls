@@ -75,7 +75,7 @@
         {"need": "linked", "link": "black"}
       ],
       "steps": [],
-      "hatch": {"module": "prov-1220ba123219c43ce8691e3ed37a0342f8a0af104a94c43a21e621a8d980772ceb15", "reads": [{"field": "phase"}, {"field": "pieces"}], "steps_most": 1000000, "answers": {"fields": ["pieces"]}, "why": "why_chess"},
+      "hatch": {"module": "prov-12206bd2c2d329bfe74c82e65e8d6fe7d75b6b93d6d884af8e1941047594b8a4d8da", "reads": [{"field": "phase"}, {"field": "pieces"}], "steps_most": 1000000, "answers": {"fields": ["pieces"]}, "why": "why_chess"},
       "effects": [
         {"change": "set", "field": "phase", "to": "playing", "event": "game_began"},
         {"change": "set", "field": "check", "to": false, "event": "no_check"},
@@ -92,7 +92,7 @@
       "needs": [{"need": "state", "field": "phase", "is": "playing"}, {"need": "state", "field": "turn", "is": "white"}],
       "steps": [{"step": "move", "move": "slide", "at": "board"}],
       "hatch": {
-        "module": "prov-1220ba123219c43ce8691e3ed37a0342f8a0af104a94c43a21e621a8d980772ceb15",
+        "module": "prov-12206bd2c2d329bfe74c82e65e8d6fe7d75b6b93d6d884af8e1941047594b8a4d8da",
         "reads": [
           {"field": "pieces"},
           {"field": "turn"},
@@ -115,7 +115,7 @@
       "needs": [{"need": "state", "field": "phase", "is": "playing"}, {"need": "state", "field": "turn", "is": "black"}],
       "steps": [{"step": "move", "move": "slide", "at": "board"}],
       "hatch": {
-        "module": "prov-1220ba123219c43ce8691e3ed37a0342f8a0af104a94c43a21e621a8d980772ceb15",
+        "module": "prov-12206bd2c2d329bfe74c82e65e8d6fe7d75b6b93d6d884af8e1941047594b8a4d8da",
         "reads": [
           {"field": "pieces"},
           {"field": "turn"},
