@@ -37,6 +37,8 @@ const SAID = 'souls:said';
 const MOVED = 'souls:form-move', RUN_ENDED = 'souls:form-ended';
 const NAME = 30;
 const DESCRIPTION = 31;
+/** A body's stance field (#3791, `replica::bodies::F_STANCE`): 1 sit, 2 lie, 3 stand. */
+const STANCE = 51;
 
 function nodeRec(v: Map<number, unknown>): NodeRec {
   const pose = v.get(7) as Map<number, unknown> | undefined;
@@ -61,6 +63,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(23)) rec.scale = num(f.get(23));
   if (f.has(24)) rec.tileSize = num(f.get(24));
   if (f.has(25)) rec.tiles = (f.get(25) as unknown[][]).map((t) => [num(t[0]), num(t[1]), t[2] as Uint8Array, t[3] as Uint8Array]);
+  if (f.has(STANCE)) rec.stance = num(f.get(STANCE));
   if (f.has(NAME)) rec.name = refOf(f.get(NAME));
   if (f.has(DESCRIPTION)) rec.description = refOf(f.get(DESCRIPTION));
   const sky = skyFields(f); // V19: the world node's day, night and weather

@@ -277,7 +277,7 @@ export class WorldView {
       const n = this.nodes.get(id);
       if (!p || !n) continue;
       v.set(p[0] * UM, p[1] * UM, p[2] * UM).applyMatrix4(this.frame(n.parent));
-      if (crowd) (crowd.place(id, v.x, v.y, v.z, n.slot !== null), k++);
+      if (crowd) (crowd.place(id, v.x, v.y, v.z, n.slot !== null, n.stance === 2 ? { yaw: this.slotYaw(n) } : null), k++);
       else this.bodies.setMatrixAt(k++, m.makeTranslation(v.x, v.y, v.z));
     }
     if (crowd) {
@@ -287,6 +287,14 @@ export class WorldView {
     this.bodies.count = k;
     this.bodies.instanceMatrix.needsUpdate = true;
     return k;
+  }
+
+  /** The world yaw (radians) of the slot body `n` holds (#3791: a bed's, so a body lies along it), or undefined. */
+  private slotYaw(n: NodeRec): number | undefined {
+    const row = n.parent && n.slot !== null ? this.nodes.get(n.parent)?.slots?.find((r) => r[0] === n.slot) : undefined;
+    if (!row) return undefined;
+    const e = new THREE.Euler().setFromRotationMatrix(this.frame(n.parent), 'YXZ');
+    return e.y + (row[4] / 1000) * (Math.PI / 180);
   }
 
   /** Where the bodies are thickest, for the first view: the body with the most others within 60 m. */

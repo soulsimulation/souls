@@ -36,6 +36,8 @@ export type NodeRec = {
   /** The open ground's terrain tiles: side mm (field 24) and `[tx, tz, heights, classes]` (field 25). */
   tileSize?: number;
   tiles?: [number, number, Uint8Array, Uint8Array][];
+  /** A body's stance (field 51, #3791): 1 sit, 2 lie, 3 stand; none when it stands free. */
+  stance?: number;
   /** A body's public name and one-line description (fields 30, 31, by reference; V1b), null while unknown. */
   name?: string | null;
   description?: string | null;
