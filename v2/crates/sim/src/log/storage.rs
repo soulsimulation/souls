@@ -9,6 +9,9 @@ use std::sync::{Arc, Mutex};
 
 use replica::effects::Refusal;
 
+use super::compact::{Prepared, compact_path, finish, read_cut};
+use super::record::At;
+
 type R<T> = Result<T, Refusal>;
 
 fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
@@ -36,6 +39,22 @@ pub trait Storage: Send {
     }
     /// Cuts the storage back to `len` bytes (recovery cutting a torn tail, then syncing).
     fn truncate(&mut self, len: u64) -> R<()>;
+    /// Where a compacted log starts (rule 9): none for storage that was never compacted.
+    fn cut(&mut self) -> R<Option<At>> {
+        Ok(None)
+    }
+    /// Finishes a compacted copy (rule 9) with every byte appended so far, and appends to it from then on. The flag
+    /// says the failure is final, as a failed sync is.
+    fn compact(&mut self, p: Prepared) -> Result<(), (Refusal, bool)> {
+        drop(p);
+        Err((
+            Refusal {
+                name: "compact-unsupported",
+                detail: "this storage is not compacted".into(),
+            },
+            false,
+        ))
+    }
 }
 
 /// The disk behind [`Mem`]: its bytes, how many of them are durable, and the faults set on it.
@@ -189,6 +208,11 @@ impl FileStore {
         if file.try_lock().is_err() {
             return refuse("log-locked", "another writer holds this log");
         }
+        // A compacted copy a crash left unfinished (rule 9): the log and its cut file stand without it.
+        match std::fs::remove_file(compact_path(path)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(io(e)),
+            _ => {}
+        }
         if !existed {
             // A new file's name is only durable once its directory is synced.
             let dir = path.parent().filter(|d| !d.as_os_str().is_empty());
@@ -264,5 +288,31 @@ impl Storage for FileStore {
             );
         }
         self.file.set_len(len).map_err(|e| self.io("log-io", e))
+    }
+
+    fn cut(&mut self) -> R<Option<At>> {
+        Ok(read_cut(&self.path)?.map(|c| c.at))
+    }
+
+    fn compact(&mut self, p: Prepared) -> Result<(), (Refusal, bool)> {
+        if self.failed || p.log != self.path {
+            return Err((
+                Refusal {
+                    name: "log-cut-bad",
+                    detail: "not this log's copy, or the log has failed".into(),
+                },
+                false,
+            ));
+        }
+        match finish(&self.file, p) {
+            Ok(file) => {
+                self.file = file;
+                Ok(())
+            }
+            Err((e, fatal)) => {
+                self.failed |= fatal;
+                Err((e, fatal))
+            }
+        }
     }
 }
