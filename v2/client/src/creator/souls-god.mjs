@@ -45,6 +45,9 @@
 //                                                it builds only under that claim, and lapses after --ttl (default 120)
 //   souls-god.mjs build rewind <build> --to <step> [--dry]   undoes every edit of the build after that step, newest
 //                                                first, while they are this daemon's newest (today's build rewind)
+//   souls-god.mjs event <room or ground id> '<words>' --when HH:MM|<world µs>us [--for <minutes>] [--at x,y,z]
+//                                                a calendar entry there (eden:calendar_entry), its words kept by the
+//                                                world for everyone; HH:MM is its next one on the world's calendar
 //   souls-god.mjs status | stop                  the daemon
 //   souls-god.mjs catalog [--category c] [--has slot:sit|form:<f>|point:<role>|state:<field>]   every kind, one each
 //   souls-god.mjs find <words> [--category c] [--has ...] [--all]    kinds that match, best first, with why
@@ -88,6 +91,7 @@ export const VERBS = [
   'check',
   'clear',
   'describe',
+  'event',
   'find',
   'free',
   'hours',
@@ -185,6 +189,7 @@ export const FIX = {
   'hours.malformed': 'hours <id> --open HH:MM-HH:MM[@sat,sun|@mon-fri] (repeat --open), or --closed',
   'nothing-by-that-name': 'give x,z in metres, or a name or id describe lists',
   'no-browser': 'install a headless browser: npm i -g playwright && npx playwright install chromium',
+  'when.no-calendar': 'the copy has no world clock yet: run status until connected is true, or give --when <world µs>us',
   'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
   'welcome-too-long': 'at most 500 characters',
   'welcome-not-text': 'plain words and line breaks only',
@@ -240,6 +245,29 @@ export function opsOf(verb, words, { related = false } = {}) {
   throw usage(`one of ${VERBS.join(', ')}`);
 }
 
+/** A calendar entry's kind and its fields (start, end in world µs; words): `content/kinds/calendar/entry.json`. */
+export const ENTRY = { kind: 'eden:calendar_entry', start: 28, end: 29, words: 30 };
+const MINUTE_US = 60_000_000;
+
+/** The batch that posts one event: a calendar entry placed in `into`, from `start` for `minutes`, with its words. */
+export function eventOps({ into, words, start, minutes = 60, at }) {
+  return [{ op: 'place', name: 1, kind: ENTRY.kind, in: node(into), ...(at ? { at } : {}),
+    fields: { [ENTRY.start]: start, [ENTRY.end]: start + minutes * MINUTE_US, [ENTRY.words]: { words } } }];
+}
+
+/** `event`'s words: where, what, when (HH:MM, or world µs as `<n>us`), how long and the spot. */
+export function eventOf(words) {
+  const args = [...words];
+  const when = takeOpt(args, '--when'), long = takeOpt(args, '--for'), at = takeOpt(args, '--at');
+  const how = "event <room or ground id> '<words>' --when HH:MM|<world µs>us [--for <minutes>] [--at x,y,z]";
+  if (args.length !== 2 || !args[1].trim() || !when) throw usage(how);
+  const minutes = long === undefined ? 60 : Number(long);
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 7 * 24 * 60) throw usage('--for is whole minutes, 1 to a week');
+  const us = /^(\d+)us$/.exec(when), hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(when);
+  if (!us && !hm) throw usage(how);
+  return { into: args[0], words: args[1].trim(), ...(us ? { start: Number(us[1]) } : { when }), minutes, ...(at ? { at: xyz(at) } : {}) };
+}
+
 /** A world verb's words as the daemon reads them: `{ verb, ...flags }`, numbers as given. */
 export function worldVerbOf(verb, words) {
   const args = [...words], out = { verb };
@@ -277,6 +305,7 @@ export function requestOf(argv) {
     return { look: rest, creator };
   }
   if (verb === 'where' || verb === 'clear' || verb === 'free') { parseSpace(verb, rest); return { space: verb, args: rest, creator }; }
+  if (verb === 'event') return { event: eventOf(rest), creator };
   if (verb === 'welcome') {
     if (rest.length > 1) throw usage("welcome '<words>': quote the words as one argument");
     return { directory: '/v1/worlds/welcome', body: { welcome: rest[0] ?? '' }, creator };
@@ -684,6 +713,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       out(withFix(said));
       if (said.ok === false) process.exitCode = 1;
       process.exit();
+    }
+    if (asked.event) {
+      // HH:MM is its next one on the world's published calendar, read from the creator's copy.
+      const e = asked.event, ask = (r) => call(home, creator, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: 15_000 });
+      const when = e.start === undefined ? await ask({ op: 'when', at: e.when }) : { ok: true, worldUs: e.start };
+      asked.req = when.ok ? { op: 'edit', ops: eventOps({ ...e, start: when.worldUs }) } : null;
+      if (!asked.req) { out(withFix(when)); process.exit(1); }
     }
     const pkg = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
     const ask = (req, ms = 60_000) => call(home, creator, req, { pkg, ms: req.world?.verb === 'land' ? 130_000 : ms });

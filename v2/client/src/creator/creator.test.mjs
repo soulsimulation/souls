@@ -18,7 +18,7 @@ import { createServer as createHttp } from 'node:http';
 import { DEFAULT_PKG } from '../daemon/client.mjs';
 import { readSeat } from '../home/home.mjs';
 import { pair } from '../pair/pair.mjs';
-import { areaOf, buildOf, layerOf, opsOf, outlineOf, planRow, requestOf, resolve as resolveRelation } from './souls-god.mjs';
+import { areaOf, buildOf, eventOps, layerOf, opsOf, outlineOf, planRow, requestOf, resolve as resolveRelation } from './souls-god.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -130,6 +130,13 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.throws(() => requestOf(['look', 'picture', 'f.png']), /look <place/);
   assert.deepEqual(requestOf(['free', '10x8', '--near', 'plaza']), { space: 'free', args: ['10x8', '--near', 'plaza'], creator: undefined });
   assert.throws(() => requestOf(['clear', 'plaza']), (e) => e.code === 'usage');
+  // #3699: an event is one calendar entry, its start next HH:MM on the world's calendar or given in world µs.
+  assert.deepEqual(requestOf(['event', 'aa-3', 'market', '--when', '09:00', '--for', '240']).event, { into: 'aa-3', words: 'market', when: '09:00', minutes: 240 });
+  assert.deepEqual(eventOps({ into: 'aa-3', words: 'market', start: 5, minutes: 2, at: [1, 0, 2] }),
+    [{ op: 'place', name: 1, kind: 'eden:calendar_entry', in: 'aa-3', at: [1, 0, 2], fields: { 28: 5, 29: 120_000_005, 30: { words: 'market' } } }]);
+  for (const bad of [['aa-3', 'm'], ['aa-3', '', '--when', '09:00'], ['aa-3', 'm', '--when', '9am'], ['aa-3', 'm', '--when', '09:00', '--for', '0']]) {
+    assert.throws(() => requestOf(['event', ...bad]), (e) => e.code === 'usage', bad.join(' '));
+  }
   // #3695: the world's verbs go to the daemon as words; it makes their sets on the world node from its copy.
   assert.deepEqual(requestOf(['weather', '--kind', 'storm', '--minutes', '30']).req, { op: 'edit', world: { verb: 'weather', kind: 'storm', minutes: '30' } });
   assert.deepEqual(requestOf(['check', 'strike', '12,-4']).req, { op: 'check', world: { verb: 'strike', at: '12,-4' } });
@@ -212,6 +219,11 @@ test('a creator describes, checks on its copy alone, and builds a room with a th
   const d3 = await god('describe');
   assert.deepEqual(d3.nodes.find((n) => n.id === roomId)?.hours, ['09:00-17:00@mon,tue,wed,thu,fri', '10:00-14:00@sat,sun']);
   assert.equal((await god('hours', roomId, '--open', '9-5')).code, 'hours.malformed');
+  // #3699: words in a creator's edit are kept by the world and the edit is taken (a world with no body for the creator).
+  const said = await god('batch', JSON.stringify([{ op: 'set', node: lampId, field: 30, value: { words: 'market on the green at nine' } }]));
+  assert.equal(said.ok, true, JSON.stringify(said));
+  assert.equal((await god('event', roomId, 'market', '--when', '09:00')).code, 'when.no-calendar', 'this world publishes no calendar');
+  assert.equal((await god('event', roomId, 'market', '--when', '5us')).code, 'edit.kind-unknown', 'and has no calendar entry kind');
   assert.equal((await god('remove', lampId)).ok, true);
   // What is gone is refused on the copy, before anything is sent.
   const gone = await god('set', lampId, '1', '1');
