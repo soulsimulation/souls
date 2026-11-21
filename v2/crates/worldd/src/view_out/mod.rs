@@ -1910,11 +1910,17 @@ impl<S: ObjectStore> PublicWriter<S> {
                                 replica::effects::Change::Set { node, .. } => {
                                     self.touched.insert(*node);
                                 }
-                                _ => self.structural = true,
+                                other => {
+                                    eprintln!("CUTWHY change {}", match other { replica::effects::Change::Create{..}=>"create", replica::effects::Change::Remove{..}=>"remove", replica::effects::Change::Reparent{..}=>"reparent", replica::effects::Change::Link{..}=>"link", replica::effects::Change::Unlink{..}=>"unlink", _=>"?" });
+                                    self.structural = true
+                                }
                             }
                         }
                     }
-                    _ => self.structural = true,
+                    b => {
+                        eprintln!("CUTWHY body {}", match b { Body::Transfer(_)=>"transfer", Body::Time(_)=>"time", Body::Timers(_)=>"timers", _=>"?" });
+                        self.structural = true
+                    }
                 }
             }
             let at = part.effects.last().map(|e| e.envelope.at);

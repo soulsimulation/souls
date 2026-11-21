@@ -771,7 +771,7 @@ fn copy_dir(from: &Path, to: &Path) {
         let t = to.join(p.file_name().unwrap());
         if p.is_dir() {
             copy_dir(&p, &t);
-        } else {
+        } else if p.is_file() {
             std::fs::copy(&p, &t).unwrap();
         }
     }
@@ -2114,10 +2114,10 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
     std::thread::sleep(Duration::from_secs(secs));
     stop.store(true, Ordering::Relaxed);
     let (written, played_rate, played, samples, busy, lag) = reader.join().unwrap();
-    drop(served);
     for w in walkers {
         let _ = w.join();
     }
+    drop(served);
     // The recorded world, for the public writer's byte-for-byte regression (V2_RECORDED_WORLD).
     if let Ok(keep) = std::env::var("V2_KEEP_WORLD") {
         let _ = std::fs::remove_dir_all(&keep);
