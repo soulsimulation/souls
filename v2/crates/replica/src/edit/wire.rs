@@ -27,7 +27,7 @@ pub const VERB: &str = "souls:edit";
 /// The parameter that holds the batch.
 pub const OPS: u64 = 1;
 /// The parameter that names the build claim the batch is sent under (#3701), left out when none.
-pub const CLAIM: u64 = 2;
+pub const CLAIM: u64 = 6;
 
 type R<T> = Result<T, String>;
 
@@ -295,7 +295,7 @@ pub fn parameters(ops: &[Op]) -> BTreeMap<u64, Value> {
     BTreeMap::from([(OPS, Value::Array(ops.iter().map(op).collect()))])
 }
 
-/// The batch and the claim it is sent under: `{1: [operation, ...], 2: claim id}`.
+/// The batch and the claim it is sent under: `{1: [operation, ...], 6: claim id}` (1 to 5 are the batch, builds and undo: #3694).
 pub fn parameters_under(ops: &[Op], claim: Option<&Name>) -> BTreeMap<u64, Value> {
     let mut p = parameters(ops);
     if let Some(c) = claim {
@@ -304,7 +304,7 @@ pub fn parameters_under(ops: &[Op], claim: Option<&Name>) -> BTreeMap<u64, Value
     p
 }
 
-/// The claim an edit's parameters name, if any; `Err` when parameter 2 is not a name.
+/// The claim an edit's parameters name, if any; `Err` when parameter 6 is not a name.
 pub fn claim(parameters: &BTreeMap<u64, Value>) -> R<Option<Name>> {
     match parameters.get(&CLAIM) {
         None => Ok(None),
@@ -324,7 +324,7 @@ pub fn read(parameters: &BTreeMap<u64, Value>) -> R<Vec<Op>> {
     let extra = usize::from(claim(parameters)?.is_some());
     let (Some(Value::Array(a)), true) = (parameters.get(&OPS), parameters.len() == 1 + extra)
     else {
-        return Err("an edit's parameters are {1: [operation, ...], 2: claim?}".into());
+        return Err("an edit's parameters are {1: [operation, ...], 6: claim?}".into());
     };
     if a.is_empty() || a.len() > OPS_MOST {
         return Err(format!("1 to {OPS_MOST} operations, not {}", a.len()));
