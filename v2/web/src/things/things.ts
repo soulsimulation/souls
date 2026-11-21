@@ -346,11 +346,12 @@ export class ThingLayer {
   }
 
   /** The thing a ray meets first within `far` metres, from the boxes each thing stands in (its model's bounds, or its
-   *  solids): read-only, nothing drawn changes. Each box's inverse is kept with the thing until the thing moves. */
+   *  solids), skipping what an interior view hides: read-only, nothing drawn changes. Each box's inverse is kept with the thing until the thing moves. */
   pick(origin: THREE.Vector3, dir: THREE.Vector3, far = Infinity): ThingHit | null {
     let best: Thing | null = null, box = -1, near = far;
     const o = new THREE.Vector3(), d = new THREE.Vector3();
     for (const t of this.things.values()) {
+      if (t.under) continue; // hidden with a storey a building's interior view hides (C10): nothing to hover
       const inv = (t.inverse ??= t.boxes.map((b) => b.clone().invert()));
       for (let k = 0; k < inv.length; k++) {
         // The ray in the box's own space: its distance along the ray stays the same (an affine map keeps ratios).
