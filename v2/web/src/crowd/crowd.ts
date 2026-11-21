@@ -6,7 +6,7 @@
 // LIVE_ROWS that V7 poses itself; a body given a row (`setLive`) is drawn from it.
 import * as THREE from 'three';
 import type { BakedModel } from './bake.ts';
-import { crowdMaterial, MAX_CLIPS, type CrowdUniforms } from './shader.ts';
+import { crowdMaterial, MAX_BONES, MAX_CLIPS, type CrowdUniforms } from './shader.ts';
 
 /** Level by distance from the camera, metres: under the first is level 0, under the second level 1, else 2. */
 export const LOD_DISTANCES = [18, 55];
@@ -53,10 +53,12 @@ export class Crowd {
 
   private makeDraws(m: BakedModel, cap: number): Draw[] {
     if (m.clips.length > MAX_CLIPS) throw new Error(`${m.name}: more than ${MAX_CLIPS} clips`);
+    if (m.bones > MAX_BONES) throw new Error(`${m.name}: more than ${MAX_BONES} bones`);
     const pad = (a: number[]) => [...a, ...new Array(MAX_CLIPS - a.length).fill(0)];
     const uniforms: CrowdUniforms = {
       uBake: { value: m.bake }, uLive: { value: this.live },
       uClipStart: { value: pad(m.clips.map((c) => c.start)) }, uClipFrames: { value: pad(m.clips.map((c) => c.frames)) },
+      uUpper: { value: [...m.upper, ...new Array(MAX_BONES - m.bones).fill(0)] },
     };
     const material = crowdMaterial(new THREE.MeshLambertMaterial({ vertexColors: true }), uniforms);
     const depth = crowdMaterial(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }), uniforms, true);
