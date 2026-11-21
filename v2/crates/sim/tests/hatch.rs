@@ -507,8 +507,8 @@ fn the_chess_table_sets_up_moves_its_pieces_and_ends_in_checkmate() {
             args.insert("to".into(), Arg::Int(sq(to)));
             args.insert("promotion".into(), Arg::Int(0));
         }
-        let reads = hatch_reads(&entry, &h, state, &args)?;
-        let v = run_hatch(&h, &module, &entry, &reads)?;
+        let reads = hatch_reads(&entry, &h, state, &args).map_err(|r| r.name)?;
+        let v = run_hatch(&h, &module, &entry, &reads).map_err(|r| r.name)?;
         if !v.yes {
             return Err(hatch_no(&h).name);
         }
