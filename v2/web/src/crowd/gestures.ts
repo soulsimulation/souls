@@ -5,7 +5,9 @@
 // - Which clip a move plays is today's choice (`mars/viewer/app/engine-view/clip-library.ts`): nod is `Yes` and
 //   shake-head `Idle_No_Loop`, both at 1.6x; cheer is `Celebration` fitted to the move; dance `Dance_Loop`. Wave plays
 //   the library's `Wave`, and bow `Bow`, made at bake time from the idle with today's bend (`activity-poses.ts`: the
-//   back leans 0.55 rad and the head 0.2, on a half sine over the move). A move with no clip draws nothing new.
+//   back leans 0.55 rad and the head 0.2, on a half sine over the move). Clap, point and stretch are made the same way
+//   from today's hand goals (`activity-poses.ts`, reached by IK), and shrug from the rig (`./made.ts`). A move with no
+//   clip draws nothing new.
 // - Weight comes in over the move's start-up (its start to contact) and goes out over `LEAVE` after its end: the
 //   planned end, or the run's ending when that comes first (a cancel). As `../pose/gesture.ts`.
 // - Seated, a move plays its seated clip where today has one (nod: `Sitting_Nodding_Loop`), and only above the hips.
@@ -17,6 +19,10 @@ export type GestureClip = { clip: string; mode: 'loop' | 'once'; rate?: number; 
 export const GESTURE_CLIPS: Readonly<Record<string, GestureClip>> = {
   wave: { clip: 'Wave', mode: 'loop' },
   bow: { clip: 'Bow', mode: 'once' },
+  clap: { clip: 'Clap', mode: 'once' },
+  point: { clip: 'Point', mode: 'once' },
+  shrug: { clip: 'Shrug', mode: 'once' },
+  stretch: { clip: 'Stretch', mode: 'once' },
   nod: { clip: 'Yes', mode: 'loop', rate: 1.6, seated: 'Sitting_Nodding_Loop' },
   shake_head: { clip: 'Idle_No_Loop', mode: 'loop', rate: 1.6 },
   cheer: { clip: 'Celebration', mode: 'once' },

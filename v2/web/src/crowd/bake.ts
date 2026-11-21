@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { cluster, decodeMesh, type LodMesh } from './lod.ts';
+import { MADE, pose } from './made.ts';
 
 export const BAKE_FPS = 30;
 /** Grid cells of levels 1 and 2, metres. */
@@ -118,30 +119,8 @@ export function inPlace(clip: THREE.AnimationClip, skeleton: THREE.Skeleton): TH
   return c;
 }
 
-/** Clips made here from another (#3741): today's procedural gestures with no library clip, as a base clip's first frame
- *  with world-space turns on named bones (radians about the body's sideways axis, so positive leans forward) on a
- *  half sine over the clip. `Bow`: `activity-poses.ts`'s bow, the back 0.55 rad over three bones and the head 0.2. */
-export const MADE: Readonly<Record<string, { base: string; seconds: number; turns: [string, number][] }>> = {
-  Bow: { base: 'Idle', seconds: 1, turns: [['Abdomen', 0.15], ['Torso', 0.2], ['Chest', 0.2], ['Neck', 0.2]] },
-};
-
-const _q = new THREE.Quaternion(), _r = new THREE.Quaternion(), _x = new THREE.Vector3(1, 0, 0);
-
-/** Turns `bones` by `made`'s turns at `k` (0..1) of their full lean, each about the world x axis at its own joint. */
-function turn(made: (typeof MADE)[string], bones: THREE.Bone[], k: number, root: THREE.Object3D, rest: Map<THREE.Bone, THREE.Quaternion>): void {
-  for (const [name, rad] of made.turns) {
-    const b = bones.find((x) => x.name === name);
-    if (!b) continue;
-    // From the base clip's own rotation each frame: a bone the clip does not animate keeps no turn from the last.
-    if (!rest.has(b)) rest.set(b, b.quaternion.clone());
-    b.quaternion.copy(rest.get(b)!);
-    root.updateMatrixWorld(true);
-    b.getWorldQuaternion(_q);
-    _r.setFromAxisAngle(_x, rad * k);
-    // local' = local × (world⁻¹ × turn × world): the bone turned in the world about its own joint.
-    b.quaternion.multiply(_q.clone().invert().multiply(_r).multiply(_q));
-  }
-}
+/** Clips made at bake time from the rig (`./made.ts`): today's gestures with no library clip. */
+export { MADE } from './made.ts';
 
 export function bakeModel(name: string, gltf: GLTF, animations: THREE.AnimationClip[], clipNames: string[], simple?: LodMesh): BakedModel {
   const { mesh, skeleton, materials } = merge(gltf);
@@ -164,7 +143,7 @@ export function bakeModel(name: string, gltf: GLTF, animations: THREE.AnimationC
     const rest = new Map<THREE.Bone, THREE.Quaternion>();
     for (let f = 0; f < frames; f++) {
       mixer.setTime(made ? 0 : (f / frames) * clip.duration);
-      if (made) turn(made, skeleton.bones, Math.sin((Math.PI * f) / (frames - 1)), gltf.scene, rest);
+      if (made) pose(made, f / (frames - 1), skeleton.bones, gltf.scene, rest);
       gltf.scene.updateMatrixWorld(true);
       const row = new Float32Array(bones * 12);
       skeleton.bones.forEach((b, i) => {
