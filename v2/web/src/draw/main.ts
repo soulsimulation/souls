@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { FreeCamera } from '../camera/camera.ts';
 import { CameraDirector } from '../camera/director.ts';
+import { ViewShots } from '../welcome/shots.ts';
 import { PlaybackClock, caughtUp } from '../clock/clock.ts';
 import { reconcileSnapshot, type Pointer } from '../source/source.ts';
 import { StreamSource } from '../source/stream.ts';
@@ -82,6 +83,7 @@ const clock = new PlaybackClock();
 const things = pageThings(scene, world, new URLSearchParams(location.search));
 const souls = pageSouls(canvas, world, new URLSearchParams(location.search)); // W4: chips, status, speech, a Soul's page
 const director = new CameraDirector(cam, canvas, world, souls, new URLSearchParams(location.search), moment !== null); // V20: broadcast, follow, find
+director.shots = new ViewShots(renderer, scene, () => things.layer?.settled ?? true); // #3738: Explore's pictures, from this page's own draw
 Object.assign(globalThis, { v2: { renderer, scene, sky, cam, director, world, things, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 installCapture(globalThis as any, q, document); // G10: `shoot` names a place, Soul or thing and the camera goes there
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.

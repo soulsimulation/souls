@@ -6,10 +6,11 @@
 // page starts on the free camera. Cameras observe: none of them moves anything in the world.
 // C2 (#3674): once the world is drawn, a first-time visitor gets the welcome card, and in Eden a guided camera tour
 // (`tour` mode) flies between today's Explore views; any gesture, Esc or "Leave tour" gives the free camera from there.
+// #3738: in Eden the Explore list flies the camera to one view (`view` mode), then gives the free camera from there.
 import * as THREE from 'three';
 import { farLimit, type FreeCamera } from './camera.ts';
 import { Broadcast, SHOT } from './broadcast.ts';
-import { Flight, shotOffset } from './flight.ts';
+import { Flight, PoseFlight, shotOffset } from './flight.ts';
 import { FOLLOW_MAX, FOLLOW_MIN, Follow, TARGET_UP, bodyAt } from './follow.ts';
 import type { WorldView } from '../draw/world.ts';
 import type { PageSouls } from '../souls/page.ts';
@@ -17,8 +18,12 @@ import type { PartRec } from '../source/source.ts';
 import { Tour } from '../welcome/tour.ts';
 import { EDEN_STOPS } from '../welcome/stops.ts';
 import { mountWelcome, worldOf, type Welcome } from '../welcome/welcome.ts';
+import { mountExplore, type Explore } from '../welcome/explore.ts';
+import { EDEN_VIEWS } from '../welcome/views.ts';
+import type { Stop } from '../welcome/stops.ts';
+import type { ViewShots } from '../welcome/shots.ts';
 
-export type Mode = 'broadcast' | 'free' | 'fly' | 'follow' | 'tour';
+export type Mode = 'broadcast' | 'free' | 'fly' | 'follow' | 'tour' | 'view';
 /** A tap moves less than this (px); a body this near the tap (px) is the one tapped; a pan this far (m) in one gesture
  *  leaves the follow. */
 const TAP_PX = 6, HIT_PX = 36, PAN_LEAVES = 1;
@@ -50,6 +55,10 @@ export class CameraDirector {
   readonly find: HTMLInputElement;
   tour: Tour | null = null;
   welcome: Welcome | null = null;
+  explore: Explore | null = null;
+  /** Explore's pictures, given by the page (it holds the renderer). */
+  shots: ViewShots | null = null;
+  private view: PoseFlight | null = null;
 
   constructor(cam: FreeCamera, canvas: HTMLCanvasElement, world: WorldView, souls: PageSouls, params: URLSearchParams, history: boolean) {
     this.cam = cam;
@@ -58,7 +67,7 @@ export class CameraDirector {
     this.pending = params.get('follow');
     this.mode = history || params.get('camera') === 'free' ? 'free' : 'broadcast';
     const take = () => {
-      if (this.mode === 'broadcast' || this.mode === 'fly' || this.mode === 'tour') this.free();
+      if (this.mode === 'broadcast' || this.mode === 'fly' || this.mode === 'tour' || this.mode === 'view') this.free();
       this.follow?.touched();
     };
     canvas.addEventListener('pointerdown', (e) => ((this.down = [e.clientX, e.clientY]), take()));
@@ -86,7 +95,11 @@ export class CameraDirector {
     if (!this.welcome && this.world.nodes.size > 0) {
       const world = worldOf(location.pathname, new URLSearchParams(location.search), () => [...this.world.nodes.values()].map((n) => n.kind));
       this.welcome = mountWelcome(document, this, { world, tour: world === 'eden', store: () => localStorage });
+      if (world === 'eden')
+        this.explore = mountExplore(document, { world: 'Eden', views: EDEN_VIEWS, go: (v) => this.toView(v), picture: (v) => this.shots?.shot(v) ?? Promise.resolve(null), closed: () => this.shots?.cancel() });
     }
+    if (this.explore && !this.explore.panel.hidden) this.shots?.pump();
+    if (this.mode === 'view') return this.onView(s);
     if (this.mode === 'tour') return this.onTour(s);
     if (this.pending && this.target(this.pending)) {
       const target = this.target(this.pending)!;
@@ -119,6 +132,20 @@ export class CameraDirector {
     return true;
   }
 
+  /** Flies the camera to an Explore view, then gives the free camera there. */
+  toView(v: Stop): boolean {
+    this.free();
+    this.view = new PoseFlight(this.cam.camera.position, this.cam.controls.target, new THREE.Vector3(...v.p), new THREE.Vector3(...v.target));
+    this.mode = 'view';
+    return true;
+  }
+
+  private onView(s: number): void {
+    const pose = this.view!.step(s);
+    this.show(pose.eye, pose.target);
+    if (pose.done) this.free();
+  }
+
   leaveTour(): void {
     if (this.mode === 'tour') this.free();
   }
@@ -137,7 +164,7 @@ export class CameraDirector {
   /** The free camera, from where the camera is now. */
   free(): void {
     this.mode = 'free';
-    this.follow = this.flight = this.tour = null;
+    this.follow = this.flight = this.tour = this.view = null;
     this.welcome?.frame(null);
     this.cam.controls.minDistance = 0;
     this.cam.controls.maxDistance = farLimit(this.world.extent);
