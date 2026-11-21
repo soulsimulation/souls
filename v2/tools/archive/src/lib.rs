@@ -1083,8 +1083,9 @@ impl Bundler {
         for (offset, e) in part.effects.iter().enumerate() {
             self.after.apply_entry(header, e)?;
             let changes = public.changes(&self.before, e, &self.after, &self.redactions)?;
-            let time = (public.time != public_time(&self.after, &self.redactions))
-                .then(|| public_time(&self.after, &self.redactions));
+            let time = matches!(e.body, replica::effects::Body::Time(_))
+                .then(|| public_time(&self.after, &self.redactions))
+                .filter(|t| *t != public.time);
             let start = match mode.anchor {
                 Some(anchor) => e
                     .envelope
@@ -1457,32 +1458,36 @@ impl Projection {
         after: &State,
         redactions: &Redactions,
     ) -> R<Vec<((u64, Id), Option<Value>)>> {
-        use replica::effects::{Body, Change, TimerRec};
+        use replica::effects::{Body, Change, ChangeRec, TimerRec, TransferRec};
         let mut nodes = BTreeSet::new();
         let mut links = BTreeSet::new();
         let mut timers = BTreeSet::new();
         let mut flights = BTreeSet::new();
         let mut structural = false;
-        match &e.body {
-            Body::Changes(cs) => {
-                for c in cs {
-                    match &c.change {
-                        Change::Create { node, .. }
-                        | Change::Reparent { node, .. }
-                        | Change::Set { node, .. } => {
-                            nodes.insert(*node);
-                        }
-                        Change::Motion(m) => {
-                            nodes.insert(m.node);
-                        }
-                        Change::Remove { .. } => structural = true,
-                        Change::Link { link, .. } | Change::Unlink { link } => {
-                            links.insert(*link);
-                        }
+        let mut changed = |cs: &[ChangeRec], structural: &mut bool| {
+            for c in cs {
+                match &c.change {
+                    Change::Create { node, .. }
+                    | Change::Reparent { node, .. }
+                    | Change::Set { node, .. } => {
+                        nodes.insert(*node);
+                    }
+                    Change::Motion(m) => {
+                        nodes.insert(m.node);
+                    }
+                    Change::Remove { .. } => *structural = true,
+                    Change::Link { link, .. } | Change::Unlink { link } => {
+                        links.insert(*link);
                     }
                 }
             }
+        };
+        match &e.body {
+            Body::Changes(cs) => changed(cs, &mut structural),
             Body::Transfer(t) => {
+                if let TransferRec::Arrive { carried, .. } = t {
+                    changed(carried, &mut structural);
+                }
                 flights.insert(t.transfer());
                 structural = true;
             }
