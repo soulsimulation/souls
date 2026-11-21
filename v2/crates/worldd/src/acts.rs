@@ -546,7 +546,19 @@ impl Sight<'_> {
         let view = self.view.as_ref()?;
         let n = self.tree.node(self.tree.handle(target)?)?;
         let entry = self.kinds.get(plain(n.kind()))?;
+        // A body on one of the thing's own floors (inside a greenhouse, C34 #3599) is in the thing's frame: a floor is
+        // placed at its building's origin. Carried up the tree, the point would land on the ground cut out under it.
+        let own_floor = self
+            .tree
+            .handle(floor)
+            .and_then(|h| self.tree.node(h))
+            .is_some_and(|f| {
+                f.parent() == Some(target) && f.place().is_none_or(|p| p.position == Vec3::ZERO)
+            });
         let on = |p: Vec3| {
+            if own_floor {
+                return Some([p.x, p.z]);
+            }
             view.on_floor(target, p)
                 .filter(|(f, ..)| *f == floor)
                 .map(|(_, p, _)| [p.x, p.z])
