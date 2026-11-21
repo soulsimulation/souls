@@ -1680,7 +1680,8 @@ impl<S: ObjectStore> PublicWriter<S> {
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .and_then(|t| i64::try_from(t.as_micros()).ok())
                 .is_some_and(|at| {
-                    now.saturating_sub(at) >= i64::try_from(self.prune_grace.as_micros()).unwrap_or(i64::MAX)
+                    now.saturating_sub(at)
+                        >= i64::try_from(self.prune_grace.as_micros()).unwrap_or(i64::MAX)
                 });
             if old {
                 let _ = fs::remove_dir_all(entry.path());
@@ -1901,10 +1902,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.force_remainder = self.canonical.version() > self.player.version();
 
         // Only the current generation's files are written again; older ones are on the disk or pruned (#3825).
-        let current = chain
-            .iter()
-            .rposition(|m| m.contains_key(&8))
-            .unwrap_or(0);
+        let current = chain.iter().rposition(|m| m.contains_key(&8)).unwrap_or(0);
         for (i, m) in chain.into_iter().enumerate() {
             if obj_bytes(&m, 1)? != self.seed {
                 return Err(fault("stream-recovery", "generation source changed"));

@@ -2981,7 +2981,9 @@ fn i3825_run(
     };
     let body = Id::new(Scope([72; 16]), 1).unwrap();
     let mut out = open();
-    let mut began = vec![replica::encode::to_hex(&replica::ids::sha256(&out.baseline))];
+    let mut began = vec![replica::encode::to_hex(&replica::ids::sha256(
+        &out.baseline,
+    ))];
     for r in 0..records {
         let effect = if r == 0 {
             w3e_create(&h, 0, body, h.zone, Audience::Everyone)
@@ -3012,13 +3014,12 @@ fn i3825_run(
         let e = e.unwrap();
         gens.insert(e.file_name().into_string().unwrap(), files(&e.path()));
     }
-    let pointer = object_map(
-        &fs::read(views.join(stream::dir(&h, &key(&h))).join(POINTER)).unwrap(),
-    )
-    .unwrap()
-    .into_iter()
-    .filter(|(k, _)| [1, 8, 9, 10].contains(k))
-    .collect();
+    let pointer =
+        object_map(&fs::read(views.join(stream::dir(&h, &key(&h))).join(POINTER)).unwrap())
+            .unwrap()
+            .into_iter()
+            .filter(|(k, _)| [1, 8, 9, 10].contains(k))
+            .collect();
     (gens, pointer, began)
 }
 
@@ -3042,7 +3043,10 @@ fn i3825_generations_roll_over_prune_after_the_grace_and_restart_with_the_same_b
             want.push(format!("{n}.text"));
         }
         want.sort();
-        assert_eq!(names, want, "generation {i} holds its baseline and its parts");
+        assert_eq!(
+            names, want,
+            "generation {i} holds its baseline and its parts"
+        );
     }
     // The pointer names the newest generation, its newest part, and the handoff from the one before.
     let hex = |v: &Value| match v {
@@ -3055,7 +3059,11 @@ fn i3825_generations_roll_over_prune_after_the_grace_and_restart_with_the_same_b
     let Value::Array(handoff) = &pointer[&9] else {
         panic!("a handoff")
     };
-    assert_eq!(handoff[1], Value::Uint(3), "the old generation ends after its 3 parts");
+    assert_eq!(
+        handoff[1],
+        Value::Uint(3),
+        "the old generation ends after its 3 parts"
+    );
     // A live viewer crosses every generation: it drains the old one, its version and digest are the handoff's, and
     // the new baseline's digest is the same; it then plays the new generation's parts from there.
     let h = header();
@@ -3071,7 +3079,11 @@ fn i3825_generations_roll_over_prune_after_the_grace_and_restart_with_the_same_b
     for (i, g) in began.iter().enumerate() {
         if i > 0 {
             let next = PublicPlayer::start(h.stored(), &bytes(g, "baseline")).unwrap();
-            assert_eq!(next.hash().unwrap(), live.hash().unwrap(), "no gap at generation {i}");
+            assert_eq!(
+                next.hash().unwrap(),
+                live.hash().unwrap(),
+                "no gap at generation {i}"
+            );
             assert_eq!(next.version(), live.version());
             live = next;
         }
@@ -3080,10 +3092,21 @@ fn i3825_generations_roll_over_prune_after_the_grace_and_restart_with_the_same_b
             live.play(&bytes(g, &n.to_string())).unwrap();
         }
     }
-    assert_eq!(handoff[0], Value::Uint(PublicPlayer::start(h.stored(), &bytes(&began[3], "baseline")).unwrap().version()));
+    assert_eq!(
+        handoff[0],
+        Value::Uint(
+            PublicPlayer::start(h.stored(), &bytes(&began[3], "baseline"))
+                .unwrap()
+                .version()
+        )
+    );
     // A writer reopened from the Store after every record, rollovers included, writes the same files and pointer.
-    let (again, pointer_again, began_again) =
-        i3825_run("restarted", 11, &(0..11).collect::<Vec<_>>(), Duration::from_secs(3600));
+    let (again, pointer_again, began_again) = i3825_run(
+        "restarted",
+        11,
+        &(0..11).collect::<Vec<_>>(),
+        Duration::from_secs(3600),
+    );
     assert_eq!(began_again, began);
     assert_eq!(again, gens, "a restart publishes the same bytes");
     assert_eq!(pointer_again, pointer);

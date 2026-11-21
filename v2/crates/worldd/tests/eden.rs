@@ -2083,7 +2083,7 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
             )
             .unwrap();
             let stream = dir.join(world.get("stream").and_then(|v| v.str()).unwrap());
-            let (mut player, mut generation, mut next) = (None, Vec::new(), 0u64);
+            let (mut player, mut generation, mut next) = (None::<PublicPlayer>, Vec::new(), 0u64);
             let mut crossed = 0u64;
             let (mut played, mut samples, mut lags, mut busy) =
                 (0u64, 0usize, Vec::new(), Duration::ZERO);
@@ -2127,11 +2127,16 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
                         while next < *end {
                             let bytes = std::fs::read(old.join(next.to_string()))
                                 .expect("the old generation's part");
-                            p.play(&bytes).expect("the public reader drains the old generation");
+                            p.play(&bytes)
+                                .expect("the public reader drains the old generation");
                             samples += p.samples().len();
                             next += 1;
                         }
-                        assert_eq!(p.hash().unwrap(), *digest, "the old generation ends at the handoff");
+                        assert_eq!(
+                            p.hash().unwrap(),
+                            *digest,
+                            "the old generation ends at the handoff"
+                        );
                         crossed += 1;
                     }
                     let headers = stream.ancestors().nth(3).unwrap().join("headers");
@@ -2143,7 +2148,11 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
                     if let Some(p) = &player
                         && next > 0
                     {
-                        assert_eq!(fresh.hash().unwrap(), p.hash().unwrap(), "no gap at the crossing");
+                        assert_eq!(
+                            fresh.hash().unwrap(),
+                            p.hash().unwrap(),
+                            "no gap at the crossing"
+                        );
                     }
                     player = Some(fresh);
                     generation = g.clone();
