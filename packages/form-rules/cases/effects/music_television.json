@@ -50,7 +50,7 @@
         "change": "set",
         "node": "t1",
         "field": "showing",
-        "n": 1,
+        "n": 28,
         "to": "garden"
        }
       ],
@@ -80,7 +80,7 @@
         "change": "set",
         "node": "t1",
         "field": "showing",
-        "n": 1,
+        "n": 28,
         "to": "sea"
        }
       ],
@@ -110,7 +110,7 @@
         "change": "set",
         "node": "t1",
         "field": "showing",
-        "n": 1,
+        "n": 28,
         "to": "stars"
        }
       ]
@@ -130,7 +130,7 @@
         "change": "set",
         "node": "t1",
         "field": "showing",
-        "n": 1,
+        "n": 28,
         "to": "test_card"
        }
       ]
@@ -150,7 +150,7 @@
         "change": "set",
         "node": "t1",
         "field": "showing",
-        "n": 1,
+        "n": 28,
         "to": "garden"
        }
       ]
@@ -170,7 +170,7 @@
         "change": "set",
         "node": "t1",
         "field": "showing",
-        "n": 1,
+        "n": 28,
         "to": "off"
        }
       ],

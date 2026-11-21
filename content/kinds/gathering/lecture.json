@@ -3,10 +3,10 @@
   "kind": "eden:lecture",
   "owner": "thing",
   "state": {
-    "running": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
-    "topic": { "n": 2, "type": "text", "default": null, "audience": { "rule": "everyone" } },
-    "planned": { "n": 3, "type": "duration", "default": 2700000000, "audience": { "rule": "everyone" } },
-    "notes": { "n": 4, "type": "text", "default": null, "audience": { "rule": "linked", "link": "listener" } }
+    "running": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "topic": { "n": 29, "type": "text", "default": null, "audience": { "rule": "everyone" } },
+    "planned": { "n": 30, "type": "duration", "default": 2700000000, "audience": { "rule": "everyone" } },
+    "notes": { "n": 31, "type": "text", "default": null, "audience": { "rule": "linked", "link": "listener" } }
   },
   "links": {
     "speaker": { "n": 1, "from": "soul", "most": 1, "audience": { "rule": "everyone" } },

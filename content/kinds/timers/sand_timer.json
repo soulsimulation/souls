@@ -3,7 +3,7 @@
   "kind": "eden:sand_timer",
   "owner": "thing",
   "state": {
-    "sand": { "n": 1, "type": "enum", "values": ["top", "bottom"], "default": "top", "audience": { "rule": "everyone" } }
+    "sand": { "n": 28, "type": "enum", "values": ["top", "bottom"], "default": "top", "audience": { "rule": "everyone" } }
   },
   "points": {
     "frame": { "role": "grip", "at_mm": [0, 120, 0] }

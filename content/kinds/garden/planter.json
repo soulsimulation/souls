@@ -3,13 +3,13 @@
   "kind": "eden:planter",
   "owner": "thing",
   "state": {
-    "water": { "n": 1, "type": "timed", "unit": "mg", "default": { "value": 400000, "per_s": -5, "set_us": 0 }, "min": 0, "max": 4000000, "audience": { "rule": "everyone" } },
-    "stage": { "n": 2, "type": "enum", "values": ["bare", "seed", "sprout", "leafy", "flowering", "fruiting"], "default": "bare", "audience": { "rule": "everyone" } },
-    "ripening": { "n": 3, "type": "timed", "unit": "count", "default": { "value": 0, "per_s": 1, "set_us": 0 }, "min": 0, "audience": { "rule": "everyone" } },
-    "fruit": { "n": 4, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } },
-    "tray": { "n": 5, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } },
-    "weeds": { "n": 6, "type": "bool", "default": true, "audience": { "rule": "everyone" } },
-    "compost": { "n": 7, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 4, "audience": { "rule": "everyone" } }
+    "water": { "n": 28, "type": "timed", "unit": "mg", "default": { "value": 400000, "per_s": -5, "set_us": 0 }, "min": 0, "max": 4000000, "audience": { "rule": "everyone" } },
+    "stage": { "n": 29, "type": "enum", "values": ["bare", "seed", "sprout", "leafy", "flowering", "fruiting"], "default": "bare", "audience": { "rule": "everyone" } },
+    "ripening": { "n": 30, "type": "timed", "unit": "count", "default": { "value": 0, "per_s": 1, "set_us": 0 }, "min": 0, "audience": { "rule": "everyone" } },
+    "fruit": { "n": 31, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } },
+    "tray": { "n": 32, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } },
+    "weeds": { "n": 33, "type": "bool", "default": true, "audience": { "rule": "everyone" } },
+    "compost": { "n": 34, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 4, "audience": { "rule": "everyone" } }
   },
   "points": {
     "soil": { "role": "contact", "at_mm": [0,372,0] },

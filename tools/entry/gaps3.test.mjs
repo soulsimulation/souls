@@ -61,8 +61,8 @@ test('the rules and effects read a choice, and refuse one the form does not list
   const state = {actor: 'b1', nodes: {sh1: {kind: 'eden:pruning_shrub'}, b1: {hands}}};
   const done = effects({kinds, act: {this: 'sh1', form: 'prune', args: {shoot: 'right_mid'}}, state, receipt: 'r1'});
   assert.deepEqual(done.changes, [
-    {change: 'set', node: 'sh1', field: 'right_mid', n: 4, to: 0},
-    {change: 'set', node: 'sh1', field: 'cuttings', n: 7, to: 1},
+    {change: 'set', node: 'sh1', field: 'right_mid', n: 31, to: 0},
+    {change: 'set', node: 'sh1', field: 'cuttings', n: 34, to: 1},
   ]);
   // a field of the shrub the form does not list is never written: refused before any need is read
   const v = decide({kinds, act: {this: 'sh1', form: 'prune', args: {shoot: 'cuttings'}}, state, asker: {sees: ['public']}});

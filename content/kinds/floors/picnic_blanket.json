@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:picnic_blanket",
   "owner": "thing",
-  "state": {"spread":{"n":1,"type":"bool","default":true,"audience":{"rule":"everyone"}}},
+  "state": {"spread":{"n":28,"type":"bool","default":true,"audience":{"rule":"everyone"}}},
   "points": {"side":{"role":"stand","at_mm":[0,0,1100]}},
   "geometry": {"bounds_mm":[1800,250,1800]},
   "forms": {

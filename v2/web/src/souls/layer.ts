@@ -81,7 +81,9 @@ export { SPEECH_W };
 // local scene as today's `dialogue-threads.ts` folds aloud talk. A line joins the live thread whose recent speakers
 // include its speaker or someone within its reach when it was said; otherwise it opens a new thread. Only lines whose
 // words are in the public text file are folded: a whisper or a private conversation's turn is never in the public view,
-// and one listed without words is left out. A line is keyed by its speaker, time and reference, so a part played again
+// and one listed without words is left out. A private conversation's turn shows as its public record does (#3775, today's
+// sealed thread): one thread per conversation, its members named, each turn its speaker, its time and '…', never words.
+// A line is keyed by its speaker, time and reference, so a part played again
 // after a reconnect folds once.
 
 /** A scene stays one thread while someone in it keeps talking within this gap (today's `ALOUD_GAP_MS`), µs. */
@@ -92,7 +94,10 @@ export const SCENE_LINES = 8, THREAD_LINES = 80, THREADS = 24;
 const TALK_MM = 5_000;
 
 export type Line = { key: string; at: number; speaker: string; words: string };
-export type Thread = { id: string; lines: Line[]; lastAt: number; colour: string; hearers: Map<string, number> };
+/** `members` is set on a private conversation's thread: who is in it, from its public record (#3775). */
+export type Thread = { id: string; lines: Line[]; lastAt: number; colour: string; hearers: Map<string, number>; members?: string[] };
+/** What a private turn's line shows in place of its words. */
+export const HIDDEN = '…';
 /** Where a body was at a world time, metres; null when it is not drawn. */
 export type Where = (id: string, at: number) => { x: number; y: number; z: number } | null;
 
@@ -111,12 +116,19 @@ export class Conversations {
   private order: string[] = [];
 
   /** Folds one public line; `bodies` are the Souls that could have heard it. Returns its thread, or null. */
-  add(s: { speaker: string; at: number; reach: number; ref: string; words: string | null }, where: Where, bodies: Iterable<string>): Thread | null {
-    if (s.words === null || !s.words.trim()) return null;
+  add(s: { speaker: string; at: number; reach: number; ref: string; words: string | null; private?: { conversation: string; members: string[] } }, where: Where, bodies: Iterable<string>): Thread | null {
+    if (!s.private && (s.words === null || !s.words.trim())) return null;
     const key = `${s.speaker}|${s.at}|${s.ref}`;
     if (this.seen.has(key)) return null;
     this.seen.add(key), this.order.push(key);
     if (this.order.length > 4000) for (const k of this.order.splice(0, 2000)) this.seen.delete(k);
+    if (s.private) {
+      const id = `private:${s.private.conversation}`;
+      let t = this.threads.get(id);
+      if (!t) (t = { id, lines: [], lastAt: s.at, colour: hue(id), hearers: new Map() }), this.threads.set(id, t), this.trim();
+      t.members = [...new Set([...(t.members ?? []), ...s.private.members, s.speaker])];
+      return this.put(t, { key, at: s.at, speaker: s.speaker, words: HIDDEN }, []);
+    }
     const reach = (s.reach > 0 ? s.reach : TALK_MM) / 1000, from = where(s.speaker, s.at);
     const heard: string[] = [];
     if (from) for (const id of bodies) {
@@ -124,33 +136,42 @@ export class Conversations {
       if (p && Math.hypot(p.x - from.x, p.y - from.y, p.z - from.z) <= reach) heard.push(id);
     }
     const people = new Set([s.speaker, ...heard]);
-    const live = [...this.threads.values()].filter((t) => Math.abs(s.at - t.lastAt) <= GAP_US).sort((a, b) => b.lastAt - a.lastAt);
+    const live = [...this.threads.values()].filter((t) => !t.members && Math.abs(s.at - t.lastAt) <= GAP_US).sort((a, b) => b.lastAt - a.lastAt);
     let t = live.find((t) => t.lines.slice(-SCENE_LINES).some((l) => people.has(l.speaker)));
     if (!t) {
       const id = `${s.speaker}:${s.at}`;
       t = { id, lines: [], lastAt: s.at, colour: hue(id), hearers: new Map() };
       this.threads.set(id, t);
-      if (this.threads.size > THREADS) for (const o of [...this.threads.values()].sort((a, b) => a.lastAt - b.lastAt).slice(0, this.threads.size - THREADS)) this.threads.delete(o.id);
+      this.trim();
     }
-    const line: Line = { key, at: s.at, speaker: s.speaker, words: s.words };
+    return this.put(t, { key, at: s.at, speaker: s.speaker, words: s.words! }, heard);
+  }
+
+  /** Keeps the newest `THREADS` threads. */
+  private trim(): void {
+    if (this.threads.size > THREADS) for (const o of [...this.threads.values()].sort((a, b) => a.lastAt - b.lastAt).slice(0, this.threads.size - THREADS)) this.threads.delete(o.id);
+  }
+
+  /** Puts `line` in `t` in time order, and notes who heard it. */
+  private put(t: Thread, line: Line, heard: string[]): Thread {
     let i = t.lines.length;
     while (i > 0 && t.lines[i - 1].at > line.at) i--;
     t.lines.splice(i, 0, line);
     if (t.lines.length > THREAD_LINES) t.lines.splice(0, t.lines.length - THREAD_LINES);
-    t.lastAt = Math.max(t.lastAt, s.at);
-    for (const id of heard) t.hearers.set(id, Math.max(t.hearers.get(id) ?? 0, s.at));
+    t.lastAt = Math.max(t.lastAt, line.at);
+    for (const id of heard) t.hearers.set(id, Math.max(t.hearers.get(id) ?? 0, line.at));
     this.version++;
     return t;
   }
 
-  /** A thread's speakers, by their first line. */
+  /** A thread's speakers, by their first line; a private conversation's members, from its public record. */
   static members(t: Thread): string[] {
-    return [...new Set(t.lines.map((l) => l.speaker))];
+    return t.members ?? [...new Set(t.lines.map((l) => l.speaker))];
   }
 
   /** The threads a Soul spoke in, newest first. */
   of(soul: string): Thread[] {
-    return [...this.threads.values()].filter((t) => t.lines.some((l) => l.speaker === soul)).sort((a, b) => b.lastAt - a.lastAt);
+    return [...this.threads.values()].filter((t) => t.members?.includes(soul) || t.lines.some((l) => l.speaker === soul)).sort((a, b) => b.lastAt - a.lastAt);
   }
 
   /** Threads still talking at `t` (a line said at or before `t`, within `within` µs of it), newest first. */

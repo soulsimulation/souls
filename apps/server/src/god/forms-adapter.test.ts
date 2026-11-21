@@ -29,7 +29,7 @@ const ROOT = resolve(import.meta.dirname, '../../../..');
 function kettle() {
   const rows = (loadEntries(resolve(ROOT, 'content/kinds'), 'content/kinds') as {entry?: {kind: string}; errors: unknown[]}[]).filter((r) => r.entry && !r.errors.length);
   const entry = rows.find((r) => r.entry!.kind === 'eden:kettle')!.entry!, refs = hashKinds(rows.map((r) => r.entry));
-  return {def: loadDef(entry, refs.get('eden:kettle').ref).def as {name: string; version: number}, entry: entry as {kind: string; state: Record<string, {min: number; max: number}>}};
+  return {def: loadDef(entry, refs.get('eden:kettle').ref).def as {name: string; version: number}, entry: entry as {kind: string; state: Record<string, {n: number; min: number; max: number}>}};
 }
 
 test('an entry thing on today\'s engine: its entry in the catalog, and the rules\' verdict in a refusal', {timeout: 300_000}, async (t) => {
@@ -73,7 +73,7 @@ test('an entry thing on today\'s engine: its entry in the catalog, and the rules
   assert.equal(refused.decided?.verdict, 'no');
   assert.equal(refused.decided?.reason, 'field_differs');
   assert.deepEqual(refused.decided?.detail, {field: 'water', found: 0, wanted: {at_least: 1}});
-  assert.ok(refused.decided?.read.some(([addr, v]: [string, unknown]) => addr === `${kettleId}/field/1` && v === 0), 'what the world read');
+  assert.ok(refused.decided?.read.some(([addr, v]: [string, unknown]) => addr === `${kettleId}/field/${k.entry.state.water.n}` && v === 0), 'what the world read (the water field, numbered by its entry)');
   assert.equal(JSON.parse(JSON.stringify(refused)).decided.reason, 'field_differs', 'it survives the wire');
 
   // A2 at the end: accepted, then the kettle is switched on by someone else before the press; the receipt fails with the verdict

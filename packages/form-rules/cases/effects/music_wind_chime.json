@@ -50,7 +50,7 @@
         "change": "set",
         "node": "w1",
         "field": "rings",
-        "n": 1,
+        "n": 28,
         "to": 1
        }
       ],
@@ -80,7 +80,7 @@
         "change": "set",
         "node": "w1",
         "field": "rings",
-        "n": 1,
+        "n": 28,
         "to": 2
        }
       ]
@@ -100,7 +100,7 @@
         "change": "set",
         "node": "w1",
         "field": "rings",
-        "n": 1,
+        "n": 28,
         "to": 3
        }
       ]

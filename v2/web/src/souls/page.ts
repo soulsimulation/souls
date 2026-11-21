@@ -167,7 +167,10 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     const members = Conversations.members(th).map(nameOf);
     const speakers = new Set(Conversations.members(th));
     const also = [...th.hearers].filter(([id, at]) => !speakers.has(id) && th.lastAt - at < 240_000_000).map(([id]) => nameOf(id));
-    const hear = `💬 aloud · anyone near hears${also.length ? ` · also heard by ${joinNames(also, 2)}` : ''} · ${ago(Math.max(0, t - (said.at(-1)?.at ?? t)))}`;
+    const since = ago(Math.max(0, t - (said.at(-1)?.at ?? t)));
+    // A private conversation (#3775): who is in it, never what they say.
+    const hear = th.members ? `🔒 private — only they hear · ${since}`
+      : `💬 aloud · anyone near hears${also.length ? ` · also heard by ${joinNames(also, 2)}` : ''} · ${since}`;
     const key = `${th.id}\u0000${said.length}\u0000${talk.version}\u0000${members.join()}\u0000${hear}`;
     if (key === dockShown) return;
     const fresh = !dockShown.startsWith(`${th.id}\u0000`);

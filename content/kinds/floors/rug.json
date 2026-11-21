@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:rug",
   "owner": "thing",
-  "state": {"rolled":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "state": {"rolled":{"n":28,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
   "points": {"end":{"role":"stand","at_mm":[-1150,0,0]}},
   "geometry": {"bounds_mm":[2000,50,1400]},
   "forms": {

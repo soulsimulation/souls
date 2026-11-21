@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "lower": {
-      "n": 1,
+      "n": 28,
       "type": "enum",
       "values": [
         "loose",
@@ -17,7 +17,7 @@
       }
     },
     "middle": {
-      "n": 2,
+      "n": 29,
       "type": "enum",
       "values": [
         "loose",
@@ -30,7 +30,7 @@
       }
     },
     "upper": {
-      "n": 3,
+      "n": 30,
       "type": "enum",
       "values": [
         "loose",
