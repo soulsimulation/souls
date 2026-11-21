@@ -2028,10 +2028,14 @@ impl<S: ObjectStore> PublicWriter<S> {
                 unreachable!("validated pair")
             };
             let id = replica::effects::read_id(&row[0])?;
+            // Only a flying id is looked up among the old rows: a scan per row is quadratic in the view (#3799).
+            if !flying.contains(&id) || self.changes.contains_key(&id) {
+                continue;
+            }
             let existed = old_rows
                 .iter()
                 .any(|r| matches!(r,Value::Array(p) if p.first()==Some(&id.to_value())));
-            if flying.contains(&id) && !existed && !self.changes.contains_key(&id) {
+            if !existed {
                 let query = wire(Value::Map(BTreeMap::from([
                     (1, Value::Uint(1)),
                     (2, id.to_value()),
@@ -2041,6 +2045,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 self.changes.insert(id, version);
             }
         }
+        eprintln!("TIMING to-flying {:.1} ms", tf.elapsed().as_secs_f64() * 1e3);
         let context = public_context(
             &self.baseline,
             self.player.state(),
