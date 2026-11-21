@@ -323,7 +323,8 @@ fn create_with(
     .to_value()
 }
 
-/// The world as built: a vessel 300 mm east of the first birth's spot, a rack 400 mm south of it. No body.
+/// The world as built: a vessel 300 mm east of the first birth's spot, a rack 400 mm south of it, a boxed crate 700 mm
+/// west. No body.
 fn world() -> Replica {
     // N2's test world as imported (its open ground and buildings), so the edit checker's town has ground to plan on;
     // its header pins the imported kinds and this test's.
@@ -343,7 +344,9 @@ fn world() -> Replica {
             crate_(),
             CRATE,
             g,
-            Vec3::new(s.x - 300_000, 0, s.z),
+            // Clear of the first two spots of the birth ring with its box (a body's 280 mm radius), and within a
+            // press's reach of the first.
+            Vec3::new(s.x - 700_000, 0, s.z),
             crate_box(),
         ),
     ]);
