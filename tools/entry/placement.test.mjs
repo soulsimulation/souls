@@ -85,7 +85,7 @@ test('A4: a form\'s placement takes only words on the list, and a case that uses
   assert.deepEqual(unlisted.sort(), ['beside', 'sideways'], 'only the two refusals of unlisted words');
   assert.deepEqual(doc.refused.filter(c => unlisted.includes(c.place.at) || unlisted.includes(c.place.facing)).map(c => c.code).sort(), ['unknown_facing', 'unknown_word']);
   const dirs = readdirSync(root + 'content/kinds');
-  for (const d of dirs) for (const f of readdirSync(root + 'content/kinds/' + d)) {
+  for (const d of dirs) for (const f of readdirSync(root + 'content/kinds/' + d).filter(f => f.endsWith('.json'))) {
     const e = F.parseEntry(readFileSync(root + `content/kinds/${d}/${f}`, 'utf8')).entry;
     // A word is written on the list, or given when the form is done as an argument of type placement (the body's put).
     for (const form of Object.values(e.forms ?? {})) for (const s of form.steps ?? []) if (s.place) assert.ok(typeof s.place.at === 'string' ? F.PLACE_WORDS.includes(s.place.at) : form.takes?.[s.place.at?.arg]?.type === 'placement', `${d}/${f}`);
