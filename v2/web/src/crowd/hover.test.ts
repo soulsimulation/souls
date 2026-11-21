@@ -52,3 +52,15 @@ test('the nearer of a Soul and a thing is hovered; nothing beyond reach', () => 
   layer.set('box', null, new THREE.Matrix4().makeTranslation(30, 0, 0), new THREE.Matrix4().makeScale(2, 2, 2));
   assert.equal(pickAt(o, d, 0, opts)!.kind, 'soul', 'a moved thing is picked where it now stands');
 });
+
+test('with no thing layer, a thing is picked from the boxes the world view draws for it', () => {
+  // a stall 2 m wide and deep, 3 m tall, standing at x = 10 (its solid in mm, in its own frame)
+  const stall = node('stall', 'eden:market-stall', { solids: [[0, 0, 1000, 1000, 0, 0, 3000]] });
+  const opts: HoverOptions = {
+    world: { nodes: new Map([['stall', stall]]), tracks: new Map(), frame: () => new THREE.Matrix4().makeTranslation(10, 0, 0) },
+    things: () => null, name: () => null, chipShown: () => false,
+  };
+  const hit = pickAt(new THREE.Vector3(0, 2.5, 0), new THREE.Vector3(1, 0, 0), 0, opts)!;
+  assert.deepEqual([hit.kind, hit.name], ['thing', 'market stall']);
+  assert.equal(pickAt(new THREE.Vector3(0, 3.5, 0), new THREE.Vector3(1, 0, 0), 0, opts), null, 'over its roof');
+});

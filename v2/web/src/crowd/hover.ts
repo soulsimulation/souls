@@ -5,10 +5,12 @@
 // hovers, and a drag clears it. Read-only: the pick reads the world view's bodies and the thing layer's boxes and
 // changes nothing drawn but the ring.
 import * as THREE from 'three';
-import type { ThingHit, ThingLayer } from '../things/things.ts';
+import { rayUnitBox, type ThingHit, type ThingLayer } from '../things/things.ts';
 import type { NodeRec } from '../source/source.ts';
 
-const UM = 1e-6;
+const UM = 1e-6, MM = 1e-3;
+/** Kinds the world view does not draw as things (`draw/world.ts`'s STRUCTURE). */
+const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway']);
 /** A body for picking: a standing cylinder this wide and tall. */
 export const BODY_R = 0.45, BODY_H = 1.9;
 /** Nothing farther than this is hovered (the chips' own reach). */
@@ -24,6 +26,7 @@ export type HoverWorld = {
 };
 export type HoverOptions = {
   world: HoverWorld;
+  /** The page's thing layer, or null when the world view draws the things as its own boxes. */
   things: () => Pick<ThingLayer, 'pick'> | null;
   /** A Soul's public name from the page's copy. */
   name: (id: string) => string | null;
@@ -69,6 +72,43 @@ export function tooltipText(name: string): string {
   return name.length > 54 ? name.slice(0, 53).trimEnd() + '…' : name;
 }
 
+/** Each solid of a thing as the world view draws it (its boxes, or half a metre with none), as unit-box frames
+ *  (`rayUnitBox`'s box), with their inverses; kept per node record, so a thing is boxed again only when it changes. */
+const boxCache = new WeakMap<NodeRec, { boxes: THREE.Matrix4[]; inverse: THREE.Matrix4[] }>();
+function viewBoxes(n: NodeRec, world: HoverWorld) {
+  let b = boxCache.get(n);
+  if (b) return b;
+  const f = world.frame(n.id), s = (n.scale ?? 1_000_000) / 1_000_000;
+  const solids = n.solids?.length ? n.solids : [[0, 0, 250, 250, 0, 0, 500]];
+  const boxes = solids.map(([cx, cz, hx, hz, yaw, y0, y1]) => f.clone().multiply(new THREE.Matrix4().compose(
+    new THREE.Vector3(cx * MM * s, y0 * MM * s, cz * MM * s),
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), (yaw / 1000) * (Math.PI / 180)),
+    new THREE.Vector3(Math.max(0.05, 2 * hx * MM * s), Math.max(0.05, (y1 - y0) * MM * s), Math.max(0.05, 2 * hz * MM * s)),
+  )));
+  b = { boxes, inverse: boxes.map((m) => m.clone().invert()) };
+  boxCache.set(n, b);
+  return b;
+}
+
+/** The thing a ray meets first among the world view's own boxes (a page with no thing layer), within `far`. */
+export function pickViewThing(origin: THREE.Vector3, dir: THREE.Vector3, world: HoverWorld, far = Infinity): ThingHit | null {
+  let best: { id: string; box: THREE.Matrix4 } | null = null, near = far;
+  const o = new THREE.Vector3(), d = new THREE.Vector3();
+  for (const n of world.nodes.values()) {
+    if (n.at !== null || world.tracks.has(n.id) || STRUCTURE.has(n.kind.split('@')[0])) continue;
+    const b = viewBoxes(n, world);
+    for (let k = 0; k < b.inverse.length; k++) {
+      o.copy(origin).applyMatrix4(b.inverse[k]);
+      d.copy(origin).add(dir).applyMatrix4(b.inverse[k]).sub(o);
+      const hit = rayUnitBox(o, d);
+      if (hit !== null && hit < near) (near = hit), (best = { id: n.id, box: b.boxes[k] });
+    }
+  }
+  if (!best) return null;
+  const e = best.box.elements;
+  return { id: best.id, distance: near, foot: new THREE.Vector3().applyMatrix4(best.box), radius: Math.hypot(Math.hypot(e[0], e[1], e[2]), Math.hypot(e[8], e[9], e[10])) / 2 };
+}
+
 /** The nearest Soul or thing along a ray at world time `t`, within `far`. */
 export function pickAt(o: THREE.Vector3, d: THREE.Vector3, t: number, opts: HoverOptions, far = FAR): HoverTarget | null {
   const { world } = opts, foot = new THREE.Vector3();
@@ -80,7 +120,8 @@ export function pickAt(o: THREE.Vector3, d: THREE.Vector3, t: number, opts: Hove
     const k = rayBody(o, d, foot);
     if (k !== null && k < near) (near = k), (soul = { id, k, foot: foot.clone() });
   }
-  const thing: ThingHit | null = opts.things()?.pick(o, d, near) ?? null;
+  const layer = opts.things();
+  const thing: ThingHit | null = layer ? layer.pick(o, d, near) : pickViewThing(o, d, world, near);
   if (thing) return { kind: 'thing', id: thing.id, name: thingName(world.nodes.get(thing.id)), foot: thing.foot, radius: thing.radius };
   if (soul) return { kind: 'soul', id: soul.id, name: opts.name(soul.id) ?? world.nodes.get(soul.id)?.name ?? 'a Soul', foot: soul.foot, radius: BODY_R };
   return null;
