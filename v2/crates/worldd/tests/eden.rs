@@ -2491,7 +2491,7 @@ fn i3833_a3_a_restart_after_an_hour_reads_only_the_newest_generation() {
     let world =
         replica::rules::json::parse(&std::fs::read_to_string(views.join("world.json")).unwrap())
             .unwrap();
-    let stream = views.join(world.get("stream").and_then(|v| v.str()).unwrap());
+    let stream = dir.join(world.get("stream").and_then(|v| v.str()).unwrap());
     let pointer = std::fs::read(stream.join("pointer")).unwrap();
     let Value::Map(p) = decode(&pointer).unwrap().value else {
         panic!("a pointer is a map")
