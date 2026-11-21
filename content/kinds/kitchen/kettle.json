@@ -15,11 +15,18 @@
   },
   "geometry": { "bounds_mm": [560, 260, 200] },
   "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    },
     "fill": {
       "who": "holder",
       "starts": "act",
       "takes": {
-        "from": { "type": "thing", "select": { "of": "things", "kind": "eden:tap", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+        "from": { "type": "thing", "select": { "of": "things", "kind": "eden:sink", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
       },
       "needs": [
         { "need": "held_by_actor" },
@@ -60,7 +67,7 @@
       "who": "holder",
       "starts": "act",
       "takes": {
-        "into": { "type": "thing", "select": { "of": "things", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+        "into": { "type": "thing", "select": { "of": "things", "kind": "eden:cup", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
       },
       "needs": [
         { "need": "held_by_actor" },
@@ -86,7 +93,7 @@
     "kitchen": "kitchen",
     "heat": "heat",
     "brew": "brew",
-    "howto_tea": "Fill the kettle at a tap, switch it on, wait for it to boil, then pour it into a cup."
+    "howto_tea": "Take the kettle, fill it at a sink, switch it on, wait for it to boil, then pour it into a cup."
   },
   "card": { "text": "card", "category": "kitchen", "synonyms": ["heat", "brew"] },
   "howtos": {

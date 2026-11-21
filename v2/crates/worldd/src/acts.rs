@@ -197,6 +197,56 @@ fn selects_body_slot(f: &Json, key: &str) -> bool {
         }))
 }
 
+/// How far from the form's thing a thing argument it selects "here" may be, µm: today's game fills a kettle at a tap
+/// within 20 m of it (`apps/server/src/god/tea.ts`, `TAP_REACH`).
+pub const HERE: i64 = 20_000_000;
+
+/// The thing a form's thing argument `take` selects when the caller leaves it out (#3715): for a `select` of `things`
+/// of one kind `in` `here`, `nearest`, rank 1, the thing of that kind nearest the form's thing `node` (a held thing is
+/// where its holder is) within [`HERE`], in the same building or on the same ground as it when both say, ties by id.
+/// `None` for any other select, or with none near.
+fn nearest_selected(tree: &Tree, node: Id, take: &Json) -> Option<Id> {
+    let sel = take.get("select")?;
+    let s = |k: &str| sel.get(k).and_then(Json::str);
+    let rank_one = sel.get("rank").is_none_or(|r| matches!(r, Json::Int(1)));
+    if take.get("type").and_then(Json::str) != Some("thing")
+        || s("of") != Some("things")
+        || s("in") != Some("here")
+        || s("order").is_some_and(|o| o != "nearest")
+        || !rank_one
+    {
+        return None;
+    }
+    let kind = s("kind")?;
+    let at = replica::select::position(tree, node).ok()?;
+    let frame = replica::select::standing(tree, node).ok().map(|f| f.0);
+    let r2 = i128::from(HERE) * i128::from(HERE);
+    let mut best: Option<(i128, Id)> = None;
+    let mut stack = vec![tree.root()];
+    while let Some(h) = stack.pop() {
+        stack.extend(tree.children(h).unwrap_or(&[]));
+        let Some(n) = tree.node(h) else {
+            continue;
+        };
+        if n.id() == node || plain(n.kind()) != kind {
+            continue;
+        }
+        let Ok(p) = replica::select::position(tree, n.id()) else {
+            continue;
+        };
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        let d2 = d(p[0], at[0]) + d(p[1], at[1]);
+        let here = match (frame, replica::select::standing(tree, n.id())) {
+            (Some(f), Ok((g, _))) => f == g,
+            _ => true,
+        };
+        if d2 <= r2 && here && best.is_none_or(|b| (d2, n.id()) < b) {
+            best = Some((d2, n.id()));
+        }
+    }
+    best.map(|b| b.1)
+}
+
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
         name,
@@ -1042,6 +1092,19 @@ impl Acts {
                             picked = true;
                         }
                         None => none_free = Some(key.clone()),
+                    }
+                }
+            }
+            // A thing the caller left out, which the form selects as the nearest thing of a kind here (#3715): the
+            // kettle's water source, the cup it pours into, the bowl a pot serves.
+            if let Some(f) = entry.get("forms").and_then(|f| f.get(form)) {
+                for (key, take) in f.get("takes").and_then(Json::obj).unwrap_or(&[]) {
+                    if all.contains_key(key) {
+                        continue;
+                    }
+                    if let Some(id) = nearest_selected(tree, *node, take) {
+                        all.insert(key.clone(), skills::form_runner::Arg::Node(id));
+                        picked = true;
                     }
                 }
             }
