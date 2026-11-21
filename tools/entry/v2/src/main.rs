@@ -189,6 +189,7 @@ impl Stage {
                 moves: &mut self.moves,
                 library: &self.library,
                 seed: 1,
+                places: None,
             },
             &mut self.forms,
         )
