@@ -358,6 +358,8 @@ mod served {
     enum Seen {
         Row(i64, Id, Id, i64, i64, bool),
         Record(i64, Id, String, Actor, Cause),
+        /// A body's public stance field set (#3791, `bodies::F_STANCE`): the body and the value.
+        Stance(Id, u64),
     }
 
     fn read_log(dir: &Path) -> Vec<Seen> {
@@ -374,6 +376,19 @@ mod served {
                 _ => p.effects.first().map_or(0, |e| e.envelope.at),
             };
             for e in &p.effects {
+                if let replica::effects::Body::Changes(cs) = &e.body {
+                    for c in cs {
+                        if let replica::effects::Change::Set {
+                            node,
+                            field: worldd::bodies::F_STANCE,
+                            to: Value::Uint(v),
+                            ..
+                        } = c.change
+                        {
+                            out.push(Seen::Stance(node, v));
+                        }
+                    }
+                }
                 for ev in e.events.iter().flatten() {
                     let n = ev.name.as_str();
                     if skills::wind_down::EVENTS.contains(&n) {
@@ -445,19 +460,24 @@ mod served {
             "{}",
             String::from_utf8_lossy(&seeded.stderr)
         );
-        let mut child = Command::new(worldd)
-            .args(["serve", "--dir"])
-            .arg(&dir)
-            .env("WORLDD_WIND_DOWN", "20,30,4,8,150")
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut out = BufReader::new(child.stdout.take().unwrap());
-        let _served = Served(child);
-        let mut line = String::new();
-        while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
-            line.clear();
-        }
+        let serve = || {
+            let mut child = Command::new(worldd)
+                .args(["serve", "--dir"])
+                .arg(&dir)
+                .env("WORLDD_WIND_DOWN", "20,30,4,8,150")
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut out = BufReader::new(child.stdout.take().unwrap());
+            let mut line = String::new();
+            while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+                line.clear();
+            }
+            // The rest of its output is left unread; it writes little.
+            std::thread::spawn(move || std::io::copy(&mut out, &mut std::io::sink()));
+            Served(child)
+        };
+        let mut served = serve();
         let lineage = Scope([0xd1; 16]);
         let t0 = Instant::now();
         let say = |what: &str| eprintln!("[{:6.1} s] {what}", t0.elapsed().as_secs_f64());
@@ -579,6 +599,27 @@ mod served {
         std::thread::sleep(Duration::from_secs(10));
         assert_eq!(read_log(&dir).len(), before, "asleep: nothing written");
         say("asleep 10 s: nothing written");
+        // #3791: its stance is public on its node, lie, so a page opened now draws it lying; a restart keeps it.
+        let stance = |log: &[Seen]| {
+            log.iter().rev().find_map(|s| match s {
+                Seen::Stance(b, v) if *b == body => Some(*v),
+                _ => None,
+            })
+        };
+        assert_eq!(stance(&read_log(&dir)), Some(2), "public: lying");
+        drop(served);
+        served = serve();
+        std::thread::sleep(Duration::from_secs(2));
+        let log = read_log(&dir);
+        assert_eq!(stance(&log), Some(2), "a restart keeps it lying");
+        assert!(
+            log.iter().rev().find_map(|s| match s {
+                Seen::Row(_, b, _, _, _, l) if *b == body => Some(*l),
+                _ => None,
+            }) == Some(true),
+            "and lying where it slept"
+        );
+        say("restarted: still public as lying");
 
         // A reflex its client sends (#3764) runs, and leaves it asleep.
         let mut soul = connect(&dir, seq, lineage);
@@ -631,9 +672,11 @@ mod served {
             after.2
         ));
         assert!(!after.2);
+        assert_eq!(stance(&log), Some(0), "woken: its stance cleared");
         assert!(
             ((after.0 - (last.1 - 2_000_000)) as f64).hypot((after.1 - last.2) as f64) < 600_000.0
         );
+        drop(served);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
