@@ -692,3 +692,56 @@ fn w17_archive_revalidates_creator_inside_the_conditional_write() {
     assert!(row.get(archive::FIELD).is_none());
     assert_eq!(row["creator"], principal_text(person(2)));
 }
+
+/// #3702: the creator alone sets the welcome; it is on the row (and so the list), checked, and cleared by empty words.
+#[test]
+fn n_g8_the_creator_sets_the_welcome_visitors_are_shown() {
+    let (store, gets, forks) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let w = worlds(&store, &gets, forks);
+    w.create(&ask("k1", "mine", "Ann"), person(1), 0, 10 * DAY)
+        .expect("made");
+    assert_eq!(
+        w.set_welcome("mine", person(2), "hi")
+            .expect_err("not hers")
+            .name,
+        "not-the-creator"
+    );
+    assert_eq!(w.welcome_of("mine").expect("read"), None);
+    let row = w
+        .set_welcome(
+            "mine",
+            person(1),
+            "  Welcome to the garden.\nTea at four.  ",
+        )
+        .expect("set");
+    assert_eq!(row["welcome"], "Welcome to the garden.\nTea at four.");
+    assert_eq!(
+        w.list().expect("a list")["worlds"][0]["welcome"],
+        "Welcome to the garden.\nTea at four."
+    );
+    assert_eq!(
+        w.welcome_of("mine").expect("read").as_deref(),
+        Some("Welcome to the garden.\nTea at four.")
+    );
+    let long = "a".repeat(WELCOME_MOST + 1);
+    assert_eq!(
+        w.set_welcome("mine", person(1), &long)
+            .expect_err("long")
+            .name,
+        "welcome-too-long"
+    );
+    assert_eq!(
+        w.set_welcome("mine", person(1), "bell\u{7}")
+            .expect_err("control")
+            .name,
+        "welcome-not-text"
+    );
+    assert!(w.is_creator("mine", person(1)).expect("read"));
+    assert!(!w.is_creator("mine", person(2)).expect("read"));
+    w.set_welcome("mine", person(1), "").expect("cleared");
+    assert_eq!(w.welcome_of("mine").expect("read"), None);
+}
