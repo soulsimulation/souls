@@ -89,7 +89,7 @@ if [ "$DATA_ONLY" = 0 ]; then
   done
   mkdir -p "$R/etc/souls" "$R$(dirname "$DROPIN")" "$R$WANTS"
   EXCHANGE=''; STORE=''
-  if [ -n "$DIRECTORY" ]; then EXCHANGE=" --creator $CREATOR --directory $DIRECTORY"; STORE=$(printf '\nEnvironment=WORLDD_STORE=%s' "$DATA/worlds/directory"); fi
+  if [ -n "$DIRECTORY" ]; then EXCHANGE=" --creator $CREATOR --directory $DIRECTORY --creator-authority-required"; STORE=$(printf '\nEnvironment=WORLDD_STORE=%s' "$DATA/worlds/directory"); fi
   ENV_TEXT=$(printf 'GATEWAYD_ARGS=--listen 127.0.0.1:%s --world %s --tokens %s --build %s --receipts %s%s' "$PORT" "$SOCKET" "$WORLD/tokens" "$BUILD" "$WORLD/receipts" "$EXCHANGE")
   DROP_TEXT=$(printf '# Written by place-world.sh (C1, #3365).\n[Service]\nEnvironment=WORLDD_SOCKET=%s%s' "$SOCKET" "$STORE")
   if [ -e "$R$ENV" ]; then [ "$(cat "$R$ENV")" = "$ENV_TEXT" ] || die "gateway configuration differs"; else printf '%s\n' "$ENV_TEXT" > "$R$ENV"; fi

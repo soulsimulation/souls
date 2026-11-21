@@ -135,17 +135,32 @@ impl Moving {
 
 /// The world's one creator as its directory record names it (G1e): `None` while it names none. There is never more
 /// than one: a change replaces it.
-#[derive(Debug, Default)]
-pub struct Creator(Mutex<Option<Id>>);
+type CreatorReader = std::sync::Arc<dyn Fn() -> Option<Id> + Send + Sync>;
+#[derive(Default)]
+pub struct Creator(Mutex<Option<Id>>, Option<CreatorReader>);
+
+impl std::fmt::Debug for Creator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Creator").field(&self.0).finish()
+    }
+}
 
 impl Creator {
     pub fn new(creator: Option<Id>) -> Creator {
-        Creator(Mutex::new(creator))
+        Creator(Mutex::new(creator), None)
     }
 
-    /// The creator now.
+    /// An existing off-clock admission reads the current authority, failing closed when unavailable.
+    pub fn with_reader(creator: Option<Id>, read: CreatorReader) -> Creator {
+        Creator(Mutex::new(creator), Some(read))
+    }
+
+    /// The creator now. No call is made from the clock thread.
     pub fn get(&self) -> Option<Id> {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner())
+        match &self.1 {
+            Some(read) => read(),
+            None => *self.0.lock().unwrap_or_else(|e| e.into_inner()),
+        }
     }
 
     /// Replaces the creator; whether it changed.
@@ -289,4 +304,27 @@ pub fn judged(tree: Vec<Who>, moving: &[Who]) -> Vec<Who> {
         .filter(|w| !held.contains(&w.body))
         .chain(moving.iter().copied())
         .collect()
+}
+
+#[cfg(test)]
+mod w16_authority_tests {
+    use super::*;
+    #[test]
+    fn w16_current_reader_is_authoritative_and_unavailable_never_uses_cached_founder() {
+        let a = Id::new(replica::ids::Scope([1; 16]), 0).unwrap();
+        let b = Id::new(replica::ids::Scope([2; 16]), 0).unwrap();
+        let current = Arc::new(Mutex::new(Some(a)));
+        let read = current.clone();
+        let creator = Creator::with_reader(Some(a), Arc::new(move || *read.lock().unwrap()));
+        assert_eq!(creator.get(), Some(a));
+        *current.lock().unwrap() = None;
+        creator.set(Some(a));
+        assert_eq!(creator.get(), None);
+        *current.lock().unwrap() = Some(b);
+        assert_eq!(creator.get(), Some(b));
+        let standalone = Creator::new(Some(a));
+        assert_eq!(standalone.get(), Some(a));
+        standalone.set(Some(b));
+        assert_eq!(standalone.get(), Some(b));
+    }
 }

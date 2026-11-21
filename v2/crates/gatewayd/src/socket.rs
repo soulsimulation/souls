@@ -257,6 +257,13 @@ async fn serve(
         return;
     };
     let Grant::Actor(actor) = grant;
+    let authority = match crate::creator::session(&gw, actor) {
+        Ok(mark) => mark,
+        Err(_) => {
+            let _ = send(&mut socket, control(token::REFUSED)).await;
+            return;
+        }
+    };
     let who = Arc::new(Who::new(
         grant.to_text(),
         account.as_deref(),
@@ -288,11 +295,17 @@ async fn serve(
                     Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
                     // R13: a message's close, the mailbox's alone.
                     Some(Ok(Message::Text(t))) => {
+                        if !crate::creator::permits(&gw,actor,authority) {
+                            let _=send(&mut socket,control(token::REFUSED)).await;break;
+                        }
                         crate::mailbox::on_text(&gw, grant, t.as_str());
                         continue;
                     }
                     _ => break,
                 };
+                if !crate::creator::permits(&gw,actor,authority) {
+                    let _=send(&mut socket,control(token::REFUSED)).await;break;
+                }
                 if let Some(request) = views::request(&bytes) {
                     if let Some((n, _)) = view.take() {
                         gw.views.end(n);
@@ -311,10 +324,12 @@ async fn serve(
                 }
             }
             Some(mail) = attached.mail.recv() => {
+                if !crate::creator::permits(&gw,actor,authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
                 ok = socket.send(Message::Text(mail.into())).await.is_ok();
             }
             out = attached.frames.recv() => match out {
                 Some(frame) => {
+                    if !crate::creator::permits(&gw,actor,authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
                     let trace = crate::world_link::delivery_trace(&frame);
                     if let Some(t) = &trace { t.at("socket-dequeue", "ready"); }
                     let frame = times::finish(frame);
@@ -331,7 +346,10 @@ async fn serve(
                     None => std::future::pending().await,
                 }
             } => match item {
-                Some(frame) => ok = send(&mut socket, frame).await,
+                Some(frame) => {
+                    if !crate::creator::permits(&gw,actor,authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
+                    ok = send(&mut socket, frame).await;
+                },
                 // Its view queue was full: let go, as a slow stream is.
                 None => break,
             },
@@ -355,8 +373,36 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
             .get()
             .and_then(|k| t.check(k, crate::unix_now()))
     };
-    let Some(mut view) = check(&presented) else {
+    // Account view tokens may include worlds served by other gateways. Drop only creator grants that
+    // this exact world's current authority does not grant; retain every ordinary Soul view.
+    let local = |mut v: View| {
+        v.grants.retain(|g| {
+            let Grant::Actor(actor) = g;
+            crate::creator::session(&gw, *actor).is_ok()
+        });
+        (!v.grants.is_empty()).then_some(v)
+    };
+    let Some(mut view) = check(&presented).and_then(&local) else {
         (gw.log)("a view sign-in was refused");
+        let _ = send(&mut socket, control(token::REFUSED)).await;
+        return;
+    };
+    let capture = |v: &View| {
+        v.grants
+            .iter()
+            .map(|g| {
+                let Grant::Actor(actor) = g;
+                crate::creator::session(&gw, *actor)
+            })
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let allowed = |v: &View, marks: &[Option<token::CreatorMark>]| {
+        v.grants.iter().zip(marks).all(|(g, mark)| {
+            let Grant::Actor(actor) = g;
+            crate::creator::permits(&gw, *actor, *mark)
+        })
+    };
+    let Ok(mut authority) = capture(&view) else {
         let _ = send(&mut socket, control(token::REFUSED)).await;
         return;
     };
@@ -377,11 +423,13 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                     Some(Ok(Message::Binary(b))) => b.to_vec(),
                     Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
                     Some(Ok(Message::Text(t))) => {
+                        if !allowed(&view,&authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
                         crate::mailbox::on_view_text(&gw, &view.grants, t.as_str(), reply.clone());
                         continue;
                     }
                     _ => break,
                 };
+                if !allowed(&view,&authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
                 if let Some(request) = views::request(&bytes) {
                     if let Some((n, _)) = sub.take() {
                         gw.views.end(n);
@@ -391,7 +439,7 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                     continue;
                 }
                 let fresh = match read_sign_in(&bytes).0 {
-                    Some(Presented::View(t)) => check(&t).ok_or(token::REFUSED),
+                    Some(Presented::View(t)) => check(&t).and_then(&local).ok_or(token::REFUSED),
                     _ => Err(VIEW_ONLY),
                 };
                 let fresh = match fresh {
@@ -402,6 +450,7 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                         continue;
                     }
                 };
+                let Ok(fresh_authority)=capture(&fresh) else { let _=send(&mut socket,control(token::REFUSED)).await;break; };
                 // What it may watch changed (a Soul given away): the subscription is made again for the new grants.
                 if audiences(&fresh) != audiences(&view)
                     && let (Some(request), Some((n, _))) = (&asked, sub.take())
@@ -410,10 +459,12 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                     sub = Some(gw.views.subscribe(request.clone(), &audiences(&fresh)));
                 }
                 view = fresh;
+                authority = fresh_authority;
                 gw.rewatch(watching, &view.grants);
                 ok = send(&mut socket, control(VIEW_RENEWED)).await;
             }
             Some(text) = mail.recv() => {
+                if !allowed(&view,&authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
                 ok = socket.send(Message::Text(text.into())).await.is_ok();
             }
             _ = tokio::time::sleep(left) => {
@@ -426,7 +477,10 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                     None => std::future::pending().await,
                 }
             } => match item {
-                Some(frame) => ok = send(&mut socket, frame).await,
+                Some(frame) => {
+                    if !allowed(&view,&authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
+                    ok = send(&mut socket, frame).await;
+                },
                 None => break,
             },
         }
