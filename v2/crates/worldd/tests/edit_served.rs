@@ -1176,11 +1176,7 @@ async fn g1e_buildsafe_refuses_a_wall_on_a_standing_soul_on_the_test_world() {
     assert_eq!(got.kind, 1, "the Soul's walk ends: {got:?}");
     let (url, tokens) = gateway(&socket, &[creator]).await;
     let mut ws = sign_in(&url, &tokens[0]).await;
-    let (got, _) = send(
-        &mut ws,
-        edit_intent(&w, creator, 1, 0, wall(&w, sx, sz)),
-    )
-    .await;
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 1, 0, wall(&w, sx, sz))).await;
     println!("a wall where the Soul stands: {got:?}");
     assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
     let (got, _) = send(
@@ -1266,7 +1262,10 @@ async fn g1e_a2_a3_eden_buildsafe_refuses_a_wall_on_a_soul_and_answers_fast() {
     let (sx, sz) = ((x0 + 40) * M, z0 * M);
     walk(&mut souls, &w, stander, 1, sx, sz);
     let got = socket_end(&mut souls);
-    assert_eq!(got.kind, 1, "the 21st Soul's walk to its place ends: {got:?}");
+    assert_eq!(
+        got.kind, 1,
+        "the 21st Soul's walk to its place ends: {got:?}"
+    );
     for (k, &body) in w.souls.iter().enumerate().take(20) {
         let x = (x0 + 2 * k as i64) * M;
         walk(&mut souls, &w, body, 1, x, (z0 + 8) * M);
