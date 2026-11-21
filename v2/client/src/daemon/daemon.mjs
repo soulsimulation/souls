@@ -142,6 +142,7 @@ import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { clockOf, worldNow } from '../clock/clock.mjs';
+import { worldOps } from '../creator/world.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
@@ -290,6 +291,31 @@ function send(bytes, sequence, ranked) {
   rankedOf.set(sequence, ranked);
   trace.write({ k: 'send', seq: sequence, ranked });
   ws.send(bytes);
+}
+
+/** The agents' socket's frame limit (`replica` `intent_limits.txt`); a creator's larger edit goes by `sendBulk`. */
+const INTENT_MOST = 4096;
+
+/** A creator's bulk edit (#3695) by the gateway's `POST /v2/creator-edit`: null when it was taken (its answer comes on
+ *  the socket), else the refusal's name. Its bytes are never logged. */
+async function sendBulk(bytes, sequence) {
+  state.unanswered.push(sequence);
+  save();
+  counts.sent++;
+  trace.write({ k: 'send', seq: sequence, ranked: 1, bulk: bytes.length });
+  const u = new URL(seat.gateway);
+  u.protocol = u.protocol === 'wss:' ? 'https:' : u.protocol === 'ws:' ? 'http:' : u.protocol;
+  u.pathname = u.pathname.replace(/\/v2\/ws$/, '') + '/v2/creator-edit';
+  u.search = ''; u.hash = '';
+  try {
+    const r = await fetch(u, { method: 'POST', headers: { authorization: `Bearer ${seat.token}`, 'content-type': 'application/cbor' }, body: bytes, signal: AbortSignal.timeout(EDIT_WITHIN) });
+    if (r.status === 202) return null;
+    let code = `edit.bulk-${r.status}`;
+    try { code = (await r.json()).refused ?? code; } catch { /* not JSON */ }
+    return code;
+  } catch {
+    return 'edit.bulk-unreachable';
+  }
 }
 
 /** Signed in and current: intents go now, and (once a socket) the subscription to what this Soul hears (C6). */
@@ -727,7 +753,8 @@ function batchOf(ops) {
   if (!Array.isArray(ops) || ops.length === 0) throw Object.assign(new Error('ops: a list of operations'), { code: 'edit.batch' });
   const kinds = pinned();
   const um = (at) => (Array.isArray(at) ? at.map((n) => Math.round(Number(n) * 1000)) : undefined);
-  return JSON.stringify(ops.map((o) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}) })));
+  // #3695: a move that must land to the micrometre (a thing lifted with the ground) gives its position as `atUm`.
+  return JSON.stringify(ops.map(({ atUm, ...o }) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}), ...(atUm ? { at: atUm.map(Number) } : {}) })));
 }
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
@@ -832,6 +859,24 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex
   if (moveForm(ranked[0])) movesOf.set(sequence, moveForm(ranked[0]));
   if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
   return { sequence, sent };
+}
+
+/** World time now: the copy's clock mapping (E7b), else the machine's clock, as a world without a mapping runs on it
+ *  (`worldd::answers::now`). For the creator's weather end and strike time (#3695). */
+const worldNowOrReal = () => worldNow(clockOf(copy)) ?? Date.now() * 1000;
+
+/** The batch an edit or a check carries: its own ops, or a world verb's (#3695) made from the copy now. The land
+ *  verbs load today's ground model (`packages/ground`, zod) only when used. */
+async function worldBatch(req) {
+  if (!req.world) return { ops: req.ops };
+  if (req.world.verb === 'land') {
+    let land;
+    try { land = await import('../creator/terrain/land.mjs'); } catch (e) {
+      return { ok: false, code: 'land.unavailable', detail: `the land verbs need packages/ground and zod beside this client: ${String(e.message ?? e).slice(0, 160)}` };
+    }
+    return land.landOps(copy, req.world);
+  }
+  return worldOps(copy, req.world, worldNowOrReal());
 }
 
 async function answer(req) {
@@ -1018,14 +1063,19 @@ async function answer(req) {
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
     }));
     case 'check': {
-      // On the copy as it is: no sync, no frame to the world (A4).
-      const v = JSON.parse(wire.editCheck(copy, batchOf(req.ops), kindsText()));
-      return closing({ ...v, local: true }, null, { now: true });
+      // On the copy as it is: no sync, no frame to the world (A4). A world verb (#3695) is made into its sets first.
+      const w = await worldBatch(req);
+      if (w.ok === false) return closing({ ...w, local: true }, null, { now: true });
+      const v = JSON.parse(wire.editCheck(copy, batchOf(w.ops), kindsText()));
+      return closing({ ...v, local: true, ...(w.says ? { would: w.says, ops: w.ops } : {}) }, null, { now: true });
     }
     case 'edit': {
       if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
-      const batch = batchOf(req.ops);
       const age = await ageAfter();
+      // #3695: weather, sky and strike are sets on the world node, made from the copy as it is now, after the sync.
+      const w = await worldBatch(req);
+      if (w.ok === false) return closing({ ...w, sent: false, local: true }, null, { age });
+      const batch = batchOf(w.ops);
       const v = JSON.parse(wire.editCheck(copy, batch, kindsText()));
       if (!v.ok) return closing({ ...v, sent: false, local: true }, null, { age });
       if (!copyVersion) return closing({ ok: false, code: 'edit.no-copy', sent: false, detail: 'no copy of the world yet' }, null, { age });
@@ -1038,12 +1088,20 @@ async function answer(req) {
         const t = setTimeout(() => { editsWaiting.delete(sequence); ok(null); }, EDIT_WITHIN);
         editsWaiting.set(sequence, (a) => { clearTimeout(t); editsWaiting.delete(sequence); ok(a); });
       });
-      if (signedIn) send(bytes, sequence, 1); else queued.push({ bytes, sequence, ranked: 1 });
+      if (bytes.length > INTENT_MOST) {
+        // #3695: an edit over the agents' frame limit (a landform's tiles) goes by the gateway's creator route; its
+        // answer comes on this socket as any edit's does.
+        const r = await sendBulk(bytes, sequence);
+        if (r) { editsWaiting.get(sequence)?.(null); return closing({ ok: false, code: r, sequence, sent: false }, null, { now: true }); }
+      } else if (signedIn) send(bytes, sequence, 1); else queued.push({ bytes, sequence, ranked: 1 });
       const a = await got;
       if (!a) return closing({ ok: false, code: 'edit.unanswered', sequence, sent: true }, null, { now: true });
       const out = a.answer === 1
-        ? { ok: true, sequence, names: a.names ?? {} }
+        ? { ok: true, sequence, names: a.names ?? {}, ...(w.says ? { did: w.says } : {}) }
         : { ok: false, sequence, code: a.reason ?? 'edit.refused', ...(a.op !== undefined ? { op: a.op } : {}) };
+      // The world node is written by the world's own sky timers too: a world verb planned just before one is stale, and
+      // is made again from the copy brought current, once.
+      if (out.code === 'edit.stale' && req.world && !req.again) return answer({ ...req, again: true });
       return closing(out);
     }
     case 'pray': case 'answer': {

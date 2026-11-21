@@ -135,7 +135,7 @@ use replica::effects::{
 };
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
-use replica::intents::{Answer, INTENT_MOST, Intent, Kind, Target};
+use replica::intents::{Answer, BULK_MOST, Intent, Kind, Target};
 use replica::pose::Pose;
 use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::select::Answer as Answered;
@@ -2083,6 +2083,20 @@ impl Clock {
                     Err(r)
                 }
             };
+            // #3695: a creator's weather (plain sets on the world node) is checked here and, once committed, written
+            // through E6's weather (`sim::edit::weather::set`): its event and its timer follow the creator's record.
+            let weather = match &checked {
+                Ok((c, ..)) => self.weather_asked(&c.checked.edit.ops, now),
+                Err(_) => Ok(None),
+            };
+            let (checked, weather) = match weather {
+                Err(r) => {
+                    let mut checked = checked;
+                    keep(&mut checked);
+                    (Err(r), None)
+                }
+                Ok(w) => (checked, w),
+            };
             let committed = checked.and_then(|(c, souls, classes, mut reserved, maps, places)| {
                 if let Some(b) = &self.bodies {
                     places.check(&b.slots)?;
@@ -2134,6 +2148,9 @@ impl Clock {
                     self.receipts.index(&c.part.effects);
                     self.effects.extend(c.part.effects.iter().cloned());
                     self.parts.push(c.part);
+                    if let Some(w) = weather {
+                        self.put_weather(now, w);
+                    }
                     self.end(id, |k| Answer::Receipt {
                         actor,
                         sequence,
@@ -2951,6 +2968,42 @@ impl Clock {
             rest: Rest::new(),
         };
         self.write_own(vec![changes, timers], "the sky");
+    }
+
+    /// The creator's weather a batch asks for (#3695), checked against world time `now`: none when it sets no weather
+    /// field on the world node; refused when it sets some but not all, a level is outside 0 to 100, its end is not
+    /// after now, or the world has no sky.
+    fn weather_asked(
+        &self,
+        ops: &[edit::Op],
+        now: Micros,
+    ) -> Result<Option<sim::edit::weather::Asked>, Refused> {
+        let tree = self.replica.tree();
+        let Some(world) = tree.node(tree.root()).map(|n| n.id()) else {
+            return Ok(None);
+        };
+        let Some(asked) = sim::edit::weather::asked(ops, world) else {
+            return Ok(None);
+        };
+        let asked = asked?;
+        if self.sky.is_none() {
+            return Err(Refused {
+                op: None,
+                name: sim::edit::weather::NO_SKY,
+                detail: "this world's node has no sky".into(),
+            });
+        }
+        sim::edit::weather::check(asked.levels, now, asked.until)?;
+        Ok(Some(asked))
+    }
+
+    /// After the creator's batch commits: E6's weather write (its event, and the weather timer set for its end).
+    fn put_weather(&mut self, now: Micros, w: sim::edit::weather::Asked) {
+        let Some(h) = self.sky.as_mut() else { return };
+        match sim::edit::weather::set(&mut h.daylight, w.kind, w.levels, now, w.until) {
+            Ok(write) => self.put_sky(now, write),
+            Err(r) => eprintln!("worldd: the creator's weather was not set: {}", r.name),
+        }
     }
 
     /// The mapping this start applies, as its time effect and the zone root's fields in one part (E7b, #3516).
@@ -4896,7 +4949,9 @@ pub fn serve(world: Door, mut stream: UnixStream) {
             return;
         }
         let len = u32::from_be_bytes(len) as usize;
-        if len > INTENT_MOST as usize {
+        // A creator's bulk edit (#3695) is the largest frame the gateway hands on; `Intent::read` keeps every other
+        // intent to the frame limit.
+        if len > BULK_MOST as usize {
             return;
         }
         let mut bytes = vec![0u8; len];
@@ -5436,6 +5491,146 @@ mod tests {
         run(intent(soul, 1, 0, place), 6);
         world.stop();
         (store.bytes(), kinds_seen)
+    }
+
+    /// #3695: a creator's weather is five plain sets on the world node; once committed, E6's weather event follows and
+    /// its timer is due at the creator's end. A level over 100 is refused by name and changes nothing.
+    #[test]
+    fn a_creators_weather_commits_with_e6s_event_and_its_end_on_the_timer() {
+        use replica::edit::wire::{VERB, parameters};
+        use replica::edit::{Op, Ref};
+        use replica::sky::{self, int};
+        let store = Held::new(Vec::new());
+        let w = toggles::World::build(1, 0, 0);
+        let initial = w.replica.frozen();
+        let root = w.replica.tree().node(w.replica.tree().root()).unwrap().id();
+        let creator = Id::new(Scope([0xc0; 16]), 1).unwrap();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.lockstep = true;
+        cfg.measures = false;
+        cfg.edits = Some(edit::World {
+            creator,
+            kinds: toggles::kinds(),
+        });
+        let cal = sky::Calendar {
+            day_s: 86_400,
+            origin: 0,
+            offsets: vec![(0, 0)],
+        };
+        cfg.sky = Some(sim::daylight::Config::today(cal, 3695));
+        let world = start(w.replica, toggles::rules(), store.clone(), cfg).unwrap();
+        let until: i64 = 40 * 3_600_000_000;
+        let weather = |rain: i64| {
+            [
+                (
+                    sky::F_WEATHER,
+                    Value::Text(Name::new("souls:storm").unwrap()),
+                ),
+                (sky::F_CLOUD, int(100)),
+                (sky::F_RAIN, int(rain)),
+                (sky::F_WIND, int(80)),
+                (sky::F_WEATHER_UNTIL, int(until)),
+            ]
+            .into_iter()
+            .map(|(field, to)| Op::Set {
+                node: Ref::Node(root),
+                field,
+                to,
+            })
+            .collect::<Vec<_>>()
+        };
+        let intent = |sequence: u64, planned: u64, ops: &[Op]| Intent {
+            actor: Actor::Creator(creator),
+            verb: Name::new(VERB).unwrap(),
+            target: None,
+            parameters: parameters(ops),
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: planned,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        // (kind, reason, the version the answer gives)
+        let run = |i: Intent, tick: i64| {
+            let rx = send(&world, &i);
+            let (done, ran) = channel();
+            world.events.send(Event::RunTo { tick, done }).unwrap();
+            ran.recv().unwrap();
+            let f = answer(&rx);
+            let Value::Map(m) = decode(&f).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Array(v)) = m.get(&1) else {
+                panic!("a version")
+            };
+            let Some(Value::Uint(version)) = v.get(3) else {
+                panic!("a sequence")
+            };
+            let (kind, reason, _) = read(&f);
+            (kind, reason, *version)
+        };
+        // The sky's first start wrote the world node after version 0: planned before it, the batch is stale.
+        let (kind, reason, now) = run(intent(1, 0, &weather(90)), 2);
+        assert_eq!(
+            (kind, reason),
+            (2, Value::Text(Name::new("edit.stale").unwrap()))
+        );
+        let (kind, reason, now) = run(intent(2, now, &weather(101)), 4);
+        assert_eq!(kind, 2, "a level of 101 is refused");
+        assert_eq!(
+            reason,
+            Value::Text(Name::new("edit.weather-level").unwrap())
+        );
+        let (kind, _, _) = run(intent(3, now, &weather(90)), 6);
+        assert_eq!(kind, 1, "the storm is set");
+        world.stop();
+        let mut live = initial;
+        let mut events = Vec::new();
+        for bytes in recover(&store.bytes()).unwrap().records {
+            if !recorder::is_input(&bytes) {
+                let part = replica::effects::Part::read(&bytes).unwrap();
+                for e in &part.effects {
+                    for ev in e.events.iter().flatten() {
+                        events.push((e.envelope.actor, ev.name.as_str().to_owned()));
+                    }
+                }
+                live.apply(&part).unwrap();
+            }
+        }
+        let tree = live.tree();
+        let node = tree.node(tree.root()).unwrap();
+        let f = node.fields();
+        assert_eq!(
+            f.get(&sky::F_WEATHER),
+            Some(&Value::Text(Name::new("souls:storm").unwrap()))
+        );
+        assert_eq!(f.get(&sky::F_RAIN), Some(&int(90)));
+        assert_eq!(
+            f.get(&sky::F_WEATHER_NEXT),
+            Some(&int(until)),
+            "the next change is the creator's end"
+        );
+        let due: Vec<_> = tree
+            .timers()
+            .iter()
+            .filter(|(_, t)| t.name.as_str() == sky::T_WEATHER)
+            .map(|(_, t)| t.due)
+            .collect();
+        assert_eq!(due, [until], "one weather timer, due at the end");
+        assert_eq!(
+            events.last().map(|(_, n)| n.as_str()),
+            Some(sky::EV_WEATHER),
+            "E6's weather event follows the creator's record"
+        );
     }
 
     #[test]

@@ -24,6 +24,7 @@ import { mountOwnerBox } from '../owner/box.ts';
 import { arrive } from '../worlds/arrive.ts';
 import { mountArrival } from '../arrival/card.ts';
 import { WorldSky } from '../sky/sky.ts';
+import { Lightning } from '../sky/lightning.ts';
 import { tickWater } from '../water/water.ts';
 import { installNightLighting, nightPools, paintNightSources, setNightStrength } from './night.ts';
 import { installCapture } from '../capture/capture.ts';
@@ -86,6 +87,9 @@ const sky = new WorldSky(scene, hemi, sun); // V19: sky, daylight and rain from 
 const cam = new FreeCamera(canvas);
 const world = new WorldView();
 scene.add(world.group);
+const lightning = new Lightning((x, z) => world.heightAt(x, z)); // #3695: a creator's strike, its bolt and thunder
+scene.add(lightning.group);
+(globalThis as { lightning?: Lightning }).lightning = lightning;
 // #3603: the replica's courseAt, loaded on this thread only when a node with a course (a rowing punt) arrives.
 world.onCourse = () => void import('replica').then(async (r) => { await r.default(); world.courseAt = r.courseAt; }, (e) => console.warn('courses stand still:', e));
 const clock = new PlaybackClock();
@@ -207,6 +211,7 @@ renderer.setAnimationLoop((now) => {
   const t = history ? history.step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil)) : worldNow === null ? null : (near ?? clock).step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
   director.update(Math.min(100, dt), t);
   sun.position.copy(sun.target.position).addScaledVector(sky.update(t ?? 0, cam.camera), 400);
+  lightning.update(t === null ? null : sky.recordAt(t)?.strike ?? null, t, cam.camera, dt / 1000, sky.dome.uniforms.uFlash.value);
   tickWater((t ?? 0) / 1e6);
   fx?.update(t === null ? null : t / 1e6, cam.camera.position);
   setNightStrength(sky.state.daylight);
