@@ -2838,6 +2838,23 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
         std::thread::sleep(Duration::from_secs(1));
     }
     println!("the public stream: the punt's courses {streamed:?}");
+    // The rider's hand-offs in the public stream: into the punt's slot 1 at boarding, out onto the ground at the plank.
+    use replica::pose::Owner;
+    let samples = public_samples(&dir);
+    let into = samples.iter().position(|(_, h)| {
+        h.to == Owner::Slot && h.pose.frame.node == punt && h.pose.frame.slot == Some(1)
+    });
+    let out = into.and_then(|i| {
+        samples[i..]
+            .iter()
+            .position(|(_, h)| h.from == Owner::Slot && h.to == Owner::Mover)
+            .map(|o| i + o)
+    });
+    println!(
+        "the public stream: the rider into the punt {:?}, out of it {:?}",
+        into.map(|i| samples[i].1),
+        out.map(|i| samples[i].1)
+    );
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(ashore, Err("not-aboard".to_owned()));
@@ -2875,4 +2892,13 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     );
     assert_eq!(logged[1].2, 2, "the stop: one station, where it is, held");
     assert_eq!(streamed, logged, "the public stream carries every course");
+    let out = out.expect("the public stream carries the rider into slot 1 and out of it");
+    let h = samples[out].1;
+    assert_eq!(h.pose.frame.node, im.nodes["ground"], "out onto the ground");
+    let (x, z) = (
+        h.pose.position.x as f64 / 1e6,
+        h.pose.position.z as f64 / 1e6,
+    );
+    let d = ((x - px).powi(2) + (z - pz).powi(2)).sqrt();
+    assert!(d < 1.5, "out at the plank: {d:.2} m from it");
 }
