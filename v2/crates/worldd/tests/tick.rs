@@ -890,3 +890,60 @@ fn k18b_a_free_running_world_with_its_planner_replays_in_lockstep() {
     );
     assert_eq!(h1, h2, "and writes the same effects");
 }
+
+/// #3765: an intent with `params` (its field 4) set.
+fn intent_params(body: Id, sequence: u64, verb: &str, params: Vec<(u64, Value)>) -> Vec<u8> {
+    let Value::Map(mut m) = decode(&intent(body, sequence, verb, None, None))
+        .unwrap()
+        .value
+    else {
+        panic!("an intent")
+    };
+    m.insert(4, Value::Map(params.into_iter().collect()));
+    encode(&Value::Map(m)).unwrap()
+}
+
+/// #3765 A4: malformed words of each kind (an act's verb, a say's, form arguments, an edit's, a set-down's) are
+/// refused by name at intake; the world keeps running, every record it wrote reads back and it restarts cleanly.
+#[test]
+fn malformed_words_are_refused_and_the_world_restarts() {
+    let p = pairs();
+    let (body, lamp) = (p[1].0, p[1].1);
+    let text = |s: &str| Value::Text(name(s));
+    let arg = |k: &str, v: Value| Value::Array(vec![Value::Bytes(k.as_bytes().to_vec()), v]);
+    let words = Value::Map(BTreeMap::from([(23, Value::Bytes(b"hello".to_vec()))]));
+    let malformed = [
+        // The world bricked on Saturn: a thin client's act word with an `undefined` in it.
+        intent(body, 1, "sit_down:undefined", Some(chair()), None),
+        intent_params(body, 2, "speech:say", vec![(1, words), (2, text("Loud:Voice"))]),
+        intent_params(body, 3, "r2:switch_on", vec![(1, Value::Array(vec![arg("thing", text("lamp:Main_1"))]))]),
+        intent_params(body, 4, "souls:edit", vec![(1, text("eden:Chair"))]),
+        intent_params(body, 5, "hands:set-down", vec![(1, text("place:on_floor:x"))]),
+    ];
+    let store = Mem::with(Vec::new());
+    let w = start(store.clone(), false);
+    let asked: Vec<_> = malformed
+        .into_iter()
+        .enumerate()
+        .map(|(k, b)| at(&w, 2 + k as i64, b))
+        .collect();
+    let switch = at(&w, 9, intent(body, 6, "r2:switch_on", Some(lamp), None));
+    let ran = run_to(&w, 60);
+    for (k, rx) in asked.iter().enumerate() {
+        assert_eq!(
+            answer(rx),
+            Err("intent.text-not-a-name".to_owned()),
+            "malformed word {k} is refused by name"
+        );
+    }
+    assert!(answer(&switch).is_ok(), "the world goes on: a later act lands");
+    assert!(ran.tick >= 60, "the clock ran on");
+    let log = bytes(&store);
+    for r in recover(&log).unwrap().records.iter().filter(|r| !recorder::is_input(r)) {
+        Part::read(r).expect("every record the world wrote reads back");
+    }
+    let before = last_state(&log);
+    let k = start(Mem::with(log), false);
+    let restarted = run_to(&k, 0);
+    assert_eq!(restarted.state.to_vec(), before, "it restarts with its last state");
+}
