@@ -8,6 +8,9 @@
 //   <form>   each of the kind's forms, with `who` may start it and the parameters it `takes` (their schema as the
 //            entry writes it: `field`/`value` with `of`, `thing`, `slot`, `part`, `count`, `duration`, `text`, ...).
 //            A parameter with a `select` is chosen by the world when it is left out.
+//   steer, stop, land   a thing that moves on a course (a punt, #3603) with seats for bodies: the engine's own verbs
+//            `carrier:steer`, `carrier:stop` and `carrier:land` for a rider seated in it. steer takes the point to row
+//            toward, `x=<m> z=<m>` in the world's metres; land rows home, and a point given must be by its home.
 // Each carries `act`, its word for `act`, and `usage`, the whole command with each parameter as `<name>=<...>`.
 
 import { find } from '../find/find.mjs';
@@ -25,8 +28,25 @@ function slotNames(entry, form) {
 /** A parameter's placeholder in `usage`: its choices when the entry lists them, else its type. */
 const placeholder = (t) => (Array.isArray(t?.of) ? t.of.join('|') : t?.type === 'thing' ? 'id' : String(t?.type ?? 'value'));
 
-/** The offers of thing `id`, whose copy row is `row`, from kind entry `entry` (absent when none is held). */
-export function offersOf(id, entry) {
+/** The engine's verbs for a rider of a thing on a course (#3603), as `act`'s words: `carrier:<verb>:<id>`. */
+export const CARRIER_VERBS = Object.freeze(['steer', 'stop', 'land']);
+const METRES = { type: 'metres' };
+
+/** A rider's offers on thing `id` that moves on a course: steer, stop and land. */
+function carrierOffers(id) {
+  const of = (name, params, usage) => ({ name, act: `carrier:${name}:${id}`, who: 'rider', ...(params ? { params } : {}), usage: ['act', `carrier:${name}:${id}`, ...usage].join(' ') });
+  return [
+    of('steer', { x: METRES, z: METRES }, ['x=<m>', 'z=<m>']),
+    of('stop', null, []),
+    of('land', { x: { ...METRES, optional: true }, z: { ...METRES, optional: true } }, ['[x=<m> z=<m>]']),
+  ];
+}
+
+/**
+ * The offers of thing `id` from kind entry `entry` (absent when none is held). `moving`: the copy holds a course on
+ * it, so a body seated in it may steer it (#3603).
+ */
+export function offersOf(id, entry, { moving = false } = {}) {
   const out = [{ name: 'walk', act: `walk:${id}`, usage: `act ${id}` }];
   const forms = entry?.forms ?? {};
   for (const posture of ['sit', 'lie']) {
@@ -48,6 +68,7 @@ export function offersOf(id, entry) {
     const words = Object.entries(params).map(([n, t]) => (t.optional || t.default !== undefined ? `[${n}=<${placeholder(t)}>]` : `${n}=<${placeholder(t)}>`));
     out.push({ name, act: `${name}:${id}`, form: name, who: f?.who ?? 'anyone', ...(Object.keys(params).length ? { params } : {}), usage: ['act', `${name}:${id}`, ...words].join(' ') });
   }
+  if (moving && slotNames(entry, 'sit').length) out.push(...carrierOffers(id));
   return out;
 }
 
@@ -76,6 +97,8 @@ function distance(a, b) {
 /** The offer `action` names: its name, its act word (`brush:<id>`), or a namespaced verb (`eden:brush`); or null. */
 export function offerNamed(offers, action) {
   const a = String(action ?? '');
+  const byAct = offers.find((o) => o.act === a);
+  if (byAct) return byAct;
   const name = a.includes(':') ? (offers.some((o) => o.act === a) ? a.slice(0, a.lastIndexOf(':')) : a.slice(a.indexOf(':') + 1)) : a;
   return offers.find((o) => o.name === name) ?? null;
 }

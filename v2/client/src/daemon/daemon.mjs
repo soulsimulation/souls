@@ -750,6 +750,8 @@ function towardOf(req) {
   return { to, verb: `${NS}:${form}`, target: me.id, ...(takes(form).includes(arg) ? { args: `${arg}=${them.id}` } : {}) };
 }
 
+/** The engine's verbs for a rider of a thing on a course (#3603): `carrier:steer|stop|land:<id>`. */
+const CARRIER = /^carrier:(steer|stop|land)$/;
 const MOVES = new Set(['walk', 'sit', 'lie', 'rise']); // worldd's bodies take these (I4b); they are not checked as forms
 
 /**
@@ -765,6 +767,8 @@ function actsOf(words) {
     const k = w.lastIndexOf(':'), tail = w.slice(k + 1), arg = /^([A-Za-z0-9_]+)=(.*)$/.exec(w);
     if (out.length && (ID.test(w) || arg)) {
       const c = out.at(-1), args = (c.args ??= {});
+      // #3603: a carrier verb's point is in metres, a decimal allowed.
+      if (arg && c.carrier) { c.args[arg[1]] = /^-?\d{1,7}(\.\d{1,6})?$/.test(arg[2]) ? Number(arg[2]) : arg[2]; continue; }
       // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`).
       if (arg) { args[arg[1]] = /^-?\d{1,15}$/.test(arg[2]) ? Number(arg[2]) : arg[2]; continue; }
       kinds ??= kindsIn(join(home, 'kinds'));
@@ -774,6 +778,7 @@ function actsOf(words) {
       if (!name) throw Object.assign(new Error(`name it: ${c.form ?? c.verb} <name>=${w}`), { code: 'act-arg-unnamed' });
       args[name] = w;
     } else if (ID.test(w)) out.push({ verb: `${NS}:walk`, this: w });
+    else if (k > 0 && ID.test(tail) && CARRIER.test(w.slice(0, k))) out.push({ verb: w.slice(0, k), this: tail, carrier: true });
     else if (k > 0 && ID.test(tail)) {
       const verb = w.slice(0, k), form = verb.replace(/^.*:/, '');
       out.push({ verb: verb.includes(':') ? verb : `${NS}:${verb}`, this: tail, ...(MOVES.has(form) ? {} : { form }) });
@@ -912,6 +917,18 @@ async function answer(req) {
       }
       // Each candidate on its own target (C10), else all on `target`; the first one's thing arguments in parameter 1.
       const target = Array.isArray(req.acts) ? keep.map((c) => c.this ?? '').join(' ') : req.target;
+      // #3603: a carrier verb's point goes as parameter 1, [x, z] in µm; a point half given is refused here.
+      if (keep[0].carrier) {
+        const { x, z, ...rest } = keep[0].args ?? {};
+        const extra = Object.keys(rest);
+        if ((x === undefined) !== (z === undefined) || [x, z].some((v) => v !== undefined && typeof v !== 'number') || extra.length) {
+          return closing({ ok: false, code: 'steer-needs-a-point', sent: false, detail: `${keep[0].verb} takes x=<m> z=<m>, in the world's metres${extra.length ? `, not ${extra.join(', ')}` : ''}` }, null, { now: true });
+        }
+        const params = x === undefined ? req.params : { ...(req.params ?? {}), 1: [Math.round(x * 1e6), Math.round(z * 1e6)] };
+        const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target: keep.map((c) => c.this ?? '').join(' '), params, basis, expiry: req.expiry });
+        if (req.for !== undefined) serving.set(sequence, req.for);
+        return closing({ ok: true, sequence, sent, basis: sequenceOf(basis) }, null, { now: true });
+      }
       // A number goes as a number, so a form's arguments then go as parameter 1's pairs (#3686).
       const pairs = Object.entries(keep[0].args ?? {}), counted = pairs.some(([, v]) => typeof v === 'number');
       const args = counted ? undefined : pairs.map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
@@ -1039,7 +1056,7 @@ function thingOf(id) {
     return { ok: false, code: 'inspect.unknown-id', detail: `${id ?? '(none)'} is not an id this Soul's copy holds; ids come from look and find`, did_you_mean: nearestIds(rows.values(), id) };
   }
   const kinds = kindsIn(join(home, 'kinds')), entry = kinds[row.kind];
-  return { ok: true, row, entry, offers: offersOf(row.id, entry), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
+  return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
 }
 
 /** A field the copy holds as bytes (hex), shown as its text when that is plain printable text. */
