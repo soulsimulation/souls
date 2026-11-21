@@ -1871,7 +1871,10 @@ fn a_soul_walks_to_a_bed_lies_in_it_and_gets_up() {
         // The log is written behind the clock: wait (at most 10 s) for the lie's frame.
         let at = std::time::Instant::now();
         let mut frame = last_frames(&dir).into_values().next();
-        while lay.is_ok() && frame.map(|f| f.0) != Some(bed) && at.elapsed() < Duration::from_secs(10) {
+        while lay.is_ok()
+            && frame.map(|f| f.0) != Some(bed)
+            && at.elapsed() < Duration::from_secs(10)
+        {
             std::thread::sleep(Duration::from_millis(250));
             frame = last_frames(&dir).into_values().next();
         }

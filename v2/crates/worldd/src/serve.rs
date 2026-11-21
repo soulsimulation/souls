@@ -791,7 +791,9 @@ fn out_of_passage(
             else {
                 continue;
             };
-            let Some(p) = view.stand_near(floor, Vec3::new(at.x + off.x, at.y, at.z + off.z), 1, None) else {
+            let Some(p) =
+                view.stand_near(floor, Vec3::new(at.x + off.x, at.y, at.z + off.z), 1, None)
+            else {
                 continue;
             };
             let gap = sim::spots::flat(p, at);
