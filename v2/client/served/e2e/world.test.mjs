@@ -321,6 +321,7 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   assert.ok(crate, 'the crate is found by its words');
   const took = await act(A, `take:${crate.id}`);
   assert.ok(accepted(took.answer), `A takes an apple from the crate: ${JSON.stringify(took.answer)}`);
+  console.log(`e2e: (e) the take: ${JSON.stringify(took.answer)}; A's apples ${JSON.stringify(await apples(A))}; A's look ${JSON.stringify(await A.cli('look')).slice(0, 1500)}`);
   const apple = (await waitFor("the apple in A's hand in B's copy", async () => (await apples(B)).at(0))).id;
   const stump = (await A.cli('find', 'stump')).found.find((r) => r.kind?.startsWith('eden:hollow_stump'));
   assert.ok(stump, 'the stump is found by its words');
