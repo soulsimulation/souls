@@ -1051,6 +1051,7 @@ impl Acts {
             // intent the forms already hold is its run or its receipt, never checked again.
             if !self.forms.known(intent.id) {
                 let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
+                let t0 = std::time::Instant::now();
                 let checked =
                     sim::forms::may(tree, &audiences, &|_| None, body, *node, &entry, form)
                         .and_then(|()| {
