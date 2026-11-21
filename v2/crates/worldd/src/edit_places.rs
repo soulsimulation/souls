@@ -89,13 +89,13 @@ impl Projection {
             {
                 // The entry the thing names in field 27 (a Mars seat borrows `eden:chair`), else its kind's: a moved
                 // seat keeps its places as start-up gave them, at its own slots.
-                let named = import_eden::entry_name(n.kind().as_str(), n.fields());
-                if let Some(entry) = entries.get(named) {
+                let entry_kind = import_eden::entry_name(n.kind().as_str(), n.fields());
+                if let Some(entry) = entries.get(entry_kind) {
                     let slots = import_eden::body_slots_of(
                         thing,
                         n.kind().as_str(),
                         n.fields(),
-                        &[(named.to_owned(), entry.clone())],
+                        &[(entry_kind.to_owned(), entry.clone())],
                     );
                     for slot in slots {
                         let Some((floor, point, facing)) =
