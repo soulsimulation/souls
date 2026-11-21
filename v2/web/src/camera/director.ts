@@ -29,10 +29,12 @@ export function findSoul(souls: Iterable<{ id: string; name: string | null }>, t
 }
 
 /** The named place a typed name means, when no Soul does (#3574): the same rule over the places' public names, a
- *  hyphen or underscore read as a space (Eden's names are written `land-west-lake`). */
-export function findPlace(nodes: Iterable<Pick<NodeRec, 'id' | 'placeName'>>, typed: string): string | null {
+ *  hyphen or underscore read as a space (Eden's names are written `land-west-lake`), an area with an outline before
+ *  a thing of the same name. */
+export function findPlace(nodes: Iterable<Pick<NodeRec, 'id' | 'placeName' | 'outline'>>, typed: string): string | null {
   const words = (t: string) => t.replace(/[-_]+/g, ' ');
-  return findSoul([...nodes].map((n) => ({ id: n.id, name: n.placeName ? words(n.placeName) : null })), words(typed));
+  const named = [...nodes].filter((n) => n.placeName).sort((a, b) => Number(!a.outline?.length) - Number(!b.outline?.length));
+  return findSoul(named.map((n) => ({ id: n.id, name: words(n.placeName!) })), words(typed));
 }
 
 /** Where a named place is seen, world m: the middle of its outline (world mm) at its own height; null without one. */
