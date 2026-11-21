@@ -156,7 +156,7 @@ pub const APPROACH_REACH: i64 = 600_000;
 /// floor the body stands on ([`short_of`]), µm: a door's handle stands in its doorway, where no body stops, so the
 /// walk aims at the clear ground before the door on the body's own side, as today's game finds clear ground by the
 /// hand's point.
-pub const APPROACH_SHORT: i64 = 500_000;
+pub const APPROACH_SHORT: i64 = 300_000;
 
 /// How far from a seat's stand point the place a walk before a `sit` or `lie` step goes to may be (C17, #3453), µm:
 /// the sit's and the lie's own reach (B2's data, a body's 0.6 m) less how near the walk comes to its end
