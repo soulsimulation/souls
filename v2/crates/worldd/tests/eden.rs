@@ -2993,11 +2993,12 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
             ("e_68df95e8", "switch_off", "done"),
         ],
     ));
-    // A cottage's door, from outside: its doorway is the only ground within reach of it.
+    // A cottage's inner door (its bedroom's): the Soul walks in to the bedroom's rug, then uses the door from there.
     wrong.extend(served_family(
         "-99.0,-93.0",
         "c25cottage",
         &[
+            ("e_7ff72484", "walk", "done"),
             ("e_00385aae", "knock", "done"),
             ("e_00385aae", "open", "done"),
             ("e_00385aae", "close", "done"),
