@@ -44,8 +44,11 @@
 //!   ends `walk.blocked` in that tick, its body's driver released, and the act's ending entry names the nearest thing
 //!   or edge in its way ([`sim::walk::stall::blocker`]).
 //!
-//! Not here: R2's needs checked again at commit (the checkers read bodies from the tree, which does not hold them
-//! yet); a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
+//! - **Needs at commit** (#3888). After who may, every need of the form is decided by R2's one evaluator on the
+//!   world's own state, links, seats and hands included ([`crate::needs`]): an unmet need is refused by its reason's
+//!   name and index before any walk or effect. Reach is the move's own, measured at its start (C22).
+//!
+//! Not here: a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
 //! nodes); resuming a run after a restart.
 
 use replica::host::WalkPlan;
@@ -1248,6 +1251,39 @@ impl Acts {
                     continue;
                 }
             };
+            // Who may, then every need of the form, decided by the world on its own state (#3888): an act whose
+            // intent the forms already hold is its run or its receipt, never checked again.
+            if !self.forms.known(intent.id) {
+                let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
+                // The binder's refusals and who may's come first, from the run's own path below: a form the binder or who
+                // may refuses is left to it, so its refusal is the same as before.
+                let bound = match sim::forms::bind_stages(&entry, form) {
+                    Ok(Some(_)) => true,
+                    Ok(None) => skills::form_runner::bind_with(&entry, form, &all)
+                        .and_then(|_| skills::form_runner::bind_effects_args(&entry, form, &all))
+                        .is_ok(),
+                    Err(_) => false,
+                };
+                let permitted = bound
+                    && sim::forms::may(tree, &audiences, &|_| None, body, *node, &entry, form)
+                        .is_ok();
+                if permitted
+                    && let Err(e) = crate::needs::check(
+                        tree,
+                        bodies.as_deref(),
+                        &self.kinds,
+                        body,
+                        *node,
+                        &entry,
+                        form,
+                        &all,
+                        now,
+                    )
+                {
+                    first.get_or_insert(e);
+                    continue;
+                }
+            }
             // A form's code hatch (F8, #3713) checks the act before any walk, and its answered fields are written
             // with the form's effects, in place of the form's own sets of those fields.
             let hatched = match self.hatch_sets(tree, *node, &entry, form, &all) {
