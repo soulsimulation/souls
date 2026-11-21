@@ -269,6 +269,7 @@ impl Client {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         let bytes = encode(&i.to_value()).unwrap();
         self.0

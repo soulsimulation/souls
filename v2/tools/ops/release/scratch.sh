@@ -107,7 +107,7 @@ EOF
     (cd "$m/data/worlds" && unit "$m" "worldd@$name" env WORLDS_ROOT=. "WORLDD_SOCKET=../run/$name.sock" \
       "$m/lib/supervisor" launch "$name")
     (cd "$m/data/worlds" && unit "$m" "souls-gateway@$name" "$m/lib/gatewayd" --listen 127.0.0.1:0 \
-      --world "../run/$name.sock" --tokens "worlds/$name/tokens" --build 1220)
+      --world "../run/$name.sock" --tokens "worlds/$name/tokens" --build 1220 --entries "worlds/$name/entries")
     echo "scratch: Eden world $name seeded, pinned to ${h:0:16}… (before), its unit and gateway running"
   done
 }
