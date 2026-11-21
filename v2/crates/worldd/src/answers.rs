@@ -870,8 +870,6 @@ enum CheckJob {
     Reprepare(Box<(Id, Checked, Vec<sim::controller::BuildBasis>)>),
     /// B12b: kept surfaces the clock is done with, dropped here rather than on the clock.
     Release(Vec<sim::walk::town::RebindSurfaces>),
-    /// A Soul's set-down (#3604), checked on the same town with the engine's rules.
-    SetDown(crate::setdown::Ask),
 }
 
 #[derive(Clone, PartialEq)]
@@ -4487,31 +4485,6 @@ fn edit_checker(
                         let result = request.check(&copy);
                         if events
                             .send(Event::Worn(Box::new((request, result))))
-                            .is_err()
-                        {
-                            break;
-                        }
-                        continue;
-                    }
-                    CheckJob::SetDown(a) => {
-                        let copy =
-                            publisher.wait_for(a.planned.max(edited), Duration::from_secs(1));
-                        let ground = buildsafe::open_ground(&copy);
-                        let checked = match &mut set_downs {
-                            Some((rules, mint)) => {
-                                let latest = walkers.latest();
-                                let souls = buildsafe::souls(&copy, &kinds);
-                                let bodies = buildsafe::judged(souls.clone(), &latest);
-                                let t = town.on(&copy, ground, &committed);
-                                crate::setdown::check(&a, &copy, t, rules, mint, &bodies, souls)
-                            }
-                            None => Err(Refusal {
-                                name: "setdown-off",
-                                detail: String::new(),
-                            }),
-                        };
-                        if events
-                            .send(Event::SetDown(Box::new((a.id, checked))))
                             .is_err()
                         {
                             break;
