@@ -6,7 +6,8 @@
 //
 // Distance detail (C12, #3683), today's WorldDistanceDetail rules per part: a part whose bounding sphere would be
 // smaller than `minRadiusPx` CSS pixels of radius is not drawn, and a small part farther than `shadowNear +
-// shadowPerMetre·radius` metres is drawn into the same model's batch that casts no shadow. A building's window frames
+// shadowPerMetre·radius` metres is drawn into the same model's batch that casts no shadow (instanced models; a one-off
+// shape keeps its shadow). A building's window frames
 // and fittings go first, its walls last, as today. A part moves between its batches (near, far, hidden) only when the
 // eye has moved or things changed, with a margin so it does not flicker at the line.
 import * as THREE from 'three';
@@ -23,11 +24,16 @@ const OFF = new THREE.Color(0.22, 0.22, 0.22), ON = new THREE.Color(1, 1, 1), WH
 export const NEAR = 0, FAR = 1, HIDDEN = 2;
 /** The eye moves this far (m) before parts are sorted into bands again; and they are, at least every PASS_FRAMES. */
 const MOVE = 1, PASS_FRAMES = 60, MIN_GAP = 4;
+/** Parts sorted a frame: a pass over Eden's ~10,000 parts is spread over a few frames (about 7 ms at once on a laptop,
+ *  four times that on a phone). */
+const PER_FRAME = 2500;
 /** Where one part of one thing is drawn: its batch and index (null and -1 while hidden), and what it needs to be
  *  drawn again: its geometry, material and matrix, and its world sphere for the bands. */
 type Slot = {
   batch: Batch | null; index: number; glow: boolean; band: number;
   part: Part | null; matrix: THREE.Matrix4; centre: THREE.Vector3; radius: number;
+  /** Its thing; `gone` once the thing has left or been redrawn. */
+  thing: Thing; gone: boolean;
 };
 type Thing = { id: string; model: string | null; matrix: THREE.Matrix4; boxes: THREE.Matrix4[]; slots: Slot[]; on: boolean };
 
@@ -168,6 +174,13 @@ export class ThingLayer {
   private frame = 0;
   private lastPass = -Infinity;
   private changed = false;
+  /** Every part, for the passes (rebuilt when things change), and how far the pass under way has got (-1: none). */
+  private all: Slot[] = [];
+  private allDirty = false;
+  private cursor = -1;
+  private count = [0, 0, 0];
+  private moved = 0;
+  private passMs = 0;
   /** The last band pass: parts in each band, parts moved, CPU ms. */
   readonly stats = { near: 0, far: 0, hidden: 0, moved: 0, cpuMs: 0 };
   private readonly users = new Map<string, Set<Thing>>();
@@ -215,6 +228,9 @@ export class ThingLayer {
     const px = (s.radius * k) / d;
     if (px < o.minRadiusPx * (s.band === HIDDEN ? 1.15 : 1)) return HIDDEN;
     const line = o.shadowNear + o.shadowPerMetre * s.radius;
+    // A one-off shape stays in its casting batch: a second, shadowless `BatchedMesh` per material stalled the GPU for
+    // about 200 ms every few frames on a phone (measured, #3683); only instanced models get the FAR band.
+    if (s.part && (this.share.get(s.thing.model!) ?? 0) < SHARED) return NEAR;
     return s.radius < o.shadowMaxRadius && d > line * (s.band === FAR ? 0.95 : 1) ? FAR : NEAR;
   }
 
@@ -264,6 +280,7 @@ export class ThingLayer {
   private clear(t: Thing): void {
     for (const s of t.slots) {
       this.unplace(s);
+      s.gone = true;
       if (!s.part) this.boxSlots--;
     }
     t.slots = [];
@@ -308,7 +325,8 @@ export class ThingLayer {
     const g = part?.geometry ?? this.boxGeometry;
     if (!g.boundingSphere) g.computeBoundingSphere();
     const centre = g.boundingSphere!.center.clone().applyMatrix4(matrix), radius = g.boundingSphere!.radius * matrix.getMaxScaleOnAxis();
-    const s: Slot = { batch: null, index: -1, glow, band: NEAR, part, matrix, centre, radius };
+    const s: Slot = { batch: null, index: -1, glow, band: NEAR, part, matrix, centre, radius, thing: t, gone: false };
+    this.allDirty = true;
     s.band = this.bandOf(s, k);
     if (!part) this.boxSlots++;
     t.slots.push(s);
@@ -317,20 +335,35 @@ export class ThingLayer {
 
   /** Sorts every part into its band for the eye now; moves only those whose band changed. */
   private pass(): void {
-    const t0 = performance.now(), k = this.pixels();
-    const n = [0, 0, 0];
-    let moved = 0;
-    for (const t of this.things.values()) for (const s of t.slots) {
+    if (this.cursor < 0) {
+      if (this.allDirty) {
+        this.all = [];
+        for (const t of this.things.values()) for (const s of t.slots) this.all.push(s);
+        this.allDirty = false;
+      }
+      this.cursor = 0;
+      this.count = [0, 0, 0];
+      this.moved = 0;
+      this.passMs = 0;
+    }
+    const t0 = performance.now(), k = this.pixels(), all = this.all, end = Math.min(all.length, this.cursor + PER_FRAME);
+    for (let i = this.cursor; i < end; i++) {
+      const s = all[i];
+      if (s.gone) continue;
       const band = this.bandOf(s, k);
       if (band !== s.band) {
         this.unplace(s);
         s.band = band;
-        this.place(t, s);
-        moved++;
+        this.place(s.thing, s);
+        this.moved++;
       }
-      n[s.band]++;
+      this.count[s.band]++;
     }
-    Object.assign(this.stats, { near: n[NEAR], far: n[FAR], hidden: n[HIDDEN], moved, cpuMs: performance.now() - t0 });
+    this.cursor = end;
+    this.passMs += performance.now() - t0;
+    if (end < all.length) return;
+    this.cursor = -1;
+    Object.assign(this.stats, { near: this.count[NEAR], far: this.count[FAR], hidden: this.count[HIDDEN], moved: this.moved, cpuMs: this.passMs });
   }
 
   /** Draws a thing from its model when it has arrived, as a box otherwise. */
@@ -364,7 +397,8 @@ export class ThingLayer {
       const first = !this.eye;
       this.eye = (this.eye ?? new THREE.Vector3()).copy(eye);
       const since = this.frame - this.lastPass;
-      if (first || (since >= MIN_GAP && (this.changed || since >= PASS_FRAMES || this.passEye.distanceTo(eye) > MOVE))) {
+      if (this.cursor >= 0) this.pass();
+      else if (first || (since >= MIN_GAP && (this.changed || since >= PASS_FRAMES || this.passEye.distanceTo(eye) > MOVE))) {
         this.passEye.copy(eye);
         this.lastPass = this.frame;
         this.changed = false;

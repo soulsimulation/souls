@@ -31,10 +31,13 @@ export type DistanceDetail = { minRadiusPx: number; shadowNear: number; shadowPe
 export const PHONE_DETAIL: DistanceDetail = Object.freeze({ minRadiusPx: 1.25, shadowNear: 24, shadowPerMetre: 14, shadowMaxRadius: 6 });
 export const DESKTOP_DETAIL: DistanceDetail = Object.freeze({ minRadiusPx: 1, shadowNear: 40, shadowPerMetre: 20, shadowMaxRadius: 6 });
 
-/** The detail for a tier; `?detail=0` turns it off (the measure's other arm). */
+/** The detail for a tier; `?detail=0` turns it off (the measure's other arm), and `?detailMinPx=` /
+ *  `?detailShadowNear=` tune it for measurements (today's `?phoneMinPx=` / `?phoneShadowNear=`). */
 export function detailFor(tier: QualityTier, search = ''): DistanceDetail | null {
-  if (new URLSearchParams(search).get('detail') === '0') return null;
-  return tier === 'phone' ? PHONE_DETAIL : DESKTOP_DETAIL;
+  const q = new URLSearchParams(search);
+  if (q.get('detail') === '0') return null;
+  const base = tier === 'phone' ? PHONE_DETAIL : DESKTOP_DETAIL, num = (k: string, d: number) => (q.has(k) && Number(q.get(k)) >= 0 ? Number(q.get(k)) : d);
+  return q.has('detailMinPx') || q.has('detailShadowNear') ? { ...base, minRadiusPx: num('detailMinPx', base.minRadiusPx), shadowNear: num('detailShadowNear', base.shadowNear) } : base;
 }
 
 /** The page's detail (browser only; null elsewhere, so tests choose their own). */

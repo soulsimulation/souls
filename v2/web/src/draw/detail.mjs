@@ -1,15 +1,16 @@
 // C12's measure (#3683), run by hand on hardware GL: the page as a phone sees it (390×844 CSS px, three device pixels,
-// touch, so the phone tier; the CPU slowed `throttle` times as today's phone measures were), at the page's own first
-// view (the crowd's middle from 55 m, Eden's busy square) with distance detail off (`detail=0`) and on, alternating,
+// touch, so the phone tier; the CPU slowed `throttle` times as today's phone measures were), looking over Eden's
+// old-town plaza (its busy square, `at` x,z m) from 70 m, with distance detail off (`detail=0`) and on, alternating,
 // `repeats` times each. Each arm waits until every model has arrived, then times `seconds` of frames. Prints a JSON
 // summary (no addresses or device names).
 //
-//   node v2/web/src/draw/detail.mjs '<page url with ?stream=…&models=…>' [seconds=20] [repeats=2] [throttle=4]
+//   node v2/web/src/draw/detail.mjs '<page url with ?stream=…&models=…&camera=free>' [seconds=20] [repeats=2] [throttle=4] [at=139,73] [arms]
 //
 // Playwright and the hardware GL arguments come from tools/playtest/lib/platform.mjs.
 import { browsersPath, launchArgs, resolvePlaywright } from '../../../../tools/playtest/lib/platform.mjs';
 
-const [url, seconds = '20', repeats = '2', throttle = '4'] = process.argv.slice(2);
+const [url, seconds = '20', repeats = '2', throttle = '4', at = '139,73', armsArg] = process.argv.slice(2);
+const [ax, az] = at.split(',').map(Number);
 if (!url) throw new Error('usage: node detail.mjs <page url> [seconds] [repeats] [throttle]');
 const pw = resolvePlaywright();
 if (!pw) throw new Error('no Playwright');
@@ -26,8 +27,12 @@ async function arm(name, extra) {
   await page.goto(url + extra);
   await page.waitForFunction(() => {
     const v = globalThis.v2, l = v?.things?.layer;
-    return v && /playing/.test(document.getElementById('status').textContent) && v.world.extent && l && l.loaded > 0 && l.settled;
+    return v && v.world.extent && l && l.loaded > 0 && l.settled;
   }, null, { timeout: 300_000, polling: 500 });
+  await page.evaluate(([x, z]) => {
+    const v = globalThis.v2, p = v.cam.camera.position.clone().set(x, v.world.heightAt(x, z) ?? 0, z);
+    v.cam.look(p, 0.6, -0.45, 70);
+  }, [ax, az]);
   const cdp = await ctx.newCDPSession(page);
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(throttle) });
   await page.waitForTimeout(3000);
@@ -66,6 +71,8 @@ async function arm(name, extra) {
 }
 
 const runs = [];
-for (let i = 0; i < Number(repeats); i++) for (const [name, extra] of [['off', '&detail=0'], ['on', '']]) runs.push(await arm(name, extra));
+// Arms: `off`, `on`, or `name=query` pairs separated by `;` (e.g. `noshadowband=&detailShadowNear=100000`).
+const arms = armsArg ? armsArg.split(';').map((a) => [a.split('=')[0], a.slice(a.indexOf('=') + 1)]) : [['off', '&detail=0'], ['on', '']];
+for (let i = 0; i < Number(repeats); i++) for (const [name, extra] of arms) runs.push(await arm(name, extra));
 await browser.close();
-console.log(JSON.stringify({ measure: 'C12 phone frame time, busy square', gpu, seconds: Number(seconds), throttle: Number(throttle), runs }, null, 1));
+console.log(JSON.stringify({ measure: 'C12 phone frame time, busy square', at: [ax, az], gpu, seconds: Number(seconds), throttle: Number(throttle), runs }, null, 1));
