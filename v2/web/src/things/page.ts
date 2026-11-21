@@ -7,6 +7,7 @@ import type { NodeRec } from '../source/source.ts';
 import { STRUCTURE, type WorldView } from '../draw/world.ts';
 import { fetchIndex } from './models.ts';
 import { ThingLayer } from './things.ts';
+import type { Snapshotter } from './standins.ts';
 import { setWindowLife } from './windows.ts';
 import { civil, localAt, type SkyRecord } from '../sky/record.ts';
 
@@ -53,7 +54,7 @@ export function windowLife(t: number | null, record: SkyRecord | null): void {
 }
 
 /** The page's things, from its parameters; none (the world view's boxes stay) when no `models` root is given. */
-export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams): PageThings {
+export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams, snapshot?: Snapshotter): PageThings {
   const root = params.get('models');
   const none: PageThings = { layer: null, apply() {}, update() {}, follow() {}, night: windowLife };
   if (!root) return none;
@@ -88,7 +89,7 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
   fetchIndex(base.href).then((index) => {
     const copies = Number(params.get('copies') ?? 1);
     layer = new ThingLayer({
-      index, copies,
+      index, copies, snapshot,
       hideRoofs: params.has('hideRoofs') && params.get('hideRoofs') !== '0', cut: params.has('cut') ? Number(params.get('cut')) : null,
       fetch: (h) => fetch(new URL(`worlds/models/${h}.glb`, base)).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status))))),
     });
