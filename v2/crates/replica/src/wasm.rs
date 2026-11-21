@@ -898,6 +898,9 @@ struct Held {
 /// The copy's nodes, read from its roots down by the records' hashes.
 fn held(copy: &Copy) -> Result<BTreeMap<Id, Held>, String> {
     let mut out = BTreeMap::new();
+    // A door is in a doorway while the link its field 7 names is there (`edit::check` asks the tree the same): a door
+    // whose room was removed keeps a field naming a link that is gone (#3728).
+    let (mut live, mut names_link) = (BTreeSet::new(), BTreeMap::new());
     let mut todo: Vec<Vec<u8>> = copy.roots().values().cloned().collect();
     while let Some(h) = todo.pop() {
         let Some(bytes) = copy.record(&h) else {
@@ -922,15 +925,30 @@ fn held(copy: &Copy) -> Result<BTreeMap<Id, Held>, String> {
                 _ => None,
             }));
         }
-        let doorway = matches!(m.get(&6), Some(Value::Map(fields)) if fields.get(&7).is_some_and(|v| read_id(v).is_ok()));
+        if let Some(Value::Array(owned)) = m.get(&9) {
+            live.extend(owned.iter().filter_map(|p| match p {
+                Value::Array(p) => p.first().and_then(|l| read_id(l).ok()),
+                _ => None,
+            }));
+        }
+        if let Some(Value::Map(fields)) = m.get(&6)
+            && let Some(link) = fields.get(&7).and_then(|v| read_id(v).ok())
+        {
+            names_link.insert(id, link);
+        }
         out.insert(
             id,
             Held {
                 kind,
                 parent,
-                doorway,
+                doorway: false,
             },
         );
+    }
+    for (id, link) in names_link {
+        if let Some(h) = out.get_mut(&id) {
+            h.doorway = live.contains(&link);
+        }
     }
     Ok(out)
 }
