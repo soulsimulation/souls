@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { rowsOf } from '../brief/copy.mjs';
+import { publicWordsOf, rememberPublicWords, rowsOf } from '../brief/copy.mjs';
 import { encode } from '../history/day.mjs';
 import { blankAt, calendarItems, calendarList, heldBlank, noticeBoards, whatsOn, worldTimeOf } from './world.mjs';
 
@@ -101,4 +101,19 @@ test('A2: the notice boards that make blank notices, and the blank one a body ho
   assert.equal(noticeBoards(rows, kinds, text(3))[0].id, text(31), 'the board at the place comes first');
   assert.equal(heldBlank(items, rows, text(10))?.id, text(40));
   assert.equal(heldBlank(items, rows, text(11)), null);
+});
+
+test('A2: words beside a records answer reach the copy for public records only', () => {
+  const posted = copyOf([
+    { n: 1, kind: 'souls:world' },
+    { n: 50, kind: 'eden:calendar_entry', parent: 1, fields: [[n('start'), world(5)], [n('end'), world(65)], [n('words'), new Map([[21, id(6000)]])]],
+      links: [['eden:poster', 100, 50]] },
+  ]);
+  const record = (ref, everyone) => encode(new Map([[5, new Map([[1, everyone ? 1 : 2]])], [6, new Map([[n('words'), new Map([[21, id(ref)]])]])]]));
+  const frame = encode(new Map([[22, [record(6000, true), record(6001, false)]],
+    [27, [[id(6000), Buffer.from('Tea at four')], [id(6001), Buffer.from('a private line')], [id(6002), Buffer.from('named by no record')]]]]));
+  rememberPublicWords(posted, frame);
+  assert.deepEqual([...publicWordsOf(posted)], [[text(6000), 'Tea at four']], 'a private or unnamed reference gets no words');
+  const [item] = calendarItems(posted, kinds);
+  assert.equal(item.words, 'Tea at four');
 });

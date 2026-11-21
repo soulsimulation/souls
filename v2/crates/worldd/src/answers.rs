@@ -4321,6 +4321,7 @@ pub fn start<S: Storage + 'static>(
         kept,
         (cfg.lineage, zone, cfg.epoch),
         Arc::clone(&cfg.public_names),
+        Arc::clone(&text),
     )
     .map_err(io)?;
     let fresh = if cfg.checkpoints.is_some() {
