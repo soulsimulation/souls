@@ -212,6 +212,29 @@ fn chair() -> Place {
 }
 
 #[test]
+fn edited_places_retire_only_when_unoccupied_and_preserve_hold_indexes() {
+    let mut w = world(chair());
+    let original = w.slots.place(w.chair).unwrap().clone();
+    w.slots.replace(w.chair, Vec::new()).unwrap();
+    assert!(w.slots.place(w.chair).is_none());
+    w.slots.replace(w.chair, vec![original.clone()]).unwrap();
+    w.sit(&[0], &mv("souls:sit"))[0].1.as_ref().unwrap();
+    let body = w.bodies[0];
+    assert_eq!(
+        w.slots.replace(w.chair, Vec::new()).unwrap_err().name,
+        "place-taken"
+    );
+    assert_eq!(
+        w.slots.replace(w.chair, vec![original]).unwrap_err().name,
+        "place-taken"
+    );
+    assert_eq!(w.slots.holder_in(w.chair, 1), Some(body));
+    assert_eq!(w.slots.held_by(body), Some(w.chair));
+    assert_eq!(w.slots.held_place(body).unwrap().place.slot, 1);
+    assert_eq!(w.slots.places(), 1);
+}
+
+#[test]
 fn a_seat_takes_one_body_whatever_the_order() {
     let sit = mv("souls:sit");
     for order in [[0, 1], [1, 0]] {
