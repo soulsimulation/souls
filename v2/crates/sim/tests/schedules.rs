@@ -150,6 +150,7 @@ fn sent_by(expiry: Micros) -> (Intent, Sent) {
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     let i = Intent::read(&encode(&i.to_value()).unwrap()).unwrap();
     let s = Sent {

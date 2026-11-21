@@ -44,7 +44,7 @@ const procs = [];
 const token = (k) => `soul-${body(k)}.${randomBytes(32).toString('hex')}`;
 const tokens = [0, 1, 2].map(token); // A is body 0, B body 1, C body 2
 const env = { PATH: process.env.PATH, SOULS_HOME: home, SOULS_REPLICA_PKG: PKG };
-let relay, roots, gateway, rt;
+let relay, roots, arrivals, gateway, rt;
 const children = [];
 
 /** Keep only bounded child diagnostics; redact the fixture's paths and addresses before reporting them. */
@@ -152,8 +152,9 @@ let A, C;
 before(async () => {
   const world = join(dir, 'w.sock'), list = join(dir, 'tokens.txt');
   roots = join(dir, 'roots.txt');
+  arrivals = join(dir, 'arrivals.txt');
   writeFileSync(list, tokens.map((t) => `${t.split('.')[0]} ${createHash('sha256').update(t).digest('hex')}\n`).join(''));
-  tracked(WORLDD, ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1', '--roots', roots, '--rooms', '1', '--bodies', '3', '--items', '0', '--no-measures']);
+  tracked(WORLDD, ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1', '--roots', roots, '--arrivals', arrivals, '--rooms', '1', '--bodies', '3', '--items', '0', '--no-measures']);
   await waitFor(() => { try { return statSync(world).isSocket(); } catch { return false; } });
   const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', world, '--tokens', list, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
   gateway = `ws://${addr}/v2/ws`;
@@ -222,11 +223,20 @@ test('R9b A2: a reflex fires on another Soul\'s event in the item that brings it
   const answers = events.filter((e) => e.kind === 'answer');
   assert.ok(answers.length === 1 && answers[0].answer === 1 && !answers[0].reason, JSON.stringify(answers));
   // B says a line itself: the rule never fires on its own event.
-  assert.equal((await ask({ op: 'say', words: 'and to you' })).ok, true);
+  const own = await ask({ op: 'say', words: 'and to you' });
+  assert.equal(own.ok, true);
   await sleep(1000);
   const list = await ask({ op: 'reflex' });
   assert.equal(firings.length, 1, JSON.stringify(firings));
   assert.equal(list.reflexes[0].fired, 1);
+  // #3764: the world took the reflex's intent marked as one, and B's own say (its agent's act) and A's unmarked.
+  const lines = readFileSync(arrivals, 'utf8').trim().split('\n');
+  const marked = lines.filter((l) => l.endsWith(' reflex'));
+  assert.equal(marked.length, 1, lines.join(' | '));
+  const [key, sequence] = marked[0].split(' ');
+  assert.equal(Number(sequence), answers[0].sequence, `the reflex's own intent: ${marked[0]}`);
+  assert.ok(lines.includes(`${key} ${own.sequence}`), `B's say arrived unmarked: ${lines.join(' | ')}`);
+  if (process.env.R9B_REPORT) console.log(JSON.stringify({ reflexArrival: marked[0].split(' ').slice(1), agentArrival: own.sequence, arrivals: lines.length }));
 });
 
 test('R9b A3: losing and regaining the stream resumes by hash and fires no reflex twice', async () => {

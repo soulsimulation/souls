@@ -51,12 +51,21 @@
 //     {"op":"event","event":{...}}                    an event as R9's matcher takes it, until frames carry them
 //     {"op":"pending"}                                R20's (#3328) check for a scheduler: `due` when a message is
 //                                                     open or wakes can be handed now; it sends and takes nothing
+//     {"op":"pending","list":true}                    C15's (#3685): the open messages, and what arrived since the
+//                                                     last read (taken, as `wait 0` takes it), with no wait
+//     {"op":"ack","id":"<message id>","reply":"..","close":"done|failed"}   C15's: a reply that answers the message
+//                                                     with no act, closing it (`done` unless `close` says `failed`); with
+//                                                     no `close` while an act serves it, the reply rides on that close
 //   and G11's (#3335), prayers, the mailbox's other direction: a request goes to the gateway as a text frame and the
 //   directory's reply comes back on the socket (`n` matches them); an answer to this Soul's prayer arrives as a
 //   `prayer-answered` event, which wakes a `wait`, its words quoted as data. A creator's daemon lists and answers:
 //     {"op":"pray","words":".."}          a prayer to the world's creator, at most 2,000 characters
 //     {"op":"prayers","all":bool}         a Soul's own, waiting or answered; a creator's, waiting first (all: answered too)
 //     {"op":"answer","id":"p_..","words":".."}   a creator's answer, at most 4,000 characters
+//   and C14's (#3684), the Soul's public status line (today's `now`), kept by the directory and shown on the Soul's
+//   page and its owner's, set the same way through the gateway:
+//     {"op":"now","text":".."}            sets it: one line, at most 140 characters; empty or null clears it. A line
+//                                         holding an open owner's message is refused (`now.owner-words`)
 //   and E26's (#3329), conversations (`../converse/converse.mjs`): an invitation to this Soul, or a decline or lapse of
 //   its own offer, is an event `{"kind":"conversation","what":"invited|declined|lapsed","conversation":"<id>",..}`:
 //     {"op":"converse","do":"start","with":"<body id>","words":"..","private":bool}   the offer and the opening line
@@ -71,6 +80,11 @@
 //       check instead, C14 #3442: `moves.mjs`)
 //     {"op":"can","acts":["sit:<id>"]}  and  {"op":"act","acts":["sit:<id>","sit:<id>"]}   C10's (#3414): the thin
 //       command's words, each candidate on its own target, thing arguments after their act (`actsOf`)
+//   and #3686's, today's inspect and object, from the copy as it is and the kind entries in `<home>/kinds/`
+//   (`../check/offers.mjs`), asking the world nothing; an unknown id or offer is refused with `did_you_mean`:
+//     {"op":"inspect","this":"<id>"}      what the thing is, its state, and its own offers with their parameters
+//     {"op":"object","this":"<id>"}       the same; with "action":"<offer>","args":["<name>=<value>",..] that offer
+//                                         goes through `act` (`acts: ["<offer>:<id>", ...args]`)
 //   and G7's (#2796), for a world's creator (a `creator-` token), the world's kinds text from `<home>/kinds/<world>.kinds`:
 //     {"op":"describe"}                   the copy's nodes (id, kind, parent) and what each kind admits
 //     {"op":"check","ops":[...]}          G1's checks of a batch on the copy as it is: asks the world nothing
@@ -117,6 +131,7 @@ import { ageOf } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
+import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
@@ -126,6 +141,7 @@ import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { calendarOf, worldDue } from '../schedule/world.mjs';
+import { refreshEntries } from '../pair/pair.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -204,6 +220,7 @@ if (state.wake) Object.assign(wakes, { budget: state.wake.budget, delivered: sta
 const saveWakes = () => { state.wake = { budget: wakes.budget, delivered: wakes.delivered }; save(); };
 const mail = new Map(); // R13: the owner's open messages given to this daemon, by id
 const serving = new Map(); // sequence → the message its act serves
+const replyOf = new Map(); // C15: a message's reply, sent with its close
 const closes = []; // closes not yet sent, for the next sign-in
 const copy = new wire.Copy(); // its scope, by hash (R5b)
 // A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
@@ -303,10 +320,25 @@ function askDirectory(kind, body) {
   if (!ws || !signedIn) return Promise.resolve({ ok: false, code: 'not-connected', detail: 'the daemon is not signed in: status shows when it is' });
   const n = ++replyN;
   return new Promise((ok) => {
-    const t = setTimeout(() => { replies.delete(n); ok({ ok: false, code: 'prayer.unanswered', detail: 'no reply within 10 s' }); }, PRAYER_WITHIN);
+    const t = setTimeout(() => { replies.delete(n); ok({ ok: false, code: `${kind === 'now' ? 'now' : 'prayer'}.unanswered`, detail: 'no reply within 10 s' }); }, PRAYER_WITHIN);
     replies.set(n, (r) => { clearTimeout(t); replies.delete(n); ok(r); });
     ws.send(JSON.stringify({ [kind]: { n, ...body } }));
   });
+}
+
+// --- C14 (#3684): the public status line -----------------------------------------------------------------------
+const NOW_MOST = 140;
+/** The line as the directory keeps it (today's cleaning: control, zero-width and bidi characters become spaces, runs of
+ *  space one, ends trimmed), `null` to clear; or a refusal by name: too long, or holding an open owner's message. */
+export function nowLine(raw, open = [...mail.values()].map((m) => String(m.text))) {
+  // eslint-disable-next-line no-control-regex
+  const text = String(raw ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, ' ').replace(/\s+/g, ' ').trim();
+  if ([...text].length > NOW_MOST) return { code: 'now.too-long', detail: `at most ${NOW_MOST} characters, not ${[...text].length}` };
+  const plain = (s) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (open.some((m) => plain(m).length >= 8 && plain(text).includes(plain(m)))) {
+    return { code: 'now.owner-words', detail: 'the status line is public: write your own short line, not your owner\'s message' };
+  }
+  return { text: text || null };
 }
 
 /** G11: a text frame that is a reply to a prayer request, or an answer to this Soul's prayer; true if it was one. */
@@ -330,10 +362,16 @@ function onPrayerText(f) {
   return true;
 }
 
-/** R13: the message `id` closed with its act's outcome, now or at the next sign-in. */
+/**
+ * R13: the message `id` closed with its act's outcome, now or at the next sign-in. A reply (C15) rides on the close:
+ * the directory reads only id, state and outcome, and the gateway passes the close to the owner's page as it is.
+ */
 function closeMail(id, state, outcome) {
-  const line = JSON.stringify({ close: { id, state, outcome } });
+  const reply = replyOf.get(id);
+  const line = JSON.stringify({ close: { id, state, outcome, ...(reply ? { reply } : {}) } });
   mail.delete(id);
+  replyOf.delete(id);
+  for (const [s, m] of serving) if (m === id) serving.delete(s); // closed once: a later answer closes nothing
   log(`message ${id} closed ${state} (${outcome})`);
   if (ws && signedIn) ws.send(line); else closes.push(line);
 }
@@ -385,6 +423,13 @@ function syncAnswer(sock, n, refused, bytes) {
   current();
 }
 
+/** #3760: at each sign-in, the world's kind entries into `<home>/kinds/` (an unchanged world answers 304). */
+function refreshKinds() {
+  refreshEntries({ home, world: seat.world, gateway: seat.gateway, token: seat.token })
+    .then((r) => { if (r.changed) log(`kinds: ${r.entries} entries from the world`); })
+    .catch((e) => log(`kinds: not fetched (${e.code ?? 'unreachable'})`));
+}
+
 function connect() {
   counts.connects++;
   let step = 'hello', ended = false;
@@ -414,6 +459,7 @@ function connect() {
         if (a === 'stream.resumed') counts.resumed++;
         if (a === 'stream.cannot-resume') counts.cannotResume++;
         log(`signed in: ${a}`);
+        refreshKinds();
         step = 'stream';
         clearTimeout(deadline);
         if (a === 'stream.resumed' && !copy.empty()) { followWanted = true; current(); }
@@ -444,7 +490,6 @@ function connect() {
         if (movesOf.has(s) && Number(c) !== 3) { state.seated = seatedAfter(movesOf.get(s), Number(c), state.seated ?? null); movesOf.delete(s); }
         if (serving.has(s) && Number(c) !== 3) {
           closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
-          serving.delete(s);
         }
       }
       save();
@@ -526,7 +571,8 @@ function fire(event) {
   firedKeys.add(key);
   if (firedKeys.size > FIRED_KEYS_KEPT) firedKeys.delete(firedKeys.values().next().value);
   for (const { intent } of reflexes.onEvent(event, Date.now())) {
-    sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor });
+    // Marked as a reflex (#3764): sent on the Soul's standing consent, it is not its agent acting.
+    sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor, reflex: true });
   }
 }
 
@@ -608,7 +654,8 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
+const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
 const nothingYet = () => !events.some((e) => e.kind !== 'synced');
@@ -696,9 +743,10 @@ function actsOf(words) {
   let kinds = null, rows = null;
   for (const w of words.map(String)) {
     const k = w.lastIndexOf(':'), tail = w.slice(k + 1), arg = /^([A-Za-z0-9_]+)=(.*)$/.exec(w);
-    if (out.length && (ID.test(w) || (arg && ID.test(arg[2])))) {
+    if (out.length && (ID.test(w) || arg)) {
       const c = out.at(-1), args = (c.args ??= {});
-      if (arg) { args[arg[1]] = arg[2]; continue; }
+      // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`).
+      if (arg) { args[arg[1]] = /^-?\d{1,15}$/.test(arg[2]) ? Number(arg[2]) : arg[2]; continue; }
       kinds ??= kindsIn(join(home, 'kinds'));
       rows ??= rowsOf(copy);
       const takes = Object.entries(kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
@@ -714,13 +762,16 @@ function actsOf(words) {
   return out;
 }
 
-/** Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in). */
-function sendIntent(ranked, { target, words, args, params, basis, expiry }) {
+/**
+ * Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in).
+ * `reflex` marks an R9 reflex's intent (#3764); an agent's never is.
+ */
+function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex = false }) {
   state.sequence++;
   const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
     basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words, args,
-    params ? JSON.stringify(params) : undefined);
-  save();
+    params ? JSON.stringify(params) : undefined, reflex);
+  if (!signedIn) save(); // signed in, send() writes it down once, before it goes
   const sequence = state.sequence, sent = signedIn;
   if (ranked[0] === 'life:join') joinsOf.add(sequence);
   if (moveForm(ranked[0])) movesOf.set(sequence, moveForm(ranked[0]));
@@ -739,7 +790,31 @@ async function answer(req) {
       const until = Date.now() + Math.min(Number(req.within ?? 4000), 10_000);
       while (!signedIn && Date.now() < until) await sleep(50);
       while (signedIn && mail.size === 0 && Date.now() - signedInAt < MAILBOX_FIRST_MS && Date.now() < until) await sleep(50);
-      return { ok: true, due: mail.size > 0 || wakes.due(Date.now()), mail: mail.size, connected: signedIn };
+      if (!req.list) return { ok: true, due: mail.size > 0 || wakes.due(Date.now()), mail: mail.size, connected: signedIn };
+      // C15 (#3685): the listing a turn starts from. Every message still open (one an act serves says so), and what
+      // arrived since the last read, taken as `wait 0` takes it, with the wakes the budget lets through now.
+      const handed = wakes.deliver(Date.now());
+      if (handed.length) saveWakes();
+      const got = events.splice(0), served = new Set(serving.values());
+      heardSince.length = 0;
+      const open = [...mail.values()].map((m) => ({ id: m.id, text: String(m.text), at: m.at, ...(served.has(m.id) ? { serving: true } : {}) }));
+      const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
+      return closing({ ok: true, connected: signedIn, open, events: got, ...said, ...(handed.length ? { wakes: handed } : {}),
+        ...(open.length ? { next: 'serve each open message: act <act> --for <its id>, or answer it: ack <its id> "<reply>" [--close failed]' } : {}) },
+      (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)) }), { now: true });
+    }
+    case 'ack': {
+      // C15 (#3685): an answer to the owner's message with no act: a reply, and the close (`done`, or `failed` for a no).
+      const id = String(req.id ?? ''), reply = String(req.reply ?? '').replace(/\s+/g, ' ').trim(), close = req.close ?? null;
+      if (close !== null && close !== 'done' && close !== 'failed') return { ok: false, code: 'ack-close', detail: '--close done|failed' };
+      if (!reply || [...reply].length > REPLY_MOST) return { ok: false, code: 'ack-reply', detail: `ack <message id> "<reply>": 1 to ${REPLY_MOST} characters` };
+      if (!mail.has(id)) return { ok: false, code: 'mail-not-found', detail: 'ack names an open message this daemon was given: pending lists them' };
+      replyOf.set(id, reply);
+      if (close === null && [...serving.values()].includes(id)) {
+        return { ok: true, acked: id, reply, closes: 'with the act that serves it: its outcome, your reply beside it' };
+      }
+      closeMail(id, close ?? 'done', 'replied');
+      return { ok: true, acked: id, reply, closed: close ?? 'done', sent: signedIn, ...ageNow() };
     }
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
@@ -750,7 +825,7 @@ async function answer(req) {
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),
         hearing: ws?.hearing ?? null, viewGrants, viewKinds: [...viewKinds],
-        rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since,
+        rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since, now: state.now ?? null,
       };
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
@@ -817,8 +892,11 @@ async function answer(req) {
       }
       // Each candidate on its own target (C10), else all on `target`; the first one's thing arguments in parameter 1.
       const target = Array.isArray(req.acts) ? keep.map((c) => c.this ?? '').join(' ') : req.target;
-      const args = Object.entries(keep[0].args ?? {}).map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
-      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params: req.params, basis, expiry: req.expiry });
+      // A number goes as a number, so a form's arguments then go as parameter 1's pairs (#3686).
+      const pairs = Object.entries(keep[0].args ?? {}), counted = pairs.some(([, v]) => typeof v === 'number');
+      const args = counted ? undefined : pairs.map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
+      const params = counted ? { ...(req.params ?? {}), 1: pairs } : req.params;
+      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params, basis, expiry: req.expiry });
       if (req.for !== undefined) serving.set(sequence, req.for);
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
       return closing(out, null, age ? { age } : { now: true });
@@ -843,6 +921,19 @@ async function answer(req) {
       // C26: the turn or gesture toward them goes after the words, as its own intent; its answer is its own.
       const toward = t ? { ...t.to, ...(t.verb ? { verb: t.verb, sequence: sendIntent([t.verb], { target: t.target, args: t.args, basis }).sequence } : { turned: false }) } : null;
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis), ...(toward ? { to: toward } : {}) }, null, { now: true });
+    }
+    case 'inspect': return inspect(req);
+    case 'object': {
+      // #3686: today's `object <id> [action]`: no action lists the offers (as inspect); an action is that offer sent
+      // through `act` below, with its arguments, and nothing else.
+      if (req.action === undefined) return inspect(req);
+      const seen = thingOf(req.this);
+      if (!seen.ok) return closing(seen, null, { now: true });
+      const offer = offerNamed(seen.offers, req.action);
+      if (!offer) {
+        return closing({ ok: false, code: 'object.unknown-offer', detail: `${req.this} offers no ${req.action}`, did_you_mean: nearestOffers(seen.offers, req.action), offers: seen.offers.map((o) => o.name) }, null, { now: true });
+      }
+      return answer({ op: 'act', acts: actWords(offer, req.args ?? []), ...(req.for !== undefined ? { for: req.for } : {}) });
     }
     case 'describe': return closing({ ok: true }, (rows) => ({
       nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...(r.text ? { text: r.text } : {}) })),
@@ -885,6 +976,15 @@ async function answer(req) {
       const r = await askDirectory(req.op, req.op === 'pray' ? { text: words } : { id: String(req.id ?? ''), text: words });
       return r.ok === false ? r : { ok: true, ...r };
     }
+    case 'now': {
+      const line = nowLine(req.text);
+      if (line.code) return { ok: false, ...line };
+      const r = await askDirectory('now', { text: line.text });
+      if (r.ok === false) return r;
+      state.now = r.now ?? null;
+      save();
+      return { ok: true, now: state.now };
+    }
     case 'prayers': {
       const r = await askDirectory('prayers', { all: req.all === true });
       return r.ok === false ? r : { ok: true, ...r, note: PRAYER_NOTE };
@@ -907,6 +1007,40 @@ async function answer(req) {
     case 'stop': setImmediate(stop); return { ok: true };
     default: return { ok: false, code: 'unknown-op' };
   }
+}
+
+/**
+ * #3686: thing `id` as this Soul's copy holds it, with its offers from its kind's entry in `<home>/kinds/`, or a
+ * refusal naming the ids nearest it. It reads the copy as it is: no sync, nothing asked of the world.
+ */
+function thingOf(id) {
+  const rows = rowsOf(copy), row = rows.get(String(id ?? ''));
+  if (!row) {
+    return { ok: false, code: 'inspect.unknown-id', detail: `${id ?? '(none)'} is not an id this Soul's copy holds; ids come from look and find`, did_you_mean: nearestIds(rows.values(), id) };
+  }
+  const kinds = kindsIn(join(home, 'kinds')), entry = kinds[row.kind];
+  return { ok: true, row, entry, offers: offersOf(row.id, entry), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
+}
+
+/** A field the copy holds as bytes (hex), shown as its text when that is plain printable text. */
+const readable = (fields) => Object.fromEntries(Object.entries(fields).map(([k, v]) => {
+  if (typeof v !== 'string' || !/^(?:[0-9a-f]{2})+$/.test(v)) return [k, v];
+  const t = Buffer.from(v, 'hex').toString('utf8');
+  return [k, /^[\x20-\x7e]+$/.test(t) ? t : v];
+}));
+
+/** `inspect <id>`: what the thing is, where, its state as the copy holds it, and its own offers with their parameters. */
+function inspect(req) {
+  const seen = thingOf(req.this);
+  if (!seen.ok) return closing(seen, null, { now: true });
+  const { row, entry, offers, fields } = seen;
+  return closing({
+    ok: true, id: row.id, name: row.name, kind: row.kind, ...(row.parent ? { parent: row.parent } : {}),
+    ...(row.path?.length ? { in: row.path.slice().reverse().join(', ') } : {}),
+    ...(typeof entry?.text?.[entry?.card?.text] === 'string' ? { card: entry.text[entry.card.text] } : {}),
+    ...(fields ? { state: readable(fields) } : {}), offers,
+    ...(entry ? {} : { note: 'its kind\'s entry is not on this machine: walking to it is all that is known here' }),
+  }, null, { now: true });
 }
 
 /**
@@ -960,7 +1094,11 @@ const server = createServer((c) => {
       const line = buf.slice(0, k);
       buf = buf.slice(k + 1);
       let op = 'unread';
-      Promise.resolve().then(() => { const req = JSON.parse(line); op = OPS.has(req.op) ? req.op : 'unknown'; return answer(req); })
+      Promise.resolve().then(() => {
+        const req = JSON.parse(line);
+        op = !OPS.has(req.op) ? 'unknown' : req.op === 'pending' && req.list ? 'pending-list' : req.op; // a listing is the agent's
+        return answer(req);
+      })
         .catch((e) => ({ ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }))
         .then((out) => {
           // R20: a scheduler's check is not the agent: it takes nothing an answer to the agent would carry.
@@ -988,7 +1126,11 @@ const SCHEDULE = join(soulDirOf(home, soul), 'memory', 'schedule.md');
 const BEAT_MS = 1000, BEAT_SAVED_MS = 10_000, GAP_MS = 15_000;
 const MISSED_NOTE = 'not sent: their moment passed while this daemon was off or asleep. Tell your owner; send what still matters yourself.';
 state.schedule = { marks: {}, targets: {}, beat: null, missed: [], dropped: 0, ...(state.schedule ?? {}) };
-let entries = [], stamp = null, beatSaved = 0, worldTimer = null;
+// A world moment's copy is brought current this long before it, so the check made then (`ready`, by entry key, for
+// the copy version it was made on) is recent. It only decides whether the act is checked: the send never waits for it.
+const PREPARE_MS = 250;
+let entries = [], stamp = null, beatSaved = 0, worldTimer = null, prepareTimer = null, prepared = null;
+const ready = new Map();
 const inFlight = new Set();
 
 /** The file's entries, read again only when it changed; a line that does not parse is logged once and inert. */
@@ -1003,8 +1145,19 @@ function scheduleNow() {
   return entries;
 }
 
-/** One entry's moment: a wake joins R13's queue; acts are checked at send (R8) and sent once, marked first. */
-async function fireEntry(e, now, late) {
+/** An entry's acts sifted by R8's check on the copy as it is; `current` says whether that copy may refuse. */
+function checkOf(e, current) {
+  const candidates = actsOf(e.acts);
+  if (!candidates.some((c) => c.form)) return { keep: candidates, dropped: [] };
+  return sift(candidates, current ? verdicts(candidates) : [], current);
+}
+
+/**
+ * One entry's moment: a wake joins R13's queue; acts are checked at send (R8) and sent once, marked first. A world
+ * moment (`moment`) never waits on the gateway: it takes the check made when the copy was last brought current
+ * (`ready`), or checks the copy as it is, so the act leaves at its moment however long a round trip takes.
+ */
+async function fireEntry(e, now, late, moment = false) {
   if (inFlight.has(e.key) || state.schedule.marks[e.key]) return;
   inFlight.add(e.key);
   try {
@@ -1015,11 +1168,14 @@ async function fireEntry(e, now, late) {
       for (const w of wakers.splice(0)) w();
       return;
     }
-    const candidates = actsOf(e.acts);
-    let keep = candidates, dropped = [];
-    if (candidates.some((c) => c.form)) {
-      const current = isCurrent(await ageAfter(), CURRENT_MS);
-      ({ keep, dropped } = sift(candidates, current ? verdicts(candidates) : [], current));
+    let keep, dropped;
+    if (moment) {
+      const r = ready.get(e.key);
+      ({ keep, dropped } = r?.version === copyVersion ? r : checkOf(e, !syncing && isCurrent(ageNow(), CURRENT_MS)));
+    } else {
+      const candidates = actsOf(e.acts);
+      const current = candidates.some((c) => c.form) && isCurrent(await ageAfter(), CURRENT_MS);
+      ({ keep, dropped } = checkOf(e, current));
     }
     if (state.schedule.marks[e.key]) return;
     if (keep.length === 0) {
@@ -1062,10 +1218,14 @@ function beat() {
   scheduleWorld(now, off);
 }
 
-/** One deadline on the current copy's mapping. A sync/rate change and the existing file beat re-arm it; no polling. */
+/**
+ * One deadline on the current copy's mapping, and a refresh PREPARE_MS before it. A sync/rate change and the existing
+ * file beat re-arm both; no polling.
+ */
 function scheduleWorld(now = Date.now(), off = null) {
   clearTimeout(worldTimer);
-  worldTimer = null;
+  clearTimeout(prepareTimer);
+  worldTimer = prepareTimer = null;
   if (!signedIn || syncing) return;
   const s = state.schedule;
   const { fire, missed, next, resolved } = worldDue(scheduleNow(), s.marks, s.targets, clockOf(copy), calendarOf(copy), now, off);
@@ -1076,8 +1236,37 @@ function scheduleWorld(now = Date.now(), off = null) {
     } else s.dropped++;
   }
   if (resolved || missed.length) save(); // keep the occurrence before a restart, and before any send
-  for (const f of fire) fireEntry(f.e, now, f.late);
-  if (next !== null) worldTimer = setTimeout(scheduleWorld, Math.min(next - now, 2_147_483_647));
+  for (const f of fire) fireEntry(f.e, now, f.late, true);
+  ready.clear();
+  if (next === null) return;
+  worldTimer = setTimeout(() => atMoment(next), Math.min(next - now, 2_147_483_647));
+  // The next moment's check, made now on a copy confirmed after its refresh, so the moment itself only sends.
+  if (prepared === next && isCurrent(ageNow(), CURRENT_MS)) {
+    for (const e of scheduleNow()) {
+      if (!s.marks[e.key] && s.targets[e.key]?.realMs === next && !e.wake) ready.set(e.key, { version: copyVersion, ...checkOf(e, true) });
+    }
+  }
+  const prepare = () => { prepared = next; refresh(); };
+  if (prepared !== next) {
+    if (next - now <= PREPARE_MS) prepare();
+    else prepareTimer = setTimeout(prepare, Math.min(next - now - PREPARE_MS, 2_147_483_647));
+  }
+}
+
+/**
+ * A world moment's timer: its entries fire on the deadline the timer was set for, first and from the persisted
+ * occurrences, so neither a sync under way nor re-reading the copy's mapping comes between the moment and the send.
+ */
+function atMoment(at) {
+  const now = Date.now();
+  if (now < at) { worldTimer = setTimeout(() => atMoment(at), at - now); return; } // a timer may wake a millisecond early
+  if (signedIn) {
+    const s = state.schedule;
+    for (const e of scheduleNow()) {
+      if (!s.marks[e.key] && s.targets[e.key]?.realMs === at && (e.until === null || now <= e.until)) fireEntry(e, now, now - at, true);
+    }
+  }
+  scheduleWorld();
 }
 
 /** The change entries an event fires, sent at once. */

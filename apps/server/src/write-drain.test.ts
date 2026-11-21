@@ -5,11 +5,10 @@
 // test checks the write is still open at that moment. A fixed 200 ms was not enough on a busy runner (CI server-3,
 // 2026-11-10), and neither was waiting for 100 Continue (#1778's merge group: the world had no write in flight at SIGTERM).
 import test from 'node:test';import assert from 'node:assert/strict';import {spawn} from 'node:child_process';import {connect} from 'node:net';
-import {mkdtempSync,readFileSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
+import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
-const readOr=(f:string)=>{try{return readFileSync(f,'utf8');}catch{return '';}};
 
-async function stopWithWriteInFlight(t:import('node:test').TestContext,port:number,extra:Record<string,string>){
+async function stopWithWriteInFlight(t:import('node:test').TestContext,port:number,extra:Record<string,string>,o:{restAfterExit?:boolean}={}){
  const data=mkdtempSync(join(tmpdir(),'write-drain-')),logs:string[]=[];
  const child=spawn(process.execPath,[new URL('./main.ts',import.meta.url).pathname],{env:{PATH:process.env.PATH,DATA_DIR:data,WORLD_ID:'write-drain-fixture',WORLD_KEY:'toy',ENGINE:'toy',SEED_NATIVES:'0',BRAIN_MODE:'fake',BRAIN_BUDGET_USD_PER_DAY:'0',PORT:String(port),HOST:'127.0.0.1',WRITE_DRAIN_TRACE:'1',...extra},stdio:['ignore','pipe','pipe']});
  child.stdout!.on('data',d=>logs.push(String(d)));child.stderr!.on('data',d=>logs.push(String(d)));
@@ -26,16 +25,25 @@ async function stopWithWriteInFlight(t:import('node:test').TestContext,port:numb
  const before=logs.join('');
  assert.match(before,/write in flight: 1\b/,`the world counted the write before SIGTERM: ${before}`);
  assert.doesNotMatch(before,/write closed:/,`the write is still open at SIGTERM (answered early: ${JSON.stringify(answer)}): ${before}`);
- child.kill('SIGTERM');
- // the rest of the body arrives late: only once the world has begun to stop (live.json says so; shutdown writes it before
- // it counts its writes in flight). A fixed 300 ms let a world busy for longer (#2012: CI server-3, a 338 ms stall) read the
- // rest first, answer the write as usual and so take no drain at all.
- const live=join(data,'live.json');
- for(let i=0;i<500&&!/"phase":"stopping"/.test(readOr(live));i++)await delay(20);
- assert.match(readOr(live),/"phase":"stopping"/,`the world began to stop: ${logs.join('')}`);
- sock.write(body.slice(half));
+ // the rest of the body arrives late: only once the world is in its drain. WRITE_DRAIN_TRACE prints that line on the world's
+ // stdout as the drain begins, and the test sends the rest on that line. A fixed 300 ms let a world busy for longer (#2012:
+ // CI server-3, a 338 ms stall) read the rest first and take no drain at all. Polling live.json every 20 ms for "stopping"
+ // (written by two threads, by rename) failed on CI server-2 twice (21 Nov 2026): the drain ran its full 2001 ms with no byte
+ // of the rest read, so the rest was sent after the drain had ended.
+ const at={sigterm:0,draining:0,rest:0},draining=new Promise<boolean>(r=>{
+  const check=()=>{if(/SIGTERM: draining 1 write request\(s\) in flight/.test(logs.join(''))){at.draining=performance.now();done(true);}};
+  const done=(v:boolean)=>{child.stdout!.off('data',check);child.off('exit',gone);r(v);},gone=()=>{check();done(false);};
+  child.stdout!.on('data',check);child.once('exit',gone);
+ });
+ at.sigterm=performance.now();child.kill('SIGTERM');
+ assert.ok(await draining,`the world began its drain: ${logs.join('')}`);
+ // without a drain the world must exit with the write unanswered: the rest is sent only once it has exited, so a world that
+ // is quick enough to read it first (CI server-2, #3810: a 400 to the half-read body) cannot answer the write instead
+ if(o.restAfterExit){await exited;assert.equal(answer,'',`no answer before the exit: ${logs.join('')}`);}
+ sock.write(body.slice(half));at.rest=performance.now();
  await Promise.race([closed,delay(5000)]);sock.destroy();
- return {answer,code:await exited,logs:logs.join('')};
+ const ms=(x:number)=>Math.round(x-at.sigterm);
+ return {answer,code:await exited,logs:`${logs.join('')}[test] SIGTERM +0 ms, drain line seen +${ms(at.draining)} ms, rest sent +${ms(at.rest)} ms\n`};
 }
 
 test('a write in flight at SIGTERM is answered before the world exits',async t=>{
@@ -46,7 +54,7 @@ test('a write in flight at SIGTERM is answered before the world exits',async t=>
 });
 
 test('without the drain (WRITE_DRAIN_MS=0) the same write gets no answer',async t=>{
- const r=await stopWithWriteInFlight(t,5823,{WRITE_DRAIN_MS:'0'});
+ const r=await stopWithWriteInFlight(t,5823,{WRITE_DRAIN_MS:'0'},{restAfterExit:true});
  assert.equal(r.answer,'','the connection closed under it');
  assert.equal(r.code,0);
 });
