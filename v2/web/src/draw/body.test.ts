@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as THREE from 'three';
+import { WorldView } from './world.ts';
+import type { NodeRec } from '../source/source.ts';
+import type { CrowdBodies } from '../crowd/bodies.ts';
+const node = (o: Partial<NodeRec> & { id: string; kind: string }): NodeRec => ({ parent: null, slot: null, pos: [0, 0, 0], rot: [1 << 30, 0, 0, 0], at: null, ...o });
+
+test('a static Soul draws at its authoritative parent-frame pose until actual samples arrive', () => {
+  const w = new WorldView(), body = node({ id: 'b', kind: 'souls:body@pin', parent: 'p', pos: [2_000_000, 0, 3_000_000], body: 'admitted' });
+  w.apply([node({ id: 'p', kind: 'souls:place', pos: [10_000_000, 0, 0] }), body, node({ id: 'thing', kind: 'eden:box' })], []);
+  assert.equal(w.draw(100), 1);
+  assert.equal(w.tracks.get('b')!.samples.length, 0, 'no invented motion sample or time');
+  assert.deepEqual(w.crowd(100)!.toArray(), [12, 0, 3]);
+  const meshes = w.group.children.filter((n): n is THREE.InstancedMesh => n instanceof THREE.InstancedMesh);
+  assert.equal(meshes.length, 2, 'one capsule batch and one generic thing batch');
+  assert.equal(meshes.reduce((n, m) => n + m.count, 0), 2, 'Soul is not also a generic cube');
+  const placements: unknown[][] = [];
+  w.attach({ crowd: { group: new THREE.Group() }, begin() {}, place(...args: unknown[]) { placements.push(args); }, end() {} } as unknown as CrowdBodies);
+  const camera = new THREE.PerspectiveCamera();
+  assert.equal(w.draw(100, camera), 1);
+  assert.deepEqual(placements.pop(), ['b', 12, 0, 3, 'admitted']);
+  w.apply([{ ...body, at: 200, pos: [4_000_000, 0, 3_000_000] }], [], [['b', 'p', null, 100, 2_000_000, 0, 3_000_000]]);
+  assert.equal(w.draw(150, camera), 1);
+  assert.deepEqual(placements.pop(), ['b', 13, 0, 3, 'admitted'], 'existing interpolation takes precedence');
+  w.apply([], ['b']);
+  assert.equal(w.draw(250, camera), 0);
+  assert.equal(w.tracks.has('b'), false);
+  assert.equal(w.nodes.has('thing'), true);
+});

@@ -126,6 +126,15 @@ impl RebindTriangle {
                 .checked_add(height)
                 == Some(body.pose.position.y)
     }
+    /// Whether the body's current point (x, z) lies in this triangle, its height not judged (B12b: a body that
+    /// walked on is told apart from one whose support changed).
+    pub fn contains(&self, body: &Body) -> bool {
+        let p = [
+            i128::from(body.pose.position.x),
+            i128::from(body.pose.position.z),
+        ];
+        (0..3).all(|k| orient(self.vertices[k], self.vertices[(k + 1) % 3], p) >= 0)
+    }
     /// Returns the unchanged current body with only the certified target indices substituted.
     pub fn rebind(&self, body: &Body) -> Option<Body> {
         self.permits(body).then_some(Body {

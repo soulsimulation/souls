@@ -490,6 +490,8 @@ pub struct Config {
     pub served: Option<crate::views::served::Feed>,
     /// K16's text store, where an intent's words are kept (V1b); a store in memory when none is given.
     pub text: Option<Arc<Store>>,
+    /// Immutable imported public name bytes, attached only to delivered public record references off the clock.
+    pub public_names: Arc<crate::views::names::PublicNames>,
     /// Called once at start with the log's durable mark; what it gives is handed each part record as it is appended
     /// (its number and bytes): a view tier's `offer`, so a stream writer follows the world (V1b).
     pub follow: Option<Follow>,
@@ -603,6 +605,7 @@ impl Config {
             sky: None,
             served: None,
             text: None,
+            public_names: Arc::new(Default::default()),
             follow: None,
             rate: None,
             engine: None,
@@ -853,6 +856,11 @@ struct Clock {
 enum CheckJob {
     Edit(Id, Edit, Minter),
     Wear(Box<WearRequest>),
+    /// B12b: the same checked edit back, an affected body having walked out of its prepared triangle; placed again
+    /// on its kept surfaces as the bodies stand now, nothing else prepared again.
+    Reprepare(Box<(Id, Checked, Vec<sim::controller::BuildBasis>)>),
+    /// B12b: kept surfaces the clock is done with, dropped here rather than on the clock.
+    Release(Vec<sim::walk::town::RebindSurfaces>),
 }
 
 #[derive(Clone, PartialEq)]
@@ -932,6 +940,7 @@ type Checked = (
     BTreeMap<Id, replica::kinds::sizes::Size>,
     Minter,
     Option<buildsafe::PreparedMaps>,
+    crate::edit_places::Projection,
 );
 
 /// The world node's sky in the running tick (E6, #3369): its three timers on K9's due list, each fired at its due time
@@ -1712,18 +1721,56 @@ impl Clock {
     /// whole, naming the failing operation. Placed nodes take their ids from the world's lineage, on the counter its
     /// intent ids use, so the two never meet.
     fn edits(&mut self, now: Micros) {
-        for (id, checked) in std::mem::take(&mut self.edited) {
+        let mut kept = Vec::new();
+        let mut keep = |checked: &mut Result<Checked, Refused>| {
+            if let Ok((.., Some(maps), _)) = checked {
+                kept.push(std::mem::take(&mut maps.surfaces));
+            }
+        };
+        for (id, mut checked) in std::mem::take(&mut self.edited) {
             let Some(o) = self.open.get(&id) else {
+                keep(&mut checked);
                 continue;
             };
             let (actor, sequence) = (o.actor, o.sequence);
             if expired(o.expiry, now) {
+                keep(&mut checked);
                 self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
                 continue;
             }
-            let committed = checked.and_then(|(c, souls, classes, mut reserved, maps)| {
-                if let (Some(b), Some(maps)) = (&self.bodies, &maps) {
-                    b.check_map(maps)?;
+            // Every guard first; a body that only walked on sends the same edit back to be placed again (B12b).
+            let walked = match (&self.bodies, &checked) {
+                (Some(b), Ok((.., Some(maps), _))) => b.check_map_or_walked(maps),
+                _ => Ok(None),
+            };
+            let checked = match walked {
+                Ok(Some(bases)) => {
+                    let Ok(k) = checked else { unreachable!() };
+                    let job = CheckJob::Reprepare(Box::new((id, k, bases)));
+                    match self.edits.as_ref().map(|tx| tx.send(job).is_ok()) {
+                        Some(true) => {
+                            self.outstanding += 1;
+                            continue;
+                        }
+                        _ => Err(Refused {
+                            op: None,
+                            name: "edit.body-stale",
+                            detail: "prepared triangle differs".into(),
+                        }),
+                    }
+                }
+                Ok(None) => {
+                    keep(&mut checked);
+                    checked
+                }
+                Err(r) => {
+                    keep(&mut checked);
+                    Err(r)
+                }
+            };
+            let committed = checked.and_then(|(c, souls, classes, mut reserved, maps, places)| {
+                if let Some(b) = &self.bodies {
+                    places.check(&b.slots)?;
                 }
                 let current = self
                     .bodies
@@ -1740,13 +1787,20 @@ impl Clock {
                         current_classes.as_ref().unwrap_or(&classes),
                     )
                 };
-                match (&mut self.bodies, maps) {
+                let done = match (&mut self.bodies, maps) {
                     (Some(b), Some(maps)) => b.commit_map(maps, commit),
                     _ => commit(),
-                }
+                };
+                done.map(|c| (c, places))
             });
             match committed {
-                Ok(c) => {
+                Ok((c, places)) => {
+                    if let Some(b) = &mut self.bodies
+                        && let Err(e) = places.install(&mut b.slots, &c.names)
+                    {
+                        self.faults += 1;
+                        eprintln!("worldd: edit places {}", e.name);
+                    }
                     self.unsealed = true;
                     // The edit checker's town is built again from a copy with this edit (G1e).
                     if let Some(w) = &self.walkers {
@@ -1765,6 +1819,11 @@ impl Clock {
                 }
                 Err(r) => self.end(id, |k| k.edit_refusal(actor, sequence, &r)),
             }
+        }
+        if !kept.is_empty()
+            && let Some(tx) = &self.edits
+        {
+            let _ = tx.send(CheckJob::Release(kept));
         }
     }
 
@@ -3827,6 +3886,7 @@ pub fn start<S: Storage + 'static>(
                 m,
                 events.clone(),
                 edit_kinds,
+                rules.kinds.clone(),
             )
         })
         .transpose()?;
@@ -3859,7 +3919,13 @@ pub fn start<S: Storage + 'static>(
     // one complete cache: restored records, the pre-clock checkpoint's records, and this seal's incremental records.
     let first = world.seal()?;
     kept.keep(&first);
-    let syncs = syncs::start(world.frozen(), kept, (cfg.lineage, zone, cfg.epoch)).map_err(io)?;
+    let syncs = syncs::start(
+        world.frozen(),
+        kept,
+        (cfg.lineage, zone, cfg.epoch),
+        Arc::clone(&cfg.public_names),
+    )
+    .map_err(io)?;
     let fresh = if cfg.checkpoints.is_some() {
         first.nodes
     } else {
@@ -4161,6 +4227,7 @@ fn edit_checker(
     walkers: Arc<buildsafe::Moving>,
     events: Sender<Event>,
     kinds: BTreeMap<String, replica::world_model::Kind>,
+    entries: replica::rules::json::Value,
 ) -> R<Sender<CheckJob>> {
     let (tx, rx) = channel::<CheckJob>();
     thread::Builder::new()
@@ -4168,10 +4235,31 @@ fn edit_checker(
         .spawn(move || {
             let mut town = buildsafe::TownCopy::new(kinds.clone());
             loop {
-                let next = rx.recv_timeout(EDIT_IDLE);
-                if let Err(RecvTimeoutError::Disconnected) = next {
-                    break;
-                }
+                let next = match rx.recv_timeout(EDIT_IDLE) {
+                    Err(RecvTimeoutError::Disconnected) => break,
+                    Ok(CheckJob::Release(kept)) => {
+                        drop(kept);
+                        continue;
+                    }
+                    // B12b: only placing, on the surfaces kept with the edit; no check, plan, rebuild or map.
+                    Ok(CheckJob::Reprepare(job)) => {
+                        let (id, mut checked, bases) = *job;
+                        let placed = match checked.4.as_mut() {
+                            Some(maps) => maps.reprepare(&bases),
+                            None => Err(Refused {
+                                op: None,
+                                name: "edit.body-stale",
+                                detail: "prepared triangle differs".into(),
+                            }),
+                        };
+                        let result = placed.map(|()| checked);
+                        if events.send(Event::Edited(Box::new((id, result)))).is_err() {
+                            break;
+                        }
+                        continue;
+                    }
+                    next => next,
+                };
                 // Each edit committed since, on the town; a copy that holds them all, for a town built whole.
                 let committed = walkers.take();
                 let edited = walkers.edited();
@@ -4185,6 +4273,7 @@ fn edit_checker(
                 };
                 let (id, e, reserved) = match job {
                     CheckJob::Edit(id, e, reserved) => (id, e, reserved),
+                    CheckJob::Reprepare(_) | CheckJob::Release(_) => continue,
                     CheckJob::Wear(request) => {
                         let request = *request;
                         let copy = publisher.wait_for(request.version, Duration::from_secs(1));
@@ -4241,6 +4330,7 @@ fn edit_checker(
                         )
                     })
                     .and_then(|p| {
+                        let places = crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
                         let tree = buildsafe::souls(&copy, &world.kinds);
                         let souls = buildsafe::judged(tree, &snapshot.bodies);
                         let maps = source
@@ -4256,7 +4346,7 @@ fn edit_checker(
                                 )
                             })
                             .transpose()?;
-                        Ok((p, souls, snapshot.classes.clone(), reserved, maps))
+                        Ok((p, souls, snapshot.classes.clone(), reserved, maps, places))
                     });
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
                     break;

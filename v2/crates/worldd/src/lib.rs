@@ -9,6 +9,7 @@ pub mod bodies;
 pub mod buildsafe;
 pub mod checkers;
 pub mod directory;
+mod edit_places;
 pub mod engine;
 pub mod loose;
 pub mod measures;

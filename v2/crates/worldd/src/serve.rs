@@ -201,6 +201,8 @@ struct Built {
     kinds_text: String,
     /// A Soul's body kind, its full name (C3).
     body_kind: String,
+    /// The importer’s existing immutable name dictionary, shared once with the off-clock sync worker.
+    public_names: Arc<worldd::views::names::PublicNames>,
     /// The activity kinds the engine runs (C30): the conversation's, then the entries'.
     activities: Vec<ActivityKind>,
 }
@@ -363,6 +365,7 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
         rules,
         kinds_text,
         body_kind,
+        public_names: Arc::new(im.texts),
         activities,
     })
 }
@@ -1265,9 +1268,7 @@ fn archiving(
                 indexed = a.shelf.writes.bundles;
             }
             if fresh && viewed.elapsed() >= VIEWS_EVERY {
-                if a.is_based() {
-                    a.publish_open()?;
-                }
+                a.publish_open()?;
                 for (k, v) in a.open_views()? {
                     a.shelf.put_view(&k, &v)?;
                 }
@@ -1794,6 +1795,7 @@ fn serve(args: &[String]) -> R<()> {
     let (tx, synced) = channel();
     imported_births(&dir, initial.header(), &catalogue, &mut born)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
+    cfg.public_names = Arc::clone(&built.public_names);
     let every = arg(args, "--checkpoint-every").map_or(Ok(EVERY), |n| {
         n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
     })?;
