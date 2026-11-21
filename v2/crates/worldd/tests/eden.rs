@@ -1308,6 +1308,21 @@ fn a_walk_before_a_sit_goes_to_the_seats_own_stand_point() {
     act_at("132.5,-21.7", "e_13a2e4cf", "eden:ride", "c22seat").expect("walked and seated, done");
 }
 
+/// C22 sweep follow-up: Eden's land features are drawn in the world's frame, each placed at the world's origin, so an
+/// entry's points were laid round the origin. Now they are laid on the thing's own line or outline. Born by the
+/// river's stone bridge (today's e_d10385f7, its path from (-252, -61) to (-225, -55) m), a Soul crosses it end to end
+/// (`cross`: a walk to `end_a`, then to `end_b`). Born south of the park pond (e_5c6d4b00, round (-6, 112) m), a Soul
+/// walks round it by its four shore points (`walk_around`). Each ends `done`; before, the walks went to points round
+/// the world's origin.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_bridge_is_crossed_and_a_pond_walked_round_on_their_own_shapes() {
+    let bridge = act_at("-256.0,-62.0", "e_d10385f7", "eden:cross", "c22bridge");
+    let pond = act_at("-6.0,124.0", "e_5c6d4b00", "eden:walk_around", "c22pond");
+    bridge.expect("the bridge crossed, done");
+    pond.expect("the pond walked round, done");
+}
+
 /// How one form of a sweep ended ([`sweep`]): `done`, `refused <name>` at its start, `failed <name>` by its run's
 /// ending, or `never-ended` past its deadline.
 fn ending(r: Result<String, String>) -> String {
