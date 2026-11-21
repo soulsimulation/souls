@@ -202,7 +202,9 @@ step client-upgrade node --test client/test/compat/*.test.mjs client/src/upgrade
 step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p testworld --locked --quiet &&
   node --test client/src/pair/*.test.mjs'
 # The served client (R17, #2818): the served files against the release's manifest; the one line, upgrade, rollback.
-step client-served bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/served/*.test.mjs'
+# The served client carries packages/ground's zod for the land verbs (#3695), so the build needs it installed.
+step client-served bash -c 'npm install --no-save --no-package-lock --no-audit --no-fund --prefix ../packages/ground zod@4.6.7 &&
+  cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/served/*.test.mjs'
 # The served-world gate (#1960): an Eden slice served by worldd, gatewayd and directoryd, two Souls paired and joined,
 # real acts through the thin command; the page's worker on the public stream and the client's copy, across a restart.
 # Assertions that wait on an open fix are marked PENDING #<issue> in the file and printed, never skipped silently.
