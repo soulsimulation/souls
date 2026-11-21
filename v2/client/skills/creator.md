@@ -30,9 +30,9 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
   building stands on the ground, and its rooms stand on a floor of that building. Things and bodies stand in rooms.
 - A thing can only go in something whose kind admits it. `describe` shows each kind's `admits`: a kind name, or a
   category (`thing`, `body`) that admits every kind of that sort.
-- Use the kinds the world already pins. Pick the kind that already offers what Souls should do with it; you cannot
-  invent kinds here. `describe` lists their full names, including hashes: copy a full name when several revisions
-  share a name. A short name works only when it identifies one pinned kind.
+- Use a kind the world already has when one offers what Souls should do with it; when none does, define your own
+  (below). `describe` lists every kind's full name, including its hash: copy a full name when several revisions share
+  a name. A short name works only when it identifies one kind.
 - Positions are millimetres, `x,y,z`, in the parent's frame: `y` is up. A room's floor is `y` 0.
 - Ids look like `<32 hex>-<number>`. Copy them exactly from `describe` or from an answer.
 
@@ -47,6 +47,8 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `batch '<json list>'` | several operations at once: all happen, or none |
 | `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
 | `describe` | what is there, and what each kind admits |
+| `define <record.json>` | a kind of your own, from a `souls-entry/1` record; the answer's `defines` is its full name |
+| `define-kit <kit.json> [--ns <namespace>]` | a kind of your own from a kit: a name and primitive shapes, in metres |
 
 A kind may be written as its bare name (`room`) when only one kind has that name, or as `namespace:name`.
 
@@ -71,6 +73,32 @@ Example: a room with two things in it, in one step.
 node souls-god.mjs batch '[{"op":"place","name":1,"kind":"room","in":"<place id>"},{"op":"place","name":2,"kind":"<kind>","in":1,"at":[1000,0,1000]},{"op":"place","name":3,"kind":"<kind>","in":1,"at":[-1000,0,1000]}]'
 ```
 
+## Kinds of your own
+
+When the world has no kind for what you need, define one. It is kept in the world as data (a `souls:kind` node at
+the root, which `describe` shows), and from then on you place it like any other kind.
+
+- **A kit** is the quickest: a name and its shapes, in metres, with `y` = 0 the ground, `+y` up and the front `+z`.
+  ```json
+  {"name": "birdbath", "box": [1, 1.2, 1],
+   "shapes": [{"kind": "cyl", "at": [0, 0.4, 0], "r": 0.18, "h": 0.8, "material": "stone"},
+              {"kind": "lathe", "at": [0, 0.8, 0], "profile": [[0, 0], [0.45, 0.05], [0.5, 0.15]], "material": "stone"}]}
+  ```
+  `define-kit birdbath.kit.json --ns garden` makes the kind `garden:birdbath`; then
+  `place garden:birdbath --in <room id> --at 1000,0,1000`. Shapes: `box`, `wedge`, `rbox`, `cyl`, `cone`, `capsule`,
+  `sphere`, `ring`, `torus`, `arch`, `lathe`, `extrude`, `loft`, `sweep`; each needs `at`. Angles (`yaw`, `pitch`,
+  `roll`, `arc`) are radians. Write each shape out: `repeat`, `radial`, `mirror` and `$params` are refused
+  (`kit.program`). A kit's `actions`, `components` or `state` are not carried, and the answer lists them in
+  `not_carried`.
+- **A record** says what a thing is and does: the `souls-entry/1` format of the world's own kinds (`kind`, `owner`,
+  `state`, `points`, `slots`, `geometry` with `bounds_mm` and `parts`, `forms`, `text`). Whole numbers only: mm,
+  millidegrees and permille. Its `forms` must pass the same checks the world's own kinds pass.
+- **Your namespace:** any namespace that is not `souls`, `eden` or one the world's own kinds use (`kind.namespace`).
+- **Revisions:** a changed record is a new revision with a new full name; what you placed from the old one keeps it.
+  `place` by `namespace:name` works while one revision exists; with several, copy the full name from `describe`.
+- **Removing a kind:** `remove <its souls:kind id>`, once nothing of that kind is left, or in the same batch as the
+  last of them (`kind.in-use`).
+
 ## Answers and refusals
 
 - Success: `{"ok": true, "names": {...}, "at": <version>, "changed": ...}`.
@@ -86,6 +114,12 @@ node souls-god.mjs batch '[{"op":"place","name":1,"kind":"room","in":"<place id>
 | `edit.name-unknown` | the batch uses a name no earlier place gave |
 | `edit.stale` | someone changed that thing after your copy saw it: `describe`, then send again |
 | `edit.not-the-creator` | this token is not the creator's |
+| `kind.invalid` | the record is not one the world can keep: its `detail` names the part |
+| `kind.too-large` | the record is over 64 KiB |
+| `kind.namespace` | that namespace is not yours |
+| `kind.collision` | that kind is defined already: place it by the name `describe` lists |
+| `kind.in-use` | things of that kind are still placed |
+| `kit.invalid`, `kit.program` | the kit is not one `define-kit` reads, or it uses a program |
 
 ## Good habits
 
