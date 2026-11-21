@@ -229,6 +229,9 @@ pub enum Event {
     /// read from that copy (G1c), or its refusal.
     Edited(Box<(Id, Result<Checked, Refused>)>),
     Worn(Box<(WearRequest, R<sim::mover::Body>)>),
+    /// A set-down checked off the clock thread by the edit checker's thread (E4's caller, #3604), with the walkers'
+    /// maps prepared from its part when it changes what walkers go round, or its refusal.
+    SetDown(Box<(Id, R<SetDownChecked>)>),
     /// The directory's Souls file as it now reads, and where the answers to the intents it causes go (W11b).
     Directory(Box<(Directory, Reply)>),
     /// Holds the clock thread for this long: the stuck-thread run (O4 A4).
@@ -794,8 +797,12 @@ struct Clock {
     /// Acts whose deadline passed while their sit, lie or rise was going: each ends `act.timed-out` when its move
     /// ends, so no move outlives its act.
     overdue: BTreeSet<Id>,
-    /// Where edits go to be checked off the clock thread, when the world takes edits (G1b).
+    /// Where edits and set-downs go to be checked off the clock thread (G1b, #3604): with the world's edits, its
+    /// wear or its engine; and whether it takes edits.
     edits: Option<Sender<CheckJob>>,
+    editing: bool,
+    /// Set-downs checked since the last tick, committed (or refused) at the next (#3604).
+    set_down: Vec<(Id, R<SetDownChecked>)>,
     /// Edits checked since the last tick, committed (or refused) at the next.
     edited: Vec<(Id, Result<Checked, Refused>)>,
     /// Where the edit checker reads the bodies the controller holds, handed off each tick (G1d).
@@ -852,6 +859,8 @@ struct Clock {
 
 enum CheckJob {
     Edit(Id, Edit, Minter),
+    /// A Soul's set-down (#3604).
+    SetDown(crate::setdown::Ask),
     Wear(Box<WearRequest>),
     /// B12b: the same checked edit back, an affected body having walked out of its prepared triangle; placed again
     /// on its kept surfaces as the bodies stand now, nothing else prepared again.
@@ -1011,13 +1020,19 @@ fn reserve_edit(edit: &Edit, lineage: Scope, next: &mut u64) -> Result<Minter, R
     Ok(reserved)
 }
 
-/// What an intent becomes: a form's act for the checkers, a move for the bodies, or an edit for the edit checker.
+/// What an intent becomes: a form's act for the checkers, a move for the bodies, or an edit or a set-down for the
+/// edit checker.
 enum Taken {
     Form(Act),
     Move(Asked),
     Edit(Edit),
     Engine(engine::Act),
+    SetDown(crate::setdown::Ask),
 }
+
+/// A set-down checked off the clock, and the walkers' maps prepared from its part when it puts down a thing walkers
+/// go round (the same handoff an edit's commit takes: `buildsafe::PreparedMaps`, `Bodies::commit_map`).
+type SetDownChecked = (crate::setdown::Checked, Option<buildsafe::PreparedMaps>);
 
 /// A form's arguments from an intent's parameter 1: `[[name as bytes, id or slot number], ...]`, a thing by its id
 /// (F4) and a slot of the node by its number, 1, 2, ... in its entry's order (C12).
@@ -1618,10 +1633,21 @@ impl Clock {
             }),
             // An edit (G1b): checked off the clock thread, committed at a tick through `sim::edit`.
             (None, None, None, Ok(Kind::Edit)) => {
-                match (&self.edits, edit::wire::edit_of(&intent, id)) {
-                    (Some(_), Some(e)) => Ok(Taken::Edit(e)),
-                    (None, _) => Err("edit.not-the-creator"),
+                match (self.editing, edit::wire::edit_of(&intent, id)) {
+                    (true, Some(e)) => Ok(Taken::Edit(e)),
+                    (false, _) => Err("edit.not-the-creator"),
                     (_, None) => Err("intent.not-an-edit"),
+                }
+            }
+            // A Soul puts its held thing down (E4, #3604): checked off the clock thread, committed at a tick.
+            (None, None, None, _) if intent.verb.as_str() == crate::setdown::VERB => {
+                match (&self.edits, self.body_of(&intent)) {
+                    (None, _) => Err("setdown-off"),
+                    (Some(_), Err(e)) => Err(e),
+                    (Some(_), Ok(body)) => {
+                        crate::setdown::read(&intent, id, body, self.replica.version(), now)
+                            .map(Taken::SetDown)
+                    }
                 }
             }
             (None, None, None, _) => self.body_of(&intent).and_then(|body| {
@@ -1656,6 +1682,7 @@ impl Clock {
                 Actor::World => self.zone,
             },
             Taken::Engine(a) => a.body,
+            Taken::SetDown(a) => a.body,
         };
         self.next_intent += 1;
         // The recorder's input (K12): the intent by id and verb; its words, were there any, by reference only.
@@ -1709,6 +1736,115 @@ impl Clock {
                 }
                 Err(r) => self.end(id, |c| c.edit_refusal(actor, sequence, &r)),
             },
+            Taken::SetDown(a) => {
+                if let Some(tx) = &self.edits
+                    && tx.send(CheckJob::SetDown(a)).is_ok()
+                {
+                    self.outstanding += 1;
+                }
+            }
+        }
+    }
+
+    /// The tick's checked set-downs (#3604): each still open, its thing still in the same hand and its new parent
+    /// still there, is judged by G2's kept guard against the bodies as they stand now (lookups only) and written as
+    /// one part under its intent, answered with one receipt; else refused by name, the thing left in the hand. One
+    /// that puts down a thing walkers go round commits through the walkers' prepared maps as an edit does
+    /// (`Bodies::commit_map`): the town they route on and the planner's copy take the same part, or nothing is written
+    /// (`edit.map-unchecked` when no maps were prepared).
+    fn set_downs(&mut self, now: Micros) {
+        let mut kept = Vec::new();
+        for (id, checked) in std::mem::take(&mut self.set_down) {
+            let mut checked = checked;
+            let mut keep = |c: &mut R<SetDownChecked>| {
+                if let Ok((_, Some(maps))) = c {
+                    kept.push(std::mem::take(&mut maps.surfaces));
+                }
+            };
+            let Some(o) = self.open.get(&id) else {
+                keep(&mut checked);
+                continue;
+            };
+            let (actor, sequence) = (o.actor, o.sequence);
+            if expired(o.expiry, now) {
+                keep(&mut checked);
+                self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
+                continue;
+            }
+            let soul = match actor {
+                Actor::Soul(s) => s,
+                _ => o.body,
+            };
+            if let (Ok((_, Some(maps))), Some(b)) = (&checked, &self.bodies)
+                && let Err(r) = b.check_map(maps)
+            {
+                keep(&mut checked);
+                let name = r.name;
+                self.end(id, |c| c.refusal(actor, sequence, name));
+                continue;
+            }
+            let done = checked.and_then(|(c, maps)| {
+                crate::setdown::still_held(self.replica.tree(), &c)?;
+                let bodies = match &self.bodies {
+                    Some(b) => buildsafe::judged(c.souls, &buildsafe::moving(b)),
+                    None => c.souls,
+                };
+                crate::setdown::verdict(&c.guard.judge(&bodies))?;
+                let header = self.replica.header().clone();
+                let p = sim::setdown::part(&header, 0, now, soul, Cause::Intent(id), c.entries)?;
+                let replica = &mut self.replica;
+                let write = || {
+                    applied(replica, p.effects)
+                        .map(|p| sim::edit::Committed {
+                            part: Arc::new(p),
+                            names: BTreeMap::new(),
+                        })
+                        .map_err(|r| Refused {
+                            op: None,
+                            name: r.name,
+                            detail: r.detail,
+                        })
+                };
+                let done = match (&mut self.bodies, maps, c.walk) {
+                    (Some(b), Some(maps), _) => b.commit_map(maps, write),
+                    // A thing walkers go round never reaches the world without its maps.
+                    (Some(_), None, true) => Err(Refused {
+                        op: None,
+                        name: "edit.map-unchecked",
+                        detail: "no walkers' map was prepared for the set-down".into(),
+                    }),
+                    _ => write(),
+                };
+                done.map_err(|r| Refusal {
+                    name: r.name,
+                    detail: r.detail,
+                })
+            });
+            match done {
+                Ok(c) => {
+                    self.unsealed = true;
+                    // The edit checker's town takes it too, as an edit's commit (G1e).
+                    if let Some(w) = &self.walkers {
+                        w.committed(Arc::clone(&c.part), self.replica.version());
+                    }
+                    self.receipts.index(&c.part.effects);
+                    self.effects.extend(c.part.effects.iter().cloned());
+                    self.parts.push(c.part);
+                    self.end(id, |k| Answer::Receipt {
+                        actor,
+                        sequence,
+                        intent: id,
+                        entries: k.receipts.entries(id).to_vec(),
+                        names: BTreeMap::new(),
+                    });
+                }
+                Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
+            }
+        }
+        if !kept.is_empty()
+            && let Some(tx) = &self.edits
+        {
+            let _ = tx.send(CheckJob::Release(kept));
         }
     }
 
@@ -1782,7 +1918,13 @@ impl Clock {
                 };
                 match (&mut self.bodies, maps) {
                     (Some(b), Some(maps)) => b.commit_map(maps, commit),
-                    _ => commit(),
+                    // Every edit a world with walkers commits reaches their town: none without its maps.
+                    (Some(_), None) => Err(Refused {
+                        op: None,
+                        name: "edit.map-unchecked",
+                        detail: "no walkers' map was prepared for the edit".into(),
+                    }),
+                    (None, _) => commit(),
                 }
             });
             match committed {
@@ -2483,27 +2625,11 @@ impl Clock {
 
     /// Applies entries the world writes itself as one part, whole or not at all, each numbered in turn from the
     /// replica's version.
-    fn write_all(&mut self, mut effects: Vec<Effect>) -> R<()> {
+    fn write_all(&mut self, effects: Vec<Effect>) -> R<()> {
         let changes = effects
             .iter()
             .any(|e| !matches!(&e.body, Body::Changes(c) if c.is_empty()));
-        for (k, e) in effects.iter_mut().enumerate() {
-            e.envelope.sequence = self.replica.version() + k as u64;
-        }
-        let v = Value::Map(BTreeMap::from([
-            (1, Value::Bytes(self.replica.header().hash().to_bytes())),
-            (
-                2,
-                Value::Array(effects.iter().map(Effect::to_value).collect()),
-            ),
-        ]));
-        let p = encode(&v)
-            .map_err(|e| Refusal {
-                name: "encoding",
-                detail: e.to_string(),
-            })
-            .and_then(|b| Part::read(&b))
-            .and_then(|p| self.replica.apply(&p).map(|()| p))?;
+        let p = applied(&mut self.replica, effects)?;
         self.unsealed |= changes;
         self.receipts.index(&p.effects);
         self.effects.extend(p.effects.iter().cloned());
@@ -3130,6 +3256,8 @@ impl Clock {
         // 4b. Checked edits (G1b): committed through `sim::edit`, or refused whole.
         self.edits(now);
         self.wears(now);
+        // 4c. Checked set-downs (#3604): committed with lookups only, or refused by name.
+        self.set_downs(now);
         self.start_forms(now);
         self.start_moves(now);
         self.write_forms(now);
@@ -3854,19 +3982,25 @@ pub fn start<S: Storage + 'static>(
         .unwrap_or_default();
     let engine_parts = cfg.engine.take();
     let (events, rx) = channel();
-    let walkers =
-        (cfg.edits.is_some() || cfg.wear.is_some()).then(|| Arc::new(buildsafe::Moving::default()));
-    let creator = cfg.creator.take();
-    let edit_kinds = cfg
-        .edits
+    // The edit checker's thread checks edits (with a creator), wear, and set-downs (with the engine's rules, #3604).
+    let editing = cfg.edits.is_some();
+    let set_downs = engine_parts
         .as_ref()
-        .map(|w| w.kinds.clone())
-        .unwrap_or_default();
+        .map(|(r, _)| (r.clone(), Minter::new(scope("setdown"))));
+    let walkers = (editing || cfg.wear.is_some() || set_downs.is_some())
+        .then(|| Arc::new(buildsafe::Moving::default()));
+    let creator = cfg.creator.take();
+    let edit_kinds = match (&cfg.edits, &set_downs) {
+        (Some(w), _) => w.kinds.clone(),
+        (None, Some((r, _))) => r.kinds.clone(),
+        (None, None) => BTreeMap::new(),
+    };
     let edits = walkers
         .clone()
         .map(|m| {
             edit_checker(
                 cfg.edits.take(),
+                set_downs,
                 creator,
                 Arc::clone(&publisher),
                 m,
@@ -3962,6 +4096,8 @@ pub fn start<S: Storage + 'static>(
         walks: BTreeMap::new(),
         overdue: BTreeSet::new(),
         edits,
+        editing,
+        set_down: Vec::new(),
         edited: Vec::new(),
         walkers,
         forms: Acts::new(kinds, library, header, forms_scope),
@@ -4097,6 +4233,10 @@ pub fn start<S: Storage + 'static>(
                         c.outstanding = c.outstanding.saturating_sub(1);
                         c.worn.push(*k);
                     }
+                    Event::SetDown(k) => {
+                        c.outstanding = c.outstanding.saturating_sub(1);
+                        c.set_down.push(*k);
+                    }
                     Event::Directory(d) => {
                         let (d, reply) = *d;
                         c.told.extend(d.souls());
@@ -4201,6 +4341,7 @@ pub fn start<S: Storage + 'static>(
 /// creator is the one it names now.
 fn edit_checker(
     mut world: Option<edit::World>,
+    mut set_downs: Option<(replica::tree::Rules, Minter)>,
     creator: Option<Arc<buildsafe::Creator>>,
     publisher: Arc<Publisher>,
     walkers: Arc<buildsafe::Moving>,
@@ -4251,6 +4392,68 @@ fn edit_checker(
                 };
                 let (id, e, reserved) = match job {
                     CheckJob::Edit(id, e, reserved) => (id, e, reserved),
+                    // A Soul's set-down (#3604): E4's plan, part and G2's rule on the town, off the clock; and, for a
+                    // thing walkers go round, the walkers' maps from the same basis an edit's are prepared from.
+                    CheckJob::SetDown(a) => {
+                        let snapshot = walkers.current();
+                        let needed = snapshot
+                            .map
+                            .as_ref()
+                            .map_or(edited, |m| edited.max(m.version))
+                            .max(a.planned);
+                        let copy = publisher.wait_for(needed, Duration::from_secs(1));
+                        let ground = buildsafe::open_ground(&copy);
+                        let checked = match &mut set_downs {
+                            _ if copy.version() < needed => Err(Refusal {
+                                name: "edit.stale",
+                                detail: "the published copy has not reached the map basis".into(),
+                            }),
+                            Some((rules, mint)) => {
+                                let souls = buildsafe::souls(&copy, &kinds);
+                                let bodies = buildsafe::judged(souls.clone(), &snapshot.bodies);
+                                let t = town.on(&copy, ground, &committed);
+                                crate::setdown::check(&a, &copy, t, rules, mint, &bodies, souls)
+                            }
+                            None => Err(Refusal {
+                                name: "setdown-off",
+                                detail: String::new(),
+                            }),
+                        };
+                        let checked = checked.and_then(|c| {
+                            let maps = match (&snapshot.map, c.walk) {
+                                (Some(source), true) => {
+                                    let p = sim::setdown::part(
+                                        copy.header(),
+                                        copy.version(),
+                                        a.at,
+                                        a.soul,
+                                        Cause::Intent(a.id),
+                                        c.entries.clone(),
+                                    )?;
+                                    let maps = buildsafe::PreparedMaps::prepare_part(
+                                        &copy,
+                                        Arc::new(p),
+                                        source,
+                                        &snapshot.movers,
+                                    )
+                                    .map_err(|r| Refusal {
+                                        name: r.name,
+                                        detail: r.detail,
+                                    })?;
+                                    Some(maps)
+                                }
+                                _ => None,
+                            };
+                            Ok((c, maps))
+                        });
+                        if events
+                            .send(Event::SetDown(Box::new((a.id, checked))))
+                            .is_err()
+                        {
+                            break;
+                        }
+                        continue;
+                    }
                     CheckJob::Reprepare(_) | CheckJob::Release(_) => continue,
                     CheckJob::Wear(request) => {
                         let request = *request;
@@ -4332,6 +4535,27 @@ fn edit_checker(
         })
         .map_err(io)?;
     Ok(tx)
+}
+
+/// `effects` numbered from the replica's next sequence, made one part and applied to it: the part, or the refusal.
+fn applied(replica: &mut Replica, mut effects: Vec<Effect>) -> R<Part> {
+    for (k, e) in effects.iter_mut().enumerate() {
+        e.envelope.sequence = replica.version() + k as u64;
+    }
+    let v = Value::Map(BTreeMap::from([
+        (1, Value::Bytes(replica.header().hash().to_bytes())),
+        (
+            2,
+            Value::Array(effects.iter().map(Effect::to_value).collect()),
+        ),
+    ]));
+    encode(&v)
+        .map_err(|e| Refusal {
+            name: "encoding",
+            detail: e.to_string(),
+        })
+        .and_then(|b| Part::read(&b))
+        .and_then(|p| replica.apply(&p).map(|()| p))
 }
 
 /// Serves one connection of the gateway's local socket (I1's framing: a 4-byte big-endian length, then that many

@@ -110,13 +110,33 @@ completed intent with the same form decoder as the gateway before sending it.
     is in its one byte form (`edit-not-a-batch`). The operations are place `{1: 1, 2: name, 3: kind's plain name, 4:
     kind's hash, 5: parent, 6: spot, 7: audience, 8: fields}` (7 left out for everyone, else the audience's id; 8
     left out when empty), move `{1: 2, 2: node, 3: spot}`, set `{1: 3, 2: node, 3: field, 4: value}` and remove `{1:
-    4, 2: node}`. A node is an id, or the temporary name of one placed earlier in the batch (an integer). A spot is
+    4, 2: node}`. Doorway `{1: 5, 2: name, 3: door, 4: from, 5: to, 6: [x,z], 7: yaw, 8: width, 9: height,
+    10: wall, 11: closed, 12: open}` binds
+    a door leaf to a passage owned by its parent `from` place, to another place. Geometry is millimetres and
+    millidegrees in the owning room's building frame. Its paired link, owner row and leaf backlink commit together;
+    removing the leaf retires the passage under the same ownership and BUILDSAFE checks. `wall` is the exact pinned
+    containing building of both places; `closed` and `open` contain 1–64 distinct authored solid rows each (nine
+    bounded integers per row). Only exact unique `closed` rows are replaced, leaving unrelated solids intact.
+    The check prepares the resulting wall field off-clock, and BUILDSAFE judges that same committed field. Leaf
+    field 29 is engine-owned `[wall,closed,open]`; removal restores its patch only while the owned open rows still
+    match (`edit.doorway-wall-changed`), with intervening wall writes refused `edit.stale` by the normal stamp check.
+    Imported doors have no inferred restoration: their creator supplies an explicit wall Set in the same removal
+    batch. The JSON batch uses `wall`, `closed` and `open` with the same meaning. A node is an id, or the
+    temporary name of one placed earlier in the batch (an integer). A spot is
     `{1: position, 2: orientation, 3: support, 4: slot}` as T4's pose writes them (4 left out when none). The kind is
     split so no text is over the text limit. Any actor's edit reads; the world refuses one from anyone but its
     creator (`edit.not-the-creator`), checks the rest off the clock thread and answers each batch once (rule 8): a
     receipt mapping each name to the id the world minted, or the refusal's name and the operation that failed. Code:
     `replica::edit::wire`. This adds a kind and two optional answer fields and changes no other kind's bytes
     (`goldens.txt`): additive, as the coordinator decided on #3362, so the protocol stays version 1.
+16. **A set-down is a form verb, `hands:set-down`** (E4's caller, #3604): its target is the thing the actor's body
+    holds, parameter 1 the placement word by its placements name under `place:` (`place:next_to`; here when
+    absent: a text in the log is a namespaced name), 2 the anchor's id for the words that need one, 3 the facing (a
+    node's id, or `place:to_wall`; as it was when absent). The world plans, builds and
+    judges it off the clock thread (E4's `sim::setdown` and G2's rule, on the edit checker's thread), then commits it
+    at a tick with lookups only (still in the same hand, its new parent still there, the bodies judged by the kept
+    guard) as one transfer under the intent: one receipt, or a refusal by name (`not-held`, `setdown.no-room`,
+    `edit.would-bury`, ...). Code: `worldd::setdown`; the daemon's `set-down` command sends it.
 
 **Step 0.** TRUNK's four orders are ranked fallbacks, a held stance, follow and standing in a queue: this page needs
 no fifth, and no field for a start time or a condition.
