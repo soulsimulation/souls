@@ -1221,7 +1221,7 @@ fn public_place_names_beside_public_nodes_only_and_hash_verified() {
     )
     .unwrap();
     let owner = Id::new(Scope([93; 16]), 1).unwrap();
-    let named = |seq: u64, n: u32, audience: Audience, name: &[u8]| {
+    let named = |seq: u64, n: u64, audience: Audience, name: &[u8]| {
         let node = Id::new(Scope([94; 16]), n).unwrap();
         let mut e = w3e_create(&h, seq, node, h.zone, audience);
         if let Body::Changes(changes) = &mut e.body
