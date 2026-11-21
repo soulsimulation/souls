@@ -406,11 +406,115 @@ fn with_punts(facts: &str) -> R<String> {
     Ok(f.to_json())
 }
 
+/// The facts with the courses of the rides `entries` declare (#3691): each thing on the ground whose kind's entry has a
+/// `ride` that flies a loop from its stop (`sim::courses::rides`, read from the ride's data, never its kind's name) gets
+/// its course, over the terrain beneath it. The `k`th such thing in the facts' order starts its lap `k` minutes in, so
+/// rides that stand together do not fly together. The same facts and entries give the same courses at every serve.
+fn with_rides(facts: &str, entries: &[(String, Json)]) -> R<String> {
+    let rides: BTreeMap<&str, sim::courses::rides::Ride> = entries
+        .iter()
+        .filter_map(|(k, e)| Some((k.as_str(), sim::courses::rides::Ride::of(e)?)))
+        .filter(|(_, r)| r.loops_aloft())
+        .collect();
+    if rides.is_empty() {
+        return Ok(facts.to_owned());
+    }
+    let im = import_eden::load(facts)?;
+    let Some(&ground) = im.nodes.get("ground") else {
+        return Ok(facts.to_owned());
+    };
+    let terrain = sim::ground::Terrain::of(&im.tree, ground)?;
+    let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
+    let Json::Obj(top) = &mut f else {
+        return Err("the facts are not an object".into());
+    };
+    // A kind's name as the entries name it, by its def's ref.
+    let names: BTreeMap<String, String> = top
+        .iter()
+        .find(|(k, _)| k == "kinds")
+        .and_then(|(_, v)| v.arr())
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|k| {
+            Some((
+                k.get("ref")?.str()?.to_owned(),
+                import_eden::kind_name(k.get("name")?.str()?),
+            ))
+        })
+        .collect();
+    let int = |n: i64| Json::Int(i128::from(n));
+    let num = |v: Option<&Json>| match v {
+        Some(Json::Int(n)) => i64::try_from(*n).ok(),
+        _ => None,
+    };
+    let Some((_, Json::Arr(things))) = top.iter_mut().find(|(k, _)| k == "things") else {
+        return Err("the facts have no 'things' list".into());
+    };
+    let mut k = 0;
+    for t in things.iter_mut() {
+        let on_ground = matches!(t.get("parent"), None | Some(Json::Null));
+        let Some(ride) = t
+            .get("def")
+            .and_then(Json::str)
+            .and_then(|d| names.get(d))
+            .and_then(|n| rides.get(n.as_str()))
+        else {
+            continue;
+        };
+        let Some([x, y, z]) = t
+            .get("world")
+            .and_then(Json::arr)
+            .and_then(|w| Some([num(w.first())?, num(w.get(1))?, num(w.get(2))?]))
+        else {
+            continue;
+        };
+        if !on_ground || t.get("course").is_some() {
+            continue;
+        }
+        let home = Vec3::new(x * 1000, y * 1000, z * 1000);
+        let t0 = k * 60_000_000;
+        let Some(c) = sim::courses::rides::course(
+            ride,
+            home,
+            |x, z| terrain.as_ref().and_then(|g| g.height_at(x, z)),
+            t0,
+        ) else {
+            continue;
+        };
+        k += 1;
+        println!(
+            "ride: {} at {:.3},{:.3} m, loop {} us from {} us",
+            t.get("name").and_then(Json::str).unwrap_or("?"),
+            home.x as f64 / 1e6,
+            home.z as f64 / 1e6,
+            c.load().map_or(0, |t| t.period),
+            c.t0
+        );
+        let stations = c
+            .stations
+            .iter()
+            .map(|s| Json::Arr(vec![int(s.at.x), int(s.at.y), int(s.at.z), int(s.dwell)]))
+            .collect();
+        let Json::Obj(kv) = t else { continue };
+        kv.push((
+            "course".to_owned(),
+            Json::Obj(vec![
+                ("stations".to_owned(), Json::Arr(stations)),
+                ("shape".to_owned(), int(1)),
+                ("speed".to_owned(), int(c.speed)),
+                ("t0".to_owned(), int(c.t0)),
+                ("within".to_owned(), int(c.within)),
+            ]),
+        ));
+    }
+    Ok(f.to_json())
+}
+
 /// The rowing punt's def (#3603): today's `rowing-punt`, a kind the world adds.
 const PUNT_REF: &str = "core-rowing-punt@1";
 
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
-    let facts = &with_punts(facts)?;
+    let facts = &with_rides(&with_punts(facts)?, entries)?;
     let mut im = import_eden::load(facts)?;
     stamp("facts");
     for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
@@ -662,6 +766,44 @@ fn entries(dir: &Path, out: &mut Vec<(String, Json)>) -> R<()> {
     Ok(())
 }
 
+/// The code hatches' modules a world ships (#3713): every `.wasm` file in `dir`, in name order, each checked as
+/// `replica::hatch` loads a module (refused by name, so a bad module stops the boot, not an act).
+fn hatches(dir: &Path) -> R<Vec<Vec<u8>>> {
+    let mut out = Vec::new();
+    if !dir.is_dir() {
+        return Ok(out);
+    }
+    let mut paths = Vec::new();
+    wasm_files(dir, &mut paths)?;
+    for p in paths {
+        let bytes = std::fs::read(&p).map_err(io(&p))?;
+        let mut named = vec![replica::ids::SHA2_256, 32];
+        named.extend(sha256(&bytes));
+        replica::hatch::Loaded::load(&bytes, &named)
+            .map_err(|r| format!("{}: {}: {}", p.display(), r.name, r.detail))?;
+        out.push(bytes);
+    }
+    println!("hatches: {} modules", out.len());
+    Ok(out)
+}
+
+/// Every `.wasm` file under `dir`, sorted.
+fn wasm_files(dir: &Path, out: &mut Vec<PathBuf>) -> R<()> {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(io(dir))?
+        .filter_map(|e| Some(e.ok()?.path()))
+        .collect();
+    paths.sort();
+    for p in paths {
+        if p.is_dir() {
+            wasm_files(&p, out)?;
+        } else if p.extension().is_some_and(|x| x == "wasm") {
+            out.push(p);
+        }
+    }
+    Ok(())
+}
+
 fn humanoid() -> R<Family> {
     let n = |s: &str| Name::new(s).ok_or_else(|| format!("a name: {s}"));
     let leg = |s: &str| -> R<Resource> {
@@ -774,6 +916,22 @@ fn seed_in(args: &[String]) -> R<String> {
             std::fs::write(&p, v.to_json()).map_err(io(&p))?;
         }
         println!("entries: {}", found.len());
+        // The code hatches' modules shipped beside the entries (#3713), each kept under the hash it is named by.
+        let mut modules = Vec::new();
+        if let Some(e) = arg(args, "--entries") {
+            wasm_files(Path::new(e), &mut modules)?;
+        }
+        if !modules.is_empty() {
+            std::fs::create_dir_all(dir.join("hatches")).map_err(io(&dir))?;
+        }
+        for m in &modules {
+            let bytes = std::fs::read(m).map_err(io(m))?;
+            let p = dir
+                .join("hatches")
+                .join(format!("1220{}.wasm", to_hex(&sha256(&bytes))));
+            std::fs::write(&p, &bytes).map_err(io(&p))?;
+        }
+        println!("hatches: {}", modules.len());
     }
     // The Souls: ids of a scope of their own (not the tree's minter's), a token each.
     let name = instance(built.root);
@@ -2145,6 +2303,7 @@ fn serve(args: &[String]) -> R<()> {
     cfg.synced = Some(tx);
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.header.lineage));
+    cfg.hatches = hatches(&dir.join("hatches"))?;
     // The engine's own acts (C2) and the activities they run (C30).
     cfg.engine = Some((built.rules.clone(), built.activities.clone()));
     // With a directory, its authoritative creator (including none) is always used; static metadata is only the

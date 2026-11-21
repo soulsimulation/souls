@@ -11,6 +11,7 @@ import { happenedInPart } from '../sound/record.ts';
 import { readChanged } from './changed.ts';
 import { skyFields } from '../sky/record.ts';
 import { BEHIND_US, CUT_US } from '../clock/clock.ts';
+import { fieldsOf } from '../kinds/state.ts';
 
 /** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
 const AHEAD = 16;
@@ -82,6 +83,8 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array);
   const placeName = f.get(PLACE_NAME);
   if (placeName instanceof Uint8Array && placeName.length === 32) rec.placeName = nameKey(placeName);
+  const fields = fieldsOf(f); // #3871: its kind's state, by field number
+  if (fields) rec.fields = fields;
   const sky = skyFields(f); // V19: the world node's day, night and weather
   if (sky) rec.sky = sky;
   return rec;

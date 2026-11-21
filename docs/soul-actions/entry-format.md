@@ -115,7 +115,7 @@ a named part of its surroundings: a tree's shade, a river's bank. A placed area 
 point, so a body can be sent to it. Names are one list with points and slots. Refused: an area that says nothing; a
 posture both allowed and forbidden; a forbidden posture the kind's own slot seats; and an area that only repeats what
 the kind's slots already say (the check gate reports it under `shape`). A bed (`content/kinds/rest/bed.json`) allows
-lying on it and sitting on its edge; a piano forbids sitting and lying; a tree declares its shade. A rug or a lawn needs
+lying on it and sitting on its edge; a piano forbids lying on it and seats its pianist at the bench; a tree declares its shade. A rug or a lawn needs
 no area (a body sits on the ground, SA-G3), and a thing that hangs uses a hang slot (SA-D3). Cases are data
 (`tools/entry/cases/areas.json`). Section 16 is meaning, so covered by the hash.
 
