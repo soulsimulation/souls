@@ -600,6 +600,65 @@ fn a2_a_seated_or_lying_soul_shut_in_a_room_is_refused() {
 }
 
 #[test]
+fn a_solid_placed_through_an_occupied_seat_is_refused_in_use() {
+    // Today's game refuses it (`body.in-use`, the seated Soul named) even with clear ground to stand up onto, which the
+    // #3280 rule alone lets through.
+    let mut w = world();
+    let g = w.ground;
+    let at = Vec3::new(-5 * M, 0, -10 * M);
+    let (chair, c) = w.new_holder(on(g, at, surface(g)));
+    let Change::Create {
+        node,
+        kind,
+        pose,
+        audience,
+        mut fields,
+    } = c
+    else {
+        unreachable!()
+    };
+    // A chair: a low box, its seat (slot 1) 450 mm up at its middle.
+    let slot = Value::Array([1, 0, 450, 0].into_iter().map(int).collect());
+    fields.insert(F_SLOTS, Value::Array(vec![slot]));
+    let low = solid(0, 0, 250, 250, 450);
+    fields.insert(
+        F_SOLIDS,
+        Value::Array(vec![Value::Array(low.iter().map(|&v| int(v)).collect())]),
+    );
+    w.setup(vec![Change::Create {
+        node,
+        kind,
+        pose,
+        audience,
+        fields,
+    }]);
+    let sitter = Who {
+        pose: in_slot(chair, 1),
+        ..standing(1, g, Vec3::ZERO)
+    };
+    let crate_at = |w: &mut W, dx: i64| {
+        let p = Vec3::new(at.x + dx * MM, 0, at.z);
+        w.new_box(on(g, p, surface(g)), &[solid(0, 0, 300, 300, 1_500)])
+            .1
+    };
+    // A crate through the chair: the open ground round it is still clear, but where she sits is filled.
+    let c = crate_at(&mut w, 0);
+    let (_, v) = w.check(creator(), vec![c], &[sitter]);
+    print("a crate through the occupied chair", &v);
+    assert_eq!(v.len(), 1, "{v:?}");
+    assert_eq!(
+        (v[0].name, v[0].soul, v[0].thing),
+        (IN_USE, sitter.soul, Some((chair, Use::In)))
+    );
+    // The same crate a metre and a half off the chair leaves her seat as it was.
+    let c = crate_at(&mut w, 1_500);
+    assert_eq!(w.check(creator(), vec![c.clone()], &[sitter]).1, vec![]);
+    // And through the chair with nobody in it, it is no Soul's business here.
+    let c = crate_at(&mut w, 0);
+    assert_eq!(w.check(creator(), vec![c], &[]).1, vec![]);
+}
+
+#[test]
 fn a2_a_body_partway_through_a_doorway_or_on_a_stair_is_refused() {
     let mut w = world();
     let f = w.floor1;
