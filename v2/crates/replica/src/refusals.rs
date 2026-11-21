@@ -67,7 +67,7 @@ pub const REFUSALS: [(&str, &str); 32] = [
     ),
     (
         "intent.text-not-a-name",
-        "a verb that is not namespace:form",
+        "a verb, or any other text in the intent, that is not namespace:name",
     ),
     (
         "intent.order-unknown",
