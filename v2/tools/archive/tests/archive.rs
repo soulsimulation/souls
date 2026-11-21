@@ -1401,3 +1401,62 @@ fn w3655_legacy_empty_initial_part_keeps_named_refusals_and_store_unchanged() {
         before
     );
 }
+
+/// B15 (#2750): a fresh world that goes idle mid-window still publishes that window. It is written under its content
+/// hash, published again without a conflict, and replaced in the day index (one row per start) when it closes.
+#[test]
+fn b15_an_idle_fresh_world_publishes_its_open_window() {
+    use replica::history::DayIndex;
+    let store = Memory::default();
+    let queue = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+    let q = queue.clone();
+    let mut w = script::world(
+        3,
+        10,
+        Some(Box::new(move |b: &[u8]| q.borrow_mut().push(b.to_vec()))),
+    );
+    let root = w.tree.node(w.tree.root()).expect("root").id();
+    let kind = w.tree.node(w.tree.root()).expect("root").kind().clone();
+    let mut a = Archiver::open(&store, PREFIX, &w.header, root, kind).expect("opens");
+    let mut n = 0u64;
+    let mut run =
+        |w: &mut script::World, a: &mut Archiver<&Memory>, seconds: std::ops::Range<u64>| {
+            for t in seconds {
+                script::tick(w, t * 20, 5, 7 * 20);
+            }
+            for p in queue.borrow_mut().drain(..) {
+                a.push(n, p).expect("archives");
+                n += 1;
+            }
+        };
+    let index = |store: &Memory| {
+        let o = store
+            .get(&format!("{PREFIX}bundles/00000000/index"))
+            .expect("get")
+            .expect("the open day's index is published");
+        DayIndex::read(&o.bytes).expect("index").bundles
+    };
+    run(&mut w, &mut a, 0..20);
+    a.publish_open().expect("publishes the open window");
+    let first = index(&store);
+    assert_eq!(first.len(), 1, "one row for the open window");
+    assert!(
+        first[0].1.contains('-'),
+        "an open window's key carries its hash"
+    );
+    assert!(
+        store.get(&first[0].1).expect("get").is_some(),
+        "its bundle is stored"
+    );
+    a.publish_open().expect("the same window again, unchanged");
+    run(&mut w, &mut a, 20..40);
+    a.publish_open().expect("the window, grown");
+    let grown = index(&store);
+    assert_eq!(grown.len(), 1, "still one row for the start");
+    assert_ne!(grown[0].1, first[0].1, "the grown window has a new key");
+    a.flush()
+        .expect("closing the window does not collide with a published one");
+    let closed = index(&store);
+    assert_eq!(closed.len(), 1, "one row per start after it closes");
+    assert_eq!(closed[0].0, first[0].0);
+}

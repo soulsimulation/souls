@@ -52,9 +52,11 @@ jobs:
           cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
           cargo build -p replica --release --target wasm32-unknown-unknown --locked
           target/tools/bin/wasm-bindgen --target web --out-dir target/wasm-load/pkg target/wasm32-unknown-unknown/release/replica.wasm
-      - name: Build the page
-        working-directory: v2/web
-        run: npm ci && npm run build
+      - name: Build the page and its pinned body assets
+        run: |
+          npm --prefix v2/web ci
+          node v2/tools/import-body/prepare.mjs --out "$RUNNER_TEMP/body-assets"
+          V2_BODY_ASSETS="$RUNNER_TEMP/body-assets" npm --prefix v2/web run build
       - name: Build the served client
         # The version the client's skill declares (v2/client/skill/SKILL.md); release-v2 stamps its own later.
         run: |
