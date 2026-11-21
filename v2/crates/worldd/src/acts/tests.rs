@@ -515,6 +515,7 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
         context: BTreeMap::new(),
         walks: BTreeMap::new(),
         sit_walks: BTreeMap::new(),
+        approaches: Default::default(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };
