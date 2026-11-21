@@ -3040,3 +3040,130 @@ fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_qu
     }
     assert_eq!(reader.state(), out.public_player().state());
 }
+
+/// #3822: parts played deferred (no digest worked out each) make the same state as parts played checked, and one
+/// `verify` refuses a deferred run whose state is not the one the newest part claims.
+#[test]
+fn i3822_deferred_parts_make_the_checked_state_and_a_wrong_one_is_refused_once_verified() {
+    let h = header();
+    let d = scratch("i3822-deferred");
+    let views = d.join("views");
+    let store = directoryd::directory::store::Memory::default();
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            names: None,
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: None,
+            text: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let body = Id::new(Scope([72; 16]), 1).unwrap();
+    let mut packets = vec![w3e_packet(
+        &h,
+        vec![w3e_create(&h, 0, body, h.zone, Audience::Everyone)],
+    )];
+    for n in 1..6u64 {
+        packets.push(w3e_packet(
+            &h,
+            vec![w3e_effect(
+                n,
+                body,
+                Audience::Everyone,
+                Body::Changes(vec![ChangeRec {
+                    change: Change::Set {
+                        node: body,
+                        field: 40,
+                        to: Value::Uint(n),
+                        by: None,
+                    },
+                    rest: Rest::new(),
+                }]),
+            )],
+        ));
+    }
+    for (n, p) in packets.iter().enumerate() {
+        actual.apply_bytes(p).unwrap();
+        out.push(n as u64, p).unwrap();
+        out.flush().unwrap();
+    }
+    let baseline = out.baseline.clone();
+    let dir = out.generation_dir();
+    let parts: Vec<Vec<u8>> = (0..packets.len())
+        .map(|n| fs::read(dir.join(n.to_string())).unwrap())
+        .collect();
+    let mut checked = PublicPlayer::start(h.stored(), &baseline).unwrap();
+    let mut deferred = PublicPlayer::start(h.stored(), &baseline).unwrap();
+    for p in &parts {
+        checked.play(p).unwrap();
+    }
+    for p in &parts[..parts.len() - 1] {
+        deferred.play_deferred(p).unwrap();
+    }
+    deferred.verify().unwrap();
+    // The newest part played checked after deferred ones works the digest out from the state too.
+    deferred.play(&parts[parts.len() - 1]).unwrap();
+    assert_eq!(deferred.state(), checked.state());
+    assert_eq!(deferred.hash().unwrap(), checked.hash().unwrap());
+    assert_eq!(
+        deferred
+            .query(
+                &wire(Value::Map(BTreeMap::from([
+                    (1, Value::Uint(5)),
+                    (2, Value::Uint(0))
+                ])))
+                .unwrap()
+            )
+            .unwrap(),
+        checked
+            .query(
+                &wire(Value::Map(BTreeMap::from([
+                    (1, Value::Uint(5)),
+                    (2, Value::Uint(0))
+                ])))
+                .unwrap()
+            )
+            .unwrap()
+    );
+    // A part whose delta does not make the state its digest claims: played deferred it is taken, and refused at verify.
+    let last = parts.len() - 1;
+    let mut corrupted = object_map(&parts[last]).unwrap();
+    let mut context = object_map(&obj_bytes(&corrupted, 10).unwrap()).unwrap();
+    let Some(Value::Map(delta)) = context.get_mut(&5) else {
+        panic!("a part's context holds its delta")
+    };
+    let Some(Value::Uint(v)) = delta.get(&1).cloned() else {
+        panic!("the delta holds the version")
+    };
+    delta.insert(1, Value::Uint(v + 7));
+    corrupted.insert(10, Value::Bytes(wire(Value::Map(context)).unwrap()));
+    let corrupted = wire(Value::Map(corrupted)).unwrap();
+    let mut wrong = PublicPlayer::start(h.stored(), &baseline).unwrap();
+    for p in &parts[..last] {
+        wrong.play_deferred(p).unwrap();
+    }
+    wrong.play_deferred(&corrupted).unwrap();
+    assert_eq!(wrong.verify().unwrap_err().name, "stream-digest");
+    assert_eq!(
+        wrong.verify().unwrap_err().name,
+        "stream-digest",
+        "a refused state stays refused"
+    );
+    // Played checked, the same part is refused at once.
+    let mut strict = PublicPlayer::start(h.stored(), &baseline).unwrap();
+    for p in &parts[..last] {
+        strict.play(p).unwrap();
+    }
+    assert_eq!(
+        strict.play(&corrupted).unwrap_err().name,
+        "public-stream-record"
+    );
+}
