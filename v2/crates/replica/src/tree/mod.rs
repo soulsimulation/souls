@@ -1738,6 +1738,42 @@ impl Tree {
         }
     }
 
+    /// The transfers that have arrived here.
+    pub fn arrived(&self) -> &BTreeSet<Id> {
+        &self.arrived
+    }
+
+    /// One transfer in flight from here, as [`Tree::to_state`] writes it.
+    pub fn flight(&self, transfer: Id) -> Option<Flight> {
+        self.in_flight.get(&transfer).map(|f| self.flight_of(f))
+    }
+
+    fn flight_of(&self, f: &Away) -> Flight {
+        Flight {
+            root: self.nodes[f.root as usize].id,
+            lineage: f.lineage,
+            zone: f.zone,
+            pose: f.pose,
+            nodes: f
+                .nodes
+                .iter()
+                .map(|s| {
+                    let r = &self.nodes[*s as usize];
+                    let mut n = self.node_state(r);
+                    if *s == f.root {
+                        n.parent = Some(f.from);
+                    }
+                    (r.id, n)
+                })
+                .collect(),
+            links: f
+                .links
+                .iter()
+                .map(|(id, l)| (*id, self.link_state(l)))
+                .collect(),
+        }
+    }
+
     /// The tree in T6's fixture form, so that its `souls/fixture/1` hash can be compared with the harness's
     /// (`effects.md` rule 11). Links are written once; the indexes are derived and appear nowhere.
     pub fn to_state(&self) -> State {
@@ -1755,32 +1791,7 @@ impl Tree {
         let in_flight = self
             .in_flight
             .iter()
-            .map(|(id, f)| {
-                let flight = Flight {
-                    root: self.nodes[f.root as usize].id,
-                    lineage: f.lineage,
-                    zone: f.zone,
-                    pose: f.pose,
-                    nodes: f
-                        .nodes
-                        .iter()
-                        .map(|s| {
-                            let r = &self.nodes[*s as usize];
-                            let mut n = self.node_state(r);
-                            if *s == f.root {
-                                n.parent = Some(f.from);
-                            }
-                            (r.id, n)
-                        })
-                        .collect(),
-                    links: f
-                        .links
-                        .iter()
-                        .map(|(id, l)| (*id, self.link_state(l)))
-                        .collect(),
-                };
-                (*id, flight)
-            })
+            .map(|(id, f)| (*id, self.flight_of(f)))
             .collect();
         State {
             root: self.nodes[self.root as usize].id,

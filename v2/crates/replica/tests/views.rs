@@ -470,3 +470,38 @@ fn a4_each_output_names_its_log_position_redaction_list_and_version() {
         Err("level-unknown")
     );
 }
+
+/// #3667: a view read through K2's tree (`views::Read`) writes the same bytes as one read through T6's state, at every
+/// level for two audiences, on the fixture log with its leave and arrive: the tier builds no whole state per entry.
+#[test]
+fn a_view_read_through_the_tree_equals_one_read_through_the_state() {
+    let (header, start, parts) = log();
+    let none = Redactions::default();
+    let keys = keys();
+    let by_state = build(&start, &header, &parts, &keys, &none).expect("one pass");
+    let root = header
+        .kinds
+        .iter()
+        .find(|k| k.as_str().starts_with("souls:place@"))
+        .expect("the root's kind")
+        .clone();
+    let mut views: Vec<View> = keys.iter().map(|k| View::new(*k, &header, &none)).collect();
+    let mut tree = replica::tree::Tree::start(header.zone, root);
+    for entry in parts.iter().flat_map(|p| &p.effects) {
+        let mut after = tree.frozen();
+        after
+            .apply(&header, &entry_part(&header, entry).expect("its own part"))
+            .expect("applies");
+        for v in &mut views {
+            v.step(&tree, entry, &after, &none).expect("a step");
+        }
+        tree = after;
+    }
+    for ((key, s), v) in keys.iter().zip(&by_state).zip(&views) {
+        assert_eq!(
+            s.bytes().expect("bytes"),
+            v.output().bytes().expect("bytes"),
+            "{key:?}"
+        );
+    }
+}
