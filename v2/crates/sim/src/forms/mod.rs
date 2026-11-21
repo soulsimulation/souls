@@ -1202,7 +1202,16 @@ impl Forms {
                 };
                 let taken = places
                     .slots
-                    .commit(w.controller, w.due, w.mint, w.moves, &geo, &[request], now)
+                    .commit(
+                        w.controller,
+                        w.due,
+                        w.mint,
+                        w.moves,
+                        &geo,
+                        places.floors,
+                        &[request],
+                        now,
+                    )
                     .pop()
                     .map_or_else(
                         || Err(name("place-unknown")),
