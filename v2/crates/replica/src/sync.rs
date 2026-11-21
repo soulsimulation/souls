@@ -157,7 +157,9 @@ pub struct Descent {
     taken: Vec<Vec<u8>>,
 }
 
-/// A client's copy of its scope: each scope node's hash, and the records it reaches, by hash.
+/// A client's copy of its scope: each scope node's hash, and the records it reaches, by hash. A record the world
+/// withheld (empty bytes in its answer: under a closed container this asker may not see into, #3915) is held as
+/// withheld: a leaf the copy never reads.
 #[derive(Clone, Default)]
 pub struct Copy {
     roots: BTreeMap<Id, Vec<u8>>,
@@ -166,6 +168,9 @@ pub struct Copy {
 
 /// Checks a record against the hash that named it (rule 3) and gives its children's hashes (field 10).
 fn check(want: &[u8], bytes: &[u8]) -> R<Vec<Vec<u8>>> {
+    if bytes.is_empty() {
+        return Ok(Vec::new());
+    }
     let Ok(d) = decode(bytes) else {
         return refuse("sync-record", "not a record");
     };
@@ -207,9 +212,12 @@ impl Copy {
         &self.roots
     }
 
-    /// The record a hash names, if held.
+    /// The record a hash names, if held; none for one withheld.
     pub fn record(&self, hash: &[u8]) -> Option<&[u8]> {
-        self.records.get(hash).map(Vec::as_slice)
+        self.records
+            .get(hash)
+            .filter(|b| !b.is_empty())
+            .map(Vec::as_slice)
     }
 
     /// Rule 2: the hash of each node of `scope`, then every record not held, one round per level; then rule 3's let
