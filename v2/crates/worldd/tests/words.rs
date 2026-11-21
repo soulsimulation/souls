@@ -537,7 +537,10 @@ fn c26_a_shout_is_public_at_a_raised_voice() {
         assert_eq!(said[0].audience, Audience::Everyone, "a shout is public");
         assert_eq!(said[0].reach_mm, words::SHOUT_REACH_MM);
         assert_eq!(said[1].reach_mm, words::SAY_REACH_MM);
-        assert!(said[0].reach_mm > said[1].reach_mm, "a shout carries farther");
+        assert!(
+            said[0].reach_mm > said[1].reach_mm,
+            "a shout carries farther"
+        );
         assert_eq!(store.read(said[0].words, &[]).unwrap(), lines[0].as_bytes());
     });
     for l in lines {

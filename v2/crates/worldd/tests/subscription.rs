@@ -529,10 +529,7 @@ fn c26_a_shout_is_heard_farther_than_a_say_by_the_same_rule() {
         got.insert(b, lines);
     }
     let said = |reach, w: &str| (Audience::Everyone, reach, Some(w.to_string()));
-    let (say_mm, shout_mm) = (
-        worldd::words::SAY_REACH_MM,
-        worldd::words::SHOUT_REACH_MM,
-    );
+    let (say_mm, shout_mm) = (worldd::words::SAY_REACH_MM, worldd::words::SHOUT_REACH_MM);
     assert_eq!(
         got[&near],
         vec![
