@@ -13,6 +13,9 @@
 //                                             or <name>=<id> after an act are its thing arguments (C10)
 //   souls.mjs can <act> [<arg id>...]         the daemon's local check (R8): yes, no with the reason, or unknown
 //   souls.mjs say "<words>"                   says the words out loud, to whoever is near
+//   souls.mjs say --shout "<words>" | shout "<words>"   shouts them: public, heard farther than a say (C26)
+//   souls.mjs say --to <name|id> [--gesture <g>] "<words>"   says them to that Soul: turns to it, or plays the body's
+//                                             gesture <g> toward it; an unknown name or gesture sends nothing (C26)
 //   souls.mjs whisper <body id> "<words>"     says them to that one body alone
 //   souls.mjs converse start <body id> "<text>" [--private]   offers that body a conversation; the opening line goes
 //                                             to it alone. Its accept or decline arrives in `wait` (E26)
@@ -69,7 +72,7 @@ import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount } from '../account/account.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
-export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'converse', 'lie', 'pray', 'prayers', 'wait', 'history', 'stats', 'pending', 'stop'];
+export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'shout', 'whisper', 'converse', 'lie', 'pray', 'prayers', 'wait', 'history', 'stats', 'pending', 'stop'];
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = ['digest', 'consolidate', 'schedule', 'help', 'memory', 'remember'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -101,7 +104,7 @@ export function requestOf(argv) {
   const args = [...argv], opts = {};
   // history's --soul is its question; --as is the Soul asking.
   const asking = args.includes('history');
-  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for']) {
+  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for', '--to', '--gesture']) {
     const k = args.indexOf(name);
     if (k >= 0) { opts[name.slice(2)] = args[k + 1]; args.splice(k, 2); }
     if (name === '--missed' && opts.missed === 'late') { opts.missed = `late ${args[k]}`; args.splice(k, 1); }
@@ -122,7 +125,13 @@ export function requestOf(argv) {
   if (op === 'act' && opts.for !== undefined) req.for = opts.for;
   if (op === 'pending' && rest[0] !== '--check') return { refused: 'pending-check', detail: 'pending --check; a turn reads what waits with wait 0' };
   if (op === 'pair') { req.url = rest[0]; if (opts.as !== undefined) req.as = opts.as; if (rest.includes('--move')) req.move = true; }
-  if (op === 'say' || op === 'pray') req.words = rest.join(' ');
+  if (op === 'pray') req.words = rest.join(' ');
+  if (op === 'say' || op === 'shout') {
+    // C26: a shout is a say at a raised voice; --to names whom it is for, --gesture what the body does toward them.
+    Object.assign(req, { op: 'say', words: rest.filter((w) => w !== '--shout').join(' ') });
+    if (op === 'shout' || rest.includes('--shout')) req.loud = true;
+    for (const k of ['to', 'gesture']) if (opts[k] !== undefined) req[k] = opts[k];
+  }
   if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
   if (op === 'lie') req.this = rest[0];
   if (op === 'converse') {

@@ -186,6 +186,10 @@ test('C4: say, whisper and lie make their daemon requests', () => {
   assert.deepEqual(requestOf(['say', 'the', 'bread', 'is', 'warm']).req, { op: 'say', words: 'the bread is warm' });
   assert.deepEqual(requestOf(['whisper', LAMP_B, 'just', 'you']).req, { op: 'whisper', to: LAMP_B, words: 'just you' });
   assert.deepEqual(requestOf(['lie', LAMP_B]).req, { op: 'lie', this: LAMP_B });
+  // C26 (#3689): a shout, by its own command or --shout, and a say to a named Soul with a gesture.
+  assert.deepEqual(requestOf(['shout', 'the', 'bridge']).req, { op: 'say', loud: true, words: 'the bridge' });
+  assert.deepEqual(requestOf(['say', '--shout', 'the', 'bridge']).req, { op: 'say', loud: true, words: 'the bridge' });
+  assert.deepEqual(requestOf(['say', '--to', 'Mira', '--gesture', 'wave', 'hello', 'there']).req, { op: 'say', words: 'hello there', to: 'Mira', gesture: 'wave' });
 });
 
 /** Every file under `d`, as one buffer. */
@@ -220,6 +224,18 @@ test('C4 A1: say and whisper send T8 words through the daemon; the world keeps t
   assert.equal(refused(['say']), 'words-empty-or-long');
   assert.equal(refused(['whisper', 'bob', 'hi']), 'whisper-names-a-body');
   assert.equal(refused(['lie']), 'lie-names-a-thing');
+  // C26 (#3689): a shout is the world's own form, answered with a receipt; --to names a Soul in the copy, and an
+  // unknown name or gesture is refused by name before anything is sent.
+  const shout = souls(['shout', 'the bridge is out']);
+  assert.equal(shout.verb, 'local:shout', JSON.stringify(shout));
+  await waitFor(async () => (await request(rtA.socket, { op: 'read' })).events.some((e) => e.kind === 'answer' && e.sequence === shout.sequence && e.answer === 1));
+  assert.ok(filesUnder(join(dir, 'w.text')).includes('the bridge is out'), 'the shout kept in the text store');
+  assert.equal(refused(['say', '--to', 'nobody-here', 'hi']), 'say-to-unknown');
+  assert.equal(refused(['say', '--gesture', 'wave', 'hi']), 'gesture-needs-to');
+  assert.equal(refused(['say', '--to', `${WORLD_SCOPE}-4`, '--gesture', 'no-such', 'hi']), 'gesture-unknown');
+  const to = souls(['say', '--to', `${WORLD_SCOPE}-4`, 'over here']);
+  assert.equal(to.ok, true, JSON.stringify(to));
+  assert.equal(to.to.id, `${WORLD_SCOPE}-4`, 'addressed to the other Soul\'s body');
 });
 
 test('R16: history by thing, place and Soul through the daemon, each named from the copy, under 600 bytes', async () => {
