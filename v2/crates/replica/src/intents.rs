@@ -30,6 +30,10 @@ fn not<T>(what: &str) -> R<T> {
 /// The most bytes a first frame may have, checked the same way (rule 12).
 pub const HELLO_MOST: u64 = 256;
 pub const INTENT_MOST: u64 = 4096;
+/// The most bytes a creator's bulk edit may have (#3695): a landform's ground tiles, an imported world's part. Only a
+/// creator's edit is read over [`INTENT_MOST`]; it reaches the world by the gateway's creator route alone, as the
+/// agents' socket takes no message over the frame limit.
+pub const BULK_MOST: u64 = 8 << 20;
 /// The most fallbacks an intent may rank (rule 6).
 pub const FALLBACKS_MOST: u64 = 4;
 /// This protocol's version (rule 12). A change to any frame after the first raises it: 2 added field 12, the reflex
@@ -284,12 +288,13 @@ impl Intent {
     /// (`creator-without-body`, `body-not-a-creators`; an edit drives none).
     pub fn read(bytes: &[u8]) -> R<Intent> {
         let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-        if size > INTENT_MOST {
+        if size > BULK_MOST {
             return refuse(
                 "intent-too-large",
-                format!("{size} bytes; at most {INTENT_MOST}"),
+                format!("{size} bytes; at most {INTENT_MOST}, or {BULK_MOST} for a creator's edit"),
             );
         }
+        let bulk = size > INTENT_MOST;
         let v = decode(bytes)
             .or_else(|e| refuse("encoding", e.to_string()))?
             .value;
@@ -345,6 +350,15 @@ impl Intent {
                 Some(_) => return not("a reflex marker is 1, or left out"),
             },
         };
+        if bulk
+            && !(matches!(intent.actor, Actor::Creator(_))
+                && intent.verb.as_str() == crate::edit::wire::VERB)
+        {
+            return refuse(
+                "intent-too-large",
+                format!("{size} bytes; at most {INTENT_MOST} for any but a creator's edit"),
+            );
+        }
         let kind = intent.kind()?;
         if kind != Kind::Act && !intent.fallbacks.is_empty() {
             return refuse("fallbacks-not-on-an-act", intent.verb.as_str().to_owned());
