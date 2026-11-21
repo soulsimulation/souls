@@ -26,9 +26,11 @@
 
 use crate::host::{Planned, Wants};
 use crate::walk::World;
-use crate::walk::town::Town;
+use crate::walk::town::{Rebuilt, Town};
+use replica::effects::Part;
 use replica::pose::Vec3;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -168,6 +170,13 @@ impl Planner {
     fn answer_traced(&mut self, w: &Wants, trace: &mut GroundTrace) -> Planned {
         let mut out = Planned::default();
         trace.begin(w);
+        if let Some(map) = &w.form_map {
+            if **map != self.town.versions {
+                return out;
+            }
+            out.map = Some(Arc::clone(map));
+        }
+        self.town.body_classes.clone_from(&w.classes);
         if let Some(marks) = &w.marks {
             trace.line("spots-start", String::new);
             let result = self.town.spots(marks, w.at);
@@ -234,7 +243,10 @@ impl Planner {
                 out.searched += 1;
                 let result = match q.query {
                     FormQuery::Walk { node, at, reach } => {
-                        let view = self.town.view();
+                        let view = match self.town.view_for(q.body.id) {
+                            Ok(v) => v,
+                            Err(_) => continue,
+                        };
                         let legs = view
                             .on_floor(node, at)
                             .and_then(|(floor, at, _)| {
@@ -262,9 +274,18 @@ impl Planner {
     }
 }
 
+enum Input {
+    Wants(Wants),
+    Map {
+        before: Arc<crate::ground::Versions>,
+        rebuilt: Box<Rebuilt>,
+        part: Arc<Part>,
+    },
+}
+
 /// A planner on a thread of its own.
 pub struct Thread {
-    wants: Option<Sender<Wants>>,
+    wants: Option<Sender<Input>>,
     /// A batch's answers, or `None` when they panicked.
     answers: Receiver<Option<Planned>>,
     /// Batches sent and not yet taken.
@@ -279,7 +300,7 @@ pub struct Thread {
 impl Thread {
     /// Starts `planner` on a thread named `planner`.
     pub fn spawn(mut planner: Planner) -> std::io::Result<Thread> {
-        let (wtx, wrx) = channel::<Wants>();
+        let (wtx, wrx) = channel::<Input>();
         let (ptx, prx) = channel::<Option<Planned>>();
         let handle = std::thread::Builder::new()
             .name("planner".into())
@@ -294,7 +315,26 @@ impl Thread {
                     },
                     ..GroundTrace::default()
                 };
-                for w in wrx {
+                for input in wrx {
+                    let w = match input {
+                        Input::Wants(w) => w,
+                        Input::Map {
+                            before,
+                            rebuilt,
+                            part,
+                        } => {
+                            let installed = catch_unwind(AssertUnwindSafe(|| {
+                                if *before != planner.town.versions {
+                                    return Err("planner.map-stale");
+                                }
+                                planner.town.install(*rebuilt, &part).map_err(|r| r.name)
+                            }));
+                            if !matches!(installed, Ok(Ok(()))) {
+                                eprintln!("planner: committed map not installed: {installed:?}");
+                            }
+                            continue;
+                        }
+                    };
                     let p =
                         catch_unwind(AssertUnwindSafe(|| planner.answer_traced(&w, &mut trace)))
                             .ok();
@@ -327,9 +367,20 @@ impl Thread {
     /// Hands one tick's wants over.
     pub fn send(&mut self, w: Wants) {
         if let Some(tx) = &self.wants
-            && tx.send(w).is_ok()
+            && tx.send(Input::Wants(w)).is_ok()
         {
             self.out += 1;
+        }
+    }
+
+    /// FIFO map control, before later wants and without an answer batch.
+    pub fn install(&self, before: Arc<crate::ground::Versions>, rebuilt: Rebuilt, part: Arc<Part>) {
+        if let Some(tx) = &self.wants {
+            let _ = tx.send(Input::Map {
+                before,
+                rebuilt: Box::new(rebuilt),
+                part,
+            });
         }
     }
 

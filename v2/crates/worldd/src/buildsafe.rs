@@ -33,14 +33,16 @@ use replica::apply::Replica;
 use replica::effects::Part;
 use replica::encode::encode;
 use replica::ids::Id;
+use replica::kinds::sizes::Size;
 use replica::pose::{Frame, Pose, Support, Vec3};
 use replica::tree::Rules;
 use replica::world_model::{Kind, plain};
 use sim::edit::safety::Who;
+use sim::ground::Versions;
 use sim::ground::scene::GROUND;
 use sim::links::Doors;
 use sim::routes::HANDS;
-use sim::walk::town::Town;
+use sim::walk::town::{Basis, Rebuilt, Town};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -103,16 +105,188 @@ pub fn souls(copy: &Replica, kinds: &BTreeMap<String, Kind>) -> Vec<Who> {
 /// The bodies the clock thread last handed off (G1d): written once a tick by a pointer swap, read by the edit checker;
 /// and the edits it committed since the checker last took them (G1e).
 #[derive(Default)]
-pub struct Moving(Mutex<Arc<Vec<Who>>>, Mutex<Vec<Arc<Part>>>, AtomicU64);
+pub struct Moving(Mutex<Arc<BodySnapshot>>, Mutex<Vec<Arc<Part>>>, AtomicU64);
+
+/// The authoritative map's immutable preparation input. Basis clones only its existing shared handles.
+#[derive(Default)]
+pub struct BodySnapshot {
+    pub bodies: Arc<Vec<Who>>,
+    pub classes: BTreeMap<Id, Size>,
+    pub movers: Vec<sim::controller::BuildBasis>,
+    pub map: Option<Arc<MapBasis>>,
+}
+
+pub struct MapBasis {
+    pub version: u64,
+    pub ground: Id,
+    pub stamp: Arc<Versions>,
+    pub basis: Basis,
+}
+
+/// Two installations prepared off-clock from the same canonical part and authoritative basis.
+pub struct PreparedMaps {
+    pub part: Arc<Part>,
+    pub before: Arc<Versions>,
+    pub after: Arc<Versions>,
+    pub live: Rebuilt,
+    pub worker: Rebuilt,
+    pub rebinds: Vec<sim::controller::PreparedRebind>,
+    /// The (class, node) surfaces `rebinds` were placed on, kept for a reprepare (B12b) and released off the clock.
+    pub surfaces: sim::walk::town::RebindSurfaces,
+}
+
+impl PreparedMaps {
+    pub fn prepare(
+        copy: &Replica,
+        planned: &sim::edit::Planned,
+        reserved: replica::ids::Minter,
+        souls: &[Who],
+        source: &MapBasis,
+    ) -> Result<Self, replica::edit::Refused> {
+        Self::prepare_classes(
+            copy,
+            planned,
+            reserved,
+            souls,
+            source,
+            &BTreeMap::new(),
+            &[],
+        )
+    }
+    pub fn prepare_classes(
+        copy: &Replica,
+        planned: &sim::edit::Planned,
+        mut reserved: replica::ids::Minter,
+        souls: &[Who],
+        source: &MapBasis,
+        classes: &BTreeMap<Id, Size>,
+        movers: &[sim::controller::BuildBasis],
+    ) -> Result<Self, replica::edit::Refused> {
+        let mut preview = copy.frozen();
+        let part =
+            sim::edit::commit_classes(&mut preview, &mut reserved, planned, souls, 0, classes)?
+                .part;
+        Self::prepare_part(copy, part, source, movers)
+    }
+
+    /// The same preparation for a part already made off the clock (a set-down's, #3604), not an edit's plan.
+    pub fn prepare_part(
+        copy: &Replica,
+        part: Arc<Part>,
+        source: &MapBasis,
+        movers: &[sim::controller::BuildBasis],
+    ) -> Result<Self, replica::edit::Refused> {
+        let rebuilt = Town::rebuild(
+            copy.tree().frozen(),
+            copy.header(),
+            source.ground,
+            &source.stamp,
+            &source.basis,
+            &part,
+        )
+        .map_err(|detail| replica::edit::Refused {
+            op: None,
+            name: "edit.map-unchecked",
+            detail,
+        })?;
+        let (surfaces, rebinds) = rebuilt
+            .prepare_rebind_surfaces(movers, source.ground)
+            .map_err(|r| replica::edit::Refused {
+                op: None,
+                name: r.name,
+                detail: r.detail,
+            })?;
+        let (live, worker) = rebuilt.into_pair();
+        Ok(Self {
+            part,
+            before: Arc::clone(&source.stamp),
+            after: Arc::new(live.versions.clone()),
+            live,
+            worker,
+            rebinds,
+            surfaces,
+        })
+    }
+
+    /// Off the clock (B12b): places exactly the edit's affected bodies again, as they stand now, on the kept
+    /// surfaces. Nothing else changes: the map, the part and the bodies judged are the ones first prepared.
+    pub fn reprepare(
+        &mut self,
+        current: &[sim::controller::BuildBasis],
+    ) -> Result<(), replica::edit::Refused> {
+        let same = current.len() == self.rebinds.len()
+            && current
+                .iter()
+                .zip(&self.rebinds)
+                .all(|(c, r)| c.moved.id == r.before.moved.id);
+        if !same {
+            return Err(replica::edit::Refused {
+                op: None,
+                name: "edit.body-stale",
+                detail: "affected bodies changed".into(),
+            });
+        }
+        self.rebinds = self
+            .surfaces
+            .place(current)
+            .map_err(|r| replica::edit::Refused {
+                op: None,
+                name: r.name,
+                detail: r.detail,
+            })?;
+        Ok(())
+    }
+}
 
 impl Moving {
+    /// Clock thread: a shared map basis, never a geometry build or whole-tree copy.
+    pub fn offer_map(&self, bodies: &Bodies, version: u64) {
+        let map = Arc::new(MapBasis {
+            version,
+            ground: bodies.town.ground,
+            stamp: Arc::clone(&bodies.form_map),
+            basis: bodies.town.basis(),
+        });
+        let classes = bodies
+            .runner
+            .controller
+            .ids()
+            .filter_map(|id| {
+                let size = bodies.runner.controller.build(id)?.size;
+                (size != Size::Standard).then_some((id, size))
+            })
+            .collect();
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(BodySnapshot {
+            bodies: Arc::new(moving(bodies)),
+            classes,
+            movers: bodies
+                .runner
+                .controller
+                .bodies()
+                .filter_map(|b| bodies.runner.controller.build_basis(b.id))
+                .collect(),
+            map: Some(map),
+        });
+    }
+
+    pub fn map(&self) -> Option<Arc<MapBasis>> {
+        self.current().map.clone()
+    }
+
     /// Clock thread: the tick's bodies replace the last.
     pub fn offer(&self, bodies: Vec<Who>) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(bodies);
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(BodySnapshot {
+            bodies: Arc::new(bodies),
+            ..BodySnapshot::default()
+        });
     }
 
     /// The newest bodies handed off.
     pub fn latest(&self) -> Arc<Vec<Who>> {
+        Arc::clone(&self.current().bodies)
+    }
+
+    pub fn current(&self) -> Arc<BodySnapshot> {
         Arc::clone(&self.0.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
@@ -258,7 +432,10 @@ impl TownCopy {
 pub fn moving(bodies: &Bodies) -> Vec<Who> {
     let (runner, town) = (&bodies.runner, &bodies.town);
     let mut out = Vec::new();
-    for b in runner.controller.bodies() {
+    for id in runner.controller.ids() {
+        let Some(b) = runner.controller.body(id) else {
+            continue;
+        };
         let who = Who {
             soul: b.id,
             body: b.id,
@@ -326,5 +503,98 @@ mod w16_authority_tests {
         assert_eq!(standalone.get(), Some(a));
         standalone.set(Some(b));
         assert_eq!(standalone.get(), Some(b));
+    }
+}
+
+#[cfg(test)]
+mod class_snapshot_tests {
+    use super::*;
+    use replica::bodies::{Class, Family, Resource, SkillShape, Want};
+    use replica::encode::Name;
+    use replica::ids::Scope;
+    use replica::kinds::sizes::Build;
+    use replica::pose::Quat;
+    #[test]
+    fn seated_large_body_keeps_its_actual_class_and_current_pose_in_the_guard_snapshot() {
+        let facts = testworld::generate(1, 0).unwrap();
+        let imported = import_eden::load(&facts.text).unwrap();
+        let root = imported.nodes["world"];
+        let ground = imported.nodes["ground"];
+        let header = import_eden::header(root, &imported.rules).unwrap();
+        let next = imported.tree.to_state().next;
+        let mut town = Town::new(
+            imported.tree,
+            ground,
+            Doors::new(header, imported.rules, next),
+        )
+        .unwrap();
+        town.prepare_classes([Size::Large]).unwrap();
+        let id = Id::new(Scope([0x56; 16]), 1).unwrap();
+        let build = Build {
+            size: Size::Large,
+            ..Build::STANDARD
+        };
+        let moved = town.surfaces_for(Size::Large).unwrap()[&ground]
+            .place_built(
+                id,
+                Frame {
+                    node: ground,
+                    slot: None,
+                },
+                Vec3::new(-40_000_000, 0, 30_000_000),
+                Quat::IDENTITY,
+                build,
+            )
+            .unwrap();
+        let mut bodies = Bodies::new(town, 50_000).unwrap();
+        let family = Family {
+            name: Name::new("souls:humanoid").unwrap(),
+            resources: vec![Resource {
+                name: Name::new("souls:legs").unwrap(),
+                class: Class::Locomotion,
+                slot: None,
+            }],
+        };
+        bodies.add_body_built(family, moved, build).unwrap();
+        let shape = SkillShape {
+            name: Name::new("souls:sit").unwrap(),
+            claims: vec![Want::All(Class::Locomotion)],
+            blocks: Vec::new(),
+            cancelled_by: Vec::new(),
+        };
+        let driver = bodies.runner.controller.claim(id, &shape).unwrap();
+        bodies
+            .runner
+            .controller
+            .slot_in(
+                id,
+                driver,
+                Frame {
+                    node: ground,
+                    slot: Some(1),
+                },
+                0,
+            )
+            .unwrap();
+        assert_eq!(bodies.runner.controller.bodies().count(), 0);
+        let moving = Moving::default();
+        moving.offer_map(&bodies, 0);
+        let snapshot = moving.current();
+        assert_eq!(snapshot.classes.get(&id), Some(&Size::Large));
+        assert_eq!(
+            snapshot
+                .bodies
+                .iter()
+                .find(|b| b.body == id)
+                .unwrap()
+                .pose
+                .support,
+            Support::Slot
+        );
+        assert!(
+            snapshot.movers.is_empty(),
+            "slot-owned actors are not surface-rebound"
+        );
+        assert_eq!(bodies.classes().get(&id), Some(&Size::Large));
     }
 }

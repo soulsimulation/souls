@@ -46,7 +46,10 @@
 //!     the public audience reads it (`Store::read` with no ids), so a removed reference (the redaction list) and words
 //!     of any other audience are never in it. A whisper's entry is not in a public view at all, so its reference is
 //!     not either. The file is written whole and renamed (rule 4) before the part, so a reader that finds a part finds
-//!     its words.
+//!     its words. The public writer ([`PublicWriter`]) given the importer's name dictionary also writes the words of
+//!     the place names its public nodes reference (import-eden's field 4, a SHA-256 of the words; #3574) as
+//!     `[hash, words]` rows: the baseline's for its state, a part's for the nodes its records create, each checked
+//!     against its hash (#3571's rule).
 //! 11. **A still world says so** (V5b, #3460). [`follow`] is handed the world's clock and tells the writer the world's
 //!     time now ([`Writer::idle`]) after each frame, and at least every 20 ms without one. Once a stretch's time has
 //!     passed, with [`SETTLE_US`] more for its last records to be synced, the open stretch is written, so a burst after a
@@ -863,6 +866,53 @@ use replica::stream::public::{
 };
 use replica::views::{Redactions, View};
 
+/// The public place names a value's public nodes reference (#3574), under #3571's rule: a node of the public
+/// audience whose name reference (its field 4, import-eden's 32-byte hash) is in the importer's dictionary with words
+/// of exactly that hash. A node is one in the state layout (kind 1, audience 4, fields 5), as a baseline holds it, or
+/// a create in a part's records (change 1, kind 3, audience 5, fields 6). Rows go after the K16 words in a text file
+/// as `[hash, words]`, in hash order, each once; a node of any other audience, or a hash the dictionary's words do
+/// not match, adds nothing.
+fn public_names(
+    value: &Value,
+    names: &crate::views::names::PublicNames,
+) -> BTreeMap<[u8; 32], Vec<u8>> {
+    fn walk(
+        v: &Value,
+        names: &crate::views::names::PublicNames,
+        out: &mut BTreeMap<[u8; 32], Vec<u8>>,
+    ) {
+        match v {
+            Value::Map(m) => {
+                let public = |k| matches!(m.get(&k), Some(Value::Map(a)) if a.len() == 1 && a.get(&1) == Some(&Value::Uint(1)));
+                let node = matches!(m.get(&1), Some(Value::Text(_))) && public(4);
+                let create = m.get(&1) == Some(&Value::Uint(1))
+                    && matches!(m.get(&3), Some(Value::Text(_)))
+                    && public(5);
+                let fields = match (node, create) {
+                    (true, _) => m.get(&5),
+                    (_, true) => m.get(&6),
+                    _ => None,
+                };
+                if let Some(Value::Map(fields)) = fields
+                    && let Some(Value::Bytes(r)) = fields.get(&4)
+                    && let Ok(key) = <[u8; 32]>::try_from(r.as_slice())
+                    && let Some(text) = names
+                        .get(&key)
+                        .filter(|t| replica::ids::sha256(t.as_bytes()) == key)
+                {
+                    out.insert(key, text.as_bytes().to_vec());
+                }
+                m.values().for_each(|x| walk(x, names, out));
+            }
+            Value::Array(a) => a.iter().for_each(|x| walk(x, names, out)),
+            _ => {}
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(value, names, &mut out);
+    out
+}
+
 /// Public baseline stream plus exact immutable recovery records in the world's existing Store.
 /// The caller owns this off-clock follower; no engine acknowledgement or checkpoint policy changes.
 pub struct PublicWriter<S> {
@@ -887,6 +937,7 @@ pub struct PublicWriter<S> {
     window: Option<i64>,
     last_to: Option<i64>,
     text: Option<Arc<Store>>,
+    names: Option<Arc<crate::views::names::PublicNames>>,
     clock_seed: Option<Mapping>,
     migration_cut: Option<u64>,
     migration_state: Option<Value>,
@@ -894,6 +945,76 @@ pub struct PublicWriter<S> {
     force_remainder: bool,
 }
 use std::collections::BTreeMap;
+/// What the public view reads of the source just before one entry (#3667): the parent chains of the nodes the entry
+/// names, removes or sends away, and the one transfer it names, taken from the tree before the entry applies. The
+/// writer's view is the full public view of the zone (checked at open), whose step reads nothing else before an entry.
+struct Before {
+    parents: BTreeMap<Id, Option<Id>>,
+    flight: Option<(Id, replica::effects::Flight)>,
+}
+
+impl Before {
+    fn of(tree: &replica::tree::Tree, entry: &Effect) -> Before {
+        use replica::effects::TransferRec;
+        use replica::views::Read as _;
+        let mut parents = BTreeMap::new();
+        let mut chain = |node: Id| {
+            let mut at = Some(node);
+            for _ in 0..=replica::world_model::DEPTH_LIMIT {
+                let Some(n) = at else { break };
+                if parents.contains_key(&n) {
+                    break;
+                }
+                let Some(parent) = tree.parent_of(n) else {
+                    break;
+                };
+                parents.insert(n, parent);
+                at = parent;
+            }
+        };
+        chain(entry.envelope.node);
+        let transfer = match &entry.body {
+            Body::Changes(cs) => {
+                for c in cs {
+                    if let Change::Remove { node } = &c.change {
+                        chain(*node);
+                    }
+                }
+                None
+            }
+            Body::Transfer(TransferRec::Leave { transfer, node, .. }) => {
+                chain(*node);
+                Some(*transfer)
+            }
+            Body::Transfer(
+                TransferRec::Arrive { transfer, .. }
+                | TransferRec::Return { transfer, .. }
+                | TransferRec::Settle { transfer },
+            ) => Some(*transfer),
+            _ => None,
+        };
+        let flight = transfer.and_then(|t| tree.flight(t).map(|f| (t, f)));
+        Before { parents, flight }
+    }
+}
+
+impl replica::views::Read for Before {
+    fn parent_of(&self, node: Id) -> Option<Option<Id>> {
+        self.parents.get(&node).copied()
+    }
+
+    fn flight(&self, transfer: Id) -> Option<std::borrow::Cow<'_, replica::effects::Flight>> {
+        self.flight
+            .as_ref()
+            .filter(|(t, _)| *t == transfer)
+            .map(|(_, f)| std::borrow::Cow::Borrowed(f))
+    }
+
+    fn live(&self, _: Audience, _: Id) -> u64 {
+        unreachable!("the public writer's full view counts nothing before an entry")
+    }
+}
+
 fn stream_effect(header: &Header, value: Value) -> R<Effect> {
     let bytes = wire(Value::Map(BTreeMap::from([
         (1, Value::Bytes(header.hash().to_bytes())),
@@ -974,6 +1095,8 @@ pub struct PublicStart<'a> {
     pub record: u64,
     pub checkpoint: Option<Vec<u8>>,
     pub text: Option<Arc<Store>>,
+    /// The importer's immutable name dictionary (#3571): its words go beside the public nodes that reference them.
+    pub names: Option<Arc<crate::views::names::PublicNames>>,
     pub clock_seed: Option<Mapping>,
     pub history: Option<&'a sim::log::Recovered>,
 }
@@ -1142,6 +1265,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             record,
             checkpoint,
             text,
+            names,
             clock_seed,
             history,
         } = start;
@@ -1180,6 +1304,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             window: None,
             last_to: None,
             text,
+            names,
             clock_seed,
             migration_cut: None,
             migration_state: None,
@@ -1348,7 +1473,10 @@ impl<S: ObjectStore> PublicWriter<S> {
                 (6, legacy),
                 (7, Value::Array(legacy_files)),
                 (8, Value::Bytes(legacy_header)),
-                (9, Value::Bytes(w.put(&w.words(w.player.state())?)?)),
+                (
+                    9,
+                    Value::Bytes(w.put(&w.words(w.player.state(), w.player.state())?)?),
+                ),
             ])))?;
             w.seed = w.put(&seed)?;
             let manifest = wire(Value::Map(BTreeMap::from([
@@ -1372,7 +1500,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         w.pointer(None)?;
         Ok(w)
     }
-    fn words(&self, value: &Value) -> R<Vec<u8>> {
+    fn words(&self, value: &Value, named: &Value) -> R<Vec<u8>> {
         let words = if let Some(store) = &self.text {
             replica::audience::references(value)
                 .into_iter()
@@ -1386,6 +1514,12 @@ impl<S: ObjectStore> PublicWriter<S> {
         } else {
             Vec::new()
         };
+        let mut words = words;
+        if let Some(names) = &self.names {
+            words.extend(public_names(named, names).into_iter().map(|(key, text)| {
+                Value::Array(vec![Value::Bytes(key.to_vec()), Value::Bytes(text)])
+            }));
+        }
         wire(Value::Array(words))
     }
     fn generation_dir(&self) -> PathBuf {
@@ -1666,9 +1800,101 @@ impl<S: ObjectStore> PublicWriter<S> {
                 "physical record does not follow",
             ));
         }
+        #[cfg(test)]
+        if tests::WHOLE_STATE.get() {
+            return self.apply_record_whole_state(record, raw);
+        }
         if !sim::recorder::is_input(raw) {
             let part = Part::read(raw)?;
-            // Whole canonical validation first. Never publish a partial producer result or private ledger.
+            // Whole canonical validation first. Never publish a partial producer result or private ledger. One copy
+            // takes the part entry by entry, as a viewer applies it (all of it or none); the view, the duplicates and
+            // the cut's state are kept only when every entry applied. The view reads the copy's tree around each
+            // entry: no whole state is built per entry (#3667).
+            let mut checked = self.canonical.frozen();
+            if part.effects.is_empty() || part.header != self.header.hash().to_bytes() {
+                checked.apply(&part)?;
+            }
+            let before_version = self.canonical.version();
+            let mut view = self.view.clone();
+            let mut duplicates = Vec::new();
+            let mut migration_state = None;
+            for effect in &part.effects {
+                let before = Before::of(checked.tree(), effect);
+                if effect.envelope.audience == Audience::Everyone
+                    && let Body::Transfer(replica::effects::TransferRec::Arrive {
+                        transfer, ..
+                    }) = &effect.body
+                    && checked.tree().arrived().contains(transfer)
+                {
+                    duplicates.push((effect.envelope.sequence, *transfer));
+                }
+                let one = wire(Value::Map(BTreeMap::from([
+                    (1, Value::Bytes(self.header.hash().to_bytes())),
+                    (2, Value::Array(vec![effect.to_value()])),
+                ])))?;
+                checked.apply(&Part::read(&one)?)?;
+                if self.migration_cut == Some(checked.version()) {
+                    migration_state = Some(project(&self.header, &checked.tree().to_state())?);
+                }
+                view.step(&before, effect, checked.tree(), &Redactions::default())?;
+            }
+            self.view = view;
+            self.duplicates.extend(duplicates);
+            if migration_state.is_some() {
+                self.migration_state = migration_state;
+            }
+            for (_, record) in self.view.take() {
+                if Carried::read(&record)?.is_none() {
+                    let seq = stream_effect(&self.header, record.clone())?
+                        .envelope
+                        .sequence;
+                    if self.migration_cut.is_none_or(|v| seq >= v) {
+                        self.records.push(record)
+                    }
+                }
+            }
+            // A node is a row of the public projection when it is live here and public: read from the two trees,
+            // never by projecting either whole (#3667).
+            let visible = |t: &replica::tree::Tree, id: Id| {
+                t.handle(id)
+                    .and_then(|h| t.node(h))
+                    .is_some_and(|n| n.audience() == Audience::Everyone)
+            };
+            for (id, v) in checked.changed_since(before_version) {
+                if (visible(self.canonical.tree(), id) || visible(checked.tree(), id))
+                    && self.migration_cut.is_none_or(|cut| v > cut)
+                {
+                    self.changes.insert(id, v);
+                }
+            }
+            self.duplicates
+                .retain(|(seq, _)| self.migration_cut.is_none_or(|cut| *seq >= cut));
+            self.canonical = checked;
+            let at = part.effects.last().map(|e| e.envelope.at);
+            if let Some(at) = at {
+                let win = at.div_euclid(stream::PERIOD_US);
+                self.window.get_or_insert(win);
+            }
+        }
+        self.cursor = self
+            .cursor
+            .checked_add(1)
+            .ok_or_else(|| fault("stream-source-gap", "cursor overflow"))?;
+        self.chunks.push(raw.to_vec());
+        Ok(())
+    }
+    /// The replay as it was before #3667, a whole state and projection per entry: the reference the regression
+    /// compares the tree-reading replay with, byte for byte.
+    #[cfg(test)]
+    fn apply_record_whole_state(&mut self, record: u64, raw: &[u8]) -> R<()> {
+        if record != self.cursor {
+            return Err(fault(
+                "stream-source-gap",
+                "physical record does not follow",
+            ));
+        }
+        if !sim::recorder::is_input(raw) {
+            let part = Part::read(raw)?;
             let mut checked = self.canonical.frozen();
             checked.apply(&part)?;
             let before_version = self.canonical.version();
@@ -1906,10 +2132,11 @@ impl<S: ObjectStore> PublicWriter<S> {
         ])))?;
         let chunk_hash = self.put(&chunk)?;
         let part_hash = self.put(&bytes)?;
-        let text = self.words(&Value::Array(vec![
-            after.clone(),
-            Value::Array(self.records.clone()),
-        ]))?;
+        // A part's names are those its own records create; the baseline's text holds the rest (#3574).
+        let text = self.words(
+            &Value::Array(vec![after.clone(), Value::Array(self.records.clone())]),
+            &Value::Array(self.records.clone()),
+        )?;
         let text_hash = self.put(&text)?;
         self.player.play(&bytes)?;
         let manifest = wire(Value::Map(BTreeMap::from([
