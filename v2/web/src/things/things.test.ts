@@ -125,6 +125,22 @@ test('A2: parts drop detail with distance: hidden under the pixel, no shadow far
   assert.equal(new THREE.Vector3().setFromMatrixPosition(m).x, 100, 'at its place');
 });
 
+test('hover: pick never lands on a thing whose every part distance detail hides', () => {
+  const detail = { minRadiusPx: 1.25, shadowNear: 24, shadowPerMetre: 14, shadowMaxRadius: 6 };
+  const l = new ThingLayer({ index: indexOf({ kinds: [], things: { e_a: 'cup' } }), fetch: () => new Promise(() => {}), detail, view: () => ({ height: 844, fov: 50 }) });
+  l.set('a', 'e_a', at(100), box);
+  const cup = part();
+  cup.matrix = new THREE.Matrix4().makeScale(0.1, 0.1, 0.1);
+  l.arrive('cup', [cup]);
+  const pick = () => l.pick(new THREE.Vector3(100, 0.5, -5), new THREE.Vector3(0, 0, 1))?.id ?? null;
+  l.update(new THREE.Vector3(0, 0, 0));
+  assert.equal(l.things.get('a')!.slots[0].band, HIDDEN);
+  assert.equal(pick(), null, 'a 9 cm cup 100 m away is not drawn, so not picked');
+  for (let f = 0; f < 10; f++) l.update(new THREE.Vector3(100, 0, -3));
+  assert.equal(l.things.get('a')!.slots[0].band, NEAR);
+  assert.equal(pick(), 'a', 'near: drawn and picked');
+});
+
 test('A2: no detail, no bands (the measure\'s other arm and every test above)', () => {
   const l = new ThingLayer({ index: indexOf({ kinds: [], things: { e_a: 'one' } }), fetch: () => new Promise(() => {}), detail: null });
   l.set('a', 'e_a', at(5000), box);

@@ -521,6 +521,7 @@ export class ThingLayer {
     const o = new THREE.Vector3(), d = new THREE.Vector3();
     for (const t of this.things.values()) {
       if (t.under) continue; // hidden with a storey a building's interior view hides (C10): nothing to hover
+      if (t.slots.length && t.slots.every((s) => s.off || s.band === HIDDEN)) continue; // every part out of sight (C10, C12)
       const inv = (t.inverse ??= t.boxes.map((b) => b.clone().invert()));
       for (let k = 0; k < inv.length; k++) {
         // The ray in the box's own space: its distance along the ray stays the same (an affine map keeps ratios).
