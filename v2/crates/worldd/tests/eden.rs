@@ -2971,13 +2971,11 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
             .all(|f| f.1.is_some() && f.3 == Some(Stance::Stand)),
         "each standing in a spot"
     );
-    let started = std::time::Instant::now();
     for (i, soul) in souls.iter_mut().enumerate().take(40).skip(2) {
         let up = soul.act("eden:step_up", Some(stage), BTreeMap::new());
         println!("Soul {}: step up {up:?}", i + 1);
         up.expect("stepped up onto a free spot");
     }
-    println!("38 more stepped up in {:?}", started.elapsed());
     let off = |dir: &Path| -> Vec<(Id, Stood)> {
         last_stances(dir)
             .into_iter()
