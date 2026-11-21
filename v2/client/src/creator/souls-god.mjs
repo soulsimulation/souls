@@ -110,6 +110,7 @@ export const FIX = {
   'land.smooth': 'use flatten',
   'land.unavailable': 'use Node 22.18 or later, and the client a world serves (it carries the ground model) or a checkout with packages/ground and zod installed',
   'strike.off-the-ground': 'strike somewhere on the world\'s ground',
+  'edit.off-ground': 'put it somewhere on the world\'s ground: describe shows where things stand',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'which-creator': 'name one with --creator',
   'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
