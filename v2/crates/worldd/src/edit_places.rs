@@ -182,8 +182,12 @@ mod tests {
                     .kind()
                     .as_str(),
             )
+            .to_owned()
         };
-        assert_eq!((kind(room), kind(floor)), (sim::ground::scene::ROOM, FLOOR));
+        assert_eq!(
+            (kind(room).as_str(), kind(floor).as_str()),
+            (sim::ground::scene::ROOM, FLOOR)
+        );
         let (on, ..) = on_floor(&im.tree, Some(im.nodes["ground"]), room, Vec3::ZERO)
             .expect("a floor under the room");
         assert_eq!(on, floor);
