@@ -40,7 +40,6 @@ pub struct World {
     /// Each body and the lamp beside it.
     pub pairs: Vec<(Id, Id)>,
     root: Id,
-    rooms: Vec<Id>,
 }
 
 /// The rules for the world's lamps: the lamp's entry and a press that reaches 400 mm, so a body reaches its own
@@ -151,7 +150,6 @@ impl World {
             mint,
             pairs: Vec::new(),
             root,
-            rooms: Vec::new(),
         };
         for _ in 0..rooms {
             w.room(root, bodies, items);
@@ -209,7 +207,6 @@ impl World {
 
     fn room(&mut self, root: Id, bodies: usize, items: usize) {
         let room = self.id();
-        self.rooms.push(room);
         let mut changes = vec![(root, self.create(room, "souls:room", root, 0, &[]))];
         for i in 0..bodies as i64 {
             let (b, l) = (self.id(), self.id());
@@ -230,13 +227,13 @@ impl World {
     }
 
     /// The page's proof of a moving node (#3603, `worldd gateway-link --punt`): a punt 3.5 m by 1.2 m rowing a loop
-    /// (its course, field 80) beside the first room, with the first body moved into it. It is a room's kind, so a body
-    /// may be in it. Returns the punt.
+    /// (its course, field 80) beside the room, with a body in it. It is a room's kind, so a body may be in it. Returns
+    /// the punt.
     pub fn punt(&mut self) -> Id {
         use replica::schedule::F_COURSE;
         use replica::schedule::course::{Course, Shape, Station};
         const M: i64 = 1_000_000;
-        let (punt, (body, _), room) = (self.id(), self.pairs[0], self.rooms[0]);
+        let punt = self.id();
         let station = |x: i64, z: i64, dwell: i64| Station {
             at: Vec3::new(x * M, 0, z * M),
             dwell,
@@ -268,18 +265,10 @@ impl World {
                 (F_COURSE, course.to_value()),
             ]),
         };
-        let seat = Change::Reparent {
-            node: body,
-            from: Frame {
-                node: room,
-                slot: None,
-            },
-            pose: Pose {
-                position: Vec3::new(0, 400_000, 0),
-                ..pose(punt, 0)
-            },
-        };
-        let part = self.part(vec![(self.root, create), (body, seat)]);
+        // A rider born in it (a body changes its parent only by leaving and arriving, which this world does not run).
+        let rider = self.id();
+        let seat = self.create(rider, "souls:body", punt, 0, &[]);
+        let part = self.part(vec![(self.root, create), (punt, seat)]);
         self.replica
             .apply(&part)
             .unwrap_or_else(|e| panic!("the punt applies: {e}"));
