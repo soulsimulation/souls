@@ -769,8 +769,15 @@ function actsOf(words) {
       const c = out.at(-1), args = (c.args ??= {});
       // #3603: a carrier verb's point is in metres, a decimal allowed.
       if (arg && c.carrier) { c.args[arg[1]] = /^-?\d{1,7}(\.\d{1,6})?$/.test(arg[2]) ? Number(arg[2]) : arg[2]; continue; }
-      // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`).
-      if (arg) { args[arg[1]] = /^-?\d{1,15}$/.test(arg[2]) ? Number(arg[2]) : arg[2]; continue; }
+      // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`); #3712: a form's
+      // `text` argument is words, sent as T8's `{23: words}` for the world's text store, never logged as they are.
+      if (arg) {
+        kinds ??= kindsIn(join(home, 'kinds'));
+        rows ??= rowsOf(copy);
+        const take = kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
+        args[arg[1]] = take?.type === 'text' ? { 23: arg[2] } : /^-?\d{1,15}$/.test(arg[2]) ? Number(arg[2]) : arg[2];
+        continue;
+      }
       kinds ??= kindsIn(join(home, 'kinds'));
       rows ??= rowsOf(copy);
       const takes = Object.entries(kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
@@ -929,8 +936,8 @@ async function answer(req) {
         if (req.for !== undefined) serving.set(sequence, req.for);
         return closing({ ok: true, sequence, sent, basis: sequenceOf(basis) }, null, { now: true });
       }
-      // A number goes as a number, so a form's arguments then go as parameter 1's pairs (#3686).
-      const pairs = Object.entries(keep[0].args ?? {}), counted = pairs.some(([, v]) => typeof v === 'number');
+      // A number or words go as they are, so a form's arguments then go as parameter 1's pairs (#3686, #3712).
+      const pairs = Object.entries(keep[0].args ?? {}), counted = pairs.some(([, v]) => typeof v !== 'string');
       const args = counted ? undefined : pairs.map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
       const params = counted ? { ...(req.params ?? {}), 1: pairs } : req.params;
       const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params, basis, expiry: req.expiry });
