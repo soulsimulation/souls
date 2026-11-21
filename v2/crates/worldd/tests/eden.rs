@@ -2478,6 +2478,196 @@ fn a_soul_walks_to_a_bed_lies_in_it_and_gets_up() {
     }
 }
 
+/// The commons shore pond's punt (the one nearest (-57.5, -6.0) m) as `worldd seed` from `facts` placed it: its number,
+/// its home and plank `[hx, hz, px, pz]` m, its loop's period and start, µs.
+fn commons_punt(facts: &str) -> (u64, [f64; 4], i64, i64) {
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let probe = std::env::temp_dir().join(format!("eden-punt-probe-{}", std::process::id()));
+    let seeded = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["seed", "--facts", facts, "--dir"])
+        .arg(&probe)
+        .args([
+            "--entries",
+            &format!("{root}/content/kinds"),
+            "--souls",
+            "0",
+        ])
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&probe);
+    String::from_utf8_lossy(&seeded.stdout)
+        .lines()
+        .filter_map(|l| {
+            let l = l
+                .trim()
+                .trim_start_matches("seed: ")
+                .strip_prefix("punt: rowing-punt-")?;
+            let (k, rest) = l.split_once(" on ")?;
+            let nums: Vec<f64> = rest
+                .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+                .filter_map(|w| w.parse().ok())
+                .collect();
+            let [.., hx, hz, px, pz, period, t0] = nums[..] else {
+                return None;
+            };
+            Some((k.parse().ok()?, [hx, hz, px, pz], period as i64, t0 as i64))
+        })
+        .min_by_key(|(_, h, _, _)| (((h[0] + 57.5).abs() + (h[1] + 6.0).abs()) * 1000.0) as i64)
+        .expect("a punt on Eden")
+}
+
+/// Each body's last logged place in the world's log in `dir`: its frame's node and slot, and x and z m.
+fn last_places(dir: &Path) -> BTreeMap<Id, (Id, Option<u64>, f64, f64)> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = BTreeMap::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        if let Some(Value::Array(rows)) = Part::read(&r).unwrap().rest.get(&answers::BODIES) {
+            for (id, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                let p = pose.position;
+                out.insert(
+                    id,
+                    (
+                        pose.frame.node,
+                        pose.frame.slot,
+                        p.x as f64 / 1e6,
+                        p.z as f64 / 1e6,
+                    ),
+                );
+            }
+        }
+    }
+    out
+}
+
+/// #3603 A2 and A3, served full Eden through the gateway. One Soul boards the commons punt in its boarding stop and
+/// steers it out over the pond. A second Soul on the bank asks to board while the punt stands out on the water, away
+/// from its stop: refused `boarding-frame-away`, and its body has not moved. The rider lands the punt; standing at
+/// its home the second Soul boards the other seat. The first rider steered it, so it is the driver: the second's steer
+/// and land are refused `steered`, and the driver's steer is taken. The driver lands it; both rise at the plank.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn p2_only_the_driver_steers_and_nobody_boards_the_punt_offshore() {
+    use replica::sky::int;
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    let (k1, [hx, hz, px, pz], period, t0) = commons_punt(&facts);
+    println!(
+        "the commons punt: rowing-punt-{k1}, home ({hx:.1}, {hz:.1}) m, plank ({px:.2}, {pz:.2}) m, lap {:.1} s",
+        period as f64 / 1e6
+    );
+    let at = format!("{:.2},{:.2}", px - 1.0, pz);
+    let (served, mut driver, dir, lines) = serve_lines(&facts, &at, "p2", lineage);
+    let mut passenger = join(&dir, 2, lineage);
+    let tag = format!("punt: rowing-punt-{k1} is ");
+    let shown = lines
+        .iter()
+        .find_map(|l| l.trim().strip_prefix(tag.as_str()).map(str::to_owned))
+        .expect("the punt's id line");
+    let punt = Id::new(lineage, shown.split(':').nth(1).unwrap().parse().unwrap()).unwrap();
+    let point = |x: f64, z: f64| {
+        BTreeMap::from([(
+            1,
+            Value::Array(vec![int((x * 1e6) as i64), int((z * 1e6) as i64)]),
+        )])
+    };
+    // Board in the punt's boarding stop: wait for the next one when less than 20 s of it are left.
+    let phase = |t: i64| (t - t0).rem_euclid(period);
+    let p = phase(answers::now());
+    if p > 10_000_000 {
+        std::thread::sleep(Duration::from_micros((period - p + 500_000) as u64));
+    }
+    let boarded = driver.act("eden:row", Some(punt), args(&[("seat", Value::Uint(1))]));
+    println!("the first Soul boards seat 1: {boarded:?}");
+    let p = phase(answers::now());
+    if p < 32_000_000 {
+        std::thread::sleep(Duration::from_micros((32_000_000 - p) as u64));
+    }
+    let out = driver.act("carrier:steer", Some(punt), point(-59.8, 0.0));
+    println!("the rider steers out: {out:?}");
+    // Out on the water, standing where the steer took it: the Soul on the bank asks to board.
+    std::thread::sleep(Duration::from_secs(15));
+    let before = last_places(&dir);
+    let on_bank: Vec<Id> = before
+        .iter()
+        .filter(|(_, f)| f.0 != punt)
+        .map(|(b, _)| *b)
+        .collect();
+    let offshore = passenger.act("eden:row", Some(punt), args(&[("seat", Value::Uint(2))]));
+    std::thread::sleep(Duration::from_secs(2));
+    let after = last_places(&dir);
+    println!(
+        "board offshore: {offshore:?}; the bank's bodies before {:?}, after {:?}",
+        on_bank.iter().map(|b| before.get(b)).collect::<Vec<_>>(),
+        on_bank.iter().map(|b| after.get(b)).collect::<Vec<_>>()
+    );
+    let back = driver.act("carrier:land", Some(punt), BTreeMap::new());
+    println!("the rider lands: {back:?}");
+    // At its home again, its rider still aboard: the Soul on the bank boards the other seat.
+    let mut second = Err(String::new());
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_secs(3));
+        second = passenger.act("eden:row", Some(punt), args(&[("seat", Value::Uint(2))]));
+        if second.as_ref().is_ok() || second.as_ref().is_err_and(|e| e != "boarding-frame-away") {
+            break;
+        }
+    }
+    println!("the second Soul boards seat 2 at home: {second:?}");
+    let not_driver = passenger.act("carrier:steer", Some(punt), point(-60.0, -2.0));
+    let not_driver_land = passenger.act("carrier:land", Some(punt), BTreeMap::new());
+    let steered = driver.act("carrier:steer", Some(punt), point(-59.8, 0.0));
+    println!(
+        "the passenger steers: {not_driver:?}, lands: {not_driver_land:?}; the driver steers: {steered:?}"
+    );
+    std::thread::sleep(Duration::from_secs(5));
+    let landed = driver.act("carrier:land", Some(punt), BTreeMap::new());
+    println!("the driver lands: {landed:?}");
+    let mut off = [Err(String::new()), Err(String::new())];
+    for _ in 0..80 {
+        std::thread::sleep(Duration::from_secs(3));
+        if off[0].is_err() {
+            off[0] = driver.act("eden:rise", None, BTreeMap::new());
+        }
+        if off[0].is_ok() && off[1].is_err() {
+            off[1] = passenger.act("eden:rise", None, BTreeMap::new());
+        }
+        if off.iter().all(Result::is_ok) {
+            break;
+        }
+    }
+    println!("both rise at the plank: {off:?}");
+    std::thread::sleep(Duration::from_secs(2));
+    let end = last_places(&dir);
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    boarded.expect("the first Soul boarded seat 1");
+    out.expect("the rider's steer");
+    assert_eq!(on_bank.len(), 1, "one body on the bank: {before:?}");
+    assert_eq!(offshore, Err("boarding-frame-away".to_owned()));
+    assert_eq!(
+        before.get(&on_bank[0]),
+        after.get(&on_bank[0]),
+        "the bank's body has not moved"
+    );
+    back.expect("landed");
+    second.expect("the second Soul boarded seat 2 at home");
+    assert_eq!(not_driver, Err("steered".to_owned()));
+    assert_eq!(not_driver_land, Err("steered".to_owned()));
+    steered.expect("the driver's steer");
+    landed.expect("landed again");
+    for o in off {
+        o.expect("rose at the plank");
+    }
+    let ground = im.nodes["ground"];
+    assert!(
+        end.values().all(|f| f.0 == ground),
+        "both on the ground: {end:?}"
+    );
+}
+
 /// Every set of a course field on `punt` in the parts `records` hold: (world time µs, the course's shape and stations).
 fn course_sets(records: &[Vec<u8>], punt: Id) -> Vec<(i64, u64, usize)> {
     use replica::effects::Change;
@@ -2710,6 +2900,23 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
         std::thread::sleep(Duration::from_secs(1));
     }
     println!("the public stream: the punt's courses {streamed:?}");
+    // The rider's hand-offs in the public stream: into the punt's slot 1 at boarding, out onto the ground at the plank.
+    use replica::pose::Owner;
+    let samples = public_samples(&dir);
+    let into = samples.iter().position(|(_, h)| {
+        h.to == Owner::Slot && h.pose.frame.node == punt && h.pose.frame.slot == Some(1)
+    });
+    let out = into.and_then(|i| {
+        samples[i..]
+            .iter()
+            .position(|(_, h)| h.from == Owner::Slot && h.to == Owner::Mover)
+            .map(|o| i + o)
+    });
+    println!(
+        "the public stream: the rider into the punt {:?}, out of it {:?}",
+        into.map(|i| samples[i].1),
+        out.map(|i| samples[i].1)
+    );
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(ashore, Err("not-aboard".to_owned()));
@@ -2747,4 +2954,13 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     );
     assert_eq!(logged[1].2, 2, "the stop: one station, where it is, held");
     assert_eq!(streamed, logged, "the public stream carries every course");
+    let out = out.expect("the public stream carries the rider into slot 1 and out of it");
+    let h = samples[out].1;
+    assert_eq!(h.pose.frame.node, im.nodes["ground"], "out onto the ground");
+    let (x, z) = (
+        h.pose.position.x as f64 / 1e6,
+        h.pose.position.z as f64 / 1e6,
+    );
+    let d = ((x - px).powi(2) + (z - pz).powi(2)).sqrt();
+    assert!(d < 1.5, "out at the plank: {d:.2} m from it");
 }

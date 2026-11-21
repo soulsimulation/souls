@@ -259,6 +259,13 @@ impl Slots {
         }
     }
 
+    /// `boarding-frame-away` unless `thing`, when it moves on a course, stands at its home at `now` with
+    /// [`crate::links::boarding::CROSSING`] of its stop left: asked before a form walks a body to it (#3603), so a body
+    /// is never walked toward a boat that has left.
+    pub fn boardable(&self, thing: Id, now: Micros) -> R<()> {
+        self.at_home(thing, now, crate::links::boarding::CROSSING)
+    }
+
     /// Seat ownership changes, drained by the world to wake standing queues.
     pub fn changes(&mut self) -> Vec<Id> {
         std::mem::take(&mut self.changed)
