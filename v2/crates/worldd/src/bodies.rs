@@ -222,6 +222,12 @@ pub struct Bodies {
     pub wind_log: Vec<Effect>,
     /// The rule's own move going on each body, by its intent id.
     wind_moves: BTreeMap<Id, Id>,
+    /// The stance entries since the world last took them (#3791, [`F_STANCE`]), cause and actor the world.
+    pub stance_log: Vec<Effect>,
+    /// Each body's stance as last written.
+    stances: BTreeMap<Id, u64>,
+    /// A walk's pace other than [`WALK`], by its intent, for the one call of [`Bodies::start`] that starts it.
+    paces: BTreeMap<Id, i64>,
     /// Each body the rule put to sleep on the ground: the driver holding it lying.
     sleeping: BTreeMap<Id, Driver>,
 }
@@ -229,6 +235,20 @@ pub struct Bodies {
 /// Where the log last had each body: its pose, and its stance when that pose is in a seat's slot (K18, #3160;
 /// K18c, #3176). What a restart builds its bodies at.
 pub type Placed = BTreeMap<Id, (Pose, Option<Stance>)>;
+
+/// A body node's public stance field (#3791): 1 sit, 2 lie, 3 stand, as the controller holds it; 0 once it stands
+/// free again. Written in the tick the body takes or leaves a slot, or the wind-down lays it down or wakes it, so the
+/// page reads a body's posture from its node, in a baseline as in every later part.
+pub const F_STANCE: u64 = 51;
+
+fn stance_code(s: Option<Stance>) -> u64 {
+    match s {
+        None => 0,
+        Some(Stance::Sit) => 1,
+        Some(Stance::Lie) => 2,
+        Some(Stance::Stand) => 3,
+    }
+}
 
 /// A body's row in a tick's part (K18's `answers::BODIES`): `[body, pose]`, or `[body, pose, stance]` in a seat
 /// (1 sit, 2 lie).
@@ -324,6 +344,9 @@ impl Bodies {
             ),
             wind_log: Vec::new(),
             wind_moves: BTreeMap::new(),
+            paces: BTreeMap::new(),
+            stance_log: Vec::new(),
+            stances: BTreeMap::new(),
             sleeping: BTreeMap::new(),
         })
     }
@@ -381,13 +404,19 @@ impl Bodies {
                 stance.unwrap_or(Stance::Sit),
                 at,
             );
+            // The log holds its stance field as last written (#3791): kept while it is seated again, else cleared.
+            self.stances
+                .insert(body, stance_code(Some(stance.unwrap_or(Stance::Sit))));
             match r {
                 Ok(()) => {
                     if let Some(b) = self.runner.controller.body(body) {
                         self.logged.insert(body, b.pose);
                     }
                 }
-                Err(e) => out.push((body, e)),
+                Err(e) => {
+                    self.note_stance(body, None, at);
+                    out.push((body, e));
+                }
             }
         }
         out
@@ -660,7 +689,8 @@ impl Bodies {
                 Ask::Walk { node, point } => {
                     let goal = self.goal(a.body, node, point);
                     self.replace(a.body);
-                    let walk = Box::new(Route::sent(WALK, self.runner.tick));
+                    let pace = self.paces.get(&id).copied().unwrap_or(WALK);
+                    let walk = Box::new(Route::sent(pace, self.runner.tick));
                     let r = goal.and_then(|g| self.runner.send(a.body, walk, g, id));
                     if r.is_ok() {
                         self.live.insert(a.body, (id, Live::Walk));
@@ -827,6 +857,8 @@ impl Bodies {
                     &self.town.surfaces,
                     &t,
                 );
+                let stance = self.slots.stance(t.node);
+                self.note_stance(t.node, stance, at);
                 let Some(&(id, Live::Place(n))) = self.live.get(&t.node) else {
                     continue;
                 };
@@ -1098,7 +1130,7 @@ impl Bodies {
                 Do::Stand => {
                     self.wake_ground(body);
                     if self.slots.held_by(body).is_some() {
-                        self.wind_move(body, Ask::Rise);
+                        self.wind_move(body, Ask::Rise, None);
                     }
                 }
                 Do::Walk([x, z]) => {
@@ -1109,6 +1141,7 @@ impl Bodies {
                             node,
                             point: Some(Vec3::new(x, 0, z)),
                         },
+                        Some(wind_down::shuffle(WALK)),
                     );
                 }
                 Do::Lie => self.lie_ground(body),
@@ -1120,9 +1153,13 @@ impl Bodies {
         }
     }
 
-    /// One move of the rule's, by the path every move intent takes ([`Bodies::start`]), under a fresh id.
-    fn wind_move(&mut self, body: Id, ask: Ask) {
+    /// One move of the rule's, by the path every move intent takes ([`Bodies::start`]), under a fresh id; a walk at
+    /// `pace` (µm a second) when given.
+    fn wind_move(&mut self, body: Id, ask: Ask, pace: Option<i64>) {
         let Ok(id) = self.mint.mint() else { return };
+        if let Some(p) = pace {
+            self.paces.insert(id, p);
+        }
         let started = self.start(vec![(
             id,
             Asked {
@@ -1132,9 +1169,40 @@ impl Bodies {
                 fallbacks: Vec::new(),
             },
         )]);
+        self.paces.remove(&id);
         if started.iter().all(|(_, r)| r.is_ok()) {
             self.wind_moves.insert(body, id);
         }
+    }
+
+    /// Writes `body`'s stance on its node when it changed: one entry of the world's, set in the tick it changed.
+    fn note_stance(&mut self, body: Id, stance: Option<Stance>, at: Micros) {
+        let code = stance_code(stance);
+        if self.stances.get(&body).copied().unwrap_or(0) == code {
+            return;
+        }
+        self.stances.insert(body, code);
+        self.stance_log.push(Effect {
+            envelope: replica::effects::Envelope {
+                sequence: 0,
+                at,
+                cause: replica::effects::Cause::World,
+                actor: Actor::World,
+                audience: replica::world_model::Audience::Everyone,
+                node: body,
+            },
+            body: replica::effects::Body::Changes(vec![replica::effects::ChangeRec {
+                change: replica::effects::Change::Set {
+                    node: body,
+                    field: F_STANCE,
+                    to: Value::Uint(code),
+                    by: None,
+                },
+                rest: replica::effects::Rest::new(),
+            }]),
+            events: None,
+            rest: replica::effects::Rest::new(),
+        });
     }
 
     /// The body lies down where it stands on the ground and is held lying, with no end.
@@ -1148,6 +1216,7 @@ impl Bodies {
                 self.sleeping.insert(body, d);
                 // Its row carries the lying stance from this tick.
                 self.logged.remove(&body);
+                self.note_stance(body, Some(Stance::Lie), self.runner.now);
             } else {
                 let _ = c.release(body, d);
             }
@@ -1159,6 +1228,7 @@ impl Bodies {
         if let Some(d) = self.sleeping.remove(&body) {
             let _ = self.runner.controller.release(body, d);
             self.logged.remove(&body);
+            self.note_stance(body, None, self.runner.now);
         }
     }
 

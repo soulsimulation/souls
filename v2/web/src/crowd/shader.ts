@@ -1,17 +1,20 @@
 // The crowd's skinning (V6, #2715): three's Lambert and depth materials, with the skinning chunks replaced by a read of
 // the baked bone texture. Per instance: `aAnim` (clip A, phase A, clip B, phase B; a phase is in cycles, its fraction
-// used) and `aMix` (the blend toward clip B, and the row of the per-body bone texture, or -1). A body with a row is
+// used) and `aMix` (the blend toward clip B, from 2 up above the hips only, and the row of the per-body bone texture, or -1). A body with a row is
 // posed from `uLive` (V7 fills it); every other body from its clips. Frames are blended linearly, and so are the two
 // clips: right for neighbouring frames and for like clips (idle and walk), wrong for large rotations apart.
 import * as THREE from 'three';
 
 export const MAX_CLIPS = 16;
+/** Bones a model may have for the upper-body mask (#3741). */
+export const MAX_BONES = 128;
 
 const PARS = /* glsl */ `
 uniform sampler2D uBake;
 uniform sampler2D uLive;
 uniform float uClipStart[${MAX_CLIPS}];
 uniform float uClipFrames[${MAX_CLIPS}];
+uniform float uUpper[${MAX_BONES}];
 attribute vec4 skinIndex;
 attribute vec4 skinWeight;
 attribute vec4 aAnim;
@@ -35,7 +38,9 @@ mat4 crowdClipBone(float clip, float phase, float bone) {
 mat4 crowdPose(float bone) {
   if (aMix.y >= 0.0) return crowdBone(uLive, int(aMix.y), bone);
   mat4 m = crowdClipBone(aAnim.x, aAnim.y, bone);
-  if (aMix.x > 0.001) m = m * (1.0 - aMix.x) + crowdClipBone(aAnim.z, aAnim.w, bone) * aMix.x;
+  // A blend of 2 and over is clip B above the hips only, by the blend less 2 (a gesture over a posture, #3741).
+  float w = aMix.x >= 1.5 ? (aMix.x - 2.0) * uUpper[int(bone)] : aMix.x;
+  if (w > 0.001) m = m * (1.0 - w) + crowdClipBone(aAnim.z, aAnim.w, bone) * w;
   return m;
 }
 mat4 crowdSkin() {
@@ -49,6 +54,7 @@ export type CrowdUniforms = {
   uLive: { value: THREE.Texture };
   uClipStart: { value: number[] };
   uClipFrames: { value: number[] };
+  uUpper: { value: number[] };
 };
 
 /** Patches `material` to skin from the bake; `depth` for a shadow's depth material (it has no normals). */

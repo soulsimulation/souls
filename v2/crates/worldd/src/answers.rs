@@ -2454,6 +2454,7 @@ impl Clock {
         let mut ended = b.step(now);
         let orders = std::mem::take(&mut b.orders.log);
         let wind = std::mem::take(&mut b.wind_log);
+        let stances = std::mem::take(&mut b.stance_log);
         let mut deadlines = Vec::new();
         for (id, walk) in &mut self.walks {
             let (due, blocked) = walk.step(b, now);
@@ -2477,6 +2478,9 @@ impl Clock {
         }
         if !wind.is_empty() {
             self.write_own(wind, "the wind-down");
+        }
+        if !stances.is_empty() {
+            self.write_own(stances, "bodies' stances");
         }
         for (speaker, said, at) in heard {
             let e = speech::entry(Clock::own(speaker, at), speaker, &said);

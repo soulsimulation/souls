@@ -36,6 +36,8 @@ export type NodeRec = {
   /** The open ground's terrain tiles: side mm (field 24) and `[tx, tz, heights, classes]` (field 25). */
   tileSize?: number;
   tiles?: [number, number, Uint8Array, Uint8Array][];
+  /** A body's stance (field 51, #3791): 1 sit, 2 lie, 3 stand; none when it stands free. */
+  stance?: number;
   /** A body's public name and one-line description (fields 30, 31, by reference; V1b), null while unknown. */
   name?: string | null;
   description?: string | null;
@@ -55,9 +57,14 @@ export type SampleRec = [string, string, number | null, number, number, number, 
  * words from the part's text file (null when the file does not hold them, e.g. removed). */
 export type SaidRec = { speaker: string; at: number; length: number; reach: number; ref: string; words: string | null };
 
+/** A run's move as it started (`souls:form-move`, #3741): the body, B2's record (times world µs) and the thing it acts
+ * on; and a run's ending (`souls:form-ended`): the body, when and how. The page draws gestures from these alone. */
+export type MoveRec = { body: string; name: string; start: number; ends: number[]; target: string | null };
+export type RunEndRec = { body: string; at: number; how: string };
+
 /** What one part changed, in the order played; `samples` is every motion sample in it, in entry order; `said` every
  * utterance in it (V1b). */
-export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[]; happened?: Happened[] };
+export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[]; happened?: Happened[]; moves?: MoveRec[]; runEnds?: RunEndRec[] };
 
 /** The COMPLETE currently drawable public state, including no opaque-frame descendants. A new source/worker
  * cannot know the caller's previous nodes. No invented part time, effects, events or motion. */
