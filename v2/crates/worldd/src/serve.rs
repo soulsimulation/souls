@@ -130,6 +130,17 @@ type R<T> = Result<T, String>;
 
 /// The log's epoch.
 const EPOCH: u64 = 1;
+
+/// When `serve` began (#3672): its start-up stages print their elapsed time from here. Unset outside `serve`, so
+/// `seed` and template checks print nothing.
+static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// One start-up stage's elapsed-time stamp (#3672), only while `serve` starts.
+fn stamp(stage: &str) {
+    if let Some(t) = STARTED.get() {
+        println!("start-up: {stage} at {} ms", t.elapsed().as_millis());
+    }
+}
 /// K5's checkpoint interval: one each 8 MiB of log (the bench constant, as `worldd fork`).
 const EVERY: u64 = 8 << 20;
 /// The stream writer's queue in the tier: deliveries it may fall behind by before it is handed a snapshot.
@@ -185,13 +196,11 @@ fn io(path: &Path) -> impl Fn(std::io::Error) -> String + '_ {
     move |e| format!("{}: {e}", path.display())
 }
 
-/// What a loader's facts file gives a world: its header, its import part, its walkers' town and ground.
+/// What a loader's facts file gives a world: its header, its import part and its ground. Its walkers' town is built
+/// by `serve` from the world as its log leaves it, once (#3672).
 struct Built {
     header: replica::effects::Header,
     part: Vec<u8>,
-    town: Town,
-    /// The planner's copy of the town (K18b), built with it before the clock and its watchdog start.
-    planner: Town,
     ground: Id,
     root: Id,
     /// The world's rules (T2), for the engine's own acts (C2).
@@ -275,8 +284,10 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
 /// Loads a facts file (N1's or X6's) as the world as built, with the activity kinds of `entries` (C30).
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
     let mut im = import_eden::load(facts)?;
+    stamp("facts");
     let mut activities = vec![conversation()?];
     activities.extend(activity_kinds(entries)?);
+    stamp("activities");
     for a in &activities {
         im.rules.kinds.insert(
             a.name.as_str().to_owned(),
@@ -347,18 +358,10 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
         .into(),
     ))
     .map_err(|e| e.to_string())?;
-    let next = im.tree.to_state().next;
-    let rules = im.rules.clone();
-    let doors = Doors::new(header.clone(), im.rules, next);
-    let town = Town::new(im.tree, ground, doors).map_err(|e| format!("the town: {e:?}"))?;
-    let planner = town
-        .copy()
-        .map_err(|e| format!("the planner's town: {e:?}"))?;
+    let rules = im.rules;
     Ok(Built {
         header,
         part,
-        town,
-        planner,
         ground,
         root,
         rules,
@@ -384,12 +387,11 @@ fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(
         built.rules.clone(),
         live.tree().next(),
     );
-    let town = Town::new(live.tree().frozen(), built.ground, doors)
+    stamp("log applied");
+    let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
         .map_err(|e| format!("the recovered town: {e}"))?;
-    let planner = town
-        .copy()
-        .map_err(|e| format!("the recovered planner: {e}"))?;
-    Ok((town, planner))
+    stamp("town and planner");
+    Ok(towns)
 }
 
 /// Public, data-only serving support. Only the seed's facts, flattened public entries and optional moves are
@@ -1433,6 +1435,8 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn serve(args: &[String]) -> R<()> {
+    let _ = STARTED.set(std::time::Instant::now());
+    stamp("launch");
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
         "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] \
          [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
@@ -1458,6 +1462,7 @@ fn serve(args: &[String]) -> R<()> {
     if dir.join("entries").is_dir() {
         entries(&dir.join("entries"), &mut kinds)?;
     }
+    stamp("entries");
     let built = build(
         &std::fs::read_to_string(&facts).map_err(io(&facts))?,
         &kinds,
@@ -1514,7 +1519,7 @@ fn serve(args: &[String]) -> R<()> {
     let store = log.close();
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
-    let (initial, base_record, stream_mapping, checkpoint) = if let Some(header) = stored_header {
+    let started = if let Some(header) = stored_header {
         let restored = sim::checkpoint::restore(&dir.join("checkpoints"))
             .map_err(refusal)?
             .ok_or("served-fork-checkpoint-missing")?;
@@ -1523,6 +1528,7 @@ fn serve(args: &[String]) -> R<()> {
         {
             return Err("served-fork-checkpoint-mismatch".into());
         }
+        stamp("checkpoint restore");
         let record = restored.root.record;
         let checkpoint = view_out::capture_checkpoint(
             &dir.join("checkpoints").join(format!("ckpt-{record:020}")),
@@ -1557,31 +1563,27 @@ fn serve(args: &[String]) -> R<()> {
                 }
             }
         }
+        stamp("log applied");
         built.header = header.clone();
         let doors = Doors::new(header, built.rules.clone(), live.tree().next());
-        built.town = Town::new(live.tree().frozen(), built.ground, doors)
+        let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
             .map_err(|e| format!("the fork's town: {e}"))?;
-        built.planner = built
-            .town
-            .copy()
-            .map_err(|e| format!("the fork's planner: {e}"))?;
-        (initial, record, observer, Some(checkpoint))
+        stamp("town and planner");
+        (initial, record, observer, Some(checkpoint), towns)
     } else {
         let initial = Replica::start(built.header.stored()).map_err(refusal)?;
-        let (town, planner) = recovered_towns(&built, &initial, &found.records)?;
-        built.town = town;
-        built.planner = planner;
-        (initial, 0, None, None)
+        let towns = recovered_towns(&built, &initial, &found.records)?;
+        (initial, 0, None, None, towns)
     };
-    built
-        .town
+    let (initial, base_record, stream_mapping, checkpoint, (mut town, mut planner)) = started;
+    town.prepare_classes(catalogue.classes())
+        .map_err(|e| format!("body-classes: {e}"))?;
+    planner
         .prepare_classes(catalogue.classes())
         .map_err(|e| format!("body-classes: {e}"))?;
-    built
-        .planner
-        .prepare_classes(catalogue.classes())
-        .map_err(|e| format!("body-classes: {e}"))?;
-    let (places, things, all, left, moved) = places(&mut built.town, &kinds);
+    stamp("body classes");
+    let (places, things, all, left, moved) = places(&mut town, &kinds);
+    stamp("places to sit placed");
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
          moved to clear ground",
@@ -1690,7 +1692,7 @@ fn serve(args: &[String]) -> R<()> {
     let kinds_path = dir.join("world.kinds");
     std::fs::write(&kinds_path, &built.kinds_text).map_err(io(&kinds_path))?;
 
-    let (town, planner, ground) = (built.town, built.planner, built.ground);
+    let ground = built.ground;
 
     // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
     let int = |v: &Json| match v {
@@ -1711,7 +1713,9 @@ fn serve(args: &[String]) -> R<()> {
     });
     cfg.wear = Some(answers::Wearing { catalogue, born });
     cfg.built_bodies = Some(Box::new(move |placed: &Placed, builds| {
-        bodies(town, planner, ground, placed, places.clone(), builds)
+        let b = bodies(town, planner, ground, placed, places.clone(), builds);
+        stamp("places to sit registered");
+        b
     }));
     // Capture and validate the public source before answers starts its K5 writer: normal pruning may remove an
     // eligible older checkpoint. The engine still starts from its newest restored state and unchanged clock.
@@ -1749,7 +1753,9 @@ fn serve(args: &[String]) -> R<()> {
     public_start
         .earlier_legacy_checkpoint(&dir.join("checkpoints"))
         .map_err(refusal)?;
+    stamp("before replay");
     let world = answers::start(initial.frozen(), rules, store, cfg).map_err(refusal)?;
+    stamp("replay");
     println!(
         "restart: checkpoint {:?}, {} records read, {} applied",
         world.restart.checkpoint, world.restart.read, world.restart.applied
@@ -1791,6 +1797,7 @@ fn serve(args: &[String]) -> R<()> {
         }
     }
     writer.flush().map_err(refusal)?;
+    stamp("public stream");
     drop(found);
     let (stream_tx, stream_rx) = channel::<(u64, Vec<u8>)>();
     // Shipping/archive delivery remains independent of a stopped public observer.
@@ -1835,6 +1842,7 @@ fn serve(args: &[String]) -> R<()> {
         .map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).map_err(io(&socket))?;
+    stamp("listening");
     println!("listening {}", socket.display());
     crate::ready();
     for stream in listener.incoming().flatten() {
@@ -1926,8 +1934,10 @@ mod tests {
         let building = imported.nodes["building"];
         let floor = imported.nodes["building/floor-1"];
         let built = build(&facts.text, &[]).unwrap();
-        assert!(built.town.surfaces.contains_key(&floor));
         let initial = Replica::start(built.header.stored()).unwrap();
+        let (before, _) =
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+        assert!(before.surfaces.contains_key(&floor));
         let mut live = initial.frozen();
         live.apply(&replica::effects::Part::read(&built.part).unwrap())
             .unwrap();
@@ -2580,6 +2590,50 @@ mod tests {
         assert_eq!(ordinary.replica().tree().to_state(), parent.to_state());
         drop(log.close());
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// #3672: the planner `Town::with_planner` clones answers every query as `Town::copy`'s second assembly does.
+    #[test]
+    fn planner_clone_answers_as_the_assembled_copy() {
+        let facts = testworld::generate(1, 0).unwrap();
+        let built = build(&facts.text, &[]).unwrap();
+        let initial = Replica::start(built.header.stored()).unwrap();
+        let (mut town, mut planner) =
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+        let mut copy = town.copy().unwrap();
+        for t in [&mut town, &mut planner, &mut copy] {
+            t.prepare_classes([replica::kinds::sizes::Size::Large])
+                .unwrap();
+        }
+        assert_eq!(planner.tree.to_state(), copy.tree.to_state());
+        let floors: Vec<Id> = copy.surfaces.keys().copied().collect();
+        assert!(
+            floors.len() > 1,
+            "the test world has floors besides the ground"
+        );
+        assert_eq!(planner.surfaces.keys().copied().collect::<Vec<_>>(), floors);
+        let ask = |t: &mut Town| {
+            let view = t.view();
+            let mut out = Vec::new();
+            for &node in &floors {
+                for x in (-30_000..=30_000).step_by(2_500) {
+                    for z in (-30_000..=30_000).step_by(2_500) {
+                        let at = Vec3::new(x, 0, z);
+                        out.push(format!(
+                            "{:?} {:?} {:?}",
+                            view.on_floor(node, at),
+                            view.stand_near(node, at, 1, None),
+                            view.stand_near(node, at, skills::form_runner::REACH, None)
+                        ));
+                    }
+                }
+            }
+            out
+        };
+        let (cloned, assembled) = (ask(&mut planner), ask(&mut copy));
+        assert!(cloned.iter().any(|a| !a.contains("None None")));
+        assert_eq!(cloned, assembled);
+        assert_eq!(ask(&mut town), assembled);
     }
 
     #[test]
