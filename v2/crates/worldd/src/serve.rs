@@ -964,7 +964,7 @@ fn born(
 fn bodies(
     town: Town,
     planner: Town,
-    _ground: Id,
+    ground: Id,
     placed: &Placed,
     places: Vec<PlaceAt>,
     builds: &std::collections::BTreeMap<Id, replica::kinds::sizes::Build>,
