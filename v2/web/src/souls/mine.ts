@@ -10,6 +10,9 @@
 // - **Changes** are signed-in POSTs: name and description, a picture (PNG or JPEG; the directory runs G6's check), and
 //   a retire, which asks the person to confirm and then posts `confirm: true`. A link never retires a Soul; an
 //   agent's ask only marks the row.
+// - **The status line** (C14, #3684; today's `now`) is the one its agent sets (`souls.mjs now "<line>"`), read for
+//   all the listed Souls with one public request (`POST /v1/account/now`) and shown under the description, quoted,
+//   with how long ago it was set. The Soul's page (`page.ts`) reads it the same way.
 // Every field is set as text (`textContent`) or as an image's `src` from the directory's own `data:` URL.
 
 /** How often the list is read again. */
@@ -24,6 +27,36 @@ export type Mine = {
   picture: string | null;
   retire_asked: boolean;
 };
+
+/** A Soul's status line as the directory keeps it: the text and when it was set, seconds since 1970. */
+export type NowLine = { text: string; at: number };
+
+/** The status lines of these Souls (grants), from the directory; those with none are absent. Empty on any failure:
+ *  a missing line never stops a page. */
+export async function readNow(souls: string[], post: typeof fetch = fetch): Promise<Map<string, NowLine>> {
+  const out = new Map<string, NowLine>();
+  const asked = [...new Set(souls.filter((s) => /^soul-[0-9a-f]{32}-\d+$/.test(s)))].slice(0, 64);
+  if (!asked.length) return out;
+  try {
+    const r = await post('/v1/account/now', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ souls: asked }), credentials: 'omit', redirect: 'error' });
+    if (!r.ok) return out;
+    const body = (await r.json()) as { now?: Record<string, unknown> };
+    for (const [soul, v] of Object.entries(body.now ?? {})) {
+      const n = v as Partial<NowLine>;
+      if (asked.includes(soul) && typeof n?.text === 'string' && typeof n.at === 'number') out.set(soul, { text: n.text, at: n.at });
+    }
+  } catch { /* no line */ }
+  return out;
+}
+
+/** How long ago, in words, as today's card says it: `just now`, `12 min ago`, `3 h ago`, `2 d ago`. */
+export function agoText(at: number, nowMs = Date.now()): string {
+  const m = Math.round((nowMs / 1000 - at) / 60);
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
+}
+
+/** The status line as shown: the agent's words quoted, then how long ago. */
+export const nowText = (n: NowLine, nowMs = Date.now()) => `“${n.text}” · ${agoText(n.at, nowMs)}`;
 
 /** The line a world's page gives the person to paste to their agent. */
 export function cardLine(origin: string, world: string): string {
@@ -56,13 +89,17 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string,
 
 /** Draws the owner's Souls into `list`, each with its edits and its retire, and any `more` buttons the page adds;
  *  `said` is the status line, `again` reads the list again. */
-export function drawMine(list: HTMLElement, souls: Mine[], call: Call, said: (s: string) => void, again: () => void, more: (m: Mine) => HTMLElement[] = () => []): void {
+export function drawMine(list: HTMLElement, souls: Mine[], call: Call, said: (s: string) => void, again: () => void, more: (m: Mine) => HTMLElement[] = () => [], lines: (souls: string[]) => Promise<Map<string, NowLine>> = readNow): void {
+  const nows = new Map<string, HTMLElement>();
   const rows = souls.map((m) => {
     const li = el('li', { className: 'mine' });
     li.dataset.soul = m.soul;
     const pic = m.picture ? el('img', { src: m.picture, alt: '', width: 48, height: 48 }) : el('span', { className: 'pic', textContent: nameText(m).slice(0, 1) });
     const text = el('div');
-    text.append(el('strong', { textContent: nameText(m) }), el('div', { className: 'muted', textContent: m.description ?? '' }), el('div', { className: 'muted where', textContent: whereText(m) }));
+    const now = el('div', { className: 'now', hidden: true });
+    now.dataset.now = '1';
+    nows.set(m.soul, now);
+    text.append(el('strong', { textContent: nameText(m) }), el('div', { className: 'muted', textContent: m.description ?? '' }), now, el('div', { className: 'muted where', textContent: whereText(m) }));
     const done = (what: string) => (r: { ok: boolean; body: Record<string, unknown> }) => {
       said(r.ok ? what : `Refused: ${String(r.body.refused ?? 'no answer')}`);
       again();
@@ -96,6 +133,17 @@ export function drawMine(list: HTMLElement, souls: Mine[], call: Call, said: (s:
     return li;
   });
   list.replaceChildren(...(rows.length ? rows : [el('li', { className: 'muted', textContent: 'no Souls yet: bring one from a world’s page' })]));
+  if (nows.size) {
+    void lines([...nows.keys()]).then((got) => {
+      for (const [soul, n] of got) {
+        const e = nows.get(soul);
+        if (!e) continue;
+        e.textContent = nowText(n);
+        e.title = new Date(n.at * 1000).toLocaleString();
+        e.hidden = false;
+      }
+    });
+  }
 }
 
 /** The world page's card: a "New Soul" button opening the line to copy. Shown only on a world's page. */
