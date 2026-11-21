@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "heat": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "default": 1,
@@ -15,7 +15,7 @@
       }
     },
     "lit": {
-      "n": 2,
+      "n": 29,
       "type": "bool",
       "default": false,
       "audience": {

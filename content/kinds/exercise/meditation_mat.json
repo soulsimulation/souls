@@ -3,7 +3,7 @@
   "kind": "eden:meditation_mat",
   "owner": "thing",
   "state": {
-    "practices": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } }
+    "practices": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } }
   },
   "points": {
     "centre": { "role": "stand", "at_mm": [0, 0, 0], "yaw_mdeg": 0 }

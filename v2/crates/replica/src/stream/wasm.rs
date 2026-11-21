@@ -45,6 +45,17 @@ pub fn read_pointer(bytes: &[u8]) -> Result<String, JsError> {
             crate::encode::to_hex(hash)
         ));
     }
+    // #3825: the generation the field-9 handoff closes, when it is a generation rather than the legacy stream.
+    if let Some(crate::encode::Value::Bytes(from)) = m.get(&10) {
+        if from.len() != 32 {
+            return Err(JsError::new("handoff generation"));
+        }
+        json.pop();
+        json.push_str(&format!(
+            ",\"handoffFrom\":\"{}\"}}",
+            crate::encode::to_hex(from)
+        ));
+    }
     Ok(json)
 }
 
@@ -92,6 +103,27 @@ impl WasmPlayer {
         }
         .map(|p| p.to_json())
         .map_err(js)
+    }
+
+    /// [`WasmPlayer::play`] for a part a joiner far behind will not show (#3822): every check but the next state's
+    /// digest, which [`WasmPlayer::verify`] or the next part played with `play` works out once. A legacy copy plays it
+    /// checked.
+    #[wasm_bindgen(js_name = playDeferred)]
+    pub fn play_deferred(&mut self, bytes: &[u8]) -> Result<String, JsError> {
+        match &mut self.0 {
+            Copy::Legacy(p) => p.play(bytes),
+            Copy::Public(p) => p.play_deferred(bytes),
+        }
+        .map(|p| p.to_json())
+        .map_err(js)
+    }
+
+    /// Refuses (`stream-digest`) unless the state the deferred parts made has the digest the newest part claimed.
+    pub fn verify(&mut self) -> Result<(), JsError> {
+        match &mut self.0 {
+            Copy::Legacy(_) => Ok(()),
+            Copy::Public(p) => p.verify().map_err(js),
+        }
     }
 
     /// The number of the part it expects next.
@@ -145,6 +177,15 @@ impl WasmPlayer {
             .to_vec(),
         ))
         .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Continues on the next generation, both given in hex, without its baseline ([`PublicPlayer::cross`], #3825).
+    pub fn cross(&mut self, generation: &str, digest: &str) -> Result<(), JsError> {
+        let hex = |h: &str| crate::encode::from_hex(h).map_err(|e| JsError::new(&e));
+        match &mut self.0 {
+            Copy::Legacy(_) => Err(JsError::new("a legacy copy does not cross")),
+            Copy::Public(p) => p.cross(&hex(generation)?, &hex(digest)?).map_err(js),
+        }
     }
 
     /// Exact public projection digest, including unresolved references, for an explicit legacy handoff.

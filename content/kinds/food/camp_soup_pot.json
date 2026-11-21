@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "vegetables": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "default": 3,
@@ -15,7 +15,7 @@
       }
     },
     "water": {
-      "n": 2,
+      "n": 29,
       "type": "int",
       "unit": "g",
       "default": 1500,
@@ -26,7 +26,7 @@
       }
     },
     "fuel": {
-      "n": 3,
+      "n": 30,
       "type": "int",
       "unit": "count",
       "default": 1,
@@ -37,7 +37,7 @@
       }
     },
     "cooked": {
-      "n": 4,
+      "n": 31,
       "type": "bool",
       "default": false,
       "audience": {
@@ -45,7 +45,7 @@
       }
     },
     "soup": {
-      "n": 5,
+      "n": 32,
       "type": "int",
       "unit": "count",
       "default": 0,

@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "points_to": {
-      "n": 1,
+      "n": 28,
       "type": "text",
       "default": null,
       "audience": {
