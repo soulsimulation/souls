@@ -106,7 +106,7 @@ pub fn moorings_of(tree: &replica::tree::Tree, ground: Id) -> Result<Vec<Mooring
     let mut waters = Vec::new();
     for &c in tree.children(gh).unwrap_or(&[]) {
         let water = tree.node(c).is_some_and(|n| {
-            matches!(n.fields().get(&import_eden::F_PLACE_OF),
+            matches!(n.fields().get(&crate::ground::scene::F_PLACE_OF),
                 Some(replica::encode::Value::Text(t)) if t.as_str() == "eden:water")
         });
         if !water {
