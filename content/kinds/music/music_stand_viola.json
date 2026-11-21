@@ -3,7 +3,7 @@
   "kind": "eden:music_stand_viola",
   "owner": "thing",
   "state": {
-    "music": {"n":1,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
+    "music": {"n":28,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
   },
   "links": {"player":{"n":1,"from":"soul","most":1,"audience":{"rule":"everyone"}}},
   "points": {"player":{"role":"stand","at_mm":[0,0,500]}},

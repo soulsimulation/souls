@@ -4,14 +4,14 @@
   "owner": "thing",
   "state": {
     "stage": {
-      "n": 1,
+      "n": 28,
       "type": "enum",
       "values": ["dirty", "wet", "damp", "folded"],
       "default": "dirty",
       "audience": {"rule": "everyone"}
     },
     "soap": {
-      "n": 2,
+      "n": 29,
       "type": "int",
       "unit": "count",
       "default": 0,
@@ -20,7 +20,7 @@
       "audience": {"rule": "everyone"}
     },
     "water": {
-      "n": 3,
+      "n": 30,
       "type": "int",
       "unit": "count",
       "default": 0,

@@ -16,7 +16,7 @@
       "do": [
         {
           "act": { "this": "r1", "form": "uncover" }, "receipt": "rr1",
-          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "r1", "field": "covered", "n": 2, "to": 0 }], "events": [{ "event": "eden:uncovered", "node": "r1", "changes": [0] }], "timers": [] }
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "r1", "field": "covered", "n": 29, "to": 0 }], "events": [{ "event": "eden:uncovered", "node": "r1", "changes": [0] }], "timers": [] }
         },
         {
           "act": { "this": "p1", "form": "take" }, "receipt": "rr2",
@@ -27,8 +27,8 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "set", "node": "r1", "field": "water", "n": 1, "to": 2000, "by": -1000 },
-              { "change": "set", "node": "p1", "field": "water", "n": 1, "to": 1000, "by": 1000 }
+              { "change": "set", "node": "r1", "field": "water", "n": 28, "to": 2000, "by": -1000 },
+              { "change": "set", "node": "p1", "field": "water", "n": 28, "to": 1000, "by": 1000 }
             ],
             "events": [{ "event": "eden:drawn", "node": "r1", "changes": [0, 1] }],
             "timers": []
@@ -36,7 +36,7 @@
         },
         {
           "act": { "this": "r1", "form": "cover" }, "receipt": "rr4",
-          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "r1", "field": "covered", "n": 2, "to": 1 }], "events": [{ "event": "eden:covered", "node": "r1", "changes": [0] }], "timers": [] }
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "r1", "field": "covered", "n": 29, "to": 1 }], "events": [{ "event": "eden:covered", "node": "r1", "changes": [0] }], "timers": [] }
         }
       ],
       "after": {

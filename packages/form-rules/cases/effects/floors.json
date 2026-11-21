@@ -15,7 +15,7 @@
           "receipt": "rug_rolled_up_and_unrolled-0",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"r1","field":"rolled","n":1,"to":1}],
+            "changes": [{"change":"set","node":"r1","field":"rolled","n":28,"to":1}],
             "events": [{"event":"eden:rolled_up","node":"r1","changes":[0]}],
             "timers": []
           }
@@ -30,7 +30,7 @@
           "receipt": "rug_rolled_up_and_unrolled-2",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"r1","field":"rolled","n":1,"to":0}],
+            "changes": [{"change":"set","node":"r1","field":"rolled","n":28,"to":0}],
             "events": [{"event":"eden:unrolled","node":"r1","changes":[0]}],
             "timers": []
           }
@@ -60,7 +60,7 @@
           "receipt": "sandpit_castle_built_and_knocked_down-0",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"s1","field":"castle","n":1,"to":1}],
+            "changes": [{"change":"set","node":"s1","field":"castle","n":28,"to":1}],
             "events": [{"event":"eden:built_a_sandcastle","node":"s1","changes":[0]}],
             "timers": []
           }
@@ -71,7 +71,7 @@
           "receipt": "sandpit_castle_built_and_knocked_down-1",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"s1","field":"castle","n":1,"to":0}],
+            "changes": [{"change":"set","node":"s1","field":"castle","n":28,"to":0}],
             "events": [{"event":"eden:knocked_the_sandcastle_down","node":"s1","changes":[0]}],
             "timers": []
           }
@@ -102,7 +102,7 @@
           "receipt": "picnic_blanket_folded_and_spread-0",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"p1","field":"spread","n":1,"to":0}],
+            "changes": [{"change":"set","node":"p1","field":"spread","n":28,"to":0}],
             "events": [{"event":"eden:folded","node":"p1","changes":[0]}],
             "timers": []
           }
@@ -117,7 +117,7 @@
           "receipt": "picnic_blanket_folded_and_spread-2",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"p1","field":"spread","n":1,"to":1}],
+            "changes": [{"change":"set","node":"p1","field":"spread","n":28,"to":1}],
             "events": [{"event":"eden:spread_out","node":"p1","changes":[0]}],
             "timers": []
           }
@@ -127,7 +127,7 @@
           "receipt": "picnic_blanket_folded_and_spread-3",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change":"set","node":"p1","field":"spread","n":1,"to":1}],
+            "changes": [{"change":"set","node":"p1","field":"spread","n":28,"to":1}],
             "events": [{"event":"eden:spread_out","node":"p1","changes":[0]}],
             "timers": []
           }

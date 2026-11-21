@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:chair",
   "owner": "thing",
-  "state": { "tucked": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "state": { "tucked": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
   "points": {
     "front": { "role": "stand", "at_mm": [0, 0, 509], "yaw_mdeg": 180000 },
     "back": { "role": "grip", "at_mm": [0, 765, -200] }
