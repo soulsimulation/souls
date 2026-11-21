@@ -334,7 +334,7 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const lookB = JSON.stringify(await B.cli('look'));
   assert.ok(!lookB.includes(apple), "(e) B's look does not name the hidden apple");
   const streamB = JSON.stringify((await request(B.rt.socket, { op: 'read' })).events);
-  console.log(`e2e: (e) B's stream events name the hidden apple: ${streamB.includes(apple)}`);
+  assert.ok(!streamB.includes(apple), "(e) no event B's daemon was handed names the hidden apple");
   stage('hidden apple withheld from the seeker');
 
   // The acts. A walks to the bench and sits on it.
