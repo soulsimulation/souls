@@ -108,11 +108,14 @@ use crate::route::{Leg, Route};
 /// (`on`), whose place the runner reads when the step starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Step {
-    /// Walk to a point of the node (or of thing `on`), µm in its frame.
+    /// Walk to a point of the node (or of thing `on`), µm in its frame. An `approach` is the walk the binding adds
+    /// before a form's first move at a point ([`approach`]): when the world finds no way, the move is tried from where
+    /// the body stands.
     WalkTo {
         point: Name,
         at: Vec3,
         on: Option<Id>,
+        approach: bool,
     },
     /// A move by name toward a point of the node (or of thing `on`); with no point, the move's own contact.
     Move {
@@ -144,6 +147,16 @@ pub enum Step {
 /// How far from a point a walk to it may end, µm, when a body cannot stand on the point itself (C15, #3447): an arm
 /// (the longest reach a move may state) and a body, as today's engine counts a stand point's reach.
 pub const REACH: i64 = replica::moves::REACH_MOST + 600_000;
+
+/// How far from its aim the place an approach walk ([`approach`]) goes to may be, µm: an arm, a move's usual reach
+/// (`content/moves`), as today's game looks for clear ground about the hand's point.
+pub const APPROACH_REACH: i64 = 600_000;
+
+/// How far short of the move's point, toward the body, the world aims an approach walk when the point lies on the
+/// floor the body stands on ([`short_of`]), µm: a door's handle stands in its doorway, where no body stops, so the
+/// walk aims at the clear ground before the door on the body's own side, as today's game finds clear ground by the
+/// hand's point.
+pub const APPROACH_SHORT: i64 = 500_000;
 
 /// How far from a seat's stand point the place a walk before a `sit` or `lie` step goes to may be (C17, #3453), µm:
 /// the sit's and the lie's own reach (B2's data, a body's 0.6 m) less how near the walk comes to its end
@@ -337,7 +350,12 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         return refuse("step-malformed", "walk_to.point: a name");
                     };
                     let (point, at, on) = aim(entry, p, args, "walk_to.point")?;
-                    Ok(Step::WalkTo { point, at, on })
+                    Ok(Step::WalkTo {
+                        point,
+                        at,
+                        on,
+                        approach: false,
+                    })
                 }
                 "take" | "put" if s.get("move").is_none() && s.get("at").is_none() => {
                     Ok(Step::Hand)
@@ -407,6 +425,7 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
+    approach(entry, f, &mut bound)?;
     approach_in_areas(entry, &mut bound)?;
     if let Some((_, slot)) = stand_in(entry, f, args)? {
         bound.push(Step::Sit {
@@ -419,6 +438,54 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
         bound.insert(0, Step::Rise);
     }
     Ok(bound)
+}
+
+/// A form that starts with a move at one of the thing's points, with no walk before it (a door's `open` at its
+/// handle, a lamp's `switch_on` at its switch), first walks to that point: the planner stops at the nearest place
+/// within reach of it where a body may stand, as today's game walks to the stand point nearest the hand's point, else
+/// the nearest clear ground, before it acts (0.131 parity, #3688). A form whose thing is in the actor's hand
+/// (`held_by_actor`: a cup's sip, a kettle's pour) does not walk.
+fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal> {
+    let held = f
+        .get("needs")
+        .and_then(Value::arr)
+        .unwrap_or(&[])
+        .iter()
+        .any(|n| n.get("need").and_then(Value::str) == Some("held_by_actor"));
+    let Some(k) = bound.iter().position(|s| !matches!(s, Step::Wait(_))) else {
+        return Ok(());
+    };
+    if let Step::Move {
+        at: Some(p),
+        on: None,
+        ..
+    } = &bound[k]
+        && !held
+    {
+        let to = point(entry, p.as_str())?;
+        let step = Step::WalkTo {
+            point: p.clone(),
+            at: Vec3::new(to.x, 0, to.z),
+            on: None,
+            approach: true,
+        };
+        bound.insert(k, step);
+    }
+    Ok(())
+}
+
+/// Point `to` moved `by` µm toward `from` across x and z, or left where it is when `from` is nearer than that.
+pub fn short_of(to: Vec3, from: Vec3, by: i64) -> Vec3 {
+    let (dx, dz) = (
+        i128::from(from.x) - i128::from(to.x),
+        i128::from(from.z) - i128::from(to.z),
+    );
+    let len = (dx * dx + dz * dz).isqrt();
+    if len <= i128::from(by) {
+        return to;
+    }
+    let step = |d: i128| i64::try_from(d * i128::from(by) / len).unwrap_or(0);
+    Vec3::new(to.x + step(dx), to.y, to.z + step(dz))
 }
 
 /// An area is a place to be in, not a point to act from (C34, #3599): a move at a point of the thing right after a walk
@@ -450,6 +517,7 @@ fn approach_in_areas(entry: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal
                 point: area.clone(),
                 at: Vec3::new(to.x, floor.y, to.z),
                 on: None,
+                approach: false,
             };
             bound.insert(k, step);
             k += 1;
@@ -538,6 +606,7 @@ pub fn turn(steps: &mut [Step], q: Quat) -> Result<(), Refusal> {
             point,
             at,
             on: None,
+            ..
         } = s
         {
             *at = q.rotate(*at).map_err(|e| Refusal {
@@ -1377,6 +1446,9 @@ pub struct Runner {
     effected: bool,
     /// The Soul left during a move: the run ends `left` at the move's next phase boundary.
     leaving: bool,
+    /// The approach walk in progress crossed a link (into a building, #3688): when it ends, the body approaches the
+    /// point again from the floor it came onto.
+    again: bool,
 }
 
 impl Runner {
@@ -1399,6 +1471,7 @@ impl Runner {
             effect: false,
             effected: false,
             leaving: false,
+            again: false,
         }
     }
 
@@ -1450,7 +1523,9 @@ impl Runner {
             return self.end(host, name("done"));
         };
         match step {
-            Step::WalkTo { at, on, .. } => {
+            Step::WalkTo {
+                at, on, approach, ..
+            } => {
                 // A thing argument's place is read now, at the step's start (F14).
                 let Some(node) = host.read(on.unwrap_or(self.node)) else {
                     return self.end(host, name("node-gone"));
@@ -1465,6 +1540,7 @@ impl Runner {
                 // the nearest place within reach (C15), else to the point itself, on the ground the body stands on.
                 let reach = match self.steps.get(self.at + 1) {
                     Some(Step::Sit { .. }) => SIT_REACH,
+                    _ if approach => APPROACH_REACH,
                     _ => REACH,
                 };
                 let plan = node.parent.map_or(replica::host::WalkPlan::Unplanned, |p| {
@@ -1479,10 +1555,16 @@ impl Runner {
                         self.planning = true;
                         return Next::Planning;
                     }
+                    replica::host::WalkPlan::Legs(l) if l.is_empty() && approach => {
+                        // No way to the point: the move is tried from here, and judges its own reach.
+                        self.planning = false;
+                        return self.advance(host);
+                    }
                     replica::host::WalkPlan::Legs(l) if l.is_empty() => {
                         return self.end(host, name("souls:no-way"));
                     }
                     replica::host::WalkPlan::Legs(l) => {
+                        self.again = approach && !self.again && l.iter().any(|(_, k)| k.is_some());
                         l.into_iter().map(|(to, link)| Leg { to, link }).collect()
                     }
                     replica::host::WalkPlan::Unplanned => vec![Leg {
@@ -1550,6 +1632,7 @@ impl Runner {
 
     fn advance(&mut self, host: &mut dyn Host) -> Next {
         self.at += 1;
+        self.again = false;
         self.begin(host)
     }
 
@@ -1592,6 +1675,8 @@ impl Runner {
                 }
             }
             (Woke::Walked(p), Some(Step::WalkTo { .. })) => match p {
+                // In through a link: the approach again, from the floor the body came onto (#3688).
+                Progress::Done if self.again => self.begin(host),
                 Progress::Done => self.advance(host),
                 Progress::Failed(n) => self.end(host, n),
                 Progress::Going => Next::Sleep,
