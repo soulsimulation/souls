@@ -9,16 +9,89 @@
 //! else here: light and warmth are not modelled, and a body moves as before.
 
 use crate::daylight::{Daylight, Write};
-use replica::edit::Refused;
+use replica::edit::{Op, Ref, Refused};
 use replica::effects::{Change, Event, Rest};
 use replica::encode::{Name, Value};
-use replica::sky::{self, int};
+use replica::ids::Id;
+use replica::sky::{self, as_int, int};
 use replica::time::Micros;
 
 /// A level of cloud, rain or wind outside 0 to 100.
 pub const LEVEL: &str = "edit.weather-level";
 /// A weather whose end is not after the time it is set.
 pub const ENDED: &str = "edit.weather-ended";
+/// A batch that sets some of the weather's fields on the world node but not all five (kind, cloud, rain, wind, end).
+pub const PARTIAL: &str = "edit.weather-partial";
+/// A creator's weather in a world whose node has no sky (E6).
+pub const NO_SKY: &str = "edit.weather-no-sky";
+
+/// The fields a creator's weather is written by, on the world node: its kind, cloud, rain, wind and end.
+pub const FIELDS: [u64; 5] = [
+    sky::F_WEATHER,
+    sky::F_CLOUD,
+    sky::F_RAIN,
+    sky::F_WIND,
+    sky::F_WEATHER_UNTIL,
+];
+
+/// A creator's weather as a batch asks for it: the kind, its levels of cloud, rain and wind, and its end.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Asked {
+    pub kind: Name,
+    pub levels: [i64; 3],
+    pub until: Micros,
+}
+
+/// The weather `ops` ask for (#3695): the last value each of [`FIELDS`] is set to on the world node `world`, as plain
+/// sets in the batch; none when the batch sets none of them, [`PARTIAL`] when it sets some but not all five or one is
+/// not of its type (the kind a name, the rest integers). The caller then runs [`set`] after the batch commits, so the
+/// weather's timer and E6's event follow the creator's own record.
+pub fn asked(ops: &[Op], world: Id) -> Option<Result<Asked, Refused>> {
+    let mut got: [Option<&Value>; 5] = [None; 5];
+    for op in ops {
+        if let Op::Set { node, field, to } = op
+            && *node == Ref::Node(world)
+            && let Some(k) = FIELDS.iter().position(|f| f == field)
+        {
+            got[k] = Some(to);
+        }
+    }
+    if got.iter().all(Option::is_none) {
+        return None;
+    }
+    let partial = || {
+        refused(
+            PARTIAL,
+            "a creator's weather sets its kind, cloud, rain, wind and end together".into(),
+        )
+    };
+    let [Some(Value::Text(kind)), Some(c), Some(r), Some(w), Some(u)] = got else {
+        return Some(Err(partial()));
+    };
+    let ints = [c, r, w, u].map(as_int);
+    let [Some(cloud), Some(rain), Some(wind), Some(until)] = ints else {
+        return Some(Err(partial()));
+    };
+    Some(Ok(Asked {
+        kind: kind.clone(),
+        levels: [cloud, rain, wind],
+        until,
+    }))
+}
+
+/// Whether a weather with `levels` from world time `at` until `until` may be set: [`LEVEL`] or [`ENDED`] if not.
+pub fn check(levels: [i64; 3], at: Micros, until: Micros) -> Result<(), Refused> {
+    if let Some(l) = levels.iter().find(|l| !(0..=100).contains(*l)) {
+        return Err(refused(LEVEL, format!("{l} is not from 0 to 100")));
+    }
+    if until <= at {
+        return Err(refused(
+            ENDED,
+            format!("the weather would end at {until} µs, not after {at} µs"),
+        ));
+    }
+    Ok(())
+}
 
 fn refused(name: &'static str, detail: String) -> Refused {
     Refused {
@@ -38,15 +111,7 @@ pub fn set(
     at: Micros,
     until: Micros,
 ) -> Result<Write, Refused> {
-    if let Some(l) = levels.iter().find(|l| !(0..=100).contains(*l)) {
-        return Err(refused(LEVEL, format!("{l} is not from 0 to 100")));
-    }
-    if until <= at {
-        return Err(refused(
-            ENDED,
-            format!("the weather would end at {until} µs, not after {at} µs"),
-        ));
-    }
+    check(levels, at, until)?;
     let [cloud, rain, wind] = levels;
     let sets = [
         (sky::F_WEATHER, Value::Text(kind.clone())),
