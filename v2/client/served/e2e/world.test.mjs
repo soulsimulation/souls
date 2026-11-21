@@ -417,10 +417,15 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   assert.deepEqual([...record.private.members].sort(), [pageKey(meA), pageKey(meB)].sort(), '#3775: among A and B');
   assert.equal(record.words, null, '#3775: no words');
   assert.ok(!v1.parts.some((p) => (p.said ?? []).some((s) => s.words?.includes('second bell'))), '#3775: the private words are in no part the page played');
-  const publicFiles = (root) => existsSync(root) ? readdirSync(root, { recursive: true }).map((f) => join(root, f)).filter((f) => statSync(f).isFile()) : [];
+  // A writer's temporary file (`pointer.tmp`) may be renamed into place between the listing and the read: what it held
+  // is then read under its final name, which the listing also holds.
+  const gone = (f) => { try { return statSync(f).isFile() ? readFileSync(f) : null; } catch (e) { if (e.code === 'ENOENT') return null; throw e; } };
+  const publicFiles = (root) => existsSync(root) ? readdirSync(root, { recursive: true }).map((f) => join(root, f)) : [];
   for (const f of [...publicFiles(join(world, 'views')), ...publicFiles(join(world, 'history'))]) {
-    assert.ok(!readFileSync(f).includes(Buffer.from('third stone')), `(a) the whisper's words are in no public file: ${f.slice(world.length)}`);
-    assert.ok(!readFileSync(f).includes(Buffer.from('second bell')), `#3775: the private words are in no public file: ${f.slice(world.length)}`);
+    const bytes = gone(f);
+    if (!bytes) continue;
+    assert.ok(!bytes.includes(Buffer.from('third stone')), `(a) the whisper's words are in no public file: ${f.slice(world.length)}`);
+    assert.ok(!bytes.includes(Buffer.from('second bell')), `#3775: the private words are in no public file: ${f.slice(world.length)}`);
   }
 
   // (a) The wave's move record, from the body's family.
