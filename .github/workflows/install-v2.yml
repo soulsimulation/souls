@@ -46,7 +46,7 @@ jobs:
         run: |
           channel=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
           rustup toolchain install "$channel" --profile minimal --no-self-update --target wasm32-unknown-unknown
-          cargo build --release --locked -p supervisor -p worldd -p gatewayd -p directoryd -p import-accounts -p import-world
+          cargo build --release --locked -p supervisor -p worldd -p gatewayd -p directoryd -p import-accounts -p import-world -p templates
           cargo build --release --locked -p ops --bin deploy --bin gateway-upgrade
           bindgen_version=$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)
           cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet

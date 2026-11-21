@@ -9,7 +9,7 @@ sends to these programs once the owner places its site file. Routing between the
 | What | Where | Owner, mode |
 |---|---|---|
 | The unprivileged user and group | `souls`, no shell, no home of its own | system user |
-| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-accounts` (X11), `import-world` (X6) | `/usr/local/lib/souls/` | root, 755 |
+| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-accounts` (X11), `import-world` (X6), `templates` (G9, W3b's catalogue, built on the machine from Eden's facts) | `/usr/local/lib/souls/` | root, 755 |
 | The viewers' origin (`origin.mjs`, `cache.mjs`) and the page's files (V5) | `/usr/local/lib/souls/origin/`, `/usr/local/lib/souls/web/` | root, 644 |
 | Data: worlds, the directory's store, the view tier's stream files | `/var/lib/souls/{worlds,directory,views}` | souls, 750 |
 | The directory's arguments, written once, never overwritten | `/etc/souls/directory.args` | root:souls, 640 |
@@ -162,6 +162,14 @@ Package the **existing public Eden template**, with serving support made by the 
 worldd seed --facts <approved-public-facts> --entries <existing-public-entries> --souls 0 --dir <support>
 templates <approved-public-facts> <catalogue> --support <support>
 bash v2/tools/ops/install.sh bundle <out> <binaries> <page> <catalogue>
+```
+
+The catalogue is built from Eden's facts (X6's export of a backup), which are not in the repository, so
+`install-v2.yml` bundles none. On the machine, with the installed programs of the same build, as root after X6:
+
+```sh
+/usr/local/lib/souls/worldd seed --facts <facts> --entries <existing-public-entries> --souls 0 --dir <support>
+/usr/local/lib/souls/templates <facts> /usr/local/lib/souls/templates --support <support>
 ```
 
 Only allowlisted facts, public entry/move data, entry coordinates and exact runtime pin/hash metadata are packaged.
