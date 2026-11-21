@@ -6,7 +6,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 /** One drawn part of a model. `glow`: the parts a light's `on` (or `lit`) state brightens. */
-export type Part = { geometry: THREE.BufferGeometry; material: THREE.Material; matrix: THREE.Matrix4; key: string; glow: boolean };
+export type Part = { geometry: THREE.BufferGeometry; material: THREE.Material; matrix: THREE.Matrix4; key: string; glow: boolean; flame?: boolean };
+/** `flame`: a static flame part (role `flame`), the stand-in an animated fire hides while it draws (fx/layer.ts). */
 
 /** What the page needs of V17's `models.json`. */
 export type ModelIndex = {
@@ -61,8 +62,8 @@ export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMater
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
-    let role = false;
-    for (let p: THREE.Object3D | null = mesh; p; p = p.parent) if (glowRoles.includes(p.userData?.role)) role = true;
+    let role = false, flame = false;
+    for (let p: THREE.Object3D | null = mesh; p; p = p.parent) (glowRoles.includes(p.userData?.role) && (role = true), p.userData?.role === 'flame' && (flame = true));
     for (const m of [mesh.material].flat()) {
       const k = materialKey(m);
       if (!shared.has(k)) {
@@ -80,7 +81,7 @@ export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMater
       const mat = shared.get(k)!;
       const s = mat as THREE.MeshStandardMaterial;
       const glow = role || (glowMaterials && ((s.emissive && s.emissive.getHex() !== 0) || mat.type === 'MeshBasicMaterial'));
-      parts.push({ geometry: plainGeometry(mesh.geometry), material: mat, matrix: mesh.matrixWorld.clone(), key: k, glow });
+      parts.push({ geometry: plainGeometry(mesh.geometry), material: mat, matrix: mesh.matrixWorld.clone(), key: k, glow, flame });
     }
   });
   return parts;

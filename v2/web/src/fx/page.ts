@@ -17,6 +17,7 @@ export function pageFx(scene: THREE.Scene, world: WorldView, things: PageThings,
     index: () => things.layer?.opts.index ?? null,
     fetch: (h) => fetch(new URL(`worlds/models/${h}.glb`, base)).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status))))),
     phone,
+    standIns: (id, shown) => things.layer?.standIns(id, shown),
     reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches,
   });
   scene.add(fx.group);

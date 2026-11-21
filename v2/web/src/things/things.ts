@@ -10,10 +10,11 @@ import { glowOf, partsOf, type ModelIndex, type Part } from './models.ts';
 export const SHARED = 8;
 /** Models fetched at once. */
 const LOADING = 6;
+const HIDDEN = new THREE.Matrix4().makeScale(0, 0, 0);
 const OFF = new THREE.Color(0.22, 0.22, 0.22), ON = new THREE.Color(1, 1, 1), WHITE = new THREE.Color(1, 1, 1);
 
 /** Where one part of one thing is drawn. */
-type Slot = { batch: Batch; index: number; glow: boolean };
+type Slot = { batch: Batch; index: number; glow: boolean; flame?: THREE.Matrix4 };
 type Thing = { id: string; model: string | null; matrix: THREE.Matrix4; boxes: THREE.Matrix4[]; slots: Slot[]; on: boolean };
 
 /** An instanced draw whose instances are packed: removing one moves the last into its place. */
@@ -196,6 +197,16 @@ export class ThingLayer {
     return n;
   }
 
+  private readonly flamesHidden = new Set<string>();
+  /** Hides or shows a thing's static flame parts while its animated fire draws (fx/layer.ts), as today's flames do. */
+  standIns(id: string, shown: boolean): void {
+    if (shown) this.flamesHidden.delete(id); else this.flamesHidden.add(id);
+    for (const s of this.things.get(id)?.slots ?? []) if (s.flame) {
+      if (s.batch instanceof Batch) (s.batch.mesh.setMatrixAt(s.index, shown ? s.flame : HIDDEN), (s.batch.mesh.instanceMatrix.needsUpdate = true));
+      else (s.batch as unknown as Shapes).mesh.setVisibleAt(s.index, shown);
+    }
+  }
+
   private clear(t: Thing): void {
     for (const s of t.slots) {
       if (s.batch instanceof Batch) s.batch.remove(s.index);
@@ -223,14 +234,15 @@ export class ThingLayer {
       const color = p.glow ? (t.on ? ON : OFF) : WHITE;
       if (shared) {
         const batches = this.instanced.get(t.model!) ?? this.instanced.set(t.model!, parts.map((q) => new Batch(this, q.geometry, q.material, (this.share.get(t.model!) ?? 1) * this.copies))).get(t.model!)!;
-        const s: Slot = { batch: batches[k], index: 0, glow: p.glow };
+        const s: Slot = { batch: batches[k], index: 0, glow: p.glow, ...(p.flame ? { flame: m.clone() } : {}) };
         s.index = batches[k].add(s, m, color);
         t.slots.push(s);
       } else {
         const shapes = this.batched.get(p.material) ?? this.batched.set(p.material, new Shapes(this, p.material)).get(p.material)!;
-        t.slots.push({ batch: shapes as unknown as Batch, index: shapes.add(p.geometry, m, color), glow: p.glow });
+        t.slots.push({ batch: shapes as unknown as Batch, index: shapes.add(p.geometry, m, color), glow: p.glow, ...(p.flame ? { flame: m.clone() } : {}) });
       }
     });
+    if (this.flamesHidden.has(t.id)) this.standIns(t.id, false); // a model arriving under a burning fire
   }
 
   /** A model has arrived: its things leave their boxes for it. */

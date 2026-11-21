@@ -94,8 +94,9 @@ const node = (id: string, kind: string, origin: string): NodeRec => ({ id, kind,
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 test('layer: a lit fire burns near and stops when put out; a fountain runs; a kettle steams once switched on', async () => {
-  const bytes = glb();
+  const bytes = glb(), shown: [string, boolean][] = [];
   const layer = new FxLayer({
+    standIns: (id, on) => void shown.push([id, on]),
     frame: () => new THREE.Matrix4(),
     index: () => ({ things: { a: 'h1', b: 'h1', c: 'h1', d: 'h2' }, states: new Map([['h1', { lit: ['flame'] }]]) }),
     fetch: async () => bytes, phone: false,
@@ -107,11 +108,13 @@ test('layer: a lit fire burns near and stops when put out; a fountain runs; a ke
   await tick();
   layer.update(50, eye);
   assert.deepEqual(layer.stats, { fires: 1, near: 1, steaming: 0, fountains: 1 });
+  assert.deepEqual(shown, [['1', false]]); // the burning fire hides its static flame
   layer.state('1', { lit: false });
   layer.state('2', { on: false });
   layer.state('3', { heatedAt: 50 - KETTLE_CLOCK.heat - 1 });
   layer.update(50, eye);
   assert.deepEqual(layer.stats, { fires: 1, near: 0, steaming: 1, fountains: 0 });
+  assert.deepEqual(shown.at(-1), ['1', true]); // put out: the model's own (dimmed) flame shows again
   layer.update(50, new THREE.Vector3(0, 2, 500)); // far: nothing drawn
   assert.equal(layer.stats.steaming, 0);
   layer.apply([], ['1', '2', '3']);
