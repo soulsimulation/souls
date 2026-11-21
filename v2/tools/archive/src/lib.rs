@@ -1163,6 +1163,7 @@ impl Bundler {
                 }
             }
             public.next = self.after.next;
+            public.digested = None;
             if let Some(t) = time {
                 public.time = t;
             }
@@ -1279,6 +1280,8 @@ struct Projection {
     rows: BTreeMap<u64, BTreeMap<Id, (Value, Vec<u8>)>>,
     by_end: BTreeMap<Id, BTreeSet<Id>>,
     by_node: BTreeMap<Id, BTreeSet<Id>>,
+    /// The digest of the projection as it stands, once taken: a window opened just after an observation reuses it.
+    digested: Option<Vec<u8>>,
 }
 
 fn public_time(state: &State, redactions: &Redactions) -> Value {
@@ -1336,6 +1339,7 @@ impl Projection {
             rows: ROWS.iter().map(|f| (*f, BTreeMap::new())).collect(),
             by_end: BTreeMap::new(),
             by_node: BTreeMap::new(),
+            digested: None,
         };
         for field in ROWS {
             let Some(Value::Array(rows)) = m.get(&field) else {
@@ -1363,6 +1367,7 @@ impl Projection {
 
     /// Puts a row `[id, value]` in, or takes it out.
     fn set(&mut self, (field, id): (u64, Id), row: Option<Value>) -> R<()> {
+        self.digested = None;
         let rows = self.rows.entry(field).or_default();
         match row {
             Some(row) => {
@@ -1416,7 +1421,10 @@ impl Projection {
     }
 
     /// `replica::stream::public::digest` of [`Projection::whole`], put together from the rows' encodings.
-    fn digest(&self) -> R<Vec<u8>> {
+    fn digest(&mut self) -> R<Vec<u8>> {
+        if let Some(d) = &self.digested {
+            return Ok(d.clone());
+        }
         let mut out = Vec::new();
         out.push((5u8 << 5) | 8); // a map of eight fields
         for field in [1, 2, 3, 4, 6, 7, 8, 9] {
@@ -1433,7 +1441,9 @@ impl Projection {
                 }
             }
         }
-        Ok(sha256(&out).to_vec())
+        let d = sha256(&out).to_vec();
+        self.digested = Some(d.clone());
+        Ok(d)
     }
 
     /// `replica::stream::public::observation_delta` from the last observation (`seen`) to now.
