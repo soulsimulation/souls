@@ -1043,12 +1043,12 @@ async function answer(req) {
     case 'undo': {
       if (req.build === undefined) return editOnce(req);
       // A whole build, undone step by step (#3694): while the newest of this daemon's edits is that build's.
-      const done = (state.edits ??= { done: [], undone: [] }).done;
-      if (done.at(-1)?.build !== String(req.build)) {
-        return closing({ ok: false, code: 'undo.not-the-build', sent: false, detail: `the newest edit is ${done.at(-1)?.build ? `build ${done.at(-1).build}'s` : 'not a build\'s'}` }, null, { now: true });
+      const newest = () => (state.edits ??= { done: [], undone: [] }).done.at(-1);
+      if (newest()?.build !== String(req.build)) {
+        return closing({ ok: false, code: 'undo.not-the-build', sent: false, detail: `the newest edit is ${newest()?.build ? `build ${newest().build}'s` : 'not a build\'s'}` }, null, { now: true });
       }
       let steps = 0, last = null;
-      while (done.at(-1)?.build === String(req.build)) {
+      while (newest()?.build === String(req.build)) {
         last = await editOnce({ op: 'undo' });
         if (!last.ok) break;
         steps++;
