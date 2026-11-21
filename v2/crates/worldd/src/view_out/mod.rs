@@ -1525,7 +1525,8 @@ impl<S: ObjectStore> PublicWriter<S> {
     /// [`PublicWriter::words`] finds them in the two whole, each node row's kept from the last cut that set it.
     fn words_after(&mut self, after: Option<&Value>, delta: Option<&Value>) -> R<Vec<u8>> {
         if self.text.is_none() {
-            return wire(Value::Array(Vec::new()));
+            // No text store: no reference words to keep, but a part's own place names are still published (#3574).
+            return self.words_of(std::collections::BTreeSet::new(), &Value::Array(self.records.clone()));
         }
         let row_refs = |row: &Value| -> R<(Id, std::collections::BTreeSet<Id>)> {
             let Value::Array(p) = row else {
