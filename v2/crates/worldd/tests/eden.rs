@@ -2336,6 +2336,8 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
             "SOULS_STREAM_GENERATION_PARTS",
             std::env::var("V2_GENERATION_PARTS").unwrap_or_else(|_| "100".into()),
         );
+        // Nothing pruned while the start-up writes, however long it takes: both runs keep every generation.
+        c.env("SOULS_STREAM_PRUNE_GRACE_S", "86400");
         let mut child = c.spawn().unwrap();
         let mut out = BufReader::new(child.stdout.take().unwrap());
         let (mut line, mut before, mut written) = (String::new(), None, None);
