@@ -129,6 +129,7 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(requestOf(['expand', '1200']).req, { op: 'edit', world: { verb: 'expand', extent: '1200' } });
   assert.deepEqual(requestOf(['land', 'extend', '--toward', 'n', '--metres', '100']).req, { op: 'edit', world: { verb: 'land', land: 'extend', toward: 'n', metres: '100' } });
   assert.throws(() => requestOf(['expand']), /expand <metres>/);
+  assert.deepEqual(requestOf(['furnish', 'aa-3', '--style', 'cottage']).req, { op: 'edit', world: { verb: 'furnish', ref: 'aa-3', style: 'cottage' } });
 });
 
 test('#3695: a creator sets the weather and the sky palette and strikes lightning; each has a dry run and a refusal', async () => {
