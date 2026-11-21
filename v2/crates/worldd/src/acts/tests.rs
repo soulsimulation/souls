@@ -445,7 +445,13 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
         .map(d2)
         .collect();
     by.sort();
-    let nearest = select_thing(tree, &sel("nearest", Json::Int(1), None), this, nobody);
+    let nearest = select_thing(
+        tree,
+        &sel("nearest", Json::Int(1), None),
+        this,
+        nobody,
+        None,
+    );
     assert_eq!(nearest, Ok(Some(by[0].1)), "the nearest other thing");
     assert_ne!(nearest, Ok(Some(this)), "never the act's own node");
     let last = select_thing(
@@ -455,7 +461,13 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
         nobody,
         None,
     );
-    let furthest = select_thing(tree, &sel("furthest", Json::Int(1), None), this, nobody);
+    let furthest = select_thing(
+        tree,
+        &sel("furthest", Json::Int(1), None),
+        this,
+        nobody,
+        None,
+    );
     assert_eq!(last, furthest, "the last nearest is the first furthest");
     assert_eq!(
         select_thing(
