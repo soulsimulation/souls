@@ -20,6 +20,76 @@
       60
     ]
   },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
+    "put_down": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "at": {
+          "type": "placement"
+        },
+        "anchor": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "held_by_actor"
+        }
+      ],
+      "steps": [
+        {
+          "step": "put",
+          "place": {
+            "at": {
+              "arg": "at"
+            },
+            "anchor": {
+              "arg": "anchor"
+            }
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "here",
+          "event": "put_down"
+        }
+      ]
+    }
+  },
   "motion": {
     "how": "one_hand"
   },
