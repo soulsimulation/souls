@@ -679,7 +679,40 @@ fn ops_of(text: &str) -> Result<Vec<Op>, String> {
                         },
                     }
                 }
-                _ => return Err("op is place, move, set, remove or doorway".into()),
+                // #3728: a link between two nodes, its row appended to the owner's field, a door naming it.
+                Some("link") => {
+                    let ends = o
+                        .get("ends")
+                        .and_then(json::Value::arr)
+                        .ok_or("a link's ends are [node, node]")?;
+                    if ends.len() != 2 {
+                        return Err("a link's ends are [node, node]".into());
+                    }
+                    Op::Link {
+                        name: uint_of(o.get("name"), "a link's name")?,
+                        ty: o
+                            .get("type")
+                            .and_then(json::Value::str)
+                            .and_then(Name::new)
+                            .ok_or("a link's type is a name")?,
+                        ends: [ref_of(Some(&ends[0]))?, ref_of(Some(&ends[1]))?],
+                        owner: match uint_of(o.get("owner"), "a link's owner")? {
+                            0 => crate::world_model::End::First,
+                            1 => crate::world_model::End::Second,
+                            _ => return Err("a link's owner is 0 or 1".into()),
+                        },
+                        field: uint_of(o.get("field"), "a link's field")?,
+                        row: match field_value(o.get("row").ok_or("a link's row")?)? {
+                            Value::Array(row) => row,
+                            _ => return Err("a link's row is an array".into()),
+                        },
+                        door: match o.get("door") {
+                            None | Some(json::Value::Null) => None,
+                            d => Some(ref_of(d)?),
+                        },
+                    }
+                }
+                _ => return Err("op is place, move, set, remove, doorway or link".into()),
             })
         })
         .collect()
@@ -1115,6 +1148,37 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                     (_, None) => Err(("edit.root", "the zone's root is not removed".to_owned())),
                     _ => Ok(()),
                 },
+                Op::Link {
+                    name,
+                    ty,
+                    ends,
+                    field,
+                    row,
+                    door,
+                    ..
+                } => {
+                    if new.contains_key(name) || links.contains(name) {
+                        return Err(("edit.name-twice", format!("{name} is placed twice")));
+                    }
+                    if ty.as_str().starts_with("souls:")
+                        || *field == crate::edit::DOOR_GEOMETRY
+                        || *field == 7
+                        || ends[0] == ends[1]
+                        || row.len() > crate::edit::LINK_ROW_MOST
+                    {
+                        return Err(("edit.link", "a link joins two distinct nodes, is not the engine's own, and appends a short row to a field other than 7".into()));
+                    }
+                    for end in ends {
+                        named(*end)?;
+                    }
+                    if let Some(door) = door {
+                        named(*door)?;
+                        if doorways.contains(door) {
+                            return Err(("edit.doorway", "the door already has a doorway".into()));
+                        }
+                    }
+                    Ok(())
+                }
             }
         };
         if let Err((code, detail)) = step() {
@@ -1124,6 +1188,12 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
             Op::Doorway { name, door, .. } => {
                 links.insert(*name);
                 doorways.insert(*door);
+            }
+            Op::Link { name, door, .. } => {
+                links.insert(*name);
+                if let Some(door) = door {
+                    doorways.insert(*door);
+                }
             }
             Op::Place {
                 name,

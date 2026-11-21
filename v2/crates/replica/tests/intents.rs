@@ -265,6 +265,7 @@ fn g1b_an_edit_reads_to_its_batch_and_other_answers_keep_their_bytes() {
             Op::Set { .. } => "set",
             Op::Remove { .. } => "remove",
             Op::Doorway { .. } => "doorway",
+            Op::Link { .. } => "link",
         })
         .collect();
     println!(

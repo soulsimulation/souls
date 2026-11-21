@@ -198,7 +198,7 @@ fn plan_with(
 fn names(checked: &Checked, minter: &mut Minter) -> Result<BTreeMap<u64, Id>, Refused> {
     let mut names = BTreeMap::new();
     for op in &checked.edit.ops {
-        if let Op::Place { name, .. } | Op::Doorway { name, .. } = op {
+        if let Op::Place { name, .. } | Op::Doorway { name, .. } | Op::Link { name, .. } = op {
             let id = minter
                 .mint()
                 .map_err(|e| refused("edit.ids-exhausted", e.to_string()))?;
@@ -439,6 +439,70 @@ fn effects(
             ));
             continue;
         }
+        if let Op::Link {
+            name,
+            ty,
+            ends,
+            owner,
+            field: on,
+            row,
+            door,
+        } = op
+        {
+            // #3728: the link, its row appended to its owner's field, and the door standing in it naming it.
+            use crate::ground::scene::F_OPEN_DOOR_LINK;
+            let end = usize::from(*owner == replica::world_model::End::Second);
+            let (both, link) = ([id(ends[0]), id(ends[1])], names[name]);
+            let (at, seen) = (both[end], audience(ends[end]));
+            let mut rows = match field(tree, &fields, at, *on) {
+                Value::Array(rows) => rows,
+                _ => Vec::new(),
+            };
+            rows.push(Value::Array(
+                std::iter::once(link.to_value())
+                    .chain(row.iter().cloned())
+                    .collect(),
+            ));
+            let rows = Value::Array(rows);
+            fields.insert((at, *on), rows.clone());
+            if end == 0 && *on == crate::ground::scene::F_DOORWAYS {
+                linked.insert(link, both);
+            }
+            groups.push((
+                at,
+                seen,
+                vec![
+                    Change::Link {
+                        link,
+                        ty: ty.clone(),
+                        ends: both,
+                        owner: *owner,
+                        audience: seen,
+                    },
+                    Change::Set {
+                        node: at,
+                        field: *on,
+                        to: rows,
+                        by: None,
+                    },
+                ],
+            ));
+            if let Some(door) = door {
+                let d = id(*door);
+                fields.insert((d, F_OPEN_DOOR_LINK), link.to_value());
+                groups.push((
+                    d,
+                    audience(*door),
+                    vec![Change::Set {
+                        node: d,
+                        field: F_OPEN_DOOR_LINK,
+                        to: link.to_value(),
+                        by: None,
+                    }],
+                ));
+            }
+            continue;
+        }
         let (writer, seen_by, change) = match op {
             Op::Place {
                 name,
@@ -521,7 +585,7 @@ fn effects(
                 }
                 (n, audience(*node), Change::Remove { node: n })
             }
-            Op::Doorway { .. } => unreachable!("handled above"),
+            Op::Doorway { .. } | Op::Link { .. } => unreachable!("handled above"),
         };
         match &change {
             Change::Create {

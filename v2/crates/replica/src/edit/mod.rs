@@ -30,7 +30,7 @@ use crate::encode::{Name, Value};
 use crate::ids::Id;
 use crate::pose::{Frame, Pose, Quat, Support, Vec3};
 use crate::read::Read;
-use crate::world_model::{Audience, Kind, plain, show, takes};
+use crate::world_model::{Audience, End, Kind, plain, show, takes};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The most operations a batch may carry.
@@ -108,7 +108,23 @@ pub enum Op {
         closed: Vec<Value>,
         open: Vec<Value>,
     },
+    /// A link of type `ty` between two nodes that are there, owned by its `owner` end, with its row appended to the
+    /// owner's `field` (`[link, ...row]`, as a doorway's or a stair's geometry is kept), and the door standing in it,
+    /// if any, naming it in field 7 (#3728: an imported world's doorways and stairs). Nothing else changes: no wall is
+    /// cut, so the geometry the link stands for is already there.
+    Link {
+        name: u64,
+        ty: Name,
+        ends: [Ref; 2],
+        owner: End,
+        field: u64,
+        row: Vec<Value>,
+        door: Option<Ref>,
+    },
 }
+
+/// The most values a link's row carries.
+pub const LINK_ROW_MOST: usize = 16;
 
 /// An edit intent: who sends it, its id (the cause of every effect it commits), the version of the zone it was planned
 /// against, and its operations in order.
@@ -427,6 +443,72 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                     } else {
                         doorways.remove(node);
                     }
+                }
+            }
+            Op::Link {
+                name,
+                ty,
+                ends,
+                owner,
+                field,
+                row,
+                door,
+            } => {
+                if new.contains_key(name) || !links.insert(*name) {
+                    return refuse(here, "edit.name-twice", format!("{name} is placed twice"));
+                }
+                if ty.as_str().starts_with("souls:") {
+                    return refuse(
+                        here,
+                        "edit.link",
+                        "the engine's own links are not made by an edit",
+                    );
+                }
+                if *field == DOOR_GEOMETRY
+                    || *field == 7
+                    || ends[0] == ends[1]
+                    || row.len() > LINK_ROW_MOST
+                {
+                    return refuse(
+                        here,
+                        "edit.link",
+                        format!(
+                            "two distinct ends and a row of at most {LINK_ROW_MOST} values in a field other than 7 or {DOOR_GEOMETRY}"
+                        ),
+                    );
+                }
+                for end in ends {
+                    named(*end)?;
+                    if let Ref::Node(id) = end {
+                        reads.push((i, *id));
+                    }
+                }
+                let at = ends[usize::from(*owner == End::Second)];
+                if !matches!(value(at, *field), None | Some(Value::Array(_))) {
+                    return refuse(here, "edit.link", "the owner's field is not a list of rows");
+                }
+                changed.insert(at);
+                if let Some(door) = door {
+                    named(*door)?;
+                    let linked = match door {
+                        Ref::Node(id) => tree
+                            .handle(*id)
+                            .and_then(|h| tree.node(h))
+                            .and_then(|n| {
+                                n.fields()
+                                    .get(&7)
+                                    .and_then(|v| crate::effects::read_id(v).ok())
+                            })
+                            .is_some_and(|link| tree.link(link).is_some()),
+                        Ref::New(_) => false,
+                    };
+                    if linked || !doorways.insert(*door) {
+                        return refuse(here, "edit.doorway", "the door already has a doorway");
+                    }
+                    if let Ref::Node(id) = door {
+                        reads.push((i, *id));
+                    }
+                    changed.insert(*door);
                 }
             }
             Op::Doorway {
