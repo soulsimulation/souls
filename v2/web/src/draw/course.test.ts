@@ -34,9 +34,9 @@ const node = (id: string, parent: string | null, extra: Partial<NodeRec> = {}): 
 
 test('courseAt gives the place and velocity on the course at a world time', () => {
   const p = courseAt(loop, BigInt(107 * S)); // 2 s at the landing, then 5 s rowed east
-  assert.deepEqual([...p], [5 * M, 0, 0, 1 * M, 0, 0]);
+  assert.deepEqual(Array.from(p), [5 * M, 0, 0, 1 * M, 0, 0]);
   const back = courseAt(loop, BigInt(117 * S)); // 2 + 10 out, 5 back
-  assert.deepEqual([...back], [5 * M, 0, 0, -1 * M, 0, 0]);
+  assert.deepEqual(Array.from(back), [5 * M, 0, 0, -1 * M, 0, 0]);
   assert.throws(() => courseAt(loop, BigInt(50 * S)), /before-track-start/);
   assert.throws(() => courseAt(encode(7), 0n), /schedule-malformed/);
 });
