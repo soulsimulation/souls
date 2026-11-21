@@ -22,6 +22,12 @@
 //                                                standing there refuses it (edit.terrain-under-soul)
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs status | stop                  the daemon
+//   souls-god.mjs catalog [--category c] [--has slot:sit|form:<f>|point:<role>|state:<field>]   every kind, one each
+//   souls-god.mjs find <words> [--category c] [--has ...] [--all]    kinds that match, best first, with why
+//   souls-god.mjs recommend <what you want to make> [--per n]        kinds per need, and an example batch
+//   souls-god.mjs taxonomy                       categories with counts, and what kinds offer (the --has names)
+//                                                these four read the world's kinds in the home; no daemon, no server;
+//                                                --lines prints them as lines instead of JSON
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
 //   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
 //                                                these two ask the world's directory, with the creator's token
@@ -36,29 +42,36 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
-import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
+import { findHome, readSeat, soulsWithTokens, worldsOf } from '../home/home.mjs';
+import { answer as libraryAnswer, libraryOf } from './catalog.mjs';
 import { worldOf } from '../cli/souls.mjs';
 
 export const VERBS = [
   'batch',
+  'catalog',
   'check',
   'describe',
+  'find',
   'land',
   'move',
   'pair',
   'place',
+  'recommend',
   'remove',
   'set',
   'sky',
   'status',
   'stop',
   'strike',
+  'taxonomy',
   'visitors',
   'weather',
   'welcome',
 ];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
 export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land'];
+/** The verbs answered from the home's library of kinds, on this machine (#3696). */
+export const LIBRARY = new Set(['catalog', 'find', 'recommend', 'taxonomy']);
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
@@ -171,6 +184,7 @@ export function requestOf(argv) {
   const [verb = 'status', ...rest] = args;
   if (!VERBS.includes(verb)) throw Object.assign(new Error(`one of ${VERBS.join(', ')}`), { code: 'unknown-command' });
   if (verb === 'pair') return { pair: rest[0], creator };
+  if (LIBRARY.has(verb)) return { library: verb, args: rest, creator };
   if (verb === 'welcome') {
     if (rest.length > 1) throw usage("welcome '<words>': quote the words as one argument");
     return { directory: '/v1/worlds/welcome', body: { welcome: rest[0] ?? '' }, creator };
@@ -230,6 +244,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (asked.pair !== undefined) { out(await pairing(home, asked.pair, asked.creator)); process.exit(0); }
     const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
     const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
+    if (asked.library) {
+      const said = libraryAnswer(asked.library, asked.args, libraryOf(home, creator && worldsOf(home, creator)[0]));
+      if (typeof said === 'string') process.stdout.write(said + '\n'); else out(withFix(said));
+      if (said?.ok === false) process.exitCode = 1;
+      process.exit();
+    }
     if (!creator) throw Object.assign(new Error(`creators here: ${creators.join(', ') || 'none; pair first'}`), { code: 'which-creator' });
     if (asked.directory) {
       const said = await askDirectory(home, creator, asked.directory, asked.body);
