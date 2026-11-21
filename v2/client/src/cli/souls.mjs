@@ -104,7 +104,7 @@ import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount } from '../account/account.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
-export const OPS = ['query', 'batch', 'catalog', 'context', 'status', 'pair', 'look', 'find', 'act', 'inspect', 'object', 'can', 'say', 'shout', 'whisper', 'converse', 'lie', 'wear', 'pray', 'prayers', 'now', 'wait', 'history', 'stats', 'pending', 'ack', 'stop', 'quit', 'receipt', 'events', 'conversations'];
+export const OPS = ['query', 'batch', 'catalog', 'context', 'status', 'pair', 'look', 'find', 'act', 'inspect', 'object', 'can', 'say', 'shout', 'whisper', 'converse', 'lie', 'wear', 'pray', 'prayers', 'now', 'wait', 'history', 'stats', 'pending', 'ack', 'stop', 'quit', 'receipt', 'events', 'conversations', 'set-down'];
 /** #3705: today's names, kept: `stop` ends your act (the daemon's op `halt`), `quit` ends the daemon (its op `stop`). */
 const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse' };
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
@@ -208,6 +208,8 @@ export function requestOf(argv) {
     try { args = argsOf(more); } catch (e) { return { refused: e.code, detail: e.message }; }
     Object.assign(req, { this: id, ...(action !== undefined ? { action, args } : {}) });
   }
+  // #3716: put the held thing down where you stand (`here`) or by a thing (`next_to <id>`): the daemon's set-down (#3604).
+  if (op === 'set-down') { const [id, word, anchor] = rest; Object.assign(req, { this: id, ...(word ? { word } : {}), ...(anchor ? { anchor } : {}) }); }
   if (op === 'pending' && rest[0] !== '--check') req.list = true;
   if (op === 'ack') {
     if (opts.close !== undefined && !['done', 'failed'].includes(opts.close)) return { refused: 'ack-close', detail: 'ack <message id> "<reply>" --close done|failed' };
