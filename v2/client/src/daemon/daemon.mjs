@@ -773,7 +773,7 @@ function actsOf(words) {
       if (arg) { args[arg[1]] = /^-?\d{1,15}$/.test(arg[2]) ? Number(arg[2]) : arg[2]; continue; }
       kinds ??= kindsIn(join(home, 'kinds'));
       rows ??= rowsOf(copy);
-      const takes = Object.entries(kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
+      const takes = Object.entries(kinds[rows.get(c.this)?.entry ?? rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
       const name = takes.map(([n, t]) => t?.type === 'thing' && n).find((n) => n && !(n in args));
       if (!name) throw Object.assign(new Error(`name it: ${c.form ?? c.verb} <name>=${w}`), { code: 'act-arg-unnamed' });
       args[name] = w;
@@ -1062,7 +1062,7 @@ function thingOf(id) {
   if (!row) {
     return { ok: false, code: 'inspect.unknown-id', detail: `${id ?? '(none)'} is not an id this Soul's copy holds; ids come from look and find`, did_you_mean: nearestIds(rows.values(), id) };
   }
-  const kinds = kindsIn(join(home, 'kinds')), entry = kinds[row.kind];
+  const kinds = kindsIn(join(home, 'kinds')), entry = kinds[row.entry ?? row.kind];
   return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
 }
 
