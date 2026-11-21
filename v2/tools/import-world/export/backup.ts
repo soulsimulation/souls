@@ -15,6 +15,15 @@ import { WorldModel, coreLibrary, type AssetInfo, type Entity, type StoredDef } 
 const ROOT = resolve(import.meta.dirname, '../../../..');
 const CORE_INDEX = join(ROOT, 'worlds/core-assets/index.json');
 
+/** The repository's core assets as AssetStore reads them: the extra indexes beside the core index, then the core
+ *  index over them. The template replay (export.ts) resolves a template's core meshes with it too. */
+export function coreAssets(): Record<string, AssetInfo> {
+  const core: Record<string, AssetInfo> = {};
+  if (existsSync(CORE_INDEX)) for (const f of [...readdirSync(dirname(CORE_INDEX)).filter((n) => n.endsWith('.index.json')).sort().map((n) => join(dirname(CORE_INDEX), n)), CORE_INDEX])
+    Object.assign(core, (JSON.parse(readFileSync(f, 'utf8')) as { assets?: Record<string, AssetInfo> }).assets ?? {});
+  return core;
+}
+
 export type Upload = { sha: string; kind: string; ext: string; bytes: number; name: string | null };
 type MapRow = { def: string; entry?: string; waiting?: string; issue?: number; note?: string };
 
@@ -51,9 +60,7 @@ export function fromBackup(path: string, world: string, mapPath: string) {
 
     // The compiler's asset lookup: the repository's core index (as AssetStore reads it: the extra indexes beside it,
     // then the core index over them) and this world's uploads.
-    const core: Record<string, AssetInfo> = {};
-    if (existsSync(CORE_INDEX)) for (const f of [...readdirSync(dirname(CORE_INDEX)).filter((n) => n.endsWith('.index.json')).sort().map((n) => join(dirname(CORE_INDEX), n)), CORE_INDEX])
-      Object.assign(core, (JSON.parse(readFileSync(f, 'utf8')) as { assets?: Record<string, AssetInfo> }).assets ?? {});
+    const core = coreAssets();
     const own = new Map(uploads.map((u) => [u.sha, { tris: u.tris, bytes: u.bytes, textures: u.textures, box: JSON.parse(u.box),
       ...(u.kind === 'image' && (u.ext === 'png' || u.ext === 'jpg') ? { image: { ext: u.ext } } : {}) } as AssetInfo]));
     const assets = (sha: string) => own.get(sha) ?? core[sha];
