@@ -355,6 +355,7 @@ impl Geometry for Sight<'_> {
         match q {
             Ask::Toward { to, .. } => {
                 let me = self.bodies.get(&body)?;
+                let waiting = std::cell::Cell::new(false);
                 let [x, z] = match &self.split {
                     Some(_) => self.with_view(body, |v| {
                         let step = self.context.get(&body)?.2;
@@ -387,6 +388,7 @@ impl Geometry for Sight<'_> {
                         }
                         // Waiting for the existing planner is not evidence that a physical walk stalled.
                         if !pending.is_empty() {
+                            waiting.set(true);
                             return Some([me.pose.position.x, me.pose.position.z]);
                         }
                         Some(corner)
@@ -395,9 +397,12 @@ impl Geometry for Sight<'_> {
                 };
                 let y = if [x, z] == [to.x, to.z] { to.y } else { 0 };
                 let here = [me.pose.position.x, me.pose.position.z];
-                self.asked
-                    .borrow_mut()
-                    .insert(body, (sim::walk::node_of(me), here, [x, z], [to.x, to.z]));
+                // A tick spent waiting for the planner is no tick of walking: the stall watch starts again (C21).
+                if !waiting.get() {
+                    self.asked
+                        .borrow_mut()
+                        .insert(body, (sim::walk::node_of(me), here, [x, z], [to.x, to.z]));
+                }
                 Some(Answer::Point(Vec3::new(x, y, z)))
             }
             Ask::Near { .. } => Some(Answer::Near(Vec::new())),
