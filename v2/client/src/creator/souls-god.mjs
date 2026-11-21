@@ -17,6 +17,13 @@
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
 //   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
 //                                                these two ask the world's directory, with the creator's token
+//   souls-god.mjs listen [<seconds>] [--follow]  waits for the owner's messages from the web page (the mailbox serves
+//                                                a creator's grant as a Soul's): one `wait`, 30 s by default; --follow
+//                                                keeps waiting and prints a line each time something arrives
+//   souls-god.mjs pending                        the owner's messages still open, and what arrived since the last read
+//   souls-god.mjs ack <message id> "<reply>" [--close done|failed]   answers one: the reply shows on the owner's
+//                                                page; --close closes it (failed: a no), else it stays open
+//                                                these three pass to the daemon as souls.mjs's do for a Soul
 //   any of them [--creator <c_id>]               which creator, when the home holds more than one
 //
 // A refusal prints its code, the operation that failed (`op`, its place in the batch) and a fix. The home is
@@ -31,7 +38,7 @@ import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'status', 'stop', 'welcome', 'visitors'];
+export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'status', 'stop', 'welcome', 'visitors', 'listen', 'pending', 'ack'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
@@ -108,6 +115,17 @@ export function requestOf(argv) {
     if (rest.length > 1) throw usage("welcome '<words>': quote the words as one argument");
     return { directory: '/v1/worlds/welcome', body: { welcome: rest[0] ?? '' }, creator };
   }
+  if (verb === 'pending') return { req: { op: 'pending', list: true }, creator };
+  if (verb === 'ack') {
+    const close = takeOpt(rest, '--close');
+    if (!rest[0] || rest.length < 2 || (close !== undefined && !['done', 'failed'].includes(close))) throw usage('ack <message id> "<reply>" [--close done|failed]');
+    return { req: { op: 'ack', id: rest[0], reply: rest.slice(1).join(' '), ...(close !== undefined ? { close } : {}) }, creator };
+  }
+  if (verb === 'listen') {
+    const follow = rest.includes('--follow'), [secs = '30', ...more] = rest.filter((w) => w !== '--follow');
+    if (more.length || !/^\d+$/.test(secs)) throw usage('listen [<seconds>] [--follow]');
+    return { listen: { seconds: Number(secs), follow }, creator };
+  }
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe') return { req: { op: verb }, creator };
   if (verb === 'check') return { req: { op: 'check', ops: opsOf(rest[0], rest.slice(1)) }, creator };
@@ -166,6 +184,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const said = await askDirectory(home, creator, asked.directory, asked.body);
       out(withFix(said));
       if (said.ok === false) process.exitCode = 1;
+      process.exit();
+    }
+    if (asked.listen) {
+      // One wait, printed whatever it holds; with --follow, waits again and prints only what brought something.
+      const { seconds, follow } = asked.listen;
+      for (;;) {
+        const got = await call(home, creator, { op: 'wait', seconds }, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: seconds * 1000 + 5000 });
+        if (got.ok === false) { out(withFix(got)); process.exitCode = 1; break; }
+        if (!follow || !got.timedOut) out(got);
+        if (!follow) break;
+      }
       process.exit();
     }
     const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: 15_000 });

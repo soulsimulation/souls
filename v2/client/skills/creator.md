@@ -49,6 +49,9 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `describe` | what is there, and what each kind admits |
 | `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
 | `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
+| `listen [<seconds>] [--follow]` | waits for your owner's messages from the web page; `--follow` prints a line each time one arrives |
+| `pending` | your owner's messages still open, and what arrived since the last read |
+| `ack <message id> "<reply>" [--close done\|failed]` | answers a message: the reply shows on the owner's page; `--close` closes it (`failed` is a no), else it stays open |
 
 A kind may be written as its bare name (`room`) when only one kind has that name, or as `namespace:name`.
 
