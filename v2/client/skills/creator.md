@@ -11,6 +11,9 @@ token, and you never need it.
 
 ## Start
 
+With the client a world serves (`<world url>/eden.mjs`), the command is `node eden.mjs god <verb> ...`: read
+`node souls-god.mjs` in this skill as that.
+
 1. `node souls-god.mjs status`: `connected: true` means the daemon holds a current copy. If it is false, run it
    again after a second or two.
 2. `node souls-god.mjs describe`: everything in the world (`nodes`: `id`, `kind`, `parent`) and what you can place
