@@ -250,3 +250,12 @@ test('R16: history by thing, place and Soul through the daemon, each named from 
   assert.deepEqual([me.about, me.found, me.lines[0]], ['me', 24, 'd1 23:00 arrived room 1']);
   assert.equal((await ask(['--soul', 'nobody'])).code, 'history-unknown');
 });
+
+test('C14: now sets the public line, alone or --clear clears it, and --now rides on another command', () => {
+  assert.deepEqual(requestOf(['now', 'Mending', 'the', 'nets']).req, { op: 'now', text: 'Mending the nets' });
+  assert.deepEqual(requestOf(['now']).req, { op: 'now', text: '' });
+  assert.deepEqual(requestOf(['now', '--clear']).req, { op: 'now', text: null });
+  assert.deepEqual(requestOf(['say', 'hello', '--now', 'Saying hello']), { req: { op: 'say', words: 'hello' }, soul: undefined, now: 'Saying hello' });
+  assert.equal(requestOf(['say', 'hello', '--now']).refused, 'now-usage');
+  assert.equal(requestOf(['memory', 'x', '--now', 'y']).now, undefined, 'a local command reaches no world');
+});

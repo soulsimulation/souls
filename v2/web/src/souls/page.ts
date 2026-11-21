@@ -1,16 +1,19 @@
 // The Souls on the page (W4, #2748): chips, status and speech over the view, and a Soul's page, all drawn from the
 // copy the page already holds (`SoulsCopy`, fed by the parts it plays). Opening a card also reads its immutable test mark. Clicking a chip or
 // a line of speech opens that Soul's page; `soul=<id>` opens one from the address; `chips=0` draws none.
-// A Soul's page shows only what the public may see: name, description, status and recent public events. Every field is
-// set as text (`textContent`), never as markup.
+// A Soul's page shows only what the public may see: name, description, its agent's status line (C14, #3684: today's
+// `now`, read from the directory by the Soul's grant when the page opens and every `NOW_EVERY_MS` while open), status
+// and recent public events. Every field is set as text (`textContent`), never as markup.
 import * as THREE from 'three';
 import type { NodeRec, PartRec } from '../source/source.ts';
 import type { WorldView } from '../draw/world.ts';
 import { SoulsCopy, TestMark, label, wrap, type Status } from './souls.ts';
 import { SPEECH_W, measurer, paint, place, type Candidate, type Ctx, type Placed } from './layer.ts';
-import { mountCard } from './mine.ts';
+import { mountCard, nowText, readNow, type NowLine } from './mine.ts';
 
 const UM = 1e-6, HEAD = 2.1, FAR = 150;
+/** How often an open Soul page reads its status line again. */
+export const NOW_EVERY_MS = 20_000;
 
 export type PageSouls = { copy: SoulsCopy; snapshot(nodes: NodeRec[], removed: string[]): void; apply(p: PartRec): void; draw(t: number, camera: THREE.Camera): void; open(id: string | null): void; placed: Placed[] };
 
@@ -27,14 +30,17 @@ function panel(onClose: () => void) {
   close.onclick = onClose;
   const test = document.createElement('p');
   test.style.cssText = 'margin:0 0 6px;font-weight:bold';
-  const name = document.createElement('h2'), desc = document.createElement('p'), status = document.createElement('p'), list = document.createElement('ol');
+  const name = document.createElement('h2'), desc = document.createElement('p'), now = document.createElement('p'), status = document.createElement('p'), list = document.createElement('ol');
+  now.setAttribute('data-now', '1');
+  now.style.cssText = 'margin:0 0 6px;color:#e8e6e1;font-style:italic;overflow-wrap:anywhere';
+  now.hidden = true;
   name.style.cssText = 'margin:0 0 4px;font-size:16px';
   desc.style.cssText = 'margin:0 0 6px;color:#c9c4ba';
   status.style.cssText = 'margin:0 0 8px;color:#9fb3c4;font-size:12px';
   list.style.cssText = 'margin:0;padding:0 0 0 18px';
-  el.append(close, name, test, desc, status, list);
+  el.append(close, name, test, desc, now, status, list);
   document.body.append(el);
-  return { el, name, test, desc, status, list };
+  return { el, name, test, desc, now, status, list };
 }
 
 const clock = (us: number) => {
@@ -73,18 +79,33 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     marked = soul;
     mark.open(soul, (test) => { ui.test.textContent = test === true ? 'Test Soul' : test === false ? '' : 'Test status unavailable'; });
   };
+  // C14: the open Soul's status line, by its grant; a late answer for another Soul is dropped.
+  let line: { soul: string; now: NowLine | null } | null = null, lineAt = 0;
+  const readLine = (soul: string) => {
+    lineAt = performance.now();
+    void readNow([soul]).then((got) => {
+      if (copy.souls.get(open ?? '')?.soul !== soul) return;
+      line = { soul, now: got.get(soul) ?? null };
+      shown = '';
+    });
+  };
   const v = new THREE.Vector3(), m = new THREE.Vector3();
 
   const showPage = (t: number) => {
     const p = open ? copy.page(open, t, world) : null;
     ui.el.style.display = p ? 'block' : 'none';
     if (!p) return;
+    const soul = copy.souls.get(open!)?.soul ?? null;
+    if (soul && (line?.soul !== soul || performance.now() - lineAt > NOW_EVERY_MS) && performance.now() - lineAt > 1000) readLine(soul);
+    const said = soul && line?.soul === soul && line.now ? nowText(line.now) : '';
     // Rebuilt only when what it shows changed.
-    const key = `${p.name}\u0000${p.description}\u0000${p.status}\u0000${p.recent.map((r) => `${r.at}${r.ref}`).join()}`;
+    const key = `${p.name}\u0000${p.description}\u0000${said}\u0000${p.status}\u0000${p.recent.map((r) => `${r.at}${r.ref}`).join()}`;
     if (key === shown) return;
     shown = key;
     ui.name.textContent = p.name;
     ui.desc.textContent = p.description;
+    ui.now.textContent = said;
+    ui.now.hidden = !said;
     ui.status.textContent = p.status;
     ui.list.replaceChildren(...p.recent.map((r) => {
       const li = document.createElement('li');
@@ -117,6 +138,8 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
       open = id;
       shown = '';
       marked = undefined;
+      line = null;
+      lineAt = 0;
       showMark();
     },
     draw(t, camera) {
