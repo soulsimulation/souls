@@ -114,7 +114,10 @@ test('layer: a lit fire burns near and stops when put out; a fountain runs; a ke
   layer.state('3', { heatedAt: 50 - KETTLE_CLOCK.heat - 1 });
   layer.update(50, eye);
   assert.deepEqual(layer.stats, { fires: 1, near: 0, steaming: 1, fountains: 0 });
-  assert.deepEqual(shown.at(-1), ['1', true]); // put out: the model's own (dimmed) flame shows again
+  assert.deepEqual(shown, [['1', false]]); // put out: no flame at all, the static one stays hidden
+  layer.state('1', { lit: true });
+  layer.update(50, new THREE.Vector3(0, 2, 300)); // lit but too far to animate: the static flame stands in
+  assert.deepEqual(shown.at(-1), ['1', true]);
   layer.update(50, new THREE.Vector3(0, 2, 500)); // far: nothing drawn
   assert.equal(layer.stats.steaming, 0);
   layer.apply([], ['1', '2', '3']);

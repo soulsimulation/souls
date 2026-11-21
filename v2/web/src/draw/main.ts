@@ -191,7 +191,7 @@ renderer.setAnimationLoop((now) => {
   tickWater((t ?? 0) / 1e6);
   fx?.update(t === null ? null : t / 1e6, cam.camera.position);
   setNightStrength(sky.state.daylight);
-  const pools = frames++ % 60 === 0 && things.layer ? nightPools(world, things.layer.opts.index) : null; // the lamps, once a second
+  const pools = frames++ % 60 === 0 && things.layer ? nightPools(world, things.layer.opts.index, (id) => fx?.lit(id) ?? true) : null; // the lamps, once a second
   if (pools) paintNightSources(pools.sources, pools.bounds);
   const ck = near?.clock ?? clock;
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);

@@ -31,4 +31,5 @@ test('A3: what gives light, and the pools at night only', () => {
   const world = { nodes: new Map([['a', lamp], ['b', bench]]), extent: [-50, -50, 50, 50] as [number, number, number, number], frame: (id: string) => at.get(id)!, heightAt: () => 1.5 };
   const index = { things: { L1: 'h-lamp', B1: 'h-bench' }, states: new Map([['h-lamp', { on: ['light'] }]]) };
   assert.deepEqual(nightPools(world, index), { sources: [lampPool(5, -7, 1.5, false)], bounds: { x0: -50, z0: -50, x1: 50, z1: 50 } });
+  assert.deepEqual(nightPools(world, index, (id) => id !== 'a')?.sources, []); // C8: a light put out casts no pool
 });

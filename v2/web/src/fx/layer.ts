@@ -78,6 +78,8 @@ export class FxLayer {
   private readonly at = new THREE.Vector3();
   /** Fires mounted and near the camera now, for the inspector and the proof. */
   stats = { fires: 0, near: 0, steaming: 0, fountains: 0 };
+  /** The world time (s) of the last frame, to set a state from now (`state(id, { heatedAt: fx.time })`). */
+  time = 0;
   readonly opts: FxOptions;
   constructor(opts: FxOptions) {
     this.opts = opts;
@@ -111,6 +113,11 @@ export class FxLayer {
     if (e) Object.assign(e.state, s);
   }
 
+  /** Is a thing's fire lit (its light pool shows)? True for anything the effects do not know as put out. */
+  lit(id: string): boolean {
+    return this.things.get(id)?.state.lit !== false;
+  }
+
   remove(id: string): void {
     const e = this.things.get(id);
     if (!e) return;
@@ -125,6 +132,7 @@ export class FxLayer {
   /** Once a frame: `t` world seconds (null while nothing plays), `eye` the camera. */
   update(t: number | null, eye: THREE.Vector3): void {
     const now = t ?? 0;
+    this.time = now;
     tickFx(this.opts.reducedMotion ? 7.3 : now);
     const index = this.opts.index();
     if (!index) return;
@@ -158,8 +166,9 @@ export class FxLayer {
           if (level > 0) (s.near++, f.fire.update(this.opts.reducedMotion ? 7.3 : now, strength));
           else f.fire.group.visible = false;
         }
-        const burning = e.fires.some((f) => f.level > 0);
-        if (burning !== e.burning) (e.burning = burning, this.opts.standIns?.(e.id, !burning));
+        // the static flame parts stand in for a lit fire drawn too far off to animate (today's); an unlit fire has no flame
+        const hide = strength === 0 || e.fires.some((f) => f.level > 0);
+        if (hide !== e.burning) (e.burning = hide, this.opts.standIns?.(e.id, !hide));
       } else if (e.kind === 'fountain') {
         const on = e.state.on !== false && d < WATER_REACH;
         for (const o of e.water) o.visible = on;
