@@ -214,6 +214,8 @@ fn named_bodies(furniture: &Part) -> Result<Bodies, replica::effects::Refusal> {
     bodies.add_body(humanoid(), p2)?;
     Ok(bodies)
 }
+/// Each fixture's own socket, as the tests run side by side.
+static SOCKETS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn fixture() -> (NamedRun, Client) {
     let old = world();
     let mut hv = match decode(old.header().stored()).unwrap().value {
@@ -330,8 +332,9 @@ fn fixture() -> (NamedRun, Client) {
     )
     .unwrap();
     let path = std::path::PathBuf::from(format!(
-        "../../../.local/3601/args-{}.sock",
-        std::process::id()
+        "../../../.local/3601/args-{}-{}.sock",
+        std::process::id(),
+        SOCKETS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     assert!(!path.exists());

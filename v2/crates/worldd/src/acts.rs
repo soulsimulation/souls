@@ -994,13 +994,39 @@ impl Acts {
                 first.get_or_insert(refusal("arg-ambiguous", key));
                 continue;
             }
-            let mut all = match skills::form_runner::args_in(entry, &args.things, &args.slots) {
+            // A number for an argument the form takes as a count or an int is that number, not a slot (#3713).
+            let takes = entry
+                .get("forms")
+                .and_then(|f| f.get(form))
+                .and_then(|f| f.get("takes"));
+            let counted = |k: &String| {
+                matches!(
+                    takes
+                        .and_then(|t| t.get(k))
+                        .and_then(|t| t.get("type"))
+                        .and_then(Json::str),
+                    Some("count" | "int")
+                )
+            };
+            let slots: BTreeMap<String, u64> = args
+                .slots
+                .iter()
+                .filter(|(k, _)| !counted(k))
+                .map(|(k, n)| (k.clone(), *n))
+                .collect();
+            let mut all = match skills::form_runner::args_in(entry, &args.things, &slots) {
                 Ok(all) => all,
                 Err(e) => {
                     first.get_or_insert(e);
                     continue;
                 }
             };
+            for (k, n) in args.slots.iter().filter(|(k, _)| counted(k)) {
+                all.insert(
+                    k.clone(),
+                    skills::form_runner::Arg::Int(i64::try_from(*n).unwrap_or(i64::MAX)),
+                );
+            }
             let mut ambiguous = None;
             for (key, value) in &args.values {
                 if all.insert(key.clone(), value.clone()).is_some() {
