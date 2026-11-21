@@ -69,7 +69,7 @@
                 "change": "set",
                 "node": "l1",
                 "field": "words",
-                "n": 1,
+                "n": 28,
                 "to": {
                   "text": "w1"
                 }
@@ -78,7 +78,7 @@
                 "change": "set",
                 "node": "l1",
                 "field": "stage",
-                "n": 2,
+                "n": 29,
                 "to": "written"
               }
             ],
@@ -114,7 +114,7 @@
                 "change": "set",
                 "node": "l1",
                 "field": "stage",
-                "n": 2,
+                "n": 29,
                 "to": "sealed"
               }
             ],
@@ -143,7 +143,7 @@
                 "change": "set",
                 "node": "l1",
                 "field": "stage",
-                "n": 2,
+                "n": 29,
                 "to": "opened"
               }
             ],

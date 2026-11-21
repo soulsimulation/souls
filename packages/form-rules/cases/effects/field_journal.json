@@ -74,7 +74,7 @@
                 "change": "set",
                 "node": "e1",
                 "field": "words",
-                "n": 1,
+                "n": 28,
                 "to": {
                   "text": "w1"
                 }
@@ -83,7 +83,7 @@
                 "change": "set",
                 "node": "d1",
                 "field": "ink",
-                "n": 1,
+                "n": 28,
                 "to": 1,
                 "by": -1
               },
@@ -91,7 +91,7 @@
                 "change": "set",
                 "node": "e1",
                 "field": "ink",
-                "n": 2,
+                "n": 29,
                 "to": 1,
                 "by": 1
               }
@@ -147,7 +147,7 @@
                 "change": "set",
                 "node": "e2",
                 "field": "words",
-                "n": 1,
+                "n": 28,
                 "to": {
                   "text": "w2"
                 }
@@ -156,7 +156,7 @@
                 "change": "set",
                 "node": "d1",
                 "field": "ink",
-                "n": 1,
+                "n": 28,
                 "to": 0,
                 "by": -1
               },
@@ -164,7 +164,7 @@
                 "change": "set",
                 "node": "e2",
                 "field": "ink",
-                "n": 2,
+                "n": 29,
                 "to": 1,
                 "by": 1
               }
