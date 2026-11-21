@@ -315,6 +315,6 @@ fn probe_kitchen_limits() {
         if let Ok(t) = &k {
             loaded.load(&[("entry", t.as_str())]);
         }
-        println!("PROBE {f}: kind {:?} refused {:?} limits {:?}", k.as_ref().map(|_| "ok"), loaded.refused, sim::forms::amounts::limits(&loaded));
+        println!("PROBE {f}: kind {:?} refused {:?} limits {:?}", k.as_ref().map(|_| "ok"), loaded.refused(), sim::forms::amounts::limits(&loaded));
     }
 }
