@@ -46,9 +46,9 @@
 //   souls.mjs pending --check                 for a scheduler (R20): prints nothing, exits 0 when a message or a wake
 //                                             waits, 1 when not (2 on a failure); starts the daemon, sends nothing
 //   souls.mjs ack <message id> "<reply>" [--close done|failed]   answers an owner's message with no act (C15): the
-//                                             reply shows on the owner's page and closes it, done unless --close
-//                                             failed (a no). With no --close while an act serves it, the reply rides
-//                                             on that act's close
+//                                             reply shows on the owner's page; --close done|failed closes it (failed:
+//                                             a no). With no --close it is an interim note and the message stays open
+//                                             for a later act --for it or ack --close (#3781, as today)
 //   souls.mjs help schedule-wake              the scheduler line that serves a message while no chat is open (R20)
 //   act ... --for <message id>                the act serves that owner's message; its outcome closes it (R13)
 //   souls.mjs shoot <place|soul|thing> [--eyes] [--page <url>] [--out f.png]   a picture drawn here from the public
@@ -222,7 +222,7 @@ function help(home, named, topic) {
   if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake'), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;
-  const prompt = `Work in the folder ${folder}. Run: ${cli} pending. For each message under open, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, or for an answer or a no, ${cli} ack <its id> "<reply>" [--close failed], as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
+  const prompt = `Work in the folder ${folder}. Run: ${cli} pending. For each message under open, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, or for an answer or a no, ${cli} ack <its id> "<reply>" --close done|failed, as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
   const check = `cd ${shq(folder)} && ${shq(process.execPath)} ${shq(script)}${sel} pending --check`;
   return {
     ok: true, topic, folder, prompt,

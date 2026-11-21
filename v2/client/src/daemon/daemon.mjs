@@ -55,8 +55,8 @@
 //                                                     last read (taken, as `wait 0` takes it), with no wait; then, as `brief`,
 //                                                     the brief `look` gives (#3782), so a turn needs no `look` first
 //     {"op":"ack","id":"<message id>","reply":"..","close":"done|failed"}   C15's: a reply that answers the message
-//                                                     with no act, closing it (`done` unless `close` says `failed`); with
-//                                                     no `close` while an act serves it, the reply rides on that close
+//                                                     with no act, closing it `done` or `failed`; with no `close`, an
+//                                                     interim note to the owner's page, the message left open (#3781)
 //   and G11's (#3335), prayers, the mailbox's other direction: a request goes to the gateway as a text frame and the
 //   directory's reply comes back on the socket (`n` matches them); an answer to this Soul's prayer arrives as a
 //   `prayer-answered` event, which wakes a `wait`, its words quoted as data. A creator's daemon lists and answers:
@@ -826,7 +826,7 @@ async function answer(req) {
       const open = [...mail.values()].map((m) => ({ id: m.id, text: String(m.text), at: m.at, ...(served.has(m.id) ? { serving: true } : {}) }));
       const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
       return closing({ ok: true, connected: signedIn, open, events: got, ...said, ...(handed.length ? { wakes: handed } : {}),
-        ...(open.length ? { next: 'serve each open message: act <act> --for <its id>, or answer it: ack <its id> "<reply>" [--close failed]' } : {}) },
+        ...(open.length ? { next: 'serve each open message: act <act> --for <its id>, or answer it: ack <its id> "<reply>" --close done|failed' } : {}) },
       (rows, changes) => {
         // #3782: the brief `look` gives, after the messages and arrivals (today's `pending` carries it, N-C18), so the
         // turn needs no `look` first. What was heard is in `events` above, so not again in the brief.
@@ -841,12 +841,17 @@ async function answer(req) {
       if (close !== null && close !== 'done' && close !== 'failed') return { ok: false, code: 'ack-close', detail: '--close done|failed' };
       if (!reply || [...reply].length > REPLY_MOST) return { ok: false, code: 'ack-reply', detail: `ack <message id> "<reply>": 1 to ${REPLY_MOST} characters` };
       if (!mail.has(id)) return { ok: false, code: 'mail-not-found', detail: 'ack names an open message this daemon was given: pending lists them' };
-      replyOf.set(id, reply);
-      if (close === null && [...serving.values()].includes(id)) {
-        return { ok: true, acked: id, reply, closes: 'with the act that serves it: its outcome, your reply beside it' };
+      if (close === null) {
+        // #3781 (today's N-C12): an interim note. The owner's page shows it under the message, which stays open, so a
+        // later `act --for` or `ack --close` closes it. It goes to the owner's view sockets alone, never the directory.
+        const line = JSON.stringify({ note: { id, reply } });
+        if (ws && signedIn) ws.send(line); else closes.push(line);
+        return { ok: true, acked: id, reply, open: true, sent: signedIn,
+          next: `still open: act <act> --for ${id}, or ack ${id} "<reply>" --close done|failed`, ...ageNow() };
       }
-      closeMail(id, close ?? 'done', 'replied');
-      return { ok: true, acked: id, reply, closed: close ?? 'done', sent: signedIn, ...ageNow() };
+      replyOf.set(id, reply);
+      closeMail(id, close, 'replied');
+      return { ok: true, acked: id, reply, closed: close, sent: signedIn, ...ageNow() };
     }
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
