@@ -242,8 +242,7 @@ fn entries() -> Json {
         "stock": { "who": "anyone", "steps": [],
           "effects": [{ "change": "create", "kind": "PLANK", "into": "rest", "event": "stocked" }] },
         "overstock": { "who": "anyone", "steps": [],
-          "effects": [{ "change": "create", "kind": "PLANK", "into": "rest", "event": "stocked" },
-            { "change": "create", "kind": "GHOST", "into": "rest", "event": "haunted" }] } } }"#
+          "effects": [{ "change": "create", "kind": "GHOST", "into": "rest", "event": "haunted" }] } } }"#
             .replace("PLANK", &fullname(PLANK))
             .replace("GHOST", &full("test:ghost", 0xff)),
     )

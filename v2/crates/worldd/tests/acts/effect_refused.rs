@@ -1,5 +1,5 @@
 //! A form's effects the world refuses to write refuse its act by name, and nothing of them is applied: the rack's
-//! `overstock` creates a plank, then a thing of a kind the world's header does not pin (`kind-not-in-header`).
+//! `overstock` creates a thing of a kind the world's header does not pin (`kind-not-in-header`).
 use super::*;
 
 #[test]
@@ -11,7 +11,7 @@ fn a_forms_effects_the_world_refuses_refuse_its_act_and_write_nothing() {
     let r = run.replay();
     let t = r.tree();
     let made = t.children(t.handle(rack()).unwrap()).map_or(0, <[_]>::len);
-    assert_eq!(made, 0, "not the plank either: whole or nothing");
+    assert_eq!(made, 0, "nothing created");
     // The world goes on: the next act of the same body lands.
     let stocked = a.act("test:stock", Some(rack()), BTreeMap::new());
     println!("stock after: {stocked:?}");
