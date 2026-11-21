@@ -163,6 +163,17 @@ pub fn run(args: &[String]) -> i32 {
                                 .map_err(|e| e.to_string())?;
                         }
                     }
+                    // The code hatches' modules its entries name (#3713).
+                    if template.join("hatches").is_dir() {
+                        std::fs::create_dir_all(to.join("hatches")).map_err(|e| e.to_string())?;
+                        for m in std::fs::read_dir(template.join("hatches"))
+                            .map_err(|e| e.to_string())?
+                        {
+                            let m = m.map_err(|e| e.to_string())?;
+                            std::fs::copy(m.path(), to.join("hatches").join(m.file_name()))
+                                .map_err(|e| e.to_string())?;
+                        }
+                    }
                     let entry = std::fs::read_to_string(to.join("entry.json"))
                         .unwrap_or_else(|_| "[0, 0]".into());
                     let creator = directoryd::accounts::principal_text(through).replace(':', "-");
