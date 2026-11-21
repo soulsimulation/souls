@@ -280,7 +280,8 @@ export class WorldHover {
       if (e.buttons) return this.clear();
       this.pointer = { x: e.clientX, y: e.clientY };
     });
-    canvas.addEventListener('pointerleave', () => ((this.pointer = null), this.clear()));
+    // A lifted finger also leaves the canvas: what a long-press showed stays until the next touch.
+    canvas.addEventListener('pointerleave', (e) => e.pointerType !== 'touch' && ((this.pointer = null), this.clear()));
     canvas.addEventListener('pointerdown', (e) => {
       this.held = true;
       this.clear();
