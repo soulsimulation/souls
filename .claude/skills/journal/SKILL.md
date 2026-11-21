@@ -11,7 +11,10 @@ the evidence, what failed on the way, what it costs elsewhere, what is still lim
 goes into files in the tree: no status ledgers, no journals, no committed media.
 
 The tier sets the proof: `docs/process/PROOF-POLICY.yml` (`tiers` for what to produce, `pr_checks` for what the
-`proof-ok` check reads). `node tools/proof/tier.mjs` prints the tier of the current diff.
+`proof-ok` check reads). `node tools/proof/tier.mjs` prints the tier of the current diff. The journal entry is
+advice: `proof-ok` fails only without an issue link and a one-line summary, on a privacy finding, or at T3–T4 until
+the maintainer signs off ([PR body](../../../docs/process/agent-workflow.md#pr-body)). Real-run evidence counts as it
+is; never spend time reformatting a body to satisfy the checker.
 
 `gh pr` and `gh issue` may return 403 in cloud sessions. Use `gh api` REST throughout
 (`REPO=${GITHUB_REPOSITORY:-$(git remote get-url origin | sed -E 's#\.git$##; s#.*[:/]([^/]+/[^/]+)$#\1#')}`).
@@ -34,7 +37,7 @@ present the work as based on main.
 
 ## 1. Acceptance before the first edit
 
-A task issue dispatched by a coordinator already carries its Acceptance, Touches and ceiling. Copy the acceptance
+A task issue dispatched by a coordinator already carries its Acceptance, expected files and estimate. Copy the acceptance
 as written; do not rewrite it, add to it or widen it. The rest of this section is for issues that have none.
 
 Read the issue (`gh api repos/$REPO/issues/$N --jq .body`). Its **Acceptance criteria** must be pass/fail
@@ -129,7 +132,8 @@ Fill `.github/pull_request_template.md`:
   externalities (the numbers), known limits, docs.
 - **Changelog** fragment and **Risk**.
 
-Check it locally before you push the body. The `proof-ok` check runs the same code:
+Check it locally before you push the body. The `proof-ok` check runs the same code; it exits 1 only on the blocking
+minimum, and prints the rest as advice (`--strict` fails on the advice too):
 ```bash
 node tools/proof/acceptance.mjs check --body .e2e/journal/$N/pr.md --issue .e2e/journal/$N/issue.md \
   --proof .e2e/journal/$N/proof.json --base origin/main

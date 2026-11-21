@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:arcade_cabinet",
   "owner": "thing",
-  "state": { "on": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "state": { "on": { "n": 28, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
   "points": {
     "player": { "role": "stand", "at_mm": [0, 0, 700], "yaw_mdeg": 180000 },
     "joystick": { "role": "grip", "at_mm": [-150, 1200, 280] },

@@ -23,7 +23,7 @@
             "changes": [
               { "change": "link", "node": "h1", "link": "speaker", "n": 1, "end": "b1" },
               { "change": "reparent", "node": "b1", "to": { "node": "h1", "slot": "lectern" } },
-              { "change": "set", "node": "h1", "field": "phase", "n": 1, "to": "speaking" }
+              { "change": "set", "node": "h1", "field": "phase", "n": 28, "to": "speaking" }
             ],
             "events": [
               { "event": "eden:took_the_lectern", "node": "h1", "changes": [0] },

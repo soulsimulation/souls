@@ -3,9 +3,9 @@
   "kind": "eden:calendar_entry",
   "owner": "thing",
   "state": {
-    "start": { "n": 1, "type": "duration", "default": 0, "audience": { "rule": "everyone" } },
-    "end": { "n": 2, "type": "duration", "default": 0, "audience": { "rule": "everyone" } },
-    "words": { "n": 3, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+    "start": { "n": 28, "type": "duration", "default": 0, "audience": { "rule": "everyone" } },
+    "end": { "n": 29, "type": "duration", "default": 0, "audience": { "rule": "everyone" } },
+    "words": { "n": 30, "type": "text", "default": null, "audience": { "rule": "everyone" } }
   },
   "links": {
     "place": { "n": 1, "from": "thing", "most": 1, "audience": { "rule": "everyone" } },

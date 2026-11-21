@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:motorboat",
   "owner": "thing",
-  "state": {"running":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "state": {"running":{"n":28,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
   "points": {
     "jetty": {"role":"stand","at_mm":[-1900,0,100],"yaw_mdeg":90000},
     "key": {"role":"contact","at_mm":[350,800,650]}

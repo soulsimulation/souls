@@ -48,7 +48,7 @@
     "verdict": "yes",
     "read": [
      [
-      "p1/field/2",
+      "p1/field/29",
       "bare"
      ],
      [
@@ -215,15 +215,15 @@
     "verdict": "yes",
     "read": [
      [
-      "p1/field/1",
+      "p1/field/28",
       3568000
      ],
      [
-      "p1/field/2",
+      "p1/field/29",
       "seed"
      ],
      [
-      "p1/field/3",
+      "p1/field/30",
       86400
      ]
     ]
@@ -267,15 +267,15 @@
     "verdict": "yes",
     "read": [
      [
-      "p1/field/1",
+      "p1/field/28",
       3136000
      ],
      [
-      "p1/field/2",
+      "p1/field/29",
       "sprout"
      ],
      [
-      "p1/field/3",
+      "p1/field/30",
       86400
      ]
     ]
@@ -319,15 +319,15 @@
     "verdict": "yes",
     "read": [
      [
-      "p1/field/1",
+      "p1/field/28",
       2704000
      ],
      [
-      "p1/field/2",
+      "p1/field/29",
       "leafy"
      ],
      [
-      "p1/field/3",
+      "p1/field/30",
       86400
      ]
     ]
@@ -371,15 +371,15 @@
     "verdict": "yes",
     "read": [
      [
-      "p1/field/1",
+      "p1/field/28",
       2272000
      ],
      [
-      "p1/field/2",
+      "p1/field/29",
       "flowering"
      ],
      [
-      "p1/field/3",
+      "p1/field/30",
       86400
      ]
     ]
@@ -611,15 +611,15 @@
     "verdict": "yes",
     "read": [
      [
-      "p1/field/1",
+      "p1/field/28",
       1360000
      ],
      [
-      "p1/field/2",
+      "p1/field/29",
       "flowering"
      ],
      [
-      "p1/field/3",
+      "p1/field/30",
       528000
      ]
     ]
@@ -1245,15 +1245,15 @@
     "verdict": "yes",
     "read": [
      [
-      "p1/field/2",
+      "p1/field/29",
       "fruiting"
      ],
      [
-      "p1/field/4",
+      "p1/field/31",
       3
      ],
      [
-      "bk1/field/1",
+      "bk1/field/28",
       0
      ]
     ]

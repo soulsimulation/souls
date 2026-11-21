@@ -48,7 +48,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "letters",
-                "n": 2,
+                "n": 29,
                 "to": 1
               }
             ],
@@ -95,7 +95,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "locked",
-                "n": 1,
+                "n": 28,
                 "to": 0
               }
             ],
@@ -136,7 +136,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "letters",
-                "n": 2,
+                "n": 29,
                 "to": 0,
                 "by": -1
               }
@@ -166,7 +166,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "locked",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],

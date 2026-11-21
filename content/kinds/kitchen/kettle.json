@@ -3,9 +3,9 @@
   "kind": "eden:kettle",
   "owner": "thing",
   "state": {
-    "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 1700, "audience": { "rule": "everyone" } },
-    "heating": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
-    "heat": { "n": 3, "type": "timed", "unit": "mC", "default": { "value": 25000, "per_s": 0, "set_us": 0 }, "min": 25000, "max": 100000, "audience": { "rule": "everyone" } }
+    "water": { "n": 28, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 1700, "audience": { "rule": "everyone" } },
+    "heating": { "n": 29, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "heat": { "n": 30, "type": "timed", "unit": "mC", "default": { "value": 25000, "per_s": 0, "set_us": 0 }, "min": 25000, "max": 100000, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [-135, 150, 0] },
