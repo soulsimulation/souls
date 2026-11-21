@@ -130,7 +130,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock } from '../brief/brief.mjs';
-import { changedBetween, decode, rememberPublicNames, rowsOf, sequenceOf } from '../brief/copy.mjs';
+import { changedBetween, decode, posesOf, rememberPublicNames, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
@@ -708,7 +708,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['query', 'catalog', 'context', 'batch', 'status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
+const OPS = new Set(['query', 'catalog', 'context', 'batch', 'status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'undo', 'redo', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
 const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
@@ -728,6 +728,59 @@ function fullKind(kinds, k) {
   throw Object.assign(new Error(`${s}: ${hit.length ? 'ambiguous; copy a full pinned name from describe' : `not pinned; describe lists ${Object.keys(kinds).join(', ')}`}`), { code: 'edit.kind-unknown' });
 }
 /** The batch as replica's `ops_of` reads it: kinds by full name, positions in µm (a creator writes mm). */
+async function editOnce(req) {
+  if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
+  // An undo or a redo (G4, #3694) carries no batch; a build's step carries its build's and step's names.
+  const undo = req.op !== 'edit';
+  const step = !undo && req.build !== undefined ? { build: String(req.build), step: String(req.step ?? '') } : null;
+  const age = await ageAfter();
+  // #3695: weather, sky and strike are sets on the world node, made from the copy as it is now, after the sync.
+  const w = !undo && req.world ? worldOps(copy, req.world, worldNowOrReal()) : { ops: req.ops };
+  if (w.ok === false) return closing({ ...w, sent: false, local: true }, null, { age });
+  const batch = undo ? null : batchOf(w.ops);
+  if (!undo) {
+    const v = JSON.parse(wire.editCheck(copy, batch, kindsText()));
+    if (!v.ok) return closing({ ...v, sent: false, local: true }, null, { age });
+  }
+  if (!copyVersion) return closing({ ok: false, code: 'edit.no-copy', sent: false, detail: 'no copy of the world yet' }, null, { age });
+  state.sequence++;
+  // Planned at the copy's version: its sequence is the version the world checks the batch's nodes against.
+  let bytes;
+  try {
+    bytes = undo || step
+      ? wire.wireEditAsked(scope, seat.grant.counter, BigInt(state.sequence), unhex(copyVersion), undo ? req.op : 'step', batch ?? '', step?.build ?? '', step?.step ?? '')
+      : wire.wireEdit(scope, seat.grant.counter, true, BigInt(state.sequence), unhex(copyVersion), batch);
+  } catch (e) {
+    state.sequence--;
+    return closing({ ok: false, code: 'edit.batch', sent: false, detail: String(e.message ?? e).slice(0, 200) }, null, { age });
+  }
+  save();
+  const sequence = state.sequence;
+  const got = new Promise((ok) => {
+    const t = setTimeout(() => { editsWaiting.delete(sequence); ok(null); }, EDIT_WITHIN);
+    editsWaiting.set(sequence, (a) => { clearTimeout(t); editsWaiting.delete(sequence); ok(a); });
+  });
+  if (signedIn) send(bytes, sequence, 1); else queued.push({ bytes, sequence, ranked: 1 });
+  const a = await got;
+  if (!a) return closing({ ok: false, code: 'edit.unanswered', sequence, sent: true }, null, { now: true });
+  if (a.answer === 1) {
+    // This daemon's edits, newest last, for undoing a whole build (G4's history is the world's; this is a mirror).
+    const e = (state.edits ??= { done: [], undone: [] });
+    if (req.op === 'edit') { e.done.push(step ? { build: step.build, step: step.step } : {}); e.undone = []; }
+    else if (req.op === 'undo') { const x = e.done.pop(); if (x) e.undone.push(x); }
+    else { const x = e.undone.pop(); if (x) e.done.push(x); }
+    e.done = e.done.slice(-256); e.undone = e.undone.slice(-256);
+    save();
+  }
+  const out = a.answer === 1
+    ? { ok: true, sequence, ...(undo ? { [req.op === 'undo' ? 'undone' : 'redone']: true } : { names: a.names ?? {} }), ...(step ?? {}), ...(w.says ? { did: w.says } : {}) }
+    : { ok: false, sequence, code: a.reason ?? 'edit.refused', ...(a.op !== undefined ? { op: a.op } : {}) };
+  // The world node is written by the world's own sky timers too: a world verb planned just before one is stale, and
+  // is made again from the copy brought current, once.
+  if (out.code === 'edit.stale' && req.world && !req.again) return editOnce({ ...req, again: true });
+  return closing(out);
+}
+
 function batchOf(ops) {
   if (!Array.isArray(ops) || ops.length === 0) throw Object.assign(new Error('ops: a list of operations'), { code: 'edit.batch' });
   const kinds = pinned();
@@ -1039,10 +1092,14 @@ async function answer(req) {
       }
       return answer({ op: 'act', acts: actWords(offer, req.args ?? []), ...(req.for !== undefined ? { for: req.for } : {}) });
     }
-    case 'describe': return closing({ ok: true }, (rows) => ({
-      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...(r.text ? { text: r.text } : {}) })),
+    case 'describe': return closing({ ok: true }, (rows) => {
+      // Where each stands in its parent, mm, for placing by relation (#3694).
+      const poses = posesOf(copy);
+      return {
+      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...poses.get(r.id), ...(r.text ? { text: r.text } : {}) })),
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
-    }));
+      };
+    });
     case 'check': {
       // On the copy as it is: no sync, no frame to the world (A4). A world verb (#3695) is made into its sets first.
       const w = req.world ? worldOps(copy, req.world, worldNowOrReal()) : { ops: req.ops };
@@ -1050,35 +1107,21 @@ async function answer(req) {
       const v = JSON.parse(wire.editCheck(copy, batchOf(w.ops), kindsText()));
       return closing({ ...v, local: true, ...(w.says ? { would: w.says, ops: w.ops } : {}) }, null, { now: true });
     }
-    case 'edit': {
-      if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
-      const age = await ageAfter();
-      // #3695: weather, sky and strike are sets on the world node, made from the copy as it is now, after the sync.
-      const w = req.world ? worldOps(copy, req.world, worldNowOrReal()) : { ops: req.ops };
-      if (w.ok === false) return closing({ ...w, sent: false, local: true }, null, { age });
-      const batch = batchOf(w.ops);
-      const v = JSON.parse(wire.editCheck(copy, batch, kindsText()));
-      if (!v.ok) return closing({ ...v, sent: false, local: true }, null, { age });
-      if (!copyVersion) return closing({ ok: false, code: 'edit.no-copy', sent: false, detail: 'no copy of the world yet' }, null, { age });
-      state.sequence++;
-      // Planned at the copy's version: its sequence is the version the world checks the batch's nodes against.
-      const bytes = wire.wireEdit(scope, seat.grant.counter, true, BigInt(state.sequence), unhex(copyVersion), batch);
-      save();
-      const sequence = state.sequence;
-      const got = new Promise((ok) => {
-        const t = setTimeout(() => { editsWaiting.delete(sequence); ok(null); }, EDIT_WITHIN);
-        editsWaiting.set(sequence, (a) => { clearTimeout(t); editsWaiting.delete(sequence); ok(a); });
-      });
-      if (signedIn) send(bytes, sequence, 1); else queued.push({ bytes, sequence, ranked: 1 });
-      const a = await got;
-      if (!a) return closing({ ok: false, code: 'edit.unanswered', sequence, sent: true }, null, { now: true });
-      const out = a.answer === 1
-        ? { ok: true, sequence, names: a.names ?? {}, ...(w.says ? { did: w.says } : {}) }
-        : { ok: false, sequence, code: a.reason ?? 'edit.refused', ...(a.op !== undefined ? { op: a.op } : {}) };
-      // The world node is written by the world's own sky timers too: a world verb planned just before one is stale, and
-      // is made again from the copy brought current, once.
-      if (out.code === 'edit.stale' && req.world && !req.again) return answer({ ...req, again: true });
-      return closing(out);
+    case 'edit': case 'redo': return editOnce(req);
+    case 'undo': {
+      if (req.build === undefined) return editOnce(req);
+      // A whole build, undone step by step (#3694): while the newest of this daemon's edits is that build's.
+      const newest = () => (state.edits ??= { done: [], undone: [] }).done.at(-1);
+      if (newest()?.build !== String(req.build)) {
+        return closing({ ok: false, code: 'undo.not-the-build', sent: false, detail: `the newest edit is ${newest()?.build ? `build ${newest().build}'s` : 'not a build\'s'}` }, null, { now: true });
+      }
+      let steps = 0, last = null;
+      while (newest()?.build === String(req.build)) {
+        last = await editOnce({ op: 'undo' });
+        if (!last.ok) break;
+        steps++;
+      }
+      return { ...last, ok: last.ok, build: String(req.build), steps };
     }
     case 'pray': case 'answer': {
       const words = String(req.words ?? '').trim(), most = req.op === 'pray' ? PRAYER_MOST : ANSWER_MOST;

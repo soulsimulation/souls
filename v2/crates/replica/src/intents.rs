@@ -372,7 +372,7 @@ impl Intent {
             {
                 return refuse("edit-not-bare", "an edit carries only its batch");
             }
-            crate::edit::wire::read(&intent.parameters)
+            crate::edit::wire::asked(&intent.parameters)
                 .or_else(|why| refuse("edit-not-a-batch", why))?;
         }
         match (intent.actor, intent.body) {

@@ -17,6 +17,11 @@
 //   souls-god.mjs sky --palette <name>           the sky's palette (today's names: clear-day, dusk, mars-desert, ...)
 //   souls-god.mjs strike <x,z | id>              lightning at a point (metres on the open ground) or on a place
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
+//   place <kind> --in <id> --beside <id> [--dir n|ne|e|se|s|sw|w|nw] [--dist mm]   beside another (default e, 1000)
+//   place <kind> --on <id>                       in or on another: its first free slot for a thing, if it has one
+//   place|move ... --facing <id|n|e|s|w>         turned to face another, or a compass point
+//   any edit verb --build <name> --step <name>  a build's step (#3694): one batch the world keeps under that name
+//   souls-god.mjs undo [--build <name>] | redo   the newest edit undone (a whole build, step by step), or redone
 //   souls-god.mjs status | stop                  the daemon
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
 //   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
@@ -35,7 +40,7 @@ import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'check', 'status', 'stop', 'welcome', 'visitors'];
+export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'check', 'undo', 'redo', 'status', 'stop', 'welcome', 'visitors'];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
 export const WORLD_VERBS = ['weather', 'sky', 'strike'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -54,6 +59,15 @@ export const FIX = {
   'edit.too-many-nodes': 'remove less at once',
   'edit.batch': 'see the usage: souls-god.mjs with no arguments',
   'edit.unanswered': 'the world did not answer within 10 s: describe to see whether it was done',
+  'undo.nothing': 'there is no edit left to undo',
+  'undo.nothing-to-redo': 'redo follows an undo; a new edit clears what could be redone',
+  'undo.conflict': 'something the undo would change was changed since: describe, then put it back by hand',
+  'undo.no-inverse': 'that edit cannot be undone (it added a field or moved a thing in motion): change it back by hand',
+  'undo.not-the-build': 'undo --build undoes only while the newest edit is one of that build\'s steps: undo the others first',
+  'edit.would-bury': 'a Soul stands there now: wait until it has moved, or choose another place',
+  'edit.would-cut-off': 'that would shut a Soul in: leave it a way out, or wait until it has moved',
+  'edit.in-use': 'a Soul is using that thing: wait until it is done',
+  'relation-unknown': 'describe, and name an id it lists with an `at`',
   'edit.no-copy': 'the daemon has no copy yet: run status until connected is true',
   'edit.weather-level': 'levels are 0 to 1',
   'edit.weather-ended': 'give --minutes from 5 to 360',
@@ -88,20 +102,22 @@ const valueOf = (t) => (/^-?\d+$/.test(t) ? Number(t) : t === 'true' ? true : t 
 const node = (t) => (/^\d+$/.test(String(t)) ? Number(t) : String(t));
 
 /** The batch a verb's words make. */
-export function opsOf(verb, words) {
+export function opsOf(verb, words, { related = false } = {}) {
   const args = [...words];
   if (verb === 'batch') {
     try { return JSON.parse(args.join(' ')); } catch { throw usage('batch takes a JSON list of operations'); }
   }
   if (verb === 'place') {
-    const into = takeOpt(args, '--in'), at = takeOpt(args, '--at'), slot = takeOpt(args, '--slot');
+    const on = takeOpt(args, '--on');
+    const into = takeOpt(args, '--in') ?? on, at = takeOpt(args, '--at'), slot = takeOpt(args, '--slot');
     const fields = Object.fromEntries(takeAll(args, '--field').map((f) => { const [n, v] = f.split('='); return [n, valueOf(v)]; }));
     if (!args[0] || into === undefined) throw usage('place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v]');
     return [{ op: 'place', name: 1, kind: args[0], in: node(into), ...(at ? { at: xyz(at) } : {}), ...(slot !== undefined ? { slot: Number(slot) } : {}), ...(Object.keys(fields).length ? { fields } : {}) }];
   }
   if (verb === 'move') {
     const at = takeOpt(args, '--at'), slot = takeOpt(args, '--slot');
-    if (!args[0] || !at) throw usage('move <id> --at x,y,z [--slot n]');
+    if (!args[0] || (!at && !related)) throw usage('move <id> --at x,y,z [--slot n] (or --beside, --facing)');
+    if (!at) return [{ op: 'move', node: node(args[0]), ...(slot !== undefined ? { slot: Number(slot) } : {}) }];
     return [{ op: 'move', node: node(args[0]), at: xyz(at), ...(slot !== undefined ? { slot: Number(slot) } : {}) }];
   }
   if (verb === 'set') {
@@ -137,11 +153,76 @@ export function requestOf(argv) {
     return { directory: '/v1/worlds/welcome', body: { welcome: rest[0] ?? '' }, creator };
   }
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
-  if (verb === 'status' || verb === 'stop' || verb === 'describe') return { req: { op: verb }, creator };
+  if (verb === 'status' || verb === 'stop' || verb === 'describe' || verb === 'redo') return { req: { op: verb }, creator };
+  if (verb === 'undo') { const build = takeOpt(rest, '--build'); return { req: { op: 'undo', ...(build !== undefined ? { build } : {}) }, creator }; }
   if (verb === 'check' && WORLD_VERBS.includes(rest[0])) return { req: { op: 'check', world: worldVerbOf(rest[0], rest.slice(1)) }, creator };
-  if (verb === 'check') return { req: { op: 'check', ops: opsOf(rest[0], rest.slice(1)) }, creator };
   if (WORLD_VERBS.includes(verb)) return { req: { op: 'edit', world: worldVerbOf(verb, rest) }, creator };
-  return { req: { op: 'edit', ops: opsOf(verb, rest) }, creator };
+  const build = takeOpt(rest, '--build'), step = takeOpt(rest, '--step');
+  if ((build === undefined) !== (step === undefined)) throw usage('a build\'s step names both: --build <name> --step <name>');
+  const named = build !== undefined ? { build, step } : {};
+  const [v, words] = verb === 'check' ? [rest[0], rest.slice(1)] : [verb, rest];
+  const relation = v === 'place' || v === 'move' ? relationOf(words) : null;
+  let plain = relation ? withoutRelation(words) : words;
+  // Beside another, in the same parent: the parent is filled in from describe.
+  if (v === 'place' && relation?.beside !== undefined && !plain.includes('--in')) plain = [...plain, '--in', relation.beside];
+  const ops = opsOf(v, plain, { related: !!relation });
+  const req = verb === 'check' ? { op: 'check', ops } : { op: 'edit', ops, ...named };
+  return { req, creator, ...(relation ? { relation } : {}) };
+}
+
+const RELATIONS = ['--beside', '--dir', '--dist', '--facing', '--on'];
+/** A place's or a move's relation to another (#3694): `{ beside, dir, dist, facing, on }`, or null. */
+export function relationOf(words) {
+  const args = [...words], r = {};
+  for (const k of RELATIONS) { const v = takeOpt(args, k); if (v !== undefined) r[k.slice(2)] = v; }
+  return r.beside !== undefined || r.facing !== undefined || r.on !== undefined ? r : null;
+}
+const withoutRelation = (words) => { const args = [...words]; for (const k of ['--beside', '--dir', '--dist', '--facing']) takeOpt(args, k); return args; };
+
+const COMPASS = { n: [0, -1], ne: [1, -1], e: [1, 0], se: [1, 1], s: [0, 1], sw: [-1, 1], w: [-1, 0], nw: [-1, -1] };
+/**
+ * The batch with its relation resolved on `world` (describe's answer: each node's parent and `at`, mm in it): beside
+ * puts the thing `dist` mm (default 1000) from the other toward `dir` (default e; north is −z), in the same parent;
+ * on puts it in the other, in its first slot a thing may take and nothing holds; facing turns it about +y so its +z
+ * faces the other, or the compass point. A relation that names what is not there is refused `relation-unknown`.
+ */
+export function resolve(req, relation, world) {
+  const nodes = new Map(world.nodes.map((n) => [n.id, n]));
+  const known = (id) => { const n = nodes.get(String(id)); if (!n) throw Object.assign(new Error(`no ${id} here`), { code: 'relation-unknown' }); return n; };
+  const ops = req.ops.map((o) => ({ ...o }));
+  const op = ops[0];
+  const self = op.op === 'move' ? known(op.node) : null;
+  if (relation.beside !== undefined) {
+    const other = known(relation.beside);
+    if (!other.at) throw Object.assign(new Error(`${other.id} has no place to stand beside`), { code: 'relation-unknown' });
+    const [dx, dz] = COMPASS[relation.dir ?? 'e'] ?? (() => { throw usage('--dir is n, ne, e, se, s, sw, w or nw'); })();
+    const dist = Number(relation.dist ?? 1000), k = Math.hypot(dx, dz);
+    op.at = [Math.round(other.at[0] + (dx / k) * dist), other.at[1], Math.round(other.at[2] + (dz / k) * dist)];
+    if (op.op === 'place') op.in = /^\d+$/.test(String(other.parent)) ? Number(other.parent) : other.parent;
+  }
+  if (relation.on !== undefined && op.op === 'place') {
+    const other = known(relation.on);
+    const kind = Object.entries(world.kinds ?? {}).find(([name]) => name.split('@')[0] === other.kind || name === other.kind)?.[1];
+    const held = new Set(world.nodes.filter((n) => n.parent === other.id && n.slot !== undefined).map((n) => n.slot));
+    const free = Object.entries(kind?.slots ?? {}).find(([n, s]) => s?.admits !== 'body' && !s?.posture && !held.has(Number(n)));
+    if (free && op.slot === undefined) op.slot = Number(free[0]);
+    op.at ??= [0, 0, 0];
+  }
+  if (relation.facing !== undefined) {
+    const here = op.at ?? self?.at;
+    const point = COMPASS[relation.facing];
+    let d;
+    if (point) d = point;
+    else {
+      const other = known(relation.facing);
+      if (!other.at || !here) throw Object.assign(new Error(`cannot face ${relation.facing} from here`), { code: 'relation-unknown' });
+      d = [other.at[0] - here[0], other.at[2] - here[2]];
+    }
+    op.yaw = ((Math.round((Math.atan2(d[0], d[1]) * 180_000) / Math.PI) % 360_000) + 360_000) % 360_000;
+    if (op.op === 'move') op.at ??= self.at;
+  }
+  if (op.op === 'move' && !op.at) throw usage('move <id> needs --at, --beside or --facing');
+  return { ...req, ops };
 }
 
 /**
@@ -198,7 +279,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       if (said.ok === false) process.exitCode = 1;
       process.exit();
     }
-    const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: 15_000 });
+    const pkg = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
+    // A relation is resolved on the daemon's copy: describe first, then the batch with its places filled in.
+    const req = asked.relation ? resolve(asked.req, asked.relation, await call(home, creator, { op: 'describe' }, { pkg, ms: 15_000 })) : asked.req;
+    const answer = await call(home, creator, req, { pkg, ms: 60_000 });
     out(withFix(answer));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {
