@@ -1,11 +1,12 @@
 // The thing layer on the page (V8, #2718): follows the parts the page plays and places each imported thing from its
-// node, in the frame the world view computes. The page's `models` parameter is the root V17's bake wrote
-// (`models.json`, `worlds/models/<hash>.glb`), served beside the stream or from the CDN; `things=0` draws none (the
-// measure's other arm) and `copies=2` draws each thing twice, the copy one world's width further east.
+// node, in the frame the world view computes. The models root is the folder V17's bake wrote (`models.json`,
+// `worlds/models/<hash>.glb`): the page's `models` parameter, else `models/` beside the world page (`/w/<slug>/models/`,
+// the front door's per-world folder). A world with no models there keeps the world view's boxes. `things=0` draws none
+// (the measure's other arm) and `copies=2` draws each thing twice, the copy one world's width further east.
 import * as THREE from 'three';
 import type { NodeRec } from '../source/source.ts';
 import { STRUCTURE, type WorldView } from '../draw/world.ts';
-import { fetchIndex } from './models.ts';
+import { fetchIndex, type ModelIndex } from './models.ts';
 import { ThingLayer } from './things.ts';
 import { setWindowLife } from './windows.ts';
 import { civil, localAt, type SkyRecord } from '../sky/record.ts';
@@ -52,19 +53,24 @@ export function windowLife(t: number | null, record: SkyRecord | null): void {
   setWindowLife(t !== null && record ? civil(localAt(record, t)).hour : null, Math.max(0, t ?? 0) / 1e6);
 }
 
-/** The page's things, from its parameters; none (the world view's boxes stay) when no `models` root is given. */
-export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams): PageThings {
-  const root = params.get('models');
+/** The models root, resolved against the page: the `models` parameter, else `models/` beside the world page. */
+export function modelsRoot(params: URLSearchParams, page: string): URL {
+  return new URL(params.get('models') || './models/', page);
+}
+
+/** The page's things, from its parameters. Until the models' index arrives the page draws nothing for them; when it
+ *  cannot be had (no bake for this world, a 404), the world view's boxes are drawn instead. */
+export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams, index: (root: string) => Promise<ModelIndex> = fetchIndex): PageThings {
   const none: PageThings = { layer: null, apply() {}, update() {}, follow() {}, night: windowLife };
-  if (!root) return none;
   world.drawThings = false;
   if (params.get('things') === '0') return none;
-  const base = new URL(root, location.href);
-  let layer: ThingLayer | null = null;
+  const base = modelsRoot(params, location.href);
+  let layer: ThingLayer | null = null, failed = false;
   const early: [NodeRec[], string[]][] = [];
   const out: PageThings = {
     layer: null,
     apply(nodes, removed) {
+      if (failed) return;
       if (!layer) return void early.push([nodes, removed]);
       if (world.extent) layer.spacing = world.extent[2] - world.extent[0];
       for (const id of removed) layer.remove(id);
@@ -85,7 +91,7 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
     },
     night: windowLife,
   };
-  fetchIndex(base.href).then((index) => {
+  index(base.href).then((index) => {
     const copies = Number(params.get('copies') ?? 1);
     layer = new ThingLayer({
       index, copies,
@@ -95,6 +101,11 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
     out.layer = layer;
     scene.add(layer.group);
     for (const [n, r] of early.splice(0)) out.apply(n, r);
+  }, (err: unknown) => {
+    failed = true;
+    early.length = 0;
+    world.drawThings = true;
+    console.warn(`models: ${err instanceof Error ? err.message : String(err)}; things drawn as boxes`);
   });
   return out;
 }
