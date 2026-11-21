@@ -1510,6 +1510,12 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     };
 
     // On the first Soul, where it stands: refused by BUILDSAFE's name, as a boot thing would be.
+    let (control, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 9, got.version, wall(&w, x0 * M, z0 * M)),
+    )
+    .await;
+    println!("DEBUG control boot wall on the Soul: {control:?}");
     let (got, _) = send(
         &mut ws,
         edit_intent(&w, creator, 2, got.version, hedge(x0 * M, z0 * M)),
