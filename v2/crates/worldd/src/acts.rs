@@ -490,7 +490,6 @@ impl Geometry for Sight<'_> {
         let (node, at) = if self.approaches.contains(&body) {
             self.with_view(body, |v| {
                 let (floor, p, _) = v.on_floor(node, at)?;
-                eprintln!("APPROACH-DEBUG node {} floor {} p {p:?} body on {} at {:?}", replica::world_model::show(node), replica::world_model::show(floor), replica::world_model::show(sim::walk::node_of(me)), me.pose.position);
                 (floor == sim::walk::node_of(me)).then(|| {
                     let short = skills::form_runner::APPROACH_SHORT;
                     (floor, skills::form_runner::short_of(p, me.pose.position, short))

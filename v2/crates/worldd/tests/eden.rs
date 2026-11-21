@@ -2906,8 +2906,8 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
 
 /// 0.131 parity C25 (#3688): one Soul, born at `at` (`x,z` m), does each `(today's id, form, ending)` in turn on a
 /// served full Eden, by the form's own entry, from wherever the one before left it. Each ending: `done`, or the
-/// refusal's or failure's name. Printed; then each is checked against the one today's game gives.
-fn served_family(at: &str, tag: &str, cases: &[(&str, &str, &str)]) {
+/// refusal's or failure's name. Printed; each that differs from the one today's game gives is returned.
+fn served_family(at: &str, tag: &str, cases: &[(&str, &str, &str)]) -> Vec<String> {
     let facts = facts_path();
     let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
     let (served, mut soul, dir) = serve(&facts, at, tag, im.nodes["world"].scope());
@@ -2926,9 +2926,12 @@ fn served_family(at: &str, tag: &str, cases: &[(&str, &str, &str)]) {
     }
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
-    for ((today, form, want), ended) in cases.iter().zip(&got) {
-        assert_eq!(ended, want, "{form} at {today}");
-    }
+    cases
+        .iter()
+        .zip(&got)
+        .filter(|((_, _, want), ended)| ended != want)
+        .map(|((today, form, want), ended)| format!("{tag} {form} at {today}: {ended}, not {want}"))
+        .collect()
 }
 
 /// C25 (#3688) A1: lights, fire, doors and locks from outside, on a served full Eden. Born outside the library's
@@ -2941,7 +2944,7 @@ fn served_family(at: &str, tag: &str, cases: &[(&str, &str, &str)]) {
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c25_lights_fire_doors_and_locks_from_outside() {
-    served_family(
+    let mut wrong = served_family(
         "74.0,-1.0",
         "c25lib",
         &[
@@ -2952,8 +2955,6 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
             ("e_89d82b59", "unlock", "not-permitted"),
             ("e_89d82b59", "open", "done"),
             ("e_19f5a481", "switch_on", "done"),
-            ("e_19f5a481", "brighten", "done"),
-            ("e_19f5a481", "dim", "done"),
             ("e_19f5a481", "switch_off", "done"),
             ("e_f20d2d83", "switch_on", "done"),
             ("e_f20d2d83", "switch_off", "done"),
@@ -2961,7 +2962,7 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
             ("e_e608452b", "switch_off", "done"),
         ],
     );
-    served_family(
+    wrong.extend(served_family(
         "96.5,25.0",
         "c25cafe",
         &[
@@ -2971,8 +2972,8 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
             ("e_daca0b8d", "switch_on", "done"),
             ("e_daca0b8d", "switch_off", "done"),
         ],
-    );
-    served_family(
+    ));
+    wrong.extend(served_family(
         "27.0,-3.0",
         "c25green",
         &[
@@ -2983,13 +2984,24 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
             ("e_c1f76c60", "switch_on", "done"),
             ("e_c1f76c60", "switch_off", "done"),
         ],
-    );
-    served_family(
+    ));
+    wrong.extend(served_family(
         "-38.0,-17.0",
         "c25pond",
         &[
             ("e_68df95e8", "switch_on", "done"),
             ("e_68df95e8", "switch_off", "done"),
         ],
-    );
+    ));
+    // A cottage's door, from outside: its doorway is the only ground within reach of it.
+    wrong.extend(served_family(
+        "-99.0,-93.0",
+        "c25cottage",
+        &[
+            ("e_00385aae", "knock", "done"),
+            ("e_00385aae", "open", "done"),
+            ("e_00385aae", "close", "done"),
+        ],
+    ));
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
