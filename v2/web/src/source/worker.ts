@@ -9,6 +9,10 @@ import { publicSoul, type NodeRec, type PartRec, type Pointer, type SaidRec, typ
 import { happenedInPart } from '../sound/record.ts';
 import { readChanged } from './changed.ts';
 import { skyFields } from '../sky/record.ts';
+import { BEHIND_US, CUT_US } from '../clock/clock.ts';
+
+/** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
+const AHEAD = 16;
 
 type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string };
 const post = (m: Msg, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
@@ -83,10 +87,22 @@ async function run(stream: URL) {
   let drawn = new Set<string>();
   const text = new TextDecoder();
   const path = (p: StreamPointer, file: string) => p.generation ? `g/${p.generation}/${file}` : file;
-  const readText = async (file: string, p = ptr) => {
-    const b = await get(new URL(path(p, file), stream));
+  const addWords = (b: Uint8Array | null) => {
     if (!b) return;
     for (const [id, w] of decode(b, { useMaps: true }) as [IdValue, Uint8Array][]) words.set(key(id), text.decode(w));
+  };
+  const readText = async (file: string, p = ptr) => addWords(await get(new URL(path(p, file), stream)));
+  // A part's file (`suffix` '') or its words ('.text'), with the next AHEAD the pointer names already asked for.
+  const fetching = new Map<string, Promise<Uint8Array | null>>();
+  const partFile = (p: StreamPointer, n: number, suffix: string): Promise<Uint8Array | null> => {
+    for (let k = n; k < n + AHEAD && k <= (p.newest ?? n); k++) {
+      const file = path(p, `${k}${suffix}`);
+      if (!fetching.has(file)) fetching.set(file, get(new URL(file, stream)).catch(() => null));
+    }
+    const file = path(p, `${n}${suffix}`);
+    const bytes = fetching.get(file) ?? get(new URL(file, stream));
+    fetching.delete(file);
+    return bytes;
   };
   const query = (q: Map<number, unknown>) => decode(player.query(encode(q)), { useMaps: true });
   const resolveWords = (nodes: NodeRec[]) => {
@@ -146,12 +162,36 @@ async function run(stream: URL) {
     player = nextPlayer; version = nextVersion; active = p.generation;
     previous?.free();
     resolveWords(nodes);
-    const removed = [...known.keys()].filter(id => !nodes.some(n => n.id === id));
-    observe(nodes, removed, []);
+    showAll(nodes);
+  };
+  // The whole public copy as one snapshot: what a baseline or a catch-up shows.
+  const showAll = (nodes: NodeRec[]) => {
+    const present = new Set(nodes.map(n => n.id));
+    observe(nodes, [...known.keys()].filter(id => !present.has(id)), []);
+  };
+  // #3822: a joiner far behind plays the parts the clock would cut past anyway (more than BEHIND_US + CUT_US before
+  // the newest) deferred: no digest each, nothing read back or posted. The state they make is then checked against
+  // the newest claimed digest once and shown as one snapshot; the parts after it play as before.
+  const catchUp = async (p: StreamPointer, last: number): Promise<boolean> => {
+    let any = false;
+    while (Number(player.next()) <= last) {
+      const n = Number(player.next());
+      const [bytes, said] = await Promise.all([partFile(p, n, ''), partFile(p, n, '.text')]);
+      if (!bytes) break;
+      version = JSON.parse(player.playDeferred(bytes)).version;
+      addWords(said);
+      any = true;
+    }
+    if (!any) return false;
+    player.verify();
+    const nodes = (decode(player.snapshot(), { useMaps: true }) as Map<number, unknown>[]).map(nodeRec);
+    resolveWords(nodes);
+    showAll(nodes);
+    return true;
   };
   const playOne = async (p: StreamPointer): Promise<boolean> => {
     const n = Number(player.next());
-    const bytes = await get(new URL(path(p, String(n)), stream));
+    const bytes = await partFile(p, n, '');
     if (!bytes) return false;
     const played = JSON.parse(player.play(bytes));
     const changed = query(new Map<number, unknown>([[1, 5], [2, version]])) as [IdValue, number][];
@@ -200,7 +240,12 @@ async function run(stream: URL) {
       }
       ptr = latest;
       tell();
+      const far = Math.ceil((BEHIND_US + CUT_US) / ptr.period);
       while (ptr.newest !== null && Number(player.next()) <= ptr.newest) {
+        if (ptr.newest - Number(player.next()) > far) {
+          if (!(await catchUp(ptr, ptr.newest - far))) break;
+          continue;
+        }
         if (!(await playOne(ptr))) break;
         if (Number(player.next()) > (ptr.newest ?? -1)) tell();
       }

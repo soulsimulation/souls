@@ -732,6 +732,8 @@ pub struct PublicPlayer {
     samples: Vec<HandOff>,
     events: Vec<Value>,
     record: u64,
+    /// `digest` is the newest part's claim, not yet worked out from `state` (parts played deferred, #3822).
+    unverified: bool,
 }
 impl PublicPlayer {
     pub fn start(header: &[u8], baseline: &[u8]) -> R<Self> {
@@ -762,6 +764,7 @@ impl PublicPlayer {
             samples: Vec::new(),
             events: Vec::new(),
             record: uint(field(&m, 4)?)?,
+            unverified: false,
         })
     }
     pub fn state(&self) -> &Value {
@@ -858,6 +861,32 @@ impl PublicPlayer {
         digest(&self.state)
     }
     pub fn play(&mut self, bytes_: &[u8]) -> R<Played> {
+        self.play_digest(bytes_, true)
+    }
+    /// [`PublicPlayer::play`] without working out the next state's digest (#3822): every check but that one, the
+    /// part's claimed result digest kept as the state's, so the next part's prior digest still has to match it. A
+    /// joiner far behind plays the parts it will not show this way, then [`PublicPlayer::verify`] (or the next part
+    /// played checked) works out the digest of the state they made and refuses it unless it is the newest claimed one.
+    pub fn play_deferred(&mut self, bytes_: &[u8]) -> R<Played> {
+        self.play_digest(bytes_, false)
+    }
+    /// Works out the state's digest when parts were played deferred since it was last worked out, and refuses the
+    /// state (`stream-digest`) unless it is the digest the newest part claimed.
+    pub fn verify(&mut self) -> R<()> {
+        if !self.unverified {
+            return Ok(());
+        }
+        let actual = match self.enc.as_deref() {
+            Some(enc) => streamed_digest(&self.state, enc, None)?,
+            None => digest(&self.state)?,
+        };
+        if actual != self.digest {
+            return refuse("stream-digest", "the parts played deferred do not make the claimed state");
+        }
+        self.unverified = false;
+        Ok(())
+    }
+    fn play_digest(&mut self, bytes_: &[u8], check: bool) -> R<Played> {
         let sp = StreamPart::read(bytes_)?;
         if sp.number != self.next {
             return refuse("stream-gap", "public part number");
@@ -887,6 +916,7 @@ impl PublicPlayer {
         };
         let mut plan = plan;
         let in_place_digest = match &plan {
+            _ if !check => Some(bytes(field(&c, 4)?)?.to_vec()),
             Some(p) => {
                 self.encodings()?;
                 let enc = self.enc.as_deref().unwrap_or_default();
@@ -931,6 +961,7 @@ impl PublicPlayer {
                     (None, None) => {}
                 }
                 self.digest = digest;
+                self.unverified = !check;
                 self.finish(sp, part, changes, record, version)
             }
             (Err(e), _) => {

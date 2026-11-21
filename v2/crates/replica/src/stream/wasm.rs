@@ -94,6 +94,27 @@ impl WasmPlayer {
         .map_err(js)
     }
 
+    /// [`WasmPlayer::play`] for a part a joiner far behind will not show (#3822): every check but the next state's
+    /// digest, which [`WasmPlayer::verify`] or the next part played with `play` works out once. A legacy copy plays it
+    /// checked.
+    #[wasm_bindgen(js_name = playDeferred)]
+    pub fn play_deferred(&mut self, bytes: &[u8]) -> Result<String, JsError> {
+        match &mut self.0 {
+            Copy::Legacy(p) => p.play(bytes),
+            Copy::Public(p) => p.play_deferred(bytes),
+        }
+        .map(|p| p.to_json())
+        .map_err(js)
+    }
+
+    /// Refuses (`stream-digest`) unless the state the deferred parts made has the digest the newest part claimed.
+    pub fn verify(&mut self) -> Result<(), JsError> {
+        match &mut self.0 {
+            Copy::Legacy(_) => Ok(()),
+            Copy::Public(p) => p.verify().map_err(js),
+        }
+    }
+
     /// The number of the part it expects next.
     pub fn next(&self) -> u64 {
         match &self.0 {
