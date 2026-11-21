@@ -794,8 +794,7 @@ fn c20_a3_a_soul_walks_across_the_town_and_uses_a_thing_by_its_form() {
     assert!(all > 40_000_000);
 }
 
-/// A gateway walk of over 600 m across Eden, from the births to a far corner of the town (a point of one of N5's
-/// seeded route pairs, 650 m away as the crow flies), ends done (#1960): its
+/// A gateway walk of over 600 m across Eden, from the births to a point 650 to 900 m away by the map, ends done (#1960): its
 /// deadline follows its planned route, with no 180 s cap. Before, every walk over about 250 m ended `act.timed-out`
 /// while still moving. Takes about ten minutes of world time at 1/1.
 #[test]
@@ -803,8 +802,36 @@ fn c20_a3_a_soul_walks_across_the_town_and_uses_a_thing_by_its_form() {
 fn a_600_m_walk_across_eden_ends_done() {
     let facts = facts_path();
     let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
-    let ground = im.nodes["ground"];
-    let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "long", im.nodes["world"].scope());
+    let (ground, lineage) = (im.nodes["ground"], im.nodes["world"].scope());
+    // The far point: the first on a 50 m grid of the open ground whose route from the births is 650 to 900 m by the map.
+    let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
+    let next = im.tree.to_state().next;
+    let town = sim::walk::town::Town::new(
+        im.tree,
+        ground,
+        sim::links::Doors::new(header, im.rules, next),
+    )
+    .expect("the town");
+    let v = |x: i64, z: i64| replica::pose::Vec3::new(x * 1_000_000, 0, z * 1_000_000);
+    let from = town
+        .map
+        .spot(ground, v(74, -1))
+        .expect("the births on the map");
+    let (fx, fz, length) = (-10..=10)
+        .flat_map(|i| (-10..=10).map(move |j| (i * 50, j * 50)))
+        .find_map(|(x, z)| {
+            let to = town.map.spot(ground, v(x, z))?;
+            let r = town
+                .map
+                .route(&town.tree, from, to, sim::routes::ALL)
+                .ok()?;
+            (650_000..900_000)
+                .contains(&r.length)
+                .then_some((x, z, r.length))
+        })
+        .expect("a point 650 to 900 m away by the map");
+    println!("to ({fx}, {fz}) m, {:.0} m by the map", length as f64 / 1e3);
+    let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "long", lineage);
     soul.0
         .set_read_timeout(Some(Duration::from_secs(1_500)))
         .unwrap();
@@ -812,7 +839,7 @@ fn a_600_m_walk_across_eden_ends_done() {
         let v = (m * 1e6) as i64;
         u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
     };
-    let to = Value::Array(vec![um(-373.333), um(0.0), um(474.666)]);
+    let to = Value::Array(vec![um(fx as f64), um(0.0), um(fz as f64)]);
     let t0 = answers::now();
     let walked = soul.act_within(
         "eden:walk",
