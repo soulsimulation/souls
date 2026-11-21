@@ -241,15 +241,26 @@ mod served {
     #[ignore = "needs the generated Eden 2026 facts file and a built worldd"]
     fn b16_served_eden_winds_down_a_soul_whose_agent_went_and_wakes_it_on_return() {
         let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
-        let facts = std::env::var("EDEN_FACTS").unwrap_or_else(|_| format!("{root}/.local/import-eden/eden-2026.facts.json"));
-        let at = std::env::var("B16_AT").unwrap_or_else(|_| "67.5,-12".to_owned());
         let dir: PathBuf = std::env::temp_dir().join(format!("b16-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
+        // `B16_TESTWORLD=1`: N2's test world instead of Eden, its Soul born west of the square.
+        let test_world = std::env::var("B16_TESTWORLD").is_ok();
+        let (facts, entries, at) = if test_world {
+            let f = std::env::temp_dir().join(format!("b16-facts-{}.json", std::process::id()));
+            std::fs::write(&f, testworld::generate(1, 0).expect("the test world").text).unwrap();
+            (f.display().to_string(), format!("{root}/content/kinds/doors"), "-40,30".to_owned())
+        } else {
+            (
+                std::env::var("EDEN_FACTS").unwrap_or_else(|_| format!("{root}/.local/import-eden/eden-2026.facts.json")),
+                format!("{root}/content/kinds"),
+                std::env::var("B16_AT").unwrap_or_else(|_| "67.5,-12".to_owned()),
+            )
+        };
         let worldd = env!("CARGO_BIN_EXE_worldd");
         let seeded = Command::new(worldd)
             .args(["seed", "--facts", &facts, "--dir"])
             .arg(&dir)
-            .args(["--entries", &format!("{root}/content/kinds"), "--souls", "0", "--at", &at])
+            .args(["--entries", &entries, "--souls", "0", "--at", &at])
             .output()
             .unwrap();
         assert!(seeded.status.success(), "{}", String::from_utf8_lossy(&seeded.stderr));
