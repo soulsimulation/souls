@@ -4,7 +4,7 @@
 // holds every pose. Which pose a body is in beyond walk and idle is V7's.
 import type * as THREE from 'three';
 import { bakeBytes, decodeBaked, loadModel } from './bake.ts';
-import type { BodyMotion } from '../../../../mars/viewer/engine/bodies/motion.ts';
+import type { BodyMotion } from './creature/motion.ts';
 import { Crowd } from './crowd.ts';
 
 /** The body files of today's people (character-wire.ts's names) and the clips baked for each. */
