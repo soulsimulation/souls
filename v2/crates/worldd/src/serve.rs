@@ -1790,7 +1790,9 @@ fn serve(args: &[String]) -> R<()> {
         crate::watchdog::Real::start(),
         crate::watchdog::LIMIT_MS,
     );
+    stamp("P watchers");
     let mut writer = view_out::PublicWriter::open(public_start, stream_store).map_err(refusal)?;
+    stamp("P writer open");
     // Both the pointer and placement bootstrap resolve the existing strict public history export.
     let history = "history/";
     let pointer = format!(
@@ -1800,12 +1802,14 @@ fn serve(args: &[String]) -> R<()> {
     view_out::write_whole(&views.join("world.json"), pointer.as_bytes()).map_err(refusal)?;
     // Physical cursor includes input records; public effect versions are independently validated by the observer.
     writer.bridge_to(found.first).map_err(refusal)?;
+    stamp("P bridged");
     for (offset, bytes) in found.records.iter().enumerate() {
         let record = found.first + offset as u64;
         if record >= writer.source_cursor() {
             writer.push(record, bytes).map_err(refusal)?;
         }
     }
+    stamp("P pushed");
     writer.flush().map_err(refusal)?;
     stamp("public stream");
     drop(found);
