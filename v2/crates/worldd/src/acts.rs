@@ -617,9 +617,15 @@ impl Sight<'_> {
                 if own_floor {
                     return Some([p.x, p.z]);
                 }
-                view.on_floor(target, p)
-                    .filter(|(f, ..)| *f == floor)
-                    .map(|(_, p, _)| [p.x, p.z])
+                if let Some(on) = view.on_floor(target, p).filter(|(f, ..)| *f == floor) {
+                    return Some([on.1.x, on.1.z]);
+                }
+                // A thing of a building with floors (an inner door, #3688), from a body on that building's floor.
+                let place = n.place()?;
+                let up = place.position.plus(place.orientation.rotate(p).ok()?).ok()?;
+                self.floor_of(n.parent()?, up)
+                    .filter(|(f, _)| *f == floor)
+                    .map(|(_, p)| [p.x, p.z])
             };
             let q = [from.x, from.z];
             let named = um(entry
