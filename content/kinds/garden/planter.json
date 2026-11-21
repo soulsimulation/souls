@@ -3,7 +3,7 @@
   "kind": "eden:planter",
   "owner": "thing",
   "state": {
-    "water": { "n": 28, "type": "timed", "unit": "mg", "default": { "value": 400000, "per_s": -5, "set_us": 0 }, "min": 0, "max": 4000000, "audience": { "rule": "everyone" } },
+    "water": { "n": 28, "type": "timed", "unit": "mg", "default": { "value": 400000, "per_s": -15, "set_us": 0 }, "min": 0, "max": 4000000, "audience": { "rule": "everyone" } },
     "stage": { "n": 29, "type": "enum", "values": ["bare", "seed", "sprout", "leafy", "flowering", "fruiting"], "default": "bare", "audience": { "rule": "everyone" } },
     "ripening": { "n": 30, "type": "timed", "unit": "count", "default": { "value": 0, "per_s": 1, "set_us": 0 }, "min": 0, "audience": { "rule": "everyone" } },
     "fruit": { "n": 31, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } },
@@ -107,7 +107,7 @@
         { "step": "move", "move": "pour", "at": "soil" }
       ],
       "effects": [
-        { "change": "set", "field": "water", "to": 4000000, "rate": -5, "event": "watered" },
+        { "change": "set", "field": "water", "to": 4000000, "rate": -15, "event": "watered" },
         { "change": "timer", "form": "sprout", "after_us": 86400000000, "event": "sprout_due" },
         { "change": "timer", "form": "leaf", "after_us": 86400000000, "event": "leaf_due" },
         { "change": "timer", "form": "flower", "after_us": 86400000000, "event": "flower_due" },
