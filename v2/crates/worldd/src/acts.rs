@@ -539,9 +539,7 @@ impl Geometry for Sight<'_> {
                     return Some((node, at, skills::form_runner::REACH));
                 }
                 let short = skills::form_runner::APPROACH_SHORT;
-                // At the height of the floor the body stands on: a point the spot table takes as it is must be on it.
-                let mut aim = skills::form_runner::short_of(p, me.pose.position, short);
-                aim.y = me.pose.position.y;
+                let aim = skills::form_runner::short_of(p, me.pose.position, short);
                 Some((floor, aim, reach + flat([aim.x, aim.z], [p.x, p.z])))
             })
             .flatten()
