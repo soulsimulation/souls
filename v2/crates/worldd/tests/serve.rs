@@ -493,6 +493,97 @@ fn serves_walks_and_restarts(w: Served, d: &Path, dir: &Path, body: Id, root: Id
     let _ = std::fs::remove_dir_all(d);
 }
 
+/// #3837 A1, A2, A4: a served world whose log is compacted while it runs restarts from its newest checkpoint and the
+/// log after the cut, with the last logged tick's state hash; and the same log uncompacted, replayed from record 0
+/// with no checkpoint, gives the same state. The bytes before the cut are a hole on the disk.
+#[test]
+fn i3837_a_compacted_world_restarts_with_the_state_of_a_full_replay() {
+    let d = scratch("i3837");
+    let (dir, body, root, ground) = seeded(&d);
+    let socket = d.join("s");
+    // A second name for the log as written: compaction renames a new file over `log`, and this one keeps the bytes
+    // before the cut (they are the same bytes at the same offsets in both).
+    let keep = d.join("log.keep");
+    std::fs::hard_link(dir.join("log"), &keep).unwrap();
+    let w = serve_with(&dir, &socket, &["--compact-after".as_ref(), "1".as_ref()]);
+    w.line("worldd: started at tick");
+    let mut s = connect(&socket);
+    let mut compacted = None;
+    for seq in 1..=60u64 {
+        let x = if seq % 2 == 0 { -40 } else { -34 };
+        walk(&mut s, body, root.scope(), ground, seq, x, 30);
+        assert_eq!(answer(&mut s).0, 1, "walk {seq} ends in a receipt");
+        compacted = first_line(&w.lines, &w.early, "log: compacted", Duration::from_millis(200));
+        if compacted.is_some() {
+            break;
+        }
+    }
+    let compacted = compacted.expect("the log was compacted while the world ran");
+    println!("{compacted}");
+    // The world goes on after the compaction, writing to the compacted file.
+    walk(&mut s, body, root.scope(), ground, 100, -37, 33);
+    assert_eq!(answer(&mut s).0, 1);
+    std::thread::sleep(Duration::from_millis(500));
+    w.kill();
+
+    let log = dir.join("log");
+    let cut = sim::log::compact::read_cut(&log).unwrap().expect("a cut file");
+    assert!(cut.at.record > 0);
+    let before = last_state(&log);
+    let (l, found) = Log::open(FileStore::open(&log).unwrap(), 1).unwrap();
+    drop(l.close());
+    assert_eq!(found.first, cut.at.record, "a compacted log is read from its cut");
+    {
+        use std::os::unix::fs::MetadataExt;
+        let m = std::fs::metadata(&log).unwrap();
+        println!(
+            "A2: log {} bytes long, {} on the disk, cut at record {} byte {}",
+            m.len(),
+            m.blocks() * 512,
+            cut.at.record,
+            cut.at.offset
+        );
+    }
+
+    // The same log uncompacted: the kept bytes before the cut, the compacted file's from it.
+    let full = d.join("full");
+    copy_tree(&dir, &full);
+    let mut bytes = std::fs::read(&keep).unwrap();
+    bytes.truncate(cut.at.offset as usize);
+    bytes.extend_from_slice(&std::fs::read(&log).unwrap()[cut.at.offset as usize..]);
+    std::fs::write(full.join("log"), bytes).unwrap();
+    std::fs::remove_file(full.join("log.cut")).unwrap();
+    std::fs::remove_dir_all(full.join("checkpoints")).unwrap();
+    let _ = std::fs::remove_file(full.join("gateway.sock"));
+    let w = serve(&full, &d.join("f"));
+    let replayed = w.line("worldd: started at tick");
+    println!("A2 full replay: {replayed}");
+    w.kill();
+
+    let w = serve(&dir, &socket);
+    let restart = w.line("restart: ");
+    let started = w.line("worldd: started at tick");
+    println!("A1: last logged state {before}; {restart}; {started}");
+    assert!(restart.starts_with("restart: checkpoint Some("), "{restart}");
+    assert!(started.ends_with(&format!("state {before}")), "the last logged state");
+    assert!(replayed.ends_with(&format!("state {before}")), "a full replay's state");
+    w.kill();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for e in std::fs::read_dir(from).unwrap().flatten() {
+        let (p, t) = (e.path(), to.join(e.file_name()));
+        let kind = e.file_type().unwrap();
+        if kind.is_dir() {
+            copy_tree(&p, &t);
+        } else if kind.is_file() {
+            std::fs::copy(&p, &t).unwrap();
+        }
+    }
+}
+
 /// The log's records on the disk, from record 0.
 fn logged(log: &Path) -> Vec<Vec<u8>> {
     let (l, found) = Log::open(FileStore::open(log).expect("the log"), 1).expect("opens");

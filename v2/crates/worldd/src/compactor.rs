@@ -23,12 +23,12 @@ use sim::log::compact::{self, Cut};
 use sim::log::{At, Durable};
 
 /// How often the compactor looks.
-pub const EVERY: Duration = Duration::from_secs(10);
+pub const EVERY: Duration = Duration::from_secs(2);
 
-/// The least a cut gives back (bytes of log).
+/// The least a cut gives back (bytes of log), unless `worldd serve --compact-after <bytes>` says otherwise.
 pub const MIN_DEAD: u64 = 64 << 20;
 
-/// Samples of the durable place kept (one each [`EVERY`] the log moved: over 11 hours).
+/// Samples of the durable place kept (one each [`EVERY`] the log moved: over 2 hours).
 const SAMPLES: usize = 4096;
 
 /// The archive's part numbers, by the record each was taken from (rule 5), and how far its closed objects reach.
@@ -131,14 +131,14 @@ impl Floors {
 }
 
 /// One look (rules 2 to 4): the cut to make now, if any.
-fn choose(samples: &VecDeque<At>, floor: u64, kept_from: u64) -> Option<At> {
+fn choose(samples: &VecDeque<At>, floor: u64, kept_from: u64, min_dead: u64) -> Option<At> {
     let i = samples.partition_point(|a| a.record <= floor);
     let at = *samples.get(i.checked_sub(1)?)?;
-    (at.offset >= kept_from.saturating_add(MIN_DEAD)).then_some(at)
+    (at.offset >= kept_from.saturating_add(min_dead.max(1))).then_some(at)
 }
 
-/// Starts the compactor for the log at `log`.
-pub fn spawn(log: PathBuf, durable: Durable, floors: Floors) {
+/// Starts the compactor for the log at `log`; a cut gives back at least `min_dead` bytes.
+pub fn spawn(log: PathBuf, durable: Durable, floors: Floors, min_dead: u64) {
     let started = std::thread::Builder::new()
         .name("log-compactor".into())
         .spawn(move || {
@@ -181,7 +181,7 @@ pub fn spawn(log: PathBuf, durable: Durable, floors: Floors) {
                         continue;
                     }
                 };
-                let Some(at) = choose(&samples, floor, kept_from) else {
+                let Some(at) = choose(&samples, floor, kept_from, min_dead) else {
                     continue;
                 };
                 let note = match &floors.archive {
@@ -223,10 +223,14 @@ mod tests {
         let s: VecDeque<At> = [at(10, MIN_DEAD), at(20, 2 * MIN_DEAD), at(30, 3 * MIN_DEAD)]
             .into_iter()
             .collect();
-        assert_eq!(choose(&s, 25, 0), Some(at(20, 2 * MIN_DEAD)));
-        assert_eq!(choose(&s, 9, 0), None, "nothing at or before the floor");
+        assert_eq!(choose(&s, 25, 0, MIN_DEAD), Some(at(20, 2 * MIN_DEAD)));
         assert_eq!(
-            choose(&s, 25, MIN_DEAD + 1),
+            choose(&s, 9, 0, MIN_DEAD),
+            None,
+            "nothing at or before the floor"
+        );
+        assert_eq!(
+            choose(&s, 25, MIN_DEAD + 1, MIN_DEAD),
             None,
             "less than the grace given back"
         );

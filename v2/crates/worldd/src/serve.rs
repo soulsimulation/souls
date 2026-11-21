@@ -16,7 +16,8 @@
 //!   An entry whose `roles` name two or more roles is also an activity kind (C30, [`activity_kinds`]).
 //!   `moves.json`, when there, is each move's reach (`{<move>: {reach_mm}}`).
 //! - `log`: K4's log. Its first record is the import's part, every node and link the loader committed, so the log
-//!   holds the world from empty and a stream written from it draws the whole world.
+//!   holds the world from empty and a stream written from it draws the whole world. Once compacted (`compactor`,
+//!   #3837), the bytes before `log.cut` are a hole and the log is read from the cut.
 //! - `checkpoints/`: K5's, taken by K18c's rule; a start resumes from the newest that verifies.
 //! - `tokens`: the gateway's tokens file, `<grant> <sha-256 hex>` per Soul, never a token. `souls.tokens` (mode 0600)
 //!   holds the Souls' tokens themselves, for a local client; it is never copied off the machine.
@@ -29,8 +30,11 @@
 //!   `$WORLDD_SOCKET` names another (a placed world's: a socket's path is at most 108 bytes, and a world folder's
 //!   name is 67). `health.json`: O4's.
 //!
-//! **A start** reads the log through once (its records feed the stream from record 0), then hands it to K18's loop
-//! (`answers::start`), which restores the newest checkpoint and replays the records after it. It prints `worldd:
+//! **A start** reads the log through once from its cut (its records feed the stream from its own cursor), restores
+//! the newest checkpoint and builds the towns and the views' hub from it and the records after it (#3837), then hands
+//! the log to K18's loop (`answers::start`), which restores the same checkpoint and replays the same records. With no
+//! checkpoint the log is read and replayed from record 0; a compacted log with none that verifies is refused
+//! (`log-compacted-past-checkpoint`). It prints `worldd:
 //! started at tick <n> state <hash>`: after a SIGKILL that hash is the last logged tick's (K18's A3), bodies included.
 //! Each record the loop syncs comes back on [`answers::Config::synced`] and goes to the public observer, off the clock
 //! thread. No body stands on a first start; after it, each body the log has stands where the log last had it.
@@ -1785,9 +1789,10 @@ fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
     Ok(creator)
 }
 
-/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] [--machine
-/// <name>] [--rate <num>/<den>]`: runs the world until killed. A checkpoint is taken each `--checkpoint-every` bytes
-/// of log (default 8 MiB). The clock's rate is world µs per real µs (default 1/1); a start whose rate differs from the
+/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--compact-after <bytes>]
+/// [--store <store>] [--machine <name>] [--rate <num>/<den>]`: runs the world until killed. A checkpoint is taken each
+/// `--checkpoint-every` bytes of log (default 8 MiB); the log is compacted once every reader has passed at least
+/// `--compact-after` bytes of it (default 64 MiB, `compactor`). The clock's rate is world µs per real µs (default 1/1); a start whose rate differs from the
 /// last logged applies a new mapping, and the mapping in force is on the zone root for every copy (E7b, #3516).
 pub fn run(args: &[String]) -> i32 {
     match serve(args) {
@@ -1803,8 +1808,8 @@ fn serve(args: &[String]) -> R<()> {
     let _ = STARTED.set(std::time::Instant::now());
     stamp("launch");
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
-        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] \
-         [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
+        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] \
+         [--compact-after <bytes>] [--store <store>] [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
     )?);
     let socket = arg(args, "--socket")
         .map(PathBuf::from)
@@ -2050,6 +2055,9 @@ fn serve(args: &[String]) -> R<()> {
         n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
     })?;
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
+    let compact_after = arg(args, "--compact-after").map_or(Ok(crate::compactor::MIN_DEAD), |n| {
+        n.parse::<u64>().map_err(|_| "--compact-after <bytes>")
+    })?;
     cfg.health = Some(dir.join("health.json"));
     cfg.rate = Some(match arg(args, "--rate") {
         Some(r) => r
@@ -2197,6 +2205,7 @@ fn serve(args: &[String]) -> R<()> {
             shipped,
             archive: archive_floor,
         },
+        compact_after,
     );
     let door = world.door();
     // The directory's word on the Souls (W11b): its file read now, before any intent is served, and again on a change.
