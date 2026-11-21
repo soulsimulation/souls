@@ -541,10 +541,7 @@ impl<S: Store> Worlds<S> {
             );
         }
         if words.chars().any(|c| c.is_control() && c != '\n') {
-            return refuse(
-                "welcome-not-text",
-                "no control characters but line breaks".into(),
-            );
+            return refuse("welcome-not-text", "no control characters but line breaks");
         }
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let (etag, rows) = read_rows(&inner.dir.store)?;
