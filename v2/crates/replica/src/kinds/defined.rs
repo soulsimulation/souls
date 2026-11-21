@@ -254,6 +254,27 @@ pub fn defines(tree: &Tree, full: &Name) -> bool {
     })
 }
 
+/// The rules of `full`, a kind defined in `tree` (or `souls:kind` itself), by the loader; `None` for any other. Reads
+/// the root's children and the one record that names it.
+pub fn kind_named(tree: &Tree, full: &str) -> Option<Kind> {
+    if is_definition(full) {
+        return Some(kind().1.clone());
+    }
+    let root = tree.root();
+    let n = tree
+        .children(root)?
+        .iter()
+        .filter_map(|h| tree.node(*h))
+        .find(|n| is_definition(n.kind().as_str()) && named(n.fields()) == Some(full))?;
+    let Some(Value::Bytes(b)) = n.fields().get(&ENTRY) else {
+        return None;
+    };
+    read(b, &|_| false)
+        .ok()
+        .filter(|d| d.full == full)
+        .map(|d| d.kind)
+}
+
 /// The loader: the kinds a world's `souls:kind` nodes define, with `souls:kind` itself, by full name. A node whose
 /// record no longer reads (it never should: each was checked when committed) is left out.
 pub fn kinds_in(tree: &Tree) -> BTreeMap<String, Kind> {
