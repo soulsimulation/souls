@@ -39,9 +39,12 @@ export function stateOf(copy, kinds, me) {
     const bytes = copy.record(todo.pop());
     if (!bytes) continue;
     const m = decode(bytes), id = idText(m.get(1)), kind = plainKind(m.get(2));
-    const byN = Object.fromEntries(Object.entries(kinds[kind]?.state ?? {}).map(([name, def]) => [def.n, name]));
+    const defs = kinds[kind]?.state ?? {};
+    const byN = Object.fromEntries(Object.entries(defs).map(([name, def]) => [def.n, name]));
     const fields = {};
-    if (m.get(6) instanceof Map) for (const [n, v] of m.get(6)) if (byN[n]) fields[byN[n]] = plain(v);
+    // An enum's value is held as a name (`souls:stand`); the entry lists its values by their local part (`stand`).
+    const valueOf = (def, v) => (def?.type === 'enum' && typeof v === 'string' && def.values?.includes(v.replace(/^[^:]*:/, '')) ? v.replace(/^[^:]*:/, '') : v);
+    if (m.get(6) instanceof Map) for (const [n, v] of m.get(6)) if (byN[n]) fields[byN[n]] = valueOf(defs[byN[n]], plain(v));
     nodes[id] = { ...nodes[id], kind, ...(Object.keys(fields).length ? { fields } : {}) };
     for (const c of m.get(10) ?? []) todo.push(Buffer.from(c).toString('hex'));
   }
