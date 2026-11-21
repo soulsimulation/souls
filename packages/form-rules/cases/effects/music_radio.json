@@ -204,7 +204,7 @@
     "r1": {
      "kind": "eden:radio",
      "fields": {
-      "on": false,
+      "on": 0,
       "station": "quiet_piano"
      }
     }
