@@ -121,8 +121,9 @@ fn soul_of(tree: &Tree, id: Id) -> Id {
         .map_or(id, |e| e.other)
 }
 
-/// The most records made for askers kept at once, oldest let go first: enough for a descent that spans versions.
-const MADE_MOST: usize = 4096;
+/// The most records of askers' past redactions kept, oldest let go first: for a descent that spans versions. A Soul's
+/// current redaction keeps its own records, which nothing lets go while it is current.
+pub(crate) const MADE_MOST: usize = 4096;
 
 /// One asker's view of the sealed tree with the closed contents it may not see left out: each container that holds
 /// some has a record without their hashes, and so has each ancestor up to its top, each with its own hash, so the
@@ -133,6 +134,8 @@ pub(crate) struct Redaction {
     hashes: BTreeMap<Id, Hash>,
     /// The real hashes of the rewritten records: never served to this asker.
     replaced: BTreeSet<Vec<u8>>,
+    /// The rewritten records by their hash.
+    records: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
 /// The sync thread's side: the closed kinds, who put each thing in, and the records rewritten for askers.
@@ -273,7 +276,9 @@ impl Withhold {
             .is_none_or(|(v, _)| *v != version)
         {
             let r = self.redact(tree, version, asker, records);
-            self.redactions.insert(soul, (version, r));
+            if let Some((_, old)) = self.redactions.insert(soul, (version, r)) {
+                self.keep_past(old.records);
+            }
         }
     }
 
@@ -361,15 +366,7 @@ impl Withhold {
             };
             let h = Hash::of(purpose, &bytes);
             let hb = h.to_bytes();
-            if !self.made.contains_key(&hb) {
-                self.made_order.push_back(hb.clone());
-                self.made.insert(hb.clone(), bytes);
-                while self.made_order.len() > MADE_MOST {
-                    if let Some(k) = self.made_order.pop_front() {
-                        self.made.remove(&k);
-                    }
-                }
-            }
+            out.records.insert(hb.clone(), bytes);
             new_of.insert(old.clone(), hb);
             out.replaced.insert(old);
             out.hashes.insert(id, h);
@@ -377,9 +374,35 @@ impl Withhold {
         out
     }
 
-    /// A record made for an asker, by its hash.
-    pub(crate) fn made(&self, hash: &[u8]) -> Option<&Vec<u8>> {
-        self.made.get(hash)
+    /// Keeps a past redaction's records, at most [`MADE_MOST`], oldest let go first.
+    fn keep_past(&mut self, records: BTreeMap<Vec<u8>, Vec<u8>>) {
+        for (h, b) in records {
+            if self.made.insert(h.clone(), b).is_none() {
+                self.made_order.push_back(h);
+            }
+        }
+        while self.made_order.len() > MADE_MOST {
+            if let Some(k) = self.made_order.pop_front() {
+                self.made.remove(&k);
+            }
+        }
+    }
+
+    /// A record made for `asker`, by its hash: from its current redaction, which is never let go while current, else
+    /// from the past ones kept.
+    pub(crate) fn made(&self, asker: Option<Actor>, hash: &[u8]) -> Option<&Vec<u8>> {
+        self.redaction(asker)
+            .and_then(|r| r.records.get(hash))
+            .or_else(|| self.made.get(hash))
+    }
+
+    /// Fills the store of past records with `n` records no asker needs (tests).
+    #[cfg(test)]
+    pub(crate) fn fill_past(&mut self, n: usize) {
+        let filler = (0..n)
+            .map(|i| (format!("filler {i}").into_bytes(), vec![0u8]))
+            .collect();
+        self.keep_past(filler);
     }
 }
 

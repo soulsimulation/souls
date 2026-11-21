@@ -791,8 +791,18 @@ const NEAR_MM: i64 = 1_500;
 /// included.
 fn world_at(tree: &Tree, node: Id) -> Option<Vec3> {
     let n = tree.node(tree.handle(node)?)?;
-    let mut at = n.place().map_or(Vec3::ZERO, |p| p.position);
-    let mut up = n.parent();
+    carried(
+        tree,
+        n.parent(),
+        n.place().map_or(Vec3::ZERO, |p| p.position),
+    )
+}
+
+/// A position in node `frame`'s frame carried into the zone's: through each node's place up the tree, turns included
+/// (a seated body's controller pose is in its seat's frame).
+fn carried(tree: &Tree, frame: Option<Id>, local: Vec3) -> Option<Vec3> {
+    let mut at = local;
+    let mut up = frame;
     for _ in 0..64 {
         let Some(p) = up else { return Some(at) };
         let pn = tree.node(tree.handle(p)?)?;
@@ -1206,11 +1216,12 @@ impl Acts {
             // A thing the caller left out, which the form describes by a selector, is bound by it now (#3914); a
             // selector that finds nothing is refused by name, before any walk.
             let mut none_selected = None;
-            // The body's place in the zone's frame when it is not a node of the tree: its controller's, unseated.
+            // The body's place in the zone's frame when it is not a node of the tree: its controller's pose carried
+            // up from its frame (a seat's, when seated).
             let body_at = bodies
                 .as_deref()
                 .and_then(|b| b.runner.controller.body(body))
-                .map(|b| b.pose.position);
+                .and_then(|b| carried(tree, Some(b.pose.frame.node), b.pose.position));
             if let Some(f) = entry.get("forms").and_then(|f| f.get(form)) {
                 for (key, take) in f.get("takes").and_then(Json::obj).unwrap_or(&[]) {
                     if all.contains_key(key)

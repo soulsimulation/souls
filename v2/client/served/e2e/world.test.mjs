@@ -21,7 +21,7 @@
 //   (e) hide-and-seek (#3915): A takes an apple from an Eden swap shelf and hides it in an Eden hollow stump, whose entry is
 //       `closed`, with B standing by; B's copy, `find`, `look`, the stump's count of what it holds and the entries B's
 //       daemon is handed no longer name the apple, A's still do. An apple in an Eden fridge (closed to all but its
-//       opener) is in neither copy until B opens the fridge, and then in B's alone.
+//       opener) is in neither copy until B opens the fridge, then in B's alone, and out of B's again once B closes it.
 //
 // PENDING markers. An assertion that waits on an open fix runs inside `pending(<issue>, ...)`. While the fix is open it
 // fails, and the run prints `PENDING #<issue>: <what> (expected failure: <why>)` and goes on: never a silent skip. When
@@ -331,7 +331,8 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const stump = (await A.cli('find', 'stump')).found.find((r) => r.kind?.startsWith('eden:hollow_stump'));
   assert.ok(stump, 'the stump is found by its words');
   // B stands by the stump while A hides the apple, so A's entries are in B's interest.
-  assert.ok(accepted((await act(B, stump.id)).answer), "B walks to the stump");
+  const toStump = await act(B, stump.id);
+  assert.ok(accepted(toStump.answer), `B walks to the stump: ${JSON.stringify(toStump.answer)}`);
   // #3914: a search of the empty stump, within reach of it, is refused by name, not `arg-missing`.
   const emptySearch = await act(B, `search:${stump.id}`);
   assert.equal(emptySearch.answer.reason, 'thing.none-selected', `B's search of the empty stump: ${JSON.stringify(emptySearch.answer)}`);
@@ -368,6 +369,11 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   await waitFor("the fridge's apple in B's copy once B opened it", async () => (await cold(B)).length === 1, 20_000);
   assert.deepEqual(await cold(A), [], "(e) A, who did not open it, still holds nothing in the fridge");
   stage('the opener sees into the fridge');
+  // Leaving the audience: B closes the fridge (its opener link ends) and the apple leaves B's copy.
+  const shut = await act(B, `close:${fridge.id}`);
+  assert.ok(accepted(shut.answer), `B closes the fridge: ${JSON.stringify(shut.answer)}`);
+  await waitFor("the fridge's apple gone from B's copy once B closed it", async () => (await cold(B)).length === 0, 20_000);
+  stage('the fridge closed to B again');
 
   // The acts. A walks to the bench and sits on it.
   const bench = (await A.cli('find', 'bench')).found.find((r) => r.kind?.startsWith('eden:bench'));
