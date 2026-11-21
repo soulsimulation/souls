@@ -10,7 +10,7 @@ use replica::rules::json::Value as Json;
 use replica::tree::Tree;
 use replica::world_model::plain;
 use sim::edit::Planned;
-use sim::ground::scene::{FLOOR, ROOM};
+use sim::ground::scene::FLOOR;
 use sim::slots::{PlaceAt, Slots};
 
 pub struct Projection(Vec<(Ref, Vec<(PlaceAt, Ref)>)>);
@@ -34,7 +34,7 @@ fn on_floor(
     let mut turn = Quat::IDENTITY;
     for _ in 0..64 {
         let n = tree.node(tree.handle(node)?)?;
-        if Some(node) == ground || matches!(plain(n.kind().as_str()), FLOOR | ROOM) {
+        if Some(node) == ground || plain(n.kind().as_str()) == FLOOR {
             return Some((node, at, turn));
         }
         let p = n.place()?;

@@ -176,6 +176,7 @@ fn a_retirement_mid_sit_leaves_no_slot_link_or_timer() {
             &mut w.mint,
             &mut w.moves,
             &Near,
+            &w.floors,
             &[Request {
                 body,
                 thing: w.thing,
@@ -238,6 +239,7 @@ fn a_retirement_mid_sit_leaves_no_slot_link_or_timer() {
             &mut w.mint,
             &mut w.moves,
             &Near,
+            &w.floors,
             &[Request {
                 body: other,
                 thing: w.thing,
