@@ -395,7 +395,7 @@ impl Sight<'_> {
             return None;
         }
         self.kinds
-            .get(plain(n.kind()))?
+            .get(entry_of(&n))?
             .get("areas")?
             .get(point.as_str())?;
         let place = n.place()?;
@@ -603,7 +603,7 @@ impl Sight<'_> {
     fn to_thing(&self, body: Id, floor: Id, from: Vec3, target: Id, point: &Name) -> Option<i64> {
         self.with_view(body, |view| {
             let n = self.tree.node(self.tree.handle(target)?)?;
-            let entry = self.kinds.get(plain(n.kind()))?;
+            let entry = self.kinds.get(entry_of(&n))?;
             // A body on one of the thing's own floors (inside a greenhouse, C34 #3599) is in the thing's frame: a floor
             // is placed at its building's origin. Carried up the tree, the point would land on the ground cut out under it.
             let own_floor = self
@@ -787,6 +787,11 @@ pub struct Acts {
 /// The moves a form's step may name: every move content declares, and the body's own (C23, [`crate::moves`]).
 pub fn library() -> R<Vec<Move>> {
     crate::moves::library()
+}
+
+/// The name of a node's Soul Actions entry ([`import_eden::entry_name`]): the entry it names, else its kind's.
+fn entry_of<'a>(n: &'a replica::tree::NodeRef<'_>) -> &'a str {
+    import_eden::entry_name(n.kind().as_str(), n.fields())
 }
 
 /// The plain name (`namespace:name`) of a node's kind.
@@ -999,7 +1004,7 @@ impl Acts {
             let kind = tree
                 .handle(*node)
                 .and_then(|h| tree.node(h))
-                .map(|n| plain(n.kind()).to_owned());
+                .map(|n| entry_of(&n).to_owned());
             // A thing already gone is refused by name here, never handed to the runner (F4's known gap).
             let Some(kind) = kind else {
                 first.get_or_insert(refusal("thing-missing", replica::world_model::show(*node)));
@@ -1239,7 +1244,7 @@ impl Acts {
         let entry = tree
             .handle(node)
             .and_then(|h| tree.node(h))
-            .and_then(|n| self.kinds.get(plain(n.kind())).cloned());
+            .and_then(|n| self.kinds.get(entry_of(&n)).cloned());
         let asked = match entry {
             None => Err(refusal("thing-missing", replica::world_model::show(node))),
             Some(entry) => {
