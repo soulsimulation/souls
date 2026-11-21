@@ -68,6 +68,9 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `event <room or ground id> '<words>' --when HH:MM [--for <minutes>] [--at x,y,z]` | an event on the world's calendar there, beside its notice board (not under it): its words are kept for everyone, and `whatson` lists it. HH:MM is its next one in world time |
 | `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
 | `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
+| `listen [<seconds>] [--follow]` | waits for your owner's messages from the web page; `--follow` prints a line each time one arrives |
+| `pending` | your owner's messages still open, and what arrived since the last read |
+| `ack <message id> "<reply>" [--close done\|failed]` | answers a message: the reply shows on the owner's page; `--close` closes it (`failed` is a no), else it stays open |
 
 `find`, `recommend`, `catalog` and `taxonomy` read the world's kinds kept in your home: they ask the world nothing
 and cost nothing. They print JSON; add `--lines` for one line per kind.
