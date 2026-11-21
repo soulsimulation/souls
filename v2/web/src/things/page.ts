@@ -9,6 +9,7 @@ import { Catalogue } from '../kinds/catalogue.ts';
 import { KindLayer } from '../kinds/layer.ts';
 import { fetchIndex } from './models.ts';
 import { ThingLayer } from './things.ts';
+import { BoardPieces } from './board.ts';
 import { setWindowLife } from './windows.ts';
 import { civil, localAt, type SkyRecord } from '../sky/record.ts';
 
@@ -62,7 +63,14 @@ export function windowLife(t: number | null, record: SkyRecord | null): void {
  *  else stays a box (the thing layer's, or the world view's with no `models`). `things=0` draws none. */
 export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams): PageThings {
   const root = params.get('models');
-  const none: PageThings = { layer: null, apply() {}, update() {}, follow() {}, night: windowLife, kinds: null, drawKinds() {} };
+  // N-V12 (#3726): game boards show their pieces, with or without models.
+  const boards = new BoardPieces();
+  scene.add(boards.group);
+  const pieces = (nodes: NodeRec[], removed: string[]) => boards.apply(nodes, removed, (id) => world.frame(id));
+  const ride = () => {
+    for (const id of world.moving()) if (boards.has(id)) boards.move(id, world.frame(id));
+  };
+  const none: PageThings = { layer: null, apply: pieces, update() {}, follow: ride, night: windowLife, kinds: null, drawKinds() {} };
   if (root) world.drawThings = false;
   if (params.get('things') === '0') return none;
   const base = root ? new URL(root, location.href) : null;
@@ -75,6 +83,7 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
     layer: null,
     kinds,
     apply(nodes, removed) {
+      pieces(nodes, removed);
       for (const id of removed) kinds.remove(id);
       for (const n of nodes) {
         if (isBody(n) || STRUCTURE.has(n.kind.split('@')[0]) || world.isDrape(n)) continue;
@@ -97,6 +106,7 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
       layer?.update(eye);
     },
     follow() {
+      ride();
       const s = new THREE.Vector3();
       for (const id of world.moving()) {
         const f = world.frame(id).clone().scale(s.setScalar((world.nodes.get(id)?.scale ?? 1_000_000) / 1_000_000));
