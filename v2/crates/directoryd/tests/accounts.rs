@@ -834,13 +834,10 @@ fn c14_a1_a_soul_sets_its_status_line_through_the_gateway_and_anyone_reads_it() 
         (Some("asleep"), Some("zombie"))
     );
     assert_eq!(states("gateway-key", json!({ &b: "awake" })), 200);
-    assert!(
-        read(json!([b])).2["state"].as_object().unwrap().is_empty(),
-        "awake: no word"
-    );
+    assert!(read(json!([b])).2.get("state").is_none(), "awake: no word");
     assert_eq!(states("not-the-key", json!({ &b: "asleep" })), 401);
     assert!(
-        read(json!([b])).2["state"].as_object().unwrap().is_empty(),
+        read(json!([b])).2.get("state").is_none(),
         "only the gateway tells"
     );
 
