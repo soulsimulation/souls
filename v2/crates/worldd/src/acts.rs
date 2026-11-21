@@ -218,6 +218,16 @@ fn nearest_selected(tree: &Tree, body: Id, node: Id, take: &Json) -> Option<Id> 
         return None;
     }
     let kind = s("kind")?;
+    let held = tree
+        .handle(body)
+        .and_then(|h| tree.children(h))
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|&c| tree.node(c))
+        .find(|n| plain(n.kind()) == kind);
+    if let Some(n) = held {
+        return Some(n.id());
+    }
     let at = replica::select::position(tree, node).ok()?;
     let frame = replica::select::standing(tree, node).ok().map(|f| f.0);
     let r2 = i128::from(HERE) * i128::from(HERE);
@@ -231,9 +241,7 @@ fn nearest_selected(tree: &Tree, body: Id, node: Id, take: &Json) -> Option<Id> 
         if n.id() == node || plain(n.kind()) != kind {
             continue;
         }
-        if n.parent() == Some(body) {
-            return Some(n.id());
-        }
+
         let Ok(p) = replica::select::position(tree, n.id()) else {
             continue;
         };
