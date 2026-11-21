@@ -1773,11 +1773,11 @@ impl Clock {
         }
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
-            Some(_) => self
+            Some(_) if !self.forms.fixture_sit(self.replica.tree(), &intent) => self
                 .body_of(&intent)
                 .ok()
                 .and_then(|b| bodies::read(&intent, b)),
-            None => None,
+            _ => None,
         };
         let spotted = match self.bodies {
             Some(_) => spot_of(
