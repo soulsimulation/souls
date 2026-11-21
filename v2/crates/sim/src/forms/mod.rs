@@ -591,6 +591,22 @@ impl Forms {
             .collect()
     }
 
+    /// The bodies whose step in progress is a walk that is to be there, not to act from there: no `move`, `sit` or
+    /// `lie` comes next. The world may end such a walk to an area anywhere within reach of the area's circle.
+    pub fn goal_walks(&self) -> BTreeSet<Id> {
+        self.runs
+            .values()
+            .filter(|fr| {
+                matches!(fr.runner.step(), Some(Step::WalkTo { .. }))
+                    && !matches!(
+                        fr.runner.next_step(),
+                        Some(Step::Move { .. } | Step::Sit { .. })
+                    )
+            })
+            .map(|fr| fr.body)
+            .collect()
+    }
+
     /// Each body's run whose step in progress is a walk to its node's own point right before a `sit` or `lie` into a
     /// slot of that node: the step's number, the node and the slot. The world aims that walk at the seat's own stand
     /// point, as its places hold it (moved clear when the entry's point is blocked), not the entry's point.

@@ -320,6 +320,8 @@ struct Sight<'a> {
     /// Each run's walk in progress right before a sit into a slot the places hold: its step, the seat's floor and its
     /// stand point on that floor (moved clear at registration when the entry's point is blocked).
     sit_walks: BTreeMap<Id, (usize, Id, Vec3)>,
+    /// The bodies whose walk in progress is to be there, not to act from there ([`Forms::goal_walks`]).
+    goals: BTreeSet<Id>,
     planning: &'a RefCell<Planning>,
     map: Arc<Versions>,
 }
@@ -426,7 +428,22 @@ impl Sight<'_> {
         });
         let (floor, y) = match room {
             Some((floor, y)) => (floor, y),
-            None if floors.len() == 1 => (floors[0].id(), None),
+            // The only floor, when the area lies over it (a greenhouse's inside); an area off it (a bridge's end on
+            // the bank) is walked to on the ground, as any other point.
+            None if floors.len() == 1 => {
+                let f = floors[0].id();
+                let [w, x, yq, z] = place.orientation.parts();
+                let back = replica::pose::Quat::new(w, -x, -yq, -z).ok()?;
+                let local = back.rotate(at.minus(place.position).ok()?).ok()?;
+                let off = self.with_view(body, |v| {
+                    v.stand_near(f, local, skills::form_runner::REACH, None)
+                        .is_none()
+                });
+                if off == Some(true) {
+                    return None;
+                }
+                (f, None)
+            }
             None => return Some(None),
         };
         let [w, x, yq, z] = place.orientation.parts();
@@ -446,6 +463,30 @@ impl Sight<'_> {
     /// the entry's x axis from its first point to its last, stretched from the entry's bounds to the line's length,
     /// across it unstretched; an outline's around its box's middle, each axis stretched from the bounds to the box.
     /// `None` for any other walk, planned at the entry's point as before.
+
+    /// The radius of the area a body walks to, at step `step`, to be there (no move or sit after it): the walk may end
+    /// within reach of the area's circle. `None` for any other walk.
+    fn area_radius(&self, body: Id, step: usize) -> Option<i64> {
+        if !self.goals.contains(&body) {
+            return None;
+        }
+        let &(at_step, thing, ref point) = self.walks.get(&body)?;
+        if at_step != step {
+            return None;
+        }
+        let n = self.tree.node(self.tree.handle(thing)?)?;
+        let r = self
+            .kinds
+            .get(plain(n.kind()))?
+            .get("areas")?
+            .get(point.as_str())?
+            .get("radius_mm")?;
+        match r {
+            Json::Int(mm) => i64::try_from(*mm).ok()?.checked_mul(1000),
+            _ => None,
+        }
+    }
+
     fn on_shape(&self, body: Id, step: usize, node: Id) -> Option<Vec3> {
         use import_eden::{F_LINE, F_OUTLINE};
         let &(at_step, thing, ref point) = self.walks.get(&body)?;
@@ -596,6 +637,8 @@ impl Geometry for Sight<'_> {
             return WalkPlan::Legs(Vec::new());
         };
         let at = self.on_shape(body, step, node).unwrap_or(at);
+        // A walk to be in an area ends within reach of the area's circle, not of its middle.
+        let reach = reach.saturating_add(self.area_radius(body, step).unwrap_or(0));
         // A walk before a sit goes to the seat's own stand point, the one its sit is measured from.
         let (node, at) = match self.sit_walks.get(&body) {
             Some(&(at_step, floor, stand)) if at_step == step => (floor, stand),
@@ -990,6 +1033,7 @@ impl Acts {
             context,
             walks,
             sit_walks,
+            goals: self.forms.goal_walks(),
             planning: &self.planning,
             map,
         };

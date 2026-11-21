@@ -85,6 +85,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         context: BTreeMap::from([(id, (intent, 0, 0))]),
         walks: BTreeMap::new(),
         sit_walks: BTreeMap::new(),
+        goals: BTreeSet::new(),
         planning: &planning,
         map: Arc::clone(&map),
     };
@@ -265,6 +266,7 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         context: BTreeMap::new(),
         walks: BTreeMap::from([(id, (2, building, Name::new(point).unwrap()))]),
         sit_walks: BTreeMap::new(),
+        goals: BTreeSet::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };
@@ -387,6 +389,7 @@ fn a_walk_to_a_world_drawn_things_point_is_laid_on_its_outline() {
         context: BTreeMap::new(),
         walks: BTreeMap::from([(id, (0, thing, Name::new(point).unwrap()))]),
         sit_walks: BTreeMap::new(),
+        goals: BTreeSet::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };
