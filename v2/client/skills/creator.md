@@ -95,8 +95,9 @@ node souls-god.mjs batch '[{"op":"place","name":1,"kind":"room","in":"<place id>
 - `node souls-god.mjs expand <m>` grows the world's ground to a square `m` metres a side, centred on the middle.
 - `node souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres <m>` grows it one way, or
   `--bounds x0,z0,x1,z1` (metres) to cover a box.
-- The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. The whole
-  ground goes in one edit, so a refusal `expand.too-large` names the largest size one edit carries.
+- The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. Only the new
+  tiles are sent, so one grow adds at most about 390 of Eden's 64 m tiles; a larger one is refused
+  `expand.too-large`: grow it in steps.
 
 ## Answers and refusals
 
