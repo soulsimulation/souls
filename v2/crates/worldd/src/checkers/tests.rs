@@ -170,7 +170,7 @@ fn a_text_field_reads_its_reference_once_written_and_null_once_cleared() {
         r#"{"kind": "test:board", "state": {"words": {"n": 3, "type": "text", "default": null}, "count": {"n": 4, "type": "int", "default": 0}}}"#,
     )
     .unwrap();
-    let words = Id::new(Scope([0xab; 16]), 9).unwrap();
+    let words = Id::new(replica::ids::Scope([0xab; 16]), 9).unwrap();
     let record = |text: Cbor| {
         Cbor::Map(BTreeMap::from([
             (2, Cbor::Text(Name::new("test:board").unwrap())),
