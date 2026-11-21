@@ -10,7 +10,8 @@
 //!   11: closed, 12: open}`: paired passage metadata, the leaf's backlink and its owned wall solid-row patch,
 //!   millimetres/millidegrees in the owning building's frame.
 //!
-//! An undo or a redo (G4) is the same verb with `{2: 1}` (undo) or `{2: 2}` (redo) and nothing else; a batch may carry
+//! An undo or a redo (G4) is the same verb with `{5: 1}` (undo) or `{5: 2}` (redo) and nothing else (not 2: an edit
+//! that carries `{2: ...}` and no batch stays refused, `edit-not-a-batch`); a batch may carry
 //! its build's name and its step's (`{3: build, 4: step}`, both UTF-8 bytes, 1 to [`STEP_NAME_MOST`] each: words are
 //! bytes, T8) so the world keeps it as that build's step.
 //!
@@ -31,7 +32,7 @@ pub const VERB: &str = "souls:edit";
 /// The parameter that holds the batch.
 pub const OPS: u64 = 1;
 /// The parameter that asks for an undo ([`UNDO_ONE`]) or a redo ([`REDO_ONE`]) instead of a batch.
-pub const UNDO: u64 = 2;
+pub const UNDO: u64 = 5;
 pub const UNDO_ONE: u64 = 1;
 pub const REDO_ONE: u64 = 2;
 /// A batch's build and step names (G4's builds with steps).
@@ -346,14 +347,14 @@ fn step_name(b: &[u8]) -> Option<String> {
         .flatten()
 }
 
-/// Reads what an edit intent's parameters ask for: `{2: 1}` an undo, `{2: 2}` a redo, else a batch
+/// Reads what an edit intent's parameters ask for: `{5: 1}` an undo, `{5: 2}` a redo, else a batch
 /// (`{1: [...]}`, with `{3: build, 4: step}` both or neither).
 pub fn asked(parameters: &BTreeMap<u64, Value>) -> R<Asked> {
     if let Some(u) = parameters.get(&UNDO) {
         return match (u, parameters.len()) {
             (Value::Uint(UNDO_ONE), 1) => Ok(Asked::Undo),
             (Value::Uint(REDO_ONE), 1) => Ok(Asked::Redo),
-            _ => Err("an undo is {2: 1} and a redo {2: 2}, alone".into()),
+            _ => Err("an undo is {5: 1} and a redo {5: 2}, alone".into()),
         };
     }
     let step = match (parameters.get(&BUILD), parameters.get(&STEP)) {
