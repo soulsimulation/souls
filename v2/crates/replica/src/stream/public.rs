@@ -881,7 +881,10 @@ impl PublicPlayer {
             None => digest(&self.state)?,
         };
         if actual != self.digest {
-            return refuse("stream-digest", "the parts played deferred do not make the claimed state");
+            return refuse(
+                "stream-digest",
+                "the parts played deferred do not make the claimed state",
+            );
         }
         self.unverified = false;
         Ok(())

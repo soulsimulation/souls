@@ -2886,8 +2886,26 @@ fn i3822_deferred_parts_make_the_checked_state_and_a_wrong_one_is_refused_once_v
     deferred.play(&parts[parts.len() - 1]).unwrap();
     assert_eq!(deferred.state(), checked.state());
     assert_eq!(deferred.hash().unwrap(), checked.hash().unwrap());
-    assert_eq!(deferred.query(&wire(Value::Map(BTreeMap::from([(1, Value::Uint(5)), (2, Value::Uint(0))]))).unwrap()).unwrap(),
-        checked.query(&wire(Value::Map(BTreeMap::from([(1, Value::Uint(5)), (2, Value::Uint(0))]))).unwrap()).unwrap());
+    assert_eq!(
+        deferred
+            .query(
+                &wire(Value::Map(BTreeMap::from([
+                    (1, Value::Uint(5)),
+                    (2, Value::Uint(0))
+                ])))
+                .unwrap()
+            )
+            .unwrap(),
+        checked
+            .query(
+                &wire(Value::Map(BTreeMap::from([
+                    (1, Value::Uint(5)),
+                    (2, Value::Uint(0))
+                ])))
+                .unwrap()
+            )
+            .unwrap()
+    );
     // A part whose delta does not make the state its digest claims: played deferred it is taken, and refused at verify.
     let last = parts.len() - 1;
     let mut corrupted = object_map(&parts[last]).unwrap();
@@ -2907,11 +2925,18 @@ fn i3822_deferred_parts_make_the_checked_state_and_a_wrong_one_is_refused_once_v
     }
     wrong.play_deferred(&corrupted).unwrap();
     assert_eq!(wrong.verify().unwrap_err().name, "stream-digest");
-    assert_eq!(wrong.verify().unwrap_err().name, "stream-digest", "a refused state stays refused");
+    assert_eq!(
+        wrong.verify().unwrap_err().name,
+        "stream-digest",
+        "a refused state stays refused"
+    );
     // Played checked, the same part is refused at once.
     let mut strict = PublicPlayer::start(h.stored(), &baseline).unwrap();
     for p in &parts[..last] {
         strict.play(p).unwrap();
     }
-    assert_eq!(strict.play(&corrupted).unwrap_err().name, "public-stream-record");
+    assert_eq!(
+        strict.play(&corrupted).unwrap_err().name,
+        "public-stream-record"
+    );
 }

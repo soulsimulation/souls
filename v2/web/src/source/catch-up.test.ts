@@ -77,7 +77,7 @@ test('a joiner 1,000 parts behind plays the old ones deferred, shows one snapsho
       await new Promise((r) => setTimeout(r, 1));
       inFlight--;
       const body = files(new URL(String(input)).pathname);
-      return body === null ? new Response(null, { status: 404 }) : new Response(body);
+      return body === null ? new Response(null, { status: 404 }) : new Response(body as BodyInit);
     }) as typeof fetch;
     (globalThis as { setInterval: unknown }).setInterval = (fn: () => Promise<void>) => (polls.push(fn), 1);
     (globalThis as { self?: unknown }).self = {
