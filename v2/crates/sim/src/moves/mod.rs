@@ -222,6 +222,7 @@ impl Moves {
             );
         };
         if d > mv.reach {
+            eprintln!("DBG out-of-reach {} d {d}", mv.name.as_str());
             return refuse(
                 "out-of-reach",
                 format!(
