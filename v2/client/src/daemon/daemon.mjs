@@ -277,16 +277,19 @@ function hearing() {
   const [s, n] = body.split('-');
   ws.send(wire.wireSubscribe(unhex(s), BigInt(n), BigInt(HEARING_BUDGET)));
   ws.hearing = body;
-  // Items reach this socket only once the world's view tier has the subscription, which its grant says; a change
-  // before that comes in no item. So the follow waits for the grant, and the grant brings one.
+  // A socket's first subscription: items reach it only once the world's view tier has it, which its grant says, and a
+  // change before that comes in no item. So the copy's follow waits for the grant, and the grant brings one. (A later
+  // subscription replaces one already granted, whose items flow meanwhile.)
+  if (ws.granted) return;
   const sock = ws;
   clearTimeout(sock.granting);
   sock.granting = setTimeout(() => { if (ws === sock) granted(); }, GRANT_WITHIN);
 }
 
-/** The hearing is granted (or refused, or its grant is overdue): the copy follows, from after it. */
+/** The socket's first hearing is granted (or refused, or its grant is overdue): the copy follows, from after it. */
 function granted() {
-  if (!ws) return;
+  if (!ws || ws.granted) return;
+  ws.granted = true;
   clearTimeout(ws.granting);
   ws.granting = null;
   followWanted = true;
