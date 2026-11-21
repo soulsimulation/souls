@@ -517,3 +517,34 @@ fn e26a_a_turn_into_an_activity_is_its_members_alone() {
         parts.len()
     );
 }
+
+/// C26 (#3689, A1): a shout is a say at a raised voice's reach: answered with a receipt, written in the public
+/// audience at [`words::SHOUT_REACH_MM`], its words kept and only their reference logged.
+#[test]
+fn c26_a_shout_is_public_at_a_raised_voice() {
+    let r = run("c26");
+    let b0 = r.pairs[0].0;
+    let lines = ["the bridge is out", "anyone for bread"];
+    let asks = [
+        intent(b0, "eden:shout", None, 1, &[(1, words(lines[0]))]),
+        intent(b0, "eden:say", None, 2, &[(1, words(lines[1]))]),
+    ];
+    for i in &asks {
+        let (k, a) = kind(&send(&r.world, i));
+        assert_eq!(k, 1, "{}: a receipt, not {a}", i.verb.as_str());
+    }
+    let (log, _) = r.end(|store, said| {
+        assert_eq!(said.len(), 2, "a shout and a say");
+        assert_eq!(said[0].audience, Audience::Everyone, "a shout is public");
+        assert_eq!(said[0].reach_mm, words::SHOUT_REACH_MM);
+        assert_eq!(said[1].reach_mm, words::SAY_REACH_MM);
+        assert!(
+            said[0].reach_mm > said[1].reach_mm,
+            "a shout carries farther"
+        );
+        assert_eq!(store.read(said[0].words, &[]).unwrap(), lines[0].as_bytes());
+    });
+    for l in lines {
+        assert!(!has(&log, l), "{l:?} is not in the log");
+    }
+}

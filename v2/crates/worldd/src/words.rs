@@ -5,13 +5,13 @@
 //!   store for its audience, as resolved now (T8 rule 1), by the body that sent it, and replaced in the intent by
 //!   `{21: id}` before the intent is logged or acted on: no byte of the words reaches the log.
 //! - **Who may read them**, by the intent's form (its verb's name after the namespace; `souls:` verbs are the
-//!   engine's own, T10 rule 4): `say` and `describe` are public; `whisper` is its listener's alone (an audience of
+//!   engine's own, T10 rule 4): `say`, `shout` and `describe` are public; `whisper` is its listener's alone (an audience of
 //!   one, never in a public view or a public text file); a `say` into an activity (target: the activity) is its
 //!   members' alone, the activity's audience (E26a, #3504); words in any other intent are their sender's alone until
 //!   a form says otherwise.
 //! - **What the world writes** (in [`crate::answers`], at the intent's arrival, answered with a receipt after its
 //!   tick's sync): a `say` is a `souls:said` entry of the public audience, written by the speaker's body
-//!   (`replica::speech`); a `whisper` (target: the listener's body) is the same event in an entry of the listener's
+//!   (`replica::speech`), and a `shout` the same at a raised voice's reach ([`SHOUT_REACH_MM`]); a `whisper` (target: the listener's body) is the same event in an entry of the listener's
 //!   audience, its one hearer the listener; a `say` into an activity is that event in an entry of the activity's
 //!   audience, its hearers the members' bodies, and is refused `not-a-member` before its words are kept when the
 //!   speaker's body is not one ([`members`]); a `describe` sets the body's public name ([`NAME`], parameter 1) and
@@ -47,6 +47,8 @@ pub const DESCRIPTION: u64 = 31;
 pub const SAY_REACH_MM: u64 = (sim::speech::LEAVE / 1_000) as u64;
 /// How far a whisper carries, mm.
 pub const WHISPER_REACH_MM: u64 = 1_000;
+/// How far a shout carries, mm: a raised voice's reach (`replica::speech::Radii::loud`), farther than talk's.
+pub const SHOUT_REACH_MM: u64 = 12_000;
 
 /// The text store's scope for a world of `lineage`: its own, so a reference is never a world id.
 pub fn scope(lineage: Scope) -> Scope {
@@ -67,6 +69,8 @@ pub fn in_memory(lineage: Scope) -> R<Store> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Form {
     Say,
+    /// A say at a raised voice's reach (C26, #3689): public, heard farther by the same rule.
+    Shout,
     Whisper(Id),
     /// A turn into an activity, its members' alone.
     Members(Id),
@@ -83,6 +87,7 @@ pub fn form(intent: &Intent) -> Form {
     match (form, &intent.target) {
         ("say", Some(Target::Node(activity))) => Form::Members(*activity),
         ("say", _) => Form::Say,
+        ("shout", _) => Form::Shout,
         ("whisper", Some(Target::Node(to))) => Form::Whisper(*to),
         ("describe", _) => Form::Describe,
         // A Soul's join (C3, #3367) names its body as a describe does: at its birth, or again once it is here.
@@ -94,7 +99,7 @@ pub fn form(intent: &Intent) -> Form {
 /// Who may read the words of an intent of `form` sent by `body`.
 pub fn audience(form: Form, body: Id) -> Audience {
     match form {
-        Form::Say | Form::Describe => Audience::Everyone,
+        Form::Say | Form::Shout | Form::Describe => Audience::Everyone,
         Form::Whisper(to) | Form::Members(to) => Audience::Of(to),
         Form::Other => Audience::Of(body),
     }
@@ -210,6 +215,7 @@ pub fn entry(
     };
     Some(match form {
         Form::Say => said(Audience::Everyone, SAY_REACH_MM, BTreeSet::new()),
+        Form::Shout => said(Audience::Everyone, SHOUT_REACH_MM, BTreeSet::new()),
         Form::Whisper(to) => said(Audience::Of(to), WHISPER_REACH_MM, BTreeSet::from([to])),
         Form::Members(activity) => said(Audience::Of(activity), SAY_REACH_MM, members),
         Form::Describe => {
