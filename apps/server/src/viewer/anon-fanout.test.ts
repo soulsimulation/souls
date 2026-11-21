@@ -7,6 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { randomBytes } from 'node:crypto';
 import { setImmediate as turn } from 'node:timers/promises';
 import { getRequestListener } from '@hono/node-server';
 import { WebSocket } from 'ws';
@@ -206,4 +207,91 @@ test('A4: flag off, a URL hello stays on the hub', async (t) => {
   const v = await w.raw(`/ws?hello=${encodeURIComponent(anonymousHello(true))}`);
   await until(() => v.got.some(isTake), 'the join set');
   assert.deepEqual([w.hub.clients.size, w.host.viewerCount(), w.host.watched!()], [1, 1, true]);
+});
+
+test('#2522 A2: a fanout viewer that stalls for 10 s is skipped, re-pictured when it reads again, and converges with no reconnect; the others lose nothing', async (t) => {
+  const w = await world(t, 'anon-fanout-behind');
+  await w.drive(40);
+  const hubSide = w.viewer(false); hubSide.c.connect(); await until(() => hubSide.c.replica.ready, 'the hub viewer has its snapshot');
+  const fan = w.viewer(true); fan.c.connect(); await until(() => fan.c.replica.ready, 'the fanout viewer has its snapshot');
+  const other = w.viewer(true); other.c.connect(); await until(() => other.c.replica.ready, 'an ordinary fanout viewer has its snapshot');
+  await w.drive(100);
+  const conns = [hubSide.c, fan.c, other.c], counts = w.hub.fanout!.counts;
+  const quiet = async (cs: Connection[]) => { await until(() => cs.every((c) => c.replica.seq === w.host.currentBatchSeq), 'caught up'); await new Promise((r) => setTimeout(r, 50)); };
+  await quiet(conns);
+  // the stall: its socket is not read for 10 s while the world runs; public lines too large to compress (about 0.3 MB on the
+  // wire each, which the readers read as they come) take it past the kernel's buffers and 1 MB unsent
+  const sock = (fan.seen.sockets[0] as unknown as { _socket: { pause(): void; resume(): void } })._socket;
+  hubSide.seen.live.clear(); other.seen.live.clear(); hubSide.seen.rec = other.seen.rec = true;
+  sock.pause();
+  const tickers = count(other.seen, 'ticker');
+  for (let i = 0; i < 40; i++) {
+    for (let k = 0; k < 4; k++) {
+      w.hub.broadcast({ t: 'ticker', lines: [{ tick: w.host.engine.world.tick, text: randomBytes(300_000).toString('base64') }] });
+      await until(() => count(other.seen, 'ticker') === tickers + 4 * i + k + 1 && count(hubSide.seen, 'ticker') === count(other.seen, 'ticker'), 'the readers read it');
+    }
+    await w.drive(5); t.mock.timers.tick(250);
+  }
+  assert.equal(counts.behind, 1, 'the stalled socket was marked behind');
+  assert.equal(counts.repictures, 0, 'and not re-pictured while it is stalled');
+  // it reads again: once its queue drains it gets the picture and the batches after it
+  const snapshots = count(fan.seen, 'snapshot');
+  sock.resume();
+  // the queue drains in real time (a loaded runner takes longer), so wait on the clock, not on a count of ticks
+  for (const stop = performance.now() + 20_000; performance.now() < stop && counts.repictures === 0;) { await w.drive(1); await new Promise((r) => setTimeout(r, 20)); }
+  assert.equal(counts.repictures, 1, 're-pictured once its queue drained');
+  await quiet(conns); hubSide.seen.rec = other.seen.rec = false;
+  // A4: an ordinary fanout viewer got every live message the hub viewer got, the same and in the same order
+  assert.deepEqual([...other.seen.live.keys()].sort(), [...hubSide.seen.live.keys()].sort(), 'the same message types');
+  for (const k of ['batch', 'heartbeat', 'ticker', 'kernel*', 'takes*']) assert.ok((hubSide.seen.live.get(k)?.length ?? 0) > 0, `live ${k}`);
+  for (const [k, xs] of hubSide.seen.live) assert.deepEqual(other.seen.live.get(k), xs, `live ${k}: the same messages in the same order`);
+  assert.equal(count(fan.seen, 'snapshot'), snapshots + 1, 'one picture again');
+  assert.deepEqual([fan.seen.sockets.length, fan.c.stats.state, fan.c.stats.resyncs], [1, 'open', 0], 'no reconnect, no resync asked');
+  // converged: V1's oracle bars from the re-picture on (what fell while it was behind was skipped by design)
+  for (const s of [hubSide.seen, fan.seen]) { s.logs.clear(); s.talk.clear(); s.plays.clear(); s.takeEnds.clear(); s.hashes.clear(); }
+  await live(w, hubSide.seen, fan.seen, [hubSide.c, fan.c], 400);
+  await w.drive(800);
+  await until(() => fan.c.replica.seq === w.host.currentBatchSeq && hubSide.c.replica.seq === w.host.currentBatchSeq, 'both caught up');
+  oracle(hubSide, fan, [0, 0]);
+  assert.equal(other.seen.mismatches, 0);
+});
+
+test('#2522 A5: in green, a fanout viewer that stops reading for 30 s at 200 KB/s stays connected through the ping sweep, then gets one picture and converges', async (t) => {
+  const w = await world(t, 'anon-fanout-a5');
+  await w.drive(40);
+  const hubSide = w.viewer(false); hubSide.c.connect(); await until(() => hubSide.c.replica.ready, 'the hub viewer has its snapshot');
+  const fan = w.viewer(true); fan.c.connect(); await until(() => fan.c.replica.ready, 'the fanout viewer has its snapshot');
+  await w.drive(100);
+  await until(() => [hubSide.c, fan.c].every((c) => c.replica.seq === w.host.currentBatchSeq), 'caught up');
+  const fanout = w.hub.fanout!, counts = fanout.counts, server = [...fanout.wss.clients][0];
+  const load = () => (w.hub as unknown as { loadLevel: string }).loadLevel;
+  assert.equal(load(), 'green');
+  const pings = t.mock.method(server, 'ping');
+  // 30 s of real time (two or three 15 s ping sweeps, the real interval) with its socket not read, the world running and
+  // public lines of about 10 KB on the wire every 50 ms; Date is not moved, so every sweep judges
+  const sock = (fan.seen.sockets[0] as unknown as { _socket: { pause(): void; resume(): void } })._socket;
+  sock.pause();
+  const end = performance.now() + 30_000;
+  while (performance.now() < end) {
+    w.hub.broadcast({ t: 'ticker', lines: [{ tick: w.host.engine.world.tick, text: randomBytes(11_000).toString('base64') }] });
+    await w.drive(1); await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.ok(pings.mock.callCount() >= 1, 'the sweep pinged it while it was not reading');
+  assert.notEqual(load(), 'black', 'not black, so the sweep judged');
+  assert.equal(counts.behind, 1, 'it was marked behind');
+  assert.deepEqual([server.readyState, fanout.size, fan.seen.sockets.length], [1, 1, 1], 'the sweep did not end it: still connected, on its one socket');
+  // it reads again: one picture, the same socket, then V1's oracle bars against the hub viewer
+  const snapshots = count(fan.seen, 'snapshot');
+  sock.resume();
+  // the queue drains in real time (a loaded runner takes longer), so wait on the clock, not on a count of ticks
+  for (const stop = performance.now() + 20_000; performance.now() < stop && counts.repictures === 0;) { await w.drive(1); await new Promise((r) => setTimeout(r, 20)); }
+  assert.equal(counts.repictures, 1, 're-pictured once its queue drained');
+  await until(() => [hubSide.c, fan.c].every((c) => c.replica.seq === w.host.currentBatchSeq), 'caught up after the picture');
+  assert.equal(count(fan.seen, 'snapshot'), snapshots + 1, 'one picture again');
+  assert.deepEqual([fan.seen.sockets.length, fan.c.stats.state, fan.c.stats.resyncs], [1, 'open', 0], 'no reconnect, no resync asked');
+  for (const s of [hubSide.seen, fan.seen]) { s.logs.clear(); s.talk.clear(); s.plays.clear(); s.takeEnds.clear(); s.hashes.clear(); }
+  await live(w, hubSide.seen, fan.seen, [hubSide.c, fan.c], 400);
+  await w.drive(800);
+  await until(() => fan.c.replica.seq === w.host.currentBatchSeq && hubSide.c.replica.seq === w.host.currentBatchSeq, 'both caught up');
+  oracle(hubSide, fan, [0, 0]);
 });
