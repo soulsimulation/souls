@@ -3294,20 +3294,6 @@ fn i3802_a_form_with_no_slot_takes_the_nearest_free_one() {
     assert_eq!(after, before, "the fourth stays where it stood");
 }
 
-/// The value paired with `id` anywhere in `v`.
-fn find_node(v: &Value, id: &Value, out: &mut Option<Value>) {
-    match v {
-        Value::Array(a) => {
-            if a.len() == 2 && &a[0] == id {
-                *out = Some(a[1].clone());
-            }
-            a.iter().for_each(|x| find_node(x, id, out));
-        }
-        Value::Map(m) => m.values().for_each(|x| find_node(x, id, out)),
-        _ => {}
-    }
-}
-
 /// Every course in a public projection `v` (field 80 of any node).
 fn projected_courses(v: &Value, out: &mut Vec<replica::schedule::course::Course>) {
     match v {
@@ -3364,7 +3350,7 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
         .cloned()
         .expect("the festival balloon has a course");
     let balloon = im.nodes["e_a2ef2904"];
-    // The public stream's baseline carries each ride's course.
+    // The public stream, played from its baseline through its newest part, carries each ride's course.
     let mut projected = Vec::new();
     {
         use replica::stream::{Pointer, public::PublicPlayer};
@@ -3386,29 +3372,15 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
             panic!("a baseline")
         };
         let parts = stream.join("g").join(replica::encode::to_hex(generation));
-        let player = PublicPlayer::start(&header, &std::fs::read(parts.join("baseline")).unwrap())
-            .expect("the public reader");
-        projected_courses(player.state(), &mut projected);
-        if projected.is_empty() {
-            let mut found = None;
-            find_node(player.state(), &balloon.to_value(), &mut found);
-            if let Value::Map(m) = player.state()
-                && let Some(Value::Array(ns)) = m.get(&2)
-            {
-                println!("public nodes: {}", ns.len());
-                for n in ns.iter().take(400) {
-                    let t = format!("{n:?}");
-                    if t.contains("alloon") || t.contains("counter: 5786") {
-                        println!("node: {}", &t[..t.len().min(1500)]);
-                    }
-                }
-            }
-            let shown = format!("{found:?}");
-            println!(
-                "the balloon in the baseline: {}",
-                &shown[..shown.len().min(3000)]
-            );
+        let mut player =
+            PublicPlayer::start(&header, &std::fs::read(parts.join("baseline")).unwrap())
+                .expect("the public reader");
+        for n in 0..=pointer.newest.expect("a published part") {
+            player
+                .play(&std::fs::read(parts.join(n.to_string())).unwrap())
+                .expect("the public reader plays the part");
         }
+        projected_courses(player.state(), &mut projected);
     }
     println!(
         "the public stream's courses (first station, period µs): {:?}",
@@ -3417,10 +3389,9 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
             .map(|c| (c.stations[0].at, c.load().map_or(0, |t| t.period)))
             .collect::<Vec<_>>()
     );
-    assert_eq!(
-        projected.len(),
-        3,
-        "each balloon's course is in the public stream"
+    assert!(
+        projected.len() >= 3,
+        "the balloons' courses (and the punts') are in the public stream"
     );
     // Board in the balloon's boarding stop (its first 30 s each lap): wait for the next when less than 20 s are left.
     let phase = |t: i64| (t - t0).rem_euclid(period);
