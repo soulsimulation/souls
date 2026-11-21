@@ -584,10 +584,10 @@ impl Sight<'_> {
     /// How far a body seated in slot `slot` of thing `target` is from the thing's point `point`, across x and z in
     /// the thing's frame, from the body's edge: the slot's and the point's places as its entry names them. `None`
     /// when the entry names neither.
-    fn from_seat(&self, body: Id, target: Id, slot: u64, point: &Name) -> Option<i64> {
+    fn from_slot(&self, body: Id, target: Id, slot: u64, point: &Name) -> Option<i64> {
         let n = self.tree.node(self.tree.handle(target)?)?;
         let entry = self.kinds.get(plain(n.kind()))?;
-        let seat = entry
+        let held = entry
             .get("slots")
             .and_then(Json::obj)?
             .get(usize::try_from(slot).ok()?.checked_sub(1)?)
@@ -597,7 +597,7 @@ impl Sight<'_> {
             .and_then(|ps| ps.get(point.as_str()))
             .and_then(|p| p.get("at_mm")))?;
         Some(
-            flat([seat.x, seat.z], [at.x, at.z])
+            flat([held.x, held.z], [at.x, at.z])
                 .saturating_sub(self.builds.get(&body)?.size.radius_mm() * 1000)
                 .max(0),
         )
@@ -675,11 +675,11 @@ impl Reach for Sight<'_> {
             _ => target,
         };
         // A body seated in the thing's own slot reaches from that slot, in the thing's frame (#3713): a player at a
-        // table moves on its board from the seat, not from where the seat's frame would carry it.
-        if let (true, Some(slot)) = (me.pose.frame.node == target, me.pose.frame.slot) {
-            if let Some(d) = self.from_seat(body, target, slot, point) {
-                return Some(d);
-            }
+        // table moves on its board from where it sits, not from where the slot's frame would carry it.
+        if let (true, Some(slot)) = (me.pose.frame.node == target, me.pose.frame.slot)
+            && let Some(d) = self.from_slot(body, target, slot, point)
+        {
+            return Some(d);
         }
         if let Some(d) = self.to_thing(body, sim::walk::node_of(me), a, target, point) {
             return Some(d);
