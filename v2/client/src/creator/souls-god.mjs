@@ -26,6 +26,8 @@
 //                                                theirs. Your own namespace only (not souls: or eden:)
 //   souls-god.mjs define-kit <kit.json> [--ns <namespace>]   today's kit (a name and shapes in metres) as a record
 //                                                with geometry.parts (kit.mjs), then defined; namespace `kit` unless given
+//   souls-god.mjs upload <file.glb|png|jpg>     a model or a picture, through the world's check and hold point:
+//                                                {hash, state: allowed|held}; an allowed one is served at `url`
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs status | stop                  the daemon
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
@@ -39,14 +41,14 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
 import { kitEntry } from './kit.mjs';
 
-export const VERBS = ['pair', 'describe', 'define', 'define-kit', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'land', 'check', 'status', 'stop', 'welcome', 'visitors'];
+export const VERBS = ['pair', 'describe', 'define', 'define-kit', 'upload', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'land', 'check', 'status', 'stop', 'welcome', 'visitors'];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
 export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -60,6 +62,11 @@ export const FIX = {
   'kind.namespace': 'name it in your own namespace (not souls: or eden:, nor one the world\'s own kinds use)',
   'kind.collision': 'that kind is defined already: place it by the full name describe lists',
   'kind.in-use': 'remove the things of that kind first, or in the same batch',
+  'upload.size': 'a model is at most 3 MB and a picture 2 MB: make it smaller first',
+  'upload.format': 'a GLB 2.0 model, a PNG or a JPEG',
+  'upload.external-resource': 'export the GLB self-contained: every texture inside it',
+  'upload.triangle-budget': 'at most 80,000 triangles: decimate it',
+  'upload.off': 'this world takes no uploads',
   'kit.invalid': 'a kit is {"name", "shapes": [{"kind", "at": [x,y,z] m, ...}]}, as today\'s define-kit',
   'kit.program': 'write each shape out: repeat, radial, mirror and $params are not carried',
   'edit.child-not-admitted': 'put it in something whose kind admits it: describe shows each kind\'s admits',
@@ -189,6 +196,10 @@ export function requestOf(argv) {
   }
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe') return { req: { op: verb }, creator };
+  if (verb === 'upload') {
+    if (rest.length !== 1 || !/\.(glb|png|jpe?g)$/i.test(rest[0])) throw usage('upload <file.glb|png|jpg>');
+    return { req: { op: 'upload', path: resolve(rest[0]) }, creator };
+  }
   if (verb === 'check' && WORLD_VERBS.includes(rest[0])) return { req: { op: 'check', world: worldVerbOf(rest[0], rest.slice(1)) }, creator };
   if (verb === 'check') return { req: { op: 'check', ops: opsOf(rest[0], rest.slice(1)) }, creator };
   if (WORLD_VERBS.includes(verb)) return { req: { op: 'edit', world: worldVerbOf(verb, rest) }, creator };
@@ -253,7 +264,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       if (said.ok === false) process.exitCode = 1;
       process.exit();
     }
-    const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: asked.req.world?.verb === 'land' ? 130_000 : 15_000 });
+    const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: asked.req.world?.verb === 'land' ? 130_000 : asked.req.op === 'upload' ? 40_000 : 15_000 });
     out(withFix({ ...answer, ...(asked.say ?? {}) }));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {
