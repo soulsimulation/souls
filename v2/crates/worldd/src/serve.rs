@@ -292,7 +292,6 @@ fn with_punts(facts: &str) -> R<String> {
     let moorings = sim::courses::punts::moorings(&waters, terrain.as_ref(), |p| {
         view.stand_near(ground, p, 0, None).is_some()
     });
-    drop(view);
     if moorings.is_empty() {
         return Ok(facts.to_owned());
     }

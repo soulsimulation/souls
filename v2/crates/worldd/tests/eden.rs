@@ -2056,24 +2056,16 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
         .records;
     let logged = course_sets(&log, punt);
     println!("the punt's courses in the log (at, shape, stations): {logged:?}");
-    let public = public_parts(&dir);
-    let streamed = course_sets(&public, punt);
-    let rider_rows = public
-        .iter()
-        .filter_map(|r| Part::read(r).ok())
-        .filter_map(|p| p.rest.get(&answers::BODIES).cloned())
-        .filter(|rows| match rows {
-            Value::Array(rows) => rows
-                .iter()
-                .filter_map(worldd::bodies::read_row)
-                .any(|(_, pose, _)| pose.frame.node == punt),
-            _ => false,
-        })
-        .count();
-    println!(
-        "the public stream: {} parts, the punt's courses {streamed:?}, {rider_rows} parts with the rider in its seat",
-        public.len()
-    );
+    // The public stream publishes a tick's part after its sync: read it until it carries every course the log has.
+    let mut streamed = Vec::new();
+    for _ in 0..30 {
+        streamed = course_sets(&public_parts(&dir), punt);
+        if streamed == logged {
+            break;
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    println!("the public stream: the punt's courses {streamed:?}");
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(ashore, Err("not-aboard".to_owned()));
