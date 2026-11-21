@@ -2945,12 +2945,7 @@ fn i3822_deferred_parts_make_the_checked_state_and_a_wrong_one_is_refused_once_v
 /// after each record listed in `restarts`. Returns every generation's files, the pointer's generation fields and the
 /// generations named in the order they began.
 #[allow(clippy::type_complexity)]
-fn i3825_run(
-    tag: &str,
-    records: u64,
-    restarts: &[u64],
-    grace: Duration,
-) -> I3825Run {
+fn i3825_run(tag: &str, records: u64, restarts: &[u64], grace: Duration) -> I3825Run {
     let h = header();
     let d = scratch(&format!("i3825-{tag}"));
     let views = d.join("views");
@@ -3018,20 +3013,39 @@ fn i3825_run(
             .collect();
     // #3833: what a restart reads, and the state the writer ends at.
     let mut chain = 0;
-    let mut at = obj_bytes(&object_map(&out.store.get(&format!("{}head", out.prefix)).unwrap().unwrap().bytes).unwrap(), 1)
-        .unwrap();
+    let mut at = obj_bytes(
+        &object_map(
+            &out.store
+                .get(&format!("{}head", out.prefix))
+                .unwrap()
+                .unwrap()
+                .bytes,
+        )
+        .unwrap(),
+        1,
+    )
+    .unwrap();
     while !at.is_empty() {
         chain += 1;
         at = obj_bytes(&object_map(&out.get(&at).unwrap()).unwrap(), 2).unwrap();
     }
     let end = I3825End {
         chain,
-        objects: out.store.list(&format!("{}objects/", out.prefix)).unwrap().len(),
+        objects: out
+            .store
+            .list(&format!("{}objects/", out.prefix))
+            .unwrap()
+            .len(),
         state: out.canonical.tree().state_hashes_whole().unwrap(),
         changed: out.canonical.changed_at().clone(),
         public: out.player.hash().unwrap(),
     };
-    I3825Run { gens, pointer, began, end }
+    I3825Run {
+        gens,
+        pointer,
+        began,
+        end,
+    }
 }
 /// #3833: how long the recovery chain a restart reads is, how many recovery objects are kept, and the canonical and
 /// public state the writer ends at.
@@ -3153,10 +3167,14 @@ fn i3825_generations_roll_over_prune_after_the_grace_and_restart_with_the_same_b
     assert_eq!(again.gens, gens, "a restart publishes the same bytes");
     assert_eq!(again.pointer, pointer);
     assert_eq!(again.end, end, "the same state and the same recovery store");
-    assert_eq!(end.chain, 3, "the chain is cut at the rollover: the seed's manifest and 2 parts");
+    assert_eq!(
+        end.chain, 3,
+        "the chain is cut at the rollover: the seed's manifest and 2 parts"
+    );
     // Restarts at a rollover only, each generation's first record.
     let at_rollovers = i3825_run("at-rollovers", 11, &[2, 5, 8], Duration::from_secs(3600));
-    assert_eq!((at_rollovers.gens, at_rollovers.end), (gens.clone(), end));
+    assert_eq!(at_rollovers.gens, gens);
+    assert_eq!(at_rollovers.end, end);
     // With no grace, only the current and the previous generation stay, on the disk and in the recovery store
     // (#3833 A2); a writer reopened from what is left goes on with the same bytes.
     let pruned_run = i3825_run("pruned", 11, &[10], Duration::ZERO);

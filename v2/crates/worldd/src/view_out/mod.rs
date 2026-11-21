@@ -1727,7 +1727,9 @@ impl<S: ObjectStore> PublicWriter<S> {
         let sealed = self.canonical.tree().seal_whole()?;
         let audience = |a: Audience| match a {
             Audience::Everyone => Value::Map(BTreeMap::from([(1, Value::Uint(1))])),
-            Audience::Of(id) => Value::Map(BTreeMap::from([(1, Value::Uint(2)), (2, id.to_value())])),
+            Audience::Of(id) => {
+                Value::Map(BTreeMap::from([(1, Value::Uint(2)), (2, id.to_value())]))
+            }
         };
         let tree = Value::Map(BTreeMap::from([
             (
@@ -1736,7 +1738,9 @@ impl<S: ObjectStore> PublicWriter<S> {
                     sealed
                         .audiences
                         .iter()
-                        .map(|(a, h, _)| Value::Array(vec![audience(*a), Value::Bytes(h.to_bytes())]))
+                        .map(|(a, h, _)| {
+                            Value::Array(vec![audience(*a), Value::Bytes(h.to_bytes())])
+                        })
                         .collect(),
                 ),
             ),
@@ -1748,7 +1752,9 @@ impl<S: ObjectStore> PublicWriter<S> {
                         .into_iter()
                         .map(|(_, h, b)| (h, b))
                         .chain(sealed.nodes)
-                        .map(|(h, b)| Value::Array(vec![Value::Bytes(h.to_bytes()), Value::Bytes(b)]))
+                        .map(|(h, b)| {
+                            Value::Array(vec![Value::Bytes(h.to_bytes()), Value::Bytes(b)])
+                        })
                         .collect(),
                 ),
             ),
@@ -1798,7 +1804,8 @@ impl<S: ObjectStore> PublicWriter<S> {
         let Some(Value::Map(tree)) = seed.get(&10) else {
             return Err(bad("tree"));
         };
-        let (Some(Value::Array(tops)), Some(Value::Array(records))) = (tree.get(&1), tree.get(&2)) else {
+        let (Some(Value::Array(tops)), Some(Value::Array(records))) = (tree.get(&1), tree.get(&2))
+        else {
             return Err(bad("tree fields"));
         };
         let mut audiences = Vec::new();
@@ -1851,7 +1858,12 @@ impl<S: ObjectStore> PublicWriter<S> {
         let Some(Value::Array(h)) = seed.get(&14) else {
             return Err(bad("hand-off"));
         };
-        let [Value::Bytes(from), Value::Uint(version), Value::Uint(next), Value::Bytes(hash)] = h.as_slice()
+        let [
+            Value::Bytes(from),
+            Value::Uint(version),
+            Value::Uint(next),
+            Value::Bytes(hash),
+        ] = h.as_slice()
         else {
             return Err(bad("hand-off"));
         };

@@ -2423,7 +2423,10 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
         assert!(written.is_some(), "{tag}: the start-up wrote its stream");
         runs.push(files);
     }
-    assert_eq!(runs[2], runs[0], "#3833: restarted twice, the same stream byte for byte");
+    assert_eq!(
+        runs[2], runs[0],
+        "#3833: restarted twice, the same stream byte for byte"
+    );
     let (rows, whole) = (&runs[0], &runs[1]);
     let both: Vec<&String> = rows.keys().filter(|k| whole.contains_key(*k)).collect();
     let differ: Vec<&&String> = both.iter().filter(|k| rows[**k] != whole[**k]).collect();
@@ -2485,7 +2488,9 @@ fn i3833_a3_a_restart_after_an_hour_reads_only_the_newest_generation() {
     let _ = child.kill();
     let _ = child.wait();
     let views = dir.join("views");
-    let world = replica::rules::json::parse(&std::fs::read_to_string(views.join("world.json")).unwrap()).unwrap();
+    let world =
+        replica::rules::json::parse(&std::fs::read_to_string(views.join("world.json")).unwrap())
+            .unwrap();
     let stream = views.join(world.get("stream").and_then(|v| v.str()).unwrap());
     let pointer = std::fs::read(stream.join("pointer")).unwrap();
     let Value::Map(p) = decode(&pointer).unwrap().value else {

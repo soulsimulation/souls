@@ -672,12 +672,14 @@ impl View {
             name: "view-carried",
             detail: "not what a view carries".into(),
         };
-        let read_int = |v: &Value| match v {
-            Value::Uint(u) => i64::try_from(*u).ok(),
-            Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
-            _ => None,
-        }
-        .ok_or_else(bad);
+        let read_int = |v: &Value| {
+            match v {
+                Value::Uint(u) => i64::try_from(*u).ok(),
+                Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+                _ => None,
+            }
+            .ok_or_else(bad)
+        };
         let Value::Map(m) = v else { return Err(bad()) };
         let sequence = match m.get(&1) {
             None => None,
