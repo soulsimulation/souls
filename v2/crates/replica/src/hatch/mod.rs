@@ -10,7 +10,9 @@
 //! - **The calling convention.** The module exports `memory`, an `i32` global `input` (where the host writes) and
 //!   `run: (i32) -> i64`. The host writes the declared reads at `input`, each as a count of little-endian i64 words
 //!   and then the words, and calls `run` with the number of bytes written. It answers 1 or 0 (a verdict), or a
-//!   field's new value.
+//!   field's new value. A hatch that answers several fields also exports an `i32` global `output`: when it answers 1
+//!   it has written there, for each answered field in order, a count of little-endian i64 words and then the words
+//!   ([`Loaded::run_writing`]); a count past [`OUTPUT_WORDS_MOST`] or past its memory is `hatch-output-malformed`.
 //! - **Steps** are the interpreter's own fuel, counted in a fresh instance given the declared budget: the same count
 //!   on every host, since the interpreter is the same code. Running out ends the call `hatch-over-budget`; any other
 //!   trap is `hatch-trapped`, with its code. A fault in a hatch is contained in its call and named: it never panics
@@ -37,6 +39,9 @@ fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
 
 /// The most linear memory a hatch may have or grow to, in bytes: 16 pages.
 pub const MEMORY_MOST: u64 = 16 * 65_536;
+
+/// The most words a hatch may write for one answered field: a list of 100 records of eight fields, and room.
+pub const OUTPUT_WORDS_MOST: u64 = 1024;
 
 /// A hatch's module, checked and compiled, ready to run.
 pub struct Loaded {
@@ -140,12 +145,24 @@ impl Loaded {
 
     /// Runs the module once on `reads` (each read's words), in a fresh instance, with `steps_most` steps.
     pub fn run(&self, reads: &[Vec<i64>], steps_most: u64) -> R<Ran> {
+        self.run_writing(reads, steps_most, 0).map(|(ran, _)| ran)
+    }
+
+    /// [`Loaded::run`] for a hatch that answers `fields` fields: when it answers 1, the words it wrote at its
+    /// `output` global for each, in order. A module without `output` is `hatch-module-shape`; a count out of range
+    /// or past its memory `hatch-output-malformed`. With no fields, or any other answer, no words.
+    pub fn run_writing(
+        &self,
+        reads: &[Vec<i64>],
+        steps_most: u64,
+        fields: usize,
+    ) -> R<(Ran, Vec<Vec<i64>>)> {
         let mut store = store(&self.engine);
         if store.add_fuel(steps_most).is_err() {
             unreachable!("fuel is on");
         }
         let ran = |store: &Store<StoreLimits>| store.fuel_consumed().unwrap_or(steps_most);
-        let trap = |e: wasmi::Error, store: &Store<StoreLimits>| -> R<Ran> {
+        let trap = |e: wasmi::Error, store: &Store<StoreLimits>| -> R<(Ran, Vec<Vec<i64>>)> {
             match &e {
                 wasmi::Error::Trap(t) => match t.trap_code() {
                     Some(TrapCode::OutOfFuel) => {
@@ -192,13 +209,58 @@ impl Loaded {
                 format!("{} bytes at {at} do not fit its memory", bytes.len()),
             );
         }
-        match run.call(&mut store, len) {
-            Ok(answer) => Ok(Ran {
-                answer,
-                steps: ran(&store),
-            }),
-            Err(e) => trap(wasmi::Error::Trap(e), &store),
+        let answer = match run.call(&mut store, len) {
+            Ok(answer) => answer,
+            Err(e) => return trap(wasmi::Error::Trap(e), &store),
+        };
+        let done = Ran {
+            answer,
+            steps: ran(&store),
+        };
+        if fields == 0 || answer != 1 {
+            return Ok((done, Vec::new()));
         }
+        let Some(mut at) = instance
+            .get_global(&store, "output")
+            .and_then(|g| g.get(&store).i32())
+            .and_then(|a| usize::try_from(a).ok())
+        else {
+            return refuse(
+                "hatch-module-shape",
+                "a hatch that answers fields exports an i32 global output",
+            );
+        };
+        let mut out = Vec::with_capacity(fields);
+        for i in 0..fields {
+            let mut word = [0u8; 8];
+            let count = memory
+                .read(&store, at, &mut word)
+                .ok()
+                .map(|()| i64::from_le_bytes(word))
+                .and_then(|n| u64::try_from(n).ok())
+                .filter(|n| *n <= OUTPUT_WORDS_MOST);
+            let Some(count) = count else {
+                return refuse(
+                    "hatch-output-malformed",
+                    format!("field {i}: a count of 0 to {OUTPUT_WORDS_MOST} words in its memory"),
+                );
+            };
+            let mut bytes = vec![0u8; count as usize * 8];
+            if memory.read(&store, at + 8, &mut bytes).is_err() {
+                return refuse(
+                    "hatch-output-malformed",
+                    format!("field {i}: {count} words past its memory"),
+                );
+            }
+            out.push(
+                bytes
+                    .chunks_exact(8)
+                    .map(|c| i64::from_le_bytes(c.try_into().unwrap_or([0; 8])))
+                    .collect(),
+            );
+            at += 8 + bytes.len();
+        }
+        Ok((done, out))
     }
 }
 
