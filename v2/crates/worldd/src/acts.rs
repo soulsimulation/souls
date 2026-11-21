@@ -109,6 +109,8 @@ pub(crate) struct Walk {
     started: Micros,
     planned: bool,
     watch: Watch,
+    /// The leg's end last seen on the walk's line.
+    leg: Option<[i64; 2]>,
 }
 
 /// A gateway walk's time once its route is planned: the route at walking speed, plus half again for bends and yielding
@@ -136,6 +138,7 @@ impl Walk {
             started,
             planned: false,
             watch: Watch::new(),
+            leg: None,
         }
     }
 
@@ -160,22 +163,26 @@ impl Walk {
         let fields = b.runner.fields.get(&self.body);
         let waiting = sim::host::waiting(fields).is_some()
             || fields.is_some_and(|f| f.contains_key(&replica::host::F_HELD));
+        // The corner and the leg's end its line goes toward, as a form's walk asks them: never the walk's granted
+        // place, which on a route with crossings lies past the leg's end, so a leg heading away from it gained nothing
+        // and a Soul walking at full speed was ended `walk.blocked` (#1960).
         let aim = b
             .town
-            .next_corner(self.body)
-            .filter(|(node, _)| *node == sim::walk::node_of(&me));
-        if waiting || b.runner.controller.carrying(self.body).is_some() || aim.is_none() {
+            .next_corner_toward(self.body)
+            .filter(|(node, _, _)| *node == sim::walk::node_of(&me));
+        let Some((_, aim, to)) =
+            aim.filter(|_| !waiting && b.runner.controller.carrying(self.body).is_none())
+        else {
             self.watch.keep(&BTreeSet::new());
             return (due, false);
-        }
-        let (node, aim) = aim.unwrap();
-        let to = b
-            .runner
-            .asks
-            .get(&self.body)
-            .filter(|(t, _)| t.node == node)
-            .and_then(|_| b.runner.granted.get(&self.body))
-            .map_or(aim, |p| [p.x, p.z]);
+        };
+        // A line forgotten while the planner finds the next one keeps its corner, not its leg's end: the last leg's
+        // end seen stands for it (the new line goes toward the same one), so a walk trapped between lines is still
+        // watched.
+        let to = match to {
+            Some(t) => *self.leg.insert(t),
+            None => self.leg.unwrap_or(aim),
+        };
         let here = [me.pose.position.x, me.pose.position.z];
         (due, self.watch.seen(self.body, here, aim, to, now))
     }
