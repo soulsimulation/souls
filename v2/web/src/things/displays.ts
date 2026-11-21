@@ -5,17 +5,38 @@
 // go with those things. The frames keep today's places exactly: (70.6, 2.42, -3.225) and (77.2, 2.45, -3.225), turned
 // half round. Today's lesson is a 4.8 m panel at (42, 2.25, -18.35) on the expansion's stage wall. Eden 2026 has no
 // stage there, and its court wall would hide the panel, so the slide is drawn on the screen's own face instead:
-// today's `core-screen` display, 2.25 m by 1.25 m, 1.6 m up. The video plays only while it is within 80 m, faces the
-// eye and the page is shown, as today. Today's lesson slides change only in a viewer's own view, and its buttons are
+// today's `core-screen` display, 2.25 m by 1.25 m, 1.6 m up. The loop (today's video, drawn) plays only while it is
+// within 80 m, faces the eye and the page is shown, as today. Today's lesson slides change only in a viewer's own view, and its buttons are
 // never shown, so the screen shows the first slide.
 import * as THREE from 'three';
 import type { NodeRec } from '../source/source.ts';
 
-/** One authored display in its thing's frame (m, radians): a framed picture or video, or the lesson panel. */
+/** One authored display in its thing's frame (m, radians): a framed picture or loop, or the lesson panel. */
 export type Display = {
   id: string; origin: string; at: [number, number, number]; yaw: number; width: number; height: number;
-  media: { kind: 'image' | 'video'; url: string }; frame: boolean;
+  media: { kind: 'image'; url: string } | { kind: 'loop' }; frame: boolean;
 };
+
+/** Today's colour loop (`apps/web/src/media/gallery-loop.mp4`: 320 by 200, 12 frames a second, 4 s), drawn instead of
+ *  played: a 3 px frame line and two squares on a ground whose colours drift. Each frame's ground, line and squares'
+ *  colours, read from the video's 48 frames, so it draws today's frames exactly (#3725: the repository keeps no
+ *  media). */
+const LOOP = '20374471977fe4b873c07770 203744739681e2b971c0786e 223646739681e1ba71be796c 223646739681dfbb6fbe7a6a 223646739681ddbd6dbc7b68 223646739583dabe6dbc7b68 243548739585d9c06bbb7c66 243548739487d7c06bbb7c64 243548739487d5c169b97e62 25344a739489d4c269b87f60 25344a739489d1c469b8805e 25344a73948bcfc567b6805e 27334a73948bcdc667b4815c 27334a74938dccc767b4825a 27324c74928fc9c867b38358 28314c749291c7ca65b18458 28314c749291c5ca65b08556 2a314c749291c4cb65b08554 2a314c749291c1cd65ae8654 2a314c749291bfce65ac8752 2c304e739291becf65ab8852 2c304e739291bad065a98950 2d2f4e739291b9d165a88a50 2d2f4e739291b7d265a68b4e 2d2f4e739291b6d365a68b4e 2f2e4e749293b2d465a48d4c 2f2e4e749293b1d567a38e4c 302d4e769095afd567a18e4a 302d4e769095aed667a08f4a 302d4e778f97aad8679e904a 322d4e778f97a9d8699c9148 322d4e778f97a7d9699b9248 342c4e778f97a6da6b999348 342c4e798e99a2db6b989448 342c4e798e99a1dc6d969548 352b4e798e999fdc6d949646 352b4e798e999edd6f939746 372a4e7b8c9b9cde6f919846 372a4e7c8c9d9ade71909846 38294e7e8a9f99de738e9946 38294e7e8a9f97df738d9a46 38294e7f899f94e1758b9b46 3a284c7f899f92e177899c46 3a284c7f899f91e179889c46 3a284c7f899f8fe279869d46 3c284c81899f8ee27b859e46 3c284c83889f8ee27d839e48 3d274c83889f8ce37f819f48'.split(' ').map((f) => [0, 6, 12, 18].map((i) => '#' + f.slice(i, i + 6)));
+export const LOOP_FPS = 12;
+/** Draws the loop's frame `n` (0 to 47) on a 320 by 200 canvas. */
+export function drawLoop(g: CanvasRenderingContext2D, n: number): void {
+  const [ground, line, big, small] = LOOP[((n % LOOP.length) + LOOP.length) % LOOP.length];
+  g.fillStyle = ground;
+  g.fillRect(0, 0, 320, 200);
+  g.strokeStyle = line;
+  g.lineWidth = 3;
+  g.strokeRect(26.5, 26.5, 267, 147);
+  g.fillStyle = big;
+  g.fillRect(70, 70, 80, 70);
+  g.fillStyle = small;
+  g.fillRect(185, 90, 60, 50);
+}
+export const LOOP_FRAMES = LOOP.length;
 
 /** The imported things they belong to (import-eden's field 1) and where those stand in Eden (m). */
 const LIBRARY = { origin: 'e_a0741c1e', at: [74, 0, -7] }, SCREEN = { origin: 'e_ad42afe6' };
@@ -38,11 +59,11 @@ export function slide(index: number): string {
 
 export const DISPLAYS: readonly Display[] = [
   { id: 'eden-library-colour-study', origin: LIBRARY.origin, at: local(LIBRARY, [70.6, 2.42, -3.225]), yaw: Math.PI, width: 0.95, height: 1.2, frame: true, media: { kind: 'image', url: new URL('./media/gallery-study.svg', import.meta.url).href } },
-  { id: 'eden-library-colour-loop', origin: LIBRARY.origin, at: local(LIBRARY, [77.2, 2.45, -3.225]), yaw: Math.PI, width: 1.55, height: 0.97, frame: true, media: { kind: 'video', url: new URL('./media/gallery-loop.mp4', import.meta.url).href } },
+  { id: 'eden-library-colour-loop', origin: LIBRARY.origin, at: local(LIBRARY, [77.2, 2.45, -3.225]), yaw: Math.PI, width: 1.55, height: 0.97, frame: true, media: { kind: 'loop' } },
   { id: 'eden-classroom-local-projection', origin: SCREEN.origin, at: [0, 1.6, 0.066], yaw: 0, width: 2.25, height: 1.25, frame: false, media: { kind: 'image', url: slide(0) } },
 ];
 
-type Video = { video: HTMLVideoElement; mesh: THREE.Mesh; asking: boolean; retryAt: number };
+type Loop = { g: CanvasRenderingContext2D; texture: THREE.CanvasTexture; mesh: THREE.Mesh; shown: number };
 
 /** The displays of the imported things the page holds, each in its thing's frame. */
 export class Displays {
@@ -52,7 +73,7 @@ export class Displays {
   private cube = new THREE.BoxGeometry(1, 1, 1);
   private surround = new THREE.MeshStandardMaterial({ color: '#4e4033', roughness: 0.75 });
   private owned: { dispose(): void }[] = [];
-  private videos: Video[] = [];
+  private loops: Loop[] = [];
   private frustum = new THREE.Frustum();
   constructor(rows: readonly Display[] = DISPLAYS) {
     this.group.name = 'displays';
@@ -111,39 +132,40 @@ export class Displays {
       });
       this.owned.push(t);
     } else {
-      const video = document.createElement('video');
-      Object.assign(video, { crossOrigin: 'anonymous', src: r.media.url, muted: true, loop: true, playsInline: true, preload: 'metadata' });
-      const t = new THREE.VideoTexture(video);
-      t.colorSpace = THREE.SRGBColorSpace;
-      material.map = t;
-      this.owned.push(t);
-      this.videos.push({ video, mesh, asking: false, retryAt: 0 });
+      const canvas = document.createElement('canvas');
+      canvas.width = 320;
+      canvas.height = 200;
+      const g = canvas.getContext('2d');
+      if (!g) return owner;
+      drawLoop(g, 0);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      material.map = texture;
+      this.owned.push(texture);
+      this.loops.push({ g, texture, mesh, shown: 0 });
     }
     return owner;
   }
-  /** Plays a video only while it is within 80 m, faces the eye, is in view and the page is shown (today's rule). */
-  update(camera: THREE.Camera): void {
-    if (!this.videos.length) return;
+  /** Plays the loop only while it is within 80 m, faces the eye, is in view and the page is shown (today's rule for
+   *  its video); a paused loop keeps its frame. `seconds`: the page's clock. */
+  update(camera: THREE.Camera, seconds = performance.now() / 1000): void {
+    if (!this.loops.length) return;
     const shown = typeof document === 'undefined' || document.visibilityState !== 'hidden';
     const eye = camera.getWorldPosition(new THREE.Vector3()), at = new THREE.Vector3(), normal = new THREE.Vector3();
     this.frustum.setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
-    for (const v of this.videos) {
+    const frame = Math.floor(seconds * LOOP_FPS) % LOOP_FRAMES;
+    for (const v of this.loops) {
       v.mesh.updateWorldMatrix(true, false);
       at.setFromMatrixPosition(v.mesh.matrixWorld);
       const on = shown && v.mesh.parent?.parent?.parent === this.group && eye.distanceToSquared(at) < 80 ** 2
         && normal.set(0, 0, 1).transformDirection(v.mesh.matrixWorld).dot(eye.clone().sub(at)) > 0 && this.frustum.intersectsObject(v.mesh);
-      if (!on) {
-        if (!v.video.paused) v.video.pause();
-        continue;
-      }
-      if (v.video.paused && !v.asking && performance.now() >= v.retryAt) {
-        v.asking = true;
-        void v.video.play().catch(() => void (v.retryAt = performance.now() + 2000)).finally(() => void (v.asking = false));
-      }
+      if (!on || frame === v.shown) continue;
+      v.shown = frame;
+      drawLoop(v.g, frame);
+      v.texture.needsUpdate = true;
     }
   }
   dispose(): void {
-    for (const v of this.videos) (v.video.pause(), v.video.removeAttribute('src'), v.video.load());
     for (const o of this.owned) o.dispose();
     this.cube.dispose();
     this.surround.dispose();
