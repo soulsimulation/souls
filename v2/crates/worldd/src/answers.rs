@@ -2065,9 +2065,15 @@ impl Clock {
                     redo,
                     effects,
                     guard,
+                    classes,
                     souls,
                     maps,
                 } = k;
+                let sizes = self
+                    .bodies
+                    .as_ref()
+                    .map(Bodies::classes)
+                    .unwrap_or_default();
                 let bodies = match &self.bodies {
                     Some(b) => buildsafe::judged(souls, &buildsafe::moving(b)),
                     None => souls,
@@ -2089,7 +2095,7 @@ impl Clock {
                                 detail: "the world changed since the undo was checked".into(),
                             });
                         }
-                        crate::undo::verdict(&guard.judge(&bodies))
+                        crate::undo::judge(&guard, &classes, &sizes, &bodies)
                     };
                     let r = if redo {
                         history.redo(replica, &world, actor, now, &mut rule)
@@ -4846,6 +4852,7 @@ fn edit_checker(
                                     copy: &copy,
                                     kinds: &kinds,
                                     moving: &snapshot.bodies,
+                                    sizes: &snapshot.classes,
                                     source: snapshot.map.as_deref(),
                                     movers: &snapshot.movers,
                                 },

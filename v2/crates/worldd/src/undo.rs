@@ -12,6 +12,7 @@ use replica::edit::{Refused, Unsafe};
 use replica::effects::{Actor, Effect, Part};
 use replica::encode::{Value, encode};
 use replica::ids::Id;
+use replica::kinds::sizes::Size;
 use replica::world_model::Kind;
 use sim::edit::safety::{self, Guard, Known, Who};
 use std::collections::BTreeMap;
@@ -23,6 +24,8 @@ pub struct Checked {
     pub redo: bool,
     pub effects: Vec<Effect>,
     pub guard: Guard,
+    /// The guard for each body size other than the standard one (as an edit's, `sim::edit::plan_classes`).
+    pub classes: BTreeMap<Size, Guard>,
     pub souls: Vec<Who>,
     pub maps: Option<PreparedMaps>,
 }
@@ -71,6 +74,31 @@ pub fn same(a: &[Effect], b: &[Effect]) -> bool {
         })
 }
 
+/// Each body judged by the guard for its size: the standard guard, or its class's; a body whose class has no guard
+/// is refused `edit.class-unchecked`, as an edit's commit refuses it.
+pub fn judge(
+    guard: &Guard,
+    classes: &BTreeMap<Size, Guard>,
+    sizes: &BTreeMap<Id, Size>,
+    bodies: &[Who],
+) -> Result<(), Refused> {
+    for body in bodies {
+        let size = sizes.get(&body.body).copied().unwrap_or(Size::Standard);
+        let g = if size == Size::Standard {
+            guard
+        } else {
+            classes.get(&size).ok_or_else(|| {
+                refused(
+                    "edit.class-unchecked",
+                    "the current body's footprint was not prepared",
+                )
+            })?
+        };
+        verdict(&g.judge(std::slice::from_ref(body)))?;
+    }
+    Ok(())
+}
+
 /// What the edit checker's thread reads for one undo.
 pub struct Ask<'a> {
     pub actor: Actor,
@@ -80,6 +108,7 @@ pub struct Ask<'a> {
     pub copy: &'a Replica,
     pub kinds: &'a BTreeMap<String, Kind>,
     pub moving: &'a [Who],
+    pub sizes: &'a BTreeMap<Id, Size>,
     pub source: Option<&'a buildsafe::MapBasis>,
     pub movers: &'a [sim::controller::BuildBasis],
 }
@@ -99,12 +128,21 @@ pub fn check(a: Ask<'_>, town: &mut TownCopy) -> Result<Checked, Refused> {
     let souls = buildsafe::judged(buildsafe::souls(a.copy, a.kinds), a.moving);
     let ground = buildsafe::open_ground(a.copy);
     let header = a.copy.header();
-    let checked = match town.on(a.copy, ground, false) {
-        Some(t) => safety::check_on(a.copy.tree(), header, &part, &souls, &Known::of(t)),
-        None => safety::check(a.copy.tree(), header, ground, &part, &souls),
-    };
-    let (guard, v) = checked.map_err(|e| refused("edit.unsafe-check", e))?;
-    verdict(&v)?;
+    let unchecked = |e: String| refused("edit.unsafe-check", e);
+    let guard = match town.on(a.copy, ground, false) {
+        Some(t) => safety::guard_on(a.copy.tree(), header, &part, &Known::of(t)),
+        None => safety::guard(a.copy.tree(), header, ground, &part),
+    }
+    .map_err(unchecked)?;
+    let mut classes = BTreeMap::new();
+    for &size in a.sizes.values() {
+        if size != Size::Standard && !classes.contains_key(&size) {
+            let g =
+                safety::guard_for(a.copy.tree(), header, ground, &part, size).map_err(unchecked)?;
+            classes.insert(size, g);
+        }
+    }
+    judge(&guard, &classes, a.sizes, &souls)?;
     let maps = a
         .source
         .map(|s| PreparedMaps::prepare_part(a.copy, Arc::new(part), s, a.movers))
@@ -113,6 +151,7 @@ pub fn check(a: Ask<'_>, town: &mut TownCopy) -> Result<Checked, Refused> {
         redo: a.redo,
         effects: a.effects,
         guard,
+        classes,
         souls,
         maps,
     })
