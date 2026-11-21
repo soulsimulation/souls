@@ -30,3 +30,20 @@ test('a thing selector: nearest, furthest, rank, last and kind; never a body or 
   assert.equal(selectThing(sel({ in: 'this' }), 'kit', state), null);
   assert.equal(selectThing({ of: 'free_slots' }, 'kit', state), undefined);
 });
+
+test('a thing selector here: what the actor holds counts, a thing past 20 m and a body by its link do not', () => {
+  const st = {
+    actor: 'me',
+    nodes: {
+      room: { children: ['me', 'kit', 'far', 'other'] },
+      me: { hands: { right: 'held' }, at_mm: [0, 0, 0] },
+      held: { kind: 'test:x', at_mm: [0, 0, 0] },
+      far: { kind: 'test:x', at_mm: [25_000, 0, 0] },
+      other: { kind: 'test:x', links: { 'souls:body-of': ['s'] }, at_mm: [1, 0, 0] },
+      kit: { kind: 'test:kit', at_mm: [5000, 0, 0] },
+    },
+  };
+  assert.equal(selectThing(sel({ kind: 'test:x' }), 'kit', st), 'held');
+  assert.equal(selectThing(sel({ kind: 'test:x', order: 'furthest' }), 'kit', st), 'held', 'the far one is out of reach');
+});
+
