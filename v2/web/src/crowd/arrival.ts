@@ -10,7 +10,7 @@ import * as THREE from 'three';
 /** World seconds a light lasts. */
 export const ARRIVAL_S = 4;
 /** Lights drawn at once. */
-export const MAX_LIGHTS = 32;
+export const MAX_LIGHTS = 8;
 /** Wall ms after the page first draws bodies during which new ids are the world loading, not arrivals. */
 export const SETTLE_MS = 3000;
 const COLUMN_H = 7, COLUMN_R = 0.85, DISC_R = 1.6;
