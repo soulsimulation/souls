@@ -8,7 +8,7 @@ import { CREDENTIALS, Refused, runtimeOf, soulsWithTokens } from './home.mjs';
 import { request } from '../daemon/client.mjs';
 import { localId, pair } from '../pair/pair.mjs';
 import { pairAddress } from '../pair/address.mjs';
-import { accountCommand, accountList, accountPair, hasAccount } from '../account/account.mjs';
+import { accountCommand, accountList, accountPair, hasAccount, soulProfile, soulRetire, soulRetireWait, soulRevoke } from '../account/account.mjs';
 
 export const HOME_COMMANDS = [
   'accounts',
@@ -20,6 +20,9 @@ export const HOME_COMMANDS = [
   'list',
   'login',
   'logout',
+  'profile',
+  'retire',
+  'revoke',
 ];
 const ID = /^s_[A-Za-z0-9_-]+$/;
 const GRANT = /^soul-[0-9a-f]{32}-\d+$/;
@@ -297,6 +300,20 @@ export async function homeCommand(home, command, args = [], options = {}) {
   const asAt = args.indexOf('--as'), as = asAt < 0 ? undefined : args[asAt + 1];
   if (['login', 'accounts', 'logout'].includes(command)) return accountCommand(home, command, args);
   if (command === 'list') return args.includes('--account') ? accountList(home, as) : { ok: true, souls: listSouls(home) };
+  // #3707: the agent's profile, retire and revoke (today's commands). profile names its Soul by --soul.
+  if (command === 'profile') {
+    const at = args.indexOf('--soul'), named = at < 0 ? undefined : args[at + 1];
+    return soulProfile(home, chooseSoul(home, named, soulsWithTokens(home)), at < 0 ? args : args.filter((_, k) => k !== at && k !== at + 1));
+  }
+  if (command === 'retire' && args[0] === 'wait') return soulRetireWait(home);
+  if (command === 'retire' || command === 'revoke') {
+    const named = args.find((a, k) => !a.startsWith('--') && args[k - 1] !== '--as');
+    if (!named) throw new Refused(`${command}-usage`, `${command} <name|id> [--as alias]${command === 'retire' ? ' | retire wait' : ''}`);
+    if (command === 'revoke') return soulRevoke(home, named, { as });
+    const held = soulsWithTokens(home), rows = listSouls(home).filter((s) => held.includes(s.id) && (s.id === named || s.name?.toLowerCase() === named.toLowerCase()));
+    if (rows.length > 1) throw new Refused('which-soul', 'name it by its id');
+    return soulRetire(home, rows[0]?.id, named, { as });
+  }
   if (command === 'default') return setDefault(home, args[0]);
   if (command === 'doctor') return doctor(home);
   if (command === 'import') return importSoul(home, args[0]);
