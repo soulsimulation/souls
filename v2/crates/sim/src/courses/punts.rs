@@ -582,7 +582,11 @@ mod tests {
             Some(Vec3::new(20 * m, m, 6 * m))
         );
         let short = reach(&w, None, from, [60 * m, 6 * m]).expect("short of the far bank");
-        assert_eq!((short.x, short.z), (36 * m, 6 * m), "3 m short of x 40 m: {short:?}");
+        assert_eq!(
+            (short.x, short.z),
+            (36 * m, 6 * m),
+            "3 m short of x 40 m: {short:?}"
+        );
         assert_eq!(
             reach(&w, None, Vec3::new(5 * m, m, 2 * m), [5 * m, -20 * m]),
             None,
@@ -613,6 +617,10 @@ mod tests {
             left: 0,
             ..s.clone()
         };
-        assert_eq!(back(&from_home), vec![short, from, home], "no lap from its home stop");
+        assert_eq!(
+            back(&from_home),
+            vec![short, from, home],
+            "no lap from its home stop"
+        );
     }
 }

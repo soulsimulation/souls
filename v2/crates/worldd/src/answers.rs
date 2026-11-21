@@ -2524,7 +2524,12 @@ impl Clock {
         self.forms
             .tick(self.replica.tree(), self.bodies.as_mut(), tick, now);
         if let (Some(e), Some(b)) = (self.engine.as_mut(), self.bodies.as_mut()) {
-            e.tick(self.replica.tree(), &mut b.runner.controller, &mut b.slots, now);
+            e.tick(
+                self.replica.tree(),
+                &mut b.runner.controller,
+                &mut b.slots,
+                now,
+            );
         }
     }
 
@@ -3779,7 +3784,8 @@ pub fn start<S: Storage + 'static>(
                         c.bodies = Some(b);
                         // The activities the log holds, so their members speak in them and leave them again (E26).
                         if let (Some(e), Some(b)) = (c.engine.as_mut(), c.bodies.as_mut())
-                            && let Err(r) = e.restore(c.replica.tree(), &mut b.runner.controller, &mut b.slots)
+                            && let Err(r) =
+                                e.restore(c.replica.tree(), &mut b.runner.controller, &mut b.slots)
                         {
                             eprintln!("worldd: the activities were not restored: {r}");
                         }

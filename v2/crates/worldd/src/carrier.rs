@@ -18,9 +18,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use replica::effects::Change;
 use replica::effects::{Actor, Body, Cause, ChangeRec, Effect, Envelope, Refusal, Rest};
 use replica::encode::Value;
-use replica::effects::Change;
 use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::schedule::course::{Course, place_at};
@@ -49,7 +49,14 @@ pub enum Ask {
 }
 
 /// One entry on `node` of `changes`, caused by `cause`, acted by `actor`.
-fn entry(tree: &Tree, node: Id, changes: Vec<Change>, now: Micros, cause: Cause, actor: Actor) -> R<Effect> {
+fn entry(
+    tree: &Tree,
+    node: Id,
+    changes: Vec<Change>,
+    now: Micros,
+    cause: Cause,
+    actor: Actor,
+) -> R<Effect> {
     let audience = tree
         .handle(node)
         .and_then(|h| tree.node(h))
@@ -89,7 +96,12 @@ fn set(node: Id, field: u64, to: Value) -> Change {
 
 /// A steer's point, parameter 1: `[x, z]` or `[x, y, z]` µm.
 fn point(params: &BTreeMap<u64, Value>) -> R<[i64; 2]> {
-    let bad = || refusal("steer-needs-a-point", "parameter 1: [x, z] um in the boat's frame");
+    let bad = || {
+        refusal(
+            "steer-needs-a-point",
+            "parameter 1: [x, z] um in the boat's frame",
+        )
+    };
     let Some(Value::Array(p)) = params.get(&1) else {
         return Err(bad());
     };
@@ -121,7 +133,12 @@ pub fn act(
     let course = fields
         .get(&F_COURSE)
         .and_then(Course::read)
-        .ok_or_else(|| refusal("not-a-carrier", format!("{} moves on no course", show(punt))))?;
+        .ok_or_else(|| {
+            refusal(
+                "not-a-carrier",
+                format!("{} moves on no course", show(punt)),
+            )
+        })?;
     let aboard = slots
         .seated()
         .iter()
@@ -202,7 +219,12 @@ pub fn act(
 
 /// The steered punts of `steered` that stand at their home at `now` with nobody aboard take up their own loop again
 /// from `now`: one entry of the world's each, their courses handed to the slots. A punt no longer steered is dropped.
-pub fn settle(live: &Tree, slots: &mut Slots, steered: &mut BTreeSet<Id>, now: Micros) -> Vec<Effect> {
+pub fn settle(
+    live: &Tree,
+    slots: &mut Slots,
+    steered: &mut BTreeSet<Id>,
+    now: Micros,
+) -> Vec<Effect> {
     let mut out = Vec::new();
     let mut done = Vec::new();
     for &punt in steered.iter() {
