@@ -407,6 +407,7 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
+    approach(entry, f, &mut bound)?;
     approach_in_areas(entry, &mut bound)?;
     if let Some((_, slot)) = stand_in(entry, f, args)? {
         bound.push(Step::Sit {
@@ -419,6 +420,39 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
         bound.insert(0, Step::Rise);
     }
     Ok(bound)
+}
+
+/// A form that starts with a move at one of the thing's points, with no walk before it (a door's `open` at its
+/// handle, a lamp's `switch_on` at its switch), first walks to that point: the planner stops at the nearest place
+/// within reach of it where a body may stand, as today's game walks to the stand point nearest the hand's point, else
+/// the nearest clear ground, before it acts (0.131 parity, #3688). A form whose thing is in the actor's hand
+/// (`held_by_actor`: a cup's sip, a kettle's pour) does not walk.
+fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal> {
+    let held = f
+        .get("needs")
+        .and_then(Value::arr)
+        .unwrap_or(&[])
+        .iter()
+        .any(|n| n.get("need").and_then(Value::str) == Some("held_by_actor"));
+    let Some(k) = bound.iter().position(|s| !matches!(s, Step::Wait(_))) else {
+        return Ok(());
+    };
+    if let Step::Move {
+        at: Some(p),
+        on: None,
+        ..
+    } = &bound[k]
+        && !held
+    {
+        let to = point(entry, p.as_str())?;
+        let step = Step::WalkTo {
+            point: p.clone(),
+            at: Vec3::new(to.x, 0, to.z),
+            on: None,
+        };
+        bound.insert(k, step);
+    }
+    Ok(())
 }
 
 /// An area is a place to be in, not a point to act from (C34, #3599): a move at a point of the thing right after a walk
