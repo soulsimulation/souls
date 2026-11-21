@@ -1,0 +1,77 @@
+// #3799 A4: the page's Track places a body at changing positions from a real served world's public stream, not from a
+// fixture. Set V2_STREAM_DIR to the `views/` folder `worldd serve` wrote (worldd's eden test
+// `i3799_a4_the_public_stream_carries_a_soul_walking_sitting_and_rising` keeps one with V2_KEEP_STREAM); the page's
+// own worker plays it on the replica WASM (V2_REPLICA_PKG, default target/wasm-load/pkg), and the samples of the parts
+// it posts go into the page's Track as `draw/world.ts` adds them. Skipped without V2_STREAM_DIR.
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { registerHooks } from 'node:module';
+import { dirname, join, normalize, resolve } from 'node:path';
+import { test } from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import type { PartRec } from '../source/source.ts';
+import { Track } from './samples.ts';
+
+const views = process.env.V2_STREAM_DIR;
+
+test('the page Track draws a served Soul at changing positions from the real public stream', { skip: !views && 'V2_STREAM_DIR is not set' }, async () => {
+  const dir = resolve(views!);
+  const { encode } = await import('cborg');
+  const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+  const pkg = resolve(v2, process.env.V2_REPLICA_PKG ?? 'target/wasm-load/pkg');
+  const replicaUrl = pathToFileURL(join(pkg, 'replica.js')).href;
+  registerHooks({ resolve: (s, c, next) => (s === 'replica' ? { url: replicaUrl, shortCircuit: true } : next(s, c)) });
+  const stream = JSON.parse(readFileSync(join(dir, 'world.json'), 'utf8')).stream as string;
+  const base = `https://stream.example.invalid/${stream.replace(/^\/+|\/+$/g, '')}/`;
+  const parts: PartRec[] = [], errors: string[] = [], polls: (() => Promise<void>)[] = [];
+  const fetchBefore = globalThis.fetch, intervalBefore = globalThis.setInterval, selfBefore = (globalThis as { self?: unknown }).self;
+  try {
+    globalThis.fetch = (async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.protocol === 'file:') return new Response(readFileSync(url), { headers: { 'content-type': 'application/wasm' } });
+      const file = normalize(join(dir, decodeURIComponent(url.pathname)));
+      if (file.startsWith(dir) && existsSync(file)) return new Response(readFileSync(file));
+      if (url.pathname.endsWith('.text')) return new Response(encode([]));
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+    (globalThis as { setInterval: unknown }).setInterval = (fn: () => Promise<void>) => { polls.push(fn); return 1; };
+    (globalThis as { self?: unknown }).self = {
+      onmessage: null as null | ((e: unknown) => void),
+      postMessage: (m: { t: string; p: PartRec; message: string }) => (m.t === 'part' ? parts.push(m.p) : m.t === 'error' ? errors.push(m.message) : undefined),
+    };
+    await import(new URL('../source/worker.ts?stream-track', import.meta.url).href);
+    (globalThis as unknown as { self: { onmessage: (e: unknown) => void } }).self.onmessage({ data: { stream: base } });
+    const until = Date.now() + 10_000;
+    while (!polls.length && !errors.length && Date.now() < until) await new Promise((r) => setImmediate(r));
+    for (let seen = -1; seen !== parts.length && !errors.length; ) { seen = parts.length; await polls[0]?.(); }
+  } finally {
+    globalThis.fetch = fetchBefore;
+    globalThis.setInterval = intervalBefore;
+    (globalThis as { self?: unknown }).self = selfBefore;
+  }
+  assert.deepEqual(errors, []);
+  // Every sample the parts carried, into each body's Track as the page adds them (`draw/world.ts`).
+  const tracks = new Map<string, Track>(), walked = new Map<string, number[]>();
+  for (const p of parts) {
+    for (const [id, parent, slot, at, x, y, z] of p.samples) {
+      const t = tracks.get(id) ?? tracks.set(id, new Track()).get(id)!;
+      t.add(at, [x, y, z], `${parent}/${slot}`);
+      if (slot === null) (walked.get(id) ?? walked.set(id, []).get(id)!).push(at);
+    }
+  }
+  const [body, times] = [...walked].sort((a, b) => b[1].length - a[1].length)[0] ?? [];
+  assert.ok(body, `the parts carry a body's samples (${parts.length} parts)`);
+  // Replay the walk as the page would: a fresh Track fed in order, read at five times across the walk.
+  const t = new Track();
+  const on: [number, [number, number, number]][] = [];
+  for (const p of parts) for (const [id, parent, slot, at, x, y, z] of p.samples) if (id === body && slot === null) { t.add(at, [x, y, z], `${parent}/${slot}`); on.push([at, [x, y, z]]); }
+  const [t0, t1] = [times[0], times[Math.min(times.length - 1, Math.floor(times.length / 2))]];
+  const seen = new Set<string>();
+  for (let k = 0; k <= 4; k++) {
+    const pos = t.at(t0 + ((t1 - t0) * k) / 4);
+    assert.ok(pos);
+    seen.add(pos.map((v) => Math.round(v / 1000)).join(','));
+  }
+  console.log(`${parts.length} parts; body ${body}: ${times.length} samples on a floor; Track positions at five times: ${[...seen].join(' | ')} (mm)`);
+  assert.ok(seen.size >= 3, 'the Track places the body at changing positions');
+});

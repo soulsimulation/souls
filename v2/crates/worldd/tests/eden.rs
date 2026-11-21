@@ -1903,6 +1903,10 @@ fn i3799_a4_the_public_stream_carries_a_soul_walking_sitting_and_rising() {
     std::thread::sleep(Duration::from_millis(2500));
     let samples = public_samples(&dir);
     drop(served);
+    // The page's Track test plays this stream (`v2/web/src/clock/stream-track.test.ts`, V2_STREAM_DIR).
+    if let Ok(keep) = std::env::var("V2_KEEP_STREAM") {
+        copy_dir(&dir.join("views"), Path::new(&keep));
+    }
     let _ = std::fs::remove_dir_all(&dir);
     walked.expect("walked to the armchair");
     sat.expect("sat in it");
