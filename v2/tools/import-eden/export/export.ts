@@ -137,8 +137,9 @@ for (const e of m.entities.values()) {
     return { id: r.id, name: r.name, floor: r.floor, pose: out(scaled), height: S(r.height), polygon: r.polygon.map(inRoom) };
   });
   if (b.openings?.length) rec.openings = (b.openings as Opening[]).map((o) => {
-    // A window names no room: the room it opens from is the one on its floor whose wall it sits in (nearest edge).
-    const from = o.from ?? (o.kind === 'window' ? wallRoom(b.rooms ?? [], o) : undefined);
+    // A window names no room, nor does a door a model's author placed in a mesh building's wall (the Mars campus's):
+    // the room it opens from is the one on its floor whose wall it sits in (nearest edge); the door leads outside.
+    const from = o.from ?? (o.kind === 'window' || !o.to ? wallRoom(b.rooms ?? [], o) : undefined);
     const room = from && b.rooms?.find((r) => r.id === from);
     let at: number[] | undefined;
     if (room) {
