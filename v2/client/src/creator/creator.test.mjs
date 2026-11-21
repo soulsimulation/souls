@@ -18,7 +18,7 @@ import { createServer as createHttp } from 'node:http';
 import { DEFAULT_PKG } from '../daemon/client.mjs';
 import { readSeat } from '../home/home.mjs';
 import { pair } from '../pair/pair.mjs';
-import { opsOf, requestOf, resolve } from './souls-god.mjs';
+import { opsOf, requestOf, resolve as resolveRelation } from './souls-god.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -196,7 +196,7 @@ test('a relation resolves on describe: beside, on a free slot, facing (#3694)', 
     ],
     kinds: { 'r2:shelf@00': { admits: ['thing'], slots: { 0: { admits: 'thing' }, 1: { admits: 'thing' } } } },
   };
-  const of = (...a) => { const r = requestOf(a); return resolve(r.req, r.relation, world).ops[0]; };
+  const of = (...a) => { const r = requestOf(a); return resolveRelation(r.req, r.relation, world).ops[0]; };
   assert.deepEqual(of('place', 'lamp', '--beside', 'a-2', '--dir', 'n', '--dist', '500'), { op: 'place', name: 1, kind: 'lamp', in: 'a-1', at: [1000, 0, 1500] });
   assert.deepEqual(of('place', 'lamp', '--on', 'a-3'), { op: 'place', name: 1, kind: 'lamp', in: 'a-3', slot: 1, at: [0, 0, 0] });
   assert.deepEqual(of('move', 'a-2', '--facing', 'e'), { op: 'move', node: 'a-2', yaw: 90000, at: [1000, 0, 2000] });
