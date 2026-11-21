@@ -285,7 +285,10 @@ pub fn settle(
         let Ok(t) = course.load() else { continue };
         let stopped = matches!(t.stopped(now), Ok(Some(_)));
         let at_home = t.at(now).is_ok_and(|(p, _)| p.x == home.x && p.z == home.z);
-        if stopped && !at_home && now >= course.t0.saturating_add(course.within).saturating_add(HOLD) {
+        if stopped
+            && !at_home
+            && now >= course.t0.saturating_add(course.within).saturating_add(HOLD)
+        {
             // The hold ran out: rowed home along its wake, its rider (if any) carried.
             let (here, _) = t.at(now).unwrap_or((home, Vec3::ZERO));
             let back = punts::once(here, &punts::back(&s), now).and_then(|c| {
@@ -306,7 +309,7 @@ pub fn settle(
             }
             continue;
         }
-        if !(stopped && at_home) || !slots.holders(punt).is_empty() {
+        if !(stopped && at_home && slots.holders(punt).is_empty()) {
             continue;
         }
         let own = Course { t0: now, ..s.own };
