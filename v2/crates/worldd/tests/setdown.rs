@@ -295,16 +295,17 @@ fn create(sequence: u64, node: Id, kind: &str, parent: Id, at: Vec3) -> Value {
 
 /// The world as built: a vessel 300 mm east of the first birth's spot, a rack 400 mm south of it. No body.
 fn world() -> Replica {
-    // N2's test world as imported (its open ground and buildings), so the edit checker's town has ground to plan on.
+    // N2's test world as imported (its open ground and buildings), so the edit checker's town has ground to plan on;
+    // its header pins the imported kinds and this test's.
     let im = import_eden::load(&testworld::generate(1, 0).expect("the test world").text)
         .expect("the test world loads");
-    let mut r = Replica::start(&im.log.0).expect("a replica");
-    r.apply(&Part::read(&im.log.1).expect("the import's part"))
-        .expect("the import applies");
+    let h = import_eden::header(im.nodes["world"], &tree_rules()).expect("a header");
+    let mut r = Replica::start(h.stored()).expect("a replica");
     let g = ground();
     let s = first_spot();
-    let next = r.version();
-    let effects = vec![
+    let mut effects: Vec<Value> = im.effects.iter().map(Effect::to_value).collect();
+    let next = effects.len() as u64;
+    effects.extend([
         create(next, vessel(), VESSEL, g, Vec3::new(s.x + 300_000, 0, s.z)),
         create(next + 1, rack(), RACK, g, Vec3::new(s.x, 0, s.z + 400_000)),
         create(
@@ -314,9 +315,9 @@ fn world() -> Replica {
             g,
             Vec3::new(s.x - 300_000, 0, s.z),
         ),
-    ];
+    ]);
     let part = encode(&Value::Map(BTreeMap::from([
-        (1, Value::Bytes(r.header().hash().to_bytes())),
+        (1, Value::Bytes(h.hash().to_bytes())),
         (2, Value::Array(effects)),
     ])))
     .unwrap();
