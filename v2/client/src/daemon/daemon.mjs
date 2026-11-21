@@ -593,9 +593,15 @@ async function ageAfter({ now = false } = {}) {
   return !current && !age.gap ? { ...age, stale: true, gap: { ms: 0, why: signedIn ? 'syncing' : 'not-connected' } } : age;
 }
 
+/** The kind entries held in `<home>/kinds/`, the Soul's own body kind given its family's forms (E21, #2791). */
+function heldKinds() {
+  const me = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME);
+  return kindsIn(join(home, 'kinds'), me?.kind);
+}
+
 /** R2's verdict on each candidate, on the copy as it is now (R8). */
 function verdicts(candidates) {
-  const kinds = kindsIn(join(home, 'kinds')), state = stateOf(copy, kinds, ME);
+  const kinds = heldKinds(), state = stateOf(copy, kinds, ME);
   return candidates.map((c) => judge(wire.rules_decide, c, { kinds, state, asker: { sees: [] } }));
 }
 
@@ -665,7 +671,7 @@ function towardOf(req) {
   const found = exact.length ? exact : souls.filter((r) => r.name.toLowerCase() === lower);
   if (found.length === 0) return { code: 'say-to-unknown', detail: `no Soul called ${want} in the copy: find "${want}" or look` };
   if (found.length > 1) return { code: 'say-to-ambiguous', detail: `${found.length} Souls are called ${want}: use the id (${found.map((r) => r.id).join(', ')})` };
-  const them = found[0], forms = kindsIn(join(home, 'kinds'))[me?.kind]?.forms ?? {};
+  const them = found[0], forms = heldKinds()[me?.kind]?.forms ?? {};
   const takes = (f) => Object.keys(forms[f]?.takes ?? {});
   const gestures = Object.entries(forms).filter(([, f]) => f.steps?.length && f.steps.every((x) => x.step === 'move') && Object.keys(f.takes ?? {}).every((k) => k === 'toward'));
   // Today's verbs are hyphenated (`shake-head`); a kind's form names are snake_case (`shake_head_at`).
@@ -697,7 +703,7 @@ function actsOf(words) {
     if (out.length && (ID.test(w) || (arg && ID.test(arg[2])))) {
       const c = out.at(-1), args = (c.args ??= {});
       if (arg) { args[arg[1]] = arg[2]; continue; }
-      kinds ??= kindsIn(join(home, 'kinds'));
+      kinds ??= heldKinds();
       rows ??= rowsOf(copy);
       const takes = Object.entries(kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
       const name = takes.map(([n, t]) => t?.type === 'thing' && n).find((n) => n && !(n in args));
@@ -748,6 +754,8 @@ async function answer(req) {
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),
         hearing: ws?.hearing ?? null, viewGrants, viewKinds: [...viewKinds],
+        // The Soul's own body in the copy, once born (a joined body is minted, not the Soul's id): `act wave:<body>`.
+        body: [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id ?? null,
         rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since,
       };
     }
@@ -786,7 +794,7 @@ async function answer(req) {
       if (moveForm(intent?.verb)) {
         // C14: a move is checked as the world checks it, on the copy and the body's last known posture.
         const age = await ageAfter();
-        const nodes = stateOf(copy, kindsIn(join(home, 'kinds')), ME).nodes;
+        const nodes = stateOf(copy, heldKinds(), ME).nodes;
         const v = moveVerdict(wire.move_check, intent, { nodes, seated: state.seated ?? null });
         return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
       }
