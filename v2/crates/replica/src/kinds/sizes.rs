@@ -35,11 +35,13 @@ pub enum Size {
     Standard,
     /// 0.5 m.
     Large,
+    /// 1.3 m, for explicitly admitted larger released bodies.
+    Giant,
 }
 
 impl Size {
     /// Every class, smallest first.
-    pub const ALL: [Size; 3] = [Size::Small, Size::Standard, Size::Large];
+    pub const ALL: [Size; 4] = [Size::Small, Size::Standard, Size::Large, Size::Giant];
 
     /// The class's radius, mm.
     pub const fn radius_mm(self) -> i64 {
@@ -47,6 +49,7 @@ impl Size {
             Size::Small => 200,
             Size::Standard => 280,
             Size::Large => 500,
+            Size::Giant => 1_300,
         }
     }
 
@@ -56,6 +59,7 @@ impl Size {
             Size::Small => "small",
             Size::Standard => "standard",
             Size::Large => "large",
+            Size::Giant => "giant",
         }
     }
 
@@ -79,7 +83,7 @@ impl Size {
                     "body-too-large",
                     format!(
                         "a radius of {mm} mm is over the largest class's {} mm",
-                        Size::Large.radius_mm()
+                        Size::Giant.radius_mm()
                     ),
                 )
             })
@@ -97,6 +101,13 @@ pub struct Build {
 }
 
 impl Build {
+    /// The explicit existing default when no body hash was recorded.
+    pub const STANDARD: Build = Build {
+        size: Size::Standard,
+        height_mm: 1_750,
+        hover_mm: 0,
+    };
+
     /// Reads a family kind's `size`, `height` and `hover` fields (their defaults). A field missing, of another type
     /// or out of range is refused as `family-size`.
     pub fn of(kind: &KindDef) -> R<Build> {

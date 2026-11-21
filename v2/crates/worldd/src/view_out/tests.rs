@@ -16,6 +16,11 @@ use replica::views::Level;
 use replica::world_model::Audience;
 use std::process::Command;
 
+thread_local! {
+    /// Replays with the whole-state reference path instead of the tree-reading one (#3667's regression).
+    pub(super) static WHOLE_STATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 fn header() -> Header {
     Header::read(&fixture_bytes(FIXTURE_HEADER).expect("bytes")).expect("a header")
 }
@@ -1179,6 +1184,98 @@ fn w3e_compare_transfer_queries(public: &PublicPlayer, canonical: &Replica, auth
     }
 }
 
+/// #3574 under #3571's rule: a text file carries the dictionary words of the name references of public nodes only,
+/// each verified against its hash; a private node's name, a wrong dictionary entry and an unknown hash add nothing.
+#[test]
+fn public_place_names_beside_public_nodes_only_and_hash_verified() {
+    use replica::ids::sha256;
+    let h = header();
+    let mut actual = Replica::restored(
+        h.clone(),
+        replica::tree::Tree::start(h.zone, h.kinds[0].clone()),
+        0,
+    );
+    let d = scratch("public-names");
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let names = Arc::new(crate::views::names::PublicNames::from([
+        (sha256(b"Plaza"), "Plaza".to_string()),
+        (sha256(b"West lake"), "West lake".to_string()),
+        (sha256(b"Secret garden"), "Secret garden".to_string()),
+        (sha256(b"Harbour"), "not the harbour".to_string()),
+    ]));
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: None,
+            names: Some(Arc::clone(&names)),
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let owner = Id::new(Scope([93; 16]), 1).unwrap();
+    let named = |seq: u64, n: u64, audience: Audience, name: &[u8]| {
+        let node = Id::new(Scope([94; 16]), n).unwrap();
+        let mut e = w3e_create(&h, seq, node, h.zone, audience);
+        if let Body::Changes(changes) = &mut e.body
+            && let Change::Create { fields, .. } = &mut changes[0].change
+        {
+            fields.insert(4, Value::Bytes(sha256(name).to_vec()));
+        }
+        e
+    };
+    let bytes = w3e_packet(
+        &h,
+        vec![
+            named(0, 1, Audience::Everyone, b"West lake"),
+            named(1, 2, Audience::Everyone, b"Plaza"),
+            named(2, 3, Audience::Of(owner), b"Secret garden"),
+            named(3, 4, Audience::Everyone, b"Harbour"),
+            named(4, 5, Audience::Everyone, b"Nowhere"),
+        ],
+    );
+    actual.apply_bytes(&bytes).unwrap();
+    out.push(0, &bytes).unwrap();
+    out.flush().unwrap();
+    let text = fs::read(out.generation_dir().join("0.text")).unwrap();
+    let Value::Array(text) = decode(&text).unwrap().value else {
+        panic!("text")
+    };
+    let mut want = [
+        (sha256(b"Plaza"), "Plaza"),
+        (sha256(b"West lake"), "West lake"),
+    ];
+    want.sort();
+    assert_eq!(
+        text,
+        want.iter()
+            .map(|(k, w)| Value::Array(vec![
+                Value::Bytes(k.to_vec()),
+                Value::Bytes(w.as_bytes().to_vec())
+            ]))
+            .collect::<Vec<_>>(),
+        "only verified names of public nodes"
+    );
+    // The baseline's text is the same words of the public state (`PublicWriter::words` of the player's state).
+    let state = project(&h, &actual.tree().to_state()).unwrap();
+    assert_eq!(
+        public_names(&state, &names)
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        want.iter().map(|(k, _)| *k).collect::<Vec<_>>()
+    );
+    // The private node's name is in the source but never in the public projection's names.
+    assert!(!public_names(&state, &names).contains_key(&sha256(b"Secret garden")));
+}
+
 #[test]
 fn w3e_exact_imported_root_frontier_queries_and_whole_part_refusal() {
     let mut value = if let Value::Map(m) = header().to_value() {
@@ -1223,6 +1320,7 @@ fn w3e_exact_imported_root_frontier_queries_and_whole_part_refusal() {
             record: 0,
             checkpoint: Some(cp),
             text: Some(words),
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -1504,6 +1602,7 @@ fn w3e_public_and_private_root_flights_return_settle_arrive_and_duplicate_events
                     record: 2,
                     checkpoint: Some(cp),
                     text: None,
+                    names: None,
                     clock_seed: None,
                     history: None,
                 },
@@ -1605,6 +1704,7 @@ fn w3e_public_and_private_root_flights_return_settle_arrive_and_duplicate_events
                     record: 3,
                     checkpoint: Some(newer),
                     text: None,
+                    names: None,
                     clock_seed: None,
                     history: None,
                 },
@@ -1706,6 +1806,7 @@ fn w3e_public_and_private_root_flights_return_settle_arrive_and_duplicate_events
                         record: 5,
                         checkpoint: Some(cp),
                         text: None,
+                        names: None,
                         clock_seed: None,
                         history: None,
                     },
@@ -1782,6 +1883,7 @@ fn w3e_store_only_restart_preserves_old_bytes_cursor_and_live_reader() {
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -1816,6 +1918,7 @@ fn w3e_store_only_restart_preserves_old_bytes_cursor_and_live_reader() {
             record: 1,
             checkpoint: Some(cp),
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -1913,6 +2016,7 @@ fn w3e_complete_query_bytes_keep_nonzero_restored_baseline_and_untouched_node_ve
             record: 1,
             checkpoint: Some(cp),
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2055,6 +2159,7 @@ fn w3e_legacy_terminal_inside_source_part_keeps_exact_private_remainder() {
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: Some(&history),
         },
@@ -2087,6 +2192,7 @@ fn w3e_legacy_terminal_inside_source_part_keeps_exact_private_remainder() {
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2152,6 +2258,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2185,6 +2292,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2212,6 +2320,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2240,6 +2349,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2264,6 +2374,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2298,6 +2409,7 @@ fn w3e_first_durable_mapping_timers_and_pending_slowdown_remain_authoritative() 
             record: 0,
             checkpoint: Some(cp),
             text: None,
+            names: None,
             clock_seed: Some(mapping),
             history: None,
         },
@@ -2482,6 +2594,7 @@ fn w3e_older_eligible_checkpoint_and_takeover_aware_original_source_bridge_legac
         record: 1,
         checkpoint: Some(newer),
         text: None,
+        names: None,
         clock_seed: None,
         history: Some(&history),
     };
@@ -2602,6 +2715,7 @@ fn w3e_bootstrap_source_diagnostics_name_missing_changed_header_and_part() {
             record: 0,
             checkpoint: Some(checkpoint.clone()),
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         }
@@ -2626,4 +2740,187 @@ fn w3e_bootstrap_source_diagnostics_name_missing_changed_header_and_part() {
     let missing = select().unwrap_err();
     assert_eq!(missing.name, "stream-source-missing");
     assert!(missing.detail.starts_with("legacy part bytes:"));
+}
+
+/// #3667: the public writer replays a recorded log entry by entry, reading its tree instead of building a whole state
+/// per entry. Its public output (every part and text file, the baseline and the public state) is byte-identical to the
+/// whole-state replay's (the code before the change, kept as the test's reference), on a log with a migration cut
+/// inside a source part, several entries per part, transfers that leave, arrive, arrive again, return and settle, an
+/// arrival from another zone and a private entry.
+#[test]
+fn replay_reads_the_tree_and_publishes_the_same_bytes_as_the_whole_state_path() {
+    let reference = replay_output(true);
+    let tree = replay_output(false);
+    println!(
+        "3667 replay output: whole state {} bytes, tree {} bytes, {}",
+        reference.len(),
+        tree.len(),
+        if reference == tree {
+            "equal"
+        } else {
+            "DIFFERENT"
+        }
+    );
+    assert!(reference.len() > 1000, "the log published");
+    assert!(reference == tree, "the tree-reading replay differs");
+}
+
+fn replay_output(whole_state: bool) -> Vec<u8> {
+    use replica::effects::TransferRec;
+    WHOLE_STATE.set(whole_state);
+    let h = header();
+    let d = scratch(&format!("3667-replay-{whole_state}"));
+    let views = d.join("views");
+    let n = |s: u8| Id::new(Scope([0x90 + s; 16]), 1).unwrap();
+    let (body, hidden, carrier, child, foreign) = (n(1), n(2), n(3), n(4), n(5));
+    let (t1, t2, t3, t4) = (n(6), n(7), n(8), n(9));
+    let everyone = Audience::Everyone;
+    let destination = Pose {
+        frame: Frame {
+            node: h.zone,
+            slot: None,
+        },
+        position: Vec3::new(5, 0, 5),
+        orientation: Quat::IDENTITY,
+        support: Support::Surface {
+            surface: h.zone,
+            height: 0,
+        },
+    };
+    let leave = |seq: u64, node: Id, transfer: Id| {
+        w3e_effect(
+            seq,
+            node,
+            everyone,
+            Body::Transfer(TransferRec::Leave {
+                transfer,
+                node,
+                lineage: h.lineage,
+                zone: h.zone,
+                pose: destination,
+            }),
+        )
+    };
+    let end = |seq: u64, rec: TransferRec| w3e_effect(seq, h.zone, everyone, Body::Transfer(rec));
+    let change = |seq: u64, node: Id, audience: Audience, c: Change| {
+        w3e_effect(
+            seq,
+            node,
+            audience,
+            Body::Changes(vec![ChangeRec {
+                change: c,
+                rest: Rest::new(),
+            }]),
+        )
+    };
+    let public = w3e_create(&h, 0, body, h.zone, everyone);
+    // The legacy stream ends after entry 0, inside the first source part: the migration cut.
+    let original = w3e_packet(
+        &h,
+        vec![
+            public.clone(),
+            w3e_create(&h, 1, hidden, h.zone, Audience::Of(hidden)),
+            w3e_create(&h, 2, carrier, h.zone, everyone),
+            w3e_create(&h, 3, child, carrier, everyone),
+        ],
+    );
+    let mut legacy = Writer::create(&views, &h, &key(&h), (0, 0)).unwrap();
+    legacy.frame(&frame(vec![public.to_value()])).unwrap();
+    legacy.flush().unwrap();
+    let history = sim::log::Recovered {
+        header: None,
+        first: 0,
+        start: 0,
+        records: vec![original],
+        end: 0,
+        last_crc: 0,
+        torn: None,
+    };
+    let store = directoryd::directory::store::Memory::default();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: Replica::start(h.stored()).unwrap(),
+            record: 0,
+            checkpoint: None,
+            text: None,
+            names: None,
+            clock_seed: None,
+            history: Some(&history),
+        },
+        &store,
+    )
+    .unwrap();
+    out.flush().unwrap();
+    let mut source = Replica::start(h.stored()).unwrap();
+    source.apply_bytes(&history.records[0]).unwrap();
+    let foreign_create = match w3e_create(&h, 0, foreign, h.zone, everyone).body {
+        Body::Changes(cs) => cs,
+        _ => unreachable!(),
+    };
+    let log = vec![
+        vec![
+            leave(4, carrier, t1),
+            change(5, body, everyone, set(body, 1, Value::Uint(7))),
+        ],
+        vec![end(
+            6,
+            TransferRec::Arrive {
+                transfer: t1,
+                carried: Vec::new(),
+            },
+        )],
+        vec![end(
+            7,
+            TransferRec::Arrive {
+                transfer: t1,
+                carried: Vec::new(),
+            },
+        )],
+        vec![
+            leave(8, child, t2),
+            // A return is written by the node the subtree left.
+            w3e_effect(
+                9,
+                carrier,
+                everyone,
+                Body::Transfer(TransferRec::Return {
+                    transfer: t2,
+                    reason: Name::new("souls:returned").unwrap(),
+                }),
+            ),
+        ],
+        vec![leave(10, body, t3)],
+        vec![end(11, TransferRec::Settle { transfer: t3 })],
+        vec![end(
+            12,
+            TransferRec::Arrive {
+                transfer: t4,
+                carried: foreign_create,
+            },
+        )],
+        vec![change(
+            13,
+            hidden,
+            Audience::Of(hidden),
+            set(hidden, 1, Value::Uint(3)),
+        )],
+    ];
+    for (i, effects) in log.into_iter().enumerate() {
+        let bytes = w3e_packet(&h, effects);
+        source.apply_bytes(&bytes).unwrap();
+        out.push(i as u64 + 1, &bytes).unwrap();
+        out.flush().unwrap();
+    }
+    let mut all = Vec::new();
+    for (name, bytes) in files(&out.generation_dir()) {
+        all.extend(name.into_bytes());
+        all.extend(bytes);
+    }
+    all.extend(&out.baseline);
+    all.extend(wire(out.public_player().state().clone()).unwrap());
+    WHOLE_STATE.set(false);
+    all
 }

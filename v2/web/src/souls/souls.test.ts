@@ -158,6 +158,20 @@ test('A3: markup and an address in an utterance are drawn as plain text, with no
   assert.ok(!made.includes('a') && !made.includes('script') && !made.includes('img') && !made.includes('b'));
 });
 
+test('B16: a Soul the world winds down reads idle, zombie, asleep from its records, and awake again when woken', () => {
+  const c = new SoulsCopy();
+  c.apply({ nodes: [body('a.1')], removed: [], to: 0 });
+  const rec = (at: number, name: string) => ({ at, node: 'a.1', name });
+  c.apply({ nodes: [], removed: [], to: 15_000_000, happened: [rec(10_000_000, 'souls:idle')] });
+  assert.equal(c.status('a.1', 15_000_000, none), 'idle');
+  c.apply({ nodes: [], removed: [], to: 22_000_000, happened: [rec(20_000_000, 'souls:zombie')] });
+  assert.equal(c.status('a.1', 22_000_000, none), 'zombie');
+  c.apply({ nodes: [], removed: [], to: 30_000_000, happened: [rec(25_000_000, 'souls:asleep')] });
+  assert.equal(c.status('a.1', 30_000_000, none), 'asleep');
+  c.apply({ nodes: [], removed: [], to: 40_000_000, happened: [rec(35_000_000, 'souls:awake'), { at: 35_000_000, node: 'a.1', name: 'souls:said' }] });
+  assert.equal(c.status('a.1', 40_000_000, none), 'standing');
+});
+
 test('C26: a line that carries farther than talk is shown as a shout', () => {
   const line = (reach: number): SaidRec => ({ speaker: 'a', at: 0, length: 1e6, reach, ref: 'r', words: 'the bridge is out' });
   assert.equal(spoken(line(5_000)), 'the bridge is out');

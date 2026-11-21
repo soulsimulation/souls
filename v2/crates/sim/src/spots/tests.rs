@@ -68,3 +68,59 @@ fn a_point_with_no_place_within_reach_has_none() {
     assert_eq!(within(&mut g, target(0), REACH, from), None);
     assert_eq!(within(&mut g, target(0), REACH, None), None);
 }
+
+#[test]
+fn mixed_classes_share_physical_holders_across_different_candidate_keys() {
+    struct Open;
+    impl ClassGround for Open {
+        fn stand(&self, _: Size, _: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+            Some((p, p))
+        }
+        fn passage(&self, _: Size, _: Id, _: Vec3) -> bool {
+            false
+        }
+        fn walk(&mut self, _: Size, _: Id, a: Vec3, _: Id, b: Vec3) -> Option<i64> {
+            Some(flat(a, b))
+        }
+    }
+    let id = |n| Id::new(replica::ids::Scope([0x65; 16]), n).unwrap();
+    let ask = |n| Ask {
+        who: id(n),
+        order: id(n + 100),
+        node: node(),
+        from: Vec3::new(-5_000_000, 0, 0),
+        target: target(0),
+    };
+    let asks = vec![
+        (ask(1), Size::Giant),
+        (ask(2), Size::Giant),
+        (ask(3), Size::Small),
+        (ask(4), Size::Standard),
+    ];
+    let mut spots = Spots::new();
+    spots.write_sized(&mut Open, &asks, 0).unwrap();
+    for (i, (a, sa)) in asks.iter().enumerate() {
+        let pa = spots.of(a.who, &a.target).unwrap().unwrap();
+        for (b, sb) in &asks[i + 1..] {
+            let pb = spots.of(b.who, &b.target).unwrap().unwrap();
+            let clearance = (sa.radius_mm() + sb.radius_mm() + 140) * 1000;
+            assert!(
+                flat(pa, pb) >= clearance,
+                "mixed footprints cannot share a physical spot"
+            );
+        }
+    }
+    let before: Vec<_> = asks
+        .iter()
+        .map(|(a, _)| spots.of(a.who, &a.target))
+        .collect();
+    spots.invalidate_geometry();
+    spots.write_sized(&mut Open, &asks, 1).unwrap();
+    assert_eq!(
+        asks.iter()
+            .map(|(a, _)| spots.of(a.who, &a.target))
+            .collect::<Vec<_>>(),
+        before,
+        "cache rebuild preserves the one physical reservation set"
+    );
+}

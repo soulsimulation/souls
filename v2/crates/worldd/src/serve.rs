@@ -50,7 +50,9 @@
 //! seat (a sofa's three, a bed's two; C19, #3457), its point carried up the tree onto the floor a body stands on.
 //! It prints `places to sit or lie: <n> registered on <things> things; <all> body slots declared; <left> with no floor;
 //! <moved> stand points moved to clear ground`. A stand point a body cannot stand on is moved to the nearest clear ground
-//! within a form's reach (C15's rule), so a rise sets the body down where it can stand.
+//! within a form's reach (C15's rule), so a rise sets the body down where it can stand. So is one in a doorway's
+//! clearance, where the spot tables never stop a walker (a bed beside its room's door): moved to the nearest place out
+//! of it, no nearer the seat, so a walk to the seat ends within the sit's or the lie's reach.
 //!
 //! **Off the machine** (O3b, #3458), when `--store <store>`, `$WORLDD_STORE` or the directory's `$DIRECTORY_STORE_URL`
 //! names a store (O3c, #3529: the offsite bucket, `s3:https://<host>/<bucket>[/<prefix>]` with its keys in `AWS_*`, or
@@ -130,6 +132,17 @@ type R<T> = Result<T, String>;
 
 /// The log's epoch.
 const EPOCH: u64 = 1;
+
+/// When `serve` began (#3672): its start-up stages print their elapsed time from here. Unset outside `serve`, so
+/// `seed` and template checks print nothing.
+static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// One start-up stage's elapsed-time stamp (#3672), only while `serve` starts.
+fn stamp(stage: &str) {
+    if let Some(t) = STARTED.get() {
+        println!("start-up: {stage} at {} ms", t.elapsed().as_millis());
+    }
+}
 /// K5's checkpoint interval: one each 8 MiB of log (the bench constant, as `worldd fork`).
 const EVERY: u64 = 8 << 20;
 /// The stream writer's queue in the tier: deliveries it may fall behind by before it is handed a snapshot.
@@ -185,13 +198,11 @@ fn io(path: &Path) -> impl Fn(std::io::Error) -> String + '_ {
     move |e| format!("{}: {e}", path.display())
 }
 
-/// What a loader's facts file gives a world: its header, its import part, its walkers' town and ground.
+/// What a loader's facts file gives a world: its header, its import part and its ground. Its walkers' town is built
+/// by `serve` from the world as its log leaves it, once (#3672).
 struct Built {
     header: replica::effects::Header,
     part: Vec<u8>,
-    town: Town,
-    /// The planner's copy of the town (K18b), built with it before the clock and its watchdog start.
-    planner: Town,
     ground: Id,
     root: Id,
     /// The world's rules (T2), for the engine's own acts (C2).
@@ -396,6 +407,7 @@ const PUNT_REF: &str = "core-rowing-punt@1";
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
     let facts = &with_punts(facts)?;
     let mut im = import_eden::load(facts)?;
+    stamp("facts");
     for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
         println!(
             "punt: rowing-punt-{} is {}",
@@ -405,6 +417,7 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
     }
     let mut activities = vec![conversation()?];
     activities.extend(activity_kinds(entries)?);
+    stamp("activities");
     for a in &activities {
         im.rules.kinds.insert(
             a.name.as_str().to_owned(),
@@ -475,18 +488,10 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
         .into(),
     ))
     .map_err(|e| e.to_string())?;
-    let next = im.tree.to_state().next;
-    let rules = im.rules.clone();
-    let doors = Doors::new(header.clone(), im.rules, next);
-    let town = Town::new(im.tree, ground, doors).map_err(|e| format!("the town: {e:?}"))?;
-    let planner = town
-        .copy()
-        .map_err(|e| format!("the planner's town: {e:?}"))?;
+    let rules = im.rules;
     Ok(Built {
         header,
         part,
-        town,
-        planner,
         ground,
         root,
         rules,
@@ -495,6 +500,28 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
         public_names: Arc::new(im.texts),
         activities,
     })
+}
+
+/// The normal restart's movement geometry follows the same validated durable canonical parts as its writer.
+/// The reader's initial replica, log mark, mapping and checkpoint selection remain unchanged.
+fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(Town, Town)> {
+    let mut live = initial.frozen();
+    for bytes in records {
+        if !recorder::is_input(bytes) {
+            let part = replica::effects::Part::read(bytes).map_err(refusal)?;
+            live.apply(&part).map_err(refusal)?;
+        }
+    }
+    let doors = Doors::new(
+        built.header.clone(),
+        built.rules.clone(),
+        live.tree().next(),
+    );
+    stamp("log applied");
+    let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
+        .map_err(|e| format!("the recovered town: {e}"))?;
+    stamp("town and planner");
+    Ok(towns)
 }
 
 /// Public, data-only serving support. Only the seed's facts, flattened public entries and optional moves are
@@ -679,6 +706,23 @@ fn seed_in(args: &[String]) -> R<String> {
         return Err(format!("world-exists: {} has a log", dir.display()));
     }
     let souls: u64 = arg(args, "--souls").map_or(Ok(1), |n| n.parse().map_err(|_| "--souls"))?;
+    let catalogue_text = arg(args, "--bodies")
+        .map(|p| std::fs::read_to_string(p).map_err(io(Path::new(p))))
+        .transpose()?;
+    let catalogue = catalogue_text
+        .as_ref()
+        .map(|text| skills::wear::Catalogue::read(text))
+        .transpose()?
+        .unwrap_or_default();
+    let body = arg(args, "--body")
+        .map(|name| {
+            catalogue
+                .find(name)
+                .map(|p| format!(r#", "{}""#, skills::wear::hex(&p.hash)))
+                .ok_or("body-unknown")
+        })
+        .transpose()?
+        .unwrap_or_default();
     let (x, z) = match arg(args, "--at") {
         Some(at) => at
             .split_once(',')
@@ -694,6 +738,9 @@ fn seed_in(args: &[String]) -> R<String> {
     let built = build(&text, &found)?;
     std::fs::create_dir_all(dir.join("entries")).map_err(io(&dir))?;
     std::fs::write(dir.join("facts.json"), &text).map_err(io(&dir))?;
+    if let Some(text) = catalogue_text {
+        std::fs::write(dir.join("bodies.json"), text).map_err(io(&dir))?;
+    }
     if arg(args, "--entries").is_some() {
         // C13: preserve the current main stand-point repair while keeping activity loading above.
         for line in import_eden::clear_stand_points(&import_eden::load(&text)?, &mut found) {
@@ -719,7 +766,7 @@ fn seed_in(args: &[String]) -> R<String> {
             (x * 1000.0) as i64 + k as i64 * APART_MM,
             (z * 1000.0) as i64,
         );
-        rows.push(format!("[{counter}, {xm}, {zm}]"));
+        rows.push(format!("[{counter}, {xm}, {zm}{body}]"));
         let mut secret = [0u8; 32];
         std::io::Read::read_exact(&mut urandom, &mut secret).map_err(|e| e.to_string())?;
         let grant = format!("soul-{}-{counter}", to_hex(&scope));
@@ -800,11 +847,13 @@ fn souls(meta: &Json) -> R<Vec<(Id, i64, i64)>> {
 /// The seats the world's entries `kinds` declare on its things ([`import_eden::body_slots`]), each placed on the floor a
 /// body stands on: its point and facing there, and its stand point in the slot's frame. A stand point a body cannot
 /// stand on (under a table, against a wall) is moved to the nearest place within a form's reach of it where a body
-/// can (C15's rule, `skills::form_runner::REACH`), so a rise always sets the body down on clear ground. Returns the
+/// can (C15's rule, `skills::form_runner::REACH`), so a rise always sets the body down on clear ground; one in a
+/// doorway's clearance is moved out of it ([`out_of_passage`]), so the gateway's walk to the seat ends at it. Returns the
 /// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
 /// floor above the thing) and the stand points moved.
 fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize, usize) {
     let (found, all) = import_eden::body_slots(&town.tree, kinds);
+    let (buildings, ground) = (town.buildings.clone(), town.ground);
     let view = town.view();
     let (mut out, mut moved) = (Vec::new(), 0);
     for s in &found {
@@ -826,9 +875,19 @@ fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, us
         let stand = place.stand().map(|p| Vec3::new(p.x, point.y - s.at.y, p.z));
         let [w, x, y, z] = facing.parts();
         let back = replica::pose::Quat::new(w, -x, -y, -z);
-        if let (Ok(stand), Ok(back)) = (stand, back)
-            && view.stand_near(floor, stand, 1, None).is_none()
-            && let Some(clear) = view.stand_near(floor, stand, skills::form_runner::REACH, None)
+        // A stand point in a doorway's clearance is one the spot tables never give a walker (N9): a walk to it ends
+        // a ring out, beyond the sit's reach, so it is moved out of the doorway as a blocked one is moved clear.
+        let passage = |p: Vec3| sim::walk::town::in_passage(&buildings, &[], ground, floor, p);
+        let clear = stand.ok().and_then(|stand| {
+            if view.stand_near(floor, stand, 1, None).is_none() {
+                view.stand_near(floor, stand, skills::form_runner::REACH, None)
+            } else if passage(stand) {
+                out_of_passage(&view, floor, stand, point, &passage)
+            } else {
+                None
+            }
+        });
+        if let (Some(clear), Ok(back)) = (clear, back)
             && let Ok(d) = back.rotate(Vec3::new(clear.x - point.x, 0, clear.z - point.z))
         {
             place.place.stand = [d.x, d.z];
@@ -842,29 +901,120 @@ fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, us
     (out, things.len(), all, left, moved)
 }
 
+/// The nearest place to `at` (µm, `floor`'s frame) within [`skills::form_runner::REACH`] where a body may stand, that
+/// is out of every doorway and stair (`passage`) and no nearer the slot's point `slot_at` than `at` is (so not into the
+/// thing: a bed's mattress is not a solid), on [`sim::spots::within`]'s rings; `None` when none is.
+fn out_of_passage(
+    view: &sim::walk::town::View<'_>,
+    floor: Id,
+    at: Vec3,
+    slot_at: Vec3,
+    passage: &dyn Fn(Vec3) -> bool,
+) -> Option<Vec3> {
+    let pitch = sim::spots::REACH_PITCH;
+    let mut best: Option<(i64, Vec3)> = None;
+    for ring in 1..=skills::form_runner::REACH / pitch {
+        let n = 6_283 * ring / 1_000;
+        for k in 0..n {
+            let Ok(off) = replica::pose::Quat::from_yaw_mdeg(k * 360_000 / n)
+                .and_then(|q| q.rotate(Vec3::new(0, 0, ring * pitch)))
+            else {
+                continue;
+            };
+            let Some(p) =
+                view.stand_near(floor, Vec3::new(at.x + off.x, at.y, at.z + off.z), 1, None)
+            else {
+                continue;
+            };
+            let gap = sim::spots::flat(p, at);
+            let out = sim::spots::flat(p, slot_at) >= sim::spots::flat(at, slot_at);
+            if out && !passage(p) && best.is_none_or(|b| gap < b.0) {
+                best = Some((gap, p));
+            }
+        }
+        if best.is_some() {
+            break;
+        }
+    }
+    best.map(|b| b.1)
+}
+
+/// Original B15 birth choice reader: only admitted exact hashes enter the canonical body.
+fn born(
+    meta: &Json,
+    catalogue: &skills::wear::Catalogue,
+) -> R<std::collections::BTreeMap<Id, [u8; 32]>> {
+    let ids = souls(meta)?;
+    let rows = meta.get("souls").and_then(Json::arr).unwrap_or(&[]);
+    let mut out = std::collections::BTreeMap::new();
+    for ((id, _, _), row) in ids.iter().zip(rows) {
+        if let Some(value) = row.arr().and_then(|r| r.get(3)) {
+            let preset = value
+                .str()
+                .and_then(|s| catalogue.find(s))
+                .ok_or("body-unknown")?;
+            out.insert(*id, preset.hash);
+        }
+    }
+    Ok(out)
+}
+
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
 /// where the log last had it. The planner keeps its own town and all declared seats are registered.
 fn bodies(
     town: Town,
     planner: Town,
-    ground: Id,
+    _ground: Id,
     placed: &Placed,
     places: Vec<PlaceAt>,
+    builds: &std::collections::BTreeMap<Id, replica::kinds::sizes::Build>,
 ) -> Result<Bodies, Refusal> {
     let family = humanoid().map_err(|e| Refusal {
         name: "family",
         detail: e,
     })?;
-    let frame = Frame {
-        node: ground,
-        slot: None,
-    };
     let mut at = Vec::new();
     for (id, (pose, _)) in placed {
-        // Stood on the ground at its last place unless its own floor holds it there (`add_body_at`).
-        if let Ok(a) = town.surfaces[&ground].place(*id, frame, pose.position, pose.orientation) {
-            at.push(a);
-        }
+        let build = builds.get(id).copied().ok_or_else(|| Refusal {
+            name: "body-unknown",
+            detail: "recorded build missing".into(),
+        })?;
+        let (node, point, facing) = match pose.support {
+            replica::pose::Support::Surface { surface, .. } => {
+                (surface, pose.position, pose.orientation)
+            }
+            replica::pose::Support::Slot => {
+                let site = places
+                    .iter()
+                    .find(|p| {
+                        p.thing == pose.frame.node
+                            && pose.frame.slot.is_none_or(|s| s == p.place.slot)
+                    })
+                    .ok_or_else(|| Refusal {
+                        name: "place-unknown",
+                        detail: "recorded support unavailable".into(),
+                    })?;
+                (site.floor, site.stand()?, site.facing)
+            }
+            replica::pose::Support::Volume { .. }
+            | replica::pose::Support::Track
+            | replica::pose::Support::None => {
+                return Err(Refusal {
+                    name: "recorded-body-support",
+                    detail: "unsupported native body support".into(),
+                });
+            }
+        };
+        let surfaces = town.surfaces_for(build.size).ok_or_else(|| Refusal {
+            name: "body-class-unprepared",
+            detail: "recorded body".into(),
+        })?;
+        let surface = surfaces.get(&node).ok_or_else(|| Refusal {
+            name: "no-surface",
+            detail: "recorded ground".into(),
+        })?;
+        let moved = surface.place_built(*id, Frame { node, slot: None }, point, facing, build)?;
+        at.push((moved, build));
     }
     // The things on a course (today's punts, #3603): their seats are boarded and left only at their home stop.
     let mut moving = Vec::new();
@@ -889,8 +1039,8 @@ fn bodies(
         b.slots.moving(thing, &course, home)?;
     }
 
-    for a in at {
-        b.add_body_at(family.clone(), a, placed)?;
+    for (a, build) in at {
+        b.add_body_at_built(family.clone(), a, placed, build)?;
     }
     Ok(b)
 }
@@ -1483,6 +1633,8 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 fn serve(args: &[String]) -> R<()> {
+    let _ = STARTED.set(std::time::Instant::now());
+    stamp("launch");
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
         "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] \
          [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
@@ -1497,11 +1649,18 @@ fn serve(args: &[String]) -> R<()> {
         return Err("world.json is not souls/world/1".into());
     }
     let souls = souls(&meta)?;
+    let catalogue = match std::fs::read_to_string(dir.join("bodies.json")) {
+        Ok(text) => skills::wear::Catalogue::read(&text)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => skills::wear::Catalogue::default(),
+        Err(e) => return Err(format!("body-catalogue: {e}")),
+    };
+    let born = born(&meta, &catalogue)?;
     let facts = dir.join("facts.json");
     let mut kinds = Vec::new();
     if dir.join("entries").is_dir() {
         entries(&dir.join("entries"), &mut kinds)?;
     }
+    stamp("entries");
     let built = build(
         &std::fs::read_to_string(&facts).map_err(io(&facts))?,
         &kinds,
@@ -1558,7 +1717,7 @@ fn serve(args: &[String]) -> R<()> {
     let store = log.close();
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
-    let (initial, base_record, stream_mapping, checkpoint) = if let Some(header) = stored_header {
+    let started = if let Some(header) = stored_header {
         let restored = sim::checkpoint::restore(&dir.join("checkpoints"))
             .map_err(refusal)?
             .ok_or("served-fork-checkpoint-missing")?;
@@ -1567,6 +1726,7 @@ fn serve(args: &[String]) -> R<()> {
         {
             return Err("served-fork-checkpoint-mismatch".into());
         }
+        stamp("checkpoint restore");
         let record = restored.root.record;
         let checkpoint = view_out::capture_checkpoint(
             &dir.join("checkpoints").join(format!("ckpt-{record:020}")),
@@ -1601,24 +1761,27 @@ fn serve(args: &[String]) -> R<()> {
                 }
             }
         }
+        stamp("log applied");
         built.header = header.clone();
         let doors = Doors::new(header, built.rules.clone(), live.tree().next());
-        built.town = Town::new(live.tree().frozen(), built.ground, doors)
+        let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
             .map_err(|e| format!("the fork's town: {e}"))?;
-        built.planner = built
-            .town
-            .copy()
-            .map_err(|e| format!("the fork's planner: {e}"))?;
-        (initial, record, observer, Some(checkpoint))
+        stamp("town and planner");
+        (initial, record, observer, Some(checkpoint), towns)
     } else {
-        (
-            Replica::start(built.header.stored()).map_err(refusal)?,
-            0,
-            None,
-            None,
-        )
+        let initial = Replica::start(built.header.stored()).map_err(refusal)?;
+        let towns = recovered_towns(&built, &initial, &found.records)?;
+        (initial, 0, None, None, towns)
     };
-    let (places, things, all, left, moved) = places(&mut built.town, &kinds);
+    let (initial, base_record, stream_mapping, checkpoint, (mut town, mut planner)) = started;
+    town.prepare_classes(catalogue.classes())
+        .map_err(|e| format!("body-classes: {e}"))?;
+    planner
+        .prepare_classes(catalogue.classes())
+        .map_err(|e| format!("body-classes: {e}"))?;
+    stamp("body classes");
+    let (places, things, all, left, moved) = places(&mut town, &kinds);
+    stamp("places to sit placed");
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
          moved to clear ground",
@@ -1727,7 +1890,7 @@ fn serve(args: &[String]) -> R<()> {
     let kinds_path = dir.join("world.kinds");
     std::fs::write(&kinds_path, &built.kinds_text).map_err(io(&kinds_path))?;
 
-    let (town, planner, ground) = (built.town, built.planner, built.ground);
+    let ground = built.ground;
 
     // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
     let int = |v: &Json| match v {
@@ -1746,8 +1909,11 @@ fn serve(args: &[String]) -> R<()> {
         kind: Name::new(&built.body_kind).ok_or("the body's kind")?,
         per_tick: 8,
     });
-    cfg.bodies = Some(Box::new(move |placed: &Placed| {
-        bodies(town, planner, ground, placed, places.clone())
+    cfg.wear = Some(answers::Wearing { catalogue, born });
+    cfg.built_bodies = Some(Box::new(move |placed: &Placed, builds| {
+        let b = bodies(town, planner, ground, placed, places.clone(), builds);
+        stamp("places to sit registered");
+        b
     }));
     // Capture and validate the public source before answers starts its K5 writer: normal pruning may remove an
     // eligible older checkpoint. The engine still starts from its newest restored state and unchanged clock.
@@ -1779,13 +1945,16 @@ fn serve(args: &[String]) -> R<()> {
         record: base_record,
         checkpoint,
         text: cfg_text,
+        names: Some(Arc::clone(&built.public_names)),
         clock_seed: stream_mapping.map(|s| s.mapping),
         history: Some(&found),
     };
     public_start
         .earlier_legacy_checkpoint(&dir.join("checkpoints"))
         .map_err(refusal)?;
+    stamp("before replay");
     let world = answers::start(initial.frozen(), rules, store, cfg).map_err(refusal)?;
+    stamp("replay");
     println!(
         "restart: checkpoint {:?}, {} records read, {} applied",
         world.restart.checkpoint, world.restart.read, world.restart.applied
@@ -1827,6 +1996,7 @@ fn serve(args: &[String]) -> R<()> {
         }
     }
     writer.flush().map_err(refusal)?;
+    stamp("public stream");
     drop(found);
     let (stream_tx, stream_rx) = channel::<(u64, Vec<u8>)>();
     // Shipping/archive delivery remains independent of a stopped public observer.
@@ -1871,6 +2041,7 @@ fn serve(args: &[String]) -> R<()> {
         .map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).map_err(io(&socket))?;
+    stamp("listening");
     println!("listening {}", socket.display());
     crate::ready();
     for stream in listener.incoming().flatten() {
@@ -1952,6 +2123,60 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn body_classes_restart_on_the_edited_canonical_geometry() {
+        use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Rest};
+        use replica::kinds::sizes::Size;
+        let facts = testworld::generate(1, 0).unwrap();
+        let imported = import_eden::load(&facts.text).unwrap();
+        let building = imported.nodes["building"];
+        let floor = imported.nodes["building/floor-1"];
+        let built = build(&facts.text, &[]).unwrap();
+        let initial = Replica::start(built.header.stored()).unwrap();
+        let (before, _) =
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+        assert!(before.surfaces.contains_key(&floor));
+        let mut live = initial.frozen();
+        live.apply(&replica::effects::Part::read(&built.part).unwrap())
+            .unwrap();
+        let sequence = live.version();
+        let edited = sim::commit::write(
+            &mut live,
+            &[Effect {
+                envelope: Envelope {
+                    sequence,
+                    at: 0,
+                    cause: Cause::World,
+                    actor: Actor::World,
+                    audience: Audience::Everyone,
+                    node: building,
+                },
+                body: Body::Changes(vec![ChangeRec {
+                    change: Change::Remove { node: building },
+                    rest: Rest::new(),
+                }]),
+                events: None,
+                rest: Rest::new(),
+            }],
+        )
+        .unwrap();
+        let records = vec![built.part.clone(), edited.stored().to_vec()];
+        let (mut town, mut planner) = recovered_towns(&built, &initial, &records).unwrap();
+        for one in [&mut town, &mut planner] {
+            one.prepare_classes([Size::Large]).unwrap();
+            assert_eq!(one.tree.to_state(), live.tree().to_state());
+            assert!(
+                !one.surfaces_for(Size::Standard)
+                    .unwrap()
+                    .contains_key(&floor)
+            );
+            assert!(!one.surfaces_for(Size::Large).unwrap().contains_key(&floor));
+        }
+        let mut invalid = records;
+        invalid.push(vec![0xff]);
+        assert!(recovered_towns(&built, &initial, &invalid).is_err());
+    }
 
     #[test]
     fn w3c_stored_fork_base_reopens_scoped_nonempty_archive_without_local_checkpoint() {
@@ -2564,6 +2789,50 @@ mod tests {
         assert_eq!(ordinary.replica().tree().to_state(), parent.to_state());
         drop(log.close());
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// #3672: the planner `Town::with_planner` clones answers every query as `Town::copy`'s second assembly does.
+    #[test]
+    fn planner_clone_answers_as_the_assembled_copy() {
+        let facts = testworld::generate(1, 0).unwrap();
+        let built = build(&facts.text, &[]).unwrap();
+        let initial = Replica::start(built.header.stored()).unwrap();
+        let (mut town, mut planner) =
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+        let mut copy = town.copy().unwrap();
+        for t in [&mut town, &mut planner, &mut copy] {
+            t.prepare_classes([replica::kinds::sizes::Size::Large])
+                .unwrap();
+        }
+        assert_eq!(planner.tree.to_state(), copy.tree.to_state());
+        let floors: Vec<Id> = copy.surfaces.keys().copied().collect();
+        assert!(
+            floors.len() > 1,
+            "the test world has floors besides the ground"
+        );
+        assert_eq!(planner.surfaces.keys().copied().collect::<Vec<_>>(), floors);
+        let ask = |t: &mut Town| {
+            let view = t.view();
+            let mut out = Vec::new();
+            for &node in &floors {
+                for x in (-30_000..=30_000).step_by(2_500) {
+                    for z in (-30_000..=30_000).step_by(2_500) {
+                        let at = Vec3::new(x, 0, z);
+                        out.push(format!(
+                            "{:?} {:?} {:?}",
+                            view.on_floor(node, at),
+                            view.stand_near(node, at, 1, None),
+                            view.stand_near(node, at, skills::form_runner::REACH, None)
+                        ));
+                    }
+                }
+            }
+            out
+        };
+        let (cloned, assembled) = (ask(&mut planner), ask(&mut copy));
+        assert!(cloned.iter().any(|a| !a.contains("None None")));
+        assert_eq!(cloned, assembled);
+        assert_eq!(ask(&mut town), assembled);
     }
 
     #[test]

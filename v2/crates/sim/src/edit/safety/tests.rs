@@ -647,3 +647,80 @@ fn a2_a_body_partway_through_a_doorway_or_on_a_stair_is_refused() {
     let outside = standing(3, w.ground, Vec3::new(-5 * M, 0, -10 * M));
     assert_eq!(w.check(creator(), vec![gone], &[outside]).1, vec![]);
 }
+
+#[test]
+fn class_guard_and_atomic_install_preserve_each_actual_footprint() {
+    use replica::kinds::sizes::Size;
+    let mut w = world();
+    let soul = standing(1, w.ground, Vec3::new(-5 * M, 0, -10 * M));
+    // 500mm from the wall: Standard's340mm clearance fits; Large is over20mm inside its560mm margin.
+    let (_, wall) = w.new_box(
+        on(
+            w.ground,
+            Vec3::new(-5 * M, 0, -10 * M - 750 * MM),
+            surface(w.ground),
+        ),
+        &[solid(0, 0, 2000, 250, 1500)],
+    );
+    let part = w.part(creator(), vec![wall]);
+    let standard =
+        super::guard_for(&w.tree, &w.header, Some(w.ground), &part, Size::Standard).unwrap();
+    let large_guard =
+        super::guard_for(&w.tree, &w.header, Some(w.ground), &part, Size::Large).unwrap();
+    let present = |side: &super::Side| {
+        side.map
+            .spot_near(soul.pose.frame.node, soul.pose.position, super::AT_EDGE)
+            .is_some()
+    };
+    let standard_sides = standard.sides.as_ref().unwrap();
+    assert!(present(&standard_sides.before));
+    assert!(present(&standard_sides.after));
+    let large_sides = large_guard.sides.as_ref().unwrap();
+    assert!(present(&large_sides.before));
+    assert!(!present(&large_sides.after));
+    assert!(standard.judge(&[soul]).is_empty());
+    let large = large_guard.judge(&[soul]);
+    assert_eq!(large.first().map(|u| u.name), Some(BURIES));
+    let mut town = w.town();
+    town.prepare_classes([Size::Large]).unwrap();
+    let before = town.tree.to_state();
+    let versions = town.versions.clone();
+    let rebuilt = Town::rebuild(
+        town.tree.frozen(),
+        &w.header,
+        w.ground,
+        &town.versions,
+        &town.basis(),
+        &part,
+    )
+    .unwrap();
+    let (rejected, accepted) = rebuilt.into_pair();
+    assert_eq!(
+        town.install_then(rejected, &part, || Err::<(), _>(
+            replica::effects::Refusal {
+                name: "paired-refusal",
+                detail: String::new()
+            }
+        ))
+        .unwrap_err()
+        .name,
+        "paired-refusal"
+    );
+    assert_eq!(town.tree.to_state(), before);
+    assert_eq!(town.versions, versions);
+    let place = |town: &Town, size| {
+        town.surfaces_for(size).unwrap()[&w.ground].place(
+            soul.body,
+            soul.pose.frame,
+            soul.pose.position,
+            soul.pose.orientation,
+        )
+    };
+    assert!(place(&town, Size::Large).is_ok());
+    town.install(accepted, &part).unwrap();
+    assert!(place(&town, Size::Standard).is_ok());
+    assert!(
+        place(&town, Size::Large).is_err(),
+        "the class bank changes with the committed tree"
+    );
+}

@@ -17,7 +17,8 @@ Type=notify
 NotifyAccess=main
 # Start-up is judged by progress, never a deadline: worldd says READY=1 once it ticks, and a long start (K5's load)
 # extends this with EXTEND_TIMEOUT_USEC while it makes progress. After READY it says WATCHDOG=1 while it owes no tick
-# or completed one; K7's own watchdog inside ends a stalled tick in 0.5 s, this one is outside it.
+# within K7's hard limit; K7's own watchdog inside ends a clock wedged for 15 s (a 0.5 s stall is only said), this
+# one is outside it and ends a process frozen whole.
 TimeoutStartSec=30s
 WatchdogSec=5
 Environment=WORLDS_ROOT=/var/lib/souls/worlds

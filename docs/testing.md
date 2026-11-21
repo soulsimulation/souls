@@ -246,7 +246,11 @@ tree and cached baseline don't change.
 on the toolchain `v2/rust-toolchain.toml` pins, with a cargo cache keyed on that file and `v2/Cargo.lock` (every leg
 restores it; `v2-rust` saves it on a miss); they skip the pnpm install. `v2-rust` runs format, Clippy, the small checks
 and every package's tests but sim's and worldd's; `v2-sim` and `v2-worldd` run those two packages' tests; `v2-wasm` the
-WASM build against the native answers; `v2-client` the client and page tests against the built binaries. Together they
+WASM build against the native answers; `v2-client` the client and page tests against the built binaries, among them
+the served-world gate (`v2/client/served/e2e/world.test.mjs`): a served Eden slice, two paired Souls acting through
+the thin command, the page's worker on the public stream and the client's copy, across a restart. Its assertions that
+wait on an open fix run under a named `PENDING #<issue>` marker: printed while they fail, and failing the run once
+they pass, so the fix's PR removes the marker. Together they
 run exactly what `ci.sh` with no argument runs, and `ci-ok` needs each of them. They are picked by their own paths
 (`v2/`) and by every full-scope run. A change only under `v2/` runs those legs
 alone, has release-gate scope `none` (no walk, bundle, conformance or remote gate) and is T1, its docs included. The

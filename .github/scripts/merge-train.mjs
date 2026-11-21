@@ -9,6 +9,8 @@
 //        pr is empty, frozen names the pinned sha, PRs already enqueued are taken back out of the queue (they keep
 //        merge:ready), and the reason goes to the run's summary. In queue mode a PR with any file outside ci-scope.mjs's
 //        LOW_RISK waits (skipped as mixed-cap, label kept) while MIXED_CAP such PRs are queued or set to auto-merge
+//        A PR with auto-merge on and green checks that is still not in the queue after 10 minutes counts as not queued:
+//        its auto-merge is disabled and it is enqueued again (requeued names it)
 //   node .github/scripts/merge-train.mjs wait  --repo o/r --sha <sha> [--checks a,b] [--timeout-min 60] [--output f]
 //        polls check runs and commit statuses on <sha> until every required check concluded: result=pass|fail|timeout
 //   node .github/scripts/merge-train.mjs merge --repo o/r --pr <n> --sha <sha> [--queue true]
@@ -16,7 +18,8 @@
 //   node .github/scripts/merge-train.mjs hold --repo o/r --pr <n>
 //        merge:ready was removed: takes the PR out of the merge queue, or disables its auto-merge
 //   node .github/scripts/merge-train.mjs dequeued --repo o/r --pr <n> [--reason r]
-//        the queue dropped the PR: unless it merged or re-entered, ejects it with the reason
+//        the queue dropped the PR: unless it merged or re-entered, ejects it with queue:dropped and one comment naming
+//        the reason and the failed merge-group run
 //   node .github/scripts/merge-train.mjs eject --repo o/r --pr <n> [--label needs:rebase] --message-file <file>
 //        takes the PR off the train (removes merge:ready), adds the label, comments why
 //
@@ -89,6 +92,26 @@ export function holdAction(s) {
 
 /** The queue let go of a PR that did not merge, that has not re-entered, and that its author still wants landed. */
 export const dropped = s => !s.merged && !s.isInMergeQueue && (s.labels?.nodes ?? []).some(l => l.name === READY);
+
+/** The label a dropped PR gets, so the drop shows in PR lists and not only in a comment; a re-enqueue removes it. */
+export const DROPPED = 'queue:dropped';
+
+/**
+ * Auto-merge on and every required check green, yet not in the queue for over 10 minutes: GitHub did not enqueue it
+ * (#3737 sat like this for about 6 hours, skipped as queued on every pass). The train then counts it as not queued.
+ */
+export const STALE_AUTO_MERGE_MS = 10 * 60_000;
+export function staleAutoMerge(s, checks, now) {
+  if (s.isInMergeQueue || !s.autoMergeRequest || checks !== 'pass') return false;
+  return now - Date.parse(s.autoMergeRequest.enabledAt) > STALE_AUTO_MERGE_MS;
+}
+
+/** The newest failed merge-group run for this PR (its group's branch is gh-readonly-queue/<base>/pr-<n>-<sha>). */
+export function failingGroupRun(runs, pr, base) {
+  const prefix = `gh-readonly-queue/${base}/pr-${pr}-`;
+  return runs.filter(r => String(r.head_branch).startsWith(prefix) && ['failure', 'timed_out'].includes(r.conclusion))
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0] ?? null;
+}
 
 /**
  * How many PRs with a file outside the low-risk paths (ci-scope.mjs `lowRisk`) may be in the queue or waiting to enter
@@ -232,7 +255,7 @@ function comment(repo, pr, body) { ghRaw([`repos/${repo}/issues/${pr}/comments`,
 
 function queueState(repo, pr) {
   const [owner, name] = repo.split('/');
-  const query = 'query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){id merged isInMergeQueue autoMergeRequest{enabledAt} labels(first:50){nodes{name}}}}}';
+  const query = 'query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){id merged isInMergeQueue headRefOid baseRefName autoMergeRequest{enabledAt} labels(first:50){nodes{name}}}}}';
   return gh('graphql', '-f', `query=${query}`, '-f', `owner=${owner}`, '-f', `name=${name}`, '-F', `pr=${pr}`).data.repository.pullRequest;
 }
 
@@ -245,7 +268,7 @@ function hold(state) {
 function eject({ repo, pr, label, message }) {
   try { ghRaw(['-X', 'DELETE', `repos/${repo}/issues/${pr}/labels/${encodeURIComponent(READY)}`]); } catch { /* already gone */ }
   if (label) ghRaw([`repos/${repo}/issues/${pr}/labels`, '--input', '-'], JSON.stringify({ labels: [label] }));
-  comment(repo, pr, message);
+  if (message) comment(repo, pr, message);
   console.log(`ejected #${pr}${label ? ` with ${label}` : ''}`);
 }
 
@@ -301,7 +324,9 @@ export function next({ repo, maintainer, notifyIssue, freeze = null, api = { gh,
   };
   const stateOf = n => { if (!states.has(n)) states.set(n, api.queueState(repo, n)); return states.get(n); };
   let mixedQueued; // counted when the first mixed PR is about to enqueue
+  const now = api.now ?? Date.now;
   for (const [i, n] of candidates.entries()) {
+    let requeued;
     const pr = api.gh(`repos/${repo}/pulls/${n}`);
     const labels = (pr.labels ?? []).map(l => l.name);
     const files = filesOf(n);
@@ -322,9 +347,16 @@ export function next({ repo, maintainer, notifyIssue, freeze = null, api = { gh,
     if (why) { skipped.push({ pr: n, tier, why }); continue; }
     if (queue) {
       const qs = stateOf(n);
-      if (queued(qs)) {
+      const checks = queued(qs) && !qs.isInMergeQueue ? summarizeChecks({ ...readChecks(api, repo, pr.head.sha), required: DEFAULT_CHECKS }) : null;
+      if (checks && staleAutoMerge(qs, checks.state, now())) {
+        // Green, auto-merge on, still not in the queue: disable auto-merge and enqueue it again below, as for a new PR.
+        api.hold(qs);
+        states.set(n, { ...qs, autoMergeRequest: null });
+        requeued = `auto-merge on since ${qs.autoMergeRequest.enabledAt} with green checks but not in the merge queue: disabled and re-enqueued`;
+        console.error(`::warning::merge-train: #${n} ${requeued}`);
+      } else if (queued(qs)) {
         // Auto-merge waits for green checks; one that failed never enqueues, so report it instead of skipping forever.
-        const failed = !qs.isInMergeQueue ? summarizeChecks({ ...readChecks(api, repo, pr.head.sha), required: DEFAULT_CHECKS }).failed : [];
+        const failed = checks?.failed ?? [];
         if (failed.length) reportStuck({ repo, pr: n, sha: pr.head.sha, failed, notifyIssue, api });
         skipped.push({ pr: n, tier, why: 'queued', ...(failed.length ? { failed } : {}) });
         continue;
@@ -338,10 +370,31 @@ export function next({ repo, maintainer, notifyIssue, freeze = null, api = { gh,
     return {
       pr: n, tier, head_ref: pr.head.ref, head_sha: pr.head.sha, base_ref: pr.base.ref, title: pr.title,
       same_repo: pr.head.repo?.full_name === repo, more: candidates.length - i - 1 > 0, skipped,
-      mode: mode.mode, mode_why: mode.why, queue,
+      mode: mode.mode, mode_why: mode.why, queue, ...(requeued ? { requeued } : {}),
     };
   }
   return { pr: '', more: false, skipped, queue };
+}
+
+/**
+ * The queue dropped a PR (the `dequeued` relay, read after a short wait). Unless it merged, re-entered, was held or a
+ * release freeze is on, it leaves the train: merge:ready off, queue:dropped on, and one comment with the reason and
+ * the failed merge-group run. The comment carries a marker (PR, head, run), so a second relay of the same drop
+ * adds nothing.
+ */
+export function reportDrop({ repo, pr, reason, freeze = null, api = { gh, ghAll, queueState, hold, eject } }) {
+  const state = api.queueState(repo, pr);
+  if (!dropped(state)) return `#${pr} merged, re-entered or was held: nothing to do`;
+  if (freeze) return `#${pr} left the queue during the release freeze at ${freeze.sha}: kept merge:ready, the train re-enqueues it after the freeze`;
+  api.hold(state); // auto-merge left on would make the next merge:ready look already queued
+  let run = null; // best effort: without it the comment still goes, pointing at the Actions tab
+  try { run = failingGroupRun(api.gh(`repos/${repo}/actions/runs?event=merge_group&per_page=100`)?.workflow_runs ?? [], pr, state.baseRefName ?? 'main'); }
+  catch (e) { console.error(`merge-train: could not read the merge-group runs: ${e.message}`); }
+  const marker = `<!-- merge-train-dropped ${pr} ${state.headRefOid ?? ''} ${run?.id ?? 'no-run'} -->`;
+  const posted = api.ghAll(`repos/${repo}/issues/${pr}/comments?per_page=100`).some(c => String(c.body).startsWith(marker));
+  const where = run ? `The failed merge-group run: ${run.html_url}` : 'No failed merge-group run was found for it; look for its `gh-readonly-queue` branch in the Actions tab.';
+  api.eject({ repo, pr, label: DROPPED, message: posted ? null : `${marker}\nMerge queue: this PR left the queue without merging (reason: \`${reason || 'not given'}\`), so it left the train and has the \`${DROPPED}\` label. ${where}\n\nFix it and add \`merge:ready\` again; re-entering the queue removes \`${DROPPED}\`.` });
+  return `#${pr} dropped from the queue (${reason || 'no reason'}): ejected with ${DROPPED}${posted ? ', comment already there' : ''}${run ? `, run ${run.id}` : ''}`;
 }
 
 function pickMode({ repo, pr, tier, files, defaultBranch, notifyIssue, api }) {
@@ -425,6 +478,7 @@ async function main([mode, ...argv]) {
   }
   if (mode === 'merge' && opt('--queue') === 'true') {
     execFileSync('gh', enqueueArgs({ repo, pr: opt('--pr'), sha: opt('--sha') }), { stdio: ['ignore', 'inherit', 'inherit'] });
+    try { ghRaw(['-X', 'DELETE', `repos/${repo}/issues/${opt('--pr')}/labels/${encodeURIComponent(DROPPED)}`]); } catch { /* not there */ }
     console.log(`queued #${opt('--pr')} at ${opt('--sha')}`);
     return 0;
   }
@@ -443,12 +497,7 @@ async function main([mode, ...argv]) {
     return 0;
   }
   if (mode === 'dequeued') {
-    const state = queueState(repo, opt('--pr'));
-    if (!dropped(state)) { console.log(`#${opt('--pr')} merged, re-entered or was held: nothing to do`); return 0; }
-    const freeze = releaseFreeze(process.env.RELEASE_FREEZE);
-    if (freeze) { console.log(`#${opt('--pr')} left the queue during the release freeze at ${freeze.sha}: kept merge:ready, the train re-enqueues it after the freeze`); return 0; }
-    hold(state); // auto-merge left on would make the next merge:ready look already queued
-    eject({ repo, pr: opt('--pr'), message: `Merge queue: this PR left the queue without merging (reason: \`${opt('--reason') || 'not given'}\`), so it left the train. The failing run is on the \`gh-readonly-queue\` commit in the Actions tab.\n\nFix it and add \`merge:ready\` again.` });
+    console.log(reportDrop({ repo, pr: Number(opt('--pr')), reason: opt('--reason'), freeze: releaseFreeze(process.env.RELEASE_FREEZE) }));
     return 0;
   }
   console.error('usage: merge-train.mjs next | wait | merge | eject | hold | dequeued (see the header)');
