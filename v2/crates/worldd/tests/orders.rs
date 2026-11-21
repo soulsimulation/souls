@@ -140,10 +140,9 @@ fn b7c_obstructed_head_takes_by_supported_route() {
     obstructed_queue(1);
 }
 
-/// A1, FIFO as predecessors rise. Unmet: the chair's own stand point lies inside the Standard clearance of its
-/// collider (off-surface by under 20 mm), so the existing rise ends `off-surface` and the head stays seated.
+/// A1, FIFO as predecessors rise: each head rises from the chair (its stand point lies just inside the collider's
+/// Standard clearance, so the rise lands on the nearest supported point) and the next in line takes the seat.
 #[test]
-#[ignore = "B7c A1 unmet: rise from this chair ends off-surface (stand point inside Standard clearance)"]
 fn b7c_obstructed_chairs_supported_route_fifo() {
     obstructed_queue(3);
 }
