@@ -941,7 +941,10 @@ impl Bundler {
             (7, terminal),
             (8, Value::Bytes(open.base_hash.to_vec())),
         ]);
+        let __t=std::time::Instant::now();
         let mut view = open.view.output();
+        eprintln!("stage close.view {:.1}", __t.elapsed().as_secs_f64()*1e3);
+        let __t=std::time::Instant::now();
         // Unseen entries advance the internal sampler, but cannot make a private-only public bundle update.
         view.position.sequence = published;
         Bundle::new_based(
@@ -952,7 +955,7 @@ impl Bundler {
             view.to_value(),
             observation,
         )
-        .map(Some)
+        .map(Some).inspect(|_| eprintln!("stage close.bundle {:.1}", __t.elapsed().as_secs_f64()*1e3))
     }
     fn feed_based(&mut self, header: &Header, record: u64, bytes: &[u8]) -> R<Vec<Bundle>> {
         if WHOLE_STATE.get() {
@@ -1135,10 +1138,19 @@ impl Bundler {
                     if let Some(open) = mode.open.take() {
                         done.extend(self.close_based(header, open)?);
                     }
+                    let __t=std::time::Instant::now();
                     let old = public.whole();
+                    eprintln!("stage whole {:.1}", __t.elapsed().as_secs_f64()*1e3);
+                    let __t=std::time::Instant::now();
+                    let __s = Projection::snapshot(header, &old)?;
+                    eprintln!("stage snapshot {:.1}", __t.elapsed().as_secs_f64()*1e3);
+                    let __t=std::time::Instant::now();
+                    let __d = public.digest()?;
+                    eprintln!("stage digest {:.1}", __t.elapsed().as_secs_f64()*1e3);
+                    drop(__d);
                     mode.open = Some(BasedWindow {
                         start,
-                        snapshot: Projection::snapshot(header, &old)?,
+                        snapshot: __s,
                         view: probe.take().expect("candidate view"),
                         baseline: old,
                         observed: Value::Array(Vec::new()),
