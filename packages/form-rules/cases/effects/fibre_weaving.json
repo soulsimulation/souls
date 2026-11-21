@@ -6,7 +6,7 @@
       "name": "weave_stripes_tray_taken_then_take",
       "state": {"actor":"b1","nodes":{"room":{"loose":["b1","l1"]},"l1":{"kind":"eden:table_loom"},"b1":{"hands":{"left":null,"right":null}}}},
       "do": [
-        {"act":{"this":"l1","form":"weave_stripes"},"receipt":"rw1","expect":{"verdict":"yes","changes":[{"change":"set","node":"l1","field":"thread","n":1,"to":1},{"change":"create","node":"rw1.0","kind":"eden:striped_cloth","to":{"node":"l1","slot":"out"}}],"events":[{"event":"eden:thread_used","node":"l1","changes":[0]},{"event":"eden:woven_stripes","node":"l1","changes":[1]}],"timers":[]}},
+        {"act":{"this":"l1","form":"weave_stripes"},"receipt":"rw1","expect":{"verdict":"yes","changes":[{"change":"set","node":"l1","field":"thread","n":28,"to":1},{"change":"create","node":"rw1.0","kind":"eden:striped_cloth","to":{"node":"l1","slot":"out"}}],"events":[{"event":"eden:thread_used","node":"l1","changes":[0]},{"event":"eden:woven_stripes","node":"l1","changes":[1]}],"timers":[]}},
         {"act":{"this":"l1","form":"weave_checks"},"receipt":"rw2","expect":{"verdict":"no","reason":"slot_taken","need":1}},
         {"act":{"this":"rw1.0","form":"take"},"receipt":"rw3","expect":{"verdict":"yes","changes":[{"change":"reparent","node":"rw1.0","to":{"node":"b1","hand":"left"}}],"events":[{"event":"eden:taken","node":"rw1.0","changes":[0]}],"timers":[]}}
       ],
@@ -16,7 +16,7 @@
       "name": "weave_checks_last_thread_then_none",
       "state": {"actor":"b1","nodes":{"room":{"loose":["b1","l1"]},"l1":{"kind":"eden:table_loom","fields":{"thread":1}},"b1":{"hands":{"left":null,"right":null}}}},
       "do": [
-        {"act":{"this":"l1","form":"weave_checks"},"receipt":"rw1","expect":{"verdict":"yes","changes":[{"change":"set","node":"l1","field":"thread","n":1,"to":0},{"change":"create","node":"rw1.0","kind":"eden:checked_cloth","to":{"node":"l1","slot":"out"}}],"events":[{"event":"eden:thread_used","node":"l1","changes":[0]},{"event":"eden:woven_checks","node":"l1","changes":[1]}],"timers":[]}},
+        {"act":{"this":"l1","form":"weave_checks"},"receipt":"rw1","expect":{"verdict":"yes","changes":[{"change":"set","node":"l1","field":"thread","n":28,"to":0},{"change":"create","node":"rw1.0","kind":"eden:checked_cloth","to":{"node":"l1","slot":"out"}}],"events":[{"event":"eden:thread_used","node":"l1","changes":[0]},{"event":"eden:woven_checks","node":"l1","changes":[1]}],"timers":[]}},
         {"act":{"this":"rw1.0","form":"take"},"receipt":"rw2","expect":{"verdict":"yes","changes":[{"change":"reparent","node":"rw1.0","to":{"node":"b1","hand":"left"}}],"events":[{"event":"eden:taken","node":"rw1.0","changes":[0]}],"timers":[]}},
         {"act":{"this":"l1","form":"weave_stripes"},"receipt":"rw3","expect":{"verdict":"no","reason":"field_differs","need":0}}
       ],

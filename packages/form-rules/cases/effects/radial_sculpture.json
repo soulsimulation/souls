@@ -38,7 +38,7 @@
         "change": "set",
         "node": "t1",
         "field": "band_3",
-        "n": 3,
+        "n": 30,
         "to": 3
        }
       ],
@@ -67,7 +67,7 @@
         "change": "set",
         "node": "t1",
         "field": "band_3",
-        "n": 3,
+        "n": 30,
         "to": 2
        }
       ],
@@ -96,7 +96,7 @@
         "change": "set",
         "node": "t1",
         "field": "band_3",
-        "n": 3,
+        "n": 30,
         "to": 1
        }
       ],
@@ -137,7 +137,7 @@
         "change": "set",
         "node": "t1",
         "field": "band_1",
-        "n": 1,
+        "n": 28,
         "to": 3
        }
       ],
@@ -166,7 +166,7 @@
         "change": "set",
         "node": "t1",
         "field": "band_2",
-        "n": 2,
+        "n": 29,
         "to": 3
        }
       ],
@@ -195,7 +195,7 @@
         "change": "set",
         "node": "t1",
         "field": "band_4",
-        "n": 4,
+        "n": 31,
         "to": 3
        }
       ],
@@ -224,7 +224,7 @@
         "change": "set",
         "node": "t1",
         "field": "band_5",
-        "n": 5,
+        "n": 32,
         "to": 3
        }
       ],
@@ -253,7 +253,7 @@
         "change": "set",
         "node": "t1",
         "field": "band_6",
-        "n": 6,
+        "n": 33,
         "to": 3
        }
       ],
@@ -282,7 +282,7 @@
         "change": "set",
         "node": "t1",
         "field": "band_7",
-        "n": 7,
+        "n": 34,
         "to": 3
        }
       ],
@@ -311,7 +311,7 @@
         "change": "set",
         "node": "t1",
         "field": "band_8",
-        "n": 8,
+        "n": 35,
         "to": 3
        }
       ],

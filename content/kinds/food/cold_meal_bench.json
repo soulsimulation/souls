@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "greens": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "default": 3,
@@ -15,7 +15,7 @@
       }
     },
     "tomato": {
-      "n": 2,
+      "n": 29,
       "type": "int",
       "unit": "count",
       "default": 3,
@@ -26,7 +26,7 @@
       }
     },
     "beans": {
-      "n": 3,
+      "n": 30,
       "type": "int",
       "unit": "count",
       "default": 3,
@@ -37,7 +37,7 @@
       }
     },
     "portions": {
-      "n": 4,
+      "n": 31,
       "type": "int",
       "unit": "count",
       "default": 9,

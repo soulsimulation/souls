@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:armchair",
   "owner": "thing",
-  "state": { "reclined": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "state": { "reclined": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
   "points": { "front": { "role": "stand", "at_mm": [0, 0, 700], "yaw_mdeg": 180000 } },
   "slots": { "seat": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 510, 80], "stand": "front" } },
   "geometry": { "bounds_mm": [900, 880, 800] },
