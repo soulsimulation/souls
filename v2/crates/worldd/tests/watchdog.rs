@@ -12,6 +12,10 @@ use std::time::{Duration, Instant};
 
 /// Runs `worldd --dir` with `args`, gathering its output lines until `done` holds for one, the process ends, or 20 s
 /// pass. Returns the lines and the exit code (`None`: still running, then killed).
+///
+/// The output ends (its pipe closes) a moment before the ended process can be waited for: the kernel closes its files
+/// first. So once the output has ended, the exit code is waited for (to the same 20 s), not read once: a single
+/// `try_wait` there can land in that moment, see the process still running and kill it (#3819's flake on CI).
 fn run(name: &str, args: &[&str], done: impl Fn(&str) -> bool) -> (Vec<String>, Option<i32>) {
     let dir = std::env::temp_dir().join(format!("worldd-k7-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -34,6 +38,7 @@ fn run(name: &str, args: &[&str], done: impl Fn(&str) -> bool) -> (Vec<String>, 
     });
     let until = Instant::now() + Duration::from_secs(20);
     let mut lines = Vec::new();
+    let mut ended = false;
     while Instant::now() < until {
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(l) => {
@@ -44,10 +49,18 @@ fn run(name: &str, args: &[&str], done: impl Fn(&str) -> bool) -> (Vec<String>, 
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                ended = true;
+                break;
+            }
         }
     }
-    let code = match child.try_wait().expect("its state") {
+    let mut state = child.try_wait().expect("its state");
+    while ended && state.is_none() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(5));
+        state = child.try_wait().expect("its state");
+    }
+    let code = match state {
         Some(s) => s.code(),
         None => {
             let _ = child.kill();
