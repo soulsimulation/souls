@@ -52,6 +52,8 @@ export class CameraDirector {
   private swipe = new SoulSwipe();
   /** When each body was last heard (it spoke, or a named event happened to it; µs), for the swipe's order. */
   private heard = new Map<string, number>();
+  /** The Soul whose page a tap on its label opened (the Soul page opens it), so a swipe turns that page to the next. */
+  private card: string | null = null;
 
   constructor(cam: FreeCamera, canvas: HTMLCanvasElement, world: WorldView, souls: PageSouls, params: URLSearchParams, history: boolean) {
     this.cam = cam;
@@ -79,6 +81,7 @@ export class CameraDirector {
       if (this.mode === 'fly' && e.pointerType === 'touch') this.free();  // a touch that was not a flick takes the camera
       if (!this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > TAP_PX) return;
       const id = this.hit(e.clientX, e.clientY);
+      this.card = id && this.souls.placed.some((p) => p.id === id && e.clientX >= p.x && e.clientX <= p.x + p.w && e.clientY >= p.y && e.clientY <= p.y + p.h) ? id : this.card;
       if (id && this.fly(id)) hapticTick();
     });
     touchHints();
@@ -104,7 +107,11 @@ export class CameraDirector {
       here.push({ id, p: [v.x, v.y, v.z], walking: !!k && k.length > 1 && k[k.length - 1].at > t - 1_000_000 });
     }
     const next = this.swipe.step(on, here.map((s) => s.id), dir, performance.now(), () => soulRing(on, here, this.heard, t));
-    if (next && this.fly(next)) hapticTick();
+    if (!next || !this.fly(next)) return;
+    hapticTick();
+    // The Soul's page that was open turns with the swipe, as today's follow chip names the Soul now shown.
+    const pageOpen = [...document.querySelectorAll('aside')].some((a) => a.style.display === 'block');
+    if (this.card === on && pageOpen) this.souls.open((this.card = next));
   }
 
   /** Each frame, `dt` ms on, the world drawn at `t` (µs). */
