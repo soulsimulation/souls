@@ -76,6 +76,15 @@ Example: a room with two things in it, in one step.
 node souls-god.mjs batch '[{"op":"place","name":1,"kind":"room","in":"<place id>"},{"op":"place","name":2,"kind":"<kind>","in":1,"at":[1000,0,1000]},{"op":"place","name":3,"kind":"<kind>","in":1,"at":[-1000,0,1000]}]'
 ```
 
+## Export and import
+
+- `node souls-god.mjs export [file]` writes every node of the world (not its Souls) to a file, `world.souls.json` by
+  default: kinds, places, fields and poses, and the world's public names.
+- `node souls-god.mjs import <file>` brings such a file into the world you are paired with, as edits, parents first.
+  What the world already holds (the same id and kind, the world itself and its open ground) keeps its id and only its
+  changed fields are set; everything else is placed. The answer counts the edits, what was placed and set, and what
+  was not brought over: doorway and stair links, and any field naming one. A refusal stops it and says how far it got.
+
 ## Answers and refusals
 
 - Success: `{"ok": true, "names": {...}, "at": <version>, "changed": ...}`.
