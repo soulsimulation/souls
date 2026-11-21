@@ -21,7 +21,7 @@
 //! The store is W8's: an S3-compatible bucket (R2) over HTTP, or its in-memory stand-in. Never production's bucket
 //! from a test. Not here: ten-second shipping (O3), serving a restored world (O12), seeking (V4), removal (W7).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
 
@@ -809,6 +809,16 @@ struct BasedWindow {
     cursor: (u64, u64),
     rows: Vec<Value>,
     base_hash: [u8; 32],
+    /// Since the last observation (#3755): its digest, its next sequence and time, and each row changed since, as it
+    /// stood then. The whole-state reference keeps `observed` instead.
+    seen: Seen,
+}
+#[derive(Clone)]
+struct Seen {
+    digest: Vec<u8>,
+    next: u64,
+    time: Value,
+    rows: BTreeMap<(u64, Id), Option<Value>>,
 }
 #[derive(Default)]
 struct BasedHistory {
@@ -825,6 +835,8 @@ pub struct Bundler {
     root: Id,
     open: Option<(i64, Value, View)>,
     based: Option<BasedHistory>,
+    /// The based builder's public projection of `before`, row by row (#3755).
+    public: Option<Projection>,
 }
 
 impl Bundler {
@@ -838,6 +850,7 @@ impl Bundler {
             root,
             open: None,
             based: None,
+            public: None,
         }
     }
 
@@ -847,8 +860,11 @@ impl Bundler {
     pub fn from_base_with_redactions(base: &Base, redactions: Redactions) -> R<Self> {
         let tree = base.tree()?;
         let state = tree.to_state();
+        let header = Header::read(&base.header)?;
+        let public = Projection::new(&header, &state, &redactions)?;
         Ok(Self {
-            header: Some(Header::read(&base.header)?),
+            header: Some(header),
+            public: Some(public),
             redactions,
             before: state.clone(),
             after: state,
@@ -914,7 +930,14 @@ impl Bundler {
                 Value::Array(vec![Value::Uint(open.cursor.0), Value::Uint(open.cursor.1)]),
             ),
             (5, Value::Array(open.rows)),
-            (6, Value::Bytes(digest(&open.observed)?)),
+            (
+                6,
+                Value::Bytes(if WHOLE_STATE.get() {
+                    digest(&open.observed)?
+                } else {
+                    open.seen.digest
+                }),
+            ),
             (7, terminal),
             (8, Value::Bytes(open.base_hash.to_vec())),
         ]);
@@ -932,6 +955,15 @@ impl Bundler {
         .map(Some)
     }
     fn feed_based(&mut self, header: &Header, record: u64, bytes: &[u8]) -> R<Vec<Bundle>> {
+        if WHOLE_STATE.get() {
+            self.feed_based_whole(header, record, bytes)
+        } else {
+            self.feed_based_rows(header, record, bytes)
+        }
+    }
+    /// The whole-state reference (before #3755): it projects the whole public state twice per entry. Kept as the
+    /// regression's reference ([`whole_state_reference`]).
+    fn feed_based_whole(&mut self, header: &Header, record: u64, bytes: &[u8]) -> R<Vec<Bundle>> {
         let part = Part::read(bytes)?;
         let mut whole = self.before.clone();
         whole.apply(header, &part)?;
@@ -1007,6 +1039,12 @@ impl Bundler {
                             cursor: (record, offset as u64),
                             rows: Vec::new(),
                             base_hash: mode.base_hash,
+                            seen: Seen {
+                                digest: Vec::new(),
+                                next: 0,
+                                time: Value::Array(Vec::new()),
+                                rows: BTreeMap::new(),
+                            },
                         });
                     }
                     let open = mode.open.as_mut().expect("observation window");
@@ -1028,6 +1066,135 @@ impl Bundler {
         })();
         self.based = Some(mode);
         result
+    }
+
+    /// Feeds one record on the based path (#3755): each entry applies to `after`, the projection's rows that entry can
+    /// touch are made again from `after` and nothing else is projected. The output is the whole-state reference's,
+    /// byte for byte. A refusal part way leaves the builder unusable (`archive-base`), as every caller drops it.
+    fn feed_based_rows(&mut self, header: &Header, record: u64, bytes: &[u8]) -> R<Vec<Bundle>> {
+        let part = Part::read(bytes)?;
+        if part.header != header.hash().to_bytes() {
+            return refuse("header-mismatch", "the part names another header");
+        }
+        let mut mode = self.based.take().ok_or_else(|| Refusal {
+            name: "archive-base",
+            detail: "based builder missing".into(),
+        })?;
+        let mut public = self.public.take().ok_or_else(|| Refusal {
+            name: "archive-base",
+            detail: "based projection missing".into(),
+        })?;
+        let mut done = Vec::new();
+        for (offset, e) in part.effects.iter().enumerate() {
+            self.after.apply_entry(header, e)?;
+            let changes = public.changes(&self.before, e, &self.after, &self.redactions)?;
+            let time = matches!(e.body, replica::effects::Body::Time(_))
+                .then(|| public_time(&self.after, &self.redactions))
+                .filter(|t| *t != public.time);
+            let start = match mode.anchor {
+                Some(anchor) => e
+                    .envelope
+                    .at
+                    .checked_sub(anchor)
+                    .and_then(|n| n.div_euclid(WINDOW).checked_mul(WINDOW))
+                    .and_then(|n| anchor.checked_add(n))
+                    .ok_or_else(|| Refusal {
+                        name: "history-window",
+                        detail: "rolling range overflow".into(),
+                    })?,
+                None => e.envelope.at,
+            };
+            let same = mode.open.as_ref().is_some_and(|o| o.start == start);
+            let mut probe = (!same).then(|| {
+                View::new(
+                    Key {
+                        node: self.root,
+                        level: Level::Sampled,
+                        audience: Audience::Everyone,
+                    },
+                    header,
+                    &self.redactions,
+                )
+            });
+            let view = if same {
+                &mut mode.open.as_mut().expect("open window").view
+            } else {
+                probe.as_mut().expect("candidate view")
+            };
+            let prior = view.output().records.len();
+            view.step(&self.before, e, &self.after, &self.redactions)?;
+            let kept = view.output().records.len() != prior;
+            let thinned = matches!(&e.body,replica::effects::Body::Changes(cs) if !cs.is_empty() && cs.iter().all(|c|matches!(&c.change,replica::effects::Change::Motion(_))))
+                && !kept;
+            // The whole projections differ, field 1 (the next sequence) aside, exactly when a row or the time did.
+            let differs = !changes.is_empty() || time.is_some();
+            let observe = kept || (!thinned && differs);
+            if observe {
+                mode.anchor.get_or_insert(e.envelope.at);
+                if !same {
+                    if let Some(open) = mode.open.take() {
+                        done.extend(self.close_based(header, open)?);
+                    }
+                    let old = public.whole();
+                    mode.open = Some(BasedWindow {
+                        start,
+                        snapshot: Projection::snapshot(header, &old)?,
+                        view: probe.take().expect("candidate view"),
+                        baseline: old,
+                        observed: Value::Array(Vec::new()),
+                        cursor: (record, offset as u64),
+                        rows: Vec::new(),
+                        base_hash: mode.base_hash,
+                        seen: Seen {
+                            digest: public.digest()?,
+                            next: public.next,
+                            time: public.time.clone(),
+                            rows: BTreeMap::new(),
+                        },
+                    });
+                }
+            }
+            if let Some(open) = &mut mode.open {
+                for (key, _) in &changes {
+                    open.seen
+                        .rows
+                        .entry(*key)
+                        .or_insert_with(|| public.get(*key).cloned());
+                }
+            }
+            public.next = self.after.next;
+            public.digested = None;
+            if let Some(t) = time {
+                public.time = t;
+            }
+            for (key, row) in changes {
+                public.set(key, row)?;
+            }
+            if observe {
+                let open = mode.open.as_mut().expect("observation window");
+                let after = public.digest()?;
+                let delta = public.delta(&open.seen);
+                open.rows.push(Value::Array(vec![
+                    Value::Uint(record),
+                    Value::Uint(offset as u64 + 1),
+                    Value::Uint(e.envelope.sequence),
+                    int(e.envelope.at),
+                    Value::Bytes(std::mem::take(&mut open.seen.digest)),
+                    Value::Bytes(after.clone()),
+                    delta,
+                ]));
+                open.seen = Seen {
+                    digest: after,
+                    next: public.next,
+                    time: public.time.clone(),
+                    rows: BTreeMap::new(),
+                };
+            }
+            self.before.apply_entry(header, e)?;
+        }
+        self.based = Some(mode);
+        self.public = Some(public);
+        Ok(done)
     }
 
     fn close(&mut self) -> R<Option<Bundle>> {
@@ -1083,6 +1250,467 @@ impl Bundler {
             };
         }
         self.close()
+    }
+}
+
+// --- The based builder's projection, row by row (#3755) ----------------------------------------------------------
+
+thread_local! {
+    static WHOLE_STATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Makes this thread's based bundlers project the whole public state per entry, as before #3755: the reference the
+/// regression compares bytes with. Not for use outside tests and measurements.
+#[doc(hidden)]
+pub fn whole_state_reference(on: bool) {
+    WHOLE_STATE.set(on);
+}
+
+/// The rows an entry changed: each key `(field, id)` with its row now, or none when gone.
+type Changed = Vec<((u64, Id), Option<Value>)>;
+
+/// The projection's fields kept row by row (`replica::stream::public::project`): live nodes, live links, public
+/// flights, timers, opaque flying nodes and their links. Field 1 is the next sequence and 7 the time effects.
+const ROWS: [u64; 6] = [2, 3, 4, 6, 8, 9];
+
+/// The scrubbed public projection of a state (`scrub(project(..))`), kept as rows `[id, value]` by field with each
+/// row's encoding, so an entry costs only the rows it can touch, and the whole is put together (for a digest or a
+/// window's baseline) without projecting again. Links by end and timers by node say which rows a node's coming or
+/// going touches.
+struct Projection {
+    next: u64,
+    time: Value,
+    rows: BTreeMap<u64, BTreeMap<Id, (Value, Vec<u8>)>>,
+    by_end: BTreeMap<Id, BTreeSet<Id>>,
+    by_node: BTreeMap<Id, BTreeSet<Id>>,
+    /// The digest of the projection as it stands, once taken: a window opened just after an observation reuses it.
+    digested: Option<Vec<u8>>,
+}
+
+fn public_time(state: &State, redactions: &Redactions) -> Value {
+    redactions.scrub(Value::Array(
+        state.time.iter().map(|t| t.to_value()).collect(),
+    ))
+}
+
+/// The CBOR head of an array of `n` items (`replica::encode`'s, shortest form).
+fn array_head(out: &mut Vec<u8>, n: usize) {
+    let n = n as u64;
+    let m = 4u8 << 5;
+    if n < 24 {
+        out.push(m | n as u8);
+    } else if let Ok(a) = u8::try_from(n) {
+        out.extend([m | 24, a]);
+    } else if let Ok(a) = u16::try_from(n) {
+        out.push(m | 25);
+        out.extend(a.to_be_bytes());
+    } else if let Ok(a) = u32::try_from(n) {
+        out.push(m | 26);
+        out.extend(a.to_be_bytes());
+    } else {
+        out.push(m | 27);
+        out.extend(n.to_be_bytes());
+    }
+}
+
+/// `value`'s encoding where it stands in the whole, `depth` containers down: the encoder's depth limit applies as it
+/// would there.
+fn encoded_at(value: &Value, depth: usize) -> R<Vec<u8>> {
+    let mut v = value.clone();
+    for _ in 0..depth {
+        v = Value::Array(vec![v]);
+    }
+    let mut bytes = enc(&v)?;
+    bytes.drain(..depth);
+    Ok(bytes)
+}
+
+fn public_audience(a: Audience) -> bool {
+    a == Audience::Everyone
+}
+
+impl Projection {
+    fn new(header: &Header, state: &State, redactions: &Redactions) -> R<Projection> {
+        let whole = redactions.scrub(project(header, state)?);
+        replica::stream::public::validate_projection(header, &whole)?;
+        let Value::Map(m) = &whole else {
+            return refuse("archive-base", "projection is not a map");
+        };
+        let mut p = Projection {
+            next: state.next,
+            time: m.get(&7).cloned().unwrap_or(Value::Array(Vec::new())),
+            rows: ROWS.iter().map(|f| (*f, BTreeMap::new())).collect(),
+            by_end: BTreeMap::new(),
+            by_node: BTreeMap::new(),
+            digested: None,
+        };
+        for field in ROWS {
+            let Some(Value::Array(rows)) = m.get(&field) else {
+                return refuse("archive-base", "projection rows");
+            };
+            for row in rows {
+                let id = match row {
+                    Value::Array(pair) if pair.len() == 2 => read_id(&pair[0])?,
+                    _ => return refuse("archive-base", "projection row"),
+                };
+                p.set((field, id), Some(row.clone()))?;
+            }
+        }
+        let flying = state.in_flight.values().flat_map(|f| f.links.iter());
+        for (id, l) in state.links.iter().chain(flying) {
+            for end in l.ends {
+                p.by_end.entry(end).or_default().insert(*id);
+            }
+        }
+        for (id, t) in &state.timers {
+            p.by_node.entry(t.node).or_default().insert(*id);
+        }
+        Ok(p)
+    }
+
+    /// Puts a row `[id, value]` in, or takes it out.
+    fn set(&mut self, (field, id): (u64, Id), row: Option<Value>) -> R<()> {
+        self.digested = None;
+        let rows = self.rows.entry(field).or_default();
+        match row {
+            Some(row) => {
+                // A row is two containers down: the projection map, then its field's array.
+                let bytes = encoded_at(&row, 2)?;
+                rows.insert(id, (row, bytes));
+            }
+            None => {
+                rows.remove(&id);
+            }
+        }
+        Ok(())
+    }
+
+    fn get(&self, (field, id): (u64, Id)) -> Option<&Value> {
+        self.rows.get(&field)?.get(&id).map(|(v, _)| v)
+    }
+
+    /// The whole projection, as `scrub(project(..))` gives it.
+    fn whole(&self) -> Value {
+        let mut m = BTreeMap::from([(1, Value::Uint(self.next)), (7, self.time.clone())]);
+        for field in ROWS {
+            m.insert(
+                field,
+                Value::Array(
+                    self.rows
+                        .get(&field)
+                        .into_iter()
+                        .flat_map(|r| r.values())
+                        .map(|(row, _)| row.clone())
+                        .collect(),
+                ),
+            );
+        }
+        Value::Map(m)
+    }
+
+    /// The window's public snapshot (`public_snapshot(live_observation(whole))`): the live nodes and links, the
+    /// projection's rows 2 and 3 as they are (each row already scrubbed and in the state layout).
+    fn snapshot(header: &Header, whole: &Value) -> R<Value> {
+        let Value::Map(m) = whole else {
+            return refuse("archive-base", "projection is not a map");
+        };
+        let field = |k| m.get(&k).cloned().unwrap_or(Value::Array(Vec::new()));
+        let nodes = field(2);
+        let root = matches!(&nodes, Value::Array(rows) if rows.iter().any(|r| matches!(r, Value::Array(p) if read_id(&p[0]).ok() == Some(header.zone))));
+        if !root {
+            return refuse("history-root-missing", "public root missing");
+        }
+        Ok(Value::Map(BTreeMap::from([(1, nodes), (2, field(3))])))
+    }
+
+    /// `replica::stream::public::digest` of [`Projection::whole`], put together from the rows' encodings.
+    fn digest(&mut self) -> R<Vec<u8>> {
+        if let Some(d) = &self.digested {
+            return Ok(d.clone());
+        }
+        let mut out = Vec::new();
+        out.push((5u8 << 5) | 8); // a map of eight fields
+        for field in [1, 2, 3, 4, 6, 7, 8, 9] {
+            out.push(field as u8);
+            match field {
+                1 => out.extend(enc(&Value::Uint(self.next))?),
+                7 => out.extend(encoded_at(&self.time, 1)?),
+                _ => {
+                    let rows = self.rows.get(&field);
+                    array_head(&mut out, rows.map_or(0, BTreeMap::len));
+                    for (_, bytes) in rows.into_iter().flat_map(|r| r.values()) {
+                        out.extend_from_slice(bytes);
+                    }
+                }
+            }
+        }
+        let d = sha256(&out).to_vec();
+        self.digested = Some(d.clone());
+        Ok(d)
+    }
+
+    /// `replica::stream::public::observation_delta` from the last observation (`seen`) to now.
+    fn delta(&self, seen: &Seen) -> Value {
+        let mut delta = BTreeMap::new();
+        if seen.next != self.next {
+            delta.insert(1, Value::Uint(self.next));
+        }
+        if seen.time != self.time {
+            delta.insert(7, self.time.clone());
+        }
+        for ((field, id), was) in &seen.rows {
+            let now = self.get((*field, *id));
+            if was.as_ref() == now {
+                continue;
+            }
+            let mut row = vec![id.to_value()];
+            if let Some(Value::Array(pair)) = now {
+                row.push(pair[1].clone());
+            }
+            let rows = delta
+                .entry(*field)
+                .or_insert_with(|| Value::Array(Vec::new()));
+            if let Value::Array(rows) = rows {
+                rows.push(Value::Array(row));
+            }
+        }
+        Value::Map(delta)
+    }
+
+    /// The rows entry `e` changed, from `before` to `after` (each as it is now in `after`, or none when gone), and
+    /// the indexes kept up. A node's coming, going or moving into or out of a flight touches the links with an end
+    /// at it, the timers it set and the flights holding it; a structural entry (a remove or a transfer) is read
+    /// from the two states' ids.
+    fn changes(
+        &mut self,
+        before: &State,
+        e: &replica::effects::Effect,
+        after: &State,
+        redactions: &Redactions,
+    ) -> R<Changed> {
+        use replica::effects::{Body, Change, ChangeRec, TimerRec, TransferRec};
+        let mut nodes = BTreeSet::new();
+        let mut links = BTreeSet::new();
+        let mut timers = BTreeSet::new();
+        let mut flights = BTreeSet::new();
+        let mut structural = false;
+        let mut changed = |cs: &[ChangeRec], structural: &mut bool| {
+            for c in cs {
+                match &c.change {
+                    Change::Create { node, .. }
+                    | Change::Reparent { node, .. }
+                    | Change::Set { node, .. } => {
+                        nodes.insert(*node);
+                    }
+                    Change::Motion(m) => {
+                        nodes.insert(m.node);
+                    }
+                    Change::Remove { .. } => *structural = true,
+                    Change::Link { link, .. } | Change::Unlink { link } => {
+                        links.insert(*link);
+                    }
+                }
+            }
+        };
+        match &e.body {
+            Body::Changes(cs) => changed(cs, &mut structural),
+            Body::Transfer(t) => {
+                if let TransferRec::Arrive { carried, .. } = t {
+                    changed(carried, &mut structural);
+                }
+                flights.insert(t.transfer());
+                structural = true;
+            }
+            Body::Time(_) => {}
+            Body::Timers(ts) => {
+                for t in ts {
+                    match t {
+                        TimerRec::Set { timer, .. } | TimerRec::Clear { timer } => {
+                            timers.insert(*timer);
+                        }
+                    }
+                }
+            }
+        }
+        if structural {
+            fn moved<V, W>(a: &BTreeMap<Id, V>, b: &BTreeMap<Id, W>, out: &mut BTreeSet<Id>) {
+                out.extend(a.keys().filter(|k| !b.contains_key(k)));
+                out.extend(b.keys().filter(|k| !a.contains_key(k)));
+            }
+            moved(&before.nodes, &after.nodes, &mut nodes);
+            moved(&before.links, &after.links, &mut links);
+            moved(&before.timers, &after.timers, &mut timers);
+            moved(&before.in_flight, &after.in_flight, &mut flights);
+        }
+        for f in &flights {
+            for s in [before, after] {
+                if let Some(f) = s.in_flight.get(f) {
+                    nodes.extend(f.nodes.keys());
+                    links.extend(f.links.keys());
+                }
+            }
+        }
+        for n in &nodes {
+            links.extend(self.by_end.get(n).into_iter().flatten());
+            timers.extend(self.by_node.get(n).into_iter().flatten());
+        }
+        for (id, f) in before.in_flight.iter().chain(&after.in_flight) {
+            if links.iter().any(|l| f.links.contains_key(l)) {
+                flights.insert(*id);
+            }
+        }
+        // The indexes: a link's ends and a timer's node never change, so only a coming or a going moves them.
+        let link_of = |s: &State, l: &Id| {
+            s.links
+                .get(l)
+                .or_else(|| s.in_flight.values().find_map(|f| f.links.get(l)))
+                .map(|l| l.ends)
+        };
+        for l in &links {
+            match (link_of(before, l), link_of(after, l)) {
+                (Some(ends), None) => {
+                    for end in ends {
+                        if let Some(set) = self.by_end.get_mut(&end) {
+                            set.remove(l);
+                            if set.is_empty() {
+                                self.by_end.remove(&end);
+                            }
+                        }
+                    }
+                }
+                (None, Some(ends)) => {
+                    for end in ends {
+                        self.by_end.entry(end).or_default().insert(*l);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for t in &timers {
+            match (before.timers.get(t), after.timers.get(t)) {
+                (Some(was), None) => {
+                    if let Some(set) = self.by_node.get_mut(&was.node) {
+                        set.remove(t);
+                        if set.is_empty() {
+                            self.by_node.remove(&was.node);
+                        }
+                    }
+                }
+                (None, Some(now)) => {
+                    self.by_node.entry(now.node).or_default().insert(*t);
+                }
+                _ => {}
+            }
+        }
+        let keys = nodes
+            .iter()
+            .flat_map(|n| [(2, *n), (8, *n)])
+            .chain(links.iter().flat_map(|l| [(3, *l), (9, *l)]))
+            .chain(flights.iter().map(|f| (4, *f)))
+            .chain(timers.iter().map(|t| (6, *t)));
+        let mut out = Vec::new();
+        for key in keys {
+            let row =
+                row(after, key).map(|v| Value::Array(vec![key.1.to_value(), redactions.scrub(v)]));
+            if self.get(key) != row.as_ref() {
+                out.push((key, row));
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// One row of `project(state)` (`replica::stream::public`), unscrubbed: what the whole projection holds for `key`.
+fn row(state: &State, (field, id): (u64, Id)) -> Option<Value> {
+    use replica::effects::{Flight, LinkState, flight_value, link_value, node_value, timer_value};
+    use replica::world_model::End;
+    // The audience of a node here: a later flight's over an earlier one's, a flight's over a live node's.
+    let audience = |i: &Id| {
+        state
+            .in_flight
+            .values()
+            .rev()
+            .find_map(|f| f.nodes.get(i))
+            .or_else(|| state.nodes.get(i))
+            .map(|n| n.audience)
+    };
+    let ends = |l: &LinkState| {
+        l.ends
+            .iter()
+            .all(|i| audience(i).is_none_or(public_audience))
+    };
+    let root_public = |f: &Flight| {
+        f.nodes
+            .get(&f.root)
+            .is_some_and(|n| public_audience(n.audience))
+    };
+    let flying_link = |f: &Flight, l: &LinkState| {
+        public_audience(l.audience)
+            && f.nodes
+                .get(&l.ends[usize::from(l.owner == End::Second)])
+                .is_some_and(|n| public_audience(n.audience))
+            && ends(l)
+    };
+    match field {
+        2 => state
+            .nodes
+            .get(&id)
+            .filter(|n| public_audience(n.audience))
+            .map(node_value),
+        3 => state
+            .links
+            .get(&id)
+            .filter(|l| public_audience(l.audience) && ends(l))
+            .map(link_value),
+        4 => state
+            .in_flight
+            .get(&id)
+            .filter(|f| root_public(f))
+            .map(|f| {
+                let mut f = f.clone();
+                f.nodes.retain(|_, n| public_audience(n.audience));
+                let kept: Vec<Id> = f
+                    .links
+                    .iter()
+                    .filter(|(_, l)| flying_link(&f, l))
+                    .map(|(i, _)| *i)
+                    .collect();
+                f.links.retain(|i, _| kept.contains(i));
+                flight_value(&f)
+            }),
+        6 => state
+            .timers
+            .get(&id)
+            .filter(|t| {
+                state
+                    .nodes
+                    .get(&t.node)
+                    .into_iter()
+                    .chain(
+                        state
+                            .in_flight
+                            .values()
+                            .filter_map(|f| f.nodes.get(&t.node)),
+                    )
+                    .any(|n| public_audience(n.audience))
+            })
+            .map(timer_value),
+        // A later flight's row over an earlier one's, as the projection collects them.
+        8 => state
+            .in_flight
+            .values()
+            .rev()
+            .filter(|f| !root_public(f))
+            .find_map(|f| f.nodes.get(&id).filter(|n| public_audience(n.audience)))
+            .map(node_value),
+        9 => state
+            .in_flight
+            .values()
+            .rev()
+            .filter(|f| !root_public(f))
+            .find_map(|f| f.links.get(&id).filter(|l| flying_link(f, l)))
+            .map(link_value),
+        _ => None,
     }
 }
 

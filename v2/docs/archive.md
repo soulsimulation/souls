@@ -37,7 +37,10 @@ meaning, and field 7 carries an authorized observation chain. Its version-1 fiel
 public projection (3), physical record/effect-offset cursor (4), rows (5), terminal projection digest (6), terminal
 cursor (7), and original private-base digest (8). Each row binds the genuine physical cursor, effect sequence and
 world time, prior/result public digests, and the existing public projection delta. The producer validates each
-whole canonical Part first. The projection retains authorized carry/flight state and real opaque parent references;
+whole canonical Part first. The bundler keeps the scrubbed public projection row by row with each row's encoding,
+remakes only the rows an entry can touch (its nodes, links and timers, a flight's, and the links and timers of a node
+that comes, goes or flies) and puts digests and window baselines together from those rows; it never projects the
+whole state per entry (#3755). The projection retains authorized carry/flight state and real opaque parent references;
 it never publishes private flight identity, private arrived bookkeeping or private fields. References and genuine
 Sampled records are scrubbed before hashing. A private-only change emits no observation row or private timestamp. The same existing
 text Store is opened once before archive replay; its current redaction list is checked at each publication boundary.

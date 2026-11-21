@@ -1401,3 +1401,337 @@ fn w3655_legacy_empty_initial_part_keeps_named_refusals_and_store_unchanged() {
         before
     );
 }
+
+/// #3755: a fork's based bundles made row by row are byte-identical to the whole-state reference's, live and made
+/// again, over the rows an entry can touch: a private flight's opaque public nodes and links going and coming back,
+/// a public link whose private end settles away (it becomes public), motion thinned and kept across windows, a field
+/// set, a timer set and cleared, an unlink, a remove that takes a link with it, and a public subtree leaving and
+/// settling with a timer of its own (which stops being public).
+#[test]
+fn w3755_rows_equal_the_whole_state_reference_on_flights_links_timers_and_removes() {
+    use replica::effects::{Body, Change, ChangeRec, TimerRec, TransferRec};
+    use replica::encode::Value;
+    use replica::ids::{Id, Scope};
+    use replica::pose::{HandOff, Owner, Vec3};
+    use replica::world_model::{Audience, End};
+    let (scratch, mut fork, _original) = w3c_fork("rows");
+    let h = fork.header.clone();
+    let private = Id::new(Scope([0x6b; 16]), 1).unwrap();
+    let room = fork
+        .tree
+        .to_state()
+        .nodes
+        .iter()
+        .find(|(id, n)| **id != h.zone && n.kind.as_str().starts_with("souls:room@"))
+        .map(|(id, _)| *id)
+        .unwrap();
+    let kind = |plain: &str| {
+        h.kinds
+            .iter()
+            .find(|k| k.as_str().starts_with(plain))
+            .unwrap()
+            .clone()
+    };
+    let one = |change| {
+        Body::Changes(vec![ChangeRec {
+            change,
+            rest: Default::default(),
+        }])
+    };
+    let make = |node, kind, pose, audience| Change::Create {
+        node,
+        kind,
+        pose,
+        audience,
+        fields: Default::default(),
+    };
+    let link = |link, ends| Change::Link {
+        link,
+        ty: Name::new("souls:seen-with").unwrap(),
+        ends,
+        owner: End::First,
+        audience: Audience::Everyone,
+    };
+    let motion = |node, at, x| {
+        one(Change::Motion(HandOff {
+            node,
+            at,
+            from: Owner::Mover,
+            to: Owner::Mover,
+            pose: script::world::pose(room, None, x),
+            linear: Vec3::new(17, 0, 0),
+            angular: Vec3::ZERO,
+        }))
+    };
+    let [
+        container,
+        child,
+        slotted,
+        walker,
+        inner,
+        outer,
+        timer,
+        away,
+        gone,
+    ] = std::array::from_fn(|_| fork.minter.mint().unwrap());
+    let [far, toward, second, settled] = std::array::from_fn(|_| fork.minter.mint().unwrap());
+    let everyone = Audience::Everyone;
+    let hidden = Audience::Of(private);
+    let at = 60_000_000;
+    let make_private = one(make(
+        container,
+        kind("souls:body@"),
+        script::world::pose(room, None, 0),
+        hidden,
+    ));
+    w3c_fork_effect(&mut fork, at, room, hidden, make_private);
+    let children = Body::Changes(
+        [
+            make(
+                child,
+                kind("souls:cup@"),
+                script::world::pose(container, None, 2),
+                everyone,
+            ),
+            make(
+                slotted,
+                kind("souls:cup@"),
+                script::world::pose(container, Some(2), 0),
+                everyone,
+            ),
+        ]
+        .map(|change| ChangeRec {
+            change,
+            rest: Default::default(),
+        })
+        .into(),
+    );
+    w3c_fork_effect(&mut fork, at, container, everyone, children);
+    w3c_fork_effect(
+        &mut fork,
+        at,
+        child,
+        everyone,
+        one(link(inner, [child, slotted])),
+    );
+    let make_walker = one(make(
+        walker,
+        kind("souls:body@"),
+        script::world::pose(room, None, 1),
+        everyone,
+    ));
+    w3c_fork_effect(&mut fork, at, room, everyone, make_walker);
+    w3c_fork_effect(
+        &mut fork,
+        at,
+        walker,
+        everyone,
+        one(link(outer, [walker, container])),
+    );
+    let make_far = one(make(
+        far,
+        kind("souls:body@"),
+        script::world::pose(room, None, 3),
+        hidden,
+    ));
+    w3c_fork_effect(&mut fork, at, room, hidden, make_far);
+    w3c_fork_effect(
+        &mut fork,
+        at,
+        walker,
+        everyone,
+        one(link(toward, [walker, far])),
+    );
+    let set = Body::Timers(
+        [timer, second]
+            .map(|timer| TimerRec::Set {
+                timer,
+                due: 600_000_000,
+                name: Name::new("souls:wake").unwrap(),
+            })
+            .into(),
+    );
+    w3c_fork_effect(&mut fork, at, walker, everyone, set);
+    let leave = |transfer, node, x| {
+        Body::Transfer(TransferRec::Leave {
+            transfer,
+            node,
+            lineage: h.lineage,
+            zone: h.zone,
+            pose: script::world::pose(room, None, x),
+        })
+    };
+    let base = w3c_checkpoint(&scratch, &mut fork);
+    let returned = Body::Transfer(TransferRec::Return {
+        transfer: away,
+        reason: Name::new("souls:returned").unwrap(),
+    });
+    let set_field = one(Change::Set {
+        node: walker,
+        field: 98,
+        to: Value::Uint(7),
+        by: None,
+    });
+    let clear = Body::Timers(vec![TimerRec::Clear { timer }]);
+    let script: Vec<(i64, Id, Audience, Body)> = vec![
+        (62_000_000, walker, everyone, motion(walker, 62_000_000, 2)),
+        (62_100_000, walker, everyone, motion(walker, 62_100_000, 3)),
+        (63_000_000, walker, everyone, set_field),
+        (64_000_000, container, hidden, leave(away, container, 0)),
+        (65_000_000, far, hidden, leave(settled, far, 3)),
+        (
+            66_000_000,
+            room,
+            hidden,
+            Body::Transfer(TransferRec::Settle { transfer: settled }),
+        ),
+        (119_500_000, room, hidden, returned),
+        (
+            125_000_000,
+            walker,
+            everyone,
+            motion(walker, 125_000_000, 4),
+        ),
+        (
+            126_000_000,
+            walker,
+            everyone,
+            one(Change::Unlink { link: outer }),
+        ),
+        (127_000_000, walker, everyone, clear),
+        (
+            128_000_000,
+            slotted,
+            everyone,
+            one(Change::Remove { node: slotted }),
+        ),
+        (190_000_000, walker, everyone, leave(gone, walker, 5)),
+        (
+            191_000_000,
+            room,
+            everyone,
+            Body::Transfer(TransferRec::Settle { transfer: gone }),
+        ),
+        (
+            250_000_000,
+            child,
+            everyone,
+            one(Change::Set {
+                node: child,
+                field: 98,
+                to: Value::Uint(1),
+                by: None,
+            }),
+        ),
+    ];
+    let records: Vec<Vec<u8>> = script
+        .into_iter()
+        .map(|(at, node, audience, body)| w3c_fork_effect(&mut fork, at, node, audience, body))
+        .collect();
+    let bytes = |b: Vec<Bundle>| b.iter().map(|b| b.bytes().to_vec()).collect::<Vec<_>>();
+    let mut arms = Vec::new();
+    for whole in [true, false] {
+        archive::whole_state_reference(whole);
+        let store = Memory::default();
+        let mut a = Archiver::open_based(&store, PREFIX, &base).unwrap();
+        for (n, r) in records.iter().enumerate() {
+            a.push(base.record + n as u64, r.clone()).unwrap();
+        }
+        a.flush().unwrap();
+        let f = fetch(&store, PREFIX).unwrap();
+        arms.push((
+            bytes(stored_bundles(&store, PREFIX, &f).unwrap()),
+            bytes(rebuild_bundles(&f).unwrap()),
+        ));
+    }
+    archive::whole_state_reference(false);
+    let (whole, rows) = (&arms[0], &arms[1]);
+    assert!(whole.0.len() >= 3, "several windows: {}", whole.0.len());
+    assert_eq!(
+        whole.0, whole.1,
+        "the reference made again equals itself stored"
+    );
+    assert_eq!(
+        rows.0, whole.0,
+        "row by row, live, equals the whole-state reference"
+    );
+    assert_eq!(
+        rows.1, whole.0,
+        "row by row, made again, equals the whole-state reference"
+    );
+}
+
+/// #3755's regression on a recorded full-Eden fork: `ARCHIVE_EDEN` names a copy of a served world's store folder
+/// (its `h/<world>/<lineage>/` archive is found in it; the open rewrites the same bytes into it). The based bundles
+/// made row by row are byte-identical to the whole-state reference's; prints each one's cost per record, each
+/// archive open's time and whether the bundles stored live are the same bytes. Run on Saturn, `--ignored`.
+#[test]
+#[ignore = "needs a recorded full-Eden store folder in ARCHIVE_EDEN"]
+#[allow(clippy::disallowed_methods)] // A measurement: it times the bundlers on the wall clock (K7 allows tools to).
+fn w3755_full_eden_bundles_row_by_row_equal_the_whole_state_reference() {
+    use directoryd::directory::folder::Folder;
+    use std::time::Instant;
+    let root = std::path::PathBuf::from(std::env::var("ARCHIVE_EDEN").expect("ARCHIVE_EDEN"));
+    let head = Folder::new(root.clone())
+        .keys("h/")
+        .into_iter()
+        .find(|k| k.ends_with("/archive/head"))
+        .expect("an archive in the store");
+    // The served world's archive keys are relative to its own folder (worldd's `Under`).
+    let store = Folder::new(root.join(head.trim_end_matches("archive/head")));
+    let prefix = String::new();
+    let f = fetch(&store, &prefix).expect("fetched");
+    let base = f.base.clone().expect("a based archive (a fork)");
+    let records = f
+        .segments
+        .iter()
+        .flat_map(|s| &s.records)
+        .filter(|r| !sim::recorder::is_input(r))
+        .count();
+    let entries: usize = f
+        .segments
+        .iter()
+        .flat_map(|s| &s.records)
+        .filter(|r| !sim::recorder::is_input(r))
+        .map(|r| replica::effects::Part::read(r).unwrap().effects.len())
+        .sum();
+    let bytes = |b: &[Bundle]| b.iter().map(|b| b.bytes().to_vec()).collect::<Vec<_>>();
+    let t = Instant::now();
+    drop(archive::Bundler::from_base(&base).expect("a bundler"));
+    let from_base = t.elapsed().as_secs_f64();
+    eprintln!("w3755: the bundler's start from the base (paid once per open) {from_base:.3} s");
+    let mut made = Vec::new();
+    for whole in [false, true, false, true] {
+        archive::whole_state_reference(whole);
+        let t = Instant::now();
+        let b = rebuild_bundles(&f).expect("made again");
+        let took = t.elapsed();
+        let t = Instant::now();
+        drop(Archiver::open_based(&store, &prefix, &base).expect("opens"));
+        let open = t.elapsed();
+        eprintln!(
+            "w3755: {} records ({entries} entries) after base record {}, {}: {} bundles in {:.3} s, {:.1} ms per \
+             record past the start; archive open {:.3} s",
+            records,
+            base.record,
+            if whole {
+                "whole-state reference"
+            } else {
+                "row by row"
+            },
+            b.len(),
+            took.as_secs_f64(),
+            (took.as_secs_f64() - from_base) * 1000.0 / records.max(1) as f64,
+            open.as_secs_f64()
+        );
+        made.push(bytes(&b));
+    }
+    archive::whole_state_reference(false);
+    assert!(!made[0].is_empty(), "the fork made public bundles");
+    assert!(made.iter().all(|m| *m == made[0]), "byte-identical bundles");
+    eprintln!(
+        "w3755: {} bundles, {} bytes, byte-identical in every run of both arms",
+        made[0].len(),
+        made[0].iter().map(Vec::len).sum::<usize>(),
+    );
+}
