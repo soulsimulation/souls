@@ -152,7 +152,7 @@ fn fixture() -> (NamedRun, Client) {
             DRESSER,
             Vec3::new(at1().x, 0, at1().z - 702_000),
             Audience::Everyone,
-            BTreeMap::from([(1, Value::Text(name("eden:shut")))]),
+            BTreeMap::from([(DRESSER_OPEN, Value::Text(name("eden:shut")))]),
         ),
         (
             note(),
