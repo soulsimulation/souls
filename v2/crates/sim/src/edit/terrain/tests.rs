@@ -323,6 +323,66 @@ fn square() -> Vec<[i64; 2]> {
     ]
 }
 
+#[test]
+fn landform_parameters_and_owned_doorway_metadata_have_distinct_fields() {
+    use replica::edit::DOOR_GEOMETRY;
+
+    assert_eq!(DOOR_GEOMETRY, 29);
+    let im = field();
+    let mut edits = Edits::of(&im);
+    let parameters = Value::Bytes(br#"{"kind":"bump","h":0}"#.to_vec());
+    let place = edits.landform("eden:landform", &square(), vec![(28, parameters.clone())]);
+    let made = edits
+        .run(vec![place], &[], 0)
+        .expect("landform field 28 Place");
+    let node = made.names[&1];
+    let updated = Value::Bytes(br#"{"kind":"bump","h":1}"#.to_vec());
+    edits
+        .run(
+            vec![Op::Set {
+                node: Ref::Node(node),
+                field: 28,
+                to: updated.clone(),
+            }],
+            &[],
+            0,
+        )
+        .expect("landform field 28 Set");
+    let tree = edits.live.tree();
+    let placed = tree.node(tree.handle(node).unwrap()).unwrap();
+    let fields = placed.fields();
+    assert_eq!(fields.get(&28), Some(&updated));
+    assert!(!fields.contains_key(&DOOR_GEOMETRY));
+
+    // Reserved metadata stays protected regardless of the forged value's shape.
+    for forged in [parameters, Value::Array(vec![])] {
+        let before = edits.live.version();
+        let place = edits.landform(
+            "eden:landform",
+            &square(),
+            vec![(DOOR_GEOMETRY, forged.clone())],
+        );
+        let refused = edits
+            .run(vec![place], &[], 0)
+            .expect_err("forged metadata Place");
+        assert_eq!(refused.name, "edit.doorway-geometry");
+        assert_eq!(edits.live.version(), before);
+        let refused = edits
+            .run(
+                vec![Op::Set {
+                    node: Ref::Node(node),
+                    field: DOOR_GEOMETRY,
+                    to: forged,
+                }],
+                &[],
+                0,
+            )
+            .expect_err("forged metadata Set");
+        assert_eq!(refused.name, "edit.doorway-geometry");
+        assert_eq!(edits.live.version(), before);
+    }
+}
+
 /// The hill's batch: its node, the tiles, and the box lifted by the ground's change under it (a sample, so exact).
 fn hill_ops(e: &Edits, box_id: Id, lift: bool) -> Vec<Op> {
     let ([cx, cz], r, h) = SHAPE.get();

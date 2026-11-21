@@ -17,3 +17,5 @@ pub mod walk;
 
 /// The existing B15 recorded body-choice and admitted catalogue interface.
 pub mod wear;
+/// The wind-down, the one move the world starts on a body (B16, #2751).
+pub mod wind_down;

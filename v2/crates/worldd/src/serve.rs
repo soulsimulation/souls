@@ -1583,7 +1583,7 @@ fn serve(args: &[String]) -> R<()> {
         .map_err(|e| format!("body-classes: {e}"))?;
     stamp("body classes");
     let (places, things, all, left, moved) = places(&mut town, &kinds);
-    stamp("seats placed");
+    stamp("places to sit placed");
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
          moved to clear ground",
@@ -1714,7 +1714,7 @@ fn serve(args: &[String]) -> R<()> {
     cfg.wear = Some(answers::Wearing { catalogue, born });
     cfg.built_bodies = Some(Box::new(move |placed: &Placed, builds| {
         let b = bodies(town, planner, ground, placed, places.clone(), builds);
-        stamp("seats registered");
+        stamp("places to sit registered");
         b
     }));
     // Capture and validate the public source before answers starts its K5 writer: normal pruning may remove an
