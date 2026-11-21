@@ -339,6 +339,20 @@ test('R8 A3, A4: checked on the copy and at send time; only a current copy refus
   if (process.env.R8_REPORT) console.log(JSON.stringify({ can: marked, stop, two, blind: { ok: blind.ok, checked: blind.checked, gap: blind.gap }, basis: later.basis, at: later.at }));
 });
 
+test('#3604: the thin set-down command reaches the world and is answered once, refused by name when nothing is held', async () => {
+  const bad = await request(rt.socket, { op: 'set-down', this: 'no-id' });
+  assert.equal(bad.code, 'set-down-names-a-thing', JSON.stringify(bad));
+  const a = await request(rt.socket, { op: 'set-down', this: LAMP, word: 'here' });
+  outputs.push(JSON.stringify(a));
+  assert.equal(a.ok, true, JSON.stringify(a));
+  assert.equal(a.verb, 'hands:set-down');
+  const answer = await waitFor(async () =>
+    (await request(rt.socket, { op: 'read' })).events.find((e) => e.kind === 'answer' && e.sequence === a.sequence));
+  // This world's Soul holds no lamp: a refusal by name (`setdown-off` where the world runs no engine), never a move.
+  assert.equal(answer.answer, 2, JSON.stringify(answer));
+  assert.ok(['not-held', 'setdown-off', 'intent.no-body'].includes(answer.reason), JSON.stringify(answer));
+});
+
 test('#3346: answers that share a version are counted as seen, so a resume gives none of them twice', async () => {
   // The lamp on (a new version), then three refusals at that same version; every answer taken.
   const acts = [];

@@ -125,7 +125,9 @@ slot) with the stance the request named. Postures are the controller's stance in
 - **Reserved at commit.** One tick's requests are taken together and ordered by a stable key: the body's id, then the
   seat's. The first takes the seat. Each later request is refused `place-taken`, and the refusal names the holder. The
   hold is keyed by the seat's thing, so finding the holder is one lookup, never a scan.
-- **A seat above standing reach is refused** `place-out-of-reach`. Its height alone is compared with the move's reach.
+- **A seat above standing reach is refused** `place-out-of-reach`. Its height alone is compared with the body's
+  standing reach: 2.06 m for the standard 1.75 m body, scaled by the admitted build's height, unscaled for a hovering
+  body (`sim::slots::standing_reach`, today's SEATDEF). The move's own reach is horizontal, to the seat's stand point.
 - **A seated body has no timer and no mover.** A driver with no timer holds its legs and its stance, and the
   controller keeps it apart from the bodies it steps, so a tick never visits it.
 - **The engine releases the seat, never the skill.** It does so when the holder rises (at the rise's contact), and
@@ -157,6 +159,23 @@ the move is checked by `replica::move_check`, the function a client's `can` runs
 receipts, so its `no` is the world's name: `move.no-target`, `move.bad-point`, `resource-held` (a walk while seated),
 `place-already-held`, `place-taken`, `not-seated`. A seat's holds are not in a client's copy, so its verdict on a sit
 on a free-looking seat stays `unknown`.
+
+## The wind-down (B16)
+
+The one move the world starts on a body (TRUNK T10, Gene 17 Nov; today's `wind-down/1`): `skills::wind_down` decides,
+`worldd::bodies` carries it out. A Soul whose agent has not acted for an hour (an intent with `Intent::agent_act`: a
+reflex its client sends never counts) stands up and wanders (`idle`: a walk of 5 to 15 m every 2 to 4 minutes, each
+ending farther from the town's centre), becomes a `zombie` 30 minutes later and walks to its sleeping spot (the
+nearest open ground with 3 m of open ground round it, 3 m from another Soul's spot, within 80 m), then lies down there
+`asleep`, held by a driver of its own, at the latest 50 minutes after it began wandering. Its agent's next act lets it
+go on that tick (`awake`) and runs. Each move goes through `Bodies::start` like any move intent (N7's walk, B3's rise)
+and is written as the world's record (cause and actor the world, event `souls:idle|zombie|asleep|awake` with the rule's
+state); a restart rebuilds the rule from those records. Choices come from a hash of the body's id, never the world's
+random source. It never moves a body something else holds (an open act, an order, a carry). A sleeping body is on no
+due list. BUILDSAFE judges it as any body on the ground, so an edit cannot bury it. `WORLDD_WIND_DOWN=wander,zombie,
+leg_min,leg_max,bound` (seconds) shortens the clocks in a test world. The page's Soul card reads its word from the
+records. A restart rebuilds it from the records after its checkpoint; a body the checkpoint has lying on the ground
+sleeps on, and one wandering or walking out starts its hour again.
 
 ## The code hatch, shape only
 

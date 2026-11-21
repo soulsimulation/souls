@@ -328,7 +328,8 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
 /// reads it. `words`, when given, is parameter 1 as T8's `{23: words}` (a say or a whisper, V1b). C10 (#3414): `target`
 /// may be one id per verb, split by spaces; `args`, the first verb's thing arguments as `name=<id>` split by spaces, is
 /// parameter 1 as C2's `[[name, id], ...]`. E26 (#3329): `params`, a JSON object of numbered parameters for an engine
-/// act (`activity:offer`): a whole number, a name, an id (`<scope hex>-<counter>`), or a list of those.
+/// act (`activity:offer`): a whole number, a name, an id (`<scope hex>-<counter>`), or a list of those. `reflex`, when
+/// true, marks it as sent by the client on its own standing consent, not by its agent (field 12, #3764).
 #[wasm_bindgen(js_name = wireIntent)]
 // JS calls it with positional arguments; the words came last (C4, #3368), then the arguments (C10, #3414).
 #[allow(clippy::too_many_arguments)]
@@ -343,6 +344,7 @@ pub fn wire_intent(
     words: Option<String>,
     args: Option<String>,
     params: Option<String>,
+    reflex: Option<bool>,
 ) -> Result<Vec<u8>, JsError> {
     let node = |t: &str| -> Result<Option<Target>, JsError> {
         Ok(match t {
@@ -470,6 +472,7 @@ pub fn wire_intent(
         fallbacks,
         replaces: None,
         body: None,
+        reflex: reflex.unwrap_or(false),
     };
     let bytes = encode(&intent.to_value()).map_err(js)?;
     crate::intent_decode::decode(&bytes).map_err(js)?;
@@ -537,13 +540,22 @@ fn field_value(v: &json::Value) -> Result<Value, String> {
         json::Value::Str(t) => Name::new(t)
             .map(Value::Text)
             .ok_or_else(|| format!("{t:?} is not a name (ASCII, at most 64)")),
-        _ => Err("a field's value is an integer, true or false, or a name".into()),
+        json::Value::Arr(items) => items
+            .iter()
+            .map(field_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        _ => {
+            Err("a field's value is an integer, true or false, a name, or an array of these".into())
+        }
     }
 }
 
 /// The batch the daemon passes as JSON: `[{"op": "place", "name": 1, "kind": "<namespace:name@hash>", "in": <node>,
 /// "at": [x, y, z], "slot": n, "fields": {"<n>": value}}, {"op": "move", "node": <node>, "at": [..]}, {"op": "set",
 /// "node": <node>, "field": n, "value": v}, {"op": "remove", "node": <node>}]`, positions in micrometres.
+/// A `doorway` names its leaf, owning `from` and other `to` places, with `at: [x,z]`, `yaw`, `width` and `height`
+/// in the existing doorway row's millimetres/millidegrees, in the owning room's building frame.
 fn ops_of(text: &str) -> Result<Vec<Op>, String> {
     let v = json::parse(text)?;
     let list = v.arr().ok_or("a batch is a list of operations")?;
@@ -585,7 +597,49 @@ fn ops_of(text: &str) -> Result<Vec<Op>, String> {
                     to: field_value(o.get("value").ok_or("a set's value")?)?,
                 },
                 Some("remove") => Op::Remove { node: node()? },
-                _ => return Err("op is place, move, set or remove".into()),
+                Some("doorway") => {
+                    let integer = |v: &json::Value| match v {
+                        json::Value::Int(n) => i64::try_from(*n).ok(),
+                        _ => None,
+                    };
+                    let at = o
+                        .get("at")
+                        .and_then(json::Value::arr)
+                        .ok_or("a doorway's at is [x, z] mm")?;
+                    let number = |key| {
+                        o.get(key)
+                            .and_then(integer)
+                            .ok_or("a doorway number is an integer")
+                    };
+                    if at.len() != 2 {
+                        return Err("a doorway's at is [x, z] mm".into());
+                    }
+                    Op::Doorway {
+                        name: uint_of(o.get("name"), "a doorway's name")?,
+                        door: ref_of(o.get("door"))?,
+                        from: ref_of(o.get("from"))?,
+                        to: ref_of(o.get("to"))?,
+                        at: [
+                            integer(&at[0]).ok_or("a doorway's x")?,
+                            integer(&at[1]).ok_or("a doorway's z")?,
+                        ],
+                        yaw: number("yaw")?,
+                        width: number("width")?,
+                        height: number("height")?,
+                        wall: ref_of(o.get("wall"))?,
+                        closed: match field_value(
+                            o.get("closed").ok_or("a doorway's closed solids")?,
+                        )? {
+                            Value::Array(rows) => rows,
+                            _ => return Err("a doorway's closed solids are an array".into()),
+                        },
+                        open: match field_value(o.get("open").ok_or("a doorway's open solids")?)? {
+                            Value::Array(rows) => rows,
+                            _ => return Err("a doorway's open solids are an array".into()),
+                        },
+                    }
+                }
+                _ => return Err("op is place, move, set, remove or doorway".into()),
             })
         })
         .collect()
@@ -626,9 +680,10 @@ pub fn wire_edit(
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     let bytes = encode(&intent.to_value()).map_err(js)?;
-    Intent::read(&bytes).map_err(js)?;
+    crate::intent_decode::decode(&bytes).map_err(js)?;
     Ok(bytes)
 }
 
@@ -763,6 +818,7 @@ pub fn edit_kinds(kinds: &str) -> Result<String, JsError> {
 struct Held {
     kind: String,
     parent: Option<Id>,
+    doorway: bool,
 }
 
 /// The copy's nodes, read from its roots down by the records' hashes.
@@ -792,7 +848,15 @@ fn held(copy: &Copy) -> Result<BTreeMap<Id, Held>, String> {
                 _ => None,
             }));
         }
-        out.insert(id, Held { kind, parent });
+        let doorway = matches!(m.get(&6), Some(Value::Map(fields)) if fields.get(&7).is_some_and(|v| read_id(v).is_ok()));
+        out.insert(
+            id,
+            Held {
+                kind,
+                parent,
+                doorway,
+            },
+        );
     }
     Ok(out)
 }
@@ -839,6 +903,12 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
     };
     // Each name placed so far, with its kind and parent, and every node the batch has removed.
     let mut new: BTreeMap<u64, (String, Ref)> = BTreeMap::new();
+    let mut links = BTreeSet::new();
+    let mut doorways: BTreeSet<Ref> = nodes
+        .iter()
+        .filter(|(_, n)| n.doorway)
+        .map(|(id, _)| Ref::Node(*id))
+        .collect();
     let mut gone: BTreeSet<Ref> = BTreeSet::new();
     for (i, op) in ops.iter().enumerate() {
         let named = |r: Ref| -> Result<(String, Option<Ref>), Why> {
@@ -884,8 +954,15 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                     kind,
                     parent,
                     at,
+                    fields,
                     ..
                 } => {
+                    if fields.contains_key(&crate::edit::DOOR_GEOMETRY) {
+                        return Err((
+                            "edit.doorway-geometry",
+                            "owned geometry is written only by the doorway operation".into(),
+                        ));
+                    }
                     if kinds
                         .as_ref()
                         .is_some_and(|k| !k.contains_key(kind.as_str()))
@@ -893,7 +970,7 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                         let d = format!("{} is not pinned by this world", kind.as_str());
                         return Err(("edit.kind-unknown", d));
                     }
-                    if new.contains_key(name) {
+                    if new.contains_key(name) || links.contains(name) {
                         return Err(("edit.name-twice", format!("{name} is placed twice")));
                     }
                     let (pk, _) = named(*parent)?;
@@ -906,7 +983,93 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                     let (pk, _) = named(parent)?;
                     admits(&pk, &k, at.slot)
                 }
-                Op::Set { node, .. } => named(*node).map(|_| ()),
+                Op::Set { node, field, .. } => {
+                    if *field == crate::edit::DOOR_GEOMETRY {
+                        return Err((
+                            "edit.doorway-geometry",
+                            "owned geometry is written only by the doorway operation".into(),
+                        ));
+                    }
+                    named(*node).map(|_| ())
+                }
+                Op::Doorway {
+                    name,
+                    door,
+                    from,
+                    to,
+                    at,
+                    width,
+                    height,
+                    wall,
+                    closed,
+                    open,
+                    ..
+                } => {
+                    if new.contains_key(name) || links.contains(name) {
+                        return Err(("edit.name-twice", format!("{name} is placed twice")));
+                    }
+                    let (kind, parent) = named(*door)?;
+                    if doorways.contains(door) {
+                        return Err(("edit.doorway", "the door already has a doorway".into()));
+                    }
+                    if parent != Some(*from)
+                        || from == to
+                        || *width <= 0
+                        || *height <= 0
+                        || at
+                            .iter()
+                            .chain([width, height])
+                            .any(|n| n.checked_mul(1000).is_none())
+                    {
+                        return Err(("edit.doorway", "a door belongs to its owning end; distinct ends and positive dimensions are required".into()));
+                    }
+                    if kinds
+                        .as_ref()
+                        .is_some_and(|k| k.get(&kind).is_none_or(|k| k.owner != "thing"))
+                    {
+                        return Err(("edit.kind-unknown", kind));
+                    }
+                    let (wall_kind, _) = named(*wall)?;
+                    if kinds
+                        .as_ref()
+                        .is_some_and(|k| k.get(&wall_kind).is_none_or(|k| k.owner != "thing"))
+                    {
+                        return Err((
+                            "edit.doorway-geometry",
+                            "the wall is an exact pinned thing".into(),
+                        ));
+                    }
+                    crate::edit::doorway_solids(&Value::Array(closed.clone()), closed, open)
+                        .map_err(|name| (name, "invalid authored geometry rows".into()))?;
+                    for mut end in [*from, *to] {
+                        let mut contained = false;
+                        for _ in 0..64 {
+                            if end == *wall {
+                                contained = true;
+                                break;
+                            }
+                            let (_, parent) = named(end)?;
+                            let Some(parent) = parent else { break };
+                            end = parent;
+                        }
+                        if !contained {
+                            return Err((
+                                "edit.doorway-geometry",
+                                "both places belong to the authored wall's building".into(),
+                            ));
+                        }
+                    }
+                    for end in [*from, *to] {
+                        let (kind, _) = named(end)?;
+                        if kinds
+                            .as_ref()
+                            .is_some_and(|k| k.get(&kind).is_none_or(|k| k.owner != "place"))
+                        {
+                            return Err(("edit.doorway", "a doorway joins places".into()));
+                        }
+                    }
+                    Ok(())
+                }
                 Op::Remove { node } => match named(*node)? {
                     (_, None) => Err(("edit.root", "the zone's root is not removed".to_owned())),
                     _ => Ok(()),
@@ -917,10 +1080,28 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
             return no(Some(i), code, &detail);
         }
         match op {
+            Op::Doorway { name, door, .. } => {
+                links.insert(*name);
+                doorways.insert(*door);
+            }
             Op::Place {
-                name, kind, parent, ..
+                name,
+                kind,
+                parent,
+                fields,
+                ..
             } => {
                 new.insert(*name, (kind.as_str().to_owned(), *parent));
+                if fields.get(&7).is_some_and(|v| read_id(v).is_ok()) {
+                    doorways.insert(Ref::New(*name));
+                }
+            }
+            Op::Set { node, field: 7, to } => {
+                if read_id(to).is_ok() {
+                    doorways.insert(*node);
+                } else {
+                    doorways.remove(node);
+                }
             }
             Op::Remove { node } => {
                 // Its subtree goes with it: every held node and placed name below it.
