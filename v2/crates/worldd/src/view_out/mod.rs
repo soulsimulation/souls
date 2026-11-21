@@ -1589,9 +1589,6 @@ impl<S: ObjectStore> PublicWriter<S> {
             chain.push(m);
         }
         chain.reverse();
-        let t0 = std::time::Instant::now();
-        let (mut ta, mut tp, mut tj) = (std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO);
-        eprintln!("PROF recover chain {}", chain.len());
         let first = chain
             .first()
             .ok_or_else(|| fault("stream-recovery", "empty chain"))?;
@@ -1682,7 +1679,6 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.chunks.clear();
         self.chunk_start = self.cursor;
         self.force_remainder = self.canonical.version() > self.player.version();
-        eprintln!("PROF recover seeded {} ms", t0.elapsed().as_millis());
 
         for m in chain {
             if obj_bytes(&m, 1)? != self.seed {
@@ -1702,14 +1698,12 @@ impl<S: ObjectStore> PublicWriter<S> {
             let Some(Value::Array(records)) = c.get(&2) else {
                 return Err(fault("stream-recovery", "source records missing"));
             };
-            let t = std::time::Instant::now();
             for raw in records {
                 let Value::Bytes(raw) = raw else {
                     return Err(fault("stream-recovery", "source record bytes"));
                 };
                 self.apply_record(self.cursor, raw)?;
             }
-            ta += t.elapsed();
             if self.cursor != obj_uint(&m, 7)? {
                 return Err(fault("stream-recovery", "manifest source cursor"));
             }
@@ -1718,14 +1712,10 @@ impl<S: ObjectStore> PublicWriter<S> {
                 return Err(fault("stream-recovery", "part number"));
             }
             let bytes = self.get(&obj_bytes(&m, 5)?)?;
-            let t = std::time::Instant::now();
             self.player.play(&bytes)?;
-            tp += t.elapsed();
-            let t = std::time::Instant::now();
             if project(&self.header, &self.canonical.tree().to_state())? != *self.player.state() {
                 return Err(fault("stream-recovery", "canonical projection differs"));
             }
-            tj += t.elapsed();
             immutable(&self.generation_dir().join(number.to_string()), &bytes)?;
             let text = obj_bytes(&m, 6)?;
             if !text.is_empty() {
@@ -1737,7 +1727,6 @@ impl<S: ObjectStore> PublicWriter<S> {
             self.last_to = Some(StreamPart::read(&bytes)?.to);
             self.clear_pending();
         }
-        eprintln!("PROF recover apply {} play {} project {} total {} ms", ta.as_millis(), tp.as_millis(), tj.as_millis(), t0.elapsed().as_millis());
         Ok(())
     }
     fn apply_record(&mut self, record: u64, raw: &[u8]) -> R<()> {
