@@ -764,7 +764,7 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex
   const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
     basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words, args,
     params ? JSON.stringify(params) : undefined, reflex);
-  save();
+  if (!signedIn) save(); // signed in, send() writes it down once, before it goes
   const sequence = state.sequence, sent = signedIn;
   if (ranked[0] === 'life:join') joinsOf.add(sequence);
   if (moveForm(ranked[0])) movesOf.set(sequence, moveForm(ranked[0]));
@@ -1069,7 +1069,11 @@ const SCHEDULE = join(soulDirOf(home, soul), 'memory', 'schedule.md');
 const BEAT_MS = 1000, BEAT_SAVED_MS = 10_000, GAP_MS = 15_000;
 const MISSED_NOTE = 'not sent: their moment passed while this daemon was off or asleep. Tell your owner; send what still matters yourself.';
 state.schedule = { marks: {}, targets: {}, beat: null, missed: [], dropped: 0, ...(state.schedule ?? {}) };
-let entries = [], stamp = null, beatSaved = 0, worldTimer = null;
+// A world moment's copy is brought current this long before it, so the check made then (`ready`, by entry key, for
+// the copy version it was made on) is recent. It only decides whether the act is checked: the send never waits for it.
+const PREPARE_MS = 250;
+let entries = [], stamp = null, beatSaved = 0, worldTimer = null, prepareTimer = null, prepared = null;
+const ready = new Map();
 const inFlight = new Set();
 
 /** The file's entries, read again only when it changed; a line that does not parse is logged once and inert. */
@@ -1084,8 +1088,19 @@ function scheduleNow() {
   return entries;
 }
 
-/** One entry's moment: a wake joins R13's queue; acts are checked at send (R8) and sent once, marked first. */
-async function fireEntry(e, now, late) {
+/** An entry's acts sifted by R8's check on the copy as it is; `current` says whether that copy may refuse. */
+function checkOf(e, current) {
+  const candidates = actsOf(e.acts);
+  if (!candidates.some((c) => c.form)) return { keep: candidates, dropped: [] };
+  return sift(candidates, current ? verdicts(candidates) : [], current);
+}
+
+/**
+ * One entry's moment: a wake joins R13's queue; acts are checked at send (R8) and sent once, marked first. A world
+ * moment (`moment`) never waits on the gateway: it takes the check made when the copy was last brought current
+ * (`ready`), or checks the copy as it is, so the act leaves at its moment however long a round trip takes.
+ */
+async function fireEntry(e, now, late, moment = false) {
   if (inFlight.has(e.key) || state.schedule.marks[e.key]) return;
   inFlight.add(e.key);
   try {
@@ -1096,11 +1111,14 @@ async function fireEntry(e, now, late) {
       for (const w of wakers.splice(0)) w();
       return;
     }
-    const candidates = actsOf(e.acts);
-    let keep = candidates, dropped = [];
-    if (candidates.some((c) => c.form)) {
-      const current = isCurrent(await ageAfter(), CURRENT_MS);
-      ({ keep, dropped } = sift(candidates, current ? verdicts(candidates) : [], current));
+    let keep, dropped;
+    if (moment) {
+      const r = ready.get(e.key);
+      ({ keep, dropped } = r?.version === copyVersion ? r : checkOf(e, !syncing && isCurrent(ageNow(), CURRENT_MS)));
+    } else {
+      const candidates = actsOf(e.acts);
+      const current = candidates.some((c) => c.form) && isCurrent(await ageAfter(), CURRENT_MS);
+      ({ keep, dropped } = checkOf(e, current));
     }
     if (state.schedule.marks[e.key]) return;
     if (keep.length === 0) {
@@ -1143,10 +1161,14 @@ function beat() {
   scheduleWorld(now, off);
 }
 
-/** One deadline on the current copy's mapping. A sync/rate change and the existing file beat re-arm it; no polling. */
+/**
+ * One deadline on the current copy's mapping, and a refresh PREPARE_MS before it. A sync/rate change and the existing
+ * file beat re-arm both; no polling.
+ */
 function scheduleWorld(now = Date.now(), off = null) {
   clearTimeout(worldTimer);
-  worldTimer = null;
+  clearTimeout(prepareTimer);
+  worldTimer = prepareTimer = null;
   if (!signedIn || syncing) return;
   const s = state.schedule;
   const { fire, missed, next, resolved } = worldDue(scheduleNow(), s.marks, s.targets, clockOf(copy), calendarOf(copy), now, off);
@@ -1157,8 +1179,37 @@ function scheduleWorld(now = Date.now(), off = null) {
     } else s.dropped++;
   }
   if (resolved || missed.length) save(); // keep the occurrence before a restart, and before any send
-  for (const f of fire) fireEntry(f.e, now, f.late);
-  if (next !== null) worldTimer = setTimeout(scheduleWorld, Math.min(next - now, 2_147_483_647));
+  for (const f of fire) fireEntry(f.e, now, f.late, true);
+  ready.clear();
+  if (next === null) return;
+  worldTimer = setTimeout(() => atMoment(next), Math.min(next - now, 2_147_483_647));
+  // The next moment's check, made now on a copy confirmed after its refresh, so the moment itself only sends.
+  if (prepared === next && isCurrent(ageNow(), CURRENT_MS)) {
+    for (const e of scheduleNow()) {
+      if (!s.marks[e.key] && s.targets[e.key]?.realMs === next && !e.wake) ready.set(e.key, { version: copyVersion, ...checkOf(e, true) });
+    }
+  }
+  const prepare = () => { prepared = next; refresh(); };
+  if (prepared !== next) {
+    if (next - now <= PREPARE_MS) prepare();
+    else prepareTimer = setTimeout(prepare, Math.min(next - now - PREPARE_MS, 2_147_483_647));
+  }
+}
+
+/**
+ * A world moment's timer: its entries fire on the deadline the timer was set for, first and from the persisted
+ * occurrences, so neither a sync under way nor re-reading the copy's mapping comes between the moment and the send.
+ */
+function atMoment(at) {
+  const now = Date.now();
+  if (now < at) { worldTimer = setTimeout(() => atMoment(at), at - now); return; } // a timer may wake a millisecond early
+  if (signedIn) {
+    const s = state.schedule;
+    for (const e of scheduleNow()) {
+      if (!s.marks[e.key] && s.targets[e.key]?.realMs === at && (e.until === null || now <= e.until)) fireEntry(e, now, now - at, true);
+    }
+  }
+  scheduleWorld();
 }
 
 /** The change entries an event fires, sent at once. */
