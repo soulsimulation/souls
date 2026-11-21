@@ -1454,9 +1454,9 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
 mod k18d;
 
 /// #3697: a creator's own kind stands as its record's bounds say, through the one loader. A hedge defined by the
-/// creator is refused `edit.would-bury` where a Soul stands; placed across another Soul's way, it commits, the Soul's
-/// real walk past it ends at its goal, and on the served log (replayed whole) the hedge holds its solids and the
-/// committed town's route goes round it.
+/// creator, placed across a Soul's way, commits; the Soul's real walk past it ends at its goal; on the served log
+/// (replayed whole) the hedge holds its solids and the committed town's route goes round it. Placed where a Soul
+/// stands it is refused `edit.would-bury`, as g1e's boot wall is (both need BUILDSAFE's served bury check).
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs the exported Eden facts file (EDEN_FACTS)"]
 async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
@@ -1515,23 +1515,15 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
         fields: BTreeMap::new(),
     };
 
-    // On the first Soul, where it stands: refused by BUILDSAFE's name, as a boot thing would be.
-    let (got, _) = send(
-        &mut ws,
-        edit_intent(&w, creator, 2, got.version, hedge(x0 * M, z0 * M)),
-    )
-    .await;
-    println!("a creator's hedge where a Soul stands: {got:?}");
-    assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
-
     // Across the second Soul's way north: it commits, and the Soul's walk past it ends at its goal.
     let (wx, hz, goal) = ((x0 + 2) * M, (z0 + 3) * M, (z0 + 6) * M);
     let (got, _) = send(
         &mut ws,
-        edit_intent(&w, creator, 3, got.version, hedge(wx, hz)),
+        edit_intent(&w, creator, 2, got.version, hedge(wx, hz)),
     )
     .await;
     assert_eq!(got.kind, 1, "the hedge across the way commits: {got:?}");
+    let version = got.version;
     walk(&mut souls, &w, w.souls[1], 1, wx, goal);
     let got = socket_answer(&mut souls);
     println!("the second Soul's walk past the hedge: {got:?}");
@@ -1574,5 +1566,14 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
         widest >= 3 * M,
         "the route goes round the hedge's 3 m half-width: {legs:?}"
     );
+    // On the first Soul, where it stands: refused by BUILDSAFE's name, as a boot thing would be.
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 4, version, hedge(x0 * M, z0 * M)),
+    )
+    .await;
+    println!("a creator's hedge where a Soul stands: {got:?}");
+    assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
+
     drop(s);
 }
