@@ -18,7 +18,7 @@
 //   souls-god.mjs build district <id> --file plan.json   records a plan once (today's plan file: metres, radians)
 //   souls-god.mjs build claim <part> --area x0,z0,x1,z1 | --district <id> [--plots a,b]   a build claim over an area
 //                                                (mm on the ground), or over a plan's plots (its next chapter if none)
-//   souls-god.mjs build claims | build release <claim>    the live claims; a claim released
+//   souls-god.mjs build claims | build release <claim>    the live claims (ids c:k<8 hex>); a claim released
 //   place, move, set, remove, batch, check ... --claim <claim>   sent under a build claim: it builds only inside it,
 //                                                and others stay out of it until it is released
 //   souls-god.mjs status | stop                  the daemon
@@ -238,7 +238,7 @@ export async function runBuild(b, ask) {
     if (rows.some((x) => !x)) return fail('district.plot', `${b.district} has no plot ${ids[rows.findIndex((x) => !x)]}`);
     area = areaOf(rows);
   }
-  const id = `c:${randomBytes(4).toString('hex')}`;
+  const id = `c:k${randomBytes(4).toString('hex')}`; // a name part starts with a letter
   const out = await set(F_CLAIMS, [...rowsIn(root.fields[F_CLAIMS]), [id, named('part', b.part), ...area]]);
   return out.ok === false ? out : { ...out, claim: { id, part: slug(b.part), area }, then: `send its edits with --claim ${id}` };
 }
