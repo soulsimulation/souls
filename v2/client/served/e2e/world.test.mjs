@@ -17,7 +17,9 @@
 //       hand-off on the sit;
 //   (b) A's copy holds the world's kind entries after pairing, and `can wave:<A's body>` answers yes;
 //   (c) the malformed word is refused by name, and the world then restarts cleanly on the same folder;
-//   (d) after the restart a new viewer's stream holds the bodies where they were, and the stream goes on (a new say).
+//   (d) after the restart a new viewer's stream holds the bodies where they were, and the stream goes on (a new say);
+//   (e) hide-and-seek (#3915): A takes an apple from an Eden swap shelf and hides it in an Eden hollow stump, whose entry is
+//       `closed`; B's copy, `find` and `look` no longer hold the apple at all, A's still do.
 //
 // PENDING markers. An assertion that waits on an open fix runs inside `pending(<issue>, ...)`. While the fix is open it
 // fails, and the run prints `PENDING #<issue>: <what> (expected failure: <why>)` and goes on: never a silent skip. When
@@ -132,7 +134,7 @@ function souls(home, ...args) {
 }
 
 // ---- The world ---------------------------------------------------------------------------------------------------
-const BENCH = [0, 0, 6000], CHAIR = [4000, 0, 6000];
+const BENCH = [0, 0, 6000], CHAIR = [4000, 0, 6000], STUMP = [-4000, 0, 6000], SHELF = [-2500, 0, 4500];
 
 /** N2's test world with an Eden slice: an Eden bench and chair on the square, its doors as Eden doors. */
 async function edenSlice() {
@@ -141,19 +143,23 @@ async function edenSlice() {
   const facts = JSON.parse(readFileSync(join(dir, 'testworld-s1-t0.facts.json'), 'utf8'));
   facts.kinds.find((k) => k.ref === 'testworld-door@1').name = 'eden:door';
   const kind = (ref, name) => ({ ref, hash: Buffer.from(`souls/e2e/${ref}`).toString('hex').padEnd(64, '0').slice(0, 64), name, form: 'point' });
-  facts.kinds.push(kind('e2e-bench@1', 'eden:bench'), kind('e2e-chair@1', 'eden:chair'));
+  facts.kinds.push(kind('e2e-bench@1', 'eden:bench'), kind('e2e-chair@1', 'eden:chair'), kind('e2e-stump@1', 'eden:hollow_stump'),
+    kind('e2e-shelf@1', 'eden:swap_shelf'), kind('e2e-apple@1', 'eden:apple'));
   const thing = (id, def, pose, name, slots) => ({ id, def, ref: def, parent: null, pose, scale_ppm: 1_000_000, name, slots });
   const slot = (n, id, at) => ({ n, id, kind: 'seat', at, yaw: 0, capacity: 1 });
   facts.things.push(
     thing('bench-1', 'e2e-bench@1', [...BENCH, 0], 'the square bench', [slot(1, 'left', [-400, 465, 20]), slot(2, 'right', [400, 465, 20])]),
     thing('chair-1', 'e2e-chair@1', [...CHAIR, 0], 'the square chair', [slot(1, 'seat', [0, 470, 20])]),
+    thing('stump-1', 'e2e-stump@1', [...STUMP, 0], 'the square stump', []),
+    thing('shelf-1', 'e2e-shelf@1', [...SHELF, 0], 'the square shelf', [{ n: 1, id: 'shelf', kind: 'thing', at: [0, 1015, -10], yaw: 0, capacity: 3 }]),
+    { ...thing('apple-1', 'e2e-apple@1', [0, 1015, -10, 0], 'an apple', []), parent: 'shelf-1', slot: { n: 1 } },
   );
   const path = join(dir, 'eden-slice.facts.json');
   writeFileSync(path, JSON.stringify(facts));
   // Eden's own entries for what the slice holds, and the body's family.
   const entries = join(dir, 'entries');
   mkdirSync(entries);
-  for (const f of ['doors/door.json', 'seating/bench.json', 'seating/chair.json', 'body/humanoid.json']) copyFileSync(join(content, f), join(entries, f.replace('/', '-')));
+  for (const f of ['doors/door.json', 'seating/bench.json', 'seating/chair.json', 'body/humanoid.json', 'containers/hollow_stump.json', 'containers/swap_shelf.json', 'food/apple.json']) copyFileSync(join(content, f), join(entries, f.replace('/', '-')));
   return { facts: path, entries };
 }
 
@@ -309,6 +315,27 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   assert.ok((await sent(B, 'converse', 'accept', invite.conversation)).every(accepted), 'the accept lands');
   assert.ok((await sent(B, 'converse', 'say', invite.conversation, hidden, '--private')).every(accepted), 'the private turn lands');
   stage('private turn answered');
+
+  // (e) Hide-and-seek (#3915): before the hide both copies hold the apple; after it only the hider's does.
+  const apples = async (s) => ((await s.cli('find', 'apple', '--limit', '50')).found ?? []).filter((r) => r.kind?.startsWith('eden:apple'));
+  const apple = (await waitFor("the apple on the shelf in B's copy", async () => (await apples(B)).at(0))).id;
+  const shelf = (await A.cli('find', 'shelf')).found.find((r) => r.kind?.startsWith('eden:swap_shelf'));
+  assert.ok(shelf, 'the shelf is found by its words');
+  const took = await act(A, `take:${shelf.id}`, `thing=${apple}`);
+  assert.ok(accepted(took.answer), `A takes the apple from the shelf: ${JSON.stringify(took.answer)}`);
+  const stump = (await A.cli('find', 'stump')).found.find((r) => r.kind?.startsWith('eden:hollow_stump'));
+  assert.ok(stump, 'the stump is found by its words');
+  const hid = await act(A, `hide:${stump.id}`, `thing=${apple}`);
+  assert.ok(accepted(hid.answer), `A hides the apple in the stump: ${JSON.stringify(hid.answer)}`);
+  await waitFor("the apple in the stump in A's copy", async () => (await apples(A)).find((r) => r.id === apple && r.in?.startsWith(stump.name)), 20_000);
+  const seekerSees = await apples(B);
+  console.log(`e2e: (e) after the hide, A's find: ${JSON.stringify((await apples(A)).map((r) => [r.id, r.in]))}; B's: ${JSON.stringify(seekerSees.map((r) => [r.id, r.in]))}`);
+  assert.deepEqual(seekerSees.filter((r) => r.id === apple), [], "(e) B's find does not hold the hidden apple");
+  const lookB = JSON.stringify(await B.cli('look'));
+  assert.ok(!lookB.includes(apple), "(e) B's look does not name the hidden apple");
+  const streamB = JSON.stringify((await request(B.rt.socket, { op: 'read' })).events);
+  assert.ok(!streamB.includes(apple), "(e) no event B's daemon was handed names the hidden apple");
+  stage('hidden apple withheld from the seeker');
 
   // The acts. A walks to the bench and sits on it.
   const bench = (await A.cli('find', 'bench')).found.find((r) => r.kind?.startsWith('eden:bench'));

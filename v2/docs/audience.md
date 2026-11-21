@@ -39,6 +39,12 @@ removal end to end (W7) and who may act (F6) are not here.
    with that audience, written by its own entries ([effects.md](effects.md) rule 6). The commit creates it, in an
    entry of that audience, before the field's first value. What opening a `closed` container (SA-F8 section 9) does
    to its fields and children is E22's; on this page it is a facet with the `closed` rule's audience.
+   **Until E22, a sync keeps a closed container's contents apart** (#3915): the world answers a record under a node
+   whose kind's entry declares `closed` with empty bytes, as it answers a node not granted, to any Soul that is not
+   in the rule's audience at the container now (`owner` and `linked` resolved as above; `creator` is the creator
+   alone) and is not the Soul that put the thing in. The creator always sees in. The client holds such a record as
+   withheld, a leaf it never reads, so its copy, `find` and `look` never name the thing. Code:
+   `v2/crates/worldd/src/closed.rs`.
 4. **How far a voice reaches is not who may read it** (E13). Speech is an event, `souls:said {1: reference, 2: reach
    in mm}`. Ordinary speech has the public audience and a short reach; a whisper has an audience of one, the
    listener. The speaker's own client keeps what it said.

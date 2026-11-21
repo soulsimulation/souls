@@ -14,12 +14,15 @@
 //! Requests reach it from the [`crate::answers::Door`] directly, so they never wait in the clock thread's queue.
 
 use crate::answers::Reply;
+use crate::closed::{Closed, Withhold, actor_of_key};
 use crate::views::names::{self, PublicNames};
 use replica::apply::Replica;
 use replica::effects::Part;
+use replica::effects::{Actor, Refusal};
 use replica::encode::{Value, decode, encode};
-use replica::ids::{Id, Scope, Version};
-use replica::sync::{self, Records, Served, wire};
+use replica::ids::{Hash, Id, Scope, Version};
+use replica::sync::{self, Records, Served, Source, wire};
+use replica::tree::Tree;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::mpsc::{Sender, channel};
@@ -48,16 +51,21 @@ pub(crate) fn start(
     mut kept: Records,
     (lineage, zone, epoch): (Scope, Id, u64),
     public_names: Arc<PublicNames>,
+    closed: Closed,
 ) -> std::io::Result<Sender<ToSync>> {
     let (tx, rx) = channel();
     thread::Builder::new().name("sync".into()).spawn(move || {
         let mut unsealed = false;
+        let mut withhold = Withhold::new(closed);
         for r in rx {
             match r {
                 ToSync::Parts(parts) => {
                     for p in parts {
                         match copy.apply(&p) {
-                            Ok(()) => unsealed = true,
+                            Ok(()) => {
+                                unsealed = true;
+                                withhold.applied(copy.tree(), &p);
+                            }
                             Err(e) => eprintln!("worldd: the sync copy refused a part: {e}"),
                         }
                     }
@@ -68,6 +76,7 @@ pub(crate) fn start(
                     let Some(n) = ask.remove(&wire::ASK) else {
                         continue;
                     };
+                    let asker = ask.remove(&wire::ACTOR).and_then(|k| actor_of_key(&k));
                     if unsealed && ask.contains_key(&wire::IDS) {
                         match copy.seal() {
                             Ok(sealed) => {
@@ -85,9 +94,13 @@ pub(crate) fn start(
                     }
                     .to_value();
                     let place = copy.header().zone;
-                    let mut src = Served {
-                        tree: copy.tree(),
-                        records: &kept,
+                    let mut src = Withheld {
+                        served: Served {
+                            tree: copy.tree(),
+                            records: &kept,
+                        },
+                        withhold: &withhold,
+                        asker,
                     };
                     let mut a = sync::answer(&mut src, &[place], &ask, now);
                     a.insert(wire::ASK, n);
@@ -100,4 +113,41 @@ pub(crate) fn start(
         }
     })?;
     Ok(tx)
+}
+
+/// The world's records for one asker (#3915): a record under a closed container the asker may not see into is
+/// answered with empty bytes, as a node not granted is in a hashes answer, so its copy never holds it.
+struct Withheld<'a> {
+    served: Served<'a>,
+    withhold: &'a Withhold,
+    asker: Option<Actor>,
+}
+
+impl Source for Withheld<'_> {
+    fn hashes(&mut self, ids: &[Id]) -> Result<Vec<Option<Hash>>, Refusal> {
+        let tree: &Tree = self.served.tree;
+        let mut hs = self.served.hashes(ids)?;
+        for (h, id) in hs.iter_mut().zip(ids) {
+            if self.withhold.withheld(tree, self.asker, *id) {
+                *h = None;
+            }
+        }
+        Ok(hs)
+    }
+
+    fn records(&mut self, hashes: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, Refusal> {
+        let tree: &Tree = self.served.tree;
+        Ok(self
+            .served
+            .records(hashes)?
+            .into_iter()
+            .map(|r| {
+                if self.withhold.withholds_record(tree, self.asker, &r) {
+                    Vec::new()
+                } else {
+                    r
+                }
+            })
+            .collect())
+    }
 }
