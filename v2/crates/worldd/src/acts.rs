@@ -904,6 +904,11 @@ impl Acts {
             let mut e = entry.clone();
             if let Json::Obj(o) = &mut e {
                 o.retain(|(k, _)| k != "forms");
+                // A timed field (a kettle's heat) is not an amount, and the kind format cannot hold its default yet:
+                // left out, so the entry's amounts load (#3715).
+                if let Some((_, Json::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
+                    state.retain(|(_, f)| f.get("type").and_then(Json::str) != Some("timed"));
+                }
             }
             if let Ok(text) = replica::kinds::entry::entry_to_kind(&e.to_json()) {
                 loaded.load(&[("entry", text.as_str())]);

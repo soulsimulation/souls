@@ -300,21 +300,3 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         "another step: as before"
     );
 }
-
-#[test]
-fn probe_kitchen_limits() {
-    for f in ["sink", "kettle", "bowl", "tap"] {
-        let path = format!("{}/../../../content/kinds/kitchen/{f}.json", env!("CARGO_MANIFEST_DIR"));
-        let text = std::fs::read_to_string(&path).unwrap();
-        let mut e = replica::rules::json::parse(&text).unwrap();
-        if let Json::Obj(o) = &mut e {
-            o.retain(|(k, _)| k != "forms");
-        }
-        let k = replica::kinds::entry::entry_to_kind(&e.to_json());
-        let mut loaded = replica::kinds::Kinds::default();
-        if let Ok(t) = &k {
-            loaded.load(&[("entry", t.as_str())]);
-        }
-        println!("PROBE {f}: kind {:?} refused {:?} limits {:?}", k.as_ref().map(|_| "ok"), loaded.refused(), sim::forms::amounts::limits(&loaded));
-    }
-}
