@@ -1,9 +1,14 @@
 <!--
-This PR is the journal entry for its milestone. The `proof` check (.github/workflows/proof-check.yml) reads the
-sections below by their headings, so keep them. What each tier needs: docs/process/PROOF-POLICY.yml (`pr_checks`).
-How to fill it: .claude/skills/journal/SKILL.md. T0 needs only the Problem. Clips and images are links
-(tools/proof/upload.mjs), never files in the tree.
+Required (docs/process/agent-workflow.md#pr-body): the issue link and a one-line summary, the first two lines below.
+The proof bot adds the CI run link. Everything after them is an optional journal entry: `proof-ok` reports it as
+advice and never fails on it. It does fail on device details anywhere, and at T3-T4 until the maintainer signs off.
+How to fill the rest: .claude/skills/journal/SKILL.md. Clips and images are links (tools/proof/upload.mjs), never
+files in the tree.
 -->
+Closes #
+
+<!-- One-line summary of the change. -->
+
 
 ## Problem
 
@@ -13,7 +18,7 @@ How to fill it: .claude/skills/journal/SKILL.md. T0 needs only the Problem. Clip
 
 <!-- Copied from the issue, where it was written before the work. Keep the ids. For each criterion:
        - [x] **A1** <criterion> — evidence: <clip or image link at 0:07 | proof.json | `command` -> result>
-       - [ ] **A2** <criterion> — unmet: <what happened>          (honest; keeps proof-ok red)
+       - [ ] **A2** <criterion> — unmet: <what happened>          (honest; reported as advice)
        - [ ] **A3** <criterion> — deferred: #<follow-up issue>    (moved out of this PR, never silently dropped) -->
 - [ ] **A1**
 

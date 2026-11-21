@@ -495,13 +495,25 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
     );
     let mut on_things: Vec<Id> = mine.iter().map(|s| s.thing).collect();
     on_things.dedup();
+    // The world adds today's rowing punts to the facts it is built from (#3603), each with its entry's riders' seats:
+    // the facts read here have none.
+    let punts = lines
+        .iter()
+        .filter(|l| l.starts_with("punt: rowing-punt-") && l.contains(" is "))
+        .count();
+    let riders = found
+        .iter()
+        .find(|(k, _)| k == "eden:rowing_punt")
+        .and_then(|(_, e)| e.get("slots").and_then(|s| s.obj()))
+        .map_or(0, <[_]>::len);
+    println!("{punts} rowing punts added by the world, {riders} seats each");
     assert_eq!(
-        mine.len(),
+        mine.len() + punts * riders,
         registered,
         "the world registers every slot the entries declare"
     );
     assert_eq!(left, 0, "every seat placed on a floor");
-    assert_eq!(on, on_things.len(), "the things they are on");
+    assert_eq!(on, on_things.len() + punts, "the things they are on");
     assert_eq!(registered, declared, "every declared body slot registered");
     // Every def today seats has at least today's slots, but those whose entries declare no body slot with a stand
     // point (C17: the campfire's and the piano's).
@@ -2304,18 +2316,46 @@ fn stream_files(views: &Path) -> BTreeMap<String, Vec<u8>> {
     out
 }
 
+/// How many generations of the public stream are on the disk under `views` (#3833).
+fn generations_on_disk(views: &Path) -> usize {
+    fn walk(d: &Path) -> usize {
+        let Ok(entries) = std::fs::read_dir(d) else {
+            return 0;
+        };
+        let mut n = 0;
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                n += if p.ends_with("g") {
+                    std::fs::read_dir(&p).map_or(0, |g| g.count())
+                } else {
+                    walk(&p)
+                };
+            }
+        }
+        n
+    }
+    walk(views)
+}
+
 /// #3799: the public writer cuts a part that only moves nodes by their rows, and any other whole; the stream is the
 /// same, byte for byte, as when every part is worked out whole (`SOULS_STREAM_WHOLE`). A recorded world
 /// (`V2_RECORDED_WORLD`, e.g. kept by the A5 run with `V2_KEEP_WORLD`) is served twice from copies with no stream: the
 /// stream is written again from the whole log at start-up, once each way; the two are compared file by file, and
 /// the time each start-up took to write it is printed. Both runs roll the stream over to a new generation every
-/// `V2_GENERATION_PARTS` (100) parts (#3825), so the rollovers' baselines are compared too.
+/// `V2_GENERATION_PARTS` (100) parts (#3825), so the rollovers' baselines are compared too. A third run (#3833) is
+/// killed twice while it writes, once 2 generations are on the disk and once 4 are, and started again each time from
+/// the newest generation's recovery seed: its stream is the same, byte for byte.
 #[test]
 #[ignore = "needs a recorded world (V2_RECORDED_WORLD) and a built worldd (see the module doc)"]
 fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
     let recorded = PathBuf::from(std::env::var("V2_RECORDED_WORLD").expect("V2_RECORDED_WORLD"));
     let mut runs = Vec::new();
-    for (tag, whole) in [("rows", false), ("whole", true)] {
+    for (tag, whole, kills) in [
+        ("rows", false, &[][..]),
+        ("whole", true, &[][..]),
+        ("restarted", false, &[2usize, 4][..]),
+    ] {
         let dir = std::env::temp_dir().join(format!("m3799r-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         copy_dir(&recorded, &dir);
@@ -2324,21 +2364,37 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
             let _ = std::fs::remove_dir_all(&p);
             let _ = std::fs::remove_file(&p);
         }
-        let mut c = Command::new(env!("CARGO_BIN_EXE_worldd"));
-        c.args(["serve", "--dir"])
-            .arg(&dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        if whole {
-            c.env("SOULS_STREAM_WHOLE", "1");
+        let command = || {
+            let mut c = Command::new(env!("CARGO_BIN_EXE_worldd"));
+            c.args(["serve", "--dir"])
+                .arg(&dir)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null());
+            if whole {
+                c.env("SOULS_STREAM_WHOLE", "1");
+            }
+            c.env(
+                "SOULS_STREAM_GENERATION_PARTS",
+                std::env::var("V2_GENERATION_PARTS").unwrap_or_else(|_| "100".into()),
+            );
+            // Nothing pruned while the start-up writes, however long it takes: every run keeps every generation.
+            c.env("SOULS_STREAM_PRUNE_GRACE_S", "86400");
+            c
+        };
+        // #3833: killed as a crash would, once `n` generations are on the disk, then started again.
+        for &n in kills {
+            let mut c = command();
+            let mut child = c.stdout(Stdio::null()).spawn().unwrap();
+            while generations_on_disk(&dir.join("views")) < n {
+                assert!(child.try_wait().unwrap().is_none(), "{tag}: still writing");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            child.kill().unwrap();
+            let _ = child.wait();
+            let _ = std::fs::remove_file(dir.join("gateway.sock"));
+            println!("{tag}: killed with {n} generations written");
         }
-        c.env(
-            "SOULS_STREAM_GENERATION_PARTS",
-            std::env::var("V2_GENERATION_PARTS").unwrap_or_else(|_| "100".into()),
-        );
-        // Nothing pruned while the start-up writes, however long it takes: both runs keep every generation.
-        c.env("SOULS_STREAM_PRUNE_GRACE_S", "86400");
-        let mut child = c.spawn().unwrap();
+        let mut child = command().spawn().unwrap();
         let mut out = BufReader::new(child.stdout.take().unwrap());
         let (mut line, mut before, mut written) = (String::new(), None, None);
         while out.read_line(&mut line).unwrap() > 0 {
@@ -2379,6 +2435,10 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
         assert!(written.is_some(), "{tag}: the start-up wrote its stream");
         runs.push(files);
     }
+    assert_eq!(
+        runs[2], runs[0],
+        "#3833: restarted twice, the same stream byte for byte"
+    );
     let (rows, whole) = (&runs[0], &runs[1]);
     let both: Vec<&String> = rows.keys().filter(|k| whole.contains_key(*k)).collect();
     let differ: Vec<&&String> = both.iter().filter(|k| rows[**k] != whole[**k]).collect();
@@ -2401,6 +2461,82 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
         "byte for byte: {:?}",
         &differ[..differ.len().min(5)]
     );
+}
+
+/// #3833 A3: a world that ran with walkers is started again from a copy of its folder, as after a crash
+/// (`V2_RESTART_WORLD`, e.g. kept by the A5 run with `V2_KEEP_WORLD` after an hour of 60 walkers). It prints each
+/// start-up stage, how long the public writer took to open, the generations on the disk and the parts of the newest
+/// one (the only ones a restart reads again), and the recovery objects kept; the whole start-up is under 30 s.
+#[test]
+#[ignore = "needs a recorded world (V2_RESTART_WORLD) and a built worldd (see the module doc)"]
+#[allow(clippy::disallowed_methods)]
+fn i3833_a3_a_restart_after_an_hour_reads_only_the_newest_generation() {
+    let kept = PathBuf::from(std::env::var("V2_RESTART_WORLD").expect("V2_RESTART_WORLD"));
+    let dir = std::env::temp_dir().join(format!("m3833-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_dir(&kept, &dir);
+    let _ = std::fs::remove_file(dir.join("gateway.sock"));
+    let started = std::time::Instant::now();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let (mut line, mut stages) = (String::new(), BTreeMap::new());
+    while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+        if let Some(rest) = line.trim().strip_prefix("start-up: ")
+            && let Some((stage, ms)) = rest.rsplit_once(" at ")
+            && let Some(ms) = ms.strip_suffix(" ms").and_then(|m| m.parse::<u64>().ok())
+        {
+            println!("start-up: {stage} at {ms} ms");
+            stages.insert(stage.to_owned(), ms);
+        }
+        line.clear();
+    }
+    let took = started.elapsed();
+    let _ = child.kill();
+    let _ = child.wait();
+    let views = dir.join("views");
+    let world =
+        replica::rules::json::parse(&std::fs::read_to_string(views.join("world.json")).unwrap())
+            .unwrap();
+    let stream = dir.join(world.get("stream").and_then(|v| v.str()).unwrap());
+    let pointer = std::fs::read(stream.join("pointer")).unwrap();
+    let Value::Map(p) = decode(&pointer).unwrap().value else {
+        panic!("a pointer is a map")
+    };
+    let newest = match (&p[&8], &p[&1]) {
+        (Value::Bytes(g), Value::Uint(n)) => (replica::encode::to_hex(g), n + 1),
+        (Value::Bytes(g), _) => (replica::encode::to_hex(g), 0),
+        _ => panic!("the pointer names its generation"),
+    };
+    fn objects(d: &Path) -> usize {
+        std::fs::read_dir(d).map_or(0, |entries| {
+            entries
+                .flatten()
+                .map(|e| match e.path() {
+                    p if p.ends_with("objects") => std::fs::read_dir(&p).map_or(0, |o| o.count()),
+                    p if p.is_dir() => objects(&p),
+                    _ => 0,
+                })
+                .sum()
+        })
+    }
+    let objects = objects(&dir.join(".stream-recovery-store"));
+    let writer = stages["public stream"].saturating_sub(stages["replay"]);
+    println!(
+        "A3: listening after {:.2} s ({} ms by the world's own clock); the public writer opened in {writer} ms; {} \
+         generations on the disk; the newest has {} parts; {objects} recovery objects kept",
+        took.as_secs_f64(),
+        stages.get("listening").copied().unwrap_or(0),
+        generations_on_disk(&views),
+        newest.1,
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(took < Duration::from_secs(30), "a restart under 30 s");
 }
 
 /// C34 (#3599) A2: a building's named area resolves onto its own room and floor. Born outside, a Soul climbs a
