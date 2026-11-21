@@ -164,11 +164,13 @@ export class CameraDirector {
     return n && at ? placeFrame(n, at, aspect) : null;
   }
 
-  /** A place's preview picture, from the page's own renderer and scene, asked lazily (#3676). */
-  private picture(id: string): Promise<string | null> {
+  /** A place's preview picture, from the page's own renderer and scene, asked lazily (#3676), and not while the place
+   *  camera flies: a picture costs a frame (the first one up to about 0.4 s on a phone), which would hitch the flight. */
+  private async picture(id: string): Promise<string | null> {
+    while (this.mode === 'place') await new Promise(requestAnimationFrame);
     const v2 = (globalThis as { v2?: { renderer?: THREE.WebGLRenderer; scene?: THREE.Scene } }).v2;
     if (!this.previews && v2?.renderer && v2.scene) this.previews = new PlacePreviews(v2.renderer, v2.scene);
-    return this.previews?.picture(id, () => this.placeView(id, 320 / 224)) ?? Promise.resolve(null);
+    return this.previews?.picture(id, () => this.placeView(id, 320 / 224)) ?? null;
   }
 
   private onPlace(s: number): void {

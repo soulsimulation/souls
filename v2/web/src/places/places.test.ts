@@ -7,15 +7,16 @@ import { PlaceFlight } from './camera.ts';
 
 const square = (x: number, z: number, side: number) => [[x, z], [x + side, z], [x + side, z + side], [x, z + side]];
 
-test('#3676 A1: the list holds every named area once, by name, and leaves out unnamed and outline-less nodes', () => {
+test('#3676 A1: the list holds every named area once, by name, and leaves out unnamed and outline-less nodes, without the data\'s place- prefix', () => {
   const list = placeList([
     { id: 'b', placeName: 'west-lake', outline: square(0, 0, 1000) },
     { id: 'a', placeName: 'old_town plaza', outline: square(0, 0, 1000) },
     { id: 'c', placeName: 'West Lake', outline: square(5000, 0, 1000) },
     { id: 'd', placeName: 'lamp', outline: undefined },
     { id: 'e', placeName: null, outline: square(0, 0, 1000) },
+    { id: 'f', placeName: 'place-eden-stone-garden', outline: square(0, 0, 1000) },
   ]);
-  assert.deepEqual(list, [{ id: 'a', name: 'old town plaza' }, { id: 'b', name: 'west lake' }]);
+  assert.deepEqual(list, [{ id: 'f', name: 'eden stone garden' }, { id: 'a', name: 'old town plaza' }, { id: 'b', name: 'west lake' }]);
 });
 
 test('#3676 A2: the framed view holds every corner of the place inside the frame, seen from above', () => {

@@ -14,8 +14,9 @@ const THING_SPAN = 8;
 
 export type Place = { id: string; name: string };
 
-/** A place's name as read: Eden writes `land-west-lake`, a visitor reads "land west lake". */
-export const placeWords = (name: string) => name.replace(/[-_]+/g, ' ').trim();
+/** A place's name as read: Eden writes `land-west-lake` and `place-eden-stone-garden`, a visitor reads "land west lake"
+ *  and "eden stone garden" (the `place-` prefix is the data's, not the name). */
+export const placeWords = (name: string) => name.replace(/^place[-_]+/i, '').replace(/[-_]+/g, ' ').trim();
 
 /** The places a visitor can choose: every named area with an outline, one per name (the first id in order wins), by
  *  name. Named things without an outline are found by the find box (#3574) but are not listed. */
