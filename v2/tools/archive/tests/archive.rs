@@ -1401,3 +1401,71 @@ fn w3655_legacy_empty_initial_part_keeps_named_refusals_and_store_unchanged() {
         before
     );
 }
+
+/// #3755's regression on a recorded full-Eden fork: `ARCHIVE_EDEN` names a copy of a served world's store folder
+/// (its `h/<world>/<lineage>/` archive is found in it; the open rewrites the same bytes into it). The based bundles
+/// made row by row are byte-identical to the whole-state reference's; prints each one's cost per record, each
+/// archive open's time and whether the bundles stored live are the same bytes. Run on Saturn, `--ignored`.
+#[test]
+#[ignore = "needs a recorded full-Eden store folder in ARCHIVE_EDEN"]
+fn w3755_full_eden_bundles_row_by_row_equal_the_whole_state_reference() {
+    use directoryd::directory::folder::Folder;
+    use std::time::Instant;
+    let root = std::env::var("ARCHIVE_EDEN").expect("ARCHIVE_EDEN");
+    let store = Folder::new(root.into());
+    let head = store
+        .keys("h/")
+        .into_iter()
+        .find(|k| k.ends_with("/archive/head"))
+        .expect("an archive in the store");
+    let prefix = head.trim_end_matches("archive/head").to_owned();
+    let f = fetch(&store, &prefix).expect("fetched");
+    let base = f.base.clone().expect("a based archive (a fork)");
+    let records = f
+        .segments
+        .iter()
+        .flat_map(|s| &s.records)
+        .filter(|r| !sim::recorder::is_input(r))
+        .count();
+    let entries: usize = f
+        .segments
+        .iter()
+        .flat_map(|s| &s.records)
+        .filter(|r| !sim::recorder::is_input(r))
+        .map(|r| replica::effects::Part::read(r).unwrap().effects.len())
+        .sum();
+    let bytes = |b: &[Bundle]| b.iter().map(|b| b.bytes().to_vec()).collect::<Vec<_>>();
+    let mut made = Vec::new();
+    for whole in [false, true, false, true] {
+        archive::whole_state_reference(whole);
+        let t = Instant::now();
+        let b = rebuild_bundles(&f).expect("made again");
+        let took = t.elapsed();
+        let t = Instant::now();
+        drop(Archiver::open_based(&store, &prefix, &base).expect("opens"));
+        let open = t.elapsed();
+        eprintln!(
+            "w3755: {} records ({entries} entries) after base record {}, {}: {} bundles in {:.3} s, {:.1} ms per \
+             record; archive open {:.3} s",
+            records,
+            base.record,
+            if whole { "whole-state reference" } else { "row by row" },
+            b.len(),
+            took.as_secs_f64(),
+            took.as_secs_f64() * 1000.0 / records.max(1) as f64,
+            open.as_secs_f64()
+        );
+        made.push(bytes(&b));
+    }
+    archive::whole_state_reference(false);
+    assert!(!made[0].is_empty(), "the fork made public bundles");
+    assert!(made.iter().all(|m| *m == made[0]), "byte-identical bundles");
+    let stored = bytes(&stored_bundles(&store, &prefix, &f).expect("stored"));
+    eprintln!(
+        "w3755: {} bundles, {} bytes, byte-identical in both arms; stored live: {} bundles, {}",
+        made[0].len(),
+        made[0].iter().map(Vec::len).sum::<usize>(),
+        stored.len(),
+        if stored == made[0] { "EQUAL" } else { "DIFFER" }
+    );
+}
