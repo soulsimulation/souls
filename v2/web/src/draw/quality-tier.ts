@@ -23,3 +23,25 @@ export function browserQuality(renderer: string | null = null): QualitySettings 
   const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
   return pickQualityTier({ coarsePointer: coarse, screen: [screen.width, screen.height], deviceMemory: (navigator as { deviceMemory?: number }).deviceMemory });
 }
+
+/** C12 (#3683): today's distance detail (apps/web quality-tier.ts, copied): a part under `minRadiusPx` CSS pixels of
+ *  radius is not drawn; a small part (radius under `shadowMaxRadius` m) beyond `shadowNear + shadowPerMetre·radius`
+ *  metres casts no shadow. Phones: today's PHONE_DETAIL; desktops: today's default, DESKTOP_DETAIL_FAST. */
+export type DistanceDetail = { minRadiusPx: number; shadowNear: number; shadowPerMetre: number; shadowMaxRadius: number };
+export const PHONE_DETAIL: DistanceDetail = Object.freeze({ minRadiusPx: 1.25, shadowNear: 24, shadowPerMetre: 14, shadowMaxRadius: 6 });
+export const DESKTOP_DETAIL: DistanceDetail = Object.freeze({ minRadiusPx: 1, shadowNear: 40, shadowPerMetre: 20, shadowMaxRadius: 6 });
+
+/** The detail for a tier; `?detail=0` turns it off (the measure's other arm), and `?detailMinPx=` /
+ *  `?detailShadowNear=` tune it for measurements (today's `?phoneMinPx=` / `?phoneShadowNear=`). */
+export function detailFor(tier: QualityTier, search = ''): DistanceDetail | null {
+  const q = new URLSearchParams(search);
+  if (q.get('detail') === '0') return null;
+  const base = tier === 'phone' ? PHONE_DETAIL : DESKTOP_DETAIL, num = (k: string, d: number) => (q.has(k) && Number(q.get(k)) >= 0 ? Number(q.get(k)) : d);
+  return q.has('detailMinPx') || q.has('detailShadowNear') ? { ...base, minRadiusPx: num('detailMinPx', base.minRadiusPx), shadowNear: num('detailShadowNear', base.shadowNear) } : base;
+}
+
+/** The page's detail (browser only; null elsewhere, so tests choose their own). */
+export function pageDetail(): DistanceDetail | null {
+  if (typeof window === 'undefined' || typeof screen === 'undefined') return null;
+  return detailFor(browserQuality().tier, location.search);
+}

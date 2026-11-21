@@ -8,6 +8,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { CrowdBodies } from '../crowd/bodies.ts';
 import { BANKS, DECKS, DRAPES, WATER, GroundCover, drapeMesh, drapeName, turfMaterial, type Area } from './drapes.ts';
 import { asWater } from '../water/water.ts';
+import { backdropMesh, type Backdrop } from './backdrop.ts';
 
 const UM = 1e-6, MM = 1e-3;
 export const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway']);
@@ -109,6 +110,8 @@ export class WorldView {
   private terrainDone = false;
   /** The drawn ground's tiles, for `heightAt`. */
   private ground: { side: number; tiles: Map<string, { n: number; k: number; h: DataView }> } | null = null;
+  /** C12 (#3683): the far backdrop beyond the ground's edge. */
+  backdrop: Backdrop | null = null;
   /** The open ground's node: what a ground-laid thing's heights are above. */
   groundId: string | null = null;
   extent: [number, number, number, number] | null = null;
@@ -230,7 +233,11 @@ export class WorldView {
       mesh.name = 'terrain';
       this.group.add(mesh);
     }
-    if (Number.isFinite(ext[0])) this.extent = ext;
+    if (Number.isFinite(ext[0])) {
+      this.extent = ext;
+      this.backdrop = backdropMesh(ext, (x, z) => this.heightAt(x, z), (x, z) => this.colourAt(x, z));
+      this.group.add(this.backdrop.mesh);
+    }
     this.cover = new GroundCover({
       heightAt: (x, z) => this.heightAt(x, z),
       colour: (c, y, slope, x, z) => terrainColour(c, y, slope, x, z),
@@ -242,6 +249,17 @@ export class WorldView {
       base: GROUND_BASE,
     });
     this.group.add(this.cover.group);
+  }
+
+  /** The drawn ground's colour at world `x, z`, as its vertex there is painted (today's terrain colour at its height,
+   *  slope and noise cell); on the far edges the height is read just inside. Null off the tiles. */
+  colourAt(x: number, z: number): THREE.Color | null {
+    const g = this.ground, e = this.extent;
+    const hx = e ? Math.min(x, e[2] - 1e-6) : x, hz = e ? Math.min(z, e[3] - 1e-6) : z, y = this.heightAt(hx, hz);
+    if (!g || y === null) return null;
+    const t = g.tiles.get(`${Math.floor(hx / g.side)},${Math.floor(hz / g.side)}`)!, cell = (g.side / t.n) * t.k;
+    const hx0 = this.heightAt(x - cell, z) ?? y, hx1 = this.heightAt(x + cell, z) ?? y, hz0 = this.heightAt(x, z - cell) ?? y, hz1 = this.heightAt(x, z + cell) ?? y;
+    return terrainColour(new THREE.Color(), y, Math.hypot((hx1 - hx0) / (2 * cell), (hz1 - hz0) / (2 * cell)), x, z);
   }
 
   /** The drawn ground's height at world `x, z` (m), on the same triangles the mesh draws; null off the tiles. */
