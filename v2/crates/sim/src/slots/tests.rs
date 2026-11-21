@@ -670,7 +670,7 @@ fn a_body_rises_from_a_chair_whose_stand_point_is_in_its_own_clearance() {
         "within the body's clearance radius of the stand point: {off} µm"
     );
     assert_eq!(w.c.input(b).unwrap().stance, Stance::Stand);
-    assert_eq!(w.slots.holder(w.chair), None, "the seat is free");
+    assert_eq!(w.slots.holder(w.chair), None, "the slot is free");
     run(&mut w, i64::MAX);
     let d = w.c.claim(b, &walk_shape()).expect("a walk takes the legs");
     walks_away(&mut w, b, d);

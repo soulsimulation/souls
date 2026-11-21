@@ -87,7 +87,7 @@ pub fn rise_point(floor: &Surface, at: &PlaceAt, body: Id, build: Build) -> R<Op
             .rotate(Vec3::new(0, 0, 1_000_000))
             .map_err(|e| Refusal {
                 name: e.name(),
-                detail: "a seat's facing".into(),
+                detail: "a slot's facing".into(),
             })?;
         [f.x, f.z]
     };
