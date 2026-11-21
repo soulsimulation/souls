@@ -322,7 +322,8 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
 
   // #3775: a private conversation. A offers B one, B accepts and takes a private turn.
   const hidden = 'the boat leaves at the second bell';
-  assert.ok((await sent(A, 'converse', 'start', meB)).every(accepted), 'the offer lands');
+  const offer = await sent(A, 'converse', 'start', meB);
+  assert.ok(offer.every(accepted), `the offer lands: ${JSON.stringify(offer)}`);
   const invite = await event(B, "B's invitation", (e) => e.kind === 'conversation' && e.what === 'invited');
   assert.ok((await sent(B, 'converse', 'accept', invite.conversation)).every(accepted), 'the accept lands');
   assert.ok((await sent(B, 'converse', 'say', invite.conversation, hidden, '--private')).every(accepted), 'the private turn lands');
