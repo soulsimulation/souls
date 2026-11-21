@@ -82,8 +82,9 @@ node souls-god.mjs batch '[{"op":"place","name":1,"kind":"room","in":"<place id>
   default: kinds, places, fields and poses, and the world's public names.
 - `node souls-god.mjs import <file>` brings such a file into the world you are paired with, as edits, parents first.
   What the world already holds (the same id and kind, the world itself and its open ground) keeps its id and only its
-  changed fields are set; everything else is placed. The answer counts the edits, what was placed and set, and what
-  was not brought over: doorway and stair links, and any field naming one. A refusal stops it and says how far it got.
+  changed fields are set; everything else is placed, and then each doorway and stair it lacks is linked again (the
+  `link` operation), so Souls walk in through the doors and up the stairs. The answer counts the edits, what was
+  placed, set and linked, and anything not brought over. A refusal stops it and says how far it got.
 
 ## Answers and refusals
 
