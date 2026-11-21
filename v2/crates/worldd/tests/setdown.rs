@@ -16,7 +16,6 @@ use std::time::Duration;
 use import_eden::Import;
 use replica::activity::ActivityKind;
 use replica::apply::Replica;
-use replica::audience::REFERENCE;
 use replica::bodies::{Class, Family, Resource};
 use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, fixture_bytes,
@@ -34,10 +33,9 @@ use sim::links::Doors;
 use sim::log::{Mem, recover};
 use sim::slots::PlaceAt;
 use sim::walk::town::Town;
-use worldd::answers::{self, Config, JOIN, Join, LEAVE};
+use worldd::answers::{self, Config, JOIN, Join};
 use worldd::bodies::Bodies;
 use worldd::checkers::Rules;
-use worldd::words::{DESCRIPTION, NAME, WORDS};
 
 const LINEAGE: Scope = Scope([0xd4; 16]);
 const CHAIR: &str = include_str!("../../replica/fixtures/seats/chair.diag");
@@ -514,19 +512,6 @@ impl Run {
         self.world.stop();
         let _ = std::fs::remove_file(&self.path);
     }
-}
-
-fn parent(r: &Replica, node: Id) -> (Option<Id>, Option<u64>) {
-    let t = r.tree();
-    let n = t.node(t.handle(node).expect("the node")).expect("the node");
-    (n.parent(), n.slot())
-}
-
-fn words(w: &str) -> Value {
-    Value::Map(BTreeMap::from([(
-        WORDS,
-        Value::Bytes(w.as_bytes().to_vec()),
-    )]))
 }
 
 fn p(pairs: &[(u64, Value)]) -> BTreeMap<u64, Value> {
