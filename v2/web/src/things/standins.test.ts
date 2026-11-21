@@ -17,21 +17,22 @@ const crown = (material: THREE.Material = new THREE.MeshStandardMaterial()): Par
   return { geometry, material, matrix: new THREE.Matrix4(), key: 'k', glow: false };
 };
 
-function wood(n: number, snapshot: (() => THREE.Texture | null) | null, model = 'tree') {
+function wood(n: number, snapshot: (() => readonly [number, number, number, number] | null) | null, model = 'tree') {
   const things = Object.fromEntries(Array.from({ length: n }, (_, i) => [`e_${i}`, model]));
   const shots: number[] = [];
   const l = new ThingLayer({
     index: indexOf({ kinds: [], things }), fetch: () => new Promise(() => {}), detail: PHONE_DETAIL, standins: PHONE_STAND_INS,
-    ...(snapshot ? { snapshot: () => (shots.push(1), snapshot()) } : {}), view: () => ({ height: 844, fov: 50 }),
+    ...(snapshot ? { pictures: { texture: new THREE.Texture(), add: () => (shots.push(1), snapshot()) } } : {}), view: () => ({ height: 844, fov: 50 }),
   });
   // Trees 10, 60, 110, ... m east of the eye.
   for (let i = 0; i < n; i++) l.set(`t${i}`, `e_${i}`, at(10 + i * 50), new THREE.Matrix4());
   return { l, shots };
 }
+const CELL = [0.25, 0.5, 0.0625, 0.0625] as const;
 const band = (l: ThingLayer, id: string) => l.things.get(id)!.slots[0].band;
 
 test('A1: a far tree is a card past 7 px, with no shadow, at its footprint; near, a model with its shadow again', () => {
-  const { l, shots } = wood(12, () => new THREE.Texture());
+  const { l, shots } = wood(12, () => CELL);
   l.arrive('tree', [crown()]);
   l.update(new THREE.Vector3(0, 0, 0));
   // Radius 1 m (the crown's sphere): 7 px at about 130 m on a phone's 844 px; under 1.25 px past about 700 m.
@@ -49,6 +50,9 @@ test('A1: a far tree is a card past 7 px, with no shadow, at its footprint; near
   mesh.getMatrixAt(s.index, m);
   assert.deepEqual(m.toArray(), cardMatrix(s.part!.geometry.boundingBox!, s.matrix).toArray());
   assert.equal(new THREE.Vector3().setFromMatrixPosition(m).x, 260, 'on the tree\'s footprint');
+  const cell = mesh.geometry.getAttribute('cardCell');
+  assert.deepEqual([cell.getX(s.index), cell.getY(s.index), cell.getZ(s.index), cell.getW(s.index)], [...CELL], 'its picture\'s cell of the atlas');
+  assert.equal(l.draws, 2 + 1, 'every card in one draw (beside the near and far tree batches)');
   assert.equal(l.stats.cards, 9, '160 m and beyond');
   // The eye walks to the far end: those trees are models again, the near ones become cards.
   for (let f = 0; f < 10; f++) l.update(new THREE.Vector3(560, 0, 1));
@@ -58,11 +62,11 @@ test('A1: a far tree is a card past 7 px, with no shadow, at its footprint; near
 });
 
 test('A1: what keeps its detail: see-through parts, too few things, no picture, or no stand-ins (a desktop)', () => {
-  const glass = wood(12, () => new THREE.Texture(), 'glass');
+  const glass = wood(12, () => CELL, 'glass');
   glass.l.arrive('glass', [crown(new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.5 }))]);
   glass.l.update(new THREE.Vector3(0, 0, 0));
   assert.notEqual(band(glass.l, 't11'), CARD);
-  const few = wood(11, () => new THREE.Texture());
+  const few = wood(11, () => CELL);
   few.l.arrive('tree', [crown()]);
   few.l.update(new THREE.Vector3(0, 0, 0));
   assert.notEqual(band(few.l, 't10'), CARD, 'today\'s 12 instances at least');
@@ -83,7 +87,7 @@ test('A1: what keeps its detail: see-through parts, too few things, no picture, 
 });
 
 test('A1: a card still hides under the pixel, switches its light, and follows its thing when it moves', () => {
-  const { l } = wood(12, () => new THREE.Texture());
+  const { l } = wood(12, () => CELL);
   l.arrive('tree', [crown()]);
   l.update(new THREE.Vector3(0, 0, 0));
   const s = l.things.get('t5')!.slots[0];

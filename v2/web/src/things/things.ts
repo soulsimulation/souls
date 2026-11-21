@@ -12,12 +12,12 @@
 // eye has moved or things changed, with a margin so it does not flicker at the line.
 //
 // Far stand-ins (#3786), today's WorldFarStandIns on the phone tier: a shared model's small part (standins.ts) under
-// `cardRadiusPx` CSS pixels of radius is drawn in a fourth band, CARD, as a flat camera-facing card of its own snapshot,
+// `cardRadiusPx` CSS pixels of radius is drawn in a fourth band, CARD, as a flat camera-facing card of its own picture,
 // with no shadow, so far woods and gardens keep their silhouette instead of thinning out.
 import * as THREE from 'three';
 import { glowOf, partsOf, type ModelIndex, type Part } from './models.ts';
 import { pageDetail, pageStandIns, type DistanceDetail } from '../draw/quality-tier.ts';
-import { cardGeometry, cardMaterial, cardMatrix, cardable, type Snapshotter, type StandInOptions } from './standins.ts';
+import { cardGeometry, cardMaterial, cardMatrix, cardable, type CardCell, type CardPictures, type StandInOptions } from './standins.ts';
 import { NO_CUT, above, buildingView, cutHeight, decide, hidden, sameCut, type BuildingView, type Cut, type Storey } from './interior.ts';
 
 /** A model shared by at least this many things in the index is instanced; the rest are batched by material. */
@@ -81,6 +81,8 @@ class Batch {
   shadow = true;
   /** False for a card batch: receives no shadow, as today's cards. */
   receive = true;
+  /** A card batch's per-instance picture cells (the geometry's `cardCell`, grown with it). */
+  cells: THREE.InstancedBufferAttribute | null = null;
   /** A whole upload of the colours is pending (an add or a remove); a light's one slot then rides on it. */
   private whole = false;
   readonly layer: ThingLayer;
@@ -91,6 +93,11 @@ class Batch {
   private make(g: THREE.BufferGeometry, m: THREE.Material, n: number): THREE.InstancedMesh {
     const mesh = new THREE.InstancedMesh(g, m, n);
     mesh.count = 0;
+    if (this.cells) {
+      const cells = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4);
+      cells.array.set((this.cells.array as Float32Array).subarray(0, Math.min(this.cells.array.length, n * 4)));
+      g.setAttribute('cardCell', (this.cells = cells));
+    }
     mesh.frustumCulled = false;
     mesh.castShadow = this.shadow;
     mesh.receiveShadow = this.receive;
@@ -99,7 +106,14 @@ class Batch {
     this.layer.group.add(mesh);
     return mesh;
   }
-  add(slot: Slot, matrix: THREE.Matrix4, color: THREE.Color): number {
+  /** Makes this a card batch (#3786): each instance reads its picture's cell. */
+  withCells(): this {
+    this.cells = new THREE.InstancedBufferAttribute(new Float32Array(this.mesh.instanceMatrix.count * 4), 4);
+    this.mesh.geometry.setAttribute('cardCell', this.cells);
+    this.receive = this.mesh.receiveShadow = false;
+    return this;
+  }
+  add(slot: Slot, matrix: THREE.Matrix4, color: THREE.Color, cell?: CardCell): number {
     if (this.mesh.count === this.mesh.instanceMatrix.count) {
       const old = this.mesh, grown = this.make(old.geometry, old.material as THREE.Material, old.count * 2);
       grown.instanceMatrix.array.set(old.instanceMatrix.array);
@@ -113,6 +127,7 @@ class Batch {
     this.owners[i] = slot;
     this.mesh.setMatrixAt(i, matrix);
     this.mesh.setColorAt(i, color);
+    if (this.cells && cell) (this.cells.setXYZW(i, ...cell), (this.cells.needsUpdate = true));
     this.mesh.instanceMatrix.needsUpdate = true;
     this.wholeColours();
     return i;
@@ -124,6 +139,7 @@ class Batch {
       this.mesh.getColorAt(last, c);
       this.mesh.setMatrixAt(i, m);
       this.mesh.setColorAt(i, c);
+      if (this.cells) (this.cells.setXYZW(i, this.cells.getX(last), this.cells.getY(last), this.cells.getZ(last), this.cells.getW(last)), (this.cells.needsUpdate = true));
       this.owners[i] = this.owners[last];
       this.owners[i].index = i;
     }
@@ -203,7 +219,7 @@ export type ThingLayerOptions = {
   detail?: DistanceDetail | null;
   /** #3786: far stand-ins (default the page's: phones) and how a part's card picture is taken (none: no cards). */
   standins?: StandInOptions | null;
-  snapshot?: Snapshotter;
+  pictures?: CardPictures;
   /** The view's height in CSS pixels and vertical field of view in degrees; default the window's and the page camera's 50. */
   view?: () => { height: number; fov: number };
 };
@@ -233,9 +249,9 @@ export class ThingLayer {
   /** The last band pass: parts in each band, parts moved, CPU ms. */
   readonly stats = { near: 0, far: 0, hidden: 0, cards: 0, moved: 0, cpuMs: 0 };
   readonly standins: StandInOptions | null;
-  /** Each part's card (its geometry and its snapshot's material), null where it cannot be one; and its card batch. */
-  private readonly cardOf = new Map<Part, { geometry: THREE.BufferGeometry; material: THREE.Material } | null>();
-  private readonly cardBatches = new Map<Part, Batch>();
+  /** Each part's picture's cell, null where it cannot be a card; and the one batch every card is drawn in. */
+  private readonly cardOf = new Map<Part, CardCell | null>();
+  private cards: Batch | null = null;
   private snaps = 0;
   private readonly users = new Map<string, Set<Thing>>();
   private readonly models = new Map<string, Part[]>();
@@ -257,7 +273,7 @@ export class ThingLayer {
     this.spacing = opts.spacing ?? 0;
     for (const h of Object.values(opts.index.things)) this.share.set(h, (this.share.get(h) ?? 0) + 1);
     this.detail = opts.detail === undefined ? pageDetail() : opts.detail;
-    this.standins = opts.snapshot ? (opts.standins === undefined ? pageStandIns() : opts.standins) : null;
+    this.standins = opts.pictures ? (opts.standins === undefined ? pageStandIns() : opts.standins) : null;
     const boxMaterial = new THREE.MeshLambertMaterial({ color: 0xb8b2a6 });
     this.boxes = [new Batch(this, this.boxGeometry, boxMaterial, 1024), this.far(new Batch(this, this.boxGeometry, boxMaterial, 16))];
   }
@@ -294,7 +310,7 @@ export class ThingLayer {
   }
 
   /** A shared model's part's card, made once (its snapshot taken, a few a frame); null while it cannot be one yet. */
-  private card(s: Slot): { geometry: THREE.BufferGeometry; material: THREE.Material } | null {
+  private card(s: Slot): CardCell | null {
     const p = s.part;
     if (!p || s.thing.view || (this.share.get(s.thing.model!) ?? 0) < SHARED) return null;
     const known = this.cardOf.get(p);
@@ -302,16 +318,15 @@ export class ThingLayer {
     if (!cardable(this.standins!, p.geometry, p.material, (this.share.get(s.thing.model!) ?? 0) * this.copies)) return (this.cardOf.set(p, null), null);
     if (this.snaps >= this.standins!.snapshotsPerFrame) return null;
     this.snaps++;
-    let texture: THREE.Texture | null = null;
+    let cell: CardCell | null = null;
     try {
-      texture = this.opts.snapshot!(p.geometry, p.material);
+      cell = this.opts.pictures!.add(p.geometry, p.material);
     } catch {
-      texture = null;
+      cell = null;
     }
     // A part that cannot be photographed keeps its full detail.
-    const card = texture ? { geometry: cardGeometry(p.geometry.boundingBox!), material: cardMaterial(texture) } : null;
-    this.cardOf.set(p, card);
-    return card;
+    this.cardOf.set(p, cell);
+    return cell;
   }
 
   /** The matrix a part is drawn with in its batch: its own, or its card's. */
@@ -465,16 +480,9 @@ export class ThingLayer {
       return;
     }
     if (band === CARD) {
-      const card = this.cardOf.get(s.part)!;
-      let b = this.cardBatches.get(s.part);
-      if (!b) {
-        b = new Batch(this, card.geometry, card.material, 16);
-        b.receive = false;
-        b.mesh.receiveShadow = false;
-        this.cardBatches.set(s.part, this.far(b));
-      }
+      const b = (this.cards ??= this.far(new Batch(this, cardGeometry(), cardMaterial(this.opts.pictures!.texture), 1024).withCells()));
       s.batch = b;
-      s.index = b.add(s, this.drawn(s), color);
+      s.index = b.add(s, this.drawn(s), color, this.cardOf.get(s.part)!);
       if (s.off) this.visible(s);
       return;
     }
@@ -638,7 +646,7 @@ export class ThingLayer {
     for (const b of this.boxes) if (b.mesh.count) n++;
     for (const m of this.instanced) for (const bs of m.values()) for (const b of bs) if (b.mesh.count) n++;
     for (const m of this.batched) for (const s of m.values()) if (s.mesh.instanceCount) n++;
-    for (const b of this.cardBatches.values()) if (b.mesh.count) n++;
+    if (this.cards?.mesh.count) n++;
     return n;
   }
 
