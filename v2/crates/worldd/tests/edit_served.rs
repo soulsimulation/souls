@@ -1516,6 +1516,25 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     )
     .await;
     println!("a creator's hedge where a Soul stands: {got:?}");
+    if got.kind == 1 {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        for h in t.children(t.handle(w.ground).unwrap()).unwrap() {
+            let n = t.node(*h).unwrap();
+            if n.kind().as_str() == full {
+                println!("DEBUG hedge fields {:?} place {:?}", n.fields(), n.place());
+            }
+        }
+        for b in &w.souls {
+            let n = t.node(t.handle(*b).unwrap()).unwrap();
+            println!(
+                "DEBUG soul {:?} parent {:?} place {:?}",
+                b,
+                n.parent(),
+                n.place()
+            );
+        }
+    }
     assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
 
     // Across the second Soul's way north: it commits, and the Soul's walk past it ends at its goal.
