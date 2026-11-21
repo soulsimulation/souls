@@ -15,17 +15,6 @@
    "audience": {
     "rule": "everyone"
    }
-  },
-  "throws": {
-   "n": 29,
-   "type": "int",
-   "unit": "count",
-   "default": 0,
-   "min": 0,
-   "max": 1000000000,
-   "audience": {
-    "rule": "everyone"
-   }
   }
  },
  "links": {
@@ -250,12 +239,6 @@
      "field": "disc",
      "to": "end_b",
      "event": "threw_the_frisbee"
-    },
-    {
-     "change": "set",
-     "field": "throws",
-     "by": 1,
-     "event": "caught"
     }
    ]
   },
@@ -287,12 +270,6 @@
      "field": "disc",
      "to": "corner",
      "event": "threw_the_frisbee"
-    },
-    {
-     "change": "set",
-     "field": "throws",
-     "by": 1,
-     "event": "caught"
     }
    ]
   },
@@ -324,12 +301,6 @@
      "field": "disc",
      "to": "end_a",
      "event": "threw_the_frisbee"
-    },
-    {
-     "change": "set",
-     "field": "throws",
-     "by": 1,
-     "event": "caught"
     }
    ]
   },
@@ -361,12 +332,6 @@
      "field": "disc",
      "to": "corner",
      "event": "threw_the_frisbee"
-    },
-    {
-     "change": "set",
-     "field": "throws",
-     "by": 1,
-     "event": "caught"
     }
    ]
   },
@@ -398,12 +363,6 @@
      "field": "disc",
      "to": "end_a",
      "event": "threw_the_frisbee"
-    },
-    {
-     "change": "set",
-     "field": "throws",
-     "by": 1,
-     "event": "caught"
     }
    ]
   },
@@ -435,12 +394,6 @@
      "field": "disc",
      "to": "end_b",
      "event": "threw_the_frisbee"
-    },
-    {
-     "change": "set",
-     "field": "throws",
-     "by": 1,
-     "event": "caught"
     }
    ]
   },

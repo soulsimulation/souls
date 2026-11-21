@@ -1,6 +1,6 @@
 {
  "format": "souls-form-cases/1",
- "about": "eden:frisbee (today's play-frisbee spots at a pitch's two ends and a third corner, apps/server/src/god/activity-spots.ts and the frisbee courts). Up to three players each take an end; the frisbee is with one end; its holder throws it to another player's end and the throw counts. A throw with nobody to catch is refused, as today's game waits for a second player. A frisbee left at an end nobody holds is fetched by a player.",
+ "about": "eden:frisbee (today's play-frisbee spots at a pitch's two ends and a third corner, apps/server/src/god/activity-spots.ts and the frisbee courts). Up to three players each take an end; the frisbee is with one end; its holder throws it to another player's end. A throw with nobody to catch is refused, as today's game waits for a second player. A frisbee left at an end nobody holds is fetched by a player.",
  "cases": [
   {
    "name": "play_at_end_a_when_free",
