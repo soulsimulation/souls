@@ -897,6 +897,8 @@ pub struct PublicWriter<S> {
     /// Whether the open cut holds anything but motion and fields set on nodes; else the nodes it set (#3799).
     structural: bool,
     touched: std::collections::BTreeSet<Id>,
+    /// The timers the open cut set or cleared (#3799).
+    timers: std::collections::BTreeSet<Id>,
     /// The references each node row of the published state holds, and those of the rest of it (#3799).
     /// Kept with the version of the state they are of.
     #[allow(clippy::type_complexity)]
@@ -1272,6 +1274,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             incremental: std::env::var_os("SOULS_STREAM_WHOLE").is_none(),
             structural: true,
             touched: std::collections::BTreeSet::new(),
+            timers: std::collections::BTreeSet::new(),
             refs: None,
         };
         if let Some(head) = w.store.get(&format!("{}head", w.prefix))? {
@@ -1911,14 +1914,41 @@ impl<S: ObjectStore> PublicWriter<S> {
                                     self.touched.insert(*node);
                                 }
                                 other => {
-                                    eprintln!("CUTWHY change {}", match other { replica::effects::Change::Create{..}=>"create", replica::effects::Change::Remove{..}=>"remove", replica::effects::Change::Reparent{..}=>"reparent", replica::effects::Change::Link{..}=>"link", replica::effects::Change::Unlink{..}=>"unlink", _=>"?" });
+                                    eprintln!(
+                                        "CUTWHY change {}",
+                                        match other {
+                                            replica::effects::Change::Create { .. } => "create",
+                                            replica::effects::Change::Remove { .. } => "remove",
+                                            replica::effects::Change::Reparent { .. } => "reparent",
+                                            replica::effects::Change::Link { .. } => "link",
+                                            replica::effects::Change::Unlink { .. } => "unlink",
+                                            _ => "?",
+                                        }
+                                    );
                                     self.structural = true
                                 }
                             }
                         }
                     }
+                    Body::Timers(recs) => {
+                        for r in recs {
+                            match r {
+                                replica::effects::TimerRec::Set { timer, .. }
+                                | replica::effects::TimerRec::Clear { timer } => {
+                                    self.timers.insert(*timer);
+                                }
+                            }
+                        }
+                    }
                     b => {
-                        eprintln!("CUTWHY body {}", match b { Body::Transfer(_)=>"transfer", Body::Time(_)=>"time", Body::Timers(_)=>"timers", _=>"?" });
+                        eprintln!(
+                            "CUTWHY body {}",
+                            match b {
+                                Body::Transfer(_) => "transfer",
+                                Body::Time(_) => "time",
+                                _ => "?",
+                            }
+                        );
                         self.structural = true
                     }
                 }
@@ -2039,6 +2069,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.force_remainder = false;
         self.structural = false;
         self.touched.clear();
+        self.timers.clear();
     }
     pub fn flush(&mut self) -> R<()> {
         if self.chunks.is_empty() && !self.force_remainder {
@@ -2061,7 +2092,35 @@ impl<S: ObjectStore> PublicWriter<S> {
                     (n.audience == Audience::Everyone).then(|| (*id, n.to_value()))
                 })
                 .collect();
-            self.player.row_delta(tree.next(), rows)?
+            // A timer's row as the public state holds it: of a public live owner; none once cleared. One whose
+            // owner is not live here (in flight) is left to the whole cut.
+            let int = |n: i64| {
+                u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
+            };
+            let timers: Option<Vec<(Id, Option<Value>)>> = self
+                .timers
+                .iter()
+                .map(|id| match tree.timers().get(id) {
+                    None => Some((*id, None)),
+                    Some(t) => {
+                        let owner = tree.node_state_of(t.node)?;
+                        Some((
+                            *id,
+                            (owner.audience == Audience::Everyone).then(|| {
+                                Value::Map(BTreeMap::from([
+                                    (1, t.node.to_value()),
+                                    (2, int(t.due)),
+                                    (3, Value::Text(t.name.clone())),
+                                ]))
+                            }),
+                        ))
+                    }
+                })
+                .collect();
+            match timers {
+                Some(timers) => self.player.row_delta(tree.next(), rows, timers)?,
+                None => None,
+            }
         } else {
             None
         };

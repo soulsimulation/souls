@@ -560,24 +560,48 @@ fn row_index(rows: &[Value], id: Id) -> R<Option<usize>> {
     Ok(None)
 }
 
-/// Whether `delta` can be played in place on `state` (#3799): it holds the version (key 1) and at most rows of key 2,
-/// each replacing a live node's row with one in the same frame (parent and slot), each node valid alone, and no row
-/// twice. Then the whole-state checks (frames, depth, links, timers, flights) read nothing that changes. The new
-/// version and each row's index and new row; none when the delta is any other.
-#[allow(clippy::type_complexity)]
-fn in_place(
-    header: &Header,
-    state: &Value,
-    delta: &BTreeMap<u64, Value>,
-) -> R<Option<(Value, Vec<(usize, Value)>)>> {
-    if delta.keys().any(|k| ![1, 2].contains(k)) {
+/// What a delta played in place swaps into the state (#3799): the version, node rows by index, and the timers whole.
+/// Swapped in, it holds what it replaced, so swapping it in again puts the state back.
+struct Plan {
+    v1: Value,
+    rows: Vec<(usize, Value)>,
+    timers: Option<Value>,
+}
+
+impl Plan {
+    fn swap(&mut self, state: &mut Value) {
+        let Value::Map(m) = state else {
+            unreachable!("validated state")
+        };
+        if let Some(v) = m.get_mut(&1) {
+            std::mem::swap(v, &mut self.v1);
+        }
+        if let Some(Value::Array(nodes)) = m.get_mut(&2) {
+            for (i, row) in &mut self.rows {
+                std::mem::swap(&mut nodes[*i], row);
+            }
+        }
+        if let (Some(t), Some(v)) = (self.timers.as_mut(), m.get_mut(&6)) {
+            std::mem::swap(v, t);
+        }
+    }
+}
+
+/// Whether `delta` can be played in place on `state` (#3799): it holds the version (key 1), and at most rows of key 2,
+/// each replacing a live node's row with one in the same frame (parent and slot), each node valid alone, and rows of
+/// key 6, timers set, changed or cleared, each owned by a node of the state. No node comes or goes and no frame
+/// changes, so the whole-state checks (frames, depth, links, flights) read nothing that changes but these rows. Its
+/// plan; none when the delta is any other.
+fn in_place(header: &Header, state: &Value, delta: &BTreeMap<u64, Value>) -> R<Option<Plan>> {
+    if delta.keys().any(|k| ![1, 2, 6].contains(k)) {
         return Ok(None);
     }
     let Some(v1) = delta.get(&1) else {
         return Ok(None);
     };
     uint(v1)?;
-    let rows = arr(field(map(state)?, 2)?)?;
+    let m = map(state)?;
+    let rows = arr(field(m, 2)?)?;
     let mut out = Vec::new();
     let mut ids = BTreeSet::new();
     for row in delta.get(&2).map(arr).transpose()?.unwrap_or(&[]) {
@@ -602,7 +626,55 @@ fn in_place(
         validate_node(header, id, &new)?;
         out.push((i, Value::Array(vec![id.to_value(), r[1].clone()])));
     }
-    Ok(Some((v1.clone(), out)))
+    let timers = match delta.get(&6) {
+        None => None,
+        Some(d) => {
+            let mut t = pairs(field(m, 6)?)?;
+            let mut ids = BTreeSet::new();
+            let opaque = arr(field(m, 8)?)?;
+            for row in arr(d)? {
+                let r = arr(row)?;
+                if !(1..=2).contains(&r.len()) {
+                    return Ok(None);
+                }
+                let id = read_id(&r[0])?;
+                if !ids.insert(id) {
+                    return Ok(None);
+                }
+                if r.len() == 1 {
+                    if t.remove(&id).is_none() {
+                        return Ok(None);
+                    }
+                    continue;
+                }
+                // The timer checks of `validate`, on this row alone: its owner is a node of the state.
+                let tm = map(&r[1])?;
+                let owner = read_id(field(tm, 1)?)?;
+                if tm.len() != 3
+                    || (row_index(rows, owner)?.is_none()
+                        && row_index(opaque, owner)?.is_none()
+                        && !pairs(field(m, 4)?)?.values().any(|f| {
+                            map(f)
+                                .and_then(|f| pairs(field(f, 5)?))
+                                .is_ok_and(|n| n.contains_key(&owner))
+                        }))
+                {
+                    return bad("timer owner");
+                }
+                super::read_int(tm.get(&2), "timer due")?;
+                if !matches!(tm.get(&3), Some(Value::Text(_))) {
+                    return bad("timer name");
+                }
+                t.insert(id, r[1].clone());
+            }
+            Some(paired(t))
+        }
+    };
+    Ok(Some(Plan {
+        v1: v1.clone(),
+        rows: out,
+        timers,
+    }))
 }
 
 pub struct PublicPlayer {
@@ -656,7 +728,12 @@ impl PublicPlayer {
     /// The delta from the state to one at version `next` whose node rows `rows` (by id) replace the live ones, the
     /// rows equal to the live ones left out (#3799): as [`context`] works it out from the two whole states. None when it
     /// cannot be played in place (a new or gone node, a new frame, no new version); the caller then works it out whole.
-    pub fn row_delta(&self, next: u64, mut rows: Vec<(Id, Value)>) -> R<Option<Value>> {
+    pub fn row_delta(
+        &self,
+        next: u64,
+        mut rows: Vec<(Id, Value)>,
+        timers: Vec<(Id, Option<Value>)>,
+    ) -> R<Option<Value>> {
         if next == self.version() {
             return Ok(None);
         }
@@ -675,6 +752,22 @@ impl PublicPlayer {
         if !changed.is_empty() {
             delta.insert(2, Value::Array(changed));
         }
+        // Timers set, changed or cleared: a row each that differs, in id order, as `context` finds them.
+        let live = pairs(field(map(&self.state)?, 6)?)?;
+        let mut t: Vec<Value> = timers
+            .into_iter()
+            .filter(|(id, v)| live.get(id) != v.as_ref())
+            .map(|(id, v)| {
+                let mut row = vec![id.to_value()];
+                row.extend(v);
+                (id, Value::Array(row))
+            })
+            .collect::<BTreeMap<Id, Value>>()
+            .into_values()
+            .collect();
+        if !t.is_empty() {
+            delta.insert(6, Value::Array(std::mem::take(&mut t)));
+        }
         if in_place(&self.header, &self.state, &delta)?.is_none() {
             return Ok(None);
         }
@@ -682,29 +775,12 @@ impl PublicPlayer {
     }
     /// The digest of the state `delta` (from [`PublicPlayer::row_delta`]) would make, the state left as it is.
     pub fn digest_with(&mut self, delta: &Value) -> R<Vec<u8>> {
-        let Some((v1, rows)) = in_place(&self.header, &self.state, map(delta)?)? else {
+        let Some(mut plan) = in_place(&self.header, &self.state, map(delta)?)? else {
             return bad("not an in-place delta");
         };
-        let Value::Map(m) = &mut self.state else {
-            unreachable!("validated state")
-        };
-        let old1 = std::mem::replace(m.entry(1).or_insert(Value::Uint(0)), v1);
-        let mut undo = Vec::new();
-        if let Some(Value::Array(nodes)) = m.get_mut(&2) {
-            for (i, row) in rows {
-                undo.push((i, std::mem::replace(&mut nodes[i], row)));
-            }
-        }
+        plan.swap(&mut self.state);
         let d = digest(&self.state);
-        let Value::Map(m) = &mut self.state else {
-            unreachable!("validated state")
-        };
-        m.insert(1, old1);
-        if let Some(Value::Array(nodes)) = m.get_mut(&2) {
-            for (i, old) in undo.into_iter().rev() {
-                nodes[i] = old;
-            }
-        }
+        plan.swap(&mut self.state);
         d
     }
     pub fn version(&self) -> u64 {
@@ -753,23 +829,11 @@ impl PublicPlayer {
             Some(_) => None,
             None => Some(self.whole_next(&c)?),
         };
-        let mut undo = Vec::new();
-        if let Some((v1, rows)) = plan {
-            let Value::Map(m) = &mut self.state else {
-                unreachable!("validated state")
-            };
-            undo.push((
-                usize::MAX,
-                std::mem::replace(m.entry(1).or_insert(Value::Uint(0)), v1),
-            ));
-            let Some(Value::Array(nodes)) = m.get_mut(&2) else {
-                unreachable!("validated state")
-            };
-            for (i, row) in rows {
-                undo.push((i, std::mem::replace(&mut nodes[i], row)));
-            }
+        let mut plan = plan;
+        if let Some(p) = plan.as_mut() {
+            p.swap(&mut self.state);
         }
-        let r = self.check_next(&sp, &c, whole.as_ref(), &undo, old_version, &flying);
+        let r = self.check_next(&sp, &c, whole.as_ref(), plan.as_ref(), old_version, &flying);
         match (r, whole) {
             (Ok((digest, changes, part, version)), whole) => {
                 if let Some(w) = whole {
@@ -779,15 +843,8 @@ impl PublicPlayer {
                 self.finish(sp, part, changes, record, version)
             }
             (Err(e), _) => {
-                let Value::Map(m) = &mut self.state else {
-                    unreachable!("validated state")
-                };
-                for (i, old) in undo.into_iter().rev() {
-                    if i == usize::MAX {
-                        m.insert(1, old);
-                    } else if let Some(Value::Array(nodes)) = m.get_mut(&2) {
-                        nodes[i] = old;
-                    }
+                if let Some(p) = plan.as_mut() {
+                    p.swap(&mut self.state);
                 }
                 Err(e)
             }
@@ -836,7 +893,7 @@ impl PublicPlayer {
         sp: &StreamPart,
         c: &BTreeMap<u64, Value>,
         whole: Option<&Value>,
-        undo: &[(usize, Value)],
+        old: Option<&Plan>,
         old_version: u64,
         flying: &BTreeSet<Id>,
     ) -> R<(Vec<u8>, BTreeMap<Id, u64>, Part, u64)> {
@@ -942,7 +999,7 @@ impl PublicPlayer {
                 return bad("missing changed node version");
             }
         }
-        for (i, old) in undo.iter().filter(|(i, _)| *i != usize::MAX) {
+        for (i, old) in old.iter().flat_map(|p| &p.rows) {
             let Value::Array(row) = &rows[*i] else {
                 return bad("expected an id/value pair");
             };
