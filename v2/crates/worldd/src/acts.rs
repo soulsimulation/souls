@@ -296,7 +296,7 @@ struct Sight<'a> {
     walks: BTreeMap<Id, (usize, Id, Name)>,
     /// Each run's walk in progress right before a sit into a slot the places hold: its step, the seat's floor and its
     /// stand point on that floor (moved clear at registration when the entry's point is blocked).
-    seats: BTreeMap<Id, (usize, Id, Vec3)>,
+    sit_walks: BTreeMap<Id, (usize, Id, Vec3)>,
     planning: &'a RefCell<Planning>,
     map: Arc<Versions>,
 }
@@ -482,7 +482,7 @@ impl Geometry for Sight<'_> {
             return WalkPlan::Legs(Vec::new());
         };
         // A walk before a sit goes to the seat's own stand point, the one its sit is measured from.
-        let (node, at) = match self.seats.get(&body) {
+        let (node, at) = match self.sit_walks.get(&body) {
             Some(&(at_step, floor, stand)) if at_step == step => (floor, stand),
             _ => (node, at),
         };
@@ -817,7 +817,7 @@ impl Acts {
         let context = self.forms.planning_context();
         let walks = self.forms.walks();
         self.planning.borrow_mut().keep(&context);
-        let mut seats = BTreeMap::new();
+        let mut sit_walks = BTreeMap::new();
         let (controller, split, slots, map, questions) = match bodies {
             Some(b) => {
                 for (body, (step, node, slot)) in self.forms.seat_walks() {
@@ -825,7 +825,7 @@ impl Acts {
                         && let Ok(stand) = p.stand()
                     {
                         let y = p.point.y - p.place.height;
-                        seats.insert(body, (step, p.floor, Vec3::new(stand.x, y, stand.z)));
+                        sit_walks.insert(body, (step, p.floor, Vec3::new(stand.x, y, stand.z)));
                     }
                 }
                 self.planning
@@ -874,7 +874,7 @@ impl Acts {
             asked: RefCell::new(BTreeMap::new()),
             context,
             walks,
-            seats,
+            sit_walks,
             planning: &self.planning,
             map,
         };
