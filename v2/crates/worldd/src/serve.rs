@@ -1337,12 +1337,8 @@ fn off_machine(
         archive_base = base.record;
         let (store, header, words) = (store.clone(), built.header.clone(), Arc::clone(&text));
         let open = move || {
-            let mut a = Archiver::open_based_with_redactions(
-                again.clone(),
-                "",
-                &base,
-                words.redactions(),
-            )?;
+            let mut a =
+                Archiver::open_based_with_redactions(again.clone(), "", &base, words.redactions())?;
             archive_bridge(&store, &mut a, &header, first)?;
             if a.source_base() != base.record {
                 return Err(Refusal {
@@ -1370,7 +1366,10 @@ fn off_machine(
         let a = Archiver::open(again.clone(), "", &built.header, zone, kind).map_err(refusal)?;
         again.restore_public().map_err(refusal)?;
         let (tx, rx) = channel();
-        report("the archiver", archiving(move || Ok(a), rx, Arc::clone(&text)));
+        report(
+            "the archiver",
+            archiving(move || Ok(a), rx, Arc::clone(&text)),
+        );
         Some(tx)
     } else {
         None
