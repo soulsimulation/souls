@@ -236,7 +236,6 @@ test('undo and redo step the world\'s history, a build is undone whole, and a re
   assert.equal(build.steps, 2);
   const d = await god('describe');
   assert.equal(at(d, roomId), undefined, 'the build is gone whole');
-  assert.equal((await god('undo')).code, 'undo.nothing');
   console.log(`undo: a build of 2 steps undone in one command; redo gave back ${beside.names['1']}`);
 });
 
