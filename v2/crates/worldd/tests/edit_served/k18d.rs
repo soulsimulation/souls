@@ -389,7 +389,15 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
         taken.kind, 2,
         "the occupied slot refuses a second Soul: {taken:?}"
     );
-    let mut buried = host_solids();
+    let walls = |w: &Seeded| {
+        let (copy, _) = served_copy(w);
+        let t = copy.tree();
+        t.node(t.handle(host).unwrap()).unwrap().fields()[&import_eden::F_SOLIDS].clone()
+    };
+    let before = walls(&w);
+    let Value::Array(mut buried) = before.clone() else {
+        panic!("the building's walls: {before:?}")
+    };
     // The chair stands at (2 m, -0.509 m) of the building's frame: the inner room's middle, back 0.509 m.
     buried.push(row(&[2000, -509, 400, 400, 0, 0, 2500, 1, 0]));
     let (bury, _) = send(
@@ -409,13 +417,9 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
     .await;
     // A seated Soul is judged for the ground it would stand up onto (#3280): none left there is a cut-off.
     assert_eq!((bury.kind, bury.reason.as_str()), (2, "edit.would-cut-off"));
-    let (copy, _) = served_copy(&w);
     assert_eq!(
-        copy.tree()
-            .node(copy.tree().handle(host).unwrap())
-            .unwrap()
-            .fields()[&import_eden::F_SOLIDS],
-        Value::Array(host_solids()),
+        walls(&w),
+        before,
         "the refused burial left the building's walls as they were"
     );
     assert!(poses(&w).iter().any(|(b, pose)| *b == body
