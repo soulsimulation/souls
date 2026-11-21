@@ -39,6 +39,7 @@ pub const NEAR: i64 = 1_000_000;
 #[derive(Clone, Copy, Debug)]
 struct Sample {
     at: Micros,
+    here: [i64; 2],
     left: i64,
     aim: [i64; 2],
     near: i64,
@@ -58,9 +59,15 @@ pub struct Watch {
     walkers: BTreeMap<Id, Track>,
 }
 
+/// The distance from `a` to `b`, µm; [`i64::MAX`] when it is past that (any two points' differences and squares are
+/// taken unsigned, so no input overflows: a walker's place must never panic the clock thread).
 fn len(a: [i64; 2], b: [i64; 2]) -> i64 {
-    let (x, z) = (i128::from(a[0] - b[0]), i128::from(a[1] - b[1]));
-    i64::try_from((x * x + z * z).isqrt()).unwrap_or(i64::MAX)
+    let d = |u: i64, v: i64| u128::from((i128::from(u) - i128::from(v)).unsigned_abs() as u64);
+    let (x, z) = (d(a[0], b[0]), d(a[1], b[1]));
+    (x * x)
+        .checked_add(z * z)
+        .and_then(|s| i64::try_from(s.isqrt()).ok())
+        .unwrap_or(i64::MAX)
 }
 
 impl Watch {
@@ -98,6 +105,7 @@ impl Watch {
         let s = match t.samples.back() {
             Some(b) if b.aim == aim => Sample {
                 at: now,
+                here,
                 left: b.left.min(left),
                 aim,
                 near: b.near.min(near),
@@ -106,6 +114,7 @@ impl Watch {
                 t.aimed = now;
                 Sample {
                     at: now,
+                    here,
                     left: b.left.min(left),
                     aim,
                     near,
@@ -113,6 +122,7 @@ impl Watch {
             }
             None => Sample {
                 at: now,
+                here,
                 left,
                 aim,
                 near,
@@ -129,7 +139,11 @@ impl Watch {
         }
         let on_left = first.left - s.left >= GAIN;
         let on_corner = t.aimed <= first.at && first.near - s.near >= GAIN;
-        !(on_left || on_corner)
+        // Or nearer the corner it aims at now than where the window began, by its place: a line that turns away from
+        // the leg's end at a corner reached within the window makes the way left through the new corner longer than
+        // the least before it, though the walker goes on at full speed (#1960).
+        let on_aim = len(first.here, aim).saturating_sub(len(here, aim)) >= GAIN;
+        !(on_left || on_corner || on_aim)
     }
 
     /// Only the walkers in `walking` (their walks asked their way this tick) are watched on; any other starts again
@@ -288,6 +302,48 @@ mod tests {
             p[1] += speed(t);
         }
         None
+    }
+
+    /// A corner or leg's end anywhere in µm, the far ends of i64 included (a forgotten line's sentinel, #1960), is
+    /// measured without overflow: it panicked the clock thread before.
+    #[test]
+    fn extreme_points_never_overflow() {
+        let mut w = Watch::new();
+        let far = [i64::MIN, i64::MIN];
+        for t in 0..100 {
+            let _ = w.seen(
+                fixture(9),
+                [57_000_000, t * 70_000],
+                [57_170_000, 0],
+                far,
+                t * TICK,
+            );
+        }
+        assert_eq!(len([i64::MAX, i64::MAX], far), i64::MAX);
+        assert_eq!(len([0, 0], [3, 4]), 5);
+    }
+
+    /// Served Eden (#1960): walking west at 1.4 m/s toward its leg's end 145 m to the north-west, the walk reaches a
+    /// corner and turns for the next, 16 m west, which makes the way left through it 9 m longer than the least before.
+    /// Before, it was found stalled 3 s on, still at full speed: the least left was not reached again in the window,
+    /// and the new corner had not been aimed at the whole window.
+    #[test]
+    fn a_corner_that_turns_away_from_the_legs_end_is_progress() {
+        let mut w = Watch::new();
+        let (first, next, to) = (
+            [-431_932_300, 104_688_193],
+            [-448_000_000, 105_500_000],
+            [-500_000_000, 250_000_000],
+        );
+        for t in 0..400i64 {
+            let here = [-420_000_000 - t * 70_000, 104_100_000];
+            let aim = if here[0] > first[0] + 250_000 {
+                first
+            } else {
+                next
+            };
+            assert!(!w.seen(fixture(9), here, aim, to, t * TICK), "tick {t}");
+        }
     }
 
     #[test]
