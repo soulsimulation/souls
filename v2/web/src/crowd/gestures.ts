@@ -5,7 +5,9 @@
 // - Which clip a move plays is today's choice (`mars/viewer/app/engine-view/clip-library.ts`): nod is `Yes` and
 //   shake-head `Idle_No_Loop`, both at 1.6x; cheer is `Celebration` fitted to the move; dance `Dance_Loop`. Wave plays
 //   the library's `Wave`, and bow `Bow`, made at bake time from the idle with today's bend (`activity-poses.ts`: the
-//   back leans 0.55 rad and the head 0.2, on a half sine over the move). A move with no clip draws nothing new.
+//   back leans 0.55 rad and the head 0.2, on a half sine over the move). Clap, point and stretch are made the same way
+//   from today's hand goals (`activity-poses.ts`, reached by IK), and shrug from the rig (`./made.ts`). A move with no
+//   clip draws nothing new.
 // - Weight comes in over the move's start-up (its start to contact) and goes out over `LEAVE` after its end: the
 //   planned end, or the run's ending when that comes first (a cancel). As `../pose/gesture.ts`.
 // - Seated, a move plays its seated clip where today has one (nod: `Sitting_Nodding_Loop`), and only above the hips.
@@ -17,6 +19,10 @@ export type GestureClip = { clip: string; mode: 'loop' | 'once'; rate?: number; 
 export const GESTURE_CLIPS: Readonly<Record<string, GestureClip>> = {
   wave: { clip: 'Wave', mode: 'loop' },
   bow: { clip: 'Bow', mode: 'once' },
+  clap: { clip: 'Clap', mode: 'once' },
+  point: { clip: 'Point', mode: 'once' },
+  shrug: { clip: 'Shrug', mode: 'once' },
+  stretch: { clip: 'Stretch', mode: 'once' },
   nod: { clip: 'Yes', mode: 'loop', rate: 1.6, seated: 'Sitting_Nodding_Loop' },
   shake_head: { clip: 'Idle_No_Loop', mode: 'loop', rate: 1.6 },
   cheer: { clip: 'Celebration', mode: 'once' },
@@ -35,8 +41,9 @@ const KEEP = 4;
 
 /** A move as drawn: its record and, once the run ended early, when. */
 export type Drawn = MoveRec & { cut?: number };
-/** What a body draws at a time: the clip's name, its phase in cycles (`seconds` is the clip's length) and weight. */
-export type Gesture = { clip: string; phase: number; weight: number };
+/** What a body draws at a time: the clip's name, its phase in cycles (`seconds` is the clip's length), weight, and the
+ *  move's target (a body turns to face one it can see, as today's Core turns a gesturer to its partner or target). */
+export type Gesture = { clip: string; phase: number; weight: number; target: string | null };
 
 const smooth = (u: number) => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
 
@@ -59,7 +66,7 @@ export function gestureAt(moves: readonly Drawn[], t: number, seated: boolean, s
     // A one-shot is fitted to the move (its planned span) and holds its last frame; a loop plays at its rate.
     const span = (m.ends[m.ends.length - 1] - m.start) / 1e6;
     const phase = g.mode === 'once' ? Math.min(0.999, since / Math.max(1e-3, span)) : (since * (g.rate ?? 1)) / len;
-    return { clip, phase, weight };
+    return { clip, phase, weight, target: m.target };
   }
   return null;
 }

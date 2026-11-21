@@ -5,7 +5,7 @@
 // clips: right for neighbouring frames and for like clips (idle and walk), wrong for large rotations apart.
 import * as THREE from 'three';
 
-export const MAX_CLIPS = 16;
+export const MAX_CLIPS = 24;
 /** Bones a model may have for the upper-body mask (#3741). */
 export const MAX_BONES = 128;
 
