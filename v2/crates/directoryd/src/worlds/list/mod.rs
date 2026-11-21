@@ -15,10 +15,13 @@
 //! 6. **A world's settings** (W9, #2827), today's two owner switches, by its creator alone: `unlisted` takes the row
 //!    off the list (the row's flag alone: it wakes no world), and `closed` closes it to visitors (today's one travel
 //!    switch; it refuses nothing until travel exists, X9). Each is a field of the row, written on condition of the
-//!    version read, and the list shows it from this machine's copy at once.
+//!    version read, and the list shows it from this machine's copy at once. An unlisted world stays on its own
+//!    creator's list, signed in ([`Worlds::list_for`], #3698), and on nobody else's.
 //! 7. **The list's picture** (G10, #2800), set by the creator with the settings, from a shot: it passes G6's check
 //!    and hold point with [`PICTURE_BYTES`] and [`PICTURE_SIDE`], is kept stripped of metadata, and is one field of
 //!    the world's row, `picture`, a `data:` URL; a row without one lists `picture: null`.
+//! 8. **The welcome** (#3702), set by the creator ([`Worlds::set_welcome`]): words a visitor is shown on arrival, one
+//!    field of the row, `welcome`, so the list carries it and a Soul's pairing answer names it.
 
 pub mod archive;
 pub mod handoff;
@@ -45,6 +48,8 @@ pub const KEY: &str = "world-list";
 pub const PICTURE_BYTES: u64 = 131_072;
 /// The longest side of a world's list picture, px (rule 7).
 pub const PICTURE_SIDE: u64 = 1280;
+/// The most characters a world's welcome may have (#3702).
+pub const WELCOME_MOST: usize = 500;
 
 /// A file as the list's picture (rule 7): G6's check with the picture's limits, then the hold point; the stripped
 /// bytes as a `data:` URL, or the refusal's name.
@@ -255,10 +260,29 @@ impl<S: Store> Worlds<S> {
     /// The list (rule 1): every world's row, with whether it is awake by this machine's cached directory, and the
     /// templates a world may be made from.
     pub fn list(&self) -> R<Json> {
+        self.list_for(None)
+    }
+
+    /// The list as `viewer` sees it (#3698): the public list, and with a signed-in viewer also the unlisted worlds
+    /// that viewer created, each still marked `unlisted`. Nobody else's unlisted world is in it.
+    pub fn list_for(&self, viewer: Option<Id>) -> R<Json> {
         // Locks are taken in one order, the directory then the cached copy.
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let (_, mut rows) = read_rows(&inner.dir.store)?;
-        rows.retain(|r| r.get("unlisted") != Some(&Json::Bool(true)) && archive::active(r).is_ok());
+        let (_, rows) = read_rows(&inner.dir.store)?;
+        let mut kept = Vec::with_capacity(rows.len());
+        for r in rows {
+            if archive::active(&r).is_err() {
+                continue;
+            }
+            let shown = r.get("unlisted") != Some(&Json::Bool(true))
+                || viewer.is_some_and(|v| {
+                    handoff::ownership(&inner.dir.store, &r).is_ok_and(|o| o.creator == Some(v))
+                });
+            if shown {
+                kept.push(r);
+            }
+        }
+        let mut rows = kept;
         for row in &mut rows {
             handoff::public_row(row);
             let awake = (|| {
@@ -523,6 +547,63 @@ impl<S: Store> Worlds<S> {
         let (rows, row) = write_rows(&inner.dir.store, etag, rows, set)?;
         *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
         Ok(row)
+    }
+
+    /// A world's welcome (rule 8, #3702): `creator` sets the words visitors are shown on arrival; empty words clear
+    /// it. At most [`WELCOME_MOST`] characters, no control characters but line breaks (`welcome-too-long`,
+    /// `welcome-not-text`). Answers the row.
+    pub fn set_welcome(&self, world: &str, creator: Id, words: &str) -> Result<Json, Refusal> {
+        let words = words.trim();
+        if words.chars().count() > WELCOME_MOST {
+            return refuse(
+                "welcome-too-long",
+                format!("at most {WELCOME_MOST} characters"),
+            );
+        }
+        if words.chars().any(|c| c.is_control() && c != '\n') {
+            return refuse("welcome-not-text", "no control characters but line breaks");
+        }
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let (etag, rows) = read_rows(&inner.dir.store)?;
+        let set = |rows: &mut Vec<Json>| -> R<Json> {
+            let Some(row) = rows
+                .iter_mut()
+                .find(|r| r.get("name").and_then(Json::as_str) == Some(world))
+            else {
+                return refuse("world-missing", world.to_owned());
+            };
+            if handoff::ownership(&inner.dir.store, row)?.creator != Some(creator) {
+                return refuse("not-the-creator", world.to_owned());
+            }
+            if let Some(o) = row.as_object_mut() {
+                if words.is_empty() {
+                    o.remove("welcome");
+                } else {
+                    o.insert("welcome".into(), json!(words));
+                }
+            }
+            let mut public = row.clone();
+            handoff::public_row(&mut public);
+            Ok(public)
+        };
+        let (rows, row) = write_rows(&inner.dir.store, etag, rows, set)?;
+        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
+        Ok(row)
+    }
+
+    /// The welcome of the world named `world`, if it has one (#3702).
+    pub fn welcome_of(&self, world: &str) -> R<Option<String>> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let (_, rows) = read_rows(&inner.dir.store)?;
+        Ok(rows
+            .iter()
+            .find(|r| r.get("name").and_then(Json::as_str) == Some(world))
+            .and_then(|r| r.get("welcome")?.as_str().map(str::to_owned)))
+    }
+
+    /// Whether `who` is the creator of the world named `world` (`world-missing` when there is none).
+    pub fn is_creator(&self, world: &str, who: Id) -> R<bool> {
+        Ok(self.ownership(world)?.creator == Some(who))
     }
 }
 

@@ -189,15 +189,21 @@ pub fn route(
                 Some((Poll::Refused(name, device), _)) => {
                     json(200, json!({"refused": name, "device": device}), name)
                 }
-                // R18: a former Soul's answer says its former id back.
-                Some((Poll::Token { token, grant }, secret)) => match p.former_by_secret(&secret) {
-                    Some(former) => json(
-                        200,
-                        json!({"token": token, "grant": grant, "former": former}),
-                        "delivered",
-                    ),
-                    None => json(200, json!({"token": token, "grant": grant}), "delivered"),
-                },
+                Some((Poll::Token { token, grant }, secret)) => {
+                    let mut answer = json!({"token": token, "grant": grant});
+                    // R18: a former Soul's answer says its former id back.
+                    if let Some(former) = p.former_by_secret(&secret) {
+                        answer["former"] = json!(former);
+                    }
+                    // #3702: a Soul arriving in a world is given the world's welcome, when it has one.
+                    let welcome = p
+                        .world_by_secret(&secret)
+                        .and_then(|w| app.worlds.as_ref()?.welcome_of(&w).ok().flatten());
+                    if let Some(w) = welcome.filter(|_| grant.starts_with("soul-")) {
+                        answer["welcome"] = json!(w);
+                    }
+                    json(200, answer, "delivered")
+                }
             }
         }
         ("POST", "/v1/pair/show" | "/v1/pair/approve") => {

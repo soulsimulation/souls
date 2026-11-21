@@ -55,7 +55,7 @@ test('a visit sends one count with no query, hash, Soul id or token; locally and
   assert.doesNotMatch(sent[0]!, /s_123|tok_9|CODE|igsh|soul=|token=/);
   assert.equal(new URL((await visit('https://soul.game/?x=1', { tag: 'list' }))[0]!).searchParams.get('p'), '/');
   for (const [href, o] of [['http://localhost:6960/w/eden/', {}], ['https://soul.game/w/eden/', { webdriver: true }],
-    ['https://soul.game/w/eden/?shot=1', {}], ['https://soul.game/w/eden/', { skipgc: true }]] as const) {
+    ['https://soul.game/w/eden/?shot=1', {}], ['https://soul.game/w/eden/?shot=1&hour=21:30', {}], ['https://soul.game/w/eden/', { skipgc: true }]] as const) {
     assert.deepEqual(await visit(href, { ...o, tag: 'off' + Math.random() }), [], href + JSON.stringify(o));
   }
 });
