@@ -24,10 +24,15 @@ pub const SETS_WINDOW_S: u64 = 60;
 /// The most Souls one read asks for (their grants fit the 4,096-byte body).
 pub const READ_MOST: usize = 64;
 
-/// The table this module keeps in the account store.
+/// The tables this module keeps in the account store: the lines, and each Soul's wind-down word (#3784).
 pub(super) const SCHEMA: &str =
     "CREATE TABLE IF NOT EXISTS soul_now_v1(soul TEXT PRIMARY KEY, text TEXT, at INTEGER,
-    window_at INTEGER NOT NULL, window_n INTEGER NOT NULL);";
+    window_at INTEGER NOT NULL, window_n INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS soul_state_v1(soul TEXT PRIMARY KEY, word TEXT NOT NULL, at INTEGER NOT NULL);";
+
+/// The words a world tells of a Soul whose agent has gone quiet (B16's `souls:idle`, `souls:zombie`,
+/// `souls:asleep`); `awake` clears it. Its owner's page dims the status line for `zombie` and `asleep`, as today.
+pub const WORDS: [&str; 3] = ["idle", "zombie", "asleep"];
 
 /// A Soul's line and when it was set (seconds since 1970).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,6 +100,52 @@ impl Store {
             params![soul, text, text.as_ref().map(|_| now as i64), window_at, n + 1],
         )?;
         Ok(Ok(text.map(|text| Now { text, at: now })))
+    }
+
+    /// A world's word on its Souls (#3784; from the gateway, which has it from the world on each change): each grant
+    /// with `idle`, `zombie` or `asleep` is kept, and `awake` clears it. Anything else is passed over. The count kept
+    /// or cleared.
+    pub fn states_set<'a>(
+        &self,
+        words: impl IntoIterator<Item = (&'a str, &'a str)>,
+        now: u64,
+    ) -> Result<usize, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let mut n = 0;
+        for (soul, word) in words {
+            if !is_soul(soul) {
+                continue;
+            }
+            if word == "awake" {
+                db.execute("DELETE FROM soul_state_v1 WHERE soul = ?1", params![soul])?;
+            } else if WORDS.contains(&word) {
+                db.execute(
+                    "INSERT INTO soul_state_v1(soul, word, at) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(soul) DO UPDATE SET word = ?2, at = ?3",
+                    params![soul, word, now as i64],
+                )?;
+            } else {
+                continue;
+            }
+            n += 1;
+        }
+        Ok(n)
+    }
+
+    /// The words of those of `souls` that have one (none: awake), in the order asked.
+    pub fn states_of(&self, souls: &[&str]) -> Result<Vec<(String, String)>, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let mut q = db.prepare("SELECT word FROM soul_state_v1 WHERE soul = ?1")?;
+        let mut out = Vec::new();
+        for soul in souls.iter().filter(|s| is_soul(s)) {
+            if let Some(word) = q
+                .query_row(params![soul], |r| r.get::<_, String>(0))
+                .optional()?
+            {
+                out.push((soul.to_string(), word));
+            }
+        }
+        Ok(out)
     }
 
     /// The lines of those of `souls` that have one, in the order asked.
@@ -204,6 +255,38 @@ mod tests {
             Err("now.too-often")
         );
         assert!(s.now_set(&a, "later", T0 + SETS_WINDOW_S).unwrap().is_ok());
+        drop(s);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a3784_a_worlds_word_is_kept_until_awake_and_read_with_the_lines() {
+        let (s, dir) = store();
+        let a = format!("soul-{SCOPE}-1");
+        let b = format!("soul-{SCOPE}-2");
+        assert_eq!(
+            s.states_set(
+                [
+                    (a.as_str(), "zombie"),
+                    (b.as_str(), "asleep"),
+                    ("not-a-grant", "asleep"),
+                    (a.as_str(), "dancing")
+                ],
+                T0
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            s.states_of(&[b.as_str(), a.as_str()]).unwrap(),
+            [(b.clone(), "asleep".into()), (a.clone(), "zombie".into())]
+        );
+        s.states_set([(a.as_str(), "asleep"), (b.as_str(), "awake")], T0 + 1)
+            .unwrap();
+        assert_eq!(
+            s.states_of(&[a.as_str(), b.as_str()]).unwrap(),
+            [(a.clone(), "asleep".into())]
+        );
         drop(s);
         let _ = std::fs::remove_dir_all(dir);
     }

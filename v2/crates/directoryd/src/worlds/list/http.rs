@@ -1,6 +1,7 @@
 //! The list and create over HTTP (W3), on W1's listener ([`crate::accounts::serve`]):
 //!
-//! - `GET /v1/worlds`: the list (one request, cacheable for a few seconds, the same for everyone).
+//! - `GET /v1/worlds`: the list (one request, cacheable for a few seconds, the same for everyone). Signed in as for
+//!   create, it also lists the caller's own unlisted worlds (#3698), and is not cached.
 //! - `POST /v1/worlds` with `{"key", "name", "template", "label"}`, signed in as W1's session request is: a provider
 //!   token as `Authorization: Bearer <token>`, or, with the sign-in for test worlds on, `Bearer test:<name>`.
 //!   Answers `{"world": {...}}`, or `{"refused", "detail"}`; a limit's refusal (429) adds `limit` and `retry_after`.
@@ -111,7 +112,15 @@ pub fn route(req: &Request, app: &App) -> Answer {
         return refuse(404, "no-worlds");
     };
     if req.method == "GET" {
-        return match worlds.list() {
+        // Signed in, the caller's own unlisted worlds are listed too (#3698); that answer is not cached publicly.
+        let viewer = match &req.bearer {
+            None => None,
+            Some(_) => match signed_in(req, app) {
+                Ok(a) => Some(a.principal),
+                Err(e) => return e,
+            },
+        };
+        return match worlds.list_for(viewer) {
             Ok(v) => (200, v, "list".into()),
             Err(e) => refuse(503, e.name),
         };

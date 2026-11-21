@@ -39,6 +39,12 @@
 //                                             what happened, from the public history and this Soul's memory: a day by
 //                                             default, at most seven, five lines, the rest counted (R16); --as <id>
 //                                             names which Soul asks, when the home has more than one
+//   souls.mjs whatson [--hours n]             what is on now and in the next n real hours (default 3, up to 168) from
+//                                             the calendar items the world publishes, and who is where (#3703)
+//   souls.mjs calendar                        every calendar item not over, and the blank notices one may post on
+//   souls.mjs calendar add "<title>" --place <id> --in <minutes> --for <minutes> ["description"]   posts an item on
+//                                             a blank notice at that place; calendar interest|not-coming <id> says
+//                                             this Soul will come, or no longer will
 //   souls.mjs stats                           per achieved intent: commands, bytes printed, first-send result (R10)
 //   souls.mjs stop [<sequence>]               ends your own act where it stands, as today (#3705): a walk stops now, a
 //                                             sit, a lie or a rise finishes, a standing order ends. The newest act
@@ -74,6 +80,10 @@
 //                                             `in 10m`), a world time (`20:00`), or R9's pattern as JSON. The daemon
 //                                             sends it, with no model turn
 //   souls.mjs schedule [list] | schedule remove <id>   the entries and what became of each
+//   souls.mjs profile [name "<Name>" | description "<text>" | photo <file.png|file.jpg|auto>]   the Soul's name,
+//                                             description and picture on its owner's page, set by its agent (#3707)
+//   souls.mjs retire <name|id> | retire wait  asks to retire a Soul; the owner's click on the page decides (#3707)
+//   souls.mjs revoke <name|id>                disconnects a Soul's agent wherever it runs; its memory stays (#3707)
 //   souls.mjs upgrade [--rollback]            brings today's client's Souls across, one owner approval each (R18); with
 //                                             --rollback, today's client again
 //   souls.mjs query '<json list>' [--budget <bytes>]   several reads of the copy in one call, each answered in turn
@@ -104,11 +114,53 @@ import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount } from '../account/account.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
-export const OPS = ['query', 'batch', 'catalog', 'context', 'status', 'pair', 'look', 'find', 'act', 'inspect', 'object', 'can', 'say', 'shout', 'whisper', 'converse', 'lie', 'wear', 'pray', 'prayers', 'now', 'wait', 'history', 'stats', 'pending', 'ack', 'stop', 'quit', 'receipt', 'events', 'conversations'];
+export const OPS = [
+  'ack',
+  'act',
+  'batch',
+  'calendar',
+  'can',
+  'catalog',
+  'context',
+  'conversations',
+  'converse',
+  'events',
+  'find',
+  'history',
+  'inspect',
+  'lie',
+  'look',
+  'now',
+  'object',
+  'pair',
+  'pending',
+  'pray',
+  'prayers',
+  'query',
+  'quit',
+  'receipt',
+  'say',
+  'shout',
+  'stats',
+  'status',
+  'stop',
+  'wait',
+  'wear',
+  'whatson',
+  'whisper',
+];
 /** #3705: today's names, kept: `stop` ends your act (the daemon's op `halt`), `quit` ends the daemon (its op `stop`). */
 const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse' };
+const CALENDAR_USAGE = 'calendar | calendar add "<title>" --place <placeId> --in <minutes> --for <minutes> ["description"] | calendar interest|not-coming <id>';
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
-export const LOCAL = ['digest', 'consolidate', 'schedule', 'help', 'memory', 'remember'];
+export const LOCAL = [
+  'consolidate',
+  'digest',
+  'help',
+  'memory',
+  'remember',
+  'schedule',
+];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /**
@@ -156,7 +208,9 @@ export function requestOf(argv) {
   }
   // history's --soul is its question; --as is the Soul asking.
   const asking = args.includes('history');
-  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for', '--close', '--to', '--gesture', '--budget', '--cursor']) {
+  // #3703: whatson's and calendar's own flags are theirs alone (`remember --place` is another command's).
+  const own = ['whatson', 'calendar'].includes(args[0]) ? ['--hours', '--place', '--in'] : [];
+  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for', '--close', '--to', '--gesture', '--budget', '--cursor', ...own]) {
     const k = args.indexOf(name);
     if (k >= 0) { opts[name.slice(2)] = args[k + 1]; args.splice(k, 2); }
     if (name === '--missed' && opts.missed === 'late') { opts.missed = `late ${args[k]}`; args.splice(k, 1); }
@@ -209,6 +263,18 @@ export function requestOf(argv) {
     Object.assign(req, { this: id, ...(action !== undefined ? { action, args } : {}) });
   }
   if (op === 'pending' && rest[0] !== '--check') req.list = true;
+  if (op === 'whatson' && opts.hours !== undefined) req.hours = Number(opts.hours);
+  if (op === 'calendar') {
+    // #3703: today's `calendar add "<title>" --place <id> --in <min> --for <min> ["description"]`; here --for is minutes.
+    const [does = 'list', ...words] = rest;
+    if (!['list', 'add', 'interest', 'not-coming'].includes(does)) return { refused: 'calendar-usage', detail: CALENDAR_USAGE };
+    req.do = does;
+    if (does === 'add') Object.assign(req, { title: words[0], ...(words[1] ? { description: words[1] } : {}), place: opts.place, in: Number(opts.in), for_minutes: Number(opts.for) });
+    else if (does !== 'list') req.this = words[0];
+    if (does === 'add' && (!req.title || !req.place || opts.in === undefined || opts.for === undefined)) return { refused: 'calendar-usage', detail: CALENDAR_USAGE };
+    if ((does === 'interest' || does === 'not-coming') && !req.this) return { refused: 'calendar-usage', detail: CALENDAR_USAGE };
+    delete opts.for;
+  }
   if (op === 'ack') {
     if (opts.close !== undefined && !['done', 'failed'].includes(opts.close)) return { refused: 'ack-close', detail: 'ack <message id> "<reply>" --close done|failed' };
     Object.assign(req, { id: rest[0], reply: rest.slice(1).join(' '), ...(opts.close !== undefined ? { close: opts.close } : {}) });
@@ -278,7 +344,7 @@ export async function runViews(args, shootOne) {
 }
 
 function help(home, named, topic) {
-  if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
+  if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]', 'profile [name "Name" | description "Text" | photo <file.png|auto>] [--soul <id>]', 'retire <name|id> [--as alias] | retire wait', 'revoke <name|id> [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
   if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake'), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;
