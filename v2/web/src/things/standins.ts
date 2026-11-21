@@ -27,7 +27,7 @@ export function cardable(o: StandInOptions, g: THREE.BufferGeometry, m: THREE.Ma
 /** Where a part's picture is in the cards' atlas: u, v of its corner and its width and height (0..1). */
 export type CardCell = readonly [number, number, number, number];
 /** The cards' pictures: one texture for every card, so every card on the page is one draw (today drew one a part). */
-export type CardPictures = { texture: THREE.Texture; add(geometry: THREE.BufferGeometry, material: THREE.Material): CardCell | null };
+export type CardPictures = { target?: THREE.WebGLRenderTarget; texture: THREE.Texture; add(geometry: THREE.BufferGeometry, material: THREE.Material): CardCell | null };
 
 /** The card: x in [-0.5, 0.5], y in [0, 1], normal straight up so it is lit like the ground cover around it; each
  *  instance's matrix gives its size and footprint (`cardMatrix`). */
@@ -78,6 +78,7 @@ export function rendererPictures(renderer: THREE.WebGLRenderer, cell = 96, cols 
   target.texture.minFilter = THREE.LinearMipmapLinearFilter;
   let next = 0, cleared = false;
   return {
+    target,
     texture: target.texture,
     add(geometry, material) {
       if (next >= cols * cols) return null;
