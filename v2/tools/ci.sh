@@ -168,12 +168,12 @@ client_steps() {
 # The client's library by build hash (R5, #2699): cached or downloaded, refused by name, run in a worker with a limit.
 step client-sync node --test client/src/sync/*.test.mjs
 # The resident daemon (R6, #2700): ten forced drops against the real gateway and the world's end of it (I4); R5b's resync after a long cut.
-step client-daemon bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/daemon/*.test.mjs'
+step client-daemon bash -c 'cargo build -p gatewayd -p worldd -p directoryd -p testworld --locked --quiet && node --test client/src/daemon/*.test.mjs'
 # The world's clock on every copy (E7b, #3516): world now from the root's fields, against `worldd serve` across a rate change.
 step client-clock bash -c 'cargo build -p gatewayd -p worldd -p testworld --locked --quiet && node --test client/src/clock/*.test.mjs'
 # The thin command, the brief and find (R7, #2701): 100 scripted command sequences against the same gateway and world.
 step client-command bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet &&
-  node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs client/src/shoot/*.test.mjs client/src/home/*.test.mjs'
+  node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs client/src/shoot/*.test.mjs client/src/view/*.test.mjs client/src/home/*.test.mjs'
 # The creator's command (G7, #2796): a creator's daemon checks batches on its copy with no frame sent, and edits.
 step client-creator bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/creator/*.test.mjs'
 # The client's trace and stats (R10, #2702): per achieved intent, local only, with the network refused.
@@ -193,6 +193,11 @@ step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p tes
   node --test client/src/pair/*.test.mjs'
 # The served client (R17, #2818): the served files against the release's manifest; the one line, upgrade, rollback.
 step client-served bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/served/*.test.mjs'
+# The served-world gate (#1960): an Eden slice served by worldd, gatewayd and directoryd, two Souls paired and joined,
+# real acts through the thin command; the page's worker on the public stream and the client's copy, across a restart.
+# Assertions that wait on an open fix are marked PENDING #<issue> in the file and printed, never skipped silently.
+step served-world-e2e bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p testworld --locked --quiet &&
+  node --test client/served/e2e/world.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs
 # Wake rules and the owner's messages (R13, #2753): the budget, merging with no reader, the mailbox through the gateway.

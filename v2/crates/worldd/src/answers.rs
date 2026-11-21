@@ -219,7 +219,8 @@ pub enum Event {
         bytes: Vec<u8>,
         reply: Reply,
     },
-    /// Lockstep: run every tick up to and including `tick`, then report the zone's state on `done`.
+    /// Lockstep: run every tick up to and including `tick`, then report the zone's state on `done`, once every tick
+    /// run is on the disk and in the sync copy, as a receipt is (so a sync asked after it sees the run's changes).
     RunTo {
         tick: i64,
         done: Sender<Ran>,
@@ -457,7 +458,8 @@ pub struct Config {
     /// The longest an act stays open, from its arrival, when its expiry is later.
     pub deadline: Micros,
     pub checkers: usize,
-    /// `<actor hex> <sequence>` appended for each fresh intent, in the order taken (I1's restart bench).
+    /// `<actor hex> <sequence>` appended for each fresh intent, in the order taken (I1's restart bench); ` reflex`
+    /// follows when the Soul's client sent it on its own (#3764).
     pub arrivals: Option<File>,
     /// Makes the world's bodies, on the clock thread, for move intents (I4b, #3156); without them a move is refused
     /// `intent.not-a-form-on-a-node`.
@@ -760,6 +762,8 @@ struct Tick {
     parts: Vec<Arc<Part>>,
     /// Answers sent as they are, with no block: a form act's progress (C20).
     bare: Vec<(Vec<Reply>, Vec<u8>)>,
+    /// A lockstep run's report, sent after every tick before it is on the disk and in the sync copy.
+    ran: Option<(Sender<Ran>, Ran)>,
 }
 
 struct Clock {
@@ -1158,6 +1162,24 @@ pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: 
     .unwrap_or_default()
 }
 
+/// The backstop refusal of an intent holding a text that is not a name (#3765).
+const TEXT_NOT_A_NAME: &str = "intent.text-not-a-name";
+
+/// An answered intent as its row logs it. The writer runs the reader's check (#3765): an intent holding a text that
+/// is not a name, which every intake refuses first, is logged as its encoded bytes, never as a text the log's reader
+/// refuses, and named.
+fn logged_intent(intent: Value) -> Value {
+    match replica::effects::not_a_name(&intent) {
+        None => intent,
+        Some(t) => {
+            eprintln!(
+                "worldd: an answered intent holds text-not-a-name {t:?}: logged as its bytes"
+            );
+            Value::Bytes(encode(&intent).unwrap_or_default())
+        }
+    }
+}
+
 fn name(s: &str) -> Name {
     Name::new(s).unwrap_or_else(|| Name::new("act.refused").expect("a name"))
 }
@@ -1338,7 +1360,7 @@ impl Clock {
             row.insert(3, id.to_value());
         }
         if let Some(i) = intent {
-            row.insert(5, i);
+            row.insert(5, logged_intent(i));
         }
         self.rows.push(Value::Map(row));
         self.replies.push((waiters, frame, stamps));
@@ -1455,13 +1477,20 @@ impl Clock {
         if let Some(f) = self.arrivals.as_mut() {
             // One write per line, unbuffered, so a killed world leaves every line it took.
             let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
-            let _ = f.write_all(format!("{hex} {sequence}\n").as_bytes());
+            // A reflex (#3764) is named: its Soul's client sent it, not its agent.
+            let reflex = if intent.reflex { " reflex" } else { "" };
+            let _ = f.write_all(format!("{hex} {sequence}{reflex}\n").as_bytes());
         }
         if intent.verb.as_str() == skills::wear::VERB {
             return self.wear(&intent, key, (reply, stamps), now);
         }
         let mut value = intent.to_value();
         keep_arg_names(&mut value);
+        // Every text the intent would be logged with must be a name the log's reader takes (#3765). A malformed word
+        // (an act's `sit_down:undefined`, a form argument, an edit's or a set-down's) is a backstop: the intent's own
+        // checks keep their names, and one that passes them all is refused `intent.text-not-a-name` where it would be
+        // taken, before anything is written, logged without its intent. Words are bytes (T8), so none is a text.
+        let unnamed = replica::effects::not_a_name(&value).is_some();
         let form = words::form(&intent);
         // A turn into an activity is its members' alone: refused before its words are kept when the speaker is not one.
         let mut members = BTreeSet::new();
@@ -1502,10 +1531,20 @@ impl Clock {
             let a = self.refusal(actor, sequence, "intent.ids-exhausted");
             return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
         };
+        // B16: an agent's act (never a reflex, #3764) wakes a body the wind-down holds, on this tick; the act then runs.
+        if let (true, Ok(body)) = (intent.agent_act(), self.body_of(&intent))
+            && let Some(b) = self.bodies.as_mut()
+        {
+            b.agent_acted(body, now);
+        }
         // A leave retires the Soul's body (C3).
         if let (Actor::Soul(soul), true) =
             (actor, intent.verb.as_str() == LEAVE && self.life.is_some())
         {
+            if unnamed {
+                let a = self.refusal(actor, sequence, TEXT_NOT_A_NAME);
+                return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+            }
             return self.leave(
                 soul,
                 id,
@@ -1526,6 +1565,10 @@ impl Clock {
                 Err(e) => Some(Err(e)),
             };
             if let Some(entry) = entry {
+                if unnamed && entry.is_ok() {
+                    let a = self.refusal(actor, sequence, TEXT_NOT_A_NAME);
+                    return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+                }
                 let reason = match entry {
                     Ok(e) => self.write(e).err().map(|r| r.name),
                     Err(r) => Some(r),
@@ -1556,6 +1599,10 @@ impl Clock {
                     detail: String::new(),
                 })
                 .and_then(|body| match self.bodies.as_mut() {
+                    Some(_) if unnamed => Err(Refusal {
+                        name: TEXT_NOT_A_NAME,
+                        detail: String::new(),
+                    }),
                     Some(b) => crate::orders::accept(b, &intent, body, id, now),
                     None => Err(Refusal {
                         name: "orders-off",
@@ -1677,6 +1724,10 @@ impl Clock {
         } else {
             acts::Args::default()
         };
+        if unnamed {
+            let a = self.refusal(actor, sequence, TEXT_NOT_A_NAME);
+            return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+        }
         let body = match &taken {
             Taken::Form(a) => a.body,
             Taken::Move(m) => m.body,
@@ -2218,6 +2269,7 @@ impl Clock {
                 fallbacks: Vec::new(),
                 replaces: None,
                 body: None,
+                reflex: false,
             };
             // Only a Soul with a body here (its link after a restart included); the directory never births one.
             if self.unborn(&intent).is_some() {
@@ -2856,6 +2908,7 @@ impl Clock {
         };
         let mut ended = b.step(now);
         let orders = std::mem::take(&mut b.orders.log);
+        let wind = std::mem::take(&mut b.wind_log);
         let mut deadlines = Vec::new();
         for (id, walk) in &mut self.walks {
             let (due, blocked) = walk.step(b, now);
@@ -2876,6 +2929,9 @@ impl Clock {
         let heard = std::mem::take(&mut b.heard);
         if !orders.is_empty() {
             self.write_own(orders, "standing orders");
+        }
+        if !wind.is_empty() {
+            self.write_own(wind, "the wind-down");
         }
         for (speaker, said, at) in heard {
             let e = speech::entry(Clock::own(speaker, at), speaker, &said);
@@ -3355,6 +3411,7 @@ impl Clock {
                 handed,
                 bare: progress,
                 parts,
+                ran: None,
             });
         }
         self.records += written;
@@ -3594,6 +3651,9 @@ fn answer_loop<S: Storage + 'static>(
                 let _ = w.send(frame.clone());
             }
         }
+        if let Some((done, ran)) = t.ran {
+            let _ = done.send(ran);
+        }
         if let Some(m) = &measures {
             m.queues[measures::LOG].leave(k);
         }
@@ -3707,6 +3767,8 @@ pub fn start<S: Storage + 'static>(
     let mut restart = Restart::default();
     let mut blobs = Blobs::default();
     let mut order_records = Vec::new();
+    // B16: the wind-down's records and the Souls' acts replayed, to rebuild it.
+    let mut wind_records: Vec<Effect> = Vec::new();
     let records: &[Vec<u8>] = match restored {
         Some(r) => {
             let logged = found.first + found.records.len() as u64;
@@ -3744,18 +3806,34 @@ pub fn start<S: Storage + 'static>(
         None => &found.records,
     };
     restart.read = records.len() as u64;
-    for record in records {
+    let first = found.first + (found.records.len() - records.len()) as u64;
+    for (n, record) in (first..).zip(records) {
         // The recorder's input records are what the world was handed, not what it did (K12): passed by.
         if recorder::is_input(record) {
             continue;
         }
-        let part = Part::read(record)?;
+        // A record its reader refuses stops the restart, named with its place; the log is kept as written (#3765).
+        let part = Part::read(record).map_err(|r| Refusal {
+            name: "log-record-unreadable",
+            detail: format!(
+                "record {n} of the log: {r}; the log is kept as written, nothing is dropped or repaired"
+            ),
+        })?;
         if !part.effects.is_empty() {
             world.apply(&part)?;
         }
         restart.applied += 1;
         receipts.index(&part.effects);
         remember_orders(&mut order_records, &part.effects);
+        wind_records.extend(
+            part.effects
+                .iter()
+                .filter(|e| {
+                    matches!(e.envelope.actor, Actor::Soul(_))
+                        || skills::wind_down::read(e).is_some()
+                })
+                .cloned(),
+        );
         read_back(&part, &mut placed, &mut last);
         // Nodes an edit placed took their ids on the intents' counter (G1b): never give one out again.
         for e in &part.effects {
@@ -4190,6 +4268,12 @@ pub fn start<S: Storage + 'static>(
                         if let Err(r) = crate::orders::resume(&mut b, &order_parts, at) {
                             eprintln!("worldd: standing orders were not restored: {r}");
                         }
+                        b.wind_resume(
+                            &wind_records,
+                            |s| c.life.as_ref().and_then(|l| l.life.body_of(s)),
+                            &placed,
+                            at,
+                        );
                         if let Some(w) = &c.walkers {
                             w.offer_map(&b, c.replica.version());
                         }
@@ -4301,7 +4385,22 @@ pub fn start<S: Storage + 'static>(
                             stop = true;
                         }
                     }
-                    let _ = done.send(c.ran());
+                    // Through the answers thread, behind the run's ticks: the report is an answer the caller holds.
+                    let ran = Tick {
+                        inputs: None,
+                        record: None,
+                        replies: Vec::new(),
+                        started: None,
+                        handed: None,
+                        parts: Vec::new(),
+                        bare: Vec::new(),
+                        ran: Some((done, c.ran())),
+                    };
+                    if let Err(e) = c.answers.send(ran)
+                        && let Some((done, ran)) = e.0.ran
+                    {
+                        let _ = done.send(ran);
+                    }
                     if stop {
                         break;
                     }
@@ -4728,6 +4827,7 @@ mod tests {
             }],
             replaces: None,
             body: None,
+            reflex: false,
         }
     }
 
@@ -5102,6 +5202,7 @@ mod tests {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         let place = Op::Place {
             name: 1,
@@ -5228,6 +5329,7 @@ mod tests {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         let cfg = || {
             let mut cfg = Config::new(LINEAGE, 1);
@@ -5873,6 +5975,90 @@ mod standing_order_carry_tests {
             active.iter().map(|e| e.envelope.node).collect::<Vec<_>>(),
             vec![b],
             "cancelled order cannot restart"
+        );
+    }
+}
+
+#[cfg(test)]
+mod no_brick_tests {
+    //! #3765 A4: the writer of an answered row against the log's reader, over many intent words.
+    use super::*;
+
+    /// Text the encoding allows (rule 6), so each word could arrive in an intent.
+    const ALPHABET: &[u8] = b"abcdefgxyzABCZ0189_-.:/@";
+
+    /// A tick record holding one answered row whose intent carries `word` as its verb and as a form argument.
+    fn record(row_intent: Value) -> Vec<u8> {
+        let row = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(vec![1])),
+            (2, Value::Uint(1)),
+            (4, Value::Bytes(vec![2])),
+            (5, row_intent),
+        ]));
+        encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(Hash::of(Purpose::Header, b"h").to_bytes())),
+            (2, Value::Array(Vec::new())),
+            (ANSWERED, Value::Array(vec![row])),
+        ])))
+        .unwrap()
+    }
+
+    #[test]
+    fn every_logged_intent_word_reads_back() {
+        let mut seed: u64 = 0x3765;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let (mut names, mut not_names) = (0, 0);
+        for _ in 0..20_000 {
+            // Half the words are near-names: lowercase parts round one colon, as a client means them.
+            let near = next() % 2 == 0;
+            let alphabet: &[u8] = if near { b"abcxyz019_-" } else { ALPHABET };
+            let len = 1 + (next() % 24) as usize;
+            let mut word: String = (0..len)
+                .map(|_| alphabet[(next() % alphabet.len() as u64) as usize] as char)
+                .collect();
+            if near {
+                word.insert(0, 'a');
+                word.insert(1 + (next() % len as u64) as usize, ':');
+            }
+            let text = Value::Text(Name::new(&word).expect("the alphabet is names' bytes"));
+            let intent = Value::Map(BTreeMap::from([
+                (2, text.clone()),
+                (
+                    4,
+                    Value::Map(BTreeMap::from([(
+                        1,
+                        Value::Array(vec![Value::Array(vec![
+                            Value::Bytes(b"thing".to_vec()),
+                            text,
+                        ])]),
+                    )])),
+                ),
+            ]));
+            // Intake's check and the reader agree: what intake passes, the reader reads as written.
+            let raw = Part::read(&record(intent.clone()));
+            let refused = replica::effects::not_a_name(&intent).is_some();
+            assert_eq!(raw.is_err(), refused, "intake and reader agree on {word:?}");
+            if refused {
+                not_names += 1
+            } else {
+                names += 1
+            }
+            // The writer never logs what the reader refuses, and keeps a name as it is.
+            let logged = logged_intent(intent.clone());
+            Part::read(&record(logged.clone()))
+                .unwrap_or_else(|r| panic!("{word:?} logged unreadable: {r}"));
+            if !refused {
+                assert_eq!(logged, intent, "a name is logged as written");
+            }
+        }
+        assert!(
+            names > 100 && not_names > 100,
+            "both kinds tried: {names} names, {not_names} not"
         );
     }
 }

@@ -52,3 +52,30 @@ export class Flight {
     return { eye: this.fromEye.clone().lerp(target.clone().add(this.offset), k), target: this.fromTarget.clone().lerp(target, k), done: this.t >= 1 };
   }
 }
+
+/** A flight between two views (C2, #3674): from the camera's eye and gaze to another eye and gaze, eased, timed as a
+ *  flight to a Soul is. The guided tour flies between its stops with it; it moves the camera only. */
+export class PoseFlight {
+  readonly seconds: number;
+  private t = 0;
+  private fromEye: THREE.Vector3;
+  private fromTarget: THREE.Vector3;
+  private toEye: THREE.Vector3;
+  private toTarget: THREE.Vector3;
+
+  constructor(eye: THREE.Vector3, target: THREE.Vector3, toEye: THREE.Vector3, toTarget: THREE.Vector3) {
+    this.fromEye = eye.clone();
+    this.fromTarget = target.clone();
+    this.toEye = toEye.clone();
+    this.toTarget = toTarget.clone();
+    const gaze = target.clone().sub(eye).normalize(), toGaze = toTarget.clone().sub(toEye).normalize();
+    this.seconds = flightSeconds(toEye.distanceTo(eye), gaze.angleTo(toGaze));
+  }
+
+  /** Advances `dt` seconds; the eye and gaze now. */
+  step(dt: number): { eye: THREE.Vector3; target: THREE.Vector3; done: boolean } {
+    this.t = Math.min(1, this.t + (Number.isFinite(dt) ? Math.max(0, dt) : 0) / this.seconds);
+    const k = easeInOut(this.t);
+    return { eye: this.fromEye.clone().lerp(this.toEye, k), target: this.fromTarget.clone().lerp(this.toTarget, k), done: this.t >= 1 };
+  }
+}
