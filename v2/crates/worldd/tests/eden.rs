@@ -515,8 +515,8 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
     assert_eq!(left, 0, "every seat placed on a floor");
     assert_eq!(on, on_things.len() + punts, "the things they are on");
     assert_eq!(registered, declared, "every declared body slot registered");
-    // Every def today seats has at least today's slots, but those whose entries declare no body slot with a stand
-    // point (C17: the campfire's and the piano's).
+    // Every def today seats has at least today's slots, but the one whose entry declares no body slot with a stand
+    // point (C17: the campfire's). The piano's bench seats its pianist, as today (#3714).
     let none: Vec<&str> = short
         .iter()
         .filter(|d| by_def.get(*d).copied().unwrap_or(0) > 0)
@@ -525,8 +525,8 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
     assert!(none.is_empty(), "short of today's slots: {none:?}");
     assert_eq!(
         short,
-        vec!["core-campfire@1".to_owned(), "core-piano@1".to_owned()],
-        "only the entries with no body slot"
+        vec!["core-campfire@1".to_owned()],
+        "only the entry with no body slot"
     );
     walked.expect("walked in to the armchair's stand point");
     sat.expect("sat in the armchair");
