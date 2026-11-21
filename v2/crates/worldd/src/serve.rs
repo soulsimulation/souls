@@ -82,7 +82,7 @@
 // The process reads the wall clock once for the stream's anchor (V1 rule 5); the engine never does.
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -401,11 +401,66 @@ fn with_punts(facts: &str) -> R<String> {
     Ok(f.to_json())
 }
 
+/// The facts with a kind for each entry kind a form makes (a `create`) that the facts do not already name (#3703): a
+/// blank notice the notice board gives, made in a Soul's hand. A made thing's kind must be pinned in the world's header
+/// like any other; with no thing of it in the facts it would not be. The same entries give the same kinds.
+fn with_made(facts: &str, entries: &[(String, Json)]) -> R<String> {
+    let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
+    let named: BTreeSet<String> = f
+        .get("kinds")
+        .and_then(Json::arr)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|k| k.get("name").and_then(Json::str).map(import_eden::kind_name))
+        .collect();
+    let known: BTreeSet<&str> = entries.iter().map(|(k, _)| k.as_str()).collect();
+    let made: BTreeSet<String> = entries
+        .iter()
+        .flat_map(|(_, e)| e.get("forms").and_then(Json::obj).unwrap_or(&[]))
+        .flat_map(|(_, f)| f.get("effects").and_then(Json::arr).unwrap_or(&[]))
+        .filter(|e| e.get("change").and_then(Json::str) == Some("create"))
+        .filter_map(|e| e.get("kind").and_then(Json::str))
+        .filter(|k| known.contains(k) && !named.contains(*k))
+        .map(str::to_owned)
+        .collect();
+    if made.is_empty() {
+        return Ok(facts.to_owned());
+    }
+    let Json::Obj(top) = &mut f else {
+        return Err("the facts are not an object".into());
+    };
+    let add: Vec<Json> = made
+        .iter()
+        .map(|k| {
+            Json::Obj(
+                [
+                    ("ref", Json::s(&format!("made-{}@1", k.replace(':', "-")))),
+                    ("hash", Json::s(&to_hex(&sha256(format!("souls/made/{k}").as_bytes())))),
+                    ("name", Json::s(k)),
+                    ("form", Json::s("point")),
+                    ("layer", Json::s("decor")),
+                    ("door", Json::Bool(false)),
+                    ("mesh", Json::Bool(false)),
+                    ("slots", Json::Int(0)),
+                ]
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v))
+                .collect(),
+            )
+        })
+        .collect();
+    match top.iter_mut().find(|(k, _)| k == "kinds") {
+        Some((_, Json::Arr(a))) => a.extend(add),
+        _ => return Err("the facts have no 'kinds' list".into()),
+    }
+    Ok(f.to_json())
+}
+
 /// The rowing punt's def (#3603): today's `rowing-punt`, a kind the world adds.
 const PUNT_REF: &str = "core-rowing-punt@1";
 
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
-    let facts = &with_punts(facts)?;
+    let facts = &with_made(&with_punts(facts)?, entries)?;
     let mut im = import_eden::load(facts)?;
     stamp("facts");
     for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {

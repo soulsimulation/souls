@@ -683,6 +683,41 @@ fn obj_mut<'a>(v: &'a mut Json, key: &str) -> Option<&'a mut Json> {
 /// argument is at [`AT_ARG`], that thing (returned). A point of this thing named by `at` stays as it is. An argument
 /// not given as a thing is refused `arg-missing`. The two points are added to the copy's points, at its origin, so the
 /// binder knows them; [`Sight`] measures them.
+/// `kinds` (entries by kind) with each form's `create` kind written as `pinned` names it (`<kind>@<hash>`), where it
+/// pins one; any other is left as it is, and its make is refused by name (`name-not-pinned`).
+fn pin_made(kinds: Json, pinned: &[Name]) -> Json {
+    let pin = |k: &str| pinned.iter().find(|n| plain(n) == k).map(|n| n.as_str().to_owned());
+    let Json::Obj(entries) = kinds else {
+        return kinds;
+    };
+    Json::Obj(
+        entries
+            .into_iter()
+            .map(|(name, mut entry)| {
+                if let Some(Json::Obj(forms)) = obj_mut(&mut entry, "forms") {
+                    for (_, f) in forms.iter_mut() {
+                        if let Some(Json::Arr(effects)) = obj_mut(f, "effects") {
+                            for e in effects.iter_mut() {
+                                let made = (e.get("change").and_then(Json::str) == Some("create"))
+                                    .then(|| e.get("kind").and_then(Json::str).and_then(pin))
+                                    .flatten();
+                                if let (Some(p), Json::Obj(o)) = (made, e) {
+                                    for (k, v) in o.iter_mut() {
+                                        if k == "kind" {
+                                            *v = Json::s(&p);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                (name, entry)
+            })
+            .collect(),
+    )
+}
+
 /// An intent's whole-number arguments split for `form` of `entry`: those it `takes` as an `int` or a `duration` (a
 /// count, a start time) as values, the rest as slot numbers (#3703).
 fn numbers(
@@ -816,6 +851,8 @@ impl Acts {
         header: replica::effects::Header,
         scope: Scope,
     ) -> Acts {
+        // A form's `create` names its kind plainly; the world makes it as the header pins it (#3703).
+        let kinds = pin_made(kinds, &header.kinds);
         let mut forms = Forms::new();
         let mut loaded = replica::kinds::Kinds::default();
         for (_, entry) in kinds.obj().unwrap_or(&[]) {
