@@ -740,3 +740,87 @@ fn v13c_a1_a_completed_pairing_records_the_soul_under_the_approving_account() {
         json!([{"grant": grant, "follow": follow_of(&grant)}])
     );
 }
+
+/// C14 (#3684) A1, A3: a Soul's daemon sets its status line through the gateway (the mailbox key and the socket's own
+/// grant); anyone reads it, and nothing else, by grant. A line past 140 characters is refused by name and the line
+/// kept; an empty one clears it. Without the gateway's key a set is refused.
+#[test]
+fn c14_a1_a_soul_sets_its_status_line_through_the_gateway_and_anyone_reads_it() {
+    use directoryd::accounts::serve::{App, key_digest, run};
+    let dir = scratch("c14-now");
+    let app = App {
+        store: Store::open(&dir.join("accounts.sqlite")).unwrap(),
+        verifier: None,
+        test_sign_in: false,
+        view_key: None,
+        origin: Some(PAGE.to_string()),
+        mailbox_key: Some(key_digest("gateway-key")),
+        pairing: None,
+        log: Mutex::new(Box::new(std::io::sink())),
+        worlds: None,
+    };
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    std::thread::spawn(move || run(listener, Arc::new(app)));
+    let set = |key: &str, grant: &str, text: Value| {
+        let body = json!({"now": {"n": 7, "text": text}}).to_string();
+        let mut s = TcpStream::connect(&addr).unwrap();
+        write!(s, "POST /v1/mailbox/now HTTP/1.1\r\nhost: x\r\nauthorization: Bearer {key}\r\nsouls-soul: {grant}\r\ncontent-length: {}\r\n\r\n{body}", body.len()).unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).unwrap();
+        let (head, body) = out.split_once("\r\n\r\n").unwrap();
+        (
+            head[9..12].parse::<u16>().unwrap(),
+            serde_json::from_str::<Value>(body).unwrap(),
+        )
+    };
+    let read = |souls: Value| {
+        request(
+            &addr,
+            "POST",
+            "/v1/account/now",
+            None,
+            &json!({"souls": souls}).to_string(),
+        )
+    };
+    let (a, b) = (soul_grant(1), soul_grant(2));
+
+    let (s1, r1) = set("gateway-key", &a, json!("  Mending the\nnets "));
+    assert_eq!(s1, 200);
+    assert_eq!(
+        (r1["reply"]["n"].as_u64(), r1["reply"]["ok"].as_bool()),
+        (Some(7), Some(true))
+    );
+    assert_eq!(r1["reply"]["now"]["text"], "Mending the nets");
+    let (s2, _, got) = read(json!([a, b]));
+    assert_eq!(s2, 200);
+    assert_eq!(got["now"][&a]["text"], "Mending the nets");
+    assert!(
+        got["now"].get(&b).is_none(),
+        "a Soul with no line is not in the answer"
+    );
+    assert_eq!(
+        got["now"][&a].as_object().unwrap().len(),
+        2,
+        "text and at only"
+    );
+
+    let (_, r3) = set("gateway-key", &a, json!("x".repeat(141)));
+    assert_eq!(r3["reply"]["refused"], "now.too-long");
+    assert_eq!(read(json!([a])).2["now"][&a]["text"], "Mending the nets");
+    let (_, r4) = set("gateway-key", &a, json!(""));
+    assert_eq!(
+        (r4["reply"]["ok"].as_bool(), &r4["reply"]["now"]),
+        (Some(true), &Value::Null)
+    );
+    assert!(read(json!([a])).2["now"].as_object().unwrap().is_empty());
+
+    let (s5, r5) = set("not-the-key", &a, json!("Hi"));
+    assert_eq!((s5, r5["refused"].as_str()), (401, Some("mailbox-key")));
+    let (s6, _, r6) = read(json!((0..65).map(soul_grant).collect::<Vec<_>>()));
+    assert_eq!((s6, r6["refused"].as_str()), (400, Some("now.too-many")));
+    println!(
+        "c14 a1: set {s1}; too long {}; cleared; no key {s5}; 65 asked {s6}",
+        r3["reply"]["refused"]
+    );
+}

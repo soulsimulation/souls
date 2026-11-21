@@ -20,7 +20,10 @@
 //     {"op":"act","verbs":["a","b"]}      a ranked list: the first is the act, the rest its fallbacks, each on `target`
 //     {"op":"wait","seconds":30}          returns when something addressed to this Soul happened, or at the timeout
 //   and C4's (#3368), each sent once as `act` is, its answer arriving as an event (`answer` 1 is a receipt):
-//     {"op":"say","words":".."}           words out loud, T8's `{23: words}` in parameter 1 (V1b, #3361)
+//     {"op":"say","words":".."}           words out loud, T8's `{23: words}` in parameter 1 (V1b, #3361); with
+//                                         "loud":true a shout, heard farther (C26, #3689); with "to":"<name|id">
+//                                         [and "gesture":"<g>"] then the body turns to that Soul, or plays its kind's
+//                                         gesture form <g> toward it; an unknown name or gesture sends nothing
 //     {"op":"whisper","to":"<id>","words":".."}  words to one listener's body alone
 //     {"op":"lie","this":"<id>"}          lie down on a bed (worldd's bodies, as a sit)
 //   and #3604's, sent once as `act` is: E4's set-down of a held thing, `word` one of the placements words (`here`
@@ -48,12 +51,21 @@
 //     {"op":"event","event":{...}}                    an event as R9's matcher takes it, until frames carry them
 //     {"op":"pending"}                                R20's (#3328) check for a scheduler: `due` when a message is
 //                                                     open or wakes can be handed now; it sends and takes nothing
+//     {"op":"pending","list":true}                    C15's (#3685): the open messages, and what arrived since the
+//                                                     last read (taken, as `wait 0` takes it), with no wait
+//     {"op":"ack","id":"<message id>","reply":"..","close":"done|failed"}   C15's: a reply that answers the message
+//                                                     with no act, closing it (`done` unless `close` says `failed`); with
+//                                                     no `close` while an act serves it, the reply rides on that close
 //   and G11's (#3335), prayers, the mailbox's other direction: a request goes to the gateway as a text frame and the
 //   directory's reply comes back on the socket (`n` matches them); an answer to this Soul's prayer arrives as a
 //   `prayer-answered` event, which wakes a `wait`, its words quoted as data. A creator's daemon lists and answers:
 //     {"op":"pray","words":".."}          a prayer to the world's creator, at most 2,000 characters
 //     {"op":"prayers","all":bool}         a Soul's own, waiting or answered; a creator's, waiting first (all: answered too)
 //     {"op":"answer","id":"p_..","words":".."}   a creator's answer, at most 4,000 characters
+//   and C14's (#3684), the Soul's public status line (today's `now`), kept by the directory and shown on the Soul's
+//   page and its owner's, set the same way through the gateway:
+//     {"op":"now","text":".."}            sets it: one line, at most 140 characters; empty or null clears it. A line
+//                                         holding an open owner's message is refused (`now.owner-words`)
 //   and E26's (#3329), conversations (`../converse/converse.mjs`): an invitation to this Soul, or a decline or lapse of
 //   its own offer, is an event `{"kind":"conversation","what":"invited|declined|lapsed","conversation":"<id>",..}`:
 //     {"op":"converse","do":"start","with":"<body id>","words":"..","private":bool}   the offer and the opening line
@@ -129,6 +141,7 @@ import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { calendarOf, worldDue } from '../schedule/world.mjs';
+import { refreshEntries } from '../pair/pair.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
 // A socket not signed in by then is given up and another started: one whose upgrade answer was lost can otherwise
@@ -207,6 +220,7 @@ if (state.wake) Object.assign(wakes, { budget: state.wake.budget, delivered: sta
 const saveWakes = () => { state.wake = { budget: wakes.budget, delivered: wakes.delivered }; save(); };
 const mail = new Map(); // R13: the owner's open messages given to this daemon, by id
 const serving = new Map(); // sequence → the message its act serves
+const replyOf = new Map(); // C15: a message's reply, sent with its close
 const closes = []; // closes not yet sent, for the next sign-in
 const copy = new wire.Copy(); // its scope, by hash (R5b)
 // A sync request not answered by then is given up and the socket started again. It is per request, not per sync: an
@@ -306,10 +320,25 @@ function askDirectory(kind, body) {
   if (!ws || !signedIn) return Promise.resolve({ ok: false, code: 'not-connected', detail: 'the daemon is not signed in: status shows when it is' });
   const n = ++replyN;
   return new Promise((ok) => {
-    const t = setTimeout(() => { replies.delete(n); ok({ ok: false, code: 'prayer.unanswered', detail: 'no reply within 10 s' }); }, PRAYER_WITHIN);
+    const t = setTimeout(() => { replies.delete(n); ok({ ok: false, code: `${kind === 'now' ? 'now' : 'prayer'}.unanswered`, detail: 'no reply within 10 s' }); }, PRAYER_WITHIN);
     replies.set(n, (r) => { clearTimeout(t); replies.delete(n); ok(r); });
     ws.send(JSON.stringify({ [kind]: { n, ...body } }));
   });
+}
+
+// --- C14 (#3684): the public status line -----------------------------------------------------------------------
+const NOW_MOST = 140;
+/** The line as the directory keeps it (today's cleaning: control, zero-width and bidi characters become spaces, runs of
+ *  space one, ends trimmed), `null` to clear; or a refusal by name: too long, or holding an open owner's message. */
+export function nowLine(raw, open = [...mail.values()].map((m) => String(m.text))) {
+  // eslint-disable-next-line no-control-regex
+  const text = String(raw ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, ' ').replace(/\s+/g, ' ').trim();
+  if ([...text].length > NOW_MOST) return { code: 'now.too-long', detail: `at most ${NOW_MOST} characters, not ${[...text].length}` };
+  const plain = (s) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (open.some((m) => plain(m).length >= 8 && plain(text).includes(plain(m)))) {
+    return { code: 'now.owner-words', detail: 'the status line is public: write your own short line, not your owner\'s message' };
+  }
+  return { text: text || null };
 }
 
 /** G11: a text frame that is a reply to a prayer request, or an answer to this Soul's prayer; true if it was one. */
@@ -333,10 +362,16 @@ function onPrayerText(f) {
   return true;
 }
 
-/** R13: the message `id` closed with its act's outcome, now or at the next sign-in. */
+/**
+ * R13: the message `id` closed with its act's outcome, now or at the next sign-in. A reply (C15) rides on the close:
+ * the directory reads only id, state and outcome, and the gateway passes the close to the owner's page as it is.
+ */
 function closeMail(id, state, outcome) {
-  const line = JSON.stringify({ close: { id, state, outcome } });
+  const reply = replyOf.get(id);
+  const line = JSON.stringify({ close: { id, state, outcome, ...(reply ? { reply } : {}) } });
   mail.delete(id);
+  replyOf.delete(id);
+  for (const [s, m] of serving) if (m === id) serving.delete(s); // closed once: a later answer closes nothing
   log(`message ${id} closed ${state} (${outcome})`);
   if (ws && signedIn) ws.send(line); else closes.push(line);
 }
@@ -388,6 +423,13 @@ function syncAnswer(sock, n, refused, bytes) {
   current();
 }
 
+/** #3760: at each sign-in, the world's kind entries into `<home>/kinds/` (an unchanged world answers 304). */
+function refreshKinds() {
+  refreshEntries({ home, world: seat.world, gateway: seat.gateway, token: seat.token })
+    .then((r) => { if (r.changed) log(`kinds: ${r.entries} entries from the world`); })
+    .catch((e) => log(`kinds: not fetched (${e.code ?? 'unreachable'})`));
+}
+
 function connect() {
   counts.connects++;
   let step = 'hello', ended = false;
@@ -417,6 +459,7 @@ function connect() {
         if (a === 'stream.resumed') counts.resumed++;
         if (a === 'stream.cannot-resume') counts.cannotResume++;
         log(`signed in: ${a}`);
+        refreshKinds();
         step = 'stream';
         clearTimeout(deadline);
         if (a === 'stream.resumed' && !copy.empty()) { followWanted = true; current(); }
@@ -447,7 +490,6 @@ function connect() {
         if (movesOf.has(s) && Number(c) !== 3) { state.seated = seatedAfter(movesOf.get(s), Number(c), state.seated ?? null); movesOf.delete(s); }
         if (serving.has(s) && Number(c) !== 3) {
           closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
-          serving.delete(s);
         }
       }
       save();
@@ -529,7 +571,8 @@ function fire(event) {
   firedKeys.add(key);
   if (firedKeys.size > FIRED_KEYS_KEPT) firedKeys.delete(firedKeys.values().next().value);
   for (const { intent } of reflexes.onEvent(event, Date.now())) {
-    sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor });
+    // Marked as a reflex (#3764): sent on the Soul's standing consent, it is not its agent acting.
+    sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor, reflex: true });
   }
 }
 
@@ -611,7 +654,8 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'inspect', 'object']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
+const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
 const nothingYet = () => !events.some((e) => e.kind !== 'synced');
@@ -652,8 +696,38 @@ function formOf(req) {
   }
   const words = String(req.words ?? '');
   if (!words.trim() || [...words].length > WORDS_MOST) return { code: 'words-empty-or-long', detail: `1 to ${WORDS_MOST} characters` };
-  if (req.op === 'say') return { verb: `${NS}:say`, words };
+  if (req.op === 'say') return { verb: `${NS}:${req.loud ? 'shout' : 'say'}`, words };
   return ID.test(String(req.to ?? '')) ? { verb: `${NS}:whisper`, target: req.to, words } : { code: 'whisper-names-a-body', detail: 'whisper <body id> "<words>"' };
+}
+
+/**
+ * C26 (#3689): what `say --to <name|id> [--gesture <g>]` does toward that Soul after the words: the Soul named in the
+ * copy (its body's id, its Soul's id, or its name, any case, but not the speaker), then the speaker's own body's form
+ * from its kind: the gesture's (`<g>_at`, `<g>_to` or `<g>` taking `toward`, else `<g>` alone), or with no gesture the
+ * gaze's `look_at`. A refusal by name when the name or the gesture is not known: then nothing is sent.
+ */
+function towardOf(req) {
+  if (req.to === undefined) return { code: 'gesture-needs-to', detail: 'say --to <name> --gesture <g> "<words>"' };
+  const rows = [...rowsOf(copy).values()], me = rows.find((r) => r.id === ME || r.soul === ME);
+  const want = String(req.to).trim(), lower = want.toLowerCase();
+  const souls = rows.filter((r) => r !== me && (r.soul !== undefined || r.kind === me?.kind));
+  const exact = souls.filter((r) => r.id === want || r.soul === want);
+  const found = exact.length ? exact : souls.filter((r) => r.name.toLowerCase() === lower);
+  if (found.length === 0) return { code: 'say-to-unknown', detail: `no Soul called ${want} in the copy: find "${want}" or look` };
+  if (found.length > 1) return { code: 'say-to-ambiguous', detail: `${found.length} Souls are called ${want}: use the id (${found.map((r) => r.id).join(', ')})` };
+  const them = found[0], forms = kindsIn(join(home, 'kinds'))[me?.kind]?.forms ?? {};
+  const takes = (f) => Object.keys(forms[f]?.takes ?? {});
+  const gestures = Object.entries(forms).filter(([, f]) => f.steps?.length && f.steps.every((x) => x.step === 'move') && Object.keys(f.takes ?? {}).every((k) => k === 'toward'));
+  const g = req.gesture === undefined ? null : String(req.gesture);
+  let form = g === null ? (forms.look_at && takes('look_at').includes('target') ? 'look_at' : null) : null, arg = 'target';
+  if (g !== null) {
+    form = [`${g}_at`, `${g}_to`, g].find((f) => gestures.some(([n]) => n === f) && takes(f).includes('toward')) ?? (gestures.some(([n]) => n === g) ? g : null);
+    arg = 'toward';
+    if (!form) return { code: 'gesture-unknown', detail: `one of ${[...new Set(gestures.map(([n]) => n.replace(/_(at|to)$/, '')))].sort().join(', ') || 'none: the body\'s kind is not in the copy'}` };
+  }
+  const to = { id: them.id, name: them.name };
+  if (!form || !me) return { to };
+  return { to, verb: `${NS}:${form}`, target: me.id, ...(takes(form).includes(arg) ? { args: `${arg}=${them.id}` } : {}) };
 }
 
 const MOVES = new Set(['walk', 'sit', 'lie', 'rise']); // worldd's bodies take these (I4b); they are not checked as forms
@@ -688,12 +762,15 @@ function actsOf(words) {
   return out;
 }
 
-/** Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in). */
-function sendIntent(ranked, { target, words, args, params, basis, expiry }) {
+/**
+ * Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in).
+ * `reflex` marks an R9 reflex's intent (#3764); an agent's never is.
+ */
+function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex = false }) {
   state.sequence++;
   const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
     basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words, args,
-    params ? JSON.stringify(params) : undefined);
+    params ? JSON.stringify(params) : undefined, reflex);
   save();
   const sequence = state.sequence, sent = signedIn;
   if (ranked[0] === 'life:join') joinsOf.add(sequence);
@@ -713,7 +790,31 @@ async function answer(req) {
       const until = Date.now() + Math.min(Number(req.within ?? 4000), 10_000);
       while (!signedIn && Date.now() < until) await sleep(50);
       while (signedIn && mail.size === 0 && Date.now() - signedInAt < MAILBOX_FIRST_MS && Date.now() < until) await sleep(50);
-      return { ok: true, due: mail.size > 0 || wakes.due(Date.now()), mail: mail.size, connected: signedIn };
+      if (!req.list) return { ok: true, due: mail.size > 0 || wakes.due(Date.now()), mail: mail.size, connected: signedIn };
+      // C15 (#3685): the listing a turn starts from. Every message still open (one an act serves says so), and what
+      // arrived since the last read, taken as `wait 0` takes it, with the wakes the budget lets through now.
+      const handed = wakes.deliver(Date.now());
+      if (handed.length) saveWakes();
+      const got = events.splice(0), served = new Set(serving.values());
+      heardSince.length = 0;
+      const open = [...mail.values()].map((m) => ({ id: m.id, text: String(m.text), at: m.at, ...(served.has(m.id) ? { serving: true } : {}) }));
+      const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
+      return closing({ ok: true, connected: signedIn, open, events: got, ...said, ...(handed.length ? { wakes: handed } : {}),
+        ...(open.length ? { next: 'serve each open message: act <act> --for <its id>, or answer it: ack <its id> "<reply>" [--close failed]' } : {}) },
+      (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)) }), { now: true });
+    }
+    case 'ack': {
+      // C15 (#3685): an answer to the owner's message with no act: a reply, and the close (`done`, or `failed` for a no).
+      const id = String(req.id ?? ''), reply = String(req.reply ?? '').replace(/\s+/g, ' ').trim(), close = req.close ?? null;
+      if (close !== null && close !== 'done' && close !== 'failed') return { ok: false, code: 'ack-close', detail: '--close done|failed' };
+      if (!reply || [...reply].length > REPLY_MOST) return { ok: false, code: 'ack-reply', detail: `ack <message id> "<reply>": 1 to ${REPLY_MOST} characters` };
+      if (!mail.has(id)) return { ok: false, code: 'mail-not-found', detail: 'ack names an open message this daemon was given: pending lists them' };
+      replyOf.set(id, reply);
+      if (close === null && [...serving.values()].includes(id)) {
+        return { ok: true, acked: id, reply, closes: 'with the act that serves it: its outcome, your reply beside it' };
+      }
+      closeMail(id, close ?? 'done', 'replied');
+      return { ok: true, acked: id, reply, closed: close ?? 'done', sent: signedIn, ...ageNow() };
     }
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
@@ -724,7 +825,7 @@ async function answer(req) {
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),
         hearing: ws?.hearing ?? null, viewGrants, viewKinds: [...viewKinds],
-        rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since,
+        rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since, now: state.now ?? null,
       };
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
@@ -813,9 +914,13 @@ async function answer(req) {
     case 'say': case 'whisper': case 'lie': {
       const f = formOf(req);
       if (f.code) return { ok: false, code: f.code, detail: f.detail };
+      const t = req.op === 'say' && (req.to !== undefined || req.gesture !== undefined) ? towardOf(req) : null;
+      if (t?.code) return { ok: false, code: t.code, detail: t.detail, sent: false };
       const basis = shownVersion ?? state.cursor;
       const { sequence, sent } = sendIntent([f.verb], { target: f.target, words: f.words, basis });
-      return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis) }, null, { now: true });
+      // C26: the turn or gesture toward them goes after the words, as its own intent; its answer is its own.
+      const toward = t ? { ...t.to, ...(t.verb ? { verb: t.verb, sequence: sendIntent([t.verb], { target: t.target, args: t.args, basis }).sequence } : { turned: false }) } : null;
+      return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis), ...(toward ? { to: toward } : {}) }, null, { now: true });
     }
     case 'inspect': return inspect(req);
     case 'object': {
@@ -870,6 +975,15 @@ async function answer(req) {
       if ([...words].length > most) return { ok: false, code: `${name}.too-long`, detail: `at most ${most} characters, not ${[...words].length}` };
       const r = await askDirectory(req.op, req.op === 'pray' ? { text: words } : { id: String(req.id ?? ''), text: words });
       return r.ok === false ? r : { ok: true, ...r };
+    }
+    case 'now': {
+      const line = nowLine(req.text);
+      if (line.code) return { ok: false, ...line };
+      const r = await askDirectory('now', { text: line.text });
+      if (r.ok === false) return r;
+      state.now = r.now ?? null;
+      save();
+      return { ok: true, now: state.now };
     }
     case 'prayers': {
       const r = await askDirectory('prayers', { all: req.all === true });
@@ -980,7 +1094,11 @@ const server = createServer((c) => {
       const line = buf.slice(0, k);
       buf = buf.slice(k + 1);
       let op = 'unread';
-      Promise.resolve().then(() => { const req = JSON.parse(line); op = OPS.has(req.op) ? req.op : 'unknown'; return answer(req); })
+      Promise.resolve().then(() => {
+        const req = JSON.parse(line);
+        op = !OPS.has(req.op) ? 'unknown' : req.op === 'pending' && req.list ? 'pending-list' : req.op; // a listing is the agent's
+        return answer(req);
+      })
         .catch((e) => ({ ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }))
         .then((out) => {
           // R20: a scheduler's check is not the agent: it takes nothing an answer to the agent would carry.

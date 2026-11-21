@@ -47,10 +47,11 @@ async function relay(port) {
       r.metadata.push({ atUs: observedUs(), connection: state.connection, kind, ...fields });
       if (r.metadata.length > 64) r.metadata.shift();
     };
-    r.inject = (bytes) => {
+    const inject = (bytes) => {
       assert.ok(bytes.length < 126);
       down.write(Buffer.concat([Buffer.from([0x82, bytes.length]), bytes]));
     };
+    let plain = false; // a plain HTTP exchange (the daemon's entries fetch, #3760) passes through, unparsed
     const observed = (frame, writeCalled) => {
       if (!frame) return;
       r.observed.push({ ...frame, writeCalled });
@@ -60,10 +61,13 @@ async function relay(port) {
       state.receivedBytes += chunk.length;
       data = Buffer.concat([data, chunk]);
       mark('chunk', { bytes: chunk.length, totalBytes: state.receivedBytes, bufferedBytes: data.length });
+      if (plain) { down.write(chunk); return; }
       if (!upgraded) {
         const end = data.indexOf('\r\n\r\n');
         if (end < 0) { mark('wait-upgrade', { bufferedBytes: data.length }); return; }
+        if (!data.subarray(0, 12).toString('latin1').startsWith('HTTP/1.1 101')) { plain = true; down.write(data); data = Buffer.alloc(0); return; }
         down.write(data.subarray(0, end + 4)); data = data.subarray(end + 4); upgraded = true;
+        r.inject = inject;
         mark('upgraded');
       }
       while (data.length >= 2) {
