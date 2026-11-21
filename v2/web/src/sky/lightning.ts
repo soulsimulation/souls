@@ -40,6 +40,7 @@ type Bolt = { group: THREE.Group; born: number };
 export class Lightning {
   readonly group = new THREE.Group();
   private seen: string | null = null;
+  private read: { strike: Strike | null; t: number | null } = { strike: null, t: null };
   private bolts: Bolt[] = [];
   private flash = new THREE.HemisphereLight(0xdfe7ff, 0x3a4060, 0);
   private flashLevel = 0;
@@ -64,6 +65,7 @@ export class Lightning {
   /** Each frame: the strike the record holds at world time `t` (µs), the camera, the frame's seconds, and the dome's
    *  flash uniform (x intensity, yzw unit direction toward the strike). */
   update(strike: Strike | null, t: number | null, camera: THREE.Camera, dt: number, domeFlash?: THREE.Vector4): void {
+    this.read = { strike, t };
     const d = due(strike, t, this.seen);
     this.seen = d.seen;
     if (d.fire && strike) this.fire(strike, camera);
@@ -176,5 +178,5 @@ export class Lightning {
   }
 
   /** For a capture: the bolts drawn now, the flash and what was heard. */
-  inspect() { return { bolts: this.bolts.length, flash: Math.round(this.flashLevel * 100) / 100, heard: this.heard.slice(-6), audio: this.audio?.state ?? 'locked' }; }
+  inspect() { return { strike: this.read.strike, t: this.read.t, seen: this.seen, bolts: this.bolts.length, flash: Math.round(this.flashLevel * 100) / 100, heard: this.heard.slice(-6), audio: this.audio?.state ?? 'locked' }; }
 }
