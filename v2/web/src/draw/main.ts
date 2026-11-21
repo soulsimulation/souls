@@ -82,6 +82,8 @@ const sky = new WorldSky(scene, hemi, sun); // V19: sky, daylight and rain from 
 const cam = new FreeCamera(canvas);
 const world = new WorldView();
 scene.add(world.group);
+// #3603: the replica's courseAt, loaded on this thread only when a node with a course (a rowing punt) arrives.
+world.onCourse = () => void import('replica').then(async (r) => { await r.default(); world.courseAt = r.courseAt; }, (e) => console.warn('courses stand still:', e));
 const clock = new PlaybackClock();
 const things = pageThings(scene, world, new URLSearchParams(location.search));
 const fx = pageFx(scene, world, things, q, quality.tier === 'phone'); // C8: flames, fountain water and steam
@@ -206,6 +208,7 @@ renderer.setAnimationLoop((now) => {
   let drawn = 0;
   if (t !== null) {
     drawn = world.draw(t, cam.camera);
+    things.follow(); // #3603: what rides a course, where it is now
     hover.update(now, t);
     if (!framed && drawn > 0) {
       framed = true;

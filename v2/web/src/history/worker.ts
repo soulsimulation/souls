@@ -3,7 +3,7 @@
 // WASM module, the header and the day indexes read are kept between seeks. The node records are read as V5's stream
 // worker reads them (`source/worker.ts`).
 import init, { historyAt } from 'replica';
-import { decode } from 'cborg';
+import { decode, encode } from 'cborg';
 import type { NodeRec, SampleRec } from '../source/source.ts';
 import { happenedInBundle, type Happened } from '../sound/record.ts';
 import { skyFields } from '../sky/record.ts';
@@ -18,6 +18,7 @@ export type Seeked = {
 export type HistoryMsg = { t: 'seeked'; s: Seeked } | { t: 'counts'; day: number; rows: number[][] } | { t: 'error'; seq: number; message: string };
 
 const DAY_US = 86_400_000_000;
+const COURSE = 80; // a moving node's course (#3603)
 const post = (m: HistoryMsg, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
 const num = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : (v as number));
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
@@ -62,6 +63,7 @@ export function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(23)) rec.scale = num(f.get(23));
   if (f.has(24)) rec.tileSize = num(f.get(24));
   if (f.has(25)) rec.tiles = (f.get(25) as unknown[][]).map((t) => [num(t[0]), num(t[1]), t[2] as Uint8Array, t[3] as Uint8Array]);
+  if (f.has(COURSE)) rec.course = encode(f.get(COURSE)); // #3603: re-encoded canonically, as the record holds it
   if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array);
   const sky = skyFields(f); // V19: the world node's day, night and weather
   if (sky) rec.sky = sky;
