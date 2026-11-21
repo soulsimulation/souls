@@ -1,6 +1,7 @@
 //! The world process (Engine v2, #2635): its clock and watchdog (K7, #2647), what it tells its service manager (O1,
 //! #2730), the fork request (K6, #2670), and `serve`, a world from its folder behind the gateway (C1, #3365).
 
+mod compactor;
 mod fork;
 mod gateway_link;
 mod serve;

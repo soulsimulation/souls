@@ -1,0 +1,152 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:jukebox (from core-jukebox@1 and @2, Soul Actions entry 20). Anyone turns it on and off by hand at the knob ('Turn on the jukebox', 'Turn off the jukebox'); everyone near it hears the music while it is on. Turning on a jukebox that is on, or off one that is off, is refused, as the original's when-rules refused it, and names the other form.",
+ "cases": [
+  {
+   "name": "jukebox_switch_on_every_need_met",
+   "act": {
+    "this": "j1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "j1": {
+      "kind": "eden:jukebox"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "jukebox_switch_on_when_on_names_switch_off",
+   "act": {
+    "this": "j1",
+    "form": "switch_on"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "j1": {
+      "kind": "eden:jukebox",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "switch_off"
+    }
+   }
+  },
+  {
+   "name": "jukebox_switch_off_every_need_met",
+   "act": {
+    "this": "j1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "j1": {
+      "kind": "eden:jukebox",
+      "fields": {
+       "on": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "jukebox_switch_off_when_off_names_switch_on",
+   "act": {
+    "this": "j1",
+    "form": "switch_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "j1": {
+      "kind": "eden:jukebox"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "on",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "switch_on"
+    }
+   }
+  }
+ ]
+}

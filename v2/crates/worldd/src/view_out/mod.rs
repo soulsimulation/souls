@@ -1688,6 +1688,10 @@ impl<S: ObjectStore> PublicWriter<S> {
     pub fn source_cursor(&self) -> u64 {
         self.cursor
     }
+    /// Records `..durable_cursor()` are in published parts: a reopen needs the log from here on (#3837).
+    pub fn durable_cursor(&self) -> u64 {
+        self.chunk_start
+    }
     /// Whether the current generation is full and nothing is open (#3825).
     fn rollover_due(&self) -> bool {
         self.generation_parts > 0
