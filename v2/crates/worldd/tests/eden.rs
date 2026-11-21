@@ -1862,3 +1862,15 @@ fn c34_a2_a_lighthouse_and_a_tower_are_climbed_to_their_top_rooms() {
     lantern.expect("the lighthouse climbed, done");
     top.expect("the tower climbed, done");
 }
+
+/// C34 (#3599) A2: the ground-floor areas of the sweep's other named forms resolve the same way. A Soul opens and
+/// closes a greenhouse's vent from its `inside` area (today's e_8b4c5e36: no room of that name, its only floor) and
+/// enters a chapel's nave (e_9b7418a3: the room named `nave`); each ends `done`, where each ended `souls:no-way`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c34_a2_a_greenhouses_vent_and_a_chapels_nave() {
+    let open = act_at("69.0,39.0", "e_8b4c5e36", "eden:open_vent", "c34gh");
+    let enter = act_at("279.0,110.0", "e_9b7418a3", "eden:enter", "c34ch");
+    open.expect("the vent opened, done");
+    enter.expect("the nave entered, done");
+}
