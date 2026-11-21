@@ -2,8 +2,8 @@
 //! its own lineage and exactly one creator.
 //!
 //! 1. **The name first.** A world's name record, at `world-name/<name>`, is written create-only before anything else:
-//!    `{1: name (UTF-8 bytes), 2: lineage, 3: zone, 4: creator, 5: source lineage}`. It is the world's one creator:
-//!    one field, written once, never replaced. Of two creates of one name, the store lets one through and the other
+//!    `{1: name (UTF-8 bytes), 2: lineage, 3: zone, 4: creator, 5: source lineage}`. It records the world's founder:
+//!    one field, written once, never replaced; the validated world-list records later creator handoffs. Of two creates of one name, the store lets one through and the other
 //!    is refused, `name-taken`. Today's reserved names (`eden`, `api`, `god`, `assets`) are refused, `name-reserved`.
 //! 2. **Then the first epoch:** the world's record, its build pinned (W8 `set_build`, create-only), then claimed (W8
 //!    `claim`, epoch 1), so the machine that forks is the one that holds the claim.
@@ -11,7 +11,7 @@
 //!    record with its creator and a claimed world record: never a world nobody owns. The lineage is the caller's fresh
 //!    16 bytes, the same the fork mints under.
 //! 4. **A creator's own world** may be the source ([`Source::Own`]): refused `not-your-world` unless the name record
-//!    of the source names the same creator. Forking another person's world is not offered (Gene's decision).
+//!    and effective world-list authority name the current creator. Forking another person's world is not offered (Gene's decision).
 
 use replica::effects::{Refusal, read_id};
 use replica::encode::{Value, decode, encode};
@@ -147,8 +147,18 @@ pub fn create<S: Store, T>(
     let source = match &c.source {
         Source::Template { lineage } => *lineage,
         Source::Own { name } => match named(dir, name)? {
-            Some(r) if r.creator == c.creator => r.lineage,
-            Some(_) => return refuse("not-your-world", name.clone()),
+            Some(r) => {
+                let owner = if dir.store.get(crate::worlds::list::KEY)?.is_none() {
+                    // G9's standalone library has no served list or handoff authority.
+                    Some(r.creator)
+                } else {
+                    crate::worlds::list::creator_of(&dir.store, &r.lineage, r.zone)?
+                };
+                if owner != Some(c.creator) {
+                    return refuse("not-your-world", name.clone());
+                }
+                r.lineage
+            }
             None => return refuse("world-missing", name.clone()),
         },
     };
