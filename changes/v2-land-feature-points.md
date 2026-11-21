@@ -1,4 +1,4 @@
 ---
 type: fix
 ---
-Engine v2: a Soul asked to walk along a channel, to a wood's glade, round a flower garden or behind a hedge goes to that place on the feature itself, instead of to points around the world's origin.
+Engine v2: a Soul asked to go to a wood's glade or round a flower garden goes to that place on the feature itself, instead of to points around the world's origin. Walking along a channel or behind a hedge now ends `walk.blocked` instead of reporting a false done at the origin.
