@@ -32,6 +32,7 @@ fn a1_golden_envelopes_for_every_kind_of_intent() {
         ("cancel", Kind::Cancel),
         ("replace", Kind::Act),
         ("edit", Kind::Edit),
+        ("reflex", Kind::Act),
     ];
     for (name, kind) in want {
         let (bytes, i) = intent(name);
@@ -354,4 +355,33 @@ fn the_built_checker_artifact_loads_by_its_hash() {
     let r = Checker::load(&bytes, &want).map(|c| to_hex(&c.build));
     println!("{} bytes: {r:?}", bytes.len());
     assert!(r.is_ok(), "{r:?}");
+}
+
+/// #3764: a reflex is marked (field 12 is 1) and an agent's act is not; a reflex is not its agent acting, and a
+/// marker other than 1 is refused.
+#[test]
+fn reflex_a1_a_reflex_is_marked_and_an_agents_act_is_not() {
+    let (act_bytes, act) = intent("act");
+    let (reflex_bytes, reflex) = intent("reflex");
+    assert!(!act.reflex && act.agent_act(), "an agent's act: unmarked");
+    assert!(reflex.reflex && !reflex.agent_act(), "a reflex: marked");
+    // The same act but for the marker, which is the envelope's last field: `12: 1`, two bytes, and one more field.
+    assert_eq!(reflex_bytes[0], act_bytes[0] + 1);
+    assert_eq!(&reflex_bytes[1..reflex_bytes.len() - 2], &act_bytes[1..]);
+    assert_eq!(&reflex_bytes[reflex_bytes.len() - 2..], &[0x0c, 0x01]);
+    let mut unmarked = reflex.clone();
+    unmarked.reflex = false;
+    assert_eq!(unmarked, act);
+    // Only `1` marks a reflex: `12: 0` and `12: 2` are not records.
+    for bad in [0x00, 0x02] {
+        let mut b = reflex_bytes.clone();
+        *b.last_mut().expect("a byte") = bad;
+        let r = Intent::read(&b).expect_err("refused");
+        assert_eq!(r.name, "intent-not-a-record", "12: {bad}");
+    }
+    println!(
+        "reflex: {} (an agent's act: {})",
+        to_hex(&reflex_bytes),
+        to_hex(&act_bytes)
+    );
 }

@@ -729,7 +729,7 @@ impl Checker {
 // --- The fixtures -------------------------------------------------------------------------------------------------
 
 /// The golden intents, as diagnostic notation (rule 14).
-pub const FIXTURES: [(&str, &str); 9] = [
+pub const FIXTURES: [(&str, &str); 10] = [
     ("act", include_str!("../fixtures/intents/act.diag")),
     ("move", include_str!("../fixtures/intents/move.diag")),
     (
@@ -742,6 +742,7 @@ pub const FIXTURES: [(&str, &str); 9] = [
     ("cancel", include_str!("../fixtures/intents/cancel.diag")),
     ("replace", include_str!("../fixtures/intents/replace.diag")),
     ("edit", include_str!("../fixtures/intents/edit.diag")),
+    ("reflex", include_str!("../fixtures/intents/reflex.diag")),
 ];
 
 /// The intents goldens, one per line, `name kind hex`, as `fixtures/intents/goldens.txt` holds them: the native test

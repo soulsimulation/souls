@@ -1,0 +1,3 @@
+# A reflex (#3764, v2/docs/intents.md rule 2): the act fixture's sit, sent by Soul 100's client on its own standing
+# consent (an R9 reflex), not by its agent: field 12 is 1. It does not count as the agent acting.
+{1: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 2: "eden:sit", 3: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8], 5: 7, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0], 1, 42], 7: 60000000, 8: [{1: 1, 2: 1}], 12: 1}
