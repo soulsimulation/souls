@@ -141,6 +141,30 @@ test('hover: pick never lands on a thing whose every part distance detail hides'
   assert.equal(pick(), 'a', 'near: drawn and picked');
 });
 
+test('C8: a lit campfire\'s flame stand-in stays hidden when its part changes band, and comes back when the fire goes out', () => {
+  const things = Object.fromEntries(Array.from({ length: SHARED }, (_, i) => [`e_${i}`, 'campfire']));
+  const detail = { minRadiusPx: 1.25, shadowNear: 24, shadowPerMetre: 14, shadowMaxRadius: 6 };
+  const l = new ThingLayer({ index: indexOf({ kinds: [], things }), fetch: () => new Promise(() => {}), detail, view: () => ({ height: 844, fov: 50 }) });
+  for (let i = 0; i < SHARED; i++) l.set(`t${i}`, `e_${i}`, at(i * 100), box);
+  const logs = part(), flame = { ...part(true), flame: true };
+  l.arrive('campfire', [logs, flame]);
+  const slot = (k: number) => l.things.get('t1')!.slots[k];
+  const drawn = (k: number) => {
+    const s = slot(k), m = new THREE.Matrix4();
+    (s.batch as unknown as { mesh: THREE.InstancedMesh }).mesh.getMatrixAt(s.index, m);
+    return m.determinant() !== 0;
+  };
+  l.update(new THREE.Vector3(0, 0, 0));
+  assert.equal(slot(1).band, FAR, 'the flame 100 m away: drawn, no shadow');
+  l.standIns('t1', false); // the fire is lit: its animated flame draws instead
+  assert.deepEqual([drawn(0), drawn(1)], [true, false]);
+  for (let f = 0; f < 10; f++) l.update(new THREE.Vector3(100, 0, 1));
+  assert.equal(slot(1).band, NEAR, 'the eye walked up: the flame moved to the casting batch');
+  assert.deepEqual([drawn(0), drawn(1)], [true, false], 'and its stand-in stayed hidden');
+  l.standIns('t1', true); // the fire goes out
+  assert.deepEqual([drawn(0), drawn(1)], [true, true]);
+});
+
 test('A2: no detail, no bands (the measure\'s other arm and every test above)', () => {
   const l = new ThingLayer({ index: indexOf({ kinds: [], things: { e_a: 'one' } }), fetch: () => new Promise(() => {}), detail: null });
   l.set('a', 'e_a', at(5000), box);

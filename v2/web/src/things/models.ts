@@ -9,8 +9,9 @@ import { storeyOf, type Storey } from './interior.ts';
 import { isNightGlass, nightWindows } from './windows.ts';
 
 /** One drawn part of a model. `glow`: the parts a light's `on` (or `lit`) state brightens. `storey`: where a generated
- *  building's part is (C10, `interior.ts`), so the interior view can hide its roof and upper storeys. */
-export type Part = { geometry: THREE.BufferGeometry; material: THREE.Material; matrix: THREE.Matrix4; key: string; glow: boolean; storey?: Storey };
+ *  building's part is (C10, `interior.ts`), so the interior view can hide its roof and upper storeys. `flame`: a static
+ *  flame part (role `flame`), the stand-in an animated fire hides while it draws (fx/layer.ts). */
+export type Part = { geometry: THREE.BufferGeometry; material: THREE.Material; matrix: THREE.Matrix4; key: string; glow: boolean; storey?: Storey; flame?: boolean };
 
 /** What the page needs of V17's `models.json`. */
 export type ModelIndex = {
@@ -77,8 +78,8 @@ export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMater
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
-    let role = false;
-    for (let p: THREE.Object3D | null = mesh; p; p = p.parent) if (glowRoles.includes(p.userData?.role)) role = true;
+    let role = false, flame = false;
+    for (let p: THREE.Object3D | null = mesh; p; p = p.parent) (glowRoles.includes(p.userData?.role) && (role = true), p.userData?.role === 'flame' && (flame = true));
     const storey = storeyOf(mesh) ?? undefined;
     for (const original of [mesh.material].flat()) {
       const mode = windModeOf(original.name, kind);
@@ -104,7 +105,7 @@ export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMater
       const glow = role || (glowMaterials && ((s.emissive && s.emissive.getHex() !== 0) || mat.type === 'MeshBasicMaterial'));
       const geometry = plainGeometry(mesh.geometry, isNightGlass(mat));
       if (weights) geometry.setAttribute('edenWind', new THREE.Float32BufferAttribute(weights, 1));
-      parts.push({ geometry, material: mat, matrix: mesh.matrixWorld.clone(), key: k, glow, ...(storey ? { storey } : {}) });
+      parts.push({ geometry, material: mat, matrix: mesh.matrixWorld.clone(), key: k, glow, flame, ...(storey ? { storey } : {}) });
     }
   });
   return parts;
