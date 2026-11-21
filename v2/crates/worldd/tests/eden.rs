@@ -747,8 +747,23 @@ fn walk_across_and_build(entries: &str, pause: i64, tag: &str) -> (i64, i64, i64
     let facts = facts_path();
     let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
     let blocks = im.nodes["e_1b5f1fe9"];
-    let (served, mut soul, dir, _) =
-        serve_entries(&facts, entries, "74.0,-1.0", tag, im.nodes["world"].scope());
+    // Eden seeds the blocks built, and `build` needs them knocked down (the world decides a form's needs at commit,
+    // #3888): served with them seeded knocked down.
+    let down = std::env::temp_dir().join(format!("eden-{tag}-down-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&down);
+    copy_dir(Path::new(entries), &down);
+    let file = down.join("play/toy_blocks.json");
+    let text = std::fs::read_to_string(&file).unwrap();
+    let knocked = text.replacen(r#""default": true"#, r#""default": false"#, 1);
+    assert_ne!(text, knocked, "the blocks seeded built");
+    std::fs::write(&file, knocked).unwrap();
+    let (served, mut soul, dir, _) = serve_entries(
+        &facts,
+        down.to_str().unwrap(),
+        "74.0,-1.0",
+        tag,
+        im.nodes["world"].scope(),
+    );
     soul.0
         .set_read_timeout(Some(Duration::from_secs(300)))
         .unwrap();
@@ -761,6 +776,7 @@ fn walk_across_and_build(entries: &str, pause: i64, tag: &str) -> (i64, i64, i64
     let entries = receipt_entries(&dir, built.as_deref().unwrap_or(&[]));
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&down);
     built.expect("walked across and built, done");
     for (at, names, due) in &entries {
         println!("  {at} µs: {names:?} {due:?}");
@@ -1866,7 +1882,7 @@ fn c25_a2_a3_a_slot_walked_to_rise_settle_and_use_held_on_eden() {
     let _ = std::fs::remove_file(&facts);
     assert!(out[0].is_ok(), "rises_3 done: {:?}", out[0]);
     assert!(out[1].is_ok(), "meditate done: {:?}", out[1]);
-    assert_eq!(out[2], Err("not-held".to_owned()), "juggle: not held");
+    assert_eq!(out[2], Err("not_held".to_owned()), "juggle: not held");
 }
 
 /// C28 (#3541) A2: from C21's original house court, the same-ground form walk keeps its door crossings and reaches
@@ -3241,6 +3257,8 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
         "74.0,-1.0",
         "c25lib",
         &[
+            ("e_89d82b59", "knock", "field_differs"),
+            ("e_89d82b59", "close", "done"),
             ("e_89d82b59", "knock", "done"),
             ("e_89d82b59", "open", "done"),
             ("e_89d82b59", "close", "done"),
@@ -3259,6 +3277,8 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
         "96.5,25.0",
         "c25cafe",
         &[
+            ("e_61537992", "open", "field_differs"),
+            ("e_61537992", "close", "done"),
             ("e_61537992", "open", "done"),
             ("e_63d14e62", "light", "done"),
             ("e_63d14e62", "put_out", "done"),
@@ -3304,6 +3324,7 @@ fn c25_a_cottages_inner_door_from_its_bedroom() {
         "c25cottage",
         &[
             ("e_7ff72484", "walk", "done"),
+            ("e_00385aae", "open", "field_differs"),
             ("e_00385aae", "close", "done"),
             ("e_00385aae", "open", "done"),
         ],
