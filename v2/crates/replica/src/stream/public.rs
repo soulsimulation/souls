@@ -1153,32 +1153,48 @@ impl PublicPlayer {
             hash: Some(true),
         })
     }
+    /// A live node's row value, found by its id in the state's node rows (#3799): no copy of the others.
+    fn node_row(&self, id: Id) -> R<Option<&Value>> {
+        let rows = arr(field(map(&self.state)?, 2)?)?;
+        match row_index(rows, id)? {
+            Some(i) => {
+                let row = arr(&rows[i])?;
+                if row.len() != 2 {
+                    return bad("expected an id/value pair");
+                }
+                Ok(Some(&row[1]))
+            }
+            None => Ok(None),
+        }
+    }
     fn node_value(&self, id: Id) -> R<Value> {
-        let nodes = pairs(field(map(&self.state)?, 2)?)?;
-        let Some(v) = nodes.get(&id) else {
+        let Some(v) = self.node_row(id)? else {
             return refuse("node-missing", "not a public live node");
         };
         let n = NodeState::read(v)?;
-        let links = pairs(field(map(&self.state)?, 3)?)?;
-        let rows = links
-            .into_iter()
-            .filter_map(|(lid, l)| {
-                let l = LinkState::read(&l).ok()?;
-                let other = if l.ends[0] == id {
-                    l.ends[1]
-                } else if l.ends[1] == id {
-                    l.ends[0]
-                } else {
-                    return None;
-                };
-                Some(Value::Array(vec![
-                    lid.to_value(),
-                    Value::Text(l.ty),
-                    other.to_value(),
-                    crate::hash::audience(l.audience),
-                ]))
-            })
-            .collect();
+        let mut rows = Vec::new();
+        for row in arr(field(map(&self.state)?, 3)?)? {
+            let row = arr(row)?;
+            if row.len() != 2 {
+                return bad("expected an id/value pair");
+            }
+            let Ok(l) = LinkState::read(&row[1]) else {
+                continue;
+            };
+            let other = if l.ends[0] == id {
+                l.ends[1]
+            } else if l.ends[1] == id {
+                l.ends[0]
+            } else {
+                continue;
+            };
+            rows.push(Value::Array(vec![
+                read_id(&row[0])?.to_value(),
+                Value::Text(l.ty),
+                other.to_value(),
+                crate::hash::audience(l.audience),
+            ]));
+        }
         self.node_value_with_rows(id, n, rows)
     }
     fn node_value_with_rows(&self, id: Id, n: NodeState, rows: Vec<Value>) -> R<Value> {
@@ -1233,12 +1249,11 @@ impl PublicPlayer {
         let q = read_map(query, "public query")?;
         let which = uint(field(&q, 1)?)?;
         let arg = field(&q, 2)?;
-        let nodes = pairs(field(map(&self.state)?, 2)?)?;
         let out = match which {
             1 => self.node_value(read_id(arg)?)?,
             2 => {
                 let id = read_id(arg)?;
-                if !nodes.contains_key(&id) {
+                if self.node_row(id)?.is_none() {
                     return refuse("node-missing", "public parent absent");
                 };
                 let kind = match q.get(&3) {
@@ -1247,8 +1262,12 @@ impl PublicPlayer {
                     _ => return bad("query kind"),
                 };
                 let mut out = Vec::new();
-                for (i, n) in &nodes {
-                    let n = NodeState::read(n)?;
+                for row in arr(field(map(&self.state)?, 2)?)? {
+                    let row = arr(row)?;
+                    if row.len() != 2 {
+                        return bad("expected an id/value pair");
+                    }
+                    let (i, n) = (read_id(&row[0])?, NodeState::read(&row[1])?);
                     if n.parent == Some(id)
                         && kind.is_none_or(|k| {
                             n.kind.as_str() == k
@@ -1263,8 +1282,12 @@ impl PublicPlayer {
             3 => {
                 let id = read_id(arg)?;
                 let mut out = Vec::new();
-                for (i, v) in pairs(field(map(&self.state)?, 3)?)? {
-                    let l = LinkState::read(&v)?;
+                for row in arr(field(map(&self.state)?, 3)?)? {
+                    let row = arr(row)?;
+                    if row.len() != 2 {
+                        return bad("expected an id/value pair");
+                    }
+                    let (i, l) = (read_id(&row[0])?, LinkState::read(&row[1])?);
                     if l.ends.contains(&id) {
                         out.push(Value::Array(vec![
                             i.to_value(),
@@ -1279,12 +1302,12 @@ impl PublicPlayer {
             }
             4 => {
                 let mut id = read_id(arg)?;
-                if !nodes.contains_key(&id) {
+                if self.node_row(id)?.is_none() {
                     return refuse("node-missing", "not a public live node");
                 };
                 let mut out = Vec::new();
                 loop {
-                    let Some(v) = nodes.get(&id) else {
+                    let Some(v) = self.node_row(id)? else {
                         return refuse("frame-unavailable", "public path crosses an opaque frame");
                     };
                     out.push(id.to_value());

@@ -42,9 +42,11 @@ test('the page Track draws a served Soul at changing positions from the real pub
     };
     await import(new URL('../source/worker.ts?stream-track', import.meta.url).href);
     (globalThis as unknown as { self: { onmessage: (e: unknown) => void } }).self.onmessage({ data: { stream: base } });
+    const began = performance.now();
     const until = Date.now() + 10_000;
     while (!polls.length && !errors.length && Date.now() < until) await new Promise((r) => setImmediate(r));
     for (let seen = -1; seen !== parts.length && !errors.length; ) { seen = parts.length; await polls[0]?.(); }
+    console.log(`the page's worker played ${parts.length} parts in ${((performance.now() - began) / 1000).toFixed(1)} s (${((performance.now() - began) / Math.max(1, parts.length)).toFixed(1)} ms a part)`);
   } finally {
     globalThis.fetch = fetchBefore;
     globalThis.setInterval = intervalBefore;
