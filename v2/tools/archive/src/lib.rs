@@ -1266,6 +1266,9 @@ pub fn whole_state_reference(on: bool) {
     WHOLE_STATE.set(on);
 }
 
+/// The rows an entry changed: each key `(field, id)` with its row now, or none when gone.
+type Changed = Vec<((u64, Id), Option<Value>)>;
+
 /// The projection's fields kept row by row (`replica::stream::public::project`): live nodes, live links, public
 /// flights, timers, opaque flying nodes and their links. Field 1 is the next sequence and 7 the time effects.
 const ROWS: [u64; 6] = [2, 3, 4, 6, 8, 9];
@@ -1484,7 +1487,7 @@ impl Projection {
         e: &replica::effects::Effect,
         after: &State,
         redactions: &Redactions,
-    ) -> R<Vec<((u64, Id), Option<Value>)>> {
+    ) -> R<Changed> {
         use replica::effects::{Body, Change, ChangeRec, TimerRec, TransferRec};
         let mut nodes = BTreeSet::new();
         let mut links = BTreeSet::new();
@@ -1676,20 +1679,20 @@ fn row(state: &State, (field, id): (u64, Id)) -> Option<Value> {
                     .any(|n| public_audience(n.audience))
             })
             .map(timer_value),
+        // A later flight's row over an earlier one's, as the projection collects them.
         8 => state
             .in_flight
             .values()
+            .rev()
             .filter(|f| !root_public(f))
-            .filter_map(|f| f.nodes.get(&id))
-            .filter(|n| public_audience(n.audience))
-            .last()
+            .find_map(|f| f.nodes.get(&id).filter(|n| public_audience(n.audience)))
             .map(node_value),
         9 => state
             .in_flight
             .values()
+            .rev()
             .filter(|f| !root_public(f))
-            .filter_map(|f| f.links.get(&id).filter(|l| flying_link(f, l)))
-            .last()
+            .find_map(|f| f.links.get(&id).filter(|l| flying_link(f, l)))
             .map(link_value),
         _ => None,
     }
