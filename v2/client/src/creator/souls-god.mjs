@@ -185,6 +185,7 @@ export const FIX = {
   'land.smooth': 'use flatten',
   'land.unavailable': 'use Node 22.18 or later, and the client a world serves (it carries the ground model) or a checkout with packages/ground and zod installed',
   'strike.off-the-ground': 'strike somewhere on the world\'s ground',
+  'edit.off-ground': 'put it somewhere on the world\'s ground: describe shows where things stand',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'edit.claimed': 'that is inside a live claim: send it with --claim <that claim>, or build release <claim>',
   'edit.outside-claim': 'under a claim, edit only inside its area: build claims shows it; the world\'s own fields are the lead\'s',

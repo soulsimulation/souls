@@ -7,7 +7,7 @@
     "rose": { "role": "outlet", "at_mm": [452, 341, 0], "yaw_mdeg": 0 }
   },
   "geometry": { "bounds_mm": [760, 360, 240] },
-  "forms": {},
+  "forms": {"take": {"who": "anyone", "starts": "act", "needs": [{"need": "hand", "free": true}], "steps": [{"step": "take"}], "effects": [{"change": "reparent", "what": "this", "into": "actor_hand", "event": "taken"}]}},
   "motion": { "how": "one_hand" },
   "loose": { "ever": true },
   "looks": {

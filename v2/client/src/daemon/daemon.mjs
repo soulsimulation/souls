@@ -1699,10 +1699,13 @@ function beat() {
  * file beat re-arm both; no polling.
  */
 function scheduleWorld(now = Date.now(), off = null) {
+  // A sync under way keeps the armed deadline: the beat comes every second, and clearing it here would hold the
+  // moment until the sync's last answer. The moment fires from its persisted occurrence; the sync's end re-arms.
+  if (signedIn && syncing) return;
   clearTimeout(worldTimer);
   clearTimeout(prepareTimer);
   worldTimer = prepareTimer = null;
-  if (!signedIn || syncing) return;
+  if (!signedIn) return;
   const s = state.schedule;
   const { fire, missed, next, resolved } = worldDue(scheduleNow(), s.marks, s.targets, clockOf(copy), calendarOf(copy), now, off);
   for (const m of missed) {
