@@ -107,7 +107,7 @@ test('a world moment is sent at its moment while a sync is held across a beat', 
     const tokens = readFileSync(join(world, 'souls.tokens'), 'utf8').trim().split('\n');
     const w = run('worldd', ['serve', '--dir', world, '--socket', socket, '--rate', '1/1']);
     await waitFor(() => /listening /.test(w.text()));
-    assert.match(w.text(), /worldd: clock world 0 real 0 rate 1\n/, 'a fresh seed: world µs are real µs');
+    assert.match(w.text(), /worldd: clock world 0 real 0 rate 1\/1\n/, 'a fresh seed: world µs are real µs');
     const gw = run('gatewayd', ['--listen', '127.0.0.1:0', '--world', socket, '--tokens', join(world, 'tokens'), '--build', `1220${'ab'.repeat(32)}`]);
     const port = Number((await waitFor(() => /listening \S+:(\d+)\n/.exec(gw.text())))[1]);
     const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
