@@ -18,6 +18,7 @@ import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Connect, type Plugin } from 'vite';
+import { bodyAssets } from './body-assets.ts';
 import { changelogHtml } from './src/changelog/page.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -74,5 +75,5 @@ export default defineConfig({
     target: 'es2022', outDir: 'dist', assetsInlineLimit: 0, chunkSizeWarningLimit: 1024,
     rollupOptions: { input: { main: resolve(here, 'index.html'), pairing: resolve(here, 'src/pairing/card.html'), worlds: resolve(here, 'src/worlds/index.html'), home: resolve(here, 'src/home/index.html'), account: resolve(here, 'src/account/index.html'), changelog: resolve(here, 'changelog.html'), panel: resolve(here, 'src/panel/index.html') } },
   },
-  plugins: [streamFiles(), changelogPage()],
+  plugins: [streamFiles(), changelogPage(), bodyAssets(process.env.V2_BODY_ASSETS)],
 });

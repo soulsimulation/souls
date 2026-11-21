@@ -50,8 +50,9 @@ the next train run; `gh workflow run merge-train.yml --ref main` starts one.
 see the header of `merge-train.yml`): `merge:ready` enqueues the PR through auto-merge once its required checks are
 green at its head, and the queue re-tests the combination with what is ahead of it (`merge_group` runs) and lands it.
 `proof-ok` is a required check, so T3–T4 still wait for approval. Removing `merge:ready` takes a PR out; a PR the
-queue drops loses the label with a comment giving the reason, and the same alert goes to the agenda issue (#1960, or
-the repo variable `MERGE_TRAIN_NOTIFY_ISSUE`), so a dropped PR never sits unnoticed. A PR with any file outside the low-risk paths (`LOW_RISK`
+queue drops loses the label, gets `queue:dropped` (removed when it is enqueued again) and one comment giving the
+reason and the failed merge-group run. A PR whose auto-merge is on and checks green but that GitHub has not put in the
+queue after 10 minutes counts as not queued: the train disables its auto-merge and enqueues it again. A PR with any file outside the low-risk paths (`LOW_RISK`
 in `.github/scripts/ci-scope.mjs`) waits, keeping its label, while eight such PRs are queued or set to auto-merge
 (`MIXED_CAP`); low-risk PRs enqueue up to the queue's own limit, and every queue exit starts the train again. The
 non-strict and strict landing below apply only when the ruleset does not require the queue.

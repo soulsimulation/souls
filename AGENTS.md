@@ -123,7 +123,7 @@ contract; fresh sessions recover its dated agenda and assignments before dispatc
 - Locks only for heavy builds (the Saturn cargo slots); browser runs, node tests and single serves run freely. Proof
   harnesses accept real-run evidence: attempt limits, fingerprints and descriptor pins never block a passing capture.
 - No long-lived stacks: a stacked branch lands within about 4 hours or merges into main early, and the integrator
-  lands the base first. A PR that leaves the merge queue unmerged is posted on the PR and #1960 automatically.
+  lands the base first. A PR that leaves the merge queue unmerged gets `queue:dropped` and a comment with the reason automatically.
 - Continue to the authorized endpoint, including checks, proof and review fixes; do not stop at routine milestones
   unless Gene requested review stops. Use an available goal mechanism for sustained work, otherwise a durable issue
   checkpoint. Goals never override budgets, genuine blockers or merge/release approvals. See [bounded execution](docs/process/planning.md#bounded-execution).

@@ -88,6 +88,8 @@ export function publicNameRecords(copy, missingOnly = true) {
 /** An id `[scope, counter]` as text: `<scope hex>-<counter>`. */
 export const idText = (v) => `${hex(v[0])}-${v[1]}`;
 /** A kind `namespace:name@hash` as its plain name. */
+/** A node's course field (replica `schedule::F_COURSE`): a thing that moves on its own track. */
+export const F_COURSE = 80;
 export const plainKind = (k) => String(k).replace(/@.*$/, '');
 /** A version `[lineage, zone, epoch, sequence]`'s bytes in hex, as its sequence. */
 export const sequenceOf = (versionHex) => (versionHex ? Number(decode(Buffer.from(versionHex, 'hex'))[3]) : 0);
@@ -131,7 +133,9 @@ export function rowsOf(copy) {
     const children = (m.get(10) ?? []).map(hex);
     // C30 (#3556): a body born by a join (C3) owns its `souls:body-of` link to its Soul: the row names that Soul.
     const of = (m.get(9) ?? []).map(([, l]) => l).find((l) => l instanceof Map && plainKind(l.get(1)) === 'souls:body-of');
-    rows.set(id, { id, name, kind, parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), own: d.own });
+    // #3603: a thing on a course (replica's F_COURSE, field 80) moves by itself; a rider in it may steer it.
+    const moving = fields.has(F_COURSE) || fields.has(BigInt(F_COURSE));
+    rows.set(id, { id, name, kind, parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), own: d.own });
     for (const c of children) todo.push([c, [...path, name]]);
   }
   return rows;

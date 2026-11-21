@@ -383,3 +383,29 @@ fn id_order_is_the_bytes_order() {
         }
     }
 }
+
+/// #3799: SHA-256 taken in pieces is the one-shot digest, for the standard vectors and for every split of a message
+/// across block edges.
+#[test]
+fn sha256_in_pieces_is_the_one_shot_digest() {
+    use replica::ids::{Sha256, sha256};
+    let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+    assert_eq!(
+        hex(&sha256(b"abc")),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    assert_eq!(
+        hex(&sha256(b"")),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    let msg: Vec<u8> = (0..300u32).map(|i| (i * 7 + 3) as u8).collect();
+    for n in [0, 1, 55, 56, 63, 64, 65, 119, 120, 128, 200, 300] {
+        for split in [0, 1, 17, 63, 64, 65, n / 2, n] {
+            let (a, b) = msg[..n].split_at(split.min(n));
+            let mut h = Sha256::new();
+            h.update(a);
+            h.update(b);
+            assert_eq!(h.finish(), sha256(&msg[..n]), "{n} bytes split at {split}");
+        }
+    }
+}

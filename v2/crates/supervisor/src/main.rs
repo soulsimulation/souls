@@ -60,6 +60,16 @@ fn launch(root: &Path, world: &World) -> i32 {
     if let Err(e) = health::record(root, &name, now_ms(), Event::Start) {
         eprintln!("launch: health record: {e}");
     }
+    let fences = std::env::var_os("SOULS_ARCHIVE_FENCES").map_or_else(
+        || PathBuf::from("/etc/souls/placement-data/archived"),
+        PathBuf::from,
+    );
+    if let Err(e) =
+        with_store(root, |s| supervisor::archive_guard(s, &fences, world)).and_then(|r| r)
+    {
+        eprintln!("launch: {e}");
+        return EXIT_PIN_MISSING;
+    }
     let pinned = with_store(root, |s| pin(s, root, world)).and_then(|r| r);
     let (build, from) = match pinned {
         Ok(p) => p,
@@ -97,6 +107,62 @@ fn run(args: &[String]) -> Result<i32, String> {
     let root = root();
     match args.get(1).map(String::as_str) {
         Some("launch") => Ok(launch(&root, &world_arg(args)?)),
+        Some("archive-state") => {
+            use directoryd::worlds::list::archive;
+            let op = args
+                .get(2)
+                .map(String::as_str)
+                .ok_or("archive operation missing")?;
+            let name = args.get(3).map(String::as_str).unwrap_or_default();
+            let result = with_store(&root, |store| -> Result<String, String> {
+                let err = |e: replica::effects::Refusal| e.name.to_owned();
+                let describe = |p: archive::Phase| -> Result<String, String> {
+                    let mut value = p.json();
+                    let (build, _) = pin(
+                        store,
+                        &root,
+                        &World {
+                            lineage: p.lineage,
+                            zone: p.zone,
+                        },
+                    )?;
+                    value["build"] = to_hex(&build).into();
+                    Ok(value.to_string())
+                };
+                match op {
+                    "list" if args.len() == 3 => Ok(format!(
+                        "[{}]",
+                        archive::list(&store)
+                            .map_err(err)?
+                            .iter()
+                            .map(|p| p.json().to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    )),
+                    "request" if args.len() == 4 => archive::pending_request(&store, name)
+                        .map_err(err)?
+                        .map_or_else(|| Ok("null".into()), describe),
+                    "get" if args.len() == 4 => describe(archive::get(&store, name).map_err(err)?),
+                    "restore" if args.len() == 4 => {
+                        describe(archive::begin(&store, name, None, "", true).map_err(err)?)
+                    }
+                    "finish" | "recover" if args.len() == 5 => {
+                        let phase = archive::get(&store, name).map_err(err)?;
+                        if Some(&phase.request) != args.get(4) {
+                            return Err("archive-stale".into());
+                        }
+                        describe(if op == "finish" {
+                            archive::finish(&store, &phase).map_err(err)?
+                        } else {
+                            archive::retry_restore(&store, name, &phase.request).map_err(err)?
+                        })
+                    }
+                    _ => Err("archive-arguments-invalid".into()),
+                }
+            })??;
+            println!("{result}");
+            Ok(0)
+        }
         Some("ready") => {
             health::record(&root, &world_arg(args)?.name(), now_ms(), Event::Ready)
                 .map_err(|e| e.to_string())?;

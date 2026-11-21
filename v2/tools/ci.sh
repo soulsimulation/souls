@@ -51,7 +51,7 @@ tests_worldd() { step tests-worldd cargo test -p worldd --locked; }
 small_node() {
 # The viewer's origin (V2, #2711): its headers on a part, the pointer and a 404 (v2/docs/viewer-cache.md); the site's pages it serves (O23, #3324).
 # The test files by name: Node 24 on CI reads a bare folder as one file, not as the tests inside it.
-step origin-headers node --test tools/origin/origin.test.mjs tools/origin/site.test.mjs
+step origin-headers node --test tools/origin/origin.test.mjs tools/origin/site.test.mjs tools/ops/archive-world.test.mjs web/src/home/list.test.ts
 # The install (O17, #2810): nothing it would write, and no unit, user or port it names, is today's system's.
 step install-apart bash tools/ops/install.sh check
 # What a world costs (O11, #2721): the scripted hour, the sum check, a stopped world, the not-metered rule, the page.
@@ -105,11 +105,13 @@ step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit
 web_steps() {
 # The page's pose (V7, #2716): a body's bones as a function of its record and time, the same at 30 and 144 frames a
 # second, in any order and in a fresh process, with the hand on its contact point (web/src/pose/pose.test.ts).
-step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test web/src/pose/*.test.ts web/src/source/signin.test.ts'
+step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test web/src/pose/*.test.ts web/src/source/signin.test.ts web/src/crowd/creature/creature.test.ts'
+# B15: acquire only the released inputs and exercise the actual prepared artifact, after the locked page dependencies.
+step body-presets bash -c 'node tools/import-body/prepare.mjs --out .local/ci-body-assets --test'
 # The words path (V1b, #3361): a local world's said sentence, and a body's name and description, through the page's
 # worker within the stream's lag; a whisper in no public file (web/src/source/words.test.ts). A still world is drawn
-# at once and kept live (V5b, web/src/source/still.test.ts).
-step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts web/src/source/still.test.ts web/src/source/continuity.test.ts web/src/worlds/worlds.test.ts'
+# at once and kept live (V5b, web/src/source/still.test.ts). A node on a course moves at world time (#3603).
+step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts web/src/source/still.test.ts web/src/source/continuity.test.ts web/src/worlds/worlds.test.ts web/src/draw/course.test.ts'
 
 }
 wasm_goldens() {
@@ -173,12 +175,12 @@ client_steps() {
 # The client's library by build hash (R5, #2699): cached or downloaded, refused by name, run in a worker with a limit.
 step client-sync node --test client/src/sync/*.test.mjs
 # The resident daemon (R6, #2700): ten forced drops against the real gateway and the world's end of it (I4); R5b's resync after a long cut.
-step client-daemon bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/daemon/*.test.mjs'
+step client-daemon bash -c 'cargo build -p gatewayd -p worldd -p directoryd -p testworld --locked --quiet && node --test client/src/daemon/*.test.mjs'
 # The world's clock on every copy (E7b, #3516): world now from the root's fields, against `worldd serve` across a rate change.
 step client-clock bash -c 'cargo build -p gatewayd -p worldd -p testworld --locked --quiet && node --test client/src/clock/*.test.mjs'
 # The thin command, the brief and find (R7, #2701): 100 scripted command sequences against the same gateway and world.
 step client-command bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet &&
-  node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs client/src/shoot/*.test.mjs client/src/home/*.test.mjs'
+  node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs client/src/shoot/*.test.mjs client/src/view/*.test.mjs client/src/home/*.test.mjs'
 # The creator's command (G7, #2796): a creator's daemon checks batches on its copy with no frame sent, and edits.
 step client-creator bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/creator/*.test.mjs'
 # The client's trace and stats (R10, #2702): per achieved intent, local only, with the network refused.
@@ -198,6 +200,11 @@ step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p tes
   node --test client/src/pair/*.test.mjs'
 # The served client (R17, #2818): the served files against the release's manifest; the one line, upgrade, rollback.
 step client-served bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/served/*.test.mjs'
+# The served-world gate (#1960): an Eden slice served by worldd, gatewayd and directoryd, two Souls paired and joined,
+# real acts through the thin command; the page's worker on the public stream and the client's copy, across a restart.
+# Assertions that wait on an open fix are marked PENDING #<issue> in the file and printed, never skipped silently.
+step served-world-e2e bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p testworld --locked --quiet &&
+  node --test client/served/e2e/world.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs
 # Wake rules and the owner's messages (R13, #2753): the budget, merging with no reader, the mailbox through the gateway.

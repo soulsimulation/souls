@@ -209,6 +209,7 @@ fn intent(body: Id, sequence: u64, verb: &str, target: Option<Id>, point: Option
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     encode(&i.to_value()).unwrap()
 }
@@ -889,6 +890,34 @@ fn k18b_a_free_running_world_with_its_planner_replays_in_lockstep() {
         "the replay ends in the same state"
     );
     assert_eq!(h1, h2, "and writes the same effects");
+}
+
+/// #3764: the world records a reflex's marker with its intent, in the answer row the log keeps and a replay feeds back
+/// (`script`), and an agent's act unmarked: what the idle and wind-down rule (B16) reads with `Intent::agent_act`.
+#[test]
+fn reflex_a1_the_log_keeps_a_reflex_marked_and_an_agents_act_unmarked() {
+    let p = pairs();
+    let (switcher, lamp) = (p[1].0, p[1].1);
+    let store = Mem::with(Vec::new());
+    let w = start(store.clone(), false);
+    let on = at(&w, 2, intent(switcher, 1, "r2:switch_on", Some(lamp), None));
+    let mut reflex = Intent::read(&intent(switcher, 2, "r2:switch_off", Some(lamp), None)).unwrap();
+    reflex.reflex = true;
+    let off = at(&w, 40, encode(&reflex.to_value()).unwrap());
+    run_to(&w, 80);
+    answer(&on).expect("the agent's switch_on lands");
+    answer(&off).expect("the reflex's switch_off lands");
+    w.stop();
+    let kept: Vec<Intent> = script(&bytes(&store))
+        .into_iter()
+        .map(|(_, b)| Intent::read(&b).unwrap())
+        .collect();
+    let marks: Vec<_> = kept
+        .iter()
+        .map(|i| (i.sequence, i.reflex, i.agent_act()))
+        .collect();
+    println!("reflex: (sequence, reflex, agent act) as the log keeps them: {marks:?}");
+    assert_eq!(marks, [(1, false, true), (2, true, false)]);
 }
 
 /// #3765: an intent with `params` (its field 4) set.

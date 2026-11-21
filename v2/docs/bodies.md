@@ -160,6 +160,23 @@ receipts, so its `no` is the world's name: `move.no-target`, `move.bad-point`, `
 `place-already-held`, `place-taken`, `not-seated`. A seat's holds are not in a client's copy, so its verdict on a sit
 on a free-looking seat stays `unknown`.
 
+## The wind-down (B16)
+
+The one move the world starts on a body (TRUNK T10, Gene 17 Nov; today's `wind-down/1`): `skills::wind_down` decides,
+`worldd::bodies` carries it out. A Soul whose agent has not acted for an hour (an intent with `Intent::agent_act`: a
+reflex its client sends never counts) stands up and wanders (`idle`: a walk of 5 to 15 m every 2 to 4 minutes, each
+ending farther from the town's centre), becomes a `zombie` 30 minutes later and walks to its sleeping spot (the
+nearest open ground with 3 m of open ground round it, 3 m from another Soul's spot, within 80 m), then lies down there
+`asleep`, held by a driver of its own, at the latest 50 minutes after it began wandering. Its agent's next act lets it
+go on that tick (`awake`) and runs. Each move goes through `Bodies::start` like any move intent (N7's walk, B3's rise)
+and is written as the world's record (cause and actor the world, event `souls:idle|zombie|asleep|awake` with the rule's
+state); a restart rebuilds the rule from those records. Choices come from a hash of the body's id, never the world's
+random source. It never moves a body something else holds (an open act, an order, a carry). A sleeping body is on no
+due list. BUILDSAFE judges it as any body on the ground, so an edit cannot bury it. `WORLDD_WIND_DOWN=wander,zombie,
+leg_min,leg_max,bound` (seconds) shortens the clocks in a test world. The page's Soul card reads its word from the
+records. A restart rebuilds it from the records after its checkpoint; a body the checkpoint has lying on the ground
+sleeps on, and one wandering or walking out starts its hour again.
+
 ## The code hatch, shape only
 
 10. **The hatch is one pure function named by the hash of its module** (SA-F9, #3000): `{1: module (its SHA-256
@@ -200,3 +217,25 @@ on a free-looking seat stays `unknown`.
   would answer differently.
 - **A hatch named by a name rather than a hash.** A changed module would change history.
 - **A trusted value a skill can make up** (a claim, a grant). The host must make those; a skill only asks.
+
+
+## Released body choices
+
+`node v2/tools/import-body/presets.ts --out <prepared> --media <checkout>` prepares every released Little Martian,
+Pip, monster, ghost, centaur and procedural duck, snail and dog. Ordinary uploads keep their existing size, texture
+and validation limits. Released scans require their exact manifest pin; authored examples require their existing
+normalized revision pin. Procedural models sample the released source into shared model bakes, rather than creating
+a rig for each Soul. Meshes and sampled clips determine the admitted Small, Standard, Large or Giant class.
+
+A Soul uses `wear <preset-or-hash>`. Successful native admission records field32's content hash; refused fit keeps
+the previous body. Both live and history workers carry that field to the same crowd renderer. Only an absent hash
+selects the default person. A requested model is hidden while loading, then becomes ready or named unavailable;
+it never substitutes another preset. Materials, maps and UV seams remain model-specific instanced batches.
+
+The page build accepts the explicit prepared directory as `V2_BODY_ASSETS`. Its fixed manifest validates regular
+files, source pins and the complete catalogue/model/default/decoder closure before publishing `assets/bodies/`.
+Install and release callers prepare that input through the existing verified asset pull. No runtime model fetch
+comes from a recorded arbitrary URL. Optional public-boot field7 pins the regular `bodies.json`; template creation
+and fork carry only its validated bytes. Without field7 the legacy support encoding is unchanged.
+
+The prepared catalogue also pins canonical released BODY-v1 definitions for account migration. Mapped `import-accounts --bodies` validates every owned live look before output and records choices only in the private per-world birth file. Serve validates that fixed `births.json` against its actual header and catalogue before handing choices to the existing C3 path. Existing bodies and subsequent wear are unchanged; private birth choices are never public boot support. Unknown/custom looks require an explicit supported migration, rather than silently becoming the default.

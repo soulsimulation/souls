@@ -57,12 +57,13 @@ use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, SquareMeet, back, floor_joins, ground_doors};
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
-use crate::spots::{Ask, CLEAR, Ground, Spots, Target, flat, to_segment};
+use crate::spots::{Ask, CLEAR, ClassGround, Ground, Spots, Target, flat, to_segment};
 use replica::effects::{Actor, Cause, Header, Part, Refusal};
 use replica::encode::{Value, encode};
 use replica::host::{F_GRANTED, F_TURNS, Seen};
 use replica::ids::Id;
-use replica::pose::{ControllerInput, Frame, Mode, Quat, Vec3};
+use replica::kinds::sizes::Size;
+use replica::pose::{ControllerInput, Frame, Mode, Quat, Support, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{plain, show};
@@ -137,6 +138,10 @@ impl Spent {
 /// The engine as the walk skill reads it.
 pub struct Town {
     pub tree: Tree,
+    /// Geometry only: ownership, turns, spots, lines and the tree remain singular.
+    classes: BTreeMap<Size, Geometry>,
+    /// Non-default classes of the current controller snapshot (also sent to the planner).
+    pub body_classes: BTreeMap<Id, Size>,
     pub ground: Id,
     pub map: Map,
     /// Each node's surface for the mover: the open ground (every square), and every floor that cuts.
@@ -154,7 +159,7 @@ pub struct Town {
     /// Each walker's line of corners (#3167), kept from the search that found it.
     lines: Vec<(Id, Line)>,
     /// One route search scratch per thread asking (N17b, #3255): the first is [`Town::view`]'s.
-    scratches: Vec<Scratch>,
+    scratches: Vec<ClassScratch>,
     crossings: BTreeMap<Id, Crossing>,
     /// Where each link is in `buildings` (building, link), the first that holds it: read every tick by each walker
     /// with a link ahead, so not searched for (#3213).
@@ -177,8 +182,15 @@ pub struct Town {
 
 /// What a rebuild off the clock thread reads besides the tree (#3276): the open ground as cut (each square's pieces,
 /// its meets and its doors) and each building read, with its links. Cheap to clone: it is shared, not copied.
+type TerrainFlags = BTreeMap<(i32, i32), Vec<Vec<bool>>>;
+
 #[derive(Clone)]
 pub struct Basis {
+    size: Size,
+    classes: BTreeMap<Size, Basis>,
+    layout: Arc<SurfaceLayout>,
+    floors: Arc<BTreeMap<Id, Arc<Surface>>>,
+    flags: Arc<TerrainFlags>,
     open: Arc<OpenCut>,
     /// The open ground's scene by child, to cut again only the squares a change touches (G3b, #3449).
     index: Index,
@@ -189,6 +201,11 @@ pub struct Basis {
     joined: Arc<BTreeSet<Id>>,
 }
 
+#[derive(Clone, Default)]
+struct SurfaceLayout {
+    count: u32,
+    squares: BTreeMap<(i32, i32), Vec<u32>>,
+}
 #[derive(Clone)]
 struct OpenCut {
     squares: BTreeMap<(i32, i32), Arc<Vec<Piece>>>,
@@ -198,6 +215,76 @@ struct OpenCut {
 }
 
 impl Basis {
+    /// Whether `other` is this very basis (the same shared handles, #3743), not merely an equal one: a rebuild on
+    /// either gives the same ground with the same piece numbers.
+    pub fn same(&self, other: &Basis) -> bool {
+        self.size == other.size
+            && Arc::ptr_eq(&self.layout, &other.layout)
+            && Arc::ptr_eq(&self.floors, &other.floors)
+            && Arc::ptr_eq(&self.flags, &other.flags)
+            && Arc::ptr_eq(&self.open, &other.open)
+            && self.index.same(&other.index)
+            && Arc::ptr_eq(&self.known, &other.known)
+            && Arc::ptr_eq(&self.reach, &other.reach)
+            && Arc::ptr_eq(&self.joined, &other.joined)
+            && self.classes.len() == other.classes.len()
+            && self
+                .classes
+                .iter()
+                .zip(&other.classes)
+                .all(|((a, x), (b, y))| a == b && x.same(y))
+    }
+
+    /// Reconstructs only the requested immutable surface off-clock, preserving its actual live piece numbers.
+    pub fn surface(&self, size: Size, node: Id, ground: Id) -> Result<Surface, Refusal> {
+        crate::commit::off_clock();
+        let basis = if size == Size::Standard {
+            self
+        } else {
+            self.classes
+                .get(&size)
+                .ok_or_else(|| refusal("body-class-unprepared", "missing prepared class"))?
+        };
+        if node != ground {
+            return basis
+                .floors
+                .get(&node)
+                .map(|s| s.as_ref().clone())
+                .ok_or_else(|| refusal("no-surface", "missing prepared floor"));
+        }
+        let empty = Piece {
+            outline: Vec::new(),
+            vertices: Vec::new(),
+            triangles: Vec::new(),
+            ground: crate::gaits::Ground::Dry,
+        };
+        let mut pieces = vec![empty; basis.layout.count as usize];
+        let mut flags = vec![Vec::new(); pieces.len()];
+        for (sq, indices) in &basis.layout.squares {
+            let source = basis
+                .open
+                .squares
+                .get(sq)
+                .ok_or_else(|| refusal("body-class-unprepared", "missing square"))?;
+            if source.len() != indices.len() {
+                return Err(refusal("body-class-unprepared", "square layout mismatch"));
+            }
+            for (k, &index) in indices.iter().enumerate() {
+                pieces[index as usize] = source[k].clone();
+                flags[index as usize] = basis
+                    .flags
+                    .get(sq)
+                    .and_then(|v| v.get(k))
+                    .cloned()
+                    .unwrap_or_default();
+            }
+        }
+        let mut surface = Surface::new(ground, pieces);
+        if let Some(t) = &basis.open.terrain {
+            surface = surface.on_terrain_shared(Arc::clone(t), flags);
+        }
+        Ok(surface)
+    }
     /// The open ground's square `sq` as last cut: its dry pieces.
     pub fn square(&self, sq: (i32, i32)) -> Option<&[Piece]> {
         self.open.squares.get(&sq).map(|p| p.as_slice())
@@ -246,11 +333,117 @@ pub struct Rebuilt {
     pub touched: BTreeSet<Id>,
     pub versions: Versions,
     pub fresh: Fresh,
+    classes: BTreeMap<Size, Geometry>,
+    after: Basis,
+    before_layout: Arc<SurfaceLayout>,
     /// Why the whole ground was built for a change on the open ground, when it was (G3b).
     pub why: Option<&'static str>,
 }
 
 impl Rebuilt {
+    /// Two independently mutable installations of one checked rebuild. Immutable basis handles stay shared;
+    /// all mutable geometry and route storage is copied here, before either installation reaches the clock.
+    pub fn into_pair(self) -> (Self, Self) {
+        let other = self.copy();
+        (self, other)
+    }
+
+    /// One more independently mutable installation of this rebuild (#3743: the edit checker's town takes the third),
+    /// copied as [`Rebuilt::into_pair`] copies: immutable basis handles shared, mutable geometry copied.
+    pub fn copy(&self) -> Self {
+        crate::commit::off_clock();
+        Self {
+            touched: self.touched.clone(),
+            versions: self.versions.clone(),
+            fresh: self.fresh.clone(),
+            classes: self.classes.clone(),
+            after: self.after.clone(),
+            before_layout: Arc::clone(&self.before_layout),
+            why: self.why,
+        }
+    }
+
+    pub fn affects(&self, basis: &crate::controller::BuildBasis, ground: Id) -> bool {
+        if !matches!(basis.moved.pose.support, Support::Surface { .. }) {
+            return false;
+        }
+        if basis.build.size != Size::Standard {
+            return true;
+        }
+        let node = basis.moved.pose.frame.node;
+        match &self.fresh {
+            Fresh::Whole(_) => true,
+            Fresh::Buildings(bs) => bs.iter().any(|(b, _)| b.floors.contains_key(&node)),
+            Fresh::Squares(squares, _, bs) => {
+                bs.iter().any(|(b, _)| b.floors.contains_key(&node))
+                    || node == ground
+                        && squares.iter().any(|(sq, _, _)| {
+                            self.before_layout
+                                .squares
+                                .get(sq)
+                                .is_some_and(|v| v.contains(&basis.moved.piece))
+                        })
+            }
+        }
+    }
+    pub fn prepare_rebinds(
+        &self,
+        bases: &[crate::controller::BuildBasis],
+        ground: Id,
+    ) -> Result<Vec<crate::controller::PreparedRebind>, Refusal> {
+        let (surfaces, rebinds) = self.prepare_rebind_surfaces(bases, ground)?;
+        drop(surfaces);
+        Ok(rebinds)
+    }
+
+    /// Builds, once, each (class, node) surface the affected bodies stand on, and places them on it (B12b). The
+    /// surfaces are kept so a body that walked on can be placed again without building anything.
+    pub fn prepare_rebind_surfaces(
+        &self,
+        bases: &[crate::controller::BuildBasis],
+        ground: Id,
+    ) -> Result<(RebindSurfaces, Vec<crate::controller::PreparedRebind>), Refusal> {
+        crate::commit::off_clock();
+        let mut surfaces = BTreeMap::new();
+        let affected: Vec<_> = bases
+            .iter()
+            .filter(|b| self.affects(b, ground))
+            .cloned()
+            .collect();
+        for before in &affected {
+            let key = (before.build.size, before.moved.pose.frame.node);
+            if let std::collections::btree_map::Entry::Vacant(entry) = surfaces.entry(key) {
+                let prepared = if key == (Size::Standard, ground) {
+                    if let Fresh::Squares(sq, basis, _) = &self.fresh {
+                        let mut surface = Surface::new(
+                            ground,
+                            sq.iter()
+                                .flat_map(|(_, pcs, _)| pcs.iter().cloned())
+                                .collect(),
+                        );
+                        if let Some(t) = &basis.open.terrain {
+                            surface = surface.on_terrain_shared(
+                                Arc::clone(t),
+                                sq.iter()
+                                    .flat_map(|(_, _, on)| on.iter().cloned())
+                                    .collect(),
+                            );
+                        }
+                        (surface, self.before_layout.count)
+                    } else {
+                        (self.after.surface(key.0, key.1, ground)?, 0)
+                    }
+                } else {
+                    (self.after.surface(key.0, key.1, ground)?, 0)
+                };
+                entry.insert(prepared);
+            }
+        }
+        let surfaces = RebindSurfaces(surfaces);
+        let rebinds = surfaces.place(&affected)?;
+        Ok((surfaces, rebinds))
+    }
+
     /// Whether the whole ground was built again (the open ground was touched, or a building could not be read
     /// again alone), not only the touched buildings.
     pub fn whole(&self) -> bool {
@@ -274,11 +467,55 @@ impl Rebuilt {
     }
 }
 
+/// The (class, node) surfaces an edit's affected bodies were placed on off the clock (B12b): kept, unchanged, so
+/// the same bodies can be placed again where they now stand with no rebuild, map or search beyond the placing.
+#[derive(Default)]
+pub struct RebindSurfaces(pub(crate) BTreeMap<(Size, Id), (Surface, u32)>);
+
+impl RebindSurfaces {
+    /// Places exactly these bodies on the kept surfaces: their current point, unchanged; refused when a body's
+    /// class or node has no kept surface, or the placing would change its support.
+    pub fn place(
+        &self,
+        bases: &[crate::controller::BuildBasis],
+    ) -> Result<Vec<crate::controller::PreparedRebind>, Refusal> {
+        crate::commit::off_clock();
+        let mut out = Vec::with_capacity(bases.len());
+        for before in bases {
+            let key = (before.build.size, before.moved.pose.frame.node);
+            let Some((surface, offset)) = self.0.get(&key) else {
+                return Err(refusal("edit.body-stale", "prepared body changed"));
+            };
+            let mut moved = surface.place_built(
+                before.moved.id,
+                before.moved.pose.frame,
+                before.moved.pose.position,
+                before.moved.pose.orientation,
+                before.build,
+            )?;
+            moved.linear = before.moved.linear;
+            let triangle = surface.rebind_triangle(moved.piece, moved.tri, *offset)?;
+            if moved.pose != before.moved.pose {
+                return Err(refusal(
+                    "edit.body-support-changed",
+                    "prepared support differs",
+                ));
+            }
+            out.push(crate::controller::PreparedRebind {
+                before: before.clone(),
+                triangle,
+            });
+        }
+        Ok(out)
+    }
+}
+
 /// A square of the open ground cut again: where it is, its dry pieces and, per piece and triangle, whether it lies
 /// on the terrain.
 pub type Square = ((i32, i32), Vec<Piece>, Vec<Vec<bool>>);
 
 /// The ground a rebuild built: the whole, or what it cut again (read by G2's guard, G2b #3488).
+#[derive(Clone)]
 pub enum Fresh {
     Whole(Box<Assembled>),
     /// The open ground's squares cut again (G3b, #3449): each with its dry pieces and, per piece and triangle,
@@ -297,6 +534,41 @@ pub type Assembled = (
     Basis,
     BTreeMap<(i32, i32), Vec<u32>>,
 );
+
+/// One class's geometry, without a second tree, controller, reservations or turn state.
+#[derive(Clone)]
+struct Geometry {
+    map: Map,
+    surfaces: BTreeMap<Id, Surface>,
+    buildings: Vec<Building>,
+    basis: Basis,
+    link_at: BTreeMap<Id, (usize, usize)>,
+}
+type GeometryRead<'a> = (
+    &'a Map,
+    &'a BTreeMap<Id, Surface>,
+    &'a [Building],
+    &'a BTreeMap<Id, (usize, usize)>,
+);
+impl Geometry {
+    fn from((map, surfaces, buildings, basis, _square_pieces): Assembled) -> Self {
+        let link_at = link_index(&buildings);
+        Self {
+            map,
+            surfaces,
+            buildings,
+            basis,
+            link_at,
+        }
+    }
+}
+
+/// Scratch caches never cross class/map identity.
+#[derive(Default)]
+pub struct ClassScratch {
+    standard: Scratch,
+    other: BTreeMap<Size, Scratch>,
+}
 
 /// Where each link is in `buildings`: the first building, and its first link, with that id.
 fn link_index(buildings: &[Building]) -> BTreeMap<Id, (usize, usize)> {
@@ -328,6 +600,8 @@ impl Town {
         let link_at = link_index(&buildings);
         Ok(Town {
             tree,
+            classes: BTreeMap::new(),
+            body_classes: BTreeMap::new(),
             ground,
             map,
             surfaces,
@@ -339,7 +613,7 @@ impl Town {
             meter: None,
             spent: Cell::new(Spent::default()),
             lines: Vec::new(),
-            scratches: vec![Scratch::default()],
+            scratches: vec![ClassScratch::default()],
             crossings: BTreeMap::new(),
             versions,
             basis,
@@ -374,7 +648,63 @@ impl Town {
 
     /// What [`Town::rebuild`] reads besides the tree, as the ground stands now.
     pub fn basis(&self) -> Basis {
-        self.basis.clone()
+        let mut basis = self.basis.clone();
+        basis.classes = self
+            .classes
+            .iter()
+            .map(|(&size, g)| (size, g.basis.clone()))
+            .collect();
+        basis
+    }
+
+    /// Off-clock startup preparation, only for classes admitted by the configured catalogue.
+    pub fn prepare_classes(&mut self, sizes: impl IntoIterator<Item = Size>) -> Result<(), String> {
+        for size in sizes {
+            if size != Size::Standard && !self.classes.contains_key(&size) {
+                crate::commit::off_clock();
+                let g = Self::assemble_for(&self.tree, self.ground, &self.versions, size)?;
+                self.classes.insert(size, Geometry::from(g));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn surfaces_for(&self, size: Size) -> Option<&BTreeMap<Id, Surface>> {
+        if size == Size::Standard {
+            Some(&self.surfaces)
+        } else {
+            self.classes.get(&size).map(|g| &g.surfaces)
+        }
+    }
+
+    pub fn size_of(&self, body: Id) -> Size {
+        self.body_classes
+            .get(&body)
+            .copied()
+            .unwrap_or(Size::Standard)
+    }
+
+    /// A successful class change invalidates that body's line; refused changes never call this.
+    pub fn set_class(&mut self, body: Id, size: Size) {
+        if size == Size::Standard {
+            self.body_classes.remove(&body);
+        } else {
+            self.body_classes.insert(body, size);
+        }
+        self.lines.retain(|(id, _)| *id != body);
+        self.planned.remove(&body);
+        self.planned_squares.remove(&body);
+    }
+
+    fn keep_scratches(&mut self) {
+        for s in &mut self.scratches {
+            self.map.keep(&mut s.standard);
+            for (size, scratch) in &mut s.other {
+                if let Some(g) = self.classes.get_mut(size) {
+                    g.map.keep(scratch);
+                }
+            }
+        }
     }
 
     /// The ground `body`'s last plan crossed, each node with its version then.
@@ -442,16 +772,69 @@ impl Town {
                 Ok(f) => f,
                 Err(w) => {
                     why = Some(w);
-                    Fresh::Whole(Box::new(Town::assemble(base, ground, &versions)?))
+                    Fresh::Whole(Box::new(Town::assemble_for(
+                        base, ground, &versions, basis.size,
+                    )?))
                 }
             }
         } else {
             match Town::reread(&parents, base, ground, &touched, basis) {
                 Some(bs) => Fresh::Buildings(bs),
-                None => Fresh::Whole(Box::new(Town::assemble(base, ground, &versions)?)),
+                None => Fresh::Whole(Box::new(Town::assemble_for(
+                    base, ground, &versions, basis.size,
+                )?)),
             }
         };
+        let classes: BTreeMap<Size, Geometry> = basis
+            .classes
+            .keys()
+            .map(|&size| {
+                Self::assemble_for(base, ground, &versions, size).map(|g| (size, Geometry::from(g)))
+            })
+            .collect::<Result<_, _>>()?;
+        let mut after = match &fresh {
+            Fresh::Whole(g) => g.3.clone(),
+            Fresh::Squares(_, next, _) => next.clone(),
+            Fresh::Buildings(_) => basis.clone(),
+        };
+        if !matches!(&fresh, Fresh::Whole(_)) {
+            let mut layout = (*basis.layout).clone();
+            let mut flags = (*basis.flags).clone();
+            let mut floors = (*basis.floors).clone();
+            let buildings = match &fresh {
+                Fresh::Squares(squares, _, bs) => {
+                    for (sq, pcs, on) in squares {
+                        layout.squares.insert(
+                            *sq,
+                            (layout.count..layout.count + pcs.len() as u32).collect(),
+                        );
+                        layout.count += pcs.len() as u32;
+                        flags.insert(*sq, on.clone());
+                    }
+                    bs
+                }
+                Fresh::Buildings(bs) => bs,
+                Fresh::Whole(_) => unreachable!(),
+            };
+            for (_building, surfaces) in buildings {
+                // Removed floors are absent from the canonical tree; stale immutable sources cannot be selected.
+                floors.retain(|id, _| base.handle(*id).is_some());
+                for (id, surface) in surfaces {
+                    floors.insert(*id, Arc::new(surface.clone()));
+                }
+            }
+            after.layout = Arc::new(layout);
+            after.flags = Arc::new(flags);
+            after.floors = Arc::new(floors);
+        }
+        after.classes = classes
+            .iter()
+            .map(|(&size, g)| (size, g.basis.clone()))
+            .collect();
         Ok(Rebuilt {
+            after,
+            before_layout: Arc::clone(&basis.layout),
+            classes,
             touched,
             versions,
             fresh,
@@ -481,7 +864,9 @@ impl Town {
                     .collect(),
             )
         };
-        let r = basis.index.recut(before, after, ids, HUMAN_RADIUS, &cut)?;
+        let r = basis
+            .index
+            .recut(before, after, ids, basis.size.radius_mm(), &cut)?;
         let mut cut_open = (**open).clone();
         let mut squares = Vec::new();
         // The links whose meets on a square cut again changed: their buildings are read again on the new meets.
@@ -606,7 +991,7 @@ impl Town {
                 doors: &open.doors,
                 terrain: open.terrain.as_deref(),
             };
-            Building::read_on(after, thing, Some(o)).ok()
+            Building::read_sized(after, thing, Some(o), basis.size.radius_mm()).ok()
         };
         let mut out = Vec::new();
         for &thing in things {
@@ -654,37 +1039,69 @@ impl Town {
         Some(out)
     }
 
+    /// Lookup-only preflight before the caller commits the same prepared map and part.
+    pub fn check_install(&self, r: &Rebuilt) -> Result<(), Refusal> {
+        if !r.classes.keys().eq(self.classes.keys()) {
+            return Err(refusal(
+                "body-class-unprepared",
+                "class geometry changed since preparation",
+            ));
+        }
+        if let Fresh::Squares(sq, ..) = &r.fresh {
+            let keys: Vec<(i32, i32)> = sq.iter().map(|(k, ..)| *k).collect();
+            let link_of = |id: Id| find_link(&self.link_at, &self.buildings, id).cloned();
+            self.map
+                .check_squares(self.ground, &keys, &link_of)
+                .map_err(|e| refusal("ground-changed", e))?;
+        }
+        Ok(())
+    }
+
     /// On the tick `part` commits: commits it through the zone's one write, its effects numbered from the zone's next
     /// sequence (doors may have opened since it was checked), and installs the ground `r` built for it, in the same
     /// call: the whole ground swapped in, or each building read again replaced on the map. The walks planned on the
     /// changed ground are listed in [`Town::stale`], and the lines of corners on it are dropped. A refused part
     /// installs nothing.
     pub fn install(&mut self, r: Rebuilt, part: &Part) -> Result<(), Refusal> {
+        self.install_then(r, part, || Ok(()))
+    }
+
+    /// All map and tree input checks precede the paired live write. Its refusal rolls the town tree back;
+    /// its success leaves only installation of already checked geometry, with no fallible input check.
+    pub fn install_then<T>(
+        &mut self,
+        r: Rebuilt,
+        part: &Part,
+        commit: impl FnOnce() -> Result<T, Refusal>,
+    ) -> Result<T, Refusal> {
         // What the threads' route searches found joins the map before it changes (N17b): no scratch outlives its map.
-        for s in &mut self.scratches {
-            self.map.keep(s);
-        }
-        let link_of = |id: Id| find_link(&self.link_at, &self.buildings, id).cloned();
-        if let Fresh::Squares(sq, ..) = &r.fresh {
-            let keys: Vec<(i32, i32)> = sq.iter().map(|(k, ..)| *k).collect();
-            self.map
-                .check_squares(self.ground, &keys, &link_of)
-                .map_err(|e| refusal("ground-changed", e))?;
-        }
+        self.keep_scratches();
+        self.check_install(&r)?;
         let mut p = part.clone();
         for (k, e) in p.effects.iter_mut().enumerate() {
             e.envelope.sequence = self.doors.next + k as u64;
         }
         let bytes = encode(&p.to_value()).map_err(|e| refusal("encoding", e.to_string()))?;
-        self.tree
-            .commit(&self.doors.header, &Part::read(&bytes)?, &self.doors.rules)?;
+        let committed = self.tree.commit_then(
+            &self.doors.header,
+            &Part::read(&bytes)?,
+            &self.doors.rules,
+            commit,
+        )?;
         self.doors.next += part.effects.len() as u64;
         let Rebuilt {
             mut touched,
             versions,
             fresh,
+            classes,
+            after,
             ..
         } = r;
+        self.classes = classes;
+        for scratch in &mut self.scratches {
+            scratch.other.clear();
+        }
+        self.spots.invalidate_geometry();
         // A change that cuts squares again changes the open ground there only (and the buildings read again).
         let cut: Option<BTreeSet<(i32, i32)>> = match &fresh {
             Fresh::Squares(sq, _, bs) => {
@@ -711,7 +1128,7 @@ impl Town {
                     .collect();
                 self.map
                     .replace_squares(ground, versions.of(ground), cut, &link_of)
-                    .map_err(|e| refusal("ground-changed", e))?;
+                    .expect("the same map and links passed check_install before the paired write");
                 let (mut drop, mut add, mut on) = (Vec::new(), Vec::new(), Vec::new());
                 for (sq, pieces, flags) in &squares {
                     drop.extend(self.square_pieces.get(sq).into_iter().flatten().copied());
@@ -731,6 +1148,7 @@ impl Town {
             }
             Fresh::Buildings(bs) => self.put_buildings(bs, &versions),
         }
+        self.basis = after;
         self.link_at = link_index(&self.buildings);
         self.versions = versions;
         let ground = self.ground;
@@ -796,7 +1214,7 @@ impl Town {
         self.lines.retain(|(_, l)| {
             !(changed(&l.node) || (l.node == ground && touched.contains(&ground) && crosses(l)))
         });
-        Ok(())
+        Ok(committed)
     }
 
     /// Each building read again replaced on the route map, its floors' surfaces with it.
@@ -826,15 +1244,25 @@ impl Town {
 
     /// The route map, each node's surface, the buildings and the basis for a rebuild, read from `tree` at `versions`.
     fn assemble(tree: &Tree, ground: Id, versions: &Versions) -> Result<Assembled, String> {
-        let map = Map::build(tree, ground, &|n| versions.of(n))?;
+        Self::assemble_for(tree, ground, versions, Size::Standard)
+    }
+    fn assemble_for(
+        tree: &Tree,
+        ground: Id,
+        versions: &Versions,
+        size: Size,
+    ) -> Result<Assembled, String> {
+        let map = Map::build_for(tree, ground, size, &|n| versions.of(n))?;
         let mut surfaces = BTreeMap::new();
-        let open = OpenGround::of(tree, ground, HUMAN_RADIUS)?;
+        let open = OpenGround::of(tree, ground, size.radius_mm())?;
         let terrain = open.terrain().cloned().map(Arc::new);
         let (mut pieces, mut meets, mut squares) = (Vec::new(), Vec::new(), BTreeMap::new());
         let mut square_pieces = BTreeMap::new();
+        let mut square_flags = BTreeMap::new();
         for (i, j) in open.squares() {
             let p = open.cut_square(i, j);
             let first = pieces.len() as u32;
+            square_flags.insert((i, j), open.on_terrain(&p.pieces));
             square_pieces.insert((i, j), (first..first + p.pieces.len() as u32).collect());
             squares.insert((i, j), Arc::new(p.pieces.clone()));
             pieces.extend(p.pieces);
@@ -866,7 +1294,7 @@ impl Town {
                     doors: &gdoors,
                     terrain: open.terrain(),
                 };
-                if let Ok(b) = Building::read_on(tree, id, Some(open)) {
+                if let Ok(b) = Building::read_sized(tree, id, Some(open), size.radius_mm()) {
                     for (&floor, (_, patch)) in &b.floors {
                         surfaces.insert(floor, Surface::new(floor, patch.pieces.clone()));
                     }
@@ -907,6 +1335,20 @@ impl Town {
             .filter_map(|b| Some((b.thing, reach(b)?)))
             .collect();
         let basis = Basis {
+            layout: Arc::new(SurfaceLayout {
+                count: surfaces[&ground].pieces().len() as u32,
+                squares: square_pieces.clone(),
+            }),
+            flags: Arc::new(square_flags),
+            floors: Arc::new(
+                surfaces
+                    .iter()
+                    .filter(|(id, _)| **id != ground)
+                    .map(|(&id, s)| (id, Arc::new(s.clone())))
+                    .collect(),
+            ),
+            size,
+            classes: BTreeMap::new(),
             open: Arc::new(OpenCut {
                 squares,
                 meets,
@@ -926,42 +1368,132 @@ impl Town {
     pub fn relocate(&self, body: &Body) -> Result<Body, Refusal> {
         let node = node_of(body);
         let mut b = self
-            .surfaces
+            .surfaces_for(self.size_of(body.id))
+            .ok_or_else(|| refusal("body-class-unprepared", "no prepared geometry"))?
             .get(&node)
             .ok_or_else(|| refusal("no-surface", show(node)))?
-            .place(
+            .place_built(
                 body.id,
                 body.pose.frame,
                 body.pose.position,
                 body.pose.orientation,
+                replica::kinds::sizes::Build {
+                    size: self.size_of(body.id),
+                    hover_mm: match body.pose.support {
+                        Support::Surface { height, .. } => height / 1000,
+                        Support::Slot | Support::Volume { .. } | Support::Track | Support::None => {
+                            0
+                        }
+                    },
+                    ..replica::kinds::sizes::Build::STANDARD
+                },
             )?;
         b.linear = body.linear;
         Ok(b)
     }
 
-    fn link(&self, id: Id) -> Option<&crate::links::Link> {
-        find_link(&self.link_at, &self.buildings, id)
-    }
-
-    fn building(&self, link: Id) -> Option<&Building> {
-        self.buildings.iter().find(|b| b.link(link).is_some())
+    fn geometry(&self, size: Size) -> Result<GeometryRead<'_>, Refusal> {
+        if size == Size::Standard {
+            Ok((&self.map, &self.surfaces, &self.buildings, &self.link_at))
+        } else {
+            self.classes
+                .get(&size)
+                .map(|g| (&g.map, &g.surfaces, g.buildings.as_slice(), &g.link_at))
+                .ok_or_else(|| refusal("body-class-unprepared", "no prepared geometry"))
+        }
     }
 
     /// A copy of this town for a planner (K18b, #3175): built again from a frozen copy of the tree, with its own map
     /// and spot tables, and a door writer of its own (the planner never opens a door).
     pub fn copy(&self) -> Result<Town, String> {
         let d = &self.doors;
-        Town::new(
+        let mut copy = Town::new(
             self.tree.frozen(),
             self.ground,
             Doors::new(d.header.clone(), d.rules.clone(), d.next),
-        )
+        )?;
+        copy.prepare_classes(self.classes.keys().copied())?;
+        copy.body_classes.clone_from(&self.body_classes);
+        Ok(copy)
+    }
+
+    /// A copy of this town by memory copy, as it stands (#3743): the edit checker's own town, seeded at boot from the
+    /// town the boot already built instead of assembled again. Its ground, classes and versions are this town's;
+    /// its tree is a frozen copy and its door writer its own. No walker, line, plan or spot table is copied.
+    pub fn duplicate(&self) -> Town {
+        let d = &self.doors;
+        Town {
+            tree: self.tree.frozen(),
+            classes: self.classes.clone(),
+            body_classes: self.body_classes.clone(),
+            ground: self.ground,
+            map: self.map.clone(),
+            surfaces: self.surfaces.clone(),
+            buildings: self.buildings.clone(),
+            link_at: self.link_at.clone(),
+            doors: Doors::new(d.header.clone(), d.rules.clone(), d.next),
+            turns: Some(Turns::new()),
+            spots: Spots::new(),
+            meter: None,
+            spent: Cell::new(Spent::default()),
+            lines: Vec::new(),
+            scratches: vec![ClassScratch::default()],
+            crossings: BTreeMap::new(),
+            versions: self.versions.clone(),
+            basis: self.basis.clone(),
+            square_pieces: self.square_pieces.clone(),
+            planned: BTreeMap::new(),
+            planned_squares: BTreeMap::new(),
+            stale: BTreeMap::new(),
+        }
+    }
+
+    /// A town on `tree` and its planner's copy (K18b, #3175), with the ground assembled once (#3672): the planner
+    /// gets a clone of the assembled ground instead of a second assembly. Equal to [`Town::new`] then
+    /// [`Town::copy`]: assembly reads only the tree, the ground and fresh versions, all the same for both.
+    pub fn with_planner(tree: Tree, ground: Id, doors: Doors) -> Result<(Town, Town), String> {
+        let frozen = tree.frozen();
+        let planner_doors = Doors::new(doors.header.clone(), doors.rules.clone(), doors.next);
+        let town = Town::new(tree, ground, doors)?;
+        let (map, surfaces, buildings, basis, square_pieces) = (
+            town.map.clone(),
+            town.surfaces.clone(),
+            town.buildings.clone(),
+            town.basis.clone(),
+            town.square_pieces.clone(),
+        );
+        let link_at = town.link_at.clone();
+        let planner = Town {
+            tree: frozen,
+            classes: BTreeMap::new(),
+            body_classes: BTreeMap::new(),
+            ground,
+            map,
+            surfaces,
+            buildings,
+            link_at,
+            doors: planner_doors,
+            turns: Some(Turns::new()),
+            spots: Spots::new(),
+            meter: None,
+            spent: Cell::new(Spent::default()),
+            lines: Vec::new(),
+            scratches: vec![ClassScratch::default()],
+            crossings: BTreeMap::new(),
+            versions: Versions::default(),
+            basis,
+            square_pieces,
+            planned: BTreeMap::new(),
+            planned_squares: BTreeMap::new(),
+            stale: BTreeMap::new(),
+        };
+        Ok((town, planner))
     }
 
     /// The line from where `body` stands toward `to` on its node ([`View::search`], the planning call): the planner's
     /// (K18b, #3175), not the clock's.
     pub fn line(&mut self, body: &Body, to: Vec3) -> Result<Line, Refusal> {
-        self.view().search(body, to)
+        self.view_for(body.id)?.search(body, to)
     }
 
     /// The frame on the open ground of the building that holds the floor `node`.
@@ -975,8 +1507,16 @@ impl Town {
     /// The town as the host's questions read it in a tick: the map shared, a route search's scratch behind a cell
     /// (what it finds is cached), the rest shared.
     pub fn view(&mut self) -> View<'_> {
+        self.view_for_size(Size::Standard)
+            .expect("standard geometry is always prepared")
+    }
+    pub fn view_for(&mut self, body: Id) -> Result<View<'_>, Refusal> {
+        self.view_for_size(self.size_of(body))
+    }
+    pub fn view_for_size(&mut self, size: Size) -> Result<View<'_>, Refusal> {
         let split = self.split(1);
-        split.shared.view(
+        split.shared.view_for(
+            size,
             &mut split.scratches[0],
             Lines::All(split.lines),
             split.spent,
@@ -987,16 +1527,15 @@ impl Town {
     /// reads, one route search scratch each, and the walkers' lines and the costs, which the caller hands out. What
     /// the scratches found since the last split joins the map's caches first.
     pub fn split(&mut self, workers: usize) -> Split<'_> {
-        for s in &mut self.scratches {
-            self.map.keep(s);
-        }
+        self.keep_scratches();
         let workers = workers.max(1);
         if self.scratches.len() < workers {
-            self.scratches.resize_with(workers, Scratch::default);
+            self.scratches.resize_with(workers, ClassScratch::default);
         }
         Split {
             shared: Shared {
                 tree: &self.tree,
+                classes: &self.classes,
                 map: &self.map,
                 surfaces: &self.surfaces,
                 buildings: &self.buildings,
@@ -1015,7 +1554,7 @@ impl Town {
 /// The town split for threads ([`Town::split`]).
 pub struct Split<'a> {
     pub shared: Shared<'a>,
-    pub scratches: &'a mut [Scratch],
+    pub scratches: &'a mut [ClassScratch],
     /// Each walker's line of corners, by walker: a thread's view needs those of the walkers it steps.
     pub lines: &'a mut Vec<(Id, Line)>,
     pub spent: &'a Cell<Spent>,
@@ -1025,6 +1564,7 @@ pub struct Split<'a> {
 #[derive(Clone, Copy)]
 pub struct Shared<'a> {
     pub tree: &'a Tree,
+    classes: &'a BTreeMap<Size, Geometry>,
     map: &'a Map,
     surfaces: &'a BTreeMap<Id, Surface>,
     buildings: &'a [Building],
@@ -1034,31 +1574,80 @@ pub struct Shared<'a> {
     ground: Id,
 }
 
+impl crate::mover::Floors for Shared<'_> {
+    fn for_build(&self, build: replica::kinds::sizes::Build) -> Option<&BTreeMap<Id, Surface>> {
+        if build.size == Size::Standard {
+            Some(self.surfaces)
+        } else {
+            self.classes.get(&build.size).map(|g| &g.surfaces)
+        }
+    }
+}
+impl crate::mover::Floors for Town {
+    fn for_build(&self, build: replica::kinds::sizes::Build) -> Option<&BTreeMap<Id, Surface>> {
+        self.surfaces_for(build.size)
+    }
+}
+
 impl<'a> Shared<'a> {
     /// The town as one thread's questions read it: its own scratch, the lines of the walkers it steps, and the costs
     /// it counts.
     pub fn view<'b>(
         &self,
-        scratch: &'b mut Scratch,
+        scratch: &'b mut ClassScratch,
         lines: Lines<'b>,
         spent: &'b Cell<Spent>,
     ) -> View<'b>
     where
         'a: 'b,
     {
-        View {
+        self.view_for(Size::Standard, scratch, lines, spent)
+            .expect("standard geometry")
+    }
+    pub fn view_for<'b>(
+        &self,
+        size: Size,
+        scratch: &'b mut ClassScratch,
+        lines: Lines<'b>,
+        spent: &'b Cell<Spent>,
+    ) -> Result<View<'b>, Refusal>
+    where
+        'a: 'b,
+    {
+        let (map, surfaces, buildings, link_at, scratch) = if size == Size::Standard {
+            (
+                self.map,
+                self.surfaces,
+                self.buildings,
+                self.link_at,
+                &mut scratch.standard,
+            )
+        } else {
+            let g = self
+                .classes
+                .get(&size)
+                .ok_or_else(|| refusal("body-class-unprepared", "no prepared geometry"))?;
+            (
+                &g.map,
+                &g.surfaces,
+                g.buildings.as_slice(),
+                &g.link_at,
+                scratch.other.entry(size).or_default(),
+            )
+        };
+        Ok(View {
             tree: self.tree,
-            map: self.map,
+            map,
             scratch: RefCell::new(scratch),
-            surfaces: self.surfaces,
-            buildings: self.buildings,
-            link_at: self.link_at,
+            surfaces,
+            buildings,
+            link_at,
             turns: self.turns,
             meter: self.meter,
             spent,
             lines: RefCell::new(lines),
             ground: self.ground,
-        }
+        })
     }
 }
 
@@ -1380,6 +1969,19 @@ impl MapRef<'_> {
     }
 }
 
+struct ClassGrounds<'a>(BTreeMap<Size, Grounds<'a>>);
+impl ClassGround for ClassGrounds<'_> {
+    fn stand(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.0.get(&size)?.stand(node, p)
+    }
+    fn passage(&self, size: Size, node: Id, p: Vec3) -> bool {
+        self.0.get(&size).is_none_or(|g| g.passage(node, p))
+    }
+    fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
+        self.0.get_mut(&size)?.walk(an, a, bn, b)
+    }
+}
+
 impl Ground for Grounds<'_> {
     fn stand(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
         let s = self.map.get().spot(node, p)?;
@@ -1423,18 +2025,29 @@ impl Ground for Grounds<'_> {
 
 impl World for Town {
     fn spots(&mut self, marks: &[Mark], at: Micros) -> Result<(), Refusal> {
-        let asks: Vec<Ask> = marks
+        let asks = marks
             .iter()
             .filter_map(|m| {
-                m.spot.map(|(target, order)| Ask {
-                    who: m.who,
-                    order,
-                    node: m.node,
-                    from: m.at,
-                    target,
+                m.spot.map(|(target, order)| {
+                    (
+                        Ask {
+                            who: m.who,
+                            order,
+                            node: m.node,
+                            from: m.at,
+                            target,
+                        },
+                        self.size_of(m.who),
+                    )
                 })
             })
-            .collect();
+            .collect::<Vec<_>>();
+        if asks
+            .iter()
+            .any(|(_, size)| self.surfaces_for(*size).is_none())
+        {
+            return Err(refusal("body-class-unprepared", "standing spot geometry"));
+        }
         let Town {
             spots,
             map,
@@ -1442,17 +2055,35 @@ impl World for Town {
             buildings,
             ground,
             surfaces,
+            classes,
             ..
         } = self;
-        let mut g = Grounds {
-            tree,
-            map: MapRef::Own(map),
-            surfaces,
-            buildings,
-            ground: *ground,
-            boxes: OnceCell::new(),
-        };
-        spots.write(&mut g, &asks, at)
+        let mut gs = BTreeMap::new();
+        gs.insert(
+            Size::Standard,
+            Grounds {
+                tree,
+                map: MapRef::Own(map),
+                surfaces,
+                buildings,
+                ground: *ground,
+                boxes: OnceCell::new(),
+            },
+        );
+        for (&size, g) in classes {
+            gs.insert(
+                size,
+                Grounds {
+                    tree,
+                    map: MapRef::Own(&mut g.map),
+                    surfaces: &g.surfaces,
+                    buildings: &g.buildings,
+                    ground: *ground,
+                    boxes: OnceCell::new(),
+                },
+            );
+        }
+        spots.write_sized(&mut ClassGrounds(gs), &asks, at)
     }
 
     fn spot(&self, who: Id, target: &Target) -> Option<Result<Vec3, &'static str>> {
@@ -1550,11 +2181,21 @@ impl Town {
         node: Id,
         goal: Vec3,
     ) -> Result<(Vec<Leg>, RouteMetrics), Refusal> {
+        let size = self.size_of(body.id);
+        let (map, link_at, buildings) = if size == Size::Standard {
+            (&mut self.map, &self.link_at, self.buildings.as_slice())
+        } else {
+            let g = self
+                .classes
+                .get_mut(&size)
+                .ok_or_else(|| refusal("body-class-unprepared", "no prepared geometry"))?;
+            (&mut g.map, &g.link_at, g.buildings.as_slice())
+        };
         let (legs, ground, squares, metrics) = plan_on(
-            &mut MapRef::Own(&mut self.map),
+            &mut MapRef::Own(map),
             &self.tree,
-            &self.link_at,
-            &self.buildings,
+            link_at,
+            buildings,
             self.ground,
             body,
             node,
@@ -1943,7 +2584,14 @@ impl Town {
         goal: Option<Vec3>,
     ) -> Result<(Vec<Leg>, crate::routes::way::Points), Refusal> {
         let from = body.pose.position;
-        let pts = crate::routes::way::points(&self.tree, &self.map, self.ground, from, goal, way)?;
+        let pts = crate::routes::way::points(
+            &self.tree,
+            self.geometry(self.size_of(body.id))?.0,
+            self.ground,
+            from,
+            goal,
+            way,
+        )?;
         let mut stops = pts.on.clone();
         stops.extend(goal.map(|g| (self.ground, g)));
         if stops.is_empty() {
@@ -1957,7 +2605,8 @@ impl Town {
             ground.extend(self.planned.remove(&body.id).unwrap_or_default());
             squares.extend(self.planned_squares.remove(&body.id).unwrap_or_default());
             at = self
-                .surfaces
+                .surfaces_for(self.size_of(body.id))
+                .ok_or_else(|| refusal("body-class-unprepared", "no prepared surfaces"))?
                 .get(&node)
                 .ok_or_else(|| refusal("no-surface", show(node)))?
                 .place(body.id, Frame { node, slot: None }, p, Quat::IDENTITY)?;
@@ -1978,8 +2627,9 @@ impl Town {
         speed: i64,
         at: Micros,
     ) -> Result<(u8, Option<Track>), Refusal> {
-        let l = self
-            .link(link)
+        let size = self.size_of(body.id);
+        let (map, surfaces, buildings, link_at) = self.geometry(size)?;
+        let l = find_link(link_at, buildings, link)
             .ok_or_else(|| refusal("link-missing", show(link)))?;
         if let Some(why) = l.blocked {
             return Err(refusal(why, show(link)));
@@ -2003,21 +2653,21 @@ impl Town {
         // ([`Town::landing`]), or the crossing is refused before the body moves.
         let mut arrive = None;
         if here == self.ground || to == self.ground {
-            let place = self
-                .building(link)
+            let place = buildings
+                .iter()
+                .find(|b| b.link(link).is_some())
                 .map(|b| b.place)
                 .ok_or_else(|| refusal("link-missing", show(link)))?;
             let out = |e: String| refusal("out-of-range", e);
             if let Some(e) = far {
                 // Where the map stands it, else the end's middle; then on the mover's surface (#3168).
-                let stand = self
-                    .map
+                let stand = map
                     .spot_near(to, e.middle(), AT_EDGE)
                     .map_or(e.middle(), |s| {
                         Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000)
                     });
                 let mut stand = self
-                    .landing(to, stand)
+                    .landing(size, to, stand)
                     .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
                 // The open ground's pieces are a plan at 0; a body there stands on its terrain (#3227).
                 if to == self.ground {
@@ -2025,8 +2675,7 @@ impl Town {
                         node: to,
                         slot: None,
                     };
-                    stand = self
-                        .surfaces
+                    stand = surfaces
                         .get(&to)
                         .ok_or_else(|| refusal("no-surface", show(to)))?
                         .place(body.id, at, stand, body.pose.orientation)?
@@ -2048,7 +2697,7 @@ impl Town {
                     *p = place.point(*p).map_err(out)?;
                 }
             }
-        } else if let Some(b) = self.building(link)
+        } else if let Some(b) = buildings.iter().find(|b| b.link(link).is_some())
             && let (Some(ph), Some(pt)) = (self.frame_of(here), self.frame_of(to))
             && (!b.floors.contains_key(&here) || !b.floors.contains_key(&to))
         {
@@ -2064,14 +2713,13 @@ impl Town {
                 }
             }
             if let Some(e) = far {
-                let stand = self
-                    .map
+                let stand = map
                     .spot_near(to, e.middle(), AT_EDGE)
                     .map_or(e.middle(), |s| {
                         Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000)
                     });
                 let stand = self
-                    .landing(to, stand)
+                    .landing(size, to, stand)
                     .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
                 if let Some(p) = line.last_mut() {
                     *p = to_here(stand, &pt).map_err(out)?;
@@ -2080,8 +2728,19 @@ impl Town {
             }
         } else if let Some(last) = line.last_mut() {
             *last = self
-                .landing(to, *last)
+                .landing(size, to, *last)
                 .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
+        }
+        // The same admitted support offset follows the original mover-owned crossing line.
+        let height = match body.pose.support {
+            Support::Surface { height, .. } => height,
+            Support::Slot | Support::Volume { .. } | Support::Track | Support::None => 0,
+        };
+        for point in &mut line {
+            point.y = point
+                .y
+                .checked_add(height)
+                .ok_or_else(|| refusal("out-of-range", "support height"))?;
         }
         // The carry starts at the near end: a body asking from further off would be carried there in a straight
         // line, through whatever stands between (#3168).
@@ -2137,14 +2796,14 @@ impl Town {
     /// Where a crossing stands a body on `node` for the point `at` (µm, its frame): `at` when the mover's surface
     /// holds it, else the surface's nearest legal point within [`LAND`] (N5's map and N6's mover cut the ground
     /// apart, so a link's end on a map piece's edge can lie just off the mover's), else none (#3168).
-    fn landing(&self, node: Id, at: Vec3) -> Option<Vec3> {
-        let s = self.surfaces.get(&node)?;
+    fn landing(&self, size: Size, node: Id, at: Vec3) -> Option<Vec3> {
+        let s = self.surfaces_for(size)?.get(&node)?;
         let frame = Frame { node, slot: None };
         if s.place(node, frame, at, Quat::IDENTITY).is_ok() {
             return Some(at);
         }
         let (_, q) = exits::nearest(s.pieces(), at)?;
-        (flat2(q, at) <= i128::from(LAND) * i128::from(LAND)).then_some(q)
+        (flat2(q, at) <= i128::from(LAND.min(size.radius_mm() * 1000)).pow(2)).then_some(q)
     }
 }
 
@@ -2187,5 +2846,191 @@ impl Links for Town {
             self.crossings.insert(body.id, Crossing { from, start });
         }
         Ok(track)
+    }
+}
+
+#[cfg(test)]
+mod prepared_transport_tests {
+    use super::*;
+    use crate::ground::Patch;
+    use crate::ground::scene::Xform;
+    use crate::links::{Kind, Link};
+    use replica::ids::Scope;
+
+    #[test]
+    fn class_preparation_noops_and_standard_copy_do_not_run_a_clock_checker() {
+        let make_town = || {
+            let facts = testworld::generate(1, 0).unwrap();
+            let imported = import_eden::load(&facts.text).unwrap();
+            let root = imported.nodes["world"];
+            let ground = imported.nodes["ground"];
+            let header = import_eden::header(root, &imported.rules).unwrap();
+            let next = imported.tree.to_state().next;
+            Town::new(
+                imported.tree,
+                ground,
+                Doors::new(header, imported.rules, next),
+            )
+            .unwrap()
+        };
+        let mut standard = make_town();
+        std::thread::spawn(move || {
+            crate::commit::mark_clock_thread();
+            standard.prepare_classes([]).unwrap();
+            standard.prepare_classes([Size::Standard]).unwrap();
+            let copy = standard.copy().unwrap();
+            assert_eq!(copy.ground, standard.ground);
+            assert_eq!(
+                copy.surfaces.keys().collect::<Vec<_>>(),
+                standard.surfaces.keys().collect::<Vec<_>>()
+            );
+            assert!(copy.classes.is_empty());
+        })
+        .join()
+        .unwrap();
+
+        let mut prepared = make_town();
+        prepared.prepare_classes([Size::Large]).unwrap();
+        std::thread::spawn(move || {
+            let identity = |town: &Town| {
+                let geometry = &town.classes[&Size::Large];
+                (
+                    Arc::as_ptr(&geometry.basis.layout),
+                    Arc::as_ptr(&geometry.basis.open),
+                    geometry
+                        .surfaces
+                        .iter()
+                        .map(|(&id, surface)| (id, surface as *const Surface))
+                        .collect::<Vec<_>>(),
+                )
+            };
+            let before = identity(&prepared);
+            crate::commit::mark_clock_thread();
+            prepared
+                .prepare_classes([Size::Standard, Size::Large, Size::Large])
+                .unwrap();
+            assert_eq!(identity(&prepared), before);
+            assert_eq!(prepared.classes.len(), 1);
+            #[cfg(debug_assertions)]
+            {
+                let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    prepared.prepare_classes([Size::Giant])
+                }))
+                .expect_err("a genuinely missing class remains guarded on the clock");
+                let message = panic
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic.downcast_ref::<String>().map(String::as_str));
+                assert_eq!(
+                    message,
+                    Some("a rule check or route search ran on the clock thread")
+                );
+                assert!(prepared.surfaces_for(Size::Giant).is_none());
+                assert_eq!(identity(&prepared), before);
+            }
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn prepared_installations_keep_geometry_and_versions_independent() {
+        let id = |n| Id::new(Scope([93; 16]), n).unwrap();
+        let floor = id(1);
+        let piece = Piece {
+            outline: vec![vec![[0, 0, 0], [1000, 0, 0], [0, 0, 1000]]],
+            vertices: vec![[0, 0, 0], [1000, 0, 0], [0, 0, 1000]],
+            triangles: vec![[0, 1, 2]],
+            ground: crate::gaits::Ground::Dry,
+        };
+        let building = Building {
+            thing: id(2),
+            links: vec![Link {
+                id: id(3),
+                kind: Kind::Step,
+                nodes: [floor, id(4)],
+                owner: id(2),
+                width: 1_000_000,
+                ends: [None, None],
+                line: vec![Vec3::ZERO, Vec3::new(100_000, 0, 100_000)],
+                door: None,
+                blocked: None,
+            }],
+            floors: BTreeMap::from([(
+                floor,
+                (
+                    0,
+                    Patch {
+                        radius: HUMAN_RADIUS,
+                        pieces: vec![piece.clone()],
+                        meets: Vec::new(),
+                    },
+                ),
+            )]),
+            place: Xform::IDENTITY,
+            loose: Vec::new(),
+        };
+        let facts = testworld::generate(1, 0).unwrap();
+        let imported = import_eden::load(&facts.text).unwrap();
+        let root = imported.nodes["world"];
+        let ground = imported.nodes["ground"];
+        let header = import_eden::header(root, &imported.rules).unwrap();
+        let next = imported.tree.to_state().next;
+        let town = Town::new(
+            imported.tree,
+            ground,
+            Doors::new(header, imported.rules, next),
+        )
+        .unwrap();
+        let prepared = Rebuilt {
+            after: town.basis(),
+            before_layout: Arc::clone(&town.basis.layout),
+            classes: BTreeMap::new(),
+            touched: BTreeSet::from([floor]),
+            versions: Versions::default(),
+            fresh: Fresh::Buildings(vec![(
+                building,
+                BTreeMap::from([(floor, Surface::new(floor, vec![piece]))]),
+            )]),
+            why: None,
+        };
+        let (mut live, mut worker) = prepared.into_pair();
+        live.versions.bump([&floor]);
+        live.touched.clear();
+        assert_eq!(worker.versions.of(floor), 0);
+        assert!(worker.touched.contains(&floor));
+        let Fresh::Buildings(live) = &mut live.fresh else {
+            panic!("building install")
+        };
+        let Fresh::Buildings(worker) = &mut worker.fresh else {
+            panic!("building install")
+        };
+        live[0].0.links[0].line.clear();
+        live[0]
+            .1
+            .get_mut(&floor)
+            .unwrap()
+            .replace(&[0], Vec::new(), Vec::new());
+        let frame = Frame {
+            node: floor,
+            slot: None,
+        };
+        let at = Vec3::new(100_000, 0, 100_000);
+        assert!(
+            live[0].1[&floor]
+                .place(id(5), frame, at, Quat::IDENTITY)
+                .is_err()
+        );
+        assert!(
+            worker[0].1[&floor]
+                .place(id(5), frame, at, Quat::IDENTITY)
+                .is_ok()
+        );
+        assert_eq!(worker[0].0.links[0].line.len(), 2);
+        worker[0].0.floors.clear();
+        assert_eq!(
+            live[0].0.floors[&floor].1.pieces[0].triangles,
+            vec![[0, 1, 2]]
+        );
     }
 }

@@ -32,6 +32,11 @@
 //!   ([`Bodies::add_body_at`]) and hands each that sat back into its seat ([`Bodies::seat_placed`], K18c #3176), so
 //!   the seat is held in the slots table again and a rise or another sit sees it.
 //!
+//! - **Seen moving** (#3799). After each step the world writes each body's motion on its node, as T4's samples: at
+//!   each hand-off (a start, a stop, a turn, a seat taken or left, a new floor) and every [`KEYFRAME_US`] while it
+//!   moves; a change of frame is a leave and an arrive inside the zone first. So the tree, interest and the public
+//!   stream follow the bodies ([`Bodies::motion`]).
+//!
 //! - **Who hears** (#3369). After each step of the controller the bodies call `sim::speech::heard`, which brings every
 //!   body's interest set up to date and gives each utterance the step started its hearers as they are then; the world
 //!   writes each as `sim::speech::entry` says ([`Bodies::heard`]).
@@ -40,25 +45,31 @@
 
 use sim::ground::Versions;
 use sim::planner::{FormAnswer, FormKey, FormQuestion};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use replica::bodies::Family;
+use replica::bodies::{Class, SkillShape, Want};
+use replica::effects::Effect;
 use replica::effects::{Actor, Refusal, fixture_bytes};
 use replica::encode::{Name, Value, decode};
 use replica::host::Progress;
 use replica::ids::{Id, Minter, Scope};
 use replica::intents::Intent;
+use replica::kinds::sizes::{Build, Size};
 use replica::move_check::{self, Seen, Verdict};
 use replica::moves::{Effector, Move};
-use replica::pose::{Pose, Support, Vec3};
+use replica::pose::{Frame, HandOff, Owner, Pose, Support, Vec3};
 use replica::select::{self, Spot};
 use replica::speech::Said;
 use replica::time::Micros;
+use replica::tree::Tree;
+use replica::world_model::Audience;
 use sim::commit::bind::{Bound, Slot, bind};
 use sim::commit::spot;
 use sim::controller::Stance;
+use sim::controller::{Driver, Part};
 use sim::host::Runner;
 use sim::host::{Planned, ReachKey, ReachQuestion, Wants};
 use sim::life::{Born, Life, Retired, Standing};
@@ -71,6 +82,7 @@ use sim::spots::Target;
 use sim::timers::DueList;
 use sim::walk::town::Town;
 use skills::route::Route;
+use skills::wind_down::{self, Do, Ground, Order, Phase, WindDown};
 
 type R<T> = Result<T, Refusal>;
 
@@ -187,6 +199,8 @@ pub struct Bodies {
     took: BTreeMap<Id, (usize, Option<Id>)>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
     logged: BTreeMap<Id, Pose>,
+    /// Each body's motion as the world last wrote it to its node ([`Bodies::motion`]); read from the tree when absent.
+    shown: BTreeMap<Id, Shown>,
     /// The planner thread: route searches and reach distances, off the clock (K18b, #3175).
     planner: Thread,
     /// How long a tick waits for each of the planner's batches: `None` as long as it takes (lockstep, the default),
@@ -211,20 +225,91 @@ pub struct Bodies {
     /// The utterances started since the world last took them, each with its speaker, its record (hearers resolved
     /// when it started) and the world time it started: the world writes each.
     pub heard: Vec<(Id, Said, Micros)>,
+    /// The wind-down (B16, #2751): the one rule by which the world moves a body its agent did not order.
+    pub wind: WindDown,
+    /// Its records since the world last took them, cause and actor the world.
+    pub wind_log: Vec<Effect>,
+    /// The rule's own move going on each body, by its intent id.
+    wind_moves: BTreeMap<Id, Id>,
+    /// Each body the rule put to sleep on the ground: the driver holding it lying.
+    sleeping: BTreeMap<Id, Driver>,
 }
 
 /// Where the log last had each body: its pose, and its stance when that pose is in a seat's slot (K18, #3160;
 /// K18c, #3176). What a restart builds its bodies at.
 pub type Placed = BTreeMap<Id, (Pose, Option<Stance>)>;
 
+/// About how often a moving body's motion is written while nothing else about it changes (#3799): 200 ms of world
+/// time, counted in whole ticks.
+pub const KEYFRAME_US: Micros = 200_000;
+
+/// A body's motion as the world last wrote it on its node (#3799): its pose, its velocity and when.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Shown {
+    pose: Pose,
+    linear: Vec3,
+    at: Micros,
+    audience: Audience,
+}
+
+impl Shown {
+    /// What the tree holds of `body`'s motion: its place in its parent's frame, and its last sample's velocity and time.
+    fn of(tree: &Tree, body: Id) -> Option<Shown> {
+        let n = tree.node(tree.handle(body)?)?;
+        let place = n.place()?;
+        let pose = Pose {
+            frame: Frame {
+                node: n.parent()?,
+                slot: n.slot(),
+            },
+            position: place.position,
+            orientation: place.orientation,
+            support: place.support,
+        };
+        let (linear, at) = n
+            .moved()
+            .map_or((Vec3::ZERO, Micros::MIN), |m| (m.linear, m.at));
+        Some(Shown {
+            pose,
+            linear,
+            at,
+            audience: n.audience(),
+        })
+    }
+}
+
+/// One body's motion to write this tick (#3799): T4's sample on its node, after a change of parent to `to` when its
+/// frame changed (into a seat's slot, out of one, onto another floor).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sample {
+    pub audience: Audience,
+    pub to: Option<Pose>,
+    pub handoff: HandOff,
+}
+
+/// Whether the walk turned or changed pace between two velocities: on the ground plane, more than about 7 degrees
+/// of heading, or a speed outside three quarters to four thirds of the last.
+fn turned(a: Vec3, b: Vec3) -> bool {
+    let (ax, az, bx, bz) = (
+        i128::from(a.x),
+        i128::from(a.z),
+        i128::from(b.x),
+        i128::from(b.z),
+    );
+    let (dot, cross) = (ax * bx + az * bz, ax * bz - az * bx);
+    let (a2, b2) = (ax * ax + az * az, bx * bx + bz * bz);
+    dot <= 0 || cross * cross * 64 > dot * dot || b2 * 16 < a2 * 9 || b2 * 9 > a2 * 16
+}
+
 /// A body's row in a tick's part (K18's `answers::BODIES`): `[body, pose]`, or `[body, pose, stance]` in a seat
-/// (1 sit, 2 lie).
+/// (1 sit, 2 lie, 3 stand in a standing slot, #3598).
 pub fn row(body: Id, pose: &Pose, stance: Option<Stance>) -> Value {
     let mut r = vec![body.to_value(), pose.to_value()];
     match stance {
         Some(Stance::Sit) => r.push(Value::Uint(1)),
         Some(Stance::Lie) => r.push(Value::Uint(2)),
-        _ => {}
+        Some(Stance::Stand) => r.push(Value::Uint(3)),
+        None => {}
     }
     Value::Array(r)
 }
@@ -239,6 +324,7 @@ pub fn read_row(v: &Value) -> Option<(Id, Pose, Option<Stance>)> {
     let stance = match rest {
         [Value::Uint(1)] => Some(Stance::Sit),
         [Value::Uint(2)] => Some(Stance::Lie),
+        [Value::Uint(3)] => Some(Stance::Stand),
         _ => None,
     };
     Some((
@@ -300,14 +386,213 @@ impl Bodies {
             ended: Vec::new(),
             took: BTreeMap::new(),
             logged: BTreeMap::new(),
+            shown: BTreeMap::new(),
             hearing: Hearing::new(),
             heard: Vec::new(),
+            // A test world shortens the wind-down's clocks (seconds: wander, zombie, leg min, leg max, bound).
+            wind: WindDown::new(
+                std::env::var("WORLDD_WIND_DOWN")
+                    .ok()
+                    .and_then(|t| WindDown::knobs_from(&t))
+                    .unwrap_or(wind_down::KNOBS),
+            ),
+            wind_log: Vec::new(),
+            wind_moves: BTreeMap::new(),
+            sleeping: BTreeMap::new(),
         })
+    }
+
+    pub fn classes(&self) -> BTreeMap<Id, Size> {
+        self.runner
+            .controller
+            .ids()
+            .filter_map(|id| {
+                let size = self.runner.controller.build(id)?.size;
+                (size != Size::Standard).then_some((id, size))
+            })
+            .collect()
+    }
+
+    pub(crate) fn wear_basis(&self, body: Id) -> R<sim::controller::BuildBasis> {
+        let basis = self
+            .runner
+            .controller
+            .build_basis(body)
+            .ok_or_else(|| refusal("body-unknown", body))?;
+        self.runner.controller.check_build(&basis)?;
+        if self.runner.running(body)
+            || self.live.contains_key(&body)
+            || self.orders.open(body).is_some()
+            || self.slots.held_by(body).is_some()
+        {
+            return Err(refusal("body-change-in-use", body));
+        }
+        Ok(basis)
+    }
+    pub(crate) fn commit_wear<T>(
+        &mut self,
+        basis: &sim::controller::BuildBasis,
+        build: Build,
+        moved: Moved,
+        commit: impl FnOnce() -> R<T>,
+    ) -> R<T> {
+        self.wear_basis(basis.moved.id)?;
+        let value = self
+            .runner
+            .controller
+            .commit_build(basis, moved, build, commit)?;
+        self.town.set_class(basis.moved.id, build.size);
+        self.form_map = Arc::new(self.town.versions.clone());
+        self.planned.keep_map(&self.form_map);
+        self.reached.clear();
+        self.form_answers.clear();
+        Ok(value)
+    }
+
+    /// Confirms the exact authoritative preparation basis before any replica write.
+    pub(crate) fn check_map(
+        &self,
+        maps: &crate::buildsafe::PreparedMaps,
+    ) -> Result<(), replica::edit::Refused> {
+        match self.check_map_or_walked(maps)? {
+            None => Ok(()),
+            Some(_) => Err(replica::edit::Refused {
+                op: None,
+                name: "edit.body-stale",
+                detail: "prepared triangle differs".into(),
+            }),
+        }
+    }
+
+    /// As `check_map`, but when every guard holds and an affected body only walked out of its prepared triangle
+    /// (B12b), the current bases of exactly the prepared bodies, in order, for a reprepare off the clock.
+    pub(crate) fn check_map_or_walked(
+        &self,
+        maps: &crate::buildsafe::PreparedMaps,
+    ) -> Result<Option<Vec<sim::controller::BuildBasis>>, replica::edit::Refused> {
+        if !Arc::ptr_eq(&maps.before, &self.form_map) {
+            return Err(replica::edit::Refused {
+                op: None,
+                name: "edit.stale",
+                detail: "the prepared map changed".into(),
+            });
+        }
+        let current: BTreeSet<_> = self
+            .runner
+            .controller
+            .bodies()
+            .filter_map(|body| self.runner.controller.build_basis(body.id))
+            .filter(|b| maps.live.affects(b, self.town.ground))
+            .map(|b| b.moved.id)
+            .collect();
+        let prepared: BTreeSet<_> = maps
+            .rebinds
+            .iter()
+            .map(|target| target.before.moved.id)
+            .collect();
+        if current != prepared {
+            return Err(replica::edit::Refused {
+                op: None,
+                name: "edit.body-stale",
+                detail: "affected bodies changed".into(),
+            });
+        }
+        let certified = self
+            .runner
+            .controller
+            .certify_or_walked(&maps.rebinds)
+            .map_err(|r| replica::edit::Refused {
+                op: None,
+                name: r.name,
+                detail: r.detail,
+            })?;
+        self.town
+            .check_install(&maps.live)
+            .map_err(|r| replica::edit::Refused {
+                op: None,
+                name: r.name,
+                detail: r.detail,
+            })?;
+        match certified {
+            sim::controller::Certified::Ready(_) => Ok(None),
+            sim::controller::Certified::WalkedOn => maps
+                .rebinds
+                .iter()
+                .map(|t| self.runner.controller.build_basis(t.before.moved.id))
+                .collect::<Option<Vec<_>>>()
+                .map(Some)
+                .ok_or(replica::edit::Refused {
+                    op: None,
+                    name: "edit.body-stale",
+                    detail: "prepared body missing".into(),
+                }),
+        }
+    }
+
+    /// Pairs the town transaction with the existing live edit write. Every input refusal leaves both unchanged.
+    pub(crate) fn commit_map(
+        &mut self,
+        maps: crate::buildsafe::PreparedMaps,
+        commit: impl FnOnce() -> Result<sim::edit::Committed, replica::edit::Refused>,
+    ) -> Result<sim::edit::Committed, replica::edit::Refused> {
+        self.check_map(&maps)?;
+        let rebinds = self
+            .runner
+            .controller
+            .certify_rebinds(&maps.rebinds)
+            .map_err(|r| replica::edit::Refused {
+                op: None,
+                name: r.name,
+                detail: r.detail,
+            })?;
+        let mut refused = None;
+        let town = &mut self.town;
+        let done = self
+            .runner
+            .controller
+            .commit_rebinds(&rebinds, || {
+                town.install_then(maps.live, &maps.part, || {
+                    commit().map_err(|r| {
+                        let error = Refusal {
+                            name: r.name,
+                            detail: r.detail.clone(),
+                        };
+                        refused = Some(r);
+                        error
+                    })
+                })
+            })
+            .map_err(|r| {
+                refused.unwrap_or(replica::edit::Refused {
+                    op: None,
+                    name: r.name,
+                    detail: r.detail,
+                })
+            })?;
+        self.planner
+            .install(maps.before, maps.worker, Arc::clone(&done.part));
+        self.runner.prepared_ground(&rebinds, &self.town);
+        self.form_map = maps.after;
+        self.planned.keep_map(&self.form_map);
+        self.reached.clear();
+        self.form_answers.clear();
+        Ok(done)
     }
 
     /// Adds a body of `family`, standing as the mover placed it.
     pub fn add_body(&mut self, family: Family, body: Moved) -> R<()> {
-        self.runner.add_body(family, body)
+        self.add_body_built(family, body, Build::STANDARD)
+    }
+    pub fn add_body_built(&mut self, family: Family, body: Moved, build: Build) -> R<()> {
+        self.town.surfaces_for(build.size).ok_or_else(|| Refusal {
+            name: "body-class-unprepared",
+            detail: "no prepared geometry".into(),
+        })?;
+        let id = body.id;
+        self.runner.controller.add_built(family, body, build)?;
+        self.wind.add(id, self.runner.now);
+        self.town.set_class(body.id, build.size);
+        Ok(())
     }
 
     /// Adds a seat.
@@ -324,18 +609,36 @@ impl Bodies {
     /// Adds a body of `family`: where the log last had it standing (`placed`, K18 #3160), else as the mover placed it.
     /// A body that sat is added standing as the mover placed it; [`Bodies::seat_placed`] then seats it.
     pub fn add_body_at(&mut self, family: Family, body: Moved, placed: &Placed) -> R<()> {
+        self.add_body_at_built(family, body, placed, Build::STANDARD)
+    }
+    pub fn add_body_at_built(
+        &mut self,
+        family: Family,
+        body: Moved,
+        placed: &Placed,
+        build: Build,
+    ) -> R<()> {
+        let surfaces = self.town.surfaces_for(build.size).ok_or_else(|| Refusal {
+            name: "body-class-unprepared",
+            detail: "no prepared geometry".into(),
+        })?;
         let body = match placed.get(&body.id) {
             Some((p, _)) => match p.support {
-                Support::Surface { surface, .. } => match self.town.surfaces.get(&surface) {
-                    Some(s) => s.place(body.id, p.frame, p.position, p.orientation)?,
-                    None => body,
+                Support::Surface { surface, .. } => match surfaces.get(&surface) {
+                    Some(s) => s.place_built(body.id, p.frame, p.position, p.orientation, build)?,
+                    None => {
+                        return Err(Refusal {
+                            name: "no-surface",
+                            detail: "recorded support is unavailable".into(),
+                        });
+                    }
                 },
                 _ => body,
             },
             None => body,
         };
         self.logged.insert(body.id, body.pose);
-        self.add_body(family, body)
+        self.add_body_built(family, body, build)
     }
 
     /// Restart, after the seats are added (K18c, #3176): each body the log last had in a seat's slot is handed back
@@ -376,7 +679,7 @@ impl Bodies {
                 let b = c.body(id)?;
                 let stance = match b.pose.support {
                     Support::Slot => self.slots.stance(id),
-                    _ => None,
+                    _ => self.sleeping.contains_key(&id).then_some(Stance::Lie),
                 };
                 Some((id, (b.pose, stance)))
             })
@@ -400,6 +703,74 @@ impl Bodies {
                 self.logged.insert(id, pose);
                 out.push((id, pose, stance));
             }
+        }
+        out
+    }
+
+    /// The bodies' motion to write on their nodes at this tick's end (#3799), in id order: a sample at each hand-off
+    /// (a start, a stop, a turn or change of pace, a change of frame or support, a still body set somewhere new), and
+    /// one at least every [`KEYFRAME_US`] of world time, in whole ticks, while a body moves. A still or seated body
+    /// writes nothing. Each is compared with what its node last had from here, read from `tree` when not kept (a
+    /// first tick, a restart), so a restart decides as the run it continues. A sample the world could not write is
+    /// still kept as written, so it is not tried again each tick. Pose and velocity only: no intent, target
+    /// or route. A body with no node in `tree` is left out.
+    pub fn motion(&mut self, tree: &Tree) -> Vec<Sample> {
+        let (at, tick) = (self.runner.now, self.runner.tick.max(1));
+        let every = (KEYFRAME_US + tick - 1) / tick * tick;
+        let c = &self.runner.controller;
+        let mut ids: Vec<Id> = c.ids().collect();
+        ids.sort_unstable();
+        let mut out = Vec::new();
+        for id in ids {
+            let Some(b) = c.body(id) else { continue };
+            let in_slot = b.pose.support == Support::Slot;
+            if !in_slot && !matches!(b.pose.support, Support::Surface { .. }) {
+                continue;
+            }
+            let Some(was) = self.shown.get(&id).copied().or_else(|| Shown::of(tree, id)) else {
+                continue;
+            };
+            let linear = if in_slot { Vec3::ZERO } else { b.linear };
+            let (moving, moved) = (linear != Vec3::ZERO, was.linear != Vec3::ZERO);
+            let frame = b.pose.frame != was.pose.frame;
+            let handoff = frame
+                || b.pose.support != was.pose.support
+                || moving != moved
+                || (moving && turned(was.linear, linear))
+                || (!moving && b.pose != was.pose);
+            let keyframe = moving && at.saturating_sub(was.at) >= every;
+            if !(handoff || keyframe) {
+                continue;
+            }
+            let owner = |s: Support| {
+                if s == Support::Slot {
+                    Owner::Slot
+                } else {
+                    Owner::Mover
+                }
+            };
+            self.shown.insert(
+                id,
+                Shown {
+                    pose: b.pose,
+                    linear,
+                    at,
+                    audience: was.audience,
+                },
+            );
+            out.push(Sample {
+                audience: was.audience,
+                to: frame.then_some(b.pose),
+                handoff: HandOff {
+                    node: id,
+                    at,
+                    from: owner(was.pose.support),
+                    to: owner(b.pose.support),
+                    pose: b.pose,
+                    linear,
+                    angular: Vec3::ZERO,
+                },
+            });
         }
         out
     }
@@ -479,6 +850,8 @@ impl Bodies {
                 p
             }
         };
+        // A previous map's route, line, reach or form result cannot enter any current cache.
+        p.keep_map(&self.form_map);
         // A replaced move's in-flight answer cannot be used by a newer order on the same body/fixture/slot.
         p.reach.retain(|(body, thing, slot, order), _| {
             self.waiting
@@ -683,6 +1056,8 @@ impl Bodies {
         if !pairs.is_empty() {
             let reach = self.reach_of(pairs);
             self.planner.send(Wants {
+                form_map: Some(Arc::clone(&self.form_map)),
+                classes: self.town.body_classes.clone(),
                 reach,
                 ..Wants::default()
             });
@@ -760,6 +1135,7 @@ impl Bodies {
                     &mut self.mint,
                     &mut self.moves,
                     &reach,
+                    &self.town,
                     &[request],
                     now,
                 )
@@ -798,7 +1174,7 @@ impl Bodies {
                     &mut self.mint,
                     &mut self.moves,
                     &reach,
-                    &self.town.surfaces,
+                    &self.town,
                     &t,
                 );
                 let Some(&(id, Live::Place(n))) = self.live.get(&t.node) else {
@@ -821,15 +1197,22 @@ impl Bodies {
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
             crate::orders::step(self, at);
+            self.wind_step(at);
             let planned = std::mem::take(&mut self.planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
             // Every body in a seat move, with its seat: its reach for the next tick's phase timers.
-            let seated: Vec<(Id, Id, Id)> = self
+            let mut seated: Vec<(Id, Id, Id)> = self
                 .live
                 .iter()
                 .filter(|(_, (_, l))| matches!(l, Live::Place(_)))
                 .filter_map(|(b, (id, _))| Some((*b, self.slots.held_by(*b)?, *id)))
                 .collect();
+            // A discarded obsolete reach is asked again for the same still-waiting move and exact slot.
+            seated.extend(
+                self.waiting
+                    .iter()
+                    .filter_map(|w| Some((w.body, w.place?, w.id))),
+            );
             wants.reach = self.reach_of(seated);
             // One metadata snapshot per map revision, shared by all form questions in the batch.
             if *self.form_map != self.town.versions {
@@ -900,7 +1283,33 @@ impl Bodies {
         standing: &impl Standing,
         family: &Family,
     ) -> Vec<Born> {
-        life.tick(now, &mut self.runner, &self.town.surfaces, standing, family)
+        let born = life.tick(now, &mut self.runner, &self.town.surfaces, standing, family);
+        for b in &born {
+            self.wind.add(b.body, now);
+        }
+        born
+    }
+
+    pub fn births_built(
+        &mut self,
+        life: &mut Life,
+        now: Micros,
+        standing: &impl Standing,
+        family: &Family,
+        build_of: &impl Fn(Id) -> Build,
+    ) -> Vec<Born> {
+        let born = life.tick_built(
+            now,
+            &mut self.runner,
+            &self.town,
+            standing,
+            family,
+            build_of,
+        );
+        for b in &born {
+            self.town.set_class(b.body, build_of(b.soul).size);
+        }
+        born
     }
 
     /// Retires `soul`'s body by K10's one path at world time `at` ([`Life::retire`]): its seat freed, its timers and
@@ -916,7 +1325,269 @@ impl Bodies {
         )?;
         let open = self.live.remove(&r.body).map(|(intent, _)| intent);
         self.logged.remove(&r.body);
+        self.shown.remove(&r.body);
+        self.wind.remove(r.body);
+        self.wind_moves.remove(&r.body);
+        self.sleeping.remove(&r.body);
         Ok((r, open))
+    }
+}
+
+/// The wind-down's view of the world (B16, #2751): the bodies as the controller holds them and the open ground.
+struct WindGround<'a> {
+    b: &'a Bodies,
+}
+
+/// How near another body a spot may be, µm: room to stand, and room to lie down.
+const ROOM: i64 = 800_000;
+const ROOM_LYING: i64 = 1_500_000;
+
+impl Ground for WindGround<'_> {
+    fn at(&self, body: Id) -> Option<[i64; 2]> {
+        let p = self.b.runner.controller.body(body)?.pose;
+        if !matches!(p.support, Support::Surface { .. }) || p.frame.slot.is_some() {
+            return None;
+        }
+        if p.frame.node == self.b.town.ground {
+            return Some([p.position.x, p.position.z]);
+        }
+        // On a building's floor: where that is on the open ground.
+        let place = self
+            .b
+            .town
+            .buildings
+            .iter()
+            .find(|bl| bl.floors.contains_key(&p.frame.node))?
+            .place;
+        let q = place.point(p.position).ok()?;
+        Some([q.x, q.z])
+    }
+
+    fn held(&self, body: Id) -> bool {
+        let c = &self.b.runner.controller;
+        self.b.orders.open(body).is_some()
+            || self.b.waiting.iter().any(|w| w.body == body)
+            || self
+                .b
+                .live
+                .get(&body)
+                .is_some_and(|(id, _)| self.b.wind_moves.get(&body) != Some(id))
+            || c.carried(body)
+            || c.carrying(body).is_some()
+    }
+
+    fn walking(&self, body: Id) -> bool {
+        self.b.wind_moves.get(&body).is_some_and(|id| {
+            self.b
+                .live
+                .get(&body)
+                .is_some_and(|(i, l)| i == id && matches!(l, Live::Walk))
+        })
+    }
+
+    fn aboard(&self, body: Id) -> bool {
+        self.b.runner.controller.body(body).is_some_and(|m| {
+            matches!(
+                m.pose.support,
+                Support::Track | Support::Volume { .. } | Support::None
+            )
+        })
+    }
+
+    fn clear(&self, p: [i64; 2], lying: bool) -> bool {
+        let room = if lying { ROOM_LYING } else { ROOM };
+        self.outdoors(p)
+            && self.b.runner.controller.bodies().all(|m| {
+                let q = m.pose.position;
+                m.pose.frame.node != self.b.town.ground
+                    || (i128::from(q.x - p[0])).pow(2) + (i128::from(q.z - p[1])).pow(2)
+                        >= i128::from(room).pow(2)
+            })
+    }
+
+    fn outdoors(&self, p: [i64; 2]) -> bool {
+        let ground = self.b.town.ground;
+        self.b.town.surfaces.get(&ground).is_some_and(|s| {
+            let frame = Frame {
+                node: ground,
+                slot: None,
+            };
+            s.place(
+                ground,
+                frame,
+                Vec3::new(p[0], 0, p[1]),
+                replica::pose::Quat::IDENTITY,
+            )
+            .is_ok()
+        })
+    }
+
+    fn centre(&self) -> [i64; 2] {
+        let mut n = 0i128;
+        let (mut x, mut z) = (0i128, 0i128);
+        for bl in &self.b.town.buildings {
+            x += i128::from(bl.place.pos.x);
+            z += i128::from(bl.place.pos.z);
+            n += 1;
+        }
+        if n == 0 {
+            return [0, 0];
+        }
+        [
+            i64::try_from(x / n).unwrap_or(0),
+            i64::try_from(z / n).unwrap_or(0),
+        ]
+    }
+}
+
+fn asleep_shape() -> SkillShape {
+    SkillShape {
+        name: Name::new("souls:asleep").unwrap_or_else(|| unreachable!("a literal name")),
+        claims: vec![Want::All(Class::Locomotion)],
+        blocks: vec![],
+        cancelled_by: vec![],
+    }
+}
+
+impl Bodies {
+    /// The wind-down's moves due at body time `at` (B16): each through the moves every intent takes (a rise, N7's
+    /// walk to a point on the open ground), or a lie where the body stands; each written as the world's record.
+    /// Nothing is read when nothing is due: a sleeping body costs no tick time.
+    fn wind_step(&mut self, at: Micros) {
+        if self.wind.next().is_none_or(|t| t > at) {
+            return;
+        }
+        let mut wind = std::mem::take(&mut self.wind);
+        let orders = wind.step(at, &WindGround { b: self });
+        self.wind = wind;
+        for o in orders {
+            self.wind_do(&o, at);
+        }
+    }
+
+    fn wind_do(&mut self, o: &Order, at: Micros) {
+        let body = o.body;
+        for d in &o.what {
+            match *d {
+                Do::Stop => {
+                    if let Some(id) = self.wind_moves.remove(&body) {
+                        self.cancel(id);
+                    }
+                }
+                Do::Stand => {
+                    self.wake_ground(body);
+                    if self.slots.held_by(body).is_some() {
+                        self.wind_move(body, Ask::Rise);
+                    }
+                }
+                Do::Walk([x, z]) => {
+                    let node = self.town.ground;
+                    self.wind_move(
+                        body,
+                        Ask::Walk {
+                            node,
+                            point: Some(Vec3::new(x, 0, z)),
+                        },
+                    );
+                }
+                Do::Lie => self.lie_ground(body),
+            }
+        }
+        if let Some(s) = self.wind.state(body) {
+            let e = wind_down::record(o, s, at, 0);
+            self.wind_log.push(e);
+        }
+    }
+
+    /// One move of the rule's, by the path every move intent takes ([`Bodies::start`]), under a fresh id.
+    fn wind_move(&mut self, body: Id, ask: Ask) {
+        let Ok(id) = self.mint.mint() else { return };
+        let started = self.start(vec![(
+            id,
+            Asked {
+                body,
+                actor: Actor::World,
+                ask,
+                fallbacks: Vec::new(),
+            },
+        )]);
+        if started.iter().all(|(_, r)| r.is_ok()) {
+            self.wind_moves.insert(body, id);
+        }
+    }
+
+    /// The body lies down where it stands on the ground and is held lying, with no end.
+    fn lie_ground(&mut self, body: Id) {
+        if self.sleeping.contains_key(&body) || self.slots.held_by(body).is_some() {
+            return;
+        }
+        let c = &mut self.runner.controller;
+        if let Ok(d) = c.claim(body, &asleep_shape()) {
+            if c.set(body, d, Part::Stance(Stance::Lie)).is_ok() {
+                self.sleeping.insert(body, d);
+                // Its row carries the lying stance from this tick.
+                self.logged.remove(&body);
+            } else {
+                let _ = c.release(body, d);
+            }
+        }
+    }
+
+    /// A body the rule held lying stands where it is.
+    fn wake_ground(&mut self, body: Id) {
+        if let Some(d) = self.sleeping.remove(&body) {
+            let _ = self.runner.controller.release(body, d);
+            self.logged.remove(&body);
+        }
+    }
+
+    /// Its agent acted at `now` (B16 A2): a body the rule held is let go on this tick, its walk stopped where it is and
+    /// its lie ended, so the act runs; the world writes that it woke.
+    pub fn agent_acted(&mut self, body: Id, now: Micros) {
+        if self.wind.acted(body, now).is_none() {
+            return;
+        }
+        if let Some(id) = self.wind_moves.remove(&body) {
+            self.cancel(id);
+        }
+        self.wake_ground(body);
+        if let Some(s) = self.wind.state(body) {
+            let o = Order {
+                body,
+                phase: Phase::Woken,
+                what: Vec::new(),
+            };
+            self.wind_log.push(wind_down::record(&o, s, now, 0));
+        }
+    }
+
+    /// Restart (B16): the rule rebuilt from the records and agent acts replayed (`body_of` names a Soul's body), every
+    /// body in the controller; a body asleep lies down again where it was.
+    /// A body `placed` has lying on the ground (only the rule lays one there) with no record since the checkpoint is
+    /// asleep.
+    pub fn wind_resume<'a>(
+        &mut self,
+        effects: impl IntoIterator<Item = &'a Effect>,
+        body_of: impl Fn(Id) -> Option<Id>,
+        placed: &Placed,
+        now: Micros,
+    ) {
+        let ids: Vec<Id> = self.runner.controller.ids().collect();
+        self.wind.resume(effects, body_of, ids.iter().copied(), now);
+        for (body, (pose, stance)) in placed {
+            if *stance == Some(Stance::Lie)
+                && matches!(pose.support, Support::Surface { .. })
+                && self.wind.state(*body).is_some_and(|s| s.wander.is_none())
+            {
+                self.wind
+                    .asleep(*body, [pose.position.x, pose.position.z], now);
+            }
+        }
+        for body in ids {
+            if self.wind.state(body).is_some_and(|s| s.slept) {
+                self.lie_ground(body);
+            }
+        }
     }
 }
 
@@ -933,5 +1604,183 @@ fn refusal(name: &'static str, node: Id) -> Refusal {
     Refusal {
         name,
         detail: replica::world_model::show(node),
+    }
+}
+
+#[cfg(test)]
+mod map_tests {
+    use super::*;
+    use replica::apply::Replica;
+    use replica::edit::{Edit, Op, Ref};
+    use replica::effects::{
+        Actor, Body as EffectBody, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest,
+    };
+    use replica::encode::encode;
+    use replica::world_model::Audience;
+
+    #[test]
+    fn k18d_actual_live_edit_and_town_install_refuse_atomically() {
+        let mut imported = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
+        imported.rules.kinds.extend(
+            replica::world_model::parse_kinds(&format!(
+                "{{1: \"souls:place\", 2: \"place\", 11: [\"{}\"]}}",
+                import_eden::GROUND,
+            ))
+            .unwrap(),
+        );
+        let root = imported.nodes["world"];
+        let ground = imported.nodes["ground"];
+        let floor = imported.nodes["building/floor-0"];
+        let door = imported.nodes["door-building-narrow"];
+        let rules = imported.rules;
+        let header = import_eden::header(root, &rules).unwrap();
+        let version = imported.tree.next();
+        let mut live = Replica::restored(header.clone(), imported.tree, version);
+        let town = Town::new(
+            live.tree().frozen(),
+            ground,
+            sim::links::Doors::new(header, rules.clone(), version),
+        )
+        .unwrap();
+        let mut bodies = Bodies::new(town, 50_000).unwrap();
+        let creator = Id::new(Scope([0x95; 16]), 1).unwrap();
+        let world = replica::edit::World {
+            creator,
+            kinds: rules.kinds,
+        };
+        let edit = Edit {
+            intent: Id::new(Scope([0x95; 16]), 2).unwrap(),
+            actor: Actor::Creator(creator),
+            planned: live.version(),
+            ops: vec![Op::Set {
+                node: Ref::Node(floor),
+                field: import_eden::F_STAIRS,
+                to: Value::Array(Vec::new()),
+            }],
+        };
+        let checked = replica::edit::check(edit, &live, &world).unwrap();
+        let planned =
+            sim::edit::plan_on(checked, &live, &sim::edit::safety::Known::of(&bodies.town))
+                .unwrap();
+        let minter = Minter::new(Scope([0x95; 16]));
+        let source = crate::buildsafe::MapBasis {
+            version: live.version(),
+            ground,
+            stamp: Arc::clone(&bodies.form_map),
+            basis: bodies.town.basis(),
+        };
+        let mut invalid =
+            crate::buildsafe::PreparedMaps::prepare(&live, &planned, minter.clone(), &[], &source)
+                .unwrap();
+        let refused =
+            crate::buildsafe::PreparedMaps::prepare(&live, &planned, minter.clone(), &[], &source)
+                .unwrap();
+        let stale =
+            crate::buildsafe::PreparedMaps::prepare(&live, &planned, minter.clone(), &[], &source)
+                .unwrap();
+        let mut bad = (*invalid.part).clone();
+        let EffectBody::Changes(changes) = &mut bad.effects[0].body else {
+            unreachable!()
+        };
+        changes[0].change = Change::Set {
+            node: Id::new(Scope([0x96; 16]), 999).unwrap(),
+            field: 99,
+            to: Value::Uint(1),
+            by: None,
+        };
+        invalid.part = Arc::new(Part::read(&encode(&bad.to_value()).unwrap()).unwrap());
+
+        // Independent runtime state changes after preparation, without changing the map's geometry identity.
+        let link = replica::effects::read_id(
+            &bodies
+                .town
+                .tree
+                .node(bodies.town.tree.handle(door).unwrap())
+                .unwrap()
+                .fields()[&sim::ground::scene::F_OPEN_DOOR_LINK],
+        )
+        .unwrap();
+        bodies
+            .town
+            .doors
+            .ask(door, link, Cause::World, Actor::Creator(creator));
+        bodies.town.doors.flush(&mut bodies.town.tree, 0).unwrap();
+        let live_before = live.tree().to_state();
+        let town_before = bodies.town.tree.to_state();
+        let stamp_before = Arc::clone(&bodies.form_map);
+        let called = std::cell::Cell::new(false);
+        let mut reserved = minter.clone();
+        assert!(
+            bodies
+                .commit_map(invalid, || {
+                    called.set(true);
+                    sim::edit::commit(&mut live, &mut reserved, &planned, &[], 0)
+                })
+                .is_err()
+        );
+        assert!(!called.get());
+        assert_eq!(live.tree().to_state(), live_before);
+        assert_eq!(bodies.town.tree.to_state(), town_before);
+        assert!(Arc::ptr_eq(&bodies.form_map, &stamp_before));
+        assert_eq!(bodies.planner.pending(), 0);
+
+        // A real concurrent live write changes the read stamp; the real edit's confirm refuses after staging.
+        let effect = Effect {
+            envelope: Envelope {
+                sequence: live.version(),
+                at: 0,
+                cause: Cause::World,
+                actor: Actor::Creator(creator),
+                audience: Audience::Everyone,
+                node: floor,
+            },
+            body: EffectBody::Changes(vec![ChangeRec {
+                change: Change::Set {
+                    node: floor,
+                    field: 99,
+                    to: Value::Uint(1),
+                    by: None,
+                },
+                rest: Rest::new(),
+            }]),
+            events: None,
+            rest: Rest::new(),
+        };
+        sim::commit::write(&mut live, &[effect]).unwrap();
+        let changed_live = live.tree().to_state();
+        let mut reserved = minter.clone();
+        let error = bodies
+            .commit_map(refused, || {
+                sim::edit::commit(&mut live, &mut reserved, &planned, &[], 0)
+            })
+            .unwrap_err();
+        assert_eq!(error.name, "edit.stale");
+        assert_eq!(live.tree().to_state(), changed_live);
+        assert_eq!(bodies.town.tree.to_state(), town_before);
+        assert!(Arc::ptr_eq(&bodies.form_map, &stamp_before));
+        assert_eq!(bodies.planner.pending(), 0);
+        assert_eq!(
+            bodies
+                .town
+                .tree
+                .node(bodies.town.tree.handle(door).unwrap())
+                .unwrap()
+                .fields()[&sim::links::F_OPEN],
+            Value::Uint(1)
+        );
+
+        bodies.form_map = Arc::new(bodies.town.versions.clone());
+        let mut reserved = minter;
+        let error = bodies
+            .commit_map(stale, || {
+                sim::edit::commit(&mut live, &mut reserved, &planned, &[], 0)
+            })
+            .unwrap_err();
+        assert_eq!(error.name, "edit.stale");
+        assert_eq!(live.tree().to_state(), changed_live);
+        assert_eq!(bodies.town.tree.to_state(), town_before);
+        println!(
+            "K18d: invalid staged part, real live edit.stale and obsolete map identity leave both trees/map/worker unchanged; independently opened door preserved"
+        );
     }
 }

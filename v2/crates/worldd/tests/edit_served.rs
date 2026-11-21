@@ -239,6 +239,9 @@ fn serve_with(w: &Seeded, socket: &Path, bucket: Option<&Path>) -> Served {
         let tx = tx.clone();
         std::thread::spawn(move || {
             for l in BufReader::new(pipe).lines().map_while(Result::ok) {
+                if l.starts_with("worldd: k18d-edit-stage ") {
+                    eprintln!("{l}");
+                }
                 let _ = tx.send(l);
             }
         });
@@ -309,6 +312,7 @@ fn edit_batch_intent(
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     encode(&i.to_value()).unwrap()
 }
@@ -398,12 +402,32 @@ fn served_copy(w: &Seeded) -> (replica::apply::Replica, replica::tree::Rules) {
             .children
             .insert(base.to_owned());
     }
-    let header = import_eden::header(w.root, &rules).unwrap();
-    let mut copy = replica::apply::Replica::start(header.stored()).unwrap();
-    for record in sim::log::recover(&std::fs::read(w.dir.join("log")).unwrap())
+    let prefix = import_eden::header(w.root, &rules).unwrap();
+    let records = sim::log::recover(&std::fs::read(w.dir.join("log")).unwrap())
         .unwrap()
-        .records
-    {
+        .records;
+    let first = records
+        .iter()
+        .find(|record| !sim::recorder::is_input(record))
+        .expect("the served log has a part");
+    let first = replica::effects::Part::read(first).expect("a non-input log record is a part");
+    let path = PathBuf::from(replica::stream::header_path(&prefix))
+        .with_file_name(replica::encode::to_hex(&first.header));
+    let header = replica::effects::Header::read(
+        &std::fs::read(w.dir.join("views").join(&path)).expect("the actual served header"),
+    )
+    .expect("a canonical served header");
+    assert_eq!(
+        header.hash().to_bytes(),
+        first.header,
+        "the header named by the part"
+    );
+    assert_eq!(
+        replica::stream::header_path(&header),
+        path.to_str().unwrap()
+    );
+    let mut copy = replica::apply::Replica::start(header.stored()).unwrap();
+    for record in records {
         if sim::recorder::is_input(&record) {
             continue;
         }
@@ -878,6 +902,7 @@ fn walk(s: &mut UnixStream, w: &Seeded, body: Id, sequence: u64, x: i64, z: i64)
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     let bytes = encode(&i.to_value()).unwrap();
     s.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
@@ -897,15 +922,19 @@ struct Got {
 
 fn read_answer(v: &Value) -> Got {
     let Value::Map(f) = v else { panic!("a frame") };
+    let Some(Value::Map(a)) = f.get(&2) else {
+        panic!("an answer")
+    };
     let version = match f.get(&1) {
         Some(Value::Array(a)) => match a.get(3) {
             Some(Value::Uint(s)) => *s,
             _ => panic!("a version"),
         },
-        _ => panic!("a version"),
-    };
-    let Some(Value::Map(a)) = f.get(&2) else {
-        panic!("an answer")
+        _ => panic!(
+            "versionless answer: kind {:?}, reason {:?}",
+            a.get(&3),
+            a.get(&4)
+        ),
     };
     Got {
         kind: match a.get(&3) {
@@ -1339,6 +1368,7 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
                 fallbacks: Vec::new(),
                 replaces: None,
                 body: None,
+                reflex: false,
             }
             .to_value(),
         )
@@ -1419,3 +1449,6 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
         blocked.reason, rose.entries, removed.entries, gone.reason
     );
 }
+
+#[path = "edit_served/k18d.rs"]
+mod k18d;

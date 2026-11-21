@@ -2,12 +2,18 @@
 // order, and reads back the nodes the part changed, so the page's thread only draws. Started by `StreamSource`.
 // The words path (V1b, #3361): it hands on each part's `souls:said` events (replica's event query) and a body's name
 // and description (fields 30, 31), each with its words from the part's text file `<n>.text` (`[[reference, words],
-// ...]`, the public audience's, written by V1's writer beside the part), kept by reference across parts.
+// ...]`, the public audience's, written by V1's writer beside the part), kept by reference across parts. A named
+// place's name (import-eden's field 4, a SHA-256 of its words) is a `[hash, words]` row of the same files (#3574).
 import init, { StreamPlayer, readPointer } from 'replica';
 import { decode, encode } from 'cborg';
 import { publicSoul, type NodeRec, type PartRec, type Pointer, type SaidRec, type SnapshotRec } from './source.ts';
 import { happenedInPart } from '../sound/record.ts';
+import { readChanged } from './changed.ts';
 import { skyFields } from '../sky/record.ts';
+import { BEHIND_US, CUT_US } from '../clock/clock.ts';
+
+/** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
+const AHEAD = 16;
 
 type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string };
 const post = (m: Msg, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
@@ -33,9 +39,13 @@ const refOf = (v: unknown): string | null => {
   const id = v instanceof Map ? (v.get(21) as IdValue | undefined) : undefined;
   return id ? key(id) : null;
 };
+/** The key of a name's hash (field 4), kept apart from `{21: id}` references. */
+const nameKey = (b: Uint8Array) => `n:${hex(b)}`;
 const SAID = 'souls:said';
+const PLACE_NAME = 4;
 const NAME = 30;
 const DESCRIPTION = 31;
+const COURSE = 80; // a moving node's course (#3603)
 
 function nodeRec(v: Map<number, unknown>): NodeRec {
   const pose = v.get(7) as Map<number, unknown> | undefined;
@@ -62,6 +72,10 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(25)) rec.tiles = (f.get(25) as unknown[][]).map((t) => [num(t[0]), num(t[1]), t[2] as Uint8Array, t[3] as Uint8Array]);
   if (f.has(NAME)) rec.name = refOf(f.get(NAME));
   if (f.has(DESCRIPTION)) rec.description = refOf(f.get(DESCRIPTION));
+  if (f.has(COURSE)) rec.course = encode(f.get(COURSE)); // #3603: re-encoded canonically, as the record holds it
+  if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array);
+  const placeName = f.get(PLACE_NAME);
+  if (placeName instanceof Uint8Array && placeName.length === 32) rec.placeName = nameKey(placeName);
   const sky = skyFields(f); // V19: the world node's day, night and weather
   if (sky) rec.sky = sky;
   return rec;
@@ -82,16 +96,29 @@ async function run(stream: URL) {
   let drawn = new Set<string>();
   const text = new TextDecoder();
   const path = (p: StreamPointer, file: string) => p.generation ? `g/${p.generation}/${file}` : file;
-  const readText = async (file: string, p = ptr) => {
-    const b = await get(new URL(path(p, file), stream));
+  const addWords = (b: Uint8Array | null) => {
     if (!b) return;
-    for (const [id, w] of decode(b, { useMaps: true }) as [IdValue, Uint8Array][]) words.set(key(id), text.decode(w));
+    for (const [id, w] of decode(b, { useMaps: true }) as [IdValue | Uint8Array, Uint8Array][]) words.set(id instanceof Uint8Array ? nameKey(id) : key(id), text.decode(w));
+  };
+  const readText = async (file: string, p = ptr) => addWords(await get(new URL(path(p, file), stream)));
+  // A part's file (`suffix` '') or its words ('.text'), with the next AHEAD the pointer names already asked for.
+  const fetching = new Map<string, Promise<Uint8Array | null>>();
+  const partFile = (p: StreamPointer, n: number, suffix: string): Promise<Uint8Array | null> => {
+    for (let k = n; k < n + AHEAD && k <= (p.newest ?? n); k++) {
+      const file = path(p, `${k}${suffix}`);
+      if (!fetching.has(file)) fetching.set(file, get(new URL(file, stream)).catch(() => null));
+    }
+    const file = path(p, `${n}${suffix}`);
+    const bytes = fetching.get(file) ?? get(new URL(file, stream));
+    fetching.delete(file);
+    return bytes;
   };
   const query = (q: Map<number, unknown>) => decode(player.query(encode(q)), { useMaps: true });
   const resolveWords = (nodes: NodeRec[]) => {
     for (const r of nodes) {
       if (r.name) r.name = words.get(r.name) ?? null;
       if (r.description) r.description = words.get(r.description) ?? null;
+      if (r.placeName) r.placeName = words.get(r.placeName) ?? null;
     }
   };
   // Preserve opaque local records in the WASM/public copy and here. Drawing may only observe a complete actual
@@ -145,21 +172,47 @@ async function run(stream: URL) {
     player = nextPlayer; version = nextVersion; active = p.generation;
     previous?.free();
     resolveWords(nodes);
-    const removed = [...known.keys()].filter(id => !nodes.some(n => n.id === id));
-    observe(nodes, removed, []);
+    showAll(nodes);
+  };
+  // The whole public copy as one snapshot: what a baseline or a catch-up shows.
+  const showAll = (nodes: NodeRec[]) => {
+    const present = new Set(nodes.map(n => n.id));
+    observe(nodes, [...known.keys()].filter(id => !present.has(id)), []);
+  };
+  // #3822: a joiner far behind plays the parts the clock would cut past anyway (more than BEHIND_US + CUT_US before
+  // the newest) deferred: no digest each, nothing read back or posted. The state they make is then checked against
+  // the newest claimed digest once and shown as one snapshot; the parts after it play as before.
+  const catchUp = async (p: StreamPointer, last: number): Promise<boolean> => {
+    let any = false;
+    while (Number(player.next()) <= last) {
+      const n = Number(player.next());
+      const [bytes, said] = await Promise.all([partFile(p, n, ''), partFile(p, n, '.text')]);
+      if (!bytes) break;
+      version = JSON.parse(player.playDeferred(bytes)).version;
+      addWords(said);
+      any = true;
+    }
+    if (!any) return false;
+    player.verify();
+    const nodes = (decode(player.snapshot(), { useMaps: true }) as Map<number, unknown>[]).map(nodeRec);
+    resolveWords(nodes);
+    showAll(nodes);
+    return true;
   };
   const playOne = async (p: StreamPointer): Promise<boolean> => {
     const n = Number(player.next());
-    const bytes = await get(new URL(path(p, String(n)), stream));
+    const bytes = await partFile(p, n, '');
     if (!bytes) return false;
-    const played = JSON.parse(player.play(bytes));
+    // #3822: the state's digest is worked out once a batch, at the newest part, not at each one before it.
+    const played = JSON.parse(n < (p.newest ?? n) ? player.playDeferred(bytes) : player.play(bytes));
     const changed = query(new Map<number, unknown>([[1, 5], [2, version]])) as [IdValue, number][];
     version = played.version;
-    const nodes: NodeRec[] = [], removed: string[] = [];
-    for (const [id] of changed) {
-      try { nodes.push(nodeRec(query(new Map<number, unknown>([[1, 1], [2, id]])) as Map<number, unknown>)); }
-      catch { removed.push(key(id)); }
-    }
+    const { nodes, removed } = readChanged(
+      changed.map(([id]) => id), key,
+      (id) => query(new Map<number, unknown>([[1, 1], [2, id]])) as Map<number, unknown>,
+      () => new Map((decode(player.snapshot(), { useMaps: true }) as Map<number, unknown>[]).map(v => [key(v.get(1) as IdValue), v])),
+      nodeRec,
+    );
     const samples = JSON.parse(player.samples());
     let happened: PartRec['happened'] = [];
     try { happened = happenedInPart(bytes); } catch { /* sound observes only a successfully played part */ }
@@ -170,7 +223,7 @@ async function run(stream: URL) {
       const f = e.get(2) as Map<number, unknown>, ref = refOf(f.get(1));
       if (ref) said.push({ speaker: key(e.get(3) as IdValue), at: num(e.get(4)), length: num(f.get(4)), reach: num(f.get(2)), ref, words: null });
     }
-    const refs = [...said.map(x => x.ref), ...nodes.flatMap(r => [r.name, r.description])].filter((r): r is string => !!r);
+    const refs = [...said.map(x => x.ref), ...nodes.flatMap(r => [r.name, r.description, r.placeName])].filter((r): r is string => !!r);
     if (refs.some(r => !words.has(r))) await readText(`${n}.text`, p);
     for (const x of said) x.words = words.get(x.ref) ?? null;
     resolveWords(nodes);
@@ -198,7 +251,12 @@ async function run(stream: URL) {
       }
       ptr = latest;
       tell();
+      const far = Math.ceil((BEHIND_US + CUT_US) / ptr.period);
       while (ptr.newest !== null && Number(player.next()) <= ptr.newest) {
+        if (ptr.newest - Number(player.next()) > far) {
+          if (!(await catchUp(ptr, ptr.newest - far))) break;
+          continue;
+        }
         if (!(await playOne(ptr))) break;
         if (Number(player.next()) > (ptr.newest ?? -1)) tell();
       }

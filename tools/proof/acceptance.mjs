@@ -152,6 +152,15 @@ export function allowedProofLinks(links, opts) {
 
 /** Issue references in a Problem section: closing keywords first (the PR's own issue, which proof-check reads), then
  *  bare #n and issue URLs in order. */
+/** The issues whose criteria a PR must carry: those it closes (Closes/Fixes/Resolves #n) and those it names on a
+ * `Part of #n` line, in that order. A bare mention ("separate from #12") is context, not an issue the PR answers. */
+export function carriedIssues(text = '') {
+  const nums = new Set();
+  for (const m of String(text).matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)\b/gi)) nums.add(Number(m[1]));
+  for (const m of String(text).matchAll(/\bpart of\s+#(\d+)\b/gi)) nums.add(Number(m[1]));
+  return [...nums];
+}
+
 export function linkedIssues(text = '') {
   const nums = new Set();
   for (const m of String(text).matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)\b/gi)) nums.add(Number(m[1]));
@@ -519,7 +528,7 @@ export async function prMode({ repo, pr, head, gh = ghJson, fetchImpl = fetch, p
     const result = addGate(privacyFailure(t.tier, titlePrivacy));
     return { result, comment: renderComment(result) };
   }
-  const issueNums = linkedIssues(sections(body).problem ?? '');
+  const issueNums = carriedIssues(sections(body).problem ?? '');
   let issueBody = null;
   if (issueNums.length) { try { const i = gh(`repos/${repo}/issues/${issueNums[0]}`); if (!i.pull_request) issueBody = i.body ?? ''; } catch { /* unreadable issue: skip the carry check */ } }
   // Only a proof.json on a proof host is ever fetched (#765): never a host chosen by PR text.

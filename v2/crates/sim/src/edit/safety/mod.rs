@@ -31,6 +31,10 @@
 //!   up onto the ground nearest the thing it is in (within [`REACH`], at the thing's height on its floor or the open
 //!   ground), and is cut off when that ground had a way out before the change and has none after it, or there is no
 //!   ground left there to stand up onto.
+//! - **What it sits or lies in, filled** (as today's game refuses it, `body.in-use`): a seated or lying body whose
+//!   ground to stand up onto keeps its way out is still refused `edit.in-use` when a box the change newly stands
+//!   (placed, moved or reshaped: a crate, a wall row) meets the body where it sits: within its radius of its slot's
+//!   point, from the slot up to [`SEATED`] above it. A body shut in by the change is named cut off first (#3280).
 //! - **Partway across a link** (#3280): a body crossing a doorway, stair, ramp or ladder ([`Who::crossing`]) runs the
 //!   crossing to an end. A change that removes the link or newly blocks it (its passage filled, an end covered)
 //!   buries the body in it; one that leaves neither end's piece with a way out cuts it off.
@@ -42,14 +46,16 @@
 #[cfg(test)]
 mod tests;
 
+use crate::ground::Solid;
 use crate::ground::Versions;
-use crate::ground::scene::xform_to;
+use crate::ground::scene::{slot_points, solids_under, within, xform_to};
 use crate::links::Link;
 use crate::routes::{ALL, Map, Mask, Spot};
-use crate::walk::town::{Basis, Fresh, Town};
+use crate::walk::town::{Basis, Fresh, Rebuilt, Town};
 use replica::edit::{BURIES, CUTS_OFF, IN_USE, Unsafe, Use};
 use replica::effects::{Actor, Body, Change, Header, Part, TransferRec};
 use replica::ids::Id;
+use replica::kinds::sizes::Size;
 use replica::pose::{Pose, Support, Vec3};
 use replica::tree::{Handle, Tree};
 use std::cmp::Reverse;
@@ -60,6 +66,9 @@ const AT_EDGE: i64 = 20;
 /// How far from the thing it sits or lies in a body may stand up onto the ground, mm: half the width of a thing to lie
 /// in and a body's radius, with room to spare.
 pub const REACH: i64 = 1_200;
+/// How high above its slot's point a seated or lying body reaches, mm: a new box that meets this span over the slot
+/// fills what it sits or lies in.
+pub const SEATED: i64 = 1_000;
 
 /// A Soul's body as the rule judges it: the Soul, its body's node, its pose, its abilities (N5's bits), and the link
 /// it is partway across, if it is crossing one.
@@ -87,6 +96,8 @@ struct Sides {
     before: Side,
     after: Side,
     places: BTreeMap<Id, (Id, Vec3)>,
+    /// Each slot (its thing and number) a box the change newly stands meets where a body sits or lies in it.
+    filled: BTreeSet<(Id, u64)>,
 }
 
 /// Twice a piece's area, mm².
@@ -210,6 +221,17 @@ pub fn guard(
     ground: Option<Id>,
     part: &Part,
 ) -> Result<Guard, String> {
+    guard_for(before, header, ground, part, Size::Standard)
+}
+
+/// The identical safety rule, with both geometry sides cut for the admitted class.
+pub fn guard_for(
+    before: &Tree,
+    header: &Header,
+    ground: Option<Id>,
+    part: &Part,
+    size: Size,
+) -> Result<Guard, String> {
     // It cuts the ground on both sides of the change: never on the clock thread (G3b, #3449).
     crate::commit::off_clock();
     let mut after = before.frozen();
@@ -218,9 +240,9 @@ pub fn guard(
         .map_err(|e| format!("{}: {}", e.name, e.detail))?;
     let sides = match ground {
         Some(g) => {
-            let b = Map::build(before, g, &|_| 0)?;
-            let a = Map::build(&after, g, &|_| 0)?;
-            Some(Sides::of(before, header.zone, g, b, a))
+            let b = Map::build_for(before, g, size, &|_| 0)?;
+            let a = Map::build_for(&after, g, size, &|_| 0)?;
+            Some(Sides::of(before, &after, part, header.zone, g, b, a))
         }
         None => None,
     };
@@ -266,6 +288,17 @@ pub fn guard_on(
     part: &Part,
     known: &Known,
 ) -> Result<Guard, String> {
+    guard_kept(before, header, part, known).map(|(g, _)| g)
+}
+
+/// [`guard_on`], keeping the ground its rebuild built (#3743): the map preparation installs it instead of building
+/// the same ground again, when it is for the same part on the same basis.
+pub fn guard_kept(
+    before: &Tree,
+    header: &Header,
+    part: &Part,
+    known: &Known,
+) -> Result<(Guard, Rebuilt), String> {
     crate::commit::off_clock();
     let g = known.ground;
     let mut after = before.frozen();
@@ -285,20 +318,100 @@ pub fn guard_on(
     for (b, _) in bs {
         map.replace(b, &v);
     }
-    let sides = Sides::of(before, header.zone, g, known.map.clone(), map);
-    Ok(Guard::of(before, part, Some(sides)))
+    let sides = Sides::of(before, &after, part, header.zone, g, known.map.clone(), map);
+    Ok((Guard::of(before, part, Some(sides)), r))
 }
 
 impl Sides {
-    /// Both sides from the route maps before (`b`) and after (`a`) the change.
-    fn of(before: &Tree, zone: Id, ground: Id, b: Map, a: Map) -> Sides {
+    /// Both sides from the route maps before (`b`) and after (`a`) the change `part` (`after` is `before` with it).
+    fn of(before: &Tree, after: &Tree, part: &Part, zone: Id, ground: Id, b: Map, a: Map) -> Sides {
         let b = Side::of(b);
+        let places = places(before, zone, ground, &b.map);
         Sides {
-            places: places(before, zone, ground, &b.map),
+            filled: filled(before, after, part, ground, &places),
+            places,
             before: b,
             after: Side::of(a),
         }
     }
+}
+
+fn same(a: &Solid, b: &Solid) -> bool {
+    (a.ring, a.y0, a.y1) == (b.ring, b.y0, b.y1)
+}
+
+/// The slots a box the change `part` newly stands meets where a body sits or lies (see the module's notes), each
+/// read in the open ground's frame: the boxes of what it places, moves or reshapes in `after` that `before` did not
+/// have, and the slots of the things in `places` near them. A node that cannot be read is passed over.
+fn filled(
+    before: &Tree,
+    after: &Tree,
+    part: &Part,
+    ground: Id,
+    places: &BTreeMap<Id, (Id, Vec3)>,
+) -> BTreeSet<(Id, u64)> {
+    let mut out = BTreeSet::new();
+    let (Some(gb), Some(ga)) = (before.handle(ground), after.handle(ground)) else {
+        return out;
+    };
+    let mut new: Vec<Solid> = Vec::new();
+    for id in crate::ground::changed(before, part) {
+        let Some(now) = after
+            .handle(id)
+            .and_then(|h| solids_under(after, h, ga).ok())
+        else {
+            continue;
+        };
+        let was = before
+            .handle(id)
+            .and_then(|h| solids_under(before, h, gb).ok())
+            .unwrap_or_default();
+        new.extend(now.into_iter().filter(|s| !was.iter().any(|w| same(w, s))));
+    }
+    if new.is_empty() {
+        return out;
+    }
+    // Only things within reach of a new box are read for their slots.
+    let r = Size::Standard.radius_mm() * 1000;
+    let far = REACH * 1000;
+    let mut bb = [i64::MAX, i64::MAX, i64::MIN, i64::MIN];
+    for p in new.iter().flat_map(|s| s.ring) {
+        bb = [
+            bb[0].min(p[0]),
+            bb[1].min(p[1]),
+            bb[2].max(p[0]),
+            bb[3].max(p[1]),
+        ];
+    }
+    let mut frames = BTreeMap::new();
+    for (&thing, &(patch, origin)) in places {
+        let x = frames.entry(patch).or_insert_with(|| {
+            before
+                .handle(patch)
+                .and_then(|h| xform_to(before, h, gb).ok())
+        });
+        let Some(o) = x.as_ref().and_then(|x| x.point(origin).ok()) else {
+            continue;
+        };
+        if o.x < bb[0] - far || o.x > bb[2] + far || o.z < bb[1] - far || o.z > bb[3] + far {
+            continue;
+        }
+        let Some(slots) = before
+            .handle(thing)
+            .and_then(|h| slot_points(before, h, gb).ok())
+        else {
+            continue;
+        };
+        for (slot, p) in slots {
+            if new
+                .iter()
+                .any(|s| s.y1 > p.y && s.y0 < p.y + SEATED * 1000 && within(&s.ring, [p.x, p.z], r))
+            {
+                out.insert((thing, slot));
+            }
+        }
+    }
+    out
 }
 
 impl Guard {
@@ -381,19 +494,24 @@ impl Guard {
             return fail(IN_USE, Some((*t, Use::Holds)));
         }
         let s = self.sides.as_ref()?;
-        if frame.slot.is_some() {
+        if let Some(slot) = frame.slot {
             // Seated or lying: shut in when the ground it stands up onto loses its way out.
             let &(patch, p) = s.places.get(&frame.node)?;
-            let b = s.before.map.spot_near(patch, p, REACH)?;
-            let a = s.after.map.spot_near(patch, p, REACH);
-            if s.before.out(b, w.has) && !a.is_some_and(|a| s.after.out(a, w.has)) {
-                return Some(Unsafe {
-                    name: CUTS_OFF,
-                    soul: w.soul,
-                    node: patch,
-                    at: p,
-                    thing: None,
-                });
+            if let Some(b) = s.before.map.spot_near(patch, p, REACH) {
+                let a = s.after.map.spot_near(patch, p, REACH);
+                if s.before.out(b, w.has) && !a.is_some_and(|a| s.after.out(a, w.has)) {
+                    return Some(Unsafe {
+                        name: CUTS_OFF,
+                        soul: w.soul,
+                        node: patch,
+                        at: p,
+                        thing: None,
+                    });
+                }
+            }
+            // Else in use when a new box fills what it sits or lies in, where it sits or lies.
+            if s.filled.contains(&(frame.node, slot)) {
+                return fail(IN_USE, Some((frame.node, Use::In)));
             }
             return None;
         }

@@ -11,6 +11,10 @@
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
 //                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; ids
 //                                             or <name>=<id> after an act are its thing arguments (C10)
+//   souls.mjs inspect <id>                    the thing as the copy holds it and its own offers, each with its parameters
+//                                             and the act that sends it; asks the world nothing (#3686)
+//   souls.mjs object <id> [<offer> [<name>=<value>... | '<params json>']]   no offer: inspect's offers; an offer:
+//                                             sent through act, `<offer>:<id>` with its arguments (#3686)
 //   souls.mjs can <act> [<arg id>...]         the daemon's local check (R8): yes, no with the reason, or unknown
 //   souls.mjs say "<words>"                   says the words out loud, to whoever is near
 //   souls.mjs say --shout "<words>" | shout "<words>"   shouts them: public, heard farther than a say (C26)
@@ -26,6 +30,9 @@
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
 //   souls.mjs pray "<words>"                  a prayer to the world's creator (G11); the answer comes to `wait`
 //   souls.mjs prayers                         this Soul's prayers, each waiting or answered, with the answer
+//   souls.mjs now "<line>"                    sets the Soul's public status line, shown on its page beside its
+//                                             description: at most 140 characters; `now` alone (or --clear) clears it
+//                                             (C14). `--now "<line>"` on any other command sets it after that command
 //   souls.mjs wait [seconds]                  returns when something addressed to this Soul happened (an answer, or words
 //                                             said to or near it: `heard`, also in the next look), or at the timeout
 //   souls.mjs history --at <place> | --thing <id> | --soul <name> [--since <µs>] [--until <µs>]
@@ -46,6 +53,8 @@
 //   act ... --for <message id>                the act serves that owner's message; its outcome closes it (R13)
 //   souls.mjs shoot <place|soul|thing> [--eyes] [--page <url>] [--out f.png]   a picture drawn here from the public
 //                                             stream (G10, shoot/shoot.mjs); with no browser, words and why
+//   souls.mjs view [--alt-only] [--out f.jpg] [--map]  |  map   this Soul's sight as words and its picture, or a map
+//                                             from overhead (#3687, view/view.mjs), drawn here in shoot's browser
 //   souls.mjs digest [--since <time>] [--refs]   the owner's update from the Soul's memory log (R14); no daemon
 //   souls.mjs consolidate [--force]           the owner's opt-in pass over the memory's journal (R14); no daemon
 //   souls.mjs memory <words...>               every memory line holding every word, `untrusted` when a world wrote it (R19)
@@ -74,11 +83,12 @@ import { chooseCommandSoul, chooseSoul, HOME_COMMANDS, homeCommand } from '../ho
 import { consolidateIn, digestOf, rememberIn, searchIn, soulDirOf } from '../memory/memory.mjs';
 import { addEntry, listed, readSchedule, removeEntry, shown } from '../schedule/schedule.mjs';
 import { runShoot } from '../shoot/shoot.mjs';
+import { runView } from '../view/view.mjs';
 import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount } from '../account/account.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
-export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'shout', 'whisper', 'converse', 'lie', 'pray', 'prayers', 'wait', 'history', 'stats', 'pending', 'ack', 'stop'];
+export const OPS = ['status', 'pair', 'look', 'find', 'act', 'inspect', 'object', 'can', 'say', 'shout', 'whisper', 'converse', 'lie', 'wear', 'pray', 'prayers', 'now', 'wait', 'history', 'stats', 'pending', 'ack', 'stop'];
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = ['digest', 'consolidate', 'schedule', 'help', 'memory', 'remember'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -104,10 +114,28 @@ async function pairing(home, url, { within = 15_000 } = {}) {
   throw Object.assign(new Error(`no answer from ${directory}`), { code: 'directory-not-answering' });
 }
 
+/** An offer's arguments as `<name>=<value>` words: given so, or as today's one JSON object (`'{"grams":50}'`). */
+export function argsOf(words) {
+  if (words.length === 1 && words[0].trim().startsWith('{')) {
+    let o;
+    try { o = JSON.parse(words[0]); } catch { throw Object.assign(new Error('params: a JSON object'), { code: 'object-params' }); }
+    if (!o || typeof o !== 'object' || Array.isArray(o)) throw Object.assign(new Error('params: a JSON object'), { code: 'object-params' });
+    return Object.entries(o).map(([n, v]) => `${n}=${v}`);
+  }
+  return words;
+}
+
 /** The daemon request the arguments make, or a refusal by name. */
 export function requestOf(argv) {
   if (HOME_COMMANDS.includes(argv[0])) return { home: argv[0], args: argv.slice(1) };
   const args = [...argv], opts = {};
+  // C14: `--now "<line>"` rides on any daemon command, set after it (today's flag).
+  const at = args.indexOf('--now');
+  if (at >= 0 && args[0] !== 'now') {
+    if (args[at + 1] === undefined || args[at + 1].startsWith('--')) return { refused: 'now-usage', detail: '--now "<one short first-person line, at most 140 characters>"' };
+    opts.now = args[at + 1];
+    args.splice(at, 2);
+  }
   // history's --soul is its question; --as is the Soul asking.
   const asking = args.includes('history');
   for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for', '--close', '--to', '--gesture']) {
@@ -128,7 +156,14 @@ export function requestOf(argv) {
   const req = { op };
   if (op === 'find') { req.words = rest.join(' '); if (opts.limit) req.limit = Number(opts.limit); }
   if (op === 'act' || op === 'can') req.acts = rest;
-  if (op === 'act' && opts.for !== undefined) req.for = opts.for;
+  if ((op === 'act' || op === 'object') && opts.for !== undefined) req.for = opts.for;
+  if (op === 'inspect') req.this = rest[0];
+  if (op === 'object') {
+    const [id, action, ...more] = rest;
+    let args;
+    try { args = argsOf(more); } catch (e) { return { refused: e.code, detail: e.message }; }
+    Object.assign(req, { this: id, ...(action !== undefined ? { action, args } : {}) });
+  }
   if (op === 'pending' && rest[0] !== '--check') req.list = true;
   if (op === 'ack') {
     if (opts.close !== undefined && !['done', 'failed'].includes(opts.close)) return { refused: 'ack-close', detail: 'ack <message id> "<reply>" --close done|failed' };
@@ -142,8 +177,10 @@ export function requestOf(argv) {
     if (op === 'shout' || rest.includes('--shout')) req.loud = true;
     for (const k of ['to', 'gesture']) if (opts[k] !== undefined) req[k] = opts[k];
   }
+  if (op === 'now') req.text = rest[0] === '--clear' && rest.length === 1 ? null : rest.join(' ');
   if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
   if (op === 'lie') req.this = rest[0];
+  if (op === 'wear') req.body = rest[0];
   if (op === 'converse') {
     const words = rest.filter((w) => w !== '--private');
     const [does = 'list', who, ...said] = words;
@@ -156,7 +193,7 @@ export function requestOf(argv) {
   if (op === 'history') {
     for (const [k, v] of [['at', opts.at], ['thing', opts.thing], ['soul', opts.of], ['since', opts.since], ['until', opts.until]]) if (v !== undefined) req[k] = v;
   }
-  return { req, soul: opts.soul };
+  return { req, soul: opts.soul, ...(opts.now !== undefined && !LOCAL.includes(op) && op !== 'pending' ? { now: opts.now } : {}) };
 }
 
 /** A local command: the Soul named, else the home's only Soul with a memory folder. */
@@ -230,6 +267,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       out(await runShoot(process.argv.slice(3), { home, env: process.env, ask }));
       process.exit(0);
     }
+    if (process.argv[2] === 'view' || process.argv[2] === 'map') { // #3687: today's view, read in the same browser
+      const askOf = (soul) => (r) => call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG });
+      out(await runView(process.argv.slice(3), { home, env: process.env, map: process.argv[2] === 'map', askOf }));
+      process.exit(0);
+    }
     if (refused && process.argv[2] !== 'upgrade') throw Object.assign(new Error(detail), { code: refused });
     if (asked.home) out(await homeCommand(home, asked.home, asked.args, { onAsk: (a) => out({ ok: true, step: 'approve', ...a }) }));
     else if (process.argv[2] === 'upgrade') out(await (await import('../upgrade/upgrade.mjs')).main(process.argv.slice(3)));
@@ -237,9 +279,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     else if (req.op === 'pair') { out(req.as || hasAccount(home) ? await accountPair(home, null, req.url, { as: req.as, move: req.move, fresh: true }) : await pairing(home, req.url)); process.exit(0); }
     else {
       const { soul, resident } = await chooseCommandSoul(home, named);
-      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : 5000;
-      const answer = resident ? await request(runtimeOf(home, soul).socket, req, ms)
-        : await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms });
+      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'now' ? 12_000 : 5000;
+      const ask = (r, within) => (resident ? request(runtimeOf(home, soul).socket, r, within)
+        : call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: within }));
+      const answer = await ask(req, ms);
+      // C14: a --now line is set once the command has answered, and its outcome added to the answer.
+      if (asked.now !== undefined && answer && typeof answer === 'object') answer.now = await ask({ op: 'now', text: asked.now }, 12_000);
       // R20: pending --check prints nothing: exit 0 when a turn has something to serve, 1 when not, 2 on a failure.
       if (req.op === 'pending' && !req.list) {
         if (answer.ok !== true) throw Object.assign(new Error(answer.detail ?? 'pending failed'), { code: answer.code });

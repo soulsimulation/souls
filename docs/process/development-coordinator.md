@@ -64,8 +64,8 @@ Fresh-session starter (orientation only):
   and proof harnesses accept real-run evidence (attempt limits, fingerprints and descriptor pins never block a
   passing capture).
 - **No long-lived stacks.** A stacked branch lands within about 4 hours or merges into main early; the integrator
-  lands the base first. A PR that leaves the merge queue unmerged is posted automatically on the PR and on the
-  agenda issue (the merge train's `queue-exit`); whoever owns it fixes and relabels it the same hour.
+  lands the base first. A PR that leaves the merge queue unmerged gets `queue:dropped` and a comment
+  with the reason and the failed run automatically; whoever owns it fixes and relabels it the same hour.
 - **Isolate writers.** One writer per worktree, test data directory and port set; read-only assets and caches are
   shared. Prefer lanes that touch different files and serialize coupled work, but nobody owns a file. A claim label
   is a record, not a lock.

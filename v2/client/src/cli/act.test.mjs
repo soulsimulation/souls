@@ -107,6 +107,10 @@ test('A2: an act carries each candidate\'s own target, and the first one\'s thin
   assert.equal(Buffer.from(name).toString(), 'tap');
   assert.equal(id(arg), c, 'the thing argument, by name, in parameter 1');
   assert.throws(() => wire.wireIntent(Buffer.from(s, 'hex'), 9001n, 'local:fill', 1n, new Uint8Array(), 10n ** 15n, a, undefined, 'tap'), /arg-not-name-and-id/);
+  // #3603: a steer's point, [x, z] µm, negative or not, as parameter 1.
+  const steer = decode(wire.wireIntent(Buffer.from(s, 'hex'), 9001n, 'carrier:steer', 2n, new Uint8Array(), 10n ** 15n, a, undefined, undefined, JSON.stringify({ 1: [-59800000, 250000] })));
+  assert.equal(steer.get(2), 'carrier:steer');
+  assert.deepEqual(steer.get(4).get(1).map(Number), [-59800000, 250000]);
 });
 
 test('A1, A2: can answers from the local check; a walk to a named thing and a sit on a chosen chair each end with their receipt', async () => {
@@ -131,6 +135,49 @@ test('A1, A2: can answers from the local check; a walk to a named thing and a si
   assert.equal(can.ok, true, JSON.stringify(can));
   assert.ok(['yes', 'no', 'unknown'].includes(can.can), 'R8\'s verdict, not unknown-command');
   assert.equal(souls(home, ['can']).code, 'act-candidate');
+
+  // #3686: inspect and object read the thing and its kind's offers from this machine; object sends one through act.
+  // The test world's chairs are not in the Soul's copy (an unknown id, below); its room is.
+  const room = souls(home, ['find', 'room']).found[0].id;
+  const sentBefore = (await request(rt.socket, { op: 'status' })).sent;
+  const bare = souls(home, ['inspect', room]);
+  assert.equal(bare.ok, true, JSON.stringify(bare));
+  assert.deepEqual(bare.offers.map((o) => o.name), ['walk'], 'no kind entry held: the walk alone');
+  mkdirSync(join(home, 'kinds'), { recursive: true });
+  writeFileSync(join(home, 'kinds', 'chair.json'), JSON.stringify({ format: 'souls-entry/1', kind: bare.kind, owner: 'thing',
+    slots: { seat: { admits: 'body', posture: 'sit', most: 1 } },
+    forms: { tidy: { who: 'anyone', starts: 'act', takes: { pattern: { type: 'value', of: ['along'] }, grams: { type: 'count' } }, needs: [], steps: [], effects: [] } } }));
+  const seen = souls(home, ['inspect', room]);
+  assert.deepEqual(seen.offers.map((o) => o.name), ['walk', 'sit', 'tidy'], JSON.stringify(seen));
+  assert.deepEqual(seen.offers[2].params.pattern, { type: 'value', of: ['along'] });
+  assert.deepEqual(souls(home, ['object', room]).offers, seen.offers, 'object with no offer lists the same offers');
+  assert.equal((await request(rt.socket, { op: 'status' })).sent, sentBefore, 'inspect and object without an offer send nothing');
+  const unknownId = souls(home, ['inspect', chair]);
+  assert.equal(unknownId.code, 'inspect.unknown-id', JSON.stringify(unknownId));
+  assert.ok(Array.isArray(unknownId.did_you_mean) && unknownId.did_you_mean.length > 0);
+  const unknownOffer = souls(home, ['object', room, 'tdy']);
+  assert.equal(unknownOffer.code, 'object.unknown-offer', JSON.stringify(unknownOffer));
+  assert.deepEqual(unknownOffer.did_you_mean[0], 'tidy');
+  const tidy = souls(home, ['object', room, 'tidy', 'pattern=along', 'grams=5']);
+  assert.equal(tidy.ok, true, JSON.stringify(tidy));
+  assert.ok((await answerOf(rt, tidy.sequence)).answer >= 1, 'the form went through act and was answered');
+  const walkThere = souls(home, ['object', room, 'walk']);
+  assert.equal(walkThere.ok, true, JSON.stringify(walkThere));
+  assert.ok((await answerOf(rt, walkThere.sequence)).answer >= 1, 'object <id> walk went through act and was answered');
+  rmSync(join(home, 'kinds'), { recursive: true });
+
+  // #3603: the engine's carrier verbs are sent as they are, never checked as forms; a point in metres goes as parameter
+  // 1, [x, z] µm; the world's refusal comes back by name (the room is not a carrier, and this Soul sits in nothing).
+  const halfPoint = souls(home, ['act', `carrier:steer:${room}`, 'x=4']);
+  assert.equal(halfPoint.code, 'steer-needs-a-point', JSON.stringify(halfPoint));
+  assert.equal(halfPoint.sent, false, 'a point half given sends nothing');
+  for (const words of [[`carrier:steer:${room}`, 'x=-59.8', 'z=0.25'], [`carrier:stop:${room}`], [`carrier:land:${room}`]]) {
+    const sent = souls(home, ['act', ...words]);
+    assert.equal(sent.ok, true, JSON.stringify(sent));
+    assert.equal(sent.dropped, undefined, 'not stopped by the local form check');
+    const got = await answerOf(rt, sent.sequence);
+    assert.ok(got.answer > 1 && typeof got.reason === 'string' && got.reason.length > 0, `refused by name: ${JSON.stringify(got)}`);
+  }
 
   const walk = souls(home, ['act', chair]);
   assert.equal(walk.ok, true, JSON.stringify(walk));

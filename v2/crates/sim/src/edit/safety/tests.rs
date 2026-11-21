@@ -600,6 +600,65 @@ fn a2_a_seated_or_lying_soul_shut_in_a_room_is_refused() {
 }
 
 #[test]
+fn a_solid_placed_through_an_occupied_seat_is_refused_in_use() {
+    // Today's game refuses it (`body.in-use`, the seated Soul named) even with clear ground to stand up onto, which the
+    // #3280 rule alone lets through.
+    let mut w = world();
+    let g = w.ground;
+    let at = Vec3::new(-5 * M, 0, -10 * M);
+    let (chair, c) = w.new_holder(on(g, at, surface(g)));
+    let Change::Create {
+        node,
+        kind,
+        pose,
+        audience,
+        mut fields,
+    } = c
+    else {
+        unreachable!()
+    };
+    // A chair: a low box, its seat (slot 1) 450 mm up at its middle.
+    let slot = Value::Array([1, 0, 450, 0].into_iter().map(int).collect());
+    fields.insert(F_SLOTS, Value::Array(vec![slot]));
+    let low = solid(0, 0, 250, 250, 450);
+    fields.insert(
+        F_SOLIDS,
+        Value::Array(vec![Value::Array(low.iter().map(|&v| int(v)).collect())]),
+    );
+    w.setup(vec![Change::Create {
+        node,
+        kind,
+        pose,
+        audience,
+        fields,
+    }]);
+    let sitter = Who {
+        pose: in_slot(chair, 1),
+        ..standing(1, g, Vec3::ZERO)
+    };
+    let crate_at = |w: &mut W, dx: i64| {
+        let p = Vec3::new(at.x + dx * MM, 0, at.z);
+        w.new_box(on(g, p, surface(g)), &[solid(0, 0, 300, 300, 1_500)])
+            .1
+    };
+    // A crate through the chair: the open ground round it is still clear, but where she sits is filled.
+    let c = crate_at(&mut w, 0);
+    let (_, v) = w.check(creator(), vec![c], &[sitter]);
+    print("a crate through the occupied chair", &v);
+    assert_eq!(v.len(), 1, "{v:?}");
+    assert_eq!(
+        (v[0].name, v[0].soul, v[0].thing),
+        (IN_USE, sitter.soul, Some((chair, Use::In)))
+    );
+    // The same crate a metre and a half off the chair leaves her seat as it was.
+    let c = crate_at(&mut w, 1_500);
+    assert_eq!(w.check(creator(), vec![c.clone()], &[sitter]).1, vec![]);
+    // And through the chair with nobody in it, it is no Soul's business here.
+    let c = crate_at(&mut w, 0);
+    assert_eq!(w.check(creator(), vec![c], &[]).1, vec![]);
+}
+
+#[test]
 fn a2_a_body_partway_through_a_doorway_or_on_a_stair_is_refused() {
     let mut w = world();
     let f = w.floor1;
@@ -646,4 +705,81 @@ fn a2_a_body_partway_through_a_doorway_or_on_a_stair_is_refused() {
     assert_eq!(w.check(creator(), vec![c], &[in_door, on_stair]).1, vec![]);
     let outside = standing(3, w.ground, Vec3::new(-5 * M, 0, -10 * M));
     assert_eq!(w.check(creator(), vec![gone], &[outside]).1, vec![]);
+}
+
+#[test]
+fn class_guard_and_atomic_install_preserve_each_actual_footprint() {
+    use replica::kinds::sizes::Size;
+    let mut w = world();
+    let soul = standing(1, w.ground, Vec3::new(-5 * M, 0, -10 * M));
+    // 500mm from the wall: Standard's340mm clearance fits; Large is over20mm inside its560mm margin.
+    let (_, wall) = w.new_box(
+        on(
+            w.ground,
+            Vec3::new(-5 * M, 0, -10 * M - 750 * MM),
+            surface(w.ground),
+        ),
+        &[solid(0, 0, 2000, 250, 1500)],
+    );
+    let part = w.part(creator(), vec![wall]);
+    let standard =
+        super::guard_for(&w.tree, &w.header, Some(w.ground), &part, Size::Standard).unwrap();
+    let large_guard =
+        super::guard_for(&w.tree, &w.header, Some(w.ground), &part, Size::Large).unwrap();
+    let present = |side: &super::Side| {
+        side.map
+            .spot_near(soul.pose.frame.node, soul.pose.position, super::AT_EDGE)
+            .is_some()
+    };
+    let standard_sides = standard.sides.as_ref().unwrap();
+    assert!(present(&standard_sides.before));
+    assert!(present(&standard_sides.after));
+    let large_sides = large_guard.sides.as_ref().unwrap();
+    assert!(present(&large_sides.before));
+    assert!(!present(&large_sides.after));
+    assert!(standard.judge(&[soul]).is_empty());
+    let large = large_guard.judge(&[soul]);
+    assert_eq!(large.first().map(|u| u.name), Some(BURIES));
+    let mut town = w.town();
+    town.prepare_classes([Size::Large]).unwrap();
+    let before = town.tree.to_state();
+    let versions = town.versions.clone();
+    let rebuilt = Town::rebuild(
+        town.tree.frozen(),
+        &w.header,
+        w.ground,
+        &town.versions,
+        &town.basis(),
+        &part,
+    )
+    .unwrap();
+    let (rejected, accepted) = rebuilt.into_pair();
+    assert_eq!(
+        town.install_then(rejected, &part, || Err::<(), _>(
+            replica::effects::Refusal {
+                name: "paired-refusal",
+                detail: String::new()
+            }
+        ))
+        .unwrap_err()
+        .name,
+        "paired-refusal"
+    );
+    assert_eq!(town.tree.to_state(), before);
+    assert_eq!(town.versions, versions);
+    let place = |town: &Town, size| {
+        town.surfaces_for(size).unwrap()[&w.ground].place(
+            soul.body,
+            soul.pose.frame,
+            soul.pose.position,
+            soul.pose.orientation,
+        )
+    };
+    assert!(place(&town, Size::Large).is_ok());
+    town.install(accepted, &part).unwrap();
+    assert!(place(&town, Size::Standard).is_ok());
+    assert!(
+        place(&town, Size::Large).is_err(),
+        "the class bank changes with the committed tree"
+    );
 }

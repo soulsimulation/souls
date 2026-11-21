@@ -54,6 +54,9 @@ pub const F_START: u64 = 83;
 pub const F_END: u64 = 84;
 pub const F_TEXT: u64 = 85;
 pub const F_POSTED_BY: u64 = 86;
+/// A moving node steered off its own course (a punt, #3603): who steers it, the course it left, when, and its wake
+/// (`sim::courses::punts::Steer`); an empty map while it is on its own course.
+pub const F_STEER: u64 = 87;
 
 /// The most rows hours may hold.
 pub const HOURS_MOST: usize = 64;

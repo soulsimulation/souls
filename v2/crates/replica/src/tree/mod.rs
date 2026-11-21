@@ -957,6 +957,21 @@ impl Tree {
         self.transact(header, part, Some(rules))
     }
 
+    /// The same bounded transaction, finalized only when the paired writer succeeds. A refused callback rolls
+    /// back this tree through its existing undo, including removals and independently changed fields.
+    pub fn commit_then<T>(
+        &mut self,
+        header: &Header,
+        part: &Part,
+        rules: &Rules,
+        then: impl FnOnce() -> R<T>,
+    ) -> R<T> {
+        if part.header != header.hash().to_bytes() {
+            return refuse("header-mismatch", "the part names another header");
+        }
+        self.run_then(header, &part.effects, Some(rules), then)
+    }
+
     fn transact(&mut self, header: &Header, part: &Part, rules: Option<&Rules>) -> R<()> {
         if part.header != header.hash().to_bytes() {
             return refuse("header-mismatch", "the part names another header");
@@ -971,6 +986,16 @@ impl Tree {
         effects: &[Effect],
         rules: Option<&Rules>,
     ) -> R<()> {
+        self.run_then(header, effects, rules, || Ok(()))
+    }
+
+    fn run_then<T>(
+        &mut self,
+        header: &Header,
+        effects: &[Effect],
+        rules: Option<&Rules>,
+        then: impl FnOnce() -> R<T>,
+    ) -> R<T> {
         debug_assert!(self.undo.is_empty() && self.dead.is_empty());
         self.changes += 1;
         let mut result = Ok(());
@@ -1001,18 +1026,25 @@ impl Tree {
                 ),
             );
         }
-        if result.is_err() {
+        let mut value = None;
+        if result.is_ok() {
+            match then() {
+                Ok(v) => value = Some(v),
+                Err(e) => result = Err(e),
+            }
+        }
+        if let Err(e) = result {
             while let Some(u) = self.undo.pop() {
                 u(self);
             }
             self.dead.clear();
-            return result;
+            return Err(e);
         }
         self.undo.clear();
         for slot in std::mem::take(&mut self.dead) {
             self.release(slot);
         }
-        Ok(())
+        Ok(value.expect("a successful transaction ran its paired writer"))
     }
 
     fn entry(&mut self, header: &Header, e: &Effect, rules: Option<&Rules>) -> R<()> {
@@ -1706,8 +1738,50 @@ impl Tree {
         }
     }
 
+    /// The transfers that have arrived here.
+    pub fn arrived(&self) -> &BTreeSet<Id> {
+        &self.arrived
+    }
+
+    /// One transfer in flight from here, as [`Tree::to_state`] writes it.
+    pub fn flight(&self, transfer: Id) -> Option<Flight> {
+        self.in_flight.get(&transfer).map(|f| self.flight_of(f))
+    }
+
+    fn flight_of(&self, f: &Away) -> Flight {
+        Flight {
+            root: self.nodes[f.root as usize].id,
+            lineage: f.lineage,
+            zone: f.zone,
+            pose: f.pose,
+            nodes: f
+                .nodes
+                .iter()
+                .map(|s| {
+                    let r = &self.nodes[*s as usize];
+                    let mut n = self.node_state(r);
+                    if *s == f.root {
+                        n.parent = Some(f.from);
+                    }
+                    (r.id, n)
+                })
+                .collect(),
+            links: f
+                .links
+                .iter()
+                .map(|(id, l)| (*id, self.link_state(l)))
+                .collect(),
+        }
+    }
+
     /// The tree in T6's fixture form, so that its `souls/fixture/1` hash can be compared with the harness's
     /// (`effects.md` rule 11). Links are written once; the indexes are derived and appear nowhere.
+    /// One live node as [`Tree::to_state`] holds it (#3799): what a reader of one row needs, without the whole state.
+    pub fn node_state_of(&self, id: Id) -> Option<NodeState> {
+        let slot = self.live(id).ok()?;
+        Some(self.node_state(&self.nodes[slot as usize]))
+    }
+
     pub fn to_state(&self) -> State {
         let nodes = self
             .nodes
@@ -1723,32 +1797,7 @@ impl Tree {
         let in_flight = self
             .in_flight
             .iter()
-            .map(|(id, f)| {
-                let flight = Flight {
-                    root: self.nodes[f.root as usize].id,
-                    lineage: f.lineage,
-                    zone: f.zone,
-                    pose: f.pose,
-                    nodes: f
-                        .nodes
-                        .iter()
-                        .map(|s| {
-                            let r = &self.nodes[*s as usize];
-                            let mut n = self.node_state(r);
-                            if *s == f.root {
-                                n.parent = Some(f.from);
-                            }
-                            (r.id, n)
-                        })
-                        .collect(),
-                    links: f
-                        .links
-                        .iter()
-                        .map(|(id, l)| (*id, self.link_state(l)))
-                        .collect(),
-                };
-                (*id, flight)
-            })
+            .map(|(id, f)| (*id, self.flight_of(f)))
             .collect();
         State {
             root: self.nodes[self.root as usize].id,

@@ -8,8 +8,10 @@
 #                        untested against what is ahead of it
 #   conflict             a PR that conflicts takes the rebase and Claude resolution below, then enqueues
 #   unlabeled            removing merge:ready takes the PR out of the queue, or disables its auto-merge
-#   dequeued             a PR the queue drops without merging loses merge:ready and gets a comment with the reason;
-#                        the same alert goes to the agenda issue (MERGE_TRAIN_NOTIFY_ISSUE, default 1960 for this alert)
+#   dequeued             a PR the queue drops without merging loses merge:ready, gets the queue:dropped label (removed
+#                        when it is enqueued again) and one comment with the reason and the failed merge-group run
+#   stale auto-merge     a PR with auto-merge on and green required checks that GitHub has not put in the queue
+#                        after 10 minutes counts as not queued: the pick disables its auto-merge and enqueues it again
 #   A red head check does not eject in this mode: auto-merge waits, and a fix enters the queue by itself.
 #   mixed cap            a PR with any file outside the low-risk paths (LOW_RISK in .github/scripts/ci-scope.mjs) waits,
 #                        keeping merge:ready, while MIXED_CAP (8, merge-train.mjs) such PRs are queued or set to
@@ -146,6 +148,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.exit != ''
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # One exit of a kind per PR at a time: a second relay of the same drop then finds it already handled.
+    concurrency:
+      group: merge-train-exit-${{ inputs.pr }}-${{ inputs.exit }}
+      cancel-in-progress: false
     permissions:
       contents: read
       pull-requests: write
@@ -158,7 +164,6 @@ jobs:
       ACTION: ${{ inputs.exit }}
       REASON: ${{ inputs.reason }}
       RELEASE_FREEZE: ${{ vars.RELEASE_FREEZE }}
-      NOTIFY_ISSUE: ${{ vars.MERGE_TRAIN_NOTIFY_ISSUE || '1960' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -172,7 +177,7 @@ jobs:
             node .github/scripts/merge-train.mjs hold --repo "$REPO" --pr "$PR"
           else
             sleep 20
-            node .github/scripts/merge-train.mjs dequeued --repo "$REPO" --pr "$PR" --reason "$REASON" --notify-issue "$NOTIFY_ISSUE"
+            node .github/scripts/merge-train.mjs dequeued --repo "$REPO" --pr "$PR" --reason "$REASON"
           fi
       - name: Start the train
         env:

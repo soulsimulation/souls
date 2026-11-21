@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  allowedProofLinks, checkPr, ciRunAt, clipPreviews, minimumBody, summaryLine, issueNumberFromPath, linkedIssues, loadChecks, parseAudit, parseChecklist, prMode, renderComment, sections, skeleton, validateProof, proofHostProblem, MARKER, SCHEMA,
+  allowedProofLinks, carriedIssues, checkPr, ciRunAt, clipPreviews, minimumBody, summaryLine, issueNumberFromPath, linkedIssues, loadChecks, parseAudit, parseChecklist, prMode, renderComment, sections, skeleton, validateProof, proofHostProblem, MARKER, SCHEMA,
 } from './acceptance.mjs';
 
 const policy = loadChecks();
@@ -187,6 +187,35 @@ test('init fills the issue number from a journal path and the commit it is given
   assert.equal(issueNumberFromPath(undefined), null);
   const s = skeleton({ issueBody: '### Acceptance criteria\n- [ ] **A1** One', issue: 388, commit: 'abc1234', tier: 'T2' });
   assert.equal(s.issue, 388); assert.equal(s.commit, 'abc1234');
+});
+
+test('carriedIssues: closing keywords and Part of lines, never a bare mention', () => {
+  assert.deepEqual(carriedIssues('This is separate from #3799 / #3803. Found while proving #3808.'), []);
+  assert.deepEqual(carriedIssues('Separate from #3799. Closes #12'), [12]);
+  assert.deepEqual(carriedIssues('Part of #1960 (found while proving #3808, #3687). Separate from #3799.'), [1960]);
+  assert.deepEqual(carriedIssues('fixes: #5 and resolves #6; part of #7; see #1'), [5, 6, 7]);
+});
+
+test('prMode carries criteria only from a closed or Part-of issue, not from one the Problem merely mentions', async () => {
+  const issues = { 12: '### Acceptance criteria\n- [ ] **A1** Tapping a seat opens its menu', 99: '### Acceptance criteria\n- [ ] **A9** Something only #99 asks for' };
+  const run = async problem => {
+    const asked = [];
+    const gh = path => {
+      if (path.endsWith('/pulls/7')) return { body: body({ problem }), labels: [], user: { login: 'someone' }, head: { sha: 'abc1234' }, draft: false };
+      if (path.includes('/pulls/7/files')) return [[{ filename: 'apps/web/src/seat.ts' }]];
+      const n = Number(/\/issues\/(\d+)$/.exec(path)?.[1]);
+      if (issues[n]) { asked.push(n); return { body: issues[n] }; }
+      throw Error(`unexpected ${path}`);
+    };
+    const { result } = await prMode({ repo: 'o/r', pr: 7, gh, fetchImpl: async () => { throw Error('no fetch'); }, policy });
+    return { carried: result.rows.find(r => r.name === 'carried from the issue'), asked };
+  };
+  const mention = await run('Visitors cannot open the seat menu; separate from #99.');
+  assert.deepEqual(mention.asked, []); assert.equal(mention.carried, undefined);
+  const closes = await run('Visitors cannot open the seat menu; separate from #99. Closes #12');
+  assert.deepEqual(closes.asked, [12]); assert.equal(closes.carried.ok, true);
+  const partOf = await run('Part of #99. Visitors cannot open the seat menu; see #12.');
+  assert.deepEqual(partOf.asked, [99]); assert.equal(partOf.carried.ok, false); assert.match(partOf.carried.detail, /A9 Something only #99 asks for/);
 });
 
 test('prMode reads the PR, files, issue and proof.json through injected gh/fetch', async () => {

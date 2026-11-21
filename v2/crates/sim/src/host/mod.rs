@@ -658,6 +658,8 @@ pub type ReachKey = (Id, Id, u64, Id);
 /// before the next tick: the route searches the clock does not run.
 #[derive(Clone, Debug, Default)]
 pub struct Wants {
+    /// Non-default admitted classes of this exact body snapshot.
+    pub classes: BTreeMap<Id, replica::kinds::sizes::Size>,
     /// The tick's end, world time: the spot tables are written for it.
     pub at: Micros,
     /// Every body's mark, for the spot tables (N9): `None` in a batch of reach questions alone, which writes none.
@@ -669,6 +671,7 @@ pub struct Wants {
     pub lines: Vec<(Moved, Vec3)>,
     /// Reach questions (B2, B3), retaining exact slot and pending move identity.
     pub reach: Vec<ReachQuestion>,
+    /// Immutable map identity shared by every route, line, reach and form question in this batch.
     pub form_map: Option<std::sync::Arc<crate::ground::Versions>>,
     pub forms: Vec<crate::planner::FormQuestion>,
 }
@@ -682,6 +685,8 @@ type Asked = RefCell<Vec<(Moved, Vec3)>>;
 /// The planner's answers to a tick's [`Wants`], used by the next tick ([`Runner::tick_planned`]).
 #[derive(Clone, Debug, Default)]
 pub struct Planned {
+    /// The originating batch map, shared with its authoritative caller.
+    pub map: Option<std::sync::Arc<crate::ground::Versions>>,
     /// Each walk given an answer: its order, then its place and legs, or a refusal's name.
     pub places: BTreeMap<Id, (Id, Placed)>,
     /// Each walker's line (#3167's, found by the planning call `View::search`) toward the leg's end it asked for, or
@@ -695,8 +700,32 @@ pub struct Planned {
 }
 
 impl Planned {
-    /// Takes `later`'s answers over these.
+    /// Discards answers from an obsolete map before they can enter a current cache. Searches remain counted.
+    pub fn keep_map(&mut self, current: &std::sync::Arc<crate::ground::Versions>) {
+        if self
+            .map
+            .as_ref()
+            .is_none_or(|map| !std::sync::Arc::ptr_eq(map, current))
+        {
+            self.places.clear();
+            self.lines.clear();
+            self.reach.clear();
+            self.forms.clear();
+            self.map = None;
+        }
+    }
+
+    /// Takes `later`'s answers over these. A different map cannot retain answers from its predecessor.
     pub fn merge(&mut self, later: Planned) {
+        // Unstamped legacy answers cannot acquire a stamped cache's current identity.
+        if self.map.is_some() && later.map.is_none() {
+            self.searched += later.searched;
+            return;
+        }
+        if let Some(map) = &later.map {
+            self.keep_map(map);
+            self.map = Some(std::sync::Arc::clone(map));
+        }
         self.places.extend(later.places);
         self.lines.extend(later.lines);
         self.reach.extend(later.reach);
@@ -1001,6 +1030,19 @@ impl Runner {
         near(&self.controller, body, radius)
     }
 
+    /// The paired edit already rebound these exact bodies off-clock; ordinary reground remains for other callers.
+    pub fn prepared_ground(
+        &mut self,
+        bodies: &[(crate::controller::BuildBasis, Moved)],
+        town: &Town,
+    ) {
+        for (before, _) in bodies {
+            let node = before.moved.pose.frame.node;
+            self.stood
+                .insert(before.moved.id, (node, town.versions.of(node)));
+        }
+    }
+
     /// Changed ground (G3), at the start of a tick (once a tick): each body not carried whose node's ground version
     /// moved since it last stood (or that stood off the ground) is found again on that ground where it stands
     /// ([`Town::relocate`]), or marked off the ground and held. Nothing while no ground has changed.
@@ -1081,6 +1123,15 @@ impl Runner {
         planned: Option<&Planned>,
         wants: &mut Wants,
     ) -> Result<(), Refusal> {
+        town.body_classes = self
+            .controller
+            .ids()
+            .filter_map(|id| {
+                let size = self.controller.build(id)?.size;
+                (size != replica::kinds::sizes::Size::Standard).then_some((id, size))
+            })
+            .collect();
+        wants.classes.clone_from(&town.body_classes);
         self.reground(town);
         let at = self.now + self.tick;
         // Read on the runner's threads (N17b): each mark reads one body alone.
@@ -1201,9 +1252,20 @@ impl Runner {
             self.route_metrics.remove(who);
             self.ended.insert(*who, (self.now, p.clone()));
         }
-        let stepped = self
-            .controller
-            .step_on(&town.surfaces, self.tick, at, self.threads);
+        let surfaces = replica::kinds::sizes::Size::ALL.map(|size| town.surfaces_for(size));
+        let stepped = self.controller.step_on_selected(
+            move |_, size| {
+                surfaces[match size {
+                    replica::kinds::sizes::Size::Small => 0,
+                    replica::kinds::sizes::Size::Standard => 1,
+                    replica::kinds::sizes::Size::Large => 2,
+                    replica::kinds::sizes::Size::Giant => 3,
+                }]
+            },
+            self.tick,
+            at,
+            self.threads,
+        );
         refused.extend(stepped.refused);
         // Each refused body's run ends by its first refusal's name; the others' ticks are done already.
         for (who, r) in &refused {

@@ -161,7 +161,8 @@ fn a3_a_change_to_a_larger_size_that_does_not_fit_or_has_no_exit_is_refused() {
     // A radius takes the class at or above it; one over the largest is refused.
     assert_eq!(Size::for_radius(250).unwrap(), Size::Standard);
     assert_eq!(Size::for_radius(500).unwrap(), Size::Large);
-    assert_eq!(Size::for_radius(501).unwrap_err().name, "body-too-large");
+    assert_eq!(Size::for_radius(501).unwrap(), Size::Giant);
+    assert_eq!(Size::for_radius(1301).unwrap_err().name, "body-too-large");
     let corridor = piece_near(&map, floor1, [-59_841, -146]).at;
     let on_roof = piece_near(&map, roof, [-60_000, 0]).at;
     let beyond = piece_near(&map, floor1, [-55_331, 53]).at;
@@ -361,4 +362,93 @@ fn a4_eden_cut_per_size_class() {
             );
         }
     }
+}
+
+#[test]
+fn live_town_queries_use_the_actual_class_on_narrow_and_wide_routes() {
+    use sim::links::Doors;
+    use sim::walk::town::Town;
+    let im = testworld();
+    let ground = im.nodes["ground"];
+    let floor = im.nodes["building/floor-1"];
+    let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
+    let next = im.tree.next();
+    let mut town = Town::new(im.tree, ground, Doors::new(header, im.rules, next)).unwrap();
+    town.prepare_classes([Size::Large]).unwrap();
+    let building = town
+        .buildings
+        .iter()
+        .find(|b| b.thing == im.nodes["building"])
+        .unwrap();
+    let top = building
+        .links
+        .iter()
+        .find(|l| l.kind == Kind::Stairs)
+        .unwrap()
+        .ends[1]
+        .unwrap()
+        .middle();
+    let narrow = building
+        .links
+        .iter()
+        .find(|l| l.kind == Kind::Doorway && l.width == 900_000)
+        .expect("the 900mm door");
+    let (narrow_id, narrow_door) = (narrow.id, narrow.door.unwrap());
+    let goal = um(piece_near(&town.map, floor, [-55_331, 53]).at);
+    for (i, size, ok) in [(1, Size::Standard, true), (2, Size::Large, false)] {
+        let id = Id::new(replica::ids::Scope([0x65; 16]), i).unwrap();
+        let s = &town.surfaces_for(size).unwrap()[&floor];
+        let (_, at) = sim::ground::exits::nearest(s.pieces(), top).unwrap();
+        let body = s
+            .place(
+                id,
+                Frame {
+                    node: floor,
+                    slot: None,
+                },
+                at,
+                Quat::IDENTITY,
+            )
+            .unwrap();
+        s.place(id, body.pose.frame, goal, Quat::IDENTITY)
+            .expect("the same far-room destination supports either class");
+        town.set_class(id, size);
+        let result = town.plan_with_metrics(&body, floor, goal);
+        assert_eq!(result.is_ok(), ok, "{size:?}: {result:?}");
+        match result {
+            Ok((legs, _)) => assert!(legs.iter().any(|leg| leg.link == Some(narrow_id))),
+            Err(r) => {
+                assert_eq!(r.name, "no-route");
+                assert_eq!(
+                    r.detail,
+                    format!(
+                        "link {}: link-too-narrow: the doorway (door {}) is 900 mm wide; a large body is 1000 mm wide, 1120 mm with its clearance",
+                        show(narrow_id),
+                        show(narrow_door)
+                    )
+                );
+            }
+        }
+        let s = &town.surfaces_for(size).unwrap()[&ground];
+        let body = s
+            .place(
+                id,
+                Frame {
+                    node: ground,
+                    slot: None,
+                },
+                Vec3::new(-40_000_000, 0, 30_000_000),
+                Quat::IDENTITY,
+            )
+            .unwrap();
+        assert!(
+            town.plan_with_metrics(&body, ground, Vec3::new(-38_000_000, 0, 30_000_000))
+                .is_ok(),
+            "wide supported route {size:?}"
+        );
+    }
+    assert_eq!(
+        town.view_for_size(Size::Giant).err().unwrap().name,
+        "body-class-unprepared"
+    );
 }

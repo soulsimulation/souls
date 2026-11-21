@@ -74,6 +74,10 @@
 //!   through [`Slots::fire`] so its contact hands the body into the slot, and the move's end wakes the run. A walk's
 //!   crossings are kept for the caller to carry ([`Forms::crossings`], `crate::host::carry`), so a form walks
 //!   indoors across doors and stairs.
+//! - **Standing slots** (C33, #3598). A form's hand-off into a standing slot (a phone box's inside, a pool table's
+//!   side, a balloon's basket) takes the slot through the same [`Slots`] table, on the body's feet: B2's rise move,
+//!   held in the standing stance. A full slot is refused `place-taken`, a slot the world has not placed
+//!   `place-unknown`, and the body stays where it stood.
 //!
 //! - **A run's deadline** (C20, #3469). A run's longest time is its steps' own ([`span`]): each walk's, move's or
 //!   sit's deadline as the runner sets it, each pause's length, and room for the tick that wakes each. A run is due
@@ -110,7 +114,6 @@ use skills::form_runner::{self, Limits, Next, Runner, Step, Woke};
 
 use crate::controller::{Controller, Driver};
 use crate::host::{Geometry, Run, Staged, hand_on, lend, step};
-use crate::mover::Surface;
 use crate::moves::{Fired, Instance, Moves, Reach};
 use crate::slots::{PlaceAt, Request, Slots, hands};
 use crate::timers::{DueList, Timer};
@@ -134,7 +137,7 @@ pub struct World<'a, G, R> {
 /// The places a form's sit takes (B3's table, the gateway's own) and the floors a body is set back on.
 pub struct Places<'a> {
     pub slots: &'a mut Slots,
-    pub floors: &'a BTreeMap<Id, Surface>,
+    pub floors: &'a dyn crate::mover::Floors,
 }
 
 /// A seat's reach for one body, as the gateway's sit measures it (`worldd`'s bodies): a seat is taken from its stand
@@ -568,6 +571,22 @@ impl Forms {
                         fr.runner.at()?,
                     ),
                 ))
+            })
+            .collect()
+    }
+
+    /// Each body's run whose step in progress is a walk to a named point (C34, #3599): the step's number, the node the
+    /// point is the node's own (the run's, or a thing argument's) and the point's name, so the world can resolve a
+    /// building's named area onto its own room and floor before the walk is planned.
+    pub fn walks(&self) -> BTreeMap<Id, (usize, Id, Name)> {
+        self.runs
+            .values()
+            .filter_map(|fr| match fr.runner.step()? {
+                Step::WalkTo { point, on, .. } => Some((
+                    fr.body,
+                    (fr.runner.at()?, on.unwrap_or(fr.node), point.clone()),
+                )),
+                _ => None,
             })
             .collect()
     }
@@ -1163,8 +1182,19 @@ impl Forms {
                 }
                 Err(r) => self.wake(w, run, Woke::Walked(Progress::Failed(name(r.name))), now),
             },
-            Next::Sit { node, slot, lie } => {
-                let mv = name(if lie { "souls:lie" } else { "souls:sit" });
+            // A standing slot (C33, #3598) is taken by the same hand-off on the body's feet: B2's rise move (the body
+            // stays upright; its contact hands it into the slot) held in the standing stance.
+            Next::Sit {
+                node,
+                slot,
+                lie,
+                stand,
+            } => {
+                let mv = name(match (stand, lie) {
+                    (true, _) => "souls:rise",
+                    (false, true) => "souls:lie",
+                    (false, false) => "souls:sit",
+                });
                 let (Some(found), Some(places)) =
                     (w.library.iter().find(|m| m.name == mv), w.places.as_mut())
                 else {
@@ -1180,15 +1210,24 @@ impl Forms {
                     thing: node,
                     slot: Some(slot),
                     mv: found,
-                    stance: if lie {
-                        crate::controller::Stance::Lie
-                    } else {
-                        crate::controller::Stance::Sit
+                    stance: match (stand, lie) {
+                        (true, _) => crate::controller::Stance::Stand,
+                        (false, true) => crate::controller::Stance::Lie,
+                        (false, false) => crate::controller::Stance::Sit,
                     },
                 };
                 let taken = places
                     .slots
-                    .commit(w.controller, w.due, w.mint, w.moves, &geo, &[request], now)
+                    .commit(
+                        w.controller,
+                        w.due,
+                        w.mint,
+                        w.moves,
+                        &geo,
+                        places.floors,
+                        &[request],
+                        now,
+                    )
                     .pop()
                     .map_or_else(
                         || Err(name("place-unknown")),

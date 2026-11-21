@@ -328,7 +328,8 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
 /// reads it. `words`, when given, is parameter 1 as T8's `{23: words}` (a say or a whisper, V1b). C10 (#3414): `target`
 /// may be one id per verb, split by spaces; `args`, the first verb's thing arguments as `name=<id>` split by spaces, is
 /// parameter 1 as C2's `[[name, id], ...]`. E26 (#3329): `params`, a JSON object of numbered parameters for an engine
-/// act (`activity:offer`): a whole number, a name, an id (`<scope hex>-<counter>`), or a list of those.
+/// act (`activity:offer`): a whole number, a name, an id (`<scope hex>-<counter>`), or a list of those. `reflex`, when
+/// true, marks it as sent by the client on its own standing consent, not by its agent (field 12, #3764).
 #[wasm_bindgen(js_name = wireIntent)]
 // JS calls it with positional arguments; the words came last (C4, #3368), then the arguments (C10, #3414).
 #[allow(clippy::too_many_arguments)]
@@ -343,6 +344,7 @@ pub fn wire_intent(
     words: Option<String>,
     args: Option<String>,
     params: Option<String>,
+    reflex: Option<bool>,
 ) -> Result<Vec<u8>, JsError> {
     let node = |t: &str| -> Result<Option<Target>, JsError> {
         Ok(match t {
@@ -470,6 +472,7 @@ pub fn wire_intent(
         fallbacks,
         replaces: None,
         body: None,
+        reflex: reflex.unwrap_or(false),
     };
     let bytes = encode(&intent.to_value()).map_err(js)?;
     crate::intent_decode::decode(&bytes).map_err(js)?;
@@ -677,6 +680,7 @@ pub fn wire_edit(
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     let bytes = encode(&intent.to_value()).map_err(js)?;
     crate::intent_decode::decode(&bytes).map_err(js)?;
@@ -1326,4 +1330,21 @@ impl WasmCopy {
         }
         Ok(format!("{{{}}}", out.join(",")))
     }
+}
+
+/// Where a moving node is at world time `t` (#3603): `field` is the node's course field ([`crate::schedule::F_COURSE`],
+/// 80) as its record holds it (the value's canonical bytes), `t` world µs. Gives `[x, y, z, vx, vy, vz]` in whole
+/// units (a `BigInt64Array`): its position in its parent's frame, µm, and its velocity, µm a second, read by the same
+/// formula the world reads ([`crate::schedule::course::place_at`]). Throws (`schedule-malformed`, the track's load refusals,
+/// `before-track-start`) when the field is not a course the world would move the node by; the node then stands where
+/// it was placed.
+#[wasm_bindgen(js_name = courseAt)]
+pub fn course_at(field: &[u8], t: i64) -> Result<Vec<i64>, JsError> {
+    use crate::schedule::course::Course;
+    let v = decode(field).map_err(js)?.value;
+    let course =
+        Course::read(&v).ok_or_else(|| JsError::new("schedule-malformed: not a course"))?;
+    let table = course.load().map_err(js)?;
+    let (p, v) = table.at(t).map_err(js)?;
+    Ok(vec![p.x, p.y, p.z, v.x, v.y, v.z])
 }
