@@ -1,4 +1,4 @@
 ---
 type: fix
 ---
-A walking Soul can no longer stop the world's clock when its route is replanned mid-walk.
+A walking Soul can no longer stop the world's clock through an overflow in the walk's progress check.

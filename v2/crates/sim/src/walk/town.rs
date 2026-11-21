@@ -716,10 +716,6 @@ impl Town {
     pub fn next_corner(&self, body: Id) -> Option<(Id, [i64; 2])> {
         let i = self.lines.binary_search_by_key(&body, |e| e.0).ok()?;
         let l = &self.lines[i].1;
-        // A line forgotten on a planner's thread (`Lines::forget`) is aimed at no point, which reads as none.
-        if l.to.x == i64::MIN {
-            return None;
-        }
         Some((l.node, *l.points.get(l.next)?))
     }
 
