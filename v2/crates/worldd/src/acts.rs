@@ -528,24 +528,25 @@ impl Geometry for Sight<'_> {
             None => (node, at),
         };
         // An approach to a move's point (#3688): a point of a thing on a building with floors (an inner door) is on
-        // the building's floor nearest its height. From another floor, the walk goes in to anywhere within a form's
-        // reach of it (no place may stand in the doorway), and the runner then approaches again from there; on the
-        // floor the body stands on, it is aimed short of the point, on the body's side, within the reach plus that.
-        let (node, at, reach) = if self.approaches.contains(&body) {
+        // the building's floor nearest its height, so the walk goes in to it, and once in through a link the runner
+        // approaches again from that floor; on the floor the body stands on, it is aimed short of the point, on the
+        // body's side.
+        let (node, at) = if self.approaches.contains(&body) {
             let (node, at) = self.floor_of(node, at).unwrap_or((node, at));
             self.with_view(body, |v| {
                 let (floor, p, _) = v.on_floor(node, at)?;
-                if floor != sim::walk::node_of(me) {
-                    return Some((node, at, skills::form_runner::REACH));
-                }
-                let short = skills::form_runner::APPROACH_SHORT;
-                let aim = skills::form_runner::short_of(p, me.pose.position, short);
-                Some((floor, aim, reach + flat([aim.x, aim.z], [p.x, p.z])))
+                (floor == sim::walk::node_of(me)).then(|| {
+                    let short = skills::form_runner::APPROACH_SHORT;
+                    (
+                        floor,
+                        skills::form_runner::short_of(p, me.pose.position, short),
+                    )
+                })
             })
             .flatten()
-            .unwrap_or((node, at, reach))
+            .unwrap_or((node, at))
         } else {
-            (node, at, reach)
+            (node, at)
         };
         let mut planning = self.planning.borrow_mut();
         match planning.ask(key, *me, FormQuery::Walk { node, at, reach }, &self.map) {
