@@ -5488,7 +5488,7 @@ mod tests {
             })
             .collect::<Vec<_>>()
         };
-        let intent = |sequence: u64, ops: &[Op]| Intent {
+        let intent = |sequence: u64, planned: u64, ops: &[Op]| Intent {
             actor: Actor::Creator(creator),
             verb: Name::new(VERB).unwrap(),
             target: None,
@@ -5498,7 +5498,7 @@ mod tests {
                 lineage: LINEAGE,
                 zone: Id::new(LINEAGE, 0).unwrap(),
                 epoch: 1,
-                sequence: 0,
+                sequence: planned,
             }
             .to_value(),
             expiry: i64::MAX,
@@ -5508,20 +5508,38 @@ mod tests {
             body: None,
             reflex: false,
         };
+        // (kind, reason, the version the answer gives)
         let run = |i: Intent, tick: i64| {
             let rx = send(&world, &i);
             let (done, ran) = channel();
             world.events.send(Event::RunTo { tick, done }).unwrap();
             ran.recv().unwrap();
-            read(&answer(&rx))
+            let f = answer(&rx);
+            let Value::Map(m) = decode(&f).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Array(v)) = m.get(&1) else {
+                panic!("a version")
+            };
+            let Some(Value::Uint(version)) = v.get(3) else {
+                panic!("a sequence")
+            };
+            let (kind, reason, _) = read(&f);
+            (kind, reason, *version)
         };
-        let (kind, reason, _) = run(intent(1, &weather(101)), 2);
+        // The sky's first start wrote the world node after version 0: planned before it, the batch is stale.
+        let (kind, reason, now) = run(intent(1, 0, &weather(90)), 2);
+        assert_eq!(
+            (kind, reason),
+            (2, Value::Text(Name::new("edit.stale").unwrap()))
+        );
+        let (kind, reason, now) = run(intent(2, now, &weather(101)), 4);
         assert_eq!(kind, 2, "a level of 101 is refused");
         assert_eq!(
             reason,
             Value::Text(Name::new("edit.weather-level").unwrap())
         );
-        let (kind, _, _) = run(intent(2, &weather(90)), 4);
+        let (kind, _, _) = run(intent(3, now, &weather(90)), 6);
         assert_eq!(kind, 1, "the storm is set");
         world.stop();
         let mut live = initial;
