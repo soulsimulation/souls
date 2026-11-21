@@ -905,15 +905,17 @@ async function runPlan(plan) {
   return { ok: plan.left() === 0, ...(plan.left() ? { code: 'import.unplaced', detail: `${plan.left()} nodes or links name a parent, support, end or door that was not placed` } : {}), ...summary(plan, edits, started) };
 }
 
-/** #3728: the open ground's id and its height under a point (µm), for a thing moved or copied on it; a height of
- *  null when the land verbs' model cannot load (the thing then keeps its height). */
+/** #3728: the open ground's id and its height under a point (µm), for a thing moved or copied on it; a refusal when
+ *  the land verbs' model cannot load. */
 async function liftOf() {
   try {
     const [{ groundOf }, { heightAt }] = await Promise.all([import('../creator/terrain/land.mjs'), import('../creator/terrain/terrain.mjs')]);
     const g = groundOf(copy);
     if (!g) return {};
     return { ground: g.id, lift: (x, z) => { const h = heightAt(g.tiles, g.tileMm, BigInt(Math.round(x)), BigInt(Math.round(z))); return h === null ? null : Number(h); } };
-  } catch { return {}; }
+  } catch (e) {
+    return { ok: false, code: 'land.unavailable', detail: `moving on the ground needs the land verbs' model: ${String(e.message ?? e).slice(0, 160)}` };
+  }
 }
 
 const metresPair = (v) => (v === undefined ? undefined : String(v).split(',').map(Number));
@@ -924,7 +926,9 @@ async function moveBatch(w) {
   if (!by || by.length !== 2 || by.some((n) => !Number.isFinite(n))) return { ok: false, code: 'move.by', detail: `--by dx,dz in metres, not ${w.by}` };
   const yaw = w.yaw === undefined ? undefined : Number(w.yaw);
   if (yaw !== undefined && !Number.isFinite(yaw)) return { ok: false, code: 'move.by', detail: `--yaw r in radians, not ${w.yaw}` };
-  return moveByOps(exportOf(copy).nodes, w.refs ?? [], by, { yaw, ...(await liftOf()) });
+  const lifted = await liftOf();
+  if (lifted.ok === false) return lifted;
+  return moveByOps(exportOf(copy).nodes, w.refs ?? [], by, { yaw, ...lifted });
 }
 
 /** #3728: `clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]` as an import plan of the copies. */
@@ -936,7 +940,9 @@ async function clonePlan(w) {
   if (!copyVersion) return { ok: false, code: 'edit.no-copy', detail: 'no copy of the world yet' };
   const target = exportOf(copy), src = target.nodes.find((n) => n.id === String(w.ref ?? ''));
   const width = src ? kindsIn(join(home, 'kinds'))[String(src.kind).split('@')[0]]?.geometry?.bounds_mm?.[0] : undefined;
-  const made = cloneFile(target.nodes, w.ref, { at, step, count, yaw, width, ...(await liftOf()) });
+  const lifted = await liftOf();
+  if (lifted.ok === false) return lifted;
+  const made = cloneFile(target.nodes, w.ref, { at, step, count, yaw, width, ...lifted });
   if (made.ok === false) return made;
   let plan;
   try { plan = importOf(made.file, target); } catch (e) { return { ok: false, code: e.code ?? 'import.format', detail: String(e.message ?? e).slice(0, 200) }; }
