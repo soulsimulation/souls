@@ -9,7 +9,8 @@ win 1 and the named places of win 3. Two steps, both run by hand:
    server) and writes `.local/import-eden/eden-2026.facts.json`: every thing with its pose relative to its tree parent,
    its bake (rooms, floors, solids, openings with windows, stairs, slots), the doors paired with their doorways, the
    ground (recipe, 1 m heights and classes), the waters, the named places, and the model's own counts. Whole
-   millimetres and millidegrees only. The file is generated (about 12 MB) and never committed; the same template gives
+   millimetres and millidegrees only. `--template <file>` replays another committed template (`worlds/templates/*.json`) the same way,
+   resolving the core meshes it names from `worlds/core-assets/` as the server does (the Mars campus, `mars-two.json`). The file is generated (about 12 MB) and never committed; the same template gives
    the same bytes.
 2. **Load** (Rust, `src/`), from `v2/`:
    `cargo run -p import-eden --release -- ../.local/import-eden/eden-2026.facts.json [--catalog <catalog.json>]`.
