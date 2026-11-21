@@ -7,13 +7,13 @@
   },
   "cases": [
     { "name": "a bed admits lying on it and sitting on its edge", "entry": "bed", "area": "mattress", "allows": { "lie": "on", "sit": "edge" }, "forbids": [] },
-    { "name": "a piano forbids sitting and lying, by name", "entry": "piano", "area": "lid", "allows": {}, "forbids": ["sit", "lie"] },
+    { "name": "a piano forbids lying on it, by name; its bench seats the pianist", "entry": "piano", "area": "lid", "allows": {}, "forbids": ["lie"] },
     { "name": "a tree's shade is a named place a body can be sent to", "entry": "tree", "area": "shade", "at_mm": [0, 0, 2500], "radius_mm": 3000, "walk_form": "go_to_shade" }
   ],
   "refused": [
     { "name": "a seat slot says lying already: an area repeating it is refused", "entry": "bed", "set": { "slots": { "mattress_slot": { "admits": "body", "posture": "lie", "most": 2, "at_mm": [0, 500, 0] } }, "areas": { "mattress": { "allows": { "lie": "on" } } } }, "path": "areas.mattress", "reason_has": "only repeats" },
     { "name": "a tree whose area says nothing is refused", "entry": "tree", "set": { "areas": { "shade": {} } }, "path": "areas.shade", "reason_has": "says something" },
-    { "name": "a piano forbidding what its own seat offers is refused", "entry": "piano", "set": { "slots": { "stool": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 500, 400] } } }, "path": "areas.lid.forbids", "reason_has": "seats a body" },
+    { "name": "a piano forbidding what its own seat offers is refused", "entry": "piano", "set": { "areas": { "lid": { "forbids": ["sit", "lie"] } } }, "path": "areas.lid.forbids", "reason_has": "seats a body" },
     { "name": "a posture both admitted and forbidden is refused", "entry": "bed", "set": { "areas": { "mattress": { "allows": { "lie": "on" }, "forbids": ["lie"] } } }, "path": "areas.mattress.forbids", "reason_has": "both" },
     { "name": "a float in a place is refused", "entry": "tree", "set": { "areas": { "shade": { "at_mm": [0, 0, 2500.5], "radius_mm": 3000 } } }, "path": "areas.shade.at_mm.2", "reason_has": "floating" },
     { "name": "a walk to a name that is no point, slot or placed area is refused", "entry": "tree", "set": { "forms": { "go_to_shade": { "who": "anyone", "starts": "act", "needs": [], "steps": [{ "step": "walk_to", "point": "meadow" }], "effects": [] } } }, "path": "forms.go_to_shade.steps.0.point", "reason_has": "placed area" }

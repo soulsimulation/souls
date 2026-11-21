@@ -9,7 +9,9 @@ win 1 and the named places of win 3. Two steps, both run by hand:
    server) and writes `.local/import-eden/eden-2026.facts.json`: every thing with its pose relative to its tree parent,
    its bake (rooms, floors, solids, openings with windows, stairs, slots), the doors paired with their doorways, the
    ground (recipe, 1 m heights and classes), the waters, the named places, and the model's own counts. Whole
-   millimetres and millidegrees only. The file is generated (about 12 MB) and never committed; the same template gives
+   millimetres and millidegrees only. `--template <file>` replays another committed template (`worlds/templates/*.json`) the same way,
+   resolving the core meshes it names from `worlds/core-assets/` as the server does (the Mars campus, `mars-two.json`;
+   add `--map content/worlds/mars/map.json` so its things name their entries). The file is generated (about 12 MB) and never committed; the same template gives
    the same bytes.
 2. **Load** (Rust, `src/`), from `v2/`:
    `cargo run -p import-eden --release -- ../.local/import-eden/eden-2026.facts.json [--catalog <catalog.json>]`.
@@ -40,6 +42,13 @@ exported (N1b, #3197). Today's ids, refs and hashes are stored as bytes, and nam
 a log's only text is `namespace:name`. Kinds are named as the world's Soul Actions entries (`content/kinds`) name them
 (C12, `kind_name`): the facts' `core:<name>` and `eden:eden_<name>` load as `eden:<name>`, so each thing finds its
 entry.
+
+A thing may name another kind's entry instead (field 27, `entry_name`): the exporter's `--map <map.json>` reads a
+world's map (`content/worlds/<world>/map.json`, `souls-world-map/1`) and writes each placed copy's entry, as X6 does for
+a backup. The Mars campus's chairs, sofas, tables and so on borrow existing entries this way
+(`content/worlds/mars/map.json`). worldd and the client look an entry up by that name, else by the kind's own. A
+borrowed seat or bed is set at the thing's own slot of the same number (its def's geometry), with the entry's stand
+offset from it; an entry seat the thing has no slot for is not offered.
 
 Things on another thing's floor (C27, #3509): a thing at the root that stands within a step (220 mm) of a building's
 own floor, one with a room on its level or raised more than a step (a pavilion's, a bandstand's, a deck's), and a
