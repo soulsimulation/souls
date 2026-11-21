@@ -794,8 +794,8 @@ fn c20_a3_a_soul_walks_across_the_town_and_uses_a_thing_by_its_form() {
     assert!(all > 40_000_000);
 }
 
-/// A gateway walk of over 600 m across Eden, from its north-west corner to its north-east (one of N5's seeded route
-/// pairs, 829 m by the map), ends done (#1960): its
+/// A gateway walk of over 600 m across Eden, from the births to a far corner of the town (a point of one of N5's
+/// seeded route pairs, 650 m away as the crow flies), ends done (#1960): its
 /// deadline follows its planned route, with no 180 s cap. Before, every walk over about 250 m ended `act.timed-out`
 /// while still moving. Takes about ten minutes of world time at 1/1.
 #[test]
@@ -817,7 +817,7 @@ fn a_600_m_walk_across_eden_ends_done() {
         let v = (m * 1e6) as i64;
         u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
     };
-    let to = Value::Array(vec![um(442.666), um(0.0), um(507.333)]);
+    let to = Value::Array(vec![um(-373.333), um(-0.55), um(474.666)]);
     let t0 = answers::now();
     let walked = soul.act_within(
         "eden:walk",
