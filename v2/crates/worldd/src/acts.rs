@@ -584,7 +584,7 @@ impl Sight<'_> {
     /// How far a body seated in slot `slot` of thing `target` is from the thing's point `point`, across x and z in
     /// the thing's frame, from the body's edge: the slot's and the point's places as its entry names them. `None`
     /// when the entry names neither.
-    fn from_slot(&self, body: Id, target: Id, slot: u64, point: &Name) -> Option<i64> {
+    fn reach_in_slot(&self, body: Id, target: Id, slot: u64, point: &Name) -> Option<i64> {
         let n = self.tree.node(self.tree.handle(target)?)?;
         let entry = self.kinds.get(plain(n.kind()))?;
         let held = entry
@@ -677,7 +677,7 @@ impl Reach for Sight<'_> {
         // A body seated in the thing's own slot reaches from that slot, in the thing's frame (#3713): a player at a
         // table moves on its board from where it sits, not from where the slot's frame would carry it.
         if let (true, Some(slot)) = (me.pose.frame.node == target, me.pose.frame.slot)
-            && let Some(d) = self.from_slot(body, target, slot, point)
+            && let Some(d) = self.reach_in_slot(body, target, slot, point)
         {
             return Some(d);
         }
