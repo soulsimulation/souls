@@ -1099,7 +1099,6 @@ fn a_cancel_naming_an_open_walk_stops_it_where_it_stands_and_replays() {
     let w = start(store.clone(), false);
     let walk = at(&w, 2, intent(walker, 1, "eden:walk", Some(chair()), None));
     let stop = at(&w, 20, cancel(2, 1));
-    let none = at(&w, 30, cancel(3, 1));
     let end = run_to(&w, 120);
     assert_eq!(
         answer(&walk),
@@ -1107,11 +1106,6 @@ fn a_cancel_naming_an_open_walk_stops_it_where_it_stands_and_replays() {
         "the walk ends by the stop's name"
     );
     assert!(answer(&stop).is_ok(), "the cancel has a receipt");
-    assert_eq!(
-        answer(&none),
-        Err("order-not-open".into()),
-        "nothing left to stop: refused as before"
-    );
     w.stop();
     let log = bytes(&store);
 
@@ -1186,10 +1180,15 @@ fn a_cancel_naming_an_open_walk_stops_it_where_it_stands_and_replays() {
     // Restart: the log as written, started again, has its last state.
     let before = last_state(&log);
     let k = start(Mem::with(log), false);
+    let restarted = run_to(&k, 0);
     assert_eq!(
-        run_to(&k, 0).state.to_vec(),
+        restarted.state.to_vec(),
         before,
         "the restart has the last state"
     );
+    // Stopped already: a second cancel of it names nothing open, and is refused as before.
+    let none = at(&k, restarted.tick + 1, cancel(3, 1));
+    run_to(&k, restarted.tick + 3);
+    assert_eq!(answer(&none), Err("order-not-open".into()));
     k.stop();
 }
