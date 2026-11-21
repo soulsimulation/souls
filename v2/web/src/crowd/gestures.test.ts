@@ -28,7 +28,8 @@ test('nod and shake-head play Yes and Idle_No_Loop at 1.6x, in over start-up and
   assert.ok(gestureAt([nod], 10.15 * S, false, seconds)!.weight < 1, 'coming in over start-up');
   assert.ok(gestureAt([nod], (11.5 + LEAVE / 2) * S, false, seconds)!.weight < 1, 'leaving after its end');
   assert.equal(gestureAt([nod], (11.5 + LEAVE + 0.01) * S, false, seconds), null, 'back to the posture');
-  const shake = gestureAt([move('shake_head', 0, [0.3, 1.2])], 1 * S, false, seconds)!;
+  const shake = gestureAt([move('souls:shake_head', 0, [0.3, 1.2])], 1 * S, false, seconds)!;
+  // (as the world names it: `souls:shake_head`, the content's `shake_head`)
   assert.deepEqual([shake.clip, shake.phase], ['Idle_No_Loop', 1.6 / 2.5]);
 });
 

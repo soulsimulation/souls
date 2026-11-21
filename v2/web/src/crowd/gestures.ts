@@ -46,7 +46,8 @@ export function gestureAt(moves: readonly Drawn[], t: number, seated: boolean, s
   for (let i = moves.length - 1; i >= 0; i--) {
     const m = moves[i];
     if (m.start > t) continue;
-    const g = GESTURE_CLIPS[m.name];
+    // A world names its moves in a namespace (`souls:wave`); content names them plainly (`wave`).
+    const g = GESTURE_CLIPS[m.name.slice(m.name.indexOf(':') + 1)];
     const end = Math.min(m.cut ?? Infinity, m.ends[m.ends.length - 1]);
     if (t > end + LEAVE * 1e6) return null;
     if (!g) return null;
