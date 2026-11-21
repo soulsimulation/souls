@@ -42,6 +42,66 @@ fn entries(dir: &Path, out: &mut BTreeMap<String, String>) {
     }
 }
 
+/// The field numbers the import writes on Eden's nodes: every `pub const F_<NAME>: u64 = <n>;` in its source, read
+/// from the file so the list cannot drift from the constants.
+fn import_fields() -> BTreeMap<u64, String> {
+    let src =
+        std::fs::read_to_string(format!("{}/src/lib.rs", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    src.lines()
+        .filter_map(|l| {
+            let rest = l.trim().strip_prefix("pub const F_")?;
+            let (name, n) = rest.split_once(": u64 = ")?;
+            let n = n.split(';').next()?.trim().parse().ok()?;
+            Some((n, format!("F_{name}")))
+        })
+        .collect()
+}
+
+/// A thing's entry fields and the import's fields share one numbering on the thing's node, so an entry's state field
+/// numbered like an import field reads the import's value (today's id, def, name …) and its forms refuse or misbehave
+/// on a served Eden (#1960: 99 of 173 Eden kinds with entries did). No entry's state field takes an import field's
+/// number, but the door's, which are the engine's own door fields on purpose (`sim::links`: `open` is the import's
+/// `F_OPEN`, and `locked` is `F_LOCKED`, a number the import gives only the open ground).
+#[test]
+fn no_entry_state_field_takes_a_number_the_import_writes() {
+    let reserved = import_fields();
+    assert!(reserved.len() > 20 && reserved.get(&1).map(String::as_str) == Some("F_ORIGIN"));
+    let shared: [(&str, &str, u64); 2] = [
+        ("eden:door", "open", sim::links::F_OPEN),
+        ("eden:door", "locked", sim::links::F_LOCKED),
+    ];
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let mut found = BTreeMap::new();
+    entries(Path::new(&format!("{root}/content/kinds")), &mut found);
+    let mut clash = Vec::new();
+    for (kind, file) in &found {
+        let v = json::parse_skipping_fractions(&std::fs::read_to_string(file).unwrap()).unwrap();
+        let Some(Json::Obj(state)) = v.get("state") else {
+            continue;
+        };
+        for (field, d) in state {
+            let Some(n) = d
+                .get("n")
+                .and_then(Json::int)
+                .and_then(|n| u64::try_from(n).ok())
+            else {
+                continue;
+            };
+            if let Some(f) = reserved.get(&n)
+                && !shared.contains(&(kind.as_str(), field.as_str(), n))
+            {
+                clash.push(format!("{kind} {field} = {n} ({f})"));
+            }
+        }
+    }
+    assert!(found.len() > 300, "the entries are found");
+    assert!(
+        clash.is_empty(),
+        "state fields numbered as import fields:\n{}",
+        clash.join("\n")
+    );
+}
+
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file (see the module doc)"]
 fn every_entry_naming_an_eden_kind_resolves_on_eden() {

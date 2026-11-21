@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:office_chair",
   "owner": "thing",
-  "state": { "spinning": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "state": { "spinning": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
   "points": { "front": { "role": "stand", "at_mm": [0, 0, 599], "yaw_mdeg": 180000 } },
   "slots": { "seat": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 520, 30], "stand": "front" } },
   "geometry": { "bounds_mm": [592, 1097, 598] },

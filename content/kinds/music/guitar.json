@@ -3,7 +3,7 @@
   "kind": "eden:guitar",
   "owner": "thing",
   "state": {
-    "music": {"n":1,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
+    "music": {"n":28,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
   },
   "points": {"neck":{"role":"grip","at_mm":[0,800,0]}},
   "geometry": {"bounds_mm":[400,1100,100]},

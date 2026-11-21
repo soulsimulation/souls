@@ -17,23 +17,23 @@
       "do": [
         {
           "act": { "this": "l1", "form": "crank" }, "now_us": 0, "receipt": "rl1",
-          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "charge", "n": 1, "to": 2 }], "events": [{ "event": "eden:cranked", "node": "l1", "changes": [0] }], "timers": [] }
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "charge", "n": 28, "to": 2 }], "events": [{ "event": "eden:cranked", "node": "l1", "changes": [0] }], "timers": [] }
         },
         {
           "act": { "this": "l1", "form": "crank" }, "now_us": 5000000, "receipt": "rl2",
-          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "charge", "n": 1, "to": 4 }] }
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "charge", "n": 28, "to": 4 }] }
         },
         {
           "act": { "this": "l1", "form": "crank" }, "now_us": 10000000, "receipt": "rl3",
-          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "charge", "n": 1, "to": 6 }] }
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "charge", "n": 28, "to": 6 }] }
         },
         {
           "act": { "this": "l1", "form": "shine_15s" }, "now_us": 15000000, "receipt": "rl4",
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "set", "node": "l1", "field": "charge", "n": 1, "to": 3 },
-              { "change": "set", "node": "l1", "field": "on", "n": 2, "to": 1 }
+              { "change": "set", "node": "l1", "field": "charge", "n": 28, "to": 3 },
+              { "change": "set", "node": "l1", "field": "on", "n": 29, "to": 1 }
             ],
             "events": [
               { "event": "eden:charge_spent", "node": "l1", "changes": [0] },
@@ -45,37 +45,37 @@
         },
         {
           "act": { "this": "l1", "form": "extinguish" }, "now_us": 18000000, "receipt": "rl5",
-          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "on", "n": 2, "to": 0 }], "events": [{ "event": "eden:put_out", "node": "l1", "changes": [0] }], "timers": [] }
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "on", "n": 29, "to": 0 }], "events": [{ "event": "eden:put_out", "node": "l1", "changes": [0] }], "timers": [] }
         },
         {
           "act": { "this": "l1", "form": "shine_5s" }, "now_us": 20000000, "receipt": "rl6",
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "set", "node": "l1", "field": "charge", "n": 1, "to": 2 },
-              { "change": "set", "node": "l1", "field": "on", "n": 2, "to": 1 }
+              { "change": "set", "node": "l1", "field": "charge", "n": 28, "to": 2 },
+              { "change": "set", "node": "l1", "field": "on", "n": 29, "to": 1 }
             ],
             "timers": [{ "node": "l1", "form": "goes_dark", "after_us": 5000000, "event": 2 }]
           }
         },
         {
           "act": { "this": "l1", "form": "goes_dark" }, "now_us": 25000000, "receipt": "rl7",
-          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "on", "n": 2, "to": 0 }], "events": [{ "event": "eden:went_dark", "node": "l1", "changes": [0] }], "timers": [] }
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "on", "n": 29, "to": 0 }], "events": [{ "event": "eden:went_dark", "node": "l1", "changes": [0] }], "timers": [] }
         },
         {
           "act": { "this": "l1", "form": "shine_10s" }, "now_us": 26000000, "receipt": "rl8",
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "set", "node": "l1", "field": "charge", "n": 1, "to": 0 },
-              { "change": "set", "node": "l1", "field": "on", "n": 2, "to": 1 }
+              { "change": "set", "node": "l1", "field": "charge", "n": 28, "to": 0 },
+              { "change": "set", "node": "l1", "field": "on", "n": 29, "to": 1 }
             ],
             "timers": [{ "node": "l1", "form": "goes_dark", "after_us": 10000000, "event": 2 }]
           }
         },
         {
           "act": { "this": "l1", "form": "goes_dark" }, "now_us": 36000000, "receipt": "rl9",
-          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "on", "n": 2, "to": 0 }] }
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "l1", "field": "on", "n": 29, "to": 0 }] }
         }
       ],
       "after": {

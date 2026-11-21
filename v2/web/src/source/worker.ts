@@ -31,7 +31,7 @@ async function get(url: URL): Promise<Uint8Array | null> {
 
 function readPtr(bytes: Uint8Array): StreamPointer {
   const p = JSON.parse(readPointer(bytes));
-  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header, ...(p.baseline ? { baseline: p.baseline, generation: p.generation } : {}), ...(p.legacyHash ? { legacyVersion: p.legacyVersion, legacyNext: p.legacyNext, legacyHash: p.legacyHash } : {}) };
+  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header, ...(p.baseline ? { baseline: p.baseline, generation: p.generation } : {}), ...(p.legacyHash ? { legacyVersion: p.legacyVersion, legacyNext: p.legacyNext, legacyHash: p.legacyHash } : {}), ...(p.handoffFrom ? { handoffFrom: p.handoffFrom } : {}) };
 }
 
 /** The reference in a `{21: id}` value, as the page keys it, or null. */
@@ -42,6 +42,7 @@ const refOf = (v: unknown): string | null => {
 /** The key of a name's hash (field 4), kept apart from `{21: id}` references. */
 const nameKey = (b: Uint8Array) => `n:${hex(b)}`;
 const SAID = 'souls:said';
+const SAID_PRIVATELY = 'souls:said-privately'; // #3775: who spoke in a private conversation, and when; no words
 const PLACE_NAME = 4;
 const NAME = 30;
 const DESCRIPTION = 31;
@@ -81,7 +82,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   return rec;
 }
 
-type StreamPointer = Pointer & { header: string; baseline?: string; generation?: string; legacyVersion?: number; legacyNext?: number; legacyHash?: string };
+type StreamPointer = Pointer & { header: string; baseline?: string; generation?: string; legacyVersion?: number; legacyNext?: number; legacyHash?: string; handoffFrom?: string };
 
 async function run(stream: URL) {
   await init();
@@ -219,13 +220,19 @@ async function run(stream: URL) {
     const events = decode(player.events(), { useMaps: true }) as Map<number, unknown>[];
     const said: SaidRec[] = [];
     for (const e of events) {
+      if (e.get(1) === SAID_PRIVATELY) {
+        const f = e.get(2) as Map<number, unknown>, conv = f.get(1) as IdValue | undefined;
+        if (conv) said.push({ speaker: key(e.get(3) as IdValue), at: num(e.get(4)), length: 0, reach: 0, ref: `private:${key(conv)}`, words: null,
+          private: { conversation: key(conv), members: ((f.get(3) ?? []) as IdValue[]).map(key) } });
+        continue;
+      }
       if (e.get(1) !== SAID) continue;
       const f = e.get(2) as Map<number, unknown>, ref = refOf(f.get(1));
       if (ref) said.push({ speaker: key(e.get(3) as IdValue), at: num(e.get(4)), length: num(f.get(4)), reach: num(f.get(2)), ref, words: null });
     }
-    const refs = [...said.map(x => x.ref), ...nodes.flatMap(r => [r.name, r.description, r.placeName])].filter((r): r is string => !!r);
+    const refs = [...said.filter(x => !x.private).map(x => x.ref), ...nodes.flatMap(r => [r.name, r.description, r.placeName])].filter((r): r is string => !!r);
     if (refs.some(r => !words.has(r))) await readText(`${n}.text`, p);
-    for (const x of said) x.words = words.get(x.ref) ?? null;
+    for (const x of said) if (!x.private) x.words = words.get(x.ref) ?? null;
     resolveWords(nodes);
     observe(nodes, removed, samples, { number: played.number, from: played.from, to: played.to, hash: played.hash, said, happened });
     return true;
@@ -243,11 +250,22 @@ async function run(stream: URL) {
       const b = await get(new URL('pointer', stream));
       const latest = b ? readPtr(b) as StreamPointer : ptr;
       if (latest.generation !== active) {
-        if (active !== undefined || latest.legacyNext === undefined || latest.legacyVersion === undefined || !latest.legacyHash) throw new Error('stream-generation-gap');
-        // Drain exactly the old published bytes, even when its public terminal lies within a source Part.
-        while (Number(player.next()) < latest.legacyNext) if (!(await playOne(ptr))) return;
-        if (version !== latest.legacyVersion || player.publicHash() !== latest.legacyHash) throw new Error('stream-handoff-state');
-        await install(latest);
+        // #3825: the handoff names the generation it closes (none for the legacy stream). A viewer on it drains it and
+        // crosses over; one further behind starts again from the newest baseline, as a new viewer does.
+        const handoff = latest.legacyNext !== undefined && latest.legacyVersion !== undefined && !!latest.legacyHash && latest.handoffFrom === active;
+        if (handoff) {
+          // Drain exactly the old published bytes, even when its public terminal lies within a source Part. All of
+          // them were written before the pointer named the next generation, so a missing one has been pruned.
+          let drained = true;
+          while (drained && Number(player.next()) < latest.legacyNext!) drained = await playOne(ptr);
+          if (drained && (version !== latest.legacyVersion || player.publicHash() !== latest.legacyHash)) throw new Error('stream-handoff-state');
+          if (!drained && active === undefined) return;
+          // A live viewer on a generation holds the state the new baseline holds (the digest just checked): it goes on
+          // in the new generation without fetching that baseline, and nothing on the page moves.
+          if (drained && active !== undefined) { player.cross(latest.generation!, latest.legacyHash!); active = latest.generation; }
+          else await install(latest);
+        } else if (!latest.generation) throw new Error('stream-generation-gap');
+        else await install(latest);
       }
       ptr = latest;
       tell();
