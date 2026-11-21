@@ -152,9 +152,10 @@ pub const REACH: i64 = replica::moves::REACH_MOST + 600_000;
 /// (`content/moves`), as today's game looks for clear ground about the hand's point.
 pub const APPROACH_REACH: i64 = 600_000;
 
-/// How far short of the move's point, toward the body, an approach walk aims when the body stands in the frame the
-/// thing does, µm: a door's handle stands in its doorway, where no body stops, so the walk aims at the clear ground
-/// before the door on the body's own side, as today's game finds clear ground by the hand's point.
+/// How far short of the move's point, toward the body, the world aims an approach walk when the point lies on the
+/// floor the body stands on ([`short_of`]), µm: a door's handle stands in its doorway, where no body stops, so the
+/// walk aims at the clear ground before the door on the body's own side, as today's game finds clear ground by the
+/// hand's point.
 pub const APPROACH_SHORT: i64 = 500_000;
 
 /// How far from a seat's stand point the place a walk before a `sit` or `lie` step goes to may be (C17, #3453), µm:
@@ -474,7 +475,7 @@ fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refus
 }
 
 /// Point `to` moved `by` µm toward `from` across x and z, or left where it is when `from` is nearer than that.
-fn short_of(to: Vec3, from: Vec3, by: i64) -> Vec3 {
+pub fn short_of(to: Vec3, from: Vec3, by: i64) -> Vec3 {
     let (dx, dz) = (
         i128::from(from.x) - i128::from(to.x),
         i128::from(from.z) - i128::from(to.z),
@@ -1525,17 +1526,11 @@ impl Runner {
                 let Some(node) = host.read(on.unwrap_or(self.node)) else {
                     return self.end(host, name("node-gone"));
                 };
-                let mut to = Vec3::new(
+                let to = Vec3::new(
                     node.position.x.saturating_add(at.x),
                     node.position.y.saturating_add(at.y),
                     node.position.z.saturating_add(at.z),
                 );
-                if approach
-                    && let Some(me) = host.read(host.body())
-                    && me.parent == node.parent
-                {
-                    to = short_of(to, me.position, APPROACH_SHORT);
-                }
                 // The world's legs to the point, or to the nearest place within reach where a body may stand, across
                 // the links on the way (C17), the point in its node's parent's frame. A world that does not say: from
                 // the nearest place within reach (C15), else to the point itself, on the ground the body stands on.

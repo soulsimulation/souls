@@ -294,6 +294,8 @@ struct Sight<'a> {
     context: BTreeMap<Id, (Id, usize, usize)>,
     /// Each run's walk in progress to a named point: its step, the point's node and the point's name (C34, #3599).
     walks: BTreeMap<Id, (usize, Id, Name)>,
+    /// The bodies whose walk in progress is an approach to a move's point (#3688).
+    approaches: BTreeSet<Id>,
     planning: &'a RefCell<Planning>,
     map: Arc<Versions>,
 }
@@ -483,6 +485,20 @@ impl Geometry for Sight<'_> {
             // A building's area with no room or floor of its own to stand on: no way there, the body where it is.
             Some(None) => return WalkPlan::Legs(Vec::new()),
             None => (node, at),
+        };
+        // An approach to a move's point on the floor the body stands on (#3688): aimed short of it, on the body's side.
+        let (node, at) = if self.approaches.contains(&body) {
+            self.with_view(body, |v| {
+                let (floor, p, _) = v.on_floor(node, at)?;
+                (floor == sim::walk::node_of(me)).then(|| {
+                    let short = skills::form_runner::APPROACH_SHORT;
+                    (floor, skills::form_runner::short_of(p, me.pose.position, short))
+                })
+            })
+            .flatten()
+            .unwrap_or((node, at))
+        } else {
+            (node, at)
         };
         let mut planning = self.planning.borrow_mut();
         match planning.ask(key, *me, FormQuery::Walk { node, at, reach }, &self.map) {
@@ -808,6 +824,7 @@ impl Acts {
     ) -> T {
         let context = self.forms.planning_context();
         let walks = self.forms.walks();
+        let approaches = self.forms.approaches();
         self.planning.borrow_mut().keep(&context);
         let (controller, split, slots, map, questions) = match bodies {
             Some(b) => {
@@ -857,6 +874,7 @@ impl Acts {
             asked: RefCell::new(BTreeMap::new()),
             context,
             walks,
+            approaches,
             planning: &self.planning,
             map,
         };

@@ -591,6 +591,21 @@ impl Forms {
             .collect()
     }
 
+    /// The bodies whose run's step in progress is an approach walk, the walk the binding adds before a form's first
+    /// move at a point (#3688), so the world can aim it at clear ground on the body's side of that point.
+    pub fn approaches(&self) -> std::collections::BTreeSet<Id> {
+        self.runs
+            .values()
+            .filter(|fr| {
+                matches!(
+                    fr.runner.step(),
+                    Some(Step::WalkTo { approach: true, .. })
+                )
+            })
+            .map(|fr| fr.body)
+            .collect()
+    }
+
     /// The number of the step in progress of `body`'s run.
     pub fn at(&self, body: Id) -> Option<usize> {
         let run = self.by_body.get(&body)?;
