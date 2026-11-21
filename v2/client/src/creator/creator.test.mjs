@@ -129,6 +129,10 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(requestOf(['expand', '1200']).req, { op: 'edit', world: { verb: 'expand', extent: '1200' } });
   assert.deepEqual(requestOf(['land', 'extend', '--toward', 'n', '--metres', '100']).req, { op: 'edit', world: { verb: 'land', land: 'extend', toward: 'n', metres: '100' } });
   assert.throws(() => requestOf(['expand']), /expand <metres>/);
+  // #3728: a road or an area is a place by its shape, made on the daemon's copy (which knows the open ground).
+  assert.deepEqual(requestOf(['place', 'eden:footpath', '--path', '[[0,0],[9,0]]', '--width', '2']).req, { op: 'edit', world: { verb: 'place', path: '[[0,0],[9,0]]', width: '2', kind: 'eden:footpath' } });
+  assert.deepEqual(requestOf(['check', 'place', 'eden:place', '--rect', '1,2,3,4', '--field', '15=eden:plaza']).req, { op: 'check', world: { verb: 'place', rect: '1,2,3,4', fields: { 15: 'eden:plaza' }, kind: 'eden:place' } });
+  assert.equal(requestOf(['place', 'eden:bench', '--in', 'aa-1']).req.ops[0].op, 'place');
 });
 
 test('#3695: a creator sets the weather and the sky palette and strikes lightning; each has a dry run and a refusal', async () => {

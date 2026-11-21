@@ -7,6 +7,9 @@
 //   souls-god.mjs pair <world url> --creator <creator grant>   asks the world's directory for the creator's token
 //   souls-god.mjs describe                       what is there (id, kind, parent) and what each kind admits
 //   souls-god.mjs place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v ...]   a new thing; mm in the parent
+//   souls-god.mjs place <kind> --path '[[x,z],...]' [--width m] | --area '[[x,z],...]' | --rect cx,cz,w,d
+//                         | --circle cx,cz,r [--in <id>] [--field n=v ...]   a road or an area laid on the open ground
+//                                                (metres), as today's place by a shape
 //   souls-god.mjs move <id> --at x,y,z [--slot n]                                     to another spot, same parent
 //   souls-god.mjs set <id> <field> <value>       one numbered field: an integer, true, false or a name
 //   souls-god.mjs remove <id>                    it and everything in it
@@ -47,6 +50,10 @@ import { worldOf } from '../cli/souls.mjs';
 export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'land', 'check', 'status', 'stop', 'welcome', 'visitors', 'export', 'import', 'expand'];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
 export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'expand'];
+/** A world verb by its words: a place by its shape (#3728, a road or an area) is made on the daemon's copy, which
+ *  knows the open ground. */
+const SHAPES = ['--path', '--area', '--rect', '--circle'];
+const isWorld = (verb, words) => WORLD_VERBS.includes(verb) || (verb === 'place' && words.some((w) => SHAPES.includes(w)));
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
@@ -90,6 +97,8 @@ export const FIX = {
   'import.file': 'import <file>: a file export wrote, readable here',
   'import.format': 'import a souls-world/1 file, as export writes it',
   'import.unplaced': 'some nodes name a parent or support that was not placed: export the source again and import that',
+  'shape.flag': 'place <kind> --path \'[[x,z],[x,z]]\' [--width m] | --area \'[[x,z],...]\' | --rect cx,cz,w,d | --circle cx,cz,r, in metres',
+  'shape.no-ground': 'name the parent with --in <id>',
   'export.file': 'export [file]: a file path to write',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'which-creator': 'name one with --creator',
@@ -146,12 +155,19 @@ export function worldVerbOf(verb, words) {
     weather: ['kind', 'clouds', 'rain', 'wind', 'minutes'], sky: ['palette', 'sun'], strike: ['at'],
     land: ['at', 'radius', 'amount', 'level', 'height', 'peak', 'path', 'area', 'rect', 'circle', 'edge', 'step', 'depth', 'width', 'side', 'face', 'steps', 'by', 'toward', 'metres', 'bounds'],
     expand: [],
+    place: ['path', 'width', 'area', 'rect', 'circle', 'in'],
   }[verb];
   for (const f of flags) { const v = takeOpt(args, `--${f}`); if (v !== undefined) out[f] = v; }
   if (verb === 'strike' && out.at === undefined && args[0] !== undefined) out.at = args.shift();
   if (verb === 'expand') {
     if (args[0] === undefined) throw usage('expand <metres>: the side of the centred square the world grows to');
     out.extent = args.shift();
+  }
+  if (verb === 'place') {
+    const fields = Object.fromEntries(takeAll(args, '--field').map((f) => { const [n, v] = f.split('='); return [n, valueOf(v)]; }));
+    if (Object.keys(fields).length) out.fields = fields;
+    if (args.length !== 1) throw usage('place <kind> --path \'[[x,z],...]\' [--width m] | --area \'[[x,z],...]\' | --rect cx,cz,w,d | --circle cx,cz,r [--in <id>] [--field n=v]');
+    out.kind = args.shift();
   }
   if (verb === 'land') {
     if (!args[0]) throw usage('land <raise|lower|flatten|knoll|hill|mountain|plateau|terrace|valley|ditch|cliff|pond|lake|water> [flags]');
@@ -180,9 +196,9 @@ export function requestOf(argv) {
     if (rest.length > 1 || (verb === 'import' && !rest[0])) throw usage(`${verb} ${verb === 'import' ? '<file>' : '[file]'}`);
     return { req: { op: verb, file: resolve(rest[0] ?? 'world.souls.json') }, creator };
   }
-  if (verb === 'check' && WORLD_VERBS.includes(rest[0])) return { req: { op: 'check', world: worldVerbOf(rest[0], rest.slice(1)) }, creator };
+  if (verb === 'check' && isWorld(rest[0], rest.slice(1))) return { req: { op: 'check', world: worldVerbOf(rest[0], rest.slice(1)) }, creator };
   if (verb === 'check') return { req: { op: 'check', ops: opsOf(rest[0], rest.slice(1)) }, creator };
-  if (WORLD_VERBS.includes(verb)) return { req: { op: 'edit', world: worldVerbOf(verb, rest) }, creator };
+  if (isWorld(verb, rest)) return { req: { op: 'edit', world: worldVerbOf(verb, rest) }, creator };
   return { req: { op: 'edit', ops: opsOf(verb, rest) }, creator };
 }
 
