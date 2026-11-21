@@ -863,6 +863,40 @@ use replica::stream::public::{
 };
 use replica::views::{Redactions, View};
 
+/// The public place names a value's public nodes reference (#3574), under #3571's rule: a node of the public
+/// audience (its field 4 `{1: 1}`) whose name reference (its own field 4, import-eden's 32-byte hash) is in the
+/// importer's dictionary with words of exactly that hash. Rows go after the K16 words in a text file as
+/// `[hash, words]`, in hash order, each once; a node of any other audience, or a hash the dictionary's words do not
+/// match, adds nothing.
+fn public_names(value: &Value, names: &crate::views::names::PublicNames) -> BTreeMap<[u8; 32], Vec<u8>> {
+    fn walk(
+        v: &Value,
+        names: &crate::views::names::PublicNames,
+        out: &mut BTreeMap<[u8; 32], Vec<u8>>,
+    ) {
+        match v {
+            Value::Map(m) => {
+                let public = matches!(m.get(&4), Some(Value::Map(a)) if a.len() == 1 && a.get(&1) == Some(&Value::Uint(1)));
+                if let (true, Some(Value::Map(fields))) = (public, m.get(&5))
+                    && let Some(Value::Bytes(r)) = fields.get(&4)
+                    && let Ok(key) = <[u8; 32]>::try_from(r.as_slice())
+                    && let Some(text) = names
+                        .get(&key)
+                        .filter(|t| replica::ids::sha256(t.as_bytes()) == key)
+                {
+                    out.insert(key, text.as_bytes().to_vec());
+                }
+                m.values().for_each(|x| walk(x, names, out));
+            }
+            Value::Array(a) => a.iter().for_each(|x| walk(x, names, out)),
+            _ => {}
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(value, names, &mut out);
+    out
+}
+
 /// Public baseline stream plus exact immutable recovery records in the world's existing Store.
 /// The caller owns this off-clock follower; no engine acknowledgement or checkpoint policy changes.
 pub struct PublicWriter<S> {
@@ -887,6 +921,7 @@ pub struct PublicWriter<S> {
     window: Option<i64>,
     last_to: Option<i64>,
     text: Option<Arc<Store>>,
+    names: Option<Arc<crate::views::names::PublicNames>>,
     clock_seed: Option<Mapping>,
     migration_cut: Option<u64>,
     migration_state: Option<Value>,
@@ -1044,6 +1079,8 @@ pub struct PublicStart<'a> {
     pub record: u64,
     pub checkpoint: Option<Vec<u8>>,
     pub text: Option<Arc<Store>>,
+    /// The importer's immutable name dictionary (#3571): its words go beside the public nodes that reference them.
+    pub names: Option<Arc<crate::views::names::PublicNames>>,
     pub clock_seed: Option<Mapping>,
     pub history: Option<&'a sim::log::Recovered>,
 }
@@ -1212,6 +1249,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             record,
             checkpoint,
             text,
+            names,
             clock_seed,
             history,
         } = start;
@@ -1250,6 +1288,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             window: None,
             last_to: None,
             text,
+            names,
             clock_seed,
             migration_cut: None,
             migration_state: None,
@@ -1456,6 +1495,12 @@ impl<S: ObjectStore> PublicWriter<S> {
         } else {
             Vec::new()
         };
+        let mut words = words;
+        if let Some(names) = &self.names {
+            words.extend(public_names(value, names).into_iter().map(|(key, text)| {
+                Value::Array(vec![Value::Bytes(key.to_vec()), Value::Bytes(text)])
+            }));
+        }
         wire(Value::Array(words))
     }
     fn generation_dir(&self) -> PathBuf {

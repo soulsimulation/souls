@@ -1747,6 +1747,7 @@ fn serve(args: &[String]) -> R<()> {
         record: base_record,
         checkpoint,
         text: cfg_text,
+        names: Some(Arc::clone(&built.public_names)),
         clock_seed: stream_mapping.map(|s| s.mapping),
         history: Some(&found),
     };

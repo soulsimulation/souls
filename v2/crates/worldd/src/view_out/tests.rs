@@ -1184,6 +1184,88 @@ fn w3e_compare_transfer_queries(public: &PublicPlayer, canonical: &Replica, auth
     }
 }
 
+/// #3574 under #3571's rule: a text file carries the dictionary words of the name references of public nodes only,
+/// each verified against its hash; a private node's name, a wrong dictionary entry and an unknown hash add nothing.
+#[test]
+fn public_place_names_beside_public_nodes_only_and_hash_verified() {
+    use replica::ids::sha256;
+    let h = header();
+    let mut actual = Replica::restored(h.clone(), replica::tree::Tree::start(h.zone, h.kinds[0].clone()), 0);
+    let d = scratch("public-names");
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let names = Arc::new(crate::views::names::PublicNames::from([
+        (sha256(b"Plaza"), "Plaza".to_string()),
+        (sha256(b"West lake"), "West lake".to_string()),
+        (sha256(b"Secret garden"), "Secret garden".to_string()),
+        (sha256(b"Harbour"), "not the harbour".to_string()),
+    ]));
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: None,
+            names: Some(Arc::clone(&names)),
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let owner = Id::new(Scope([93; 16]), 1).unwrap();
+    let named = |seq: u64, n: u32, audience: Audience, name: &[u8]| {
+        let node = Id::new(Scope([94; 16]), n).unwrap();
+        let mut e = w3e_create(&h, seq, node, h.zone, audience);
+        if let Body::Changes(changes) = &mut e.body
+            && let Change::Create { fields, .. } = &mut changes[0].change
+        {
+            fields.insert(4, Value::Bytes(sha256(name).to_vec()));
+        }
+        e
+    };
+    let bytes = w3e_packet(
+        &h,
+        vec![
+            named(0, 1, Audience::Everyone, b"West lake"),
+            named(1, 2, Audience::Everyone, b"Plaza"),
+            named(2, 3, Audience::Of(owner), b"Secret garden"),
+            named(3, 4, Audience::Everyone, b"Harbour"),
+            named(4, 5, Audience::Everyone, b"Nowhere"),
+        ],
+    );
+    actual.apply_bytes(&bytes).unwrap();
+    out.push(0, &bytes).unwrap();
+    out.flush().unwrap();
+    let text = fs::read(out.generation_dir().join("0.text")).unwrap();
+    let Value::Array(text) = decode(&text).unwrap().value else {
+        panic!("text")
+    };
+    let mut want = vec![(sha256(b"Plaza"), "Plaza"), (sha256(b"West lake"), "West lake")];
+    want.sort();
+    assert_eq!(
+        text,
+        want.iter()
+            .map(|(k, w)| Value::Array(vec![
+                Value::Bytes(k.to_vec()),
+                Value::Bytes(w.as_bytes().to_vec())
+            ]))
+            .collect::<Vec<_>>(),
+        "only verified names of public nodes"
+    );
+    // The baseline's text is the same words of the public state (`PublicWriter::words` of the player's state).
+    let state = project(&h, &actual.tree().to_state()).unwrap();
+    assert_eq!(
+        public_names(&state, &names).keys().copied().collect::<Vec<_>>(),
+        want.iter().map(|(k, _)| *k).collect::<Vec<_>>()
+    );
+    // The private node's name is in the source but never in the public projection's names.
+    assert!(!public_names(&state, &names).contains_key(&sha256(b"Secret garden")));
+}
+
 #[test]
 fn w3e_exact_imported_root_frontier_queries_and_whole_part_refusal() {
     let mut value = if let Value::Map(m) = header().to_value() {
@@ -1228,6 +1310,7 @@ fn w3e_exact_imported_root_frontier_queries_and_whole_part_refusal() {
             record: 0,
             checkpoint: Some(cp),
             text: Some(words),
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -1509,6 +1592,7 @@ fn w3e_public_and_private_root_flights_return_settle_arrive_and_duplicate_events
                     record: 2,
                     checkpoint: Some(cp),
                     text: None,
+                    names: None,
                     clock_seed: None,
                     history: None,
                 },
@@ -1610,6 +1694,7 @@ fn w3e_public_and_private_root_flights_return_settle_arrive_and_duplicate_events
                     record: 3,
                     checkpoint: Some(newer),
                     text: None,
+                    names: None,
                     clock_seed: None,
                     history: None,
                 },
@@ -1711,6 +1796,7 @@ fn w3e_public_and_private_root_flights_return_settle_arrive_and_duplicate_events
                         record: 5,
                         checkpoint: Some(cp),
                         text: None,
+                        names: None,
                         clock_seed: None,
                         history: None,
                     },
@@ -1787,6 +1873,7 @@ fn w3e_store_only_restart_preserves_old_bytes_cursor_and_live_reader() {
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -1821,6 +1908,7 @@ fn w3e_store_only_restart_preserves_old_bytes_cursor_and_live_reader() {
             record: 1,
             checkpoint: Some(cp),
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -1918,6 +2006,7 @@ fn w3e_complete_query_bytes_keep_nonzero_restored_baseline_and_untouched_node_ve
             record: 1,
             checkpoint: Some(cp),
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2060,6 +2149,7 @@ fn w3e_legacy_terminal_inside_source_part_keeps_exact_private_remainder() {
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: Some(&history),
         },
@@ -2092,6 +2182,7 @@ fn w3e_legacy_terminal_inside_source_part_keeps_exact_private_remainder() {
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2157,6 +2248,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2190,6 +2282,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2217,6 +2310,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2245,6 +2339,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2269,6 +2364,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2303,6 +2399,7 @@ fn w3e_first_durable_mapping_timers_and_pending_slowdown_remain_authoritative() 
             record: 0,
             checkpoint: Some(cp),
             text: None,
+            names: None,
             clock_seed: Some(mapping),
             history: None,
         },
@@ -2487,6 +2584,7 @@ fn w3e_older_eligible_checkpoint_and_takeover_aware_original_source_bridge_legac
         record: 1,
         checkpoint: Some(newer),
         text: None,
+        names: None,
         clock_seed: None,
         history: Some(&history),
     };
@@ -2607,6 +2705,7 @@ fn w3e_bootstrap_source_diagnostics_name_missing_changed_header_and_part() {
             record: 0,
             checkpoint: Some(checkpoint.clone()),
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         }
@@ -2737,6 +2836,7 @@ fn replay_output(whole_state: bool) -> Vec<u8> {
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: Some(&history),
         },
