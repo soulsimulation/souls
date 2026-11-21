@@ -1506,11 +1506,27 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     };
     let (got, _) = send(&mut ws, edit_intent(&w, creator, 1, 0, define)).await;
     assert_eq!(got.kind, 1, "the definition commits: {got:?}");
+    // The open ground is the terrain: a thing stands at the ground's height where it is put.
+    let (copy, _) = served_copy(&w);
+    let terrain = sim::ground::scene::Terrain::of(copy.tree(), w.ground).unwrap();
+    let height = |x: i64, z: i64| {
+        terrain
+            .as_ref()
+            .and_then(|t| t.height_at(x, z))
+            .unwrap_or(0)
+    };
+    println!(
+        "the ground's height where the Souls stand: {} mm",
+        height(x0 * M, z0 * M) / 1000
+    );
     let hedge = |x: i64, z: i64| Op::Place {
         name: 1,
         kind: Name::new(&full).unwrap(),
         parent: Ref::Node(w.ground),
-        at: at(x, z, w.ground),
+        at: Spot {
+            position: Vec3::new(x, height(x, z), z),
+            ..at(x, z, w.ground)
+        },
         audience: Audience::Everyone,
         fields: BTreeMap::new(),
     };
