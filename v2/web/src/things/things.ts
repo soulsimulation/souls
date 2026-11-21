@@ -35,8 +35,9 @@ type Slot = {
   part: Part | null; matrix: THREE.Matrix4; centre: THREE.Vector3; radius: number;
   /** Its thing; `gone` once the thing has left or been redrawn. */
   thing: Thing; gone: boolean;
-  /** `storey`: a building's part (C10); `off`: hidden by the interior view, in whichever band's batch it is. */
-  storey?: Storey; off?: boolean;
+  /** `storey`: a building's part (C10); `flame`: a static flame part (C8); `off`: hidden by the interior view or by its
+   *  thing's burning fire, in whichever band's batch it is. */
+  storey?: Storey; flame?: boolean; off?: boolean;
 };
 /** `view` and `cut`: a generated building's interior view and its decision; `under`: hidden by a building's cut (the
  *  furniture of the storeys it hides). */
@@ -317,10 +318,18 @@ export class ThingLayer {
     return n;
   }
 
-  /** Shows or hides every part of a thing that its own storey does not hide. */
+  private readonly flamesHidden = new Set<string>();
+  /** Hides or shows a thing's static flame parts while its animated fire draws (fx/layer.ts), as today's flames do. */
+  standIns(id: string, shown: boolean): void {
+    if (shown) this.flamesHidden.delete(id); else this.flamesHidden.add(id);
+    const t = this.things.get(id);
+    if (t) this.show(t, !t.under);
+  }
+
+  /** Shows or hides every part of a thing that its own storey, or its burning fire (a flame stand-in), does not hide. */
   private show(t: Thing, on: boolean): void {
     for (const s of t.slots) {
-      s.off = !on || !!(t.view && s.storey && hidden(s.storey, t.cut ?? NO_CUT, t.view.floors));
+      s.off = !on || !!(t.view && s.storey && hidden(s.storey, t.cut ?? NO_CUT, t.view.floors)) || !!(s.flame && this.flamesHidden.has(t.id));
       this.visible(s);
     }
   }
@@ -409,7 +418,7 @@ export class ThingLayer {
     const g = part?.geometry ?? this.boxGeometry;
     if (!g.boundingSphere) g.computeBoundingSphere();
     const centre = g.boundingSphere!.center.clone().applyMatrix4(matrix), radius = g.boundingSphere!.radius * matrix.getMaxScaleOnAxis();
-    const s: Slot = { batch: null, index: -1, glow, band: NEAR, part, matrix, centre, radius, thing: t, gone: false, ...(part?.storey ? { storey: part.storey } : {}) };
+    const s: Slot = { batch: null, index: -1, glow, band: NEAR, part, matrix, centre, radius, thing: t, gone: false, ...(part?.storey ? { storey: part.storey } : {}), ...(part?.flame ? { flame: true } : {}) };
     this.allDirty = true;
     s.band = this.bandOf(s, k);
     if (!part) this.boxSlots++;
@@ -465,7 +474,8 @@ export class ThingLayer {
     const view = buildingView(parts, t.matrix);
     if (view) (t.view = view, this.buildings.add(t));
     for (const p of parts) this.slot(t, p, new THREE.Matrix4().multiplyMatrices(t.matrix, p.matrix), p.glow, k);
-    if (t.under || t.cut) this.show(t, !t.under);
+    // A model arriving under a cut, or under a burning fire.
+    if (t.under || t.cut || this.flamesHidden.has(t.id)) this.show(t, !t.under);
   }
 
   /** A model has arrived: its things leave their boxes for it. */
