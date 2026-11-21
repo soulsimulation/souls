@@ -489,6 +489,7 @@ fn a_walk_to_a_world_drawn_things_point_is_laid_on_its_outline() {
         context: BTreeMap::new(),
         walks: BTreeMap::from([(id, (0, thing, Name::new(point).unwrap()))]),
         sit_walks: BTreeMap::new(),
+        approaches: Default::default(),
         goals: BTreeSet::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
