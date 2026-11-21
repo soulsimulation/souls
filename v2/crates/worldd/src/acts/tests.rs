@@ -4,6 +4,95 @@ use replica::pose::{Frame, Quat};
 use sim::links::Doors;
 use sim::walk::town::Town;
 
+fn seating_entry(kind: &str) -> Json {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../content/kinds/seating")
+        .join(format!("{kind}.json"));
+    replica::rules::json::parse(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[test]
+fn fixture_sit_dispatch_uses_only_the_declared_approach_without_explicit_args() {
+    use replica::encode::Value;
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let node = Id::new(Scope([0x73; 16]), 1).unwrap();
+    for kind in ["bench", "stump", "armchair"] {
+        let entry = seating_entry(kind);
+        let kind_name = entry.get("kind").and_then(Json::str).unwrap();
+        let tree = Tree::start(node, Name::new(kind_name).unwrap());
+        let acts = Acts::new(
+            Json::object([(kind_name, entry.clone())]),
+            Vec::new(),
+            header.clone(),
+            node.scope(),
+        );
+        let intent = WireIntent {
+            actor: Actor::Soul(node),
+            verb: Name::new("eden:sit").unwrap(),
+            target: Some(Target::Node(node)),
+            parameters: BTreeMap::new(),
+            sequence: 1,
+            basis: Value::Array(Vec::new()),
+            expiry: 10_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        assert!(
+            acts.fixture_sit(&tree, &intent),
+            "{kind} keeps its approach"
+        );
+        let changed = |verb: &str, target, parameters| WireIntent {
+            verb: Name::new(verb).unwrap(),
+            target,
+            parameters,
+            ..intent.clone()
+        };
+        assert!(!acts.fixture_sit(
+            &tree,
+            &changed("souls:sit", intent.target.clone(), BTreeMap::new())
+        ));
+        assert!(!acts.fixture_sit(
+            &tree,
+            &changed("eden:walk", intent.target.clone(), BTreeMap::new())
+        ));
+        assert!(!acts.fixture_sit(
+            &tree,
+            &changed(
+                "eden:sit",
+                Some(Target::Selector(2, BTreeMap::new())),
+                BTreeMap::new()
+            )
+        ));
+        assert!(!acts.fixture_sit(
+            &tree,
+            &changed(
+                "eden:sit",
+                intent.target.clone(),
+                BTreeMap::from([(1, Value::Array(Vec::new()))])
+            )
+        ));
+        assert!(!acts.fixture_sit(
+            &Tree::start(node, Name::new("souls:body").unwrap()),
+            &intent
+        ));
+        // Unsupported selectors and body/ground settle retain their own binding/refusal path.
+        let text = entry.to_json();
+        for changed in [
+            text.replace("nearest", "farthest"),
+            text.replace("walk_to", "settle"),
+        ] {
+            let changed = replica::rules::json::parse(&changed).unwrap();
+            assert_eq!(fixture_seat(&changed, "sit"), None);
+        }
+        assert_eq!(fixture_seat(&entry, "lie"), None);
+    }
+}
+
 #[test]
 fn same_ground_form_walk_keeps_the_planned_doorway_links() {
     let generated = testworld::generate(1, 0).expect("the synthetic world");
@@ -84,6 +173,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         asked: RefCell::new(BTreeMap::new()),
         context: BTreeMap::from([(id, (intent, 0, 0))]),
         walks: BTreeMap::new(),
+        sit_walks: BTreeMap::new(),
         planning: &planning,
         map: Arc::clone(&map),
     };
@@ -98,6 +188,11 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         planning.borrow().queued.contains_key(&line_key),
         "the obstructed corner is asked off-clock"
     );
+    // #3573: a far fixture sit on full Eden ended `walk.blocked` while its route was still being planned.
+    assert!(
+        !sight.asked.borrow().contains_key(&id),
+        "a tick waiting for the planner is no tick of stalled walking"
+    );
     let duplicated_line = answered.forms[&line_key].clone();
     planning.borrow_mut().receive(answered.forms);
     assert_eq!(
@@ -108,6 +203,10 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         panic!("the planned corner");
     };
     assert_ne!(corner, body.pose.position);
+    assert!(
+        sight.asked.borrow().contains_key(&id),
+        "a planned corner is watched for stalls"
+    );
     assert!(
         !planning.borrow().current.contains_key(&line_key),
         "a partial line result is consumed once"
@@ -263,6 +362,7 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         asked: RefCell::new(BTreeMap::new()),
         context: BTreeMap::new(),
         walks: BTreeMap::from([(id, (2, building, Name::new(point).unwrap()))]),
+        sit_walks: BTreeMap::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };

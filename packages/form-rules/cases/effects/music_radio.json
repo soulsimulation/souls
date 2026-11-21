@@ -1,0 +1,214 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The radio in turn: switched on (quiet piano), tuned to the dance band, spoken word and quiet piano again, switched off; tuning while off is refused.",
+ "cases": [
+  {
+   "name": "radio_switch_on_every_station_switch_off",
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "r1"
+      ]
+     },
+     "r1": {
+      "kind": "eden:radio"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       50,
+       1125,
+       120
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "r1",
+      "form": "switch_on"
+     },
+     "now_us": 0,
+     "receipt": "rr1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "r1",
+        "field": "on",
+        "n": 28,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:switched_on",
+        "node": "r1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "r1",
+      "form": "tune_dance_band"
+     },
+     "now_us": 10000000,
+     "receipt": "rr2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "r1",
+        "field": "station",
+        "n": 29,
+        "to": "dance_band"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:station_changed",
+        "node": "r1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "r1",
+      "form": "tune_spoken_word"
+     },
+     "now_us": 20000000,
+     "receipt": "rr3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "r1",
+        "field": "station",
+        "n": 29,
+        "to": "spoken_word"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:station_changed",
+        "node": "r1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "r1",
+      "form": "tune_quiet_piano"
+     },
+     "now_us": 30000000,
+     "receipt": "rr4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "r1",
+        "field": "station",
+        "n": 29,
+        "to": "quiet_piano"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:station_changed",
+        "node": "r1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "r1",
+      "form": "switch_off"
+     },
+     "now_us": 40000000,
+     "receipt": "rr5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "r1",
+        "field": "on",
+        "n": 28,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:switched_off",
+        "node": "r1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "r1",
+      "form": "tune_dance_band"
+     },
+     "now_us": 50000000,
+     "receipt": "rr6",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    }
+   ],
+   "after": {
+    "r1": {
+     "kind": "eden:radio",
+     "fields": {
+      "on": 0,
+      "station": "quiet_piano"
+     }
+    }
+   }
+  }
+ ]
+}

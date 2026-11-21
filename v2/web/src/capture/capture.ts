@@ -121,3 +121,22 @@ export function installCapture(g: { v2?: PageV2 } & Record<string, unknown>, par
   };
   Object.assign(g, { v2: { ...page(), capture } });
 }
+
+/** #3795: today's shot-ready signal for `?shot` (`LiveWorld.tsx`): the title reads `loading` until the world is drawn
+ *  with its sky and its things settled, then, two frames later, `ready`, with `window.__shotReady` set and a
+ *  `sim-shot-ready` event. Call `frame` once a frame with whether the page is ready; it does nothing without `?shot`. */
+export function shotSignal(params: URLSearchParams, win?: { document: { title: string }; dispatchEvent(e: Event): boolean } & Record<string, unknown>): { frame(ready: boolean): void } {
+  if (!params.has('shot') || !win) return { frame() {} };
+  win.document.title = 'loading';
+  let after = -1;
+  return {
+    frame(ready: boolean) {
+      if (after === -1) return void (ready && (after = 2));
+      if (after > 0 && --after === 0) {
+        win.document.title = 'ready';
+        win.__shotReady = true;
+        win.dispatchEvent(new Event('sim-shot-ready'));
+      }
+    },
+  };
+}
