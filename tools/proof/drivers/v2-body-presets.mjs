@@ -91,6 +91,8 @@ export default async function ({ page, base, arm, fixture, check }) {
   const nextSecond = Math.ceil((await command(['status'])).worldUs / 1e6) + 1;
   if (nextSecond <= oldSecond || nextSecond - oldSecond > 8) fail('history-moment-distance');
   await liveAt(nextSecond);
+  // The world publishes its open history window every 5 s; wait two of those so the wear is in the published bundle.
+  await delay(11000, owned.signal);
   const history = new URL(page.url()); history.hash = new URLSearchParams({ w: owned.recipe.world, l: owned.recipe.lineage, t: String(nextSecond * 1e6) }).toString();
   await page.goto(history.href); await page.reload(); await page.waitForFunction(() => typeof globalThis.v2?.history?.opened.hash === 'string', null, { timeout: 8000 }); await drawn(page, next.hash); await snapshot(page); await page.getByRole('button', { name: 'pause', exact: true }).click(); check('history-new-hash', (await drawn(page, next.hash)).hash === next.hash);
   for (let i = 0; i < nextSecond - oldSecond; i++) { await snapshot(page); await page.getByRole('slider').focus(); await Promise.all([page.waitForEvent('domcontentloaded'), page.getByRole('slider').press('ArrowLeft')]); }
