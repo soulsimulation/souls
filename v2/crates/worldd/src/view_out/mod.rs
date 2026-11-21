@@ -864,10 +864,11 @@ use replica::stream::public::{
 use replica::views::{Redactions, View};
 
 /// The public place names a value's public nodes reference (#3574), under #3571's rule: a node of the public
-/// audience (its field 4 `{1: 1}`) whose name reference (its own field 4, import-eden's 32-byte hash) is in the
-/// importer's dictionary with words of exactly that hash. Rows go after the K16 words in a text file as
-/// `[hash, words]`, in hash order, each once; a node of any other audience, or a hash the dictionary's words do not
-/// match, adds nothing.
+/// audience whose name reference (its field 4, import-eden's 32-byte hash) is in the importer's dictionary with words
+/// of exactly that hash. A node is one in the state layout (kind 1, audience 4, fields 5), as a baseline holds it, or
+/// a create in a part's records (change 1, kind 3, audience 5, fields 6). Rows go after the K16 words in a text file
+/// as `[hash, words]`, in hash order, each once; a node of any other audience, or a hash the dictionary's words do
+/// not match, adds nothing.
 fn public_names(
     value: &Value,
     names: &crate::views::names::PublicNames,
@@ -879,8 +880,17 @@ fn public_names(
     ) {
         match v {
             Value::Map(m) => {
-                let public = matches!(m.get(&4), Some(Value::Map(a)) if a.len() == 1 && a.get(&1) == Some(&Value::Uint(1)));
-                if let (true, Some(Value::Map(fields))) = (public, m.get(&5))
+                let public = |k| matches!(m.get(&k), Some(Value::Map(a)) if a.len() == 1 && a.get(&1) == Some(&Value::Uint(1)));
+                let node = matches!(m.get(&1), Some(Value::Text(_))) && public(4);
+                let create = m.get(&1) == Some(&Value::Uint(1))
+                    && matches!(m.get(&3), Some(Value::Text(_)))
+                    && public(5);
+                let fields = match (node, create) {
+                    (true, _) => m.get(&5),
+                    (_, true) => m.get(&6),
+                    _ => None,
+                };
+                if let Some(Value::Map(fields)) = fields
                     && let Some(Value::Bytes(r)) = fields.get(&4)
                     && let Ok(key) = <[u8; 32]>::try_from(r.as_slice())
                     && let Some(text) = names
@@ -1460,7 +1470,10 @@ impl<S: ObjectStore> PublicWriter<S> {
                 (6, legacy),
                 (7, Value::Array(legacy_files)),
                 (8, Value::Bytes(legacy_header)),
-                (9, Value::Bytes(w.put(&w.words(w.player.state())?)?)),
+                (
+                    9,
+                    Value::Bytes(w.put(&w.words(w.player.state(), w.player.state())?)?),
+                ),
             ])))?;
             w.seed = w.put(&seed)?;
             let manifest = wire(Value::Map(BTreeMap::from([
@@ -1484,7 +1497,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         w.pointer(None)?;
         Ok(w)
     }
-    fn words(&self, value: &Value) -> R<Vec<u8>> {
+    fn words(&self, value: &Value, named: &Value) -> R<Vec<u8>> {
         let words = if let Some(store) = &self.text {
             replica::audience::references(value)
                 .into_iter()
@@ -1500,7 +1513,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         };
         let mut words = words;
         if let Some(names) = &self.names {
-            words.extend(public_names(value, names).into_iter().map(|(key, text)| {
+            words.extend(public_names(named, names).into_iter().map(|(key, text)| {
                 Value::Array(vec![Value::Bytes(key.to_vec()), Value::Bytes(text)])
             }));
         }
@@ -2116,10 +2129,11 @@ impl<S: ObjectStore> PublicWriter<S> {
         ])))?;
         let chunk_hash = self.put(&chunk)?;
         let part_hash = self.put(&bytes)?;
-        let text = self.words(&Value::Array(vec![
-            after.clone(),
-            Value::Array(self.records.clone()),
-        ]))?;
+        // A part's names are those its own records create; the baseline's text holds the rest (#3574).
+        let text = self.words(
+            &Value::Array(vec![after.clone(), Value::Array(self.records.clone())]),
+            &Value::Array(self.records.clone()),
+        )?;
         let text_hash = self.put(&text)?;
         self.player.play(&bytes)?;
         let manifest = wire(Value::Map(BTreeMap::from([
