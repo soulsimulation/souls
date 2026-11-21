@@ -1650,7 +1650,12 @@ impl Clock {
                     return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
                 }
                 let reason = match entry {
-                    Ok(e) => self.write(e).err().map(|r| r.name),
+                    Ok(e) => {
+                        // A private turn's public record goes in the same part (#3775).
+                        let public = words::public_record(form, &e);
+                        let all = std::iter::once(e).chain(public).collect();
+                        self.write_all(all).err().map(|r| r.name)
+                    }
                     Err(r) => Some(r),
                 };
                 let a = match reason {

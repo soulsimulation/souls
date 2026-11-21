@@ -8,6 +8,8 @@
 //!   nothing is said.
 //! - A3: a private conversation's words are kept for its members only: no public reader and no non-member may read
 //!   them, and none is in the log. A public conversation's turns are ordinary talk: public, at talk's reach.
+//! - #3775: each private turn has a public record beside it, the turn's speaker and time among its members, and no
+//!   word or reference of it: spectators see who is talking, never what.
 //! - A4: a member reads every turn back from the text store in under 2 s; a non-member is refused.
 //! - A5: a leave is accepted; after a restart the conversation and its members are still there, a member speaks in
 //!   it, and both leave.
@@ -558,6 +560,53 @@ fn a1_a3_a4_two_souls_open_talk_privately_and_leave() {
             "A3: heard by the members"
         );
     }
+    // #3775: each private turn has a public record: its speaker's body and time, the conversation and its members, its
+    // length, and nothing else; no reference to the words.
+    let records: Vec<Effect> = run
+        .entries()
+        .into_iter()
+        .filter(|e| {
+            e.events
+                .iter()
+                .flatten()
+                .any(|ev| ev.name.as_str() == sim::speech::SAID_PRIVATELY)
+        })
+        .collect();
+    assert_eq!(records.len(), said.len(), "#3775: one public record a turn");
+    let turn_entries: Vec<Effect> = run
+        .entries()
+        .into_iter()
+        .filter(|e| e.events.iter().flatten().any(|ev| ev.name.as_str() == SAID))
+        .collect();
+    for (r, t) in records.iter().zip(&turn_entries) {
+        assert_eq!(r.envelope.audience, Audience::Everyone, "#3775: public");
+        assert_eq!(
+            r.envelope.node, t.envelope.node,
+            "#3775: the speaker's body"
+        );
+        assert_eq!(r.envelope.at, t.envelope.at, "#3775: the turn's time");
+        assert!(
+            replica::audience::references(&r.to_value()).is_empty(),
+            "#3775: no reference to the words"
+        );
+        let ev = &r.events.as_ref().unwrap()[0];
+        assert_eq!(r.events.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            ev.fields.keys().copied().collect::<Vec<_>>(),
+            vec![1, 3],
+            "#3775: the conversation and its members, nothing else (no length)"
+        );
+        assert_eq!(ev.fields[&1], conv.to_value(), "#3775: the conversation");
+        assert_eq!(
+            ev.fields[&3],
+            Value::Array(vec![soul(1).to_value(), soul(2).to_value()]),
+            "#3775: its members"
+        );
+    }
+    println!(
+        "#3775: {} public records, each naming the speaker, the time, the conversation and its two members, no reference",
+        records.len()
+    );
     // A4: a member reads every turn back; a public reader and a non-member are refused.
     let started = Instant::now();
     let read: Vec<String> = said
