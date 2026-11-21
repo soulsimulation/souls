@@ -411,7 +411,11 @@ test('#1402 the publishable release receipt: ship.sh accepts a clean one for thi
   const v7 = { schemaVersion: 1, step: 'V7', source: s.sha, dirty: false, status: 'pass', checks: [{ id: 'x', ok: true }], failed: [], at: '2026-11-08T10:30:00.000Z', ports: '5870-5879' };
   const write = (g, v) => writeFileSync(join(dir, 'release-receipt.json'), JSON.stringify(publicReceipt(g, 'a'.repeat(64), v, 'c'.repeat(64))));
   write(gate, v7);
-  assert.doesNotMatch(readFileSync(join(dir, 'release-receipt.json'), 'utf8'), /Users|someone|5870/, 'no path, name or port travels');
+  // \b: a port after a quote, colon or space, never the same digits inside a commit sha's hex (1 run in ~1000)
+  const leak = /Users|someone|\b5870/;
+  assert.doesNotMatch(`{"source":"c778ae89${'0'.repeat(20)}e58706${'1'.repeat(6)}"}`, leak, 'a sha with 5870 in its hex is not a port');
+  assert.match('{"ports":"5870-5879"}', leak); assert.match('host:5870', leak);
+  assert.doesNotMatch(readFileSync(join(dir, 'release-receipt.json'), 'utf8'), leak, 'no path, name or port travels');
   let r = s.run([...s.base, '--dry-run'], { SHIP_RECEIPTS: dir });
   assert.equal(r.status, 0, r.stdout); assert.match(r.stdout, /the release receipt is clean for this commit/);
   for (const [g, v] of [[{ ...gate, newFailures: [{}] }, v7], [{ ...gate, scope: { resolved: 'auto' } }, v7], [gate, { ...v7, dirty: true }], [gate, { ...v7, source: 'f'.repeat(40) }]]) {
