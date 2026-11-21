@@ -199,7 +199,7 @@ fn records_rebuild_the_rule_after_a_restart() {
     again.resume(&records, |_| None, [b], 70 * S);
     assert_eq!(again.state(b), w.state(b));
     assert_eq!(again.next(), None);
-    // An agent act after the last record is the newer state.
+    // A Soul's entry after it fell asleep (a reflex's, #3764) does not wake it: only the woken record does.
     let soul_act = Effect {
         envelope: Envelope {
             actor: Actor::Soul(b),
@@ -210,8 +210,21 @@ fn records_rebuild_the_rule_after_a_restart() {
     };
     let mut later = WindDown::new(SHORT);
     later.resume(records.iter().chain([&soul_act]), Some, [b], 70 * S);
-    assert_eq!(later.word(b), Some(Word::Awake));
-    assert_eq!(later.next(), Some(65 * S + SHORT.wander));
+    assert_eq!(later.word(b), Some(Word::Asleep));
+    let woken = record(
+        &Order {
+            body: b,
+            phase: Phase::Woken,
+            what: Vec::new(),
+        },
+        &State::owned(66 * S),
+        66 * S,
+        0,
+    );
+    let mut woke = WindDown::new(SHORT);
+    woke.resume(records.iter().chain([&soul_act, &woken]), Some, [b], 70 * S);
+    assert_eq!(woke.word(b), Some(Word::Awake));
+    assert_eq!(woke.next(), Some(66 * S + SHORT.wander));
 }
 
 #[test]

@@ -151,6 +151,8 @@ fn b16_a_silent_soul_walks_out_sleeps_and_wakes_on_its_agents_act() {
 
 // --- Served on Eden ------------------------------------------------------------------------------------------------
 
+// A served run waits on the real clock for the world it serves (as `tests/serve.rs`).
+#[allow(clippy::disallowed_methods)]
 mod served {
     use std::collections::BTreeMap;
     use std::io::{BufRead, BufReader, Read, Write};
