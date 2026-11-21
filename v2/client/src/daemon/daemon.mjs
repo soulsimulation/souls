@@ -94,7 +94,7 @@
 //     {"op":"describe"}                   the copy's nodes (id, kind, parent) and what each kind admits
 //     {"op":"check","ops":[...]}          G1's checks of a batch on the copy as it is: asks the world nothing
 //     {"op":"fields","node":"<id>"}       a node's fields as the copy holds them, the zone's root when no node
-//                                         (#3701: district plans and build claims are root fields 90 and 91)
+//                                         (#3701: district plans and build claims are root fields 140 and 141)
 //     {"op":"edit","ops":[...]}           the copy brought current, checked, sent as T10's edit intent (G1b) planned at
 //                                         its version, and its answer awaited: the ids of the names placed, or the
 //                                         refusal and the operation that failed. An op is {op: place, name, kind,

@@ -145,10 +145,10 @@ export function requestOf(argv) {
 }
 
 // ---------------------------------------------------------------- #3701: district plans and build claims
-// Both are fields of the zone's root (replica `edit::claims`): plans in 90, live claims in 91, whole mm on the ground
+// Both are fields of the zone's root (replica `edit::claims`): plans in 140, live claims in 141, whole mm on the ground
 // and millidegrees. Every text there is a `namespace:name` name, so ids are kept with a prefix (`d:`, `p:`, `c:`) and
 // shown without it. Recording a plan or a claim is an ordinary edit of that field, so undo takes it back.
-export const F_DISTRICTS = 90, F_CLAIMS = 91;
+export const F_DISTRICTS = 140, F_CLAIMS = 141;
 const SLUG = /^[a-z][a-z0-9_-]*$/;
 /** A name an effect may carry from what a creator writes: lowercase, other characters as `-`, a letter first. */
 export function slug(t) {
