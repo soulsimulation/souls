@@ -2953,8 +2953,9 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
         v.sort_by_key(|f| f.1);
         v
     };
+    let spot = |n: u64| args(&[("spot", Value::Uint(n))]);
     for (i, soul) in souls.iter_mut().enumerate().take(2) {
-        let up = soul.act("eden:step_up", Some(stage), BTreeMap::new());
+        let up = soul.act("eden:step_up", Some(stage), spot(i as u64 + 1));
         println!("Soul {}: step up {up:?}", i + 1);
         up.expect("stepped up onto a free spot");
     }
@@ -2969,7 +2970,7 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
     );
     let started = std::time::Instant::now();
     for (i, soul) in souls.iter_mut().enumerate().take(40).skip(2) {
-        let up = soul.act("eden:step_up", Some(stage), BTreeMap::new());
+        let up = soul.act("eden:step_up", Some(stage), spot(i as u64 + 1));
         println!("Soul {}: step up {up:?}", i + 1);
         up.expect("stepped up onto a free spot");
     }
@@ -2981,7 +2982,7 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
             .collect()
     };
     let before = off(&dir);
-    let full = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
+    let full = souls[40].act("eden:step_up", Some(stage), spot(1));
     println!("Soul 41: step up onto the full stage {full:?}");
     let all = on_stage(&dir);
     let slots: Vec<Option<u64>> = all.iter().map(|f| f.1).collect();
@@ -3021,11 +3022,11 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
         .enumerate()
         .map(|(i, s)| reconnect(&dir, i as u64 + 1, s.2, lineage))
         .collect();
-    let again = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
+    let again = souls[40].act("eden:step_up", Some(stage), spot(2));
     println!("after the restart, Soul 41: step up {again:?}");
     let down = souls[0].act("eden:step_down", Some(stage), BTreeMap::new());
     println!("after the restart, Soul 1: step down {down:?}");
-    let up = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
+    let up = souls[40].act("eden:step_up", Some(stage), spot(1));
     println!("after the restart, Soul 41: step up {up:?}");
     let after = on_stage(&dir);
     drop(served);
