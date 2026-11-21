@@ -43,6 +43,8 @@ export function decode(bytes) {
 const hex = (b) => Buffer.from(b).toString('hex');
 const NAMES = new WeakMap();
 const namesOf = (copy) => { if (!NAMES.has(copy)) NAMES.set(copy, new Map()); return NAMES.get(copy); };
+/** The public names the copy was told, `sha256 hex` -> words (#3728: a world's export carries them). */
+export const publicNames = (copy) => new Map(namesOf(copy));
 const publicRef = (record) => {
   const audience = record.get(5), fields = record.get(6);
   const ref = fields instanceof Map && fields.get(4);
