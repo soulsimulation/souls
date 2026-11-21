@@ -40,6 +40,20 @@
       "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
     },
     {
+      "name": "piano_play_seat_taken",
+      "act": {"this":"p1","form":"play"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {"kind":"eden:piano","slots":{"bench":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":2,"detail":{"node":"p1","slot":"bench"},"fix":null}
+    },
+    {
       "name": "piano_play_happy_every_need_met",
       "act": {"this":"p1","form":"play_happy"},
       "state": {"actor":"b1","nodes":{"p1":{"kind":"eden:piano"},"b1":{"hands":{"left":null,"right":null}}}},
@@ -77,6 +91,20 @@
       "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
     },
     {
+      "name": "piano_play_happy_seat_taken",
+      "act": {"this":"p1","form":"play_happy"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {"kind":"eden:piano","slots":{"bench":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":2,"detail":{"node":"p1","slot":"bench"},"fix":null}
+    },
+    {
       "name": "piano_play_sad_every_need_met",
       "act": {"this":"p1","form":"play_sad"},
       "state": {"actor":"b1","nodes":{"p1":{"kind":"eden:piano"},"b1":{"hands":{"left":null,"right":null}}}},
@@ -112,6 +140,20 @@
       },
       "asker": {"sees":["public"]},
       "expect": {"verdict":"no","reason":"already_linked","need":1,"detail":{"link":"player","count":1},"fix":null}
+    },
+    {
+      "name": "piano_play_sad_seat_taken",
+      "act": {"this":"p1","form":"play_sad"},
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {"kind":"eden:piano","slots":{"bench":["b2"]}},
+          "b1": {"hands":{"left":null,"right":null}},
+          "b2": {"hands":{"left":null,"right":null}}
+        }
+      },
+      "asker": {"sees":["public"]},
+      "expect": {"verdict":"no","reason":"slot_taken","need":2,"detail":{"node":"p1","slot":"bench"},"fix":null}
     },
     {
       "name": "piano_stop_every_need_met",

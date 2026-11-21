@@ -5,6 +5,7 @@
 // than the ground's 1 m grid, each corner at the ground's height plus the surface's own lift.
 import * as THREE from 'three';
 import { browserQuality } from './quality-tier.ts';
+import { patchWind, windWeights } from '../sky/wind.ts';
 
 /** Today's default surface colour for each ground-laid kind (by its plain name). */
 // A terrace is not one: today it draws nothing and levels the ground (generators' terrace/1).
@@ -388,7 +389,11 @@ export class GroundCover {
     this.group.visible = setting.enabled;
     const geos = { tall: tallGeometry(), tuft: tuftGeometry(), flower: flowerGeometry() };
     this.layers = COVER_KINDS.map((kind, k) => {
-      const cap = LOD[kind].cap, mesh = new THREE.InstancedMesh(geos[kind], coverMaterial(kind), cap);
+      // #3783: every blade, tuft and flower sways with the world's wind as today's (`edenWindMode: 'grass'`): each
+      // vertex's height above the blade's root is its share of the bend, read by the shared wind uniform.
+      const g = geos[kind], material = coverMaterial(kind), weights = windWeights(g, new THREE.Matrix4(), 'grass');
+      if (weights) (g.setAttribute('edenWind', new THREE.BufferAttribute(weights, 1)), patchWind(material, 'grass'));
+      const cap = LOD[kind].cap, mesh = new THREE.InstancedMesh(g, material, cap);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3).setUsage(THREE.DynamicDrawUsage);
       const rank = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1).setUsage(THREE.DynamicDrawUsage);
