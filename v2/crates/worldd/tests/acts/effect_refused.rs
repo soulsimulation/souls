@@ -7,7 +7,11 @@ fn a_forms_effects_the_world_refuses_refuse_its_act_and_write_nothing() {
     let (run, mut a, _) = serve("refused");
     let over = a.act("test:overstock", Some(rack()), BTreeMap::new());
     println!("overstock: {over:?}");
-    assert_eq!(over, Err("kind-not-in-header".to_owned()), "refused by name");
+    assert_eq!(
+        over,
+        Err("kind-not-in-header".to_owned()),
+        "refused by name"
+    );
     let r = run.replay();
     let t = r.tree();
     let made = t.children(t.handle(rack()).unwrap()).map_or(0, <[_]>::len);

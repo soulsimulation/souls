@@ -798,7 +798,7 @@ fn c24_a_forms_timer_fires_and_starts_its_form_with_the_world_as_actor() {
     assert!(r.tree().timers().is_empty());
 }
 
-#[path = "acts/named_args.rs"]
-mod named_args;
 #[path = "acts/effect_refused.rs"]
 mod effect_refused;
+#[path = "acts/named_args.rs"]
+mod named_args;
