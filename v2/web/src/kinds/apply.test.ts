@@ -59,3 +59,18 @@ test('a planter: its plants grow with its stage and wilt as its water runs out; 
   assert.ok(half > 0.4 && half < 0.6, `half wilted: ${half}`);
   assert.equal(plants().userData.look!.w, 1, 'wilted once dry, with nothing sent: the timed water read at the time drawn');
 });
+
+test('a big wheel set under way turns its wheel over the time its looks say, then holds; a carousel the same', async () => {
+  for (const [kind, axis, deg, over] of [['eden:big_wheel', 'z', 22.5, 4_687_500], ['eden:carousel', 'y', 90, 3_750_000]] as const) {
+    const { layer, at } = await drawn(kind, { 28: 0 });
+    layer.draw(1_000_000);
+    const turn = () => (part(layer.picture('t.1')!, 'wheel').rotation[axis] * 180) / Math.PI;
+    assert.equal(turn(), 0);
+    at({ 28: 1 }, 2_000_000);
+    assert.equal(turn(), 0, `${kind}: it starts where it was`);
+    layer.draw(2_000_000 + over / 2);
+    assert.ok(Math.abs(turn() - deg / 2) < 0.01, `${kind}: half way: ${turn()}`);
+    layer.draw(2_000_000 + over * 2);
+    assert.ok(Math.abs(turn() - deg) < 0.01, `${kind}: all the way: ${turn()}`);
+  }
+});
