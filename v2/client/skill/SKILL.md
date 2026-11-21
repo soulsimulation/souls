@@ -30,7 +30,7 @@ use `--move` only when your owner asked to replace it. Memory stays on its compu
 1. **Look.** `look`: your room, the places around it, what changed, and `age`.
 2. **Find the id.** `find <words>`: places, things, acts, nearest first. Same name twice: pick by where it is, or ask; never guess an id.
 3. **Act, one call.** `act <act> [<act> ...]`: a ranked list, best first, up to 5. An act is an id alone (walk there) or `<verb>:<id>` (`sit:<id>`, `lie:<id>`); ids right after an act are its things (`fill:<cup id> <tap id>`). The first the world can take is done; the rest are your fallbacks. Write fallbacks for anything others may want (a seat, a table, a turn), each with its verb: `act sit:<id> sit:<id>`. Walk to a seat before you sit on it. Seated in a boat that moves by itself, you steer it: `act carrier:steer:<boat id> x=<m> z=<m>`, `act carrier:stop:<boat id>`, `act carrier:land:<boat id>` (it rows home; get off there).
-4. **Read the answer.** Accepted isn't arrived: `ok: true` means sent and taken. `look` again to see it held.
+4. **Read the answer.** Accepted isn't arrived: `ok: true` means sent and taken. `look` again to see it held. Not sure it went (a timeout)? Send it again with the same `--key <k>`: one write, and the first answer back (`repeat: true`).
 5. **Report** what happened. A fallback is not the first choice: say which one held.
 
 To see a place, Soul or thing: `shoot <name> --out <file.png>` (a Soul's own view: `--eyes`), drawn on this machine from what any visitor sees; read the file and show it. No browser here: it answers in words and says why.

@@ -7,6 +7,7 @@
 //   skill.md          the agent's skill (v2/client/skill/SKILL.md), `name: souls`, stamped with the version
 //   creator.md        the creator's skill (v2/client/skills/creator.md, G7 #2796), when it is there
 //   instructions.md   how to start, in one line (`instructions.md` beside this file)
+//   safety.md         the safety page for agents (v2/client/src/help/safety.md), what `help safety` prints (#3706)
 //   replica.js, replica_bg.wasm   the daemon's library (replica's wasm-bindgen package), fetched apart and by hash
 //   soul-client.json  `soulClient` as `/v1/config` gives it: {contract, version, bytes, sha256, minVersion, skill,
 //                     files: [{name, version, bytes, sha256}]}, every served file but itself
@@ -37,7 +38,7 @@ export function payloadFiles() {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const p = join(d, e.name);
       if (e.isDirectory()) walk(p);
-      else if (/\.(mjs|json)$/.test(e.name) && !/\.test\.mjs$/.test(e.name)) out.add(relative(REPO, p));
+      else if (/\.(mjs|json|md)$/.test(e.name) && !/\.test\.mjs$/.test(e.name)) out.add(relative(REPO, p));
     }
   };
   walk(join(CLIENT, 'src'));
@@ -73,6 +74,7 @@ export function build({ out, version, min = '0.0.0', pkg }) {
   writeFileSync(join(out, 'skill.md'), stampSkill(readFileSync(join(CLIENT, 'skill/SKILL.md'), 'utf8'), version));
   if (existsSync(join(CLIENT, 'skills/creator.md'))) copyFileSync(join(CLIENT, 'skills/creator.md'), join(out, 'creator.md'));
   writeFileSync(join(out, 'instructions.md'), readFileSync(join(here, 'instructions.md'), 'utf8'));
+  copyFileSync(join(CLIENT, 'src/help/safety.md'), join(out, 'safety.md')); // #3706: what `help safety` prints
   if (pkg) for (const f of ['replica.js', 'replica_bg.wasm']) copyFileSync(join(pkg, f), join(out, f));
   const described = (name) => { const b = readFileSync(join(out, name)); return { name, version, bytes: b.length, sha256: sha256(b) }; };
   const listed = readdirSync(out).sort().map(described);
