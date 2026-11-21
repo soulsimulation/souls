@@ -8,7 +8,7 @@
   "links": {"player":{"n":1,"from":"soul","most":1,"audience":{"rule":"everyone"}}},
   "points": {"bench_back":{"role":"stand","at_mm":[0,0,1100]},"keys":{"role":"contact","at_mm":[0,780,100]}},
   "slots": {"bench":{"admits":"body","posture":"sit","most":1,"at_mm":[0,475,650],"stand":"bench_back"}},
-  "geometry": {"bounds_mm":[1420,1290,600]},
+  "geometry": {"bounds_mm":[1420,1290,1100]},
   "forms": {
     "play": {
       "who": "anyone",
@@ -55,7 +55,7 @@
       ]
     }
   },
-  "areas": {"lid":{"forbids":["sit","lie"]}},
+  "areas": {"lid":{"forbids":["lie"]}},
   "motion": {"how":"two_souls"},
   "loose": {"ever":true},
   "looks": {
@@ -86,7 +86,7 @@
     }
   },
   "text": {
-    "card": "An upright piano: sit at its bench and play a tune at its keys, by mood; never sit or lie on the piano itself.",
+    "card": "An upright piano: sit at its bench and play a tune by mood.",
     "instrument": "instrument",
     "keys": "keys",
     "howto_play": "Play it (a tune by mood: play, play_happy or play_sad), then stop."
