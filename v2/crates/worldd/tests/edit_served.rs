@@ -1473,6 +1473,12 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     s.line("listening ", 300);
     let (url, tokens) = gateway(&socket, &[creator]).await;
     let mut ws = sign_in(&url, &tokens[0]).await;
+    // The Souls' socket, as g1e's: their bodies stand in the world, and the edit checker holds them.
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
     let at = |x: i64, z: i64, parent: Id| Spot {
         slot: None,
         position: Vec3::new(x, 0, z),
@@ -1510,37 +1516,12 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     };
 
     // On the first Soul, where it stands: refused by BUILDSAFE's name, as a boot thing would be.
-    let (control, _) = send(
-        &mut ws,
-        edit_intent(&w, creator, 9, got.version, wall(&w, x0 * M, z0 * M)),
-    )
-    .await;
-    println!("DEBUG control boot wall on the Soul: {control:?}");
     let (got, _) = send(
         &mut ws,
         edit_intent(&w, creator, 2, got.version, hedge(x0 * M, z0 * M)),
     )
     .await;
     println!("a creator's hedge where a Soul stands: {got:?}");
-    if got.kind == 1 {
-        let (copy, _) = served_copy(&w);
-        let t = copy.tree();
-        for h in t.children(t.handle(w.ground).unwrap()).unwrap() {
-            let n = t.node(*h).unwrap();
-            if n.kind().as_str() == full {
-                println!("DEBUG hedge fields {:?} place {:?}", n.fields(), n.place());
-            }
-        }
-        for b in &w.souls {
-            let n = t.node(t.handle(*b).unwrap()).unwrap();
-            println!(
-                "DEBUG soul {:?} parent {:?} place {:?}",
-                b,
-                n.parent(),
-                n.place()
-            );
-        }
-    }
     assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
 
     // Across the second Soul's way north: it commits, and the Soul's walk past it ends at its goal.
@@ -1551,10 +1532,6 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     )
     .await;
     assert_eq!(got.kind, 1, "the hedge across the way commits: {got:?}");
-    let mut souls = connect_socket(&socket);
-    souls
-        .set_read_timeout(Some(Duration::from_secs(60)))
-        .unwrap();
     walk(&mut souls, &w, w.souls[1], 1, wx, goal);
     let got = socket_answer(&mut souls);
     println!("the second Soul's walk past the hedge: {got:?}");
