@@ -6,6 +6,9 @@
 //! - **place** `{1: 1, 2: name, 3: kind's plain name, 4: kind's hash, 5: parent, 6: spot, 7: audience, 8: fields}`,
 //!   7 left out for everyone (else the audience's id) and 8 when empty;
 //! - **move** `{1: 2, 2: node, 3: spot}`; **set** `{1: 3, 2: node, 3: field, 4: value}`; **remove** `{1: 4, 2: node}`.
+//! - **doorway** `{1: 5, 2: name, 3: door, 4: from, 5: to, 6: [x,z], 7: yaw, 8: width, 9: height, 10: wall,
+//!   11: closed, 12: open}`: paired passage metadata, the leaf's backlink and its owned wall solid-row patch,
+//!   millimetres/millidegrees in the owning building's frame.
 //!
 //! A node is an id (`[scope, counter]`) or, for one placed earlier in the batch, its temporary name (an integer). A
 //! spot is `{1: position, 2: orientation, 3: support, 4: slot}` as T4's pose writes them, 4 left out when none.
@@ -146,6 +149,32 @@ fn op(o: &Op) -> Value {
             (4, to.clone()),
         ]),
         Op::Remove { node: n } => map(vec![(1, Value::Uint(4)), (2, node(*n))]),
+        Op::Doorway {
+            name,
+            door,
+            from,
+            to,
+            at,
+            yaw,
+            width,
+            height,
+            wall,
+            closed,
+            open,
+        } => map(vec![
+            (1, Value::Uint(5)),
+            (2, Value::Uint(*name)),
+            (3, node(*door)),
+            (4, node(*from)),
+            (5, node(*to)),
+            (6, Value::Array(at.iter().map(|n| int(*n)).collect())),
+            (7, int(*yaw)),
+            (8, int(*width)),
+            (9, int(*height)),
+            (10, node(*wall)),
+            (11, Value::Array(closed.clone())),
+            (12, Value::Array(open.clone())),
+        ]),
     }
 }
 
@@ -209,9 +238,53 @@ fn read_op(v: &Value) -> R<Op> {
                 node: read_node(m.get(&2))?,
             })
         }
+        5 => {
+            only(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "a doorway")?;
+            let Some(Value::Array(at)) = m.get(&6) else {
+                return Err("a doorway's at is [x, z] mm".into());
+            };
+            if at.len() != 2 {
+                return Err("a doorway's at is [x, z] mm".into());
+            }
+            Ok(Op::Doorway {
+                name: uint(m.get(&2), "a doorway's name")?,
+                door: read_node(m.get(&3))?,
+                from: read_node(m.get(&4))?,
+                to: read_node(m.get(&5))?,
+                at: [read_int(Some(&at[0]))?, read_int(Some(&at[1]))?],
+                yaw: read_int(m.get(&7))?,
+                width: read_int(m.get(&8))?,
+                height: read_int(m.get(&9))?,
+                wall: read_node(m.get(&10))?,
+                closed: match m.get(&11) {
+                    Some(Value::Array(rows)) => rows.clone(),
+                    _ => return Err("a doorway's closed solid rows".into()),
+                },
+                open: match m.get(&12) {
+                    Some(Value::Array(rows)) => rows.clone(),
+                    _ => return Err("a doorway's open solid rows".into()),
+                },
+            })
+        }
         n => Err(format!(
-            "operation kind {n}: 1 place, 2 move, 3 set, 4 remove"
+            "operation kind {n}: 1 place, 2 move, 3 set, 4 remove, 5 doorway"
         )),
+    }
+}
+
+fn int(n: i64) -> Value {
+    u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
+}
+
+fn read_int(v: Option<&Value>) -> R<i64> {
+    match v {
+        Some(Value::Uint(n)) => {
+            i64::try_from(*n).map_err(|_| "a doorway number exceeds i64".into())
+        }
+        Some(Value::Nint(n)) => i64::try_from(*n)
+            .map(|n| -1 - n)
+            .map_err(|_| "a doorway number exceeds i64".into()),
+        _ => Err("a doorway number is an integer".into()),
     }
 }
 
