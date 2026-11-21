@@ -11,7 +11,7 @@
         "rule": "everyone"
       }
     },
-    "on": {
+    "written": {
       "n": 29,
       "type": "bool",
       "default": false,
@@ -19,8 +19,16 @@
         "rule": "everyone"
       }
     },
-    "spent": {
+    "on": {
       "n": 30,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "spent": {
+      "n": 31,
       "type": "bool",
       "default": false,
       "audience": {
@@ -92,8 +100,8 @@
         },
         {
           "need": "state",
-          "field": "words",
-          "is": null
+          "field": "written",
+          "is": false
         }
       ],
       "steps": [
@@ -115,6 +123,12 @@
             "arg": "words"
           },
           "event": "written"
+        },
+        {
+          "change": "set",
+          "field": "written",
+          "to": true,
+          "event": "paper_written"
         }
       ]
     },
@@ -134,8 +148,8 @@
         },
         {
           "need": "state",
-          "field": "words",
-          "not": null
+          "field": "written",
+          "is": true
         }
       ],
       "steps": [
@@ -155,6 +169,12 @@
           "field": "words",
           "to": null,
           "event": "erased"
+        },
+        {
+          "change": "set",
+          "field": "written",
+          "to": false,
+          "event": "paper_blank"
         }
       ]
     },
@@ -174,8 +194,8 @@
         },
         {
           "need": "state",
-          "field": "words",
-          "not": null
+          "field": "written",
+          "is": true
         }
       ],
       "steps": [
@@ -207,6 +227,12 @@
           "field": "words",
           "to": null,
           "event": "burned"
+        },
+        {
+          "change": "set",
+          "field": "written",
+          "to": false,
+          "event": "paper_burned"
         }
       ]
     },

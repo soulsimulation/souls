@@ -10,6 +10,14 @@
       "audience": {
         "rule": "everyone"
       }
+    },
+    "written": {
+      "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
     }
   },
   "points": {
@@ -50,8 +58,8 @@
       "needs": [
         {
           "need": "state",
-          "field": "poem",
-          "is": null
+          "field": "written",
+          "is": false
         }
       ],
       "steps": [
@@ -73,6 +81,12 @@
             "arg": "poem"
           },
           "event": "written"
+        },
+        {
+          "change": "set",
+          "field": "written",
+          "to": true,
+          "event": "finished"
         }
       ]
     }
