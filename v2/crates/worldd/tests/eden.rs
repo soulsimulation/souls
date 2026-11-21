@@ -495,16 +495,28 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
     );
     let mut on_things: Vec<Id> = mine.iter().map(|s| s.thing).collect();
     on_things.dedup();
+    // The world adds today's rowing punts to the facts it is built from (#3603), each with its entry's riders' seats:
+    // the facts read here have none.
+    let punts = lines
+        .iter()
+        .filter(|l| l.starts_with("punt: rowing-punt-") && l.contains(" is "))
+        .count();
+    let riders = found
+        .iter()
+        .find(|(k, _)| k == "eden:rowing_punt")
+        .and_then(|(_, e)| e.get("slots").and_then(|s| s.obj()))
+        .map_or(0, <[_]>::len);
+    println!("{punts} rowing punts added by the world, {riders} seats each");
     assert_eq!(
-        mine.len(),
+        mine.len() + punts * riders,
         registered,
         "the world registers every slot the entries declare"
     );
     assert_eq!(left, 0, "every seat placed on a floor");
-    assert_eq!(on, on_things.len(), "the things they are on");
+    assert_eq!(on, on_things.len() + punts, "the things they are on");
     assert_eq!(registered, declared, "every declared body slot registered");
-    // Every def today seats has at least today's slots, but those whose entries declare no body slot with a stand
-    // point (C17: the campfire's and the piano's).
+    // Every def today seats has at least today's slots, but the one whose entry declares no body slot with a stand
+    // point (C17: the campfire's). The piano's bench seats its pianist, as today (#3714).
     let none: Vec<&str> = short
         .iter()
         .filter(|d| by_def.get(*d).copied().unwrap_or(0) > 0)
@@ -513,8 +525,8 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
     assert!(none.is_empty(), "short of today's slots: {none:?}");
     assert_eq!(
         short,
-        vec!["core-campfire@1".to_owned(), "core-piano@1".to_owned()],
-        "only the entries with no body slot"
+        vec!["core-campfire@1".to_owned()],
+        "only the entry with no body slot"
     );
     walked.expect("walked in to the armchair's stand point");
     sat.expect("sat in the armchair");
@@ -1295,6 +1307,17 @@ fn c22_a1_the_arcade_cabinets_play_ends_done() {
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c22_a2_the_desks_write_ends_done() {
     act_at("74.0,-1.0", "e_0f7fb44b", "eden:write", "c22a2").expect("written, done");
+}
+
+/// C22 sweep follow-up: a walk before a sit goes to the seat's own stand point, as the world's places hold it, not
+/// the entry's. The narrowboat's (today's e_13a2e4cf) `towpath` point is on the water by its hull, so no place within
+/// a sit's reach of it can be stood on; `worldd serve` moves the stern's stand point onto the bank, and `ride` (a walk
+/// to `stern`, then a sit in it) walks there and sits. Before, the walk searched only round the entry's point and
+/// ended `souls:no-way`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_walk_before_a_sit_goes_to_the_seats_own_stand_point() {
+    act_at("132.5,-21.7", "e_13a2e4cf", "eden:ride", "c22seat").expect("walked and seated, done");
 }
 
 /// How one form of a sweep ended ([`sweep`]): `done`, `refused <name>` at its start, `failed <name>` by its run's
@@ -3292,4 +3315,175 @@ fn i3802_a_form_with_no_slot_takes_the_nearest_free_one() {
     );
     assert_eq!(fourth, Err("place.none-free".to_owned()));
     assert_eq!(after, before, "the fourth stays where it stood");
+}
+
+/// Every course in a public projection `v` (field 80 of any node).
+fn projected_courses(v: &Value, out: &mut Vec<replica::schedule::course::Course>) {
+    match v {
+        Value::Map(m) => {
+            for (k, x) in m {
+                if *k == replica::schedule::F_COURSE
+                    && let Some(c) = replica::schedule::course::Course::read(x)
+                {
+                    out.push(c);
+                }
+                projected_courses(x, out);
+            }
+        }
+        Value::Array(a) => a.iter().for_each(|x| projected_courses(x, out)),
+        _ => {}
+    }
+}
+
+/// #3691: the rides Eden's entries declare get their courses from their `ride` data at serve. The three festival
+/// balloons (`ride` stops one point, the air, no line back) each fly a loop aloft round their homes and their courses
+/// are in the public stream's baseline; the rides with two stops get none. A Soul born by the first balloon's door
+/// boards it in its boarding stop by the balloon's own `ride` form, is carried aloft in its slot (a rise there is
+/// refused `boarding-frame-away`), and rises at its home once the balloon is back.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+// A real process on the real clock: its waits and rates are real time.
+#[allow(clippy::disallowed_methods)]
+fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
+    use replica::pose::Owner;
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    // The festival balloon at (290, 65) m; its door 1.6 m toward -x. Born 1 m beyond the door.
+    let (served, mut soul, dir, lines) = serve_lines(&facts, "287.40,65.00", "i3691", lineage);
+    let rides: Vec<(String, [f64; 2], i64, i64)> = lines
+        .iter()
+        .filter_map(|l| {
+            let l = l.trim().strip_prefix("ride: ")?;
+            let (name, rest) = l.split_once(" at ")?;
+            let n: Vec<f64> = rest
+                .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+                .filter_map(|w| w.parse().ok())
+                .collect();
+            let [x, z, period, t0] = n[..] else {
+                return None;
+            };
+            Some((name.to_owned(), [x, z], period as i64, t0 as i64))
+        })
+        .collect();
+    println!("the rides with a course: {rides:?}");
+    let (_, home, period, t0) = rides
+        .iter()
+        .find(|r| r.0 == "festival-balloon")
+        .cloned()
+        .expect("the festival balloon has a course");
+    let balloon = im.nodes["e_a2ef2904"];
+    // The public stream, played from its baseline through its newest part, carries each ride's course.
+    let mut projected = Vec::new();
+    {
+        use replica::stream::{Pointer, public::PublicPlayer};
+        let world = replica::rules::json::parse(
+            &std::fs::read_to_string(dir.join("views/world.json")).unwrap(),
+        )
+        .unwrap();
+        let stream = dir.join(world.get("stream").and_then(|v| v.str()).unwrap());
+        let pointer = Pointer::read(&std::fs::read(stream.join("pointer")).unwrap()).unwrap();
+        let headers = stream.ancestors().nth(3).unwrap().join("headers");
+        let header = std::fs::read(headers.join(replica::encode::to_hex(&pointer.header))).unwrap();
+        let Value::Map(fields) = decode(&std::fs::read(stream.join("pointer")).unwrap())
+            .unwrap()
+            .value
+        else {
+            panic!("the pointer is a map")
+        };
+        let Some(Value::Bytes(generation)) = fields.get(&8) else {
+            panic!("a baseline")
+        };
+        let parts = stream.join("g").join(replica::encode::to_hex(generation));
+        let mut player =
+            PublicPlayer::start(&header, &std::fs::read(parts.join("baseline")).unwrap())
+                .expect("the public reader");
+        for n in 0..=pointer.newest.expect("a published part") {
+            player
+                .play(&std::fs::read(parts.join(n.to_string())).unwrap())
+                .expect("the public reader plays the part");
+        }
+        projected_courses(player.state(), &mut projected);
+    }
+    println!(
+        "the public stream's courses (first station, period µs): {:?}",
+        projected
+            .iter()
+            .map(|c| (c.stations[0].at, c.load().map_or(0, |t| t.period)))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        projected.len() >= 3,
+        "the balloons' courses (and the punts') are in the public stream"
+    );
+    // Board in the balloon's boarding stop (its first 30 s each lap): wait for the next when less than 20 s are left.
+    let phase = |t: i64| (t - t0).rem_euclid(period);
+    let p = phase(answers::now());
+    if p > 10_000_000 {
+        let wait = period - p + 500_000;
+        println!("waiting {:.1} s for the balloon's stop", wait as f64 / 1e6);
+        std::thread::sleep(Duration::from_micros(wait as u64));
+    }
+    let boarded = soul.act("eden:ride", Some(balloon), BTreeMap::new());
+    println!("board it by its own form: {boarded:?}");
+    let seated_in = last_frames(&dir).into_values().find(|f| f.0 == balloon);
+    println!("the rider's frame: {seated_in:?}");
+    // Aloft: 60 s into the lap it is on its ring, and its rider with it.
+    let p = phase(answers::now());
+    if p < 60_000_000 {
+        std::thread::sleep(Duration::from_micros((60_000_000 - p) as u64));
+    }
+    let aloft = soul.act("eden:rise", None, BTreeMap::new());
+    // Where its course has the balloon now, as the page reads it from the public stream.
+    let up = projected
+        .iter()
+        .find(|c| c.stations[0].at.x == 290_000_000 && c.stations[0].at.z == 65_000_000)
+        .and_then(|c| c.load().ok()?.at(answers::now()).ok())
+        .map(|(p, _)| (p.x as f64 / 1e6, p.y as f64 / 1e6, p.z as f64 / 1e6));
+    println!("rise aloft: {aloft:?}; the balloon, its rider in it, at {up:?} m");
+    // Back at its home: rise there.
+    let p = phase(answers::now());
+    std::thread::sleep(Duration::from_micros((period - p + 2_000_000) as u64));
+    let off = soul.act("eden:rise", None, BTreeMap::new());
+    println!("rise at its home: {off:?}");
+    std::thread::sleep(Duration::from_secs(3));
+    let samples = public_samples(&dir);
+    let into = samples
+        .iter()
+        .find(|(_, h)| h.to == Owner::Slot && h.pose.frame.node == balloon)
+        .map(|s| s.1);
+    let out = samples
+        .iter()
+        .rev()
+        .find(|(_, h)| h.from == Owner::Slot)
+        .map(|s| s.1);
+    println!("the public stream: into the balloon {into:?}, out of it {out:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(rides.len(), 3, "the three festival balloons fly loops");
+    for (name, [x, z], period, _) in &rides {
+        assert!(
+            projected
+                .iter()
+                .any(|c| c.stations[0].at.x == (x * 1e6).round() as i64
+                    && c.stations[0].at.z == (z * 1e6).round() as i64
+                    && c.load().is_ok_and(|t| t.period == *period)),
+            "{name}'s course is in the public stream"
+        );
+    }
+    assert!((home[0] - 290.0).abs() < 1e-3 && (home[1] - 65.0).abs() < 1e-3);
+    boarded.expect("boarded at its door by the balloon's own form");
+    assert!(
+        matches!(seated_in, Some((n, Some(_))) if n == balloon),
+        "in the balloon's slot"
+    );
+    assert_eq!(aloft, Err("boarding-frame-away".to_owned()));
+    assert!(up.is_some_and(|p| p.1 > 30.0), "aloft: {up:?}");
+    off.expect("rose at its home");
+    assert!(
+        into.is_some(),
+        "the public stream carries the rider into the balloon"
+    );
+    let h = out.expect("and out of it");
+    assert_eq!(h.pose.frame.node, im.nodes["ground"], "out onto the ground");
 }

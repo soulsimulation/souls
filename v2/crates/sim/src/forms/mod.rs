@@ -547,6 +547,11 @@ impl Forms {
         f
     }
 
+    /// Whether intent `intent` is one the forms hold: its run in progress, or its effects applied.
+    pub fn known(&self, intent: Id) -> bool {
+        self.by_intent.contains_key(&intent) || self.applied.contains_key(&intent)
+    }
+
     /// Marks `node` as ground: a form done there reserves nothing (E21).
     pub fn shared(&mut self, node: Id) {
         self.shared.insert(node);
@@ -586,6 +591,21 @@ impl Forms {
                     fr.body,
                     (fr.runner.at()?, on.unwrap_or(fr.node), point.clone()),
                 )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Each body's run whose step in progress is a walk to its node's own point right before a `sit` or `lie` into a
+    /// slot of that node: the step's number, the node and the slot. The world aims that walk at the seat's own stand
+    /// point, as its places hold it (moved clear when the entry's point is blocked), not the entry's point.
+    pub fn seat_walks(&self) -> BTreeMap<Id, (usize, Id, u64)> {
+        self.runs
+            .values()
+            .filter_map(|fr| match (fr.runner.step()?, fr.runner.next_step()?) {
+                (Step::WalkTo { on: None, .. }, Step::Sit { slot, .. }) => {
+                    Some((fr.body, (fr.runner.at()?, fr.node, *slot)))
+                }
                 _ => None,
             })
             .collect()

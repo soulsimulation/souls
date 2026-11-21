@@ -7,6 +7,7 @@ import type { NodeRec } from '../source/source.ts';
 import { STRUCTURE, type WorldView } from '../draw/world.ts';
 import { fetchIndex } from './models.ts';
 import { ThingLayer } from './things.ts';
+import { BoardPieces } from './board.ts';
 import { Displays } from './displays.ts';
 import { setWindowLife } from './windows.ts';
 import { civil, localAt, type SkyRecord } from '../sky/record.ts';
@@ -58,12 +59,18 @@ export function windowLife(t: number | null, record: SkyRecord | null): void {
 /** The page's things, from its parameters; none (the world view's boxes stay) when no `models` root is given. */
 export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams): PageThings {
   const root = params.get('models');
-  // N-V10, N-V11 (#3725): the library's hung pictures and the classroom screen's slide, with or without models.
+  // N-V10, N-V11 (#3725): the library's hung pictures and the classroom screen's slide; N-V12 (#3726): game boards'
+  // pieces; each with or without models.
   const displays = new Displays();
   scene.add(displays.group);
-  const shown = (nodes: NodeRec[], removed: string[]) => displays.apply(nodes, removed, (id) => world.frame(id));
+  const boards = new BoardPieces();
+  scene.add(boards.group);
+  const shown = (nodes: NodeRec[], removed: string[]) => (displays.apply(nodes, removed, (id) => world.frame(id)), boards.apply(nodes, removed, (id) => world.frame(id)));
   const look = (_eye: THREE.Vector3, camera?: THREE.Camera) => void (camera && displays.update(camera));
-  const none: PageThings = { layer: null, apply: shown, update: look, follow() {}, night: windowLife };
+  const ride = () => {
+    for (const id of world.moving()) if (boards.has(id)) boards.move(id, world.frame(id));
+  };
+  const none: PageThings = { layer: null, apply: shown, update: look, follow: ride, night: windowLife };
   if (!root) return none;
   world.drawThings = false;
   if (params.get('things') === '0') return none;
@@ -89,6 +96,7 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
       layer?.update(eye);
     },
     follow() {
+      ride();
       if (!layer) return;
       const s = new THREE.Vector3();
       for (const id of world.moving()) layer.move(id, world.frame(id).clone().scale(s.setScalar((world.nodes.get(id)?.scale ?? 1_000_000) / 1_000_000)));
