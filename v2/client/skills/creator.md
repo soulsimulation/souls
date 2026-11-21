@@ -63,6 +63,7 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `build rewind <build> --to <step> [--dry]` | undoes every edit of that build after the step, newest first (`--dry` lists them) |
 | `describe` | what is there, and what each kind admits |
 | `look <name or id> [--out f.png] [--eyes]` | a picture of a place, thing or Soul, drawn on this machine from the public stream; open the file it names. With no browser here it answers in words |
+| `where <x,z or name>` · `clear <x,z or name> --size WxD` · `free WxD --near <x,z or name>` | the room, areas and nearest things at a spot; whether a footprint there is free; the nearest free one. World metres, read from the page drawn here |
 | `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
 | `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
 

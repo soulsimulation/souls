@@ -128,6 +128,8 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.throws(() => requestOf(['look']), (e) => e.code === 'usage');
   assert.throws(() => requestOf(['look', 'market', '--out', 'm.gif']), /png or .jpg/);
   assert.throws(() => requestOf(['look', 'picture', 'f.png']), /look <place/);
+  assert.deepEqual(requestOf(['free', '10x8', '--near', 'plaza']), { space: 'free', args: ['10x8', '--near', 'plaza'], creator: undefined });
+  assert.throws(() => requestOf(['clear', 'plaza']), (e) => e.code === 'usage');
   // #3695: the world's verbs go to the daemon as words; it makes their sets on the world node from its copy.
   assert.deepEqual(requestOf(['weather', '--kind', 'storm', '--minutes', '30']).req, { op: 'edit', world: { verb: 'weather', kind: 'storm', minutes: '30' } });
   assert.deepEqual(requestOf(['check', 'strike', '12,-4']).req, { op: 'check', world: { verb: 'strike', at: '12,-4' } });

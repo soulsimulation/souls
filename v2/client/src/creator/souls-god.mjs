@@ -55,6 +55,9 @@
 //   souls-god.mjs look <place|thing|soul|id> [--eyes] [--out f.png|.jpg] [--size WxH] [--page <url>]
 //                                                a picture of it, drawn here from the public stream (souls.mjs shoot);
 //                                                with no browser here, the copy's words for it instead
+//   souls-god.mjs where <x,z|name|id> | clear <x,z|name|id> --size WxD | free WxD --near <x,z|name|id>
+//                                                the room, areas and nearest things there; whether a footprint is free
+//                                                of things and buildings; the nearest free one (world metres, space.mjs)
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
 //   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
 //                                                these two ask the world's directory, with the creator's token
@@ -75,6 +78,7 @@ import { answer as libraryAnswer, libraryOf } from './catalog.mjs';
 import { worldOf } from '../cli/souls.mjs';
 import { F_HOURS, hoursRows } from '../schedule/hours.mjs';
 import { parseShoot, runShoot } from '../shoot/shoot.mjs';
+import { parseSpace, runSpace } from './space.mjs';
 
 export const VERBS = [
   'access',
@@ -82,8 +86,10 @@ export const VERBS = [
   'build',
   'catalog',
   'check',
+  'clear',
   'describe',
   'find',
+  'free',
   'hours',
   'land',
   'layers',
@@ -106,6 +112,7 @@ export const VERBS = [
   'visitors',
   'weather',
   'welcome',
+  'where',
   'zone',
   'zone-suggest',
 ];
@@ -176,6 +183,8 @@ export const FIX = {
   'secret.off': 'secret places are off, as on soul.game today: every place is on every Soul\'s map',
   'which-creator': 'name one with --creator',
   'hours.malformed': 'hours <id> --open HH:MM-HH:MM[@sat,sun|@mon-fri] (repeat --open), or --closed',
+  'nothing-by-that-name': 'give x,z in metres, or a name or id describe lists',
+  'no-browser': 'install a headless browser: npm i -g playwright && npx playwright install chromium',
   'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
   'welcome-too-long': 'at most 500 characters',
   'welcome-not-text': 'plain words and line breaks only',
@@ -267,6 +276,7 @@ export function requestOf(argv) {
     try { parseShoot(rest); } catch (e) { throw usage(e.message.startsWith('shoot <') || /needs a value|unknown/.test(e.message) ? how : e.message); }
     return { look: rest, creator };
   }
+  if (verb === 'where' || verb === 'clear' || verb === 'free') { parseSpace(verb, rest); return { space: verb, args: rest, creator }; }
   if (verb === 'welcome') {
     if (rest.length > 1) throw usage("welcome '<words>': quote the words as one argument");
     return { directory: '/v1/worlds/welcome', body: { welcome: rest[0] ?? '' }, creator };
@@ -659,6 +669,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       out(await runShoot(asked.look, { home, env: process.env, ask }));
       process.exit(0);
     }
+    if (asked.space) { out(await runSpace(asked.space, asked.args, { home, env: process.env })); process.exit(0); }
     const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
     const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
     if (asked.library) {
