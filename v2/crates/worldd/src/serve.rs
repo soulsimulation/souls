@@ -984,7 +984,10 @@ impl Again {
         view_out::write_whole(&path, bytes)
     }
     fn restore_public(&self) -> Result<(), Refusal> {
-        for key in self.store.list("")? {
+        let t = std::time::Instant::now();
+        let keys = self.store.list("")?;
+        eprintln!("PROF restore_public listed {} keys in {} ms", keys.len(), t.elapsed().as_millis());
+        for key in keys {
             if history_public_key(&key) {
                 let object = self.store.get(&key)?.ok_or_else(|| Refusal {
                     name: "history-export",

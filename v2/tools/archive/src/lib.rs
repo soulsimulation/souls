@@ -867,8 +867,15 @@ impl Bundler {
         })
     }
     fn projected(&self, header: &Header, state: &State) -> R<Value> {
-        let public = self.redactions.scrub(project(header, state)?);
+        let t = std::time::Instant::now();
+        let p = project(header, state)?;
+        let a = t.elapsed().as_millis();
+        let public = self.redactions.scrub(p);
+        let b = t.elapsed().as_millis();
         replica::stream::public::validate_projection(header, &public)?;
+        let d0 = std::time::Instant::now();
+        let _ = digest(&public);
+        eprintln!("PROF projected project {a} scrub {} validate {} ms; digest {} ms", b - a, t.elapsed().as_millis() - b, d0.elapsed().as_millis());
         Ok(public)
     }
     fn close_based(&self, header: &Header, open: BasedWindow) -> R<Option<Bundle>> {
