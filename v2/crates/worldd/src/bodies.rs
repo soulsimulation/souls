@@ -218,13 +218,14 @@ pub struct Bodies {
 pub type Placed = BTreeMap<Id, (Pose, Option<Stance>)>;
 
 /// A body's row in a tick's part (K18's `answers::BODIES`): `[body, pose]`, or `[body, pose, stance]` in a seat
-/// (1 sit, 2 lie).
+/// (1 sit, 2 lie, 3 stand in a standing slot, #3598).
 pub fn row(body: Id, pose: &Pose, stance: Option<Stance>) -> Value {
     let mut r = vec![body.to_value(), pose.to_value()];
     match stance {
         Some(Stance::Sit) => r.push(Value::Uint(1)),
         Some(Stance::Lie) => r.push(Value::Uint(2)),
-        _ => {}
+        Some(Stance::Stand) => r.push(Value::Uint(3)),
+        None => {}
     }
     Value::Array(r)
 }
@@ -239,6 +240,7 @@ pub fn read_row(v: &Value) -> Option<(Id, Pose, Option<Stance>)> {
     let stance = match rest {
         [Value::Uint(1)] => Some(Stance::Sit),
         [Value::Uint(2)] => Some(Stance::Lie),
+        [Value::Uint(3)] => Some(Stance::Stand),
         _ => None,
     };
     Some((
