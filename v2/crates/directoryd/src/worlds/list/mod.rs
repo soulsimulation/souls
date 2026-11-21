@@ -19,6 +19,8 @@
 //! 7. **The list's picture** (G10, #2800), set by the creator with the settings, from a shot: it passes G6's check
 //!    and hold point with [`PICTURE_BYTES`] and [`PICTURE_SIDE`], is kept stripped of metadata, and is one field of
 //!    the world's row, `picture`, a `data:` URL; a row without one lists `picture: null`.
+//! 8. **The welcome** (#3702), set by the creator ([`Worlds::set_welcome`]): words a visitor is shown on arrival, one
+//!    field of the row, `welcome`, so the list carries it and a Soul's pairing answer names it.
 
 pub mod archive;
 pub mod handoff;
@@ -45,6 +47,8 @@ pub const KEY: &str = "world-list";
 pub const PICTURE_BYTES: u64 = 131_072;
 /// The longest side of a world's list picture, px (rule 7).
 pub const PICTURE_SIDE: u64 = 1280;
+/// The most characters a world's welcome may have (#3702).
+pub const WELCOME_MOST: usize = 500;
 
 /// A file as the list's picture (rule 7): G6's check with the picture's limits, then the hold point; the stripped
 /// bytes as a `data:` URL, or the refusal's name.
@@ -523,6 +527,66 @@ impl<S: Store> Worlds<S> {
         let (rows, row) = write_rows(&inner.dir.store, etag, rows, set)?;
         *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
         Ok(row)
+    }
+
+    /// A world's welcome (rule 8, #3702): `creator` sets the words visitors are shown on arrival; empty words clear
+    /// it. At most [`WELCOME_MOST`] characters, no control characters but line breaks (`welcome-too-long`,
+    /// `welcome-not-text`). Answers the row.
+    pub fn set_welcome(&self, world: &str, creator: Id, words: &str) -> Result<Json, Refusal> {
+        let words = words.trim();
+        if words.chars().count() > WELCOME_MOST {
+            return refuse(
+                "welcome-too-long",
+                format!("at most {WELCOME_MOST} characters"),
+            );
+        }
+        if words.chars().any(|c| c.is_control() && c != '\n') {
+            return refuse(
+                "welcome-not-text",
+                "no control characters but line breaks".into(),
+            );
+        }
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let (etag, rows) = read_rows(&inner.dir.store)?;
+        let set = |rows: &mut Vec<Json>| -> R<Json> {
+            let Some(row) = rows
+                .iter_mut()
+                .find(|r| r.get("name").and_then(Json::as_str) == Some(world))
+            else {
+                return refuse("world-missing", world.to_owned());
+            };
+            if handoff::ownership(&inner.dir.store, row)?.creator != Some(creator) {
+                return refuse("not-the-creator", world.to_owned());
+            }
+            if let Some(o) = row.as_object_mut() {
+                if words.is_empty() {
+                    o.remove("welcome");
+                } else {
+                    o.insert("welcome".into(), json!(words));
+                }
+            }
+            let mut public = row.clone();
+            handoff::public_row(&mut public);
+            Ok(public)
+        };
+        let (rows, row) = write_rows(&inner.dir.store, etag, rows, set)?;
+        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
+        Ok(row)
+    }
+
+    /// The welcome of the world named `world`, if it has one (#3702).
+    pub fn welcome_of(&self, world: &str) -> R<Option<String>> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let (_, rows) = read_rows(&inner.dir.store)?;
+        Ok(rows
+            .iter()
+            .find(|r| r.get("name").and_then(Json::as_str) == Some(world))
+            .and_then(|r| r.get("welcome")?.as_str().map(str::to_owned)))
+    }
+
+    /// Whether `who` is the creator of the world named `world` (`world-missing` when there is none).
+    pub fn is_creator(&self, world: &str, who: Id) -> R<bool> {
+        Ok(self.ownership(world)?.creator == Some(who))
     }
 }
 
