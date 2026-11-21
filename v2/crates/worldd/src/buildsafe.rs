@@ -195,7 +195,7 @@ impl TownCopy {
         copy: &Replica,
         ground: Option<Id>,
         committed: &[Arc<Part>],
-    ) -> Option<&Town> {
+    ) -> Option<&mut Town> {
         let mut whole = !matches!(&self.built, Some((_, g, _)) if *g == ground);
         if let Some((at, _, Some(town))) = &mut self.built {
             for p in committed {
@@ -235,7 +235,7 @@ impl TownCopy {
             });
             self.built = Some((copy.version(), ground, town));
         }
-        self.built.as_ref().and_then(|(_, _, t)| t.as_ref())
+        self.built.as_mut().and_then(|(_, _, t)| t.as_mut())
     }
 }
 /// Clock thread: each body the controller holds, as G2 judges it: where it stands, sits or lies, the link it is being
