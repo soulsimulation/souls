@@ -557,7 +557,31 @@ fn field_value(v: &json::Value) -> Result<Value, String> {
 /// A `doorway` names its leaf, owning `from` and other `to` places, with `at: [x,z]`, `yaw`, `width` and `height`
 /// in the existing doorway row's millimetres/millidegrees, in the owning room's building frame.
 fn ops_of(text: &str) -> Result<Vec<Op>, String> {
+    batch_of(text).map(|(ops, _)| ops)
+}
+
+/// A batch as [`ops_of`] reads it, or `{"claim": "<claim id>", "ops": [...]}`: the batch sent under a build claim
+/// (#3701).
+fn batch_of(text: &str) -> Result<(Vec<Op>, Option<Name>), String> {
     let v = json::parse(text)?;
+    match v.get("ops") {
+        Some(ops) => {
+            let claim = match v.get("claim") {
+                None => None,
+                Some(c) => Some(
+                    c.str()
+                        .and_then(Name::new)
+                        .filter(|n| !n.as_str().is_empty() && n.as_str().len() <= 64)
+                        .ok_or("a batch's claim is a name")?,
+                ),
+            };
+            Ok((ops_in(ops)?, claim))
+        }
+        None => Ok((ops_in(&v)?, None)),
+    }
+}
+
+fn ops_in(v: &json::Value) -> Result<Vec<Op>, String> {
     let list = v.arr().ok_or("a batch is a list of operations")?;
     if list.is_empty() || list.len() > OPS_MOST {
         return Err(format!("1 to {OPS_MOST} operations"));
@@ -663,7 +687,7 @@ pub fn wire_edit(
             .map_err(|_| JsError::new("scope-not-16-bytes"))?,
     );
     let id = Id::new(scope, counter).ok_or_else(|| JsError::new("id-counter-exhausted"))?;
-    let ops = ops_of(ops).map_err(|e| JsError::new(&format!("edit-batch: {e}")))?;
+    let (ops, claim) = batch_of(ops).map_err(|e| JsError::new(&format!("edit-batch: {e}")))?;
     let intent = Intent {
         actor: if creator {
             Actor::Creator(id)
@@ -672,7 +696,7 @@ pub fn wire_edit(
         },
         verb: Name::new(crate::edit::wire::VERB).ok_or_else(|| JsError::new("verb"))?,
         target: None,
-        parameters: crate::edit::wire::parameters(&ops),
+        parameters: crate::edit::wire::parameters_under(&ops, claim.as_ref()),
         sequence,
         basis: decode(basis).map_err(js)?.value,
         expiry: i64::MAX,
