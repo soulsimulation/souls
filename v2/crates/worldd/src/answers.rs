@@ -949,6 +949,7 @@ type Checked = (
     BTreeMap<Id, replica::kinds::sizes::Size>,
     Minter,
     Option<buildsafe::PreparedMaps>,
+    crate::edit_places::Projection,
 );
 
 /// The world node's sky in the running tick (E6, #3369): its three timers on K9's due list, each fired at its due time
@@ -1858,7 +1859,7 @@ impl Clock {
     fn edits(&mut self, now: Micros) {
         let mut kept = Vec::new();
         let mut keep = |checked: &mut Result<Checked, Refused>| {
-            if let Ok((.., Some(maps))) = checked {
+            if let Ok((.., Some(maps), _)) = checked {
                 kept.push(std::mem::take(&mut maps.surfaces));
             }
         };
@@ -1875,7 +1876,7 @@ impl Clock {
             }
             // Every guard first; a body that only walked on sends the same edit back to be placed again (B12b).
             let walked = match (&self.bodies, &checked) {
-                (Some(b), Ok((.., Some(maps)))) => b.check_map_or_walked(maps),
+                (Some(b), Ok((.., Some(maps), _))) => b.check_map_or_walked(maps),
                 _ => Ok(None),
             };
             let checked = match walked {
@@ -1903,7 +1904,10 @@ impl Clock {
                     Err(r)
                 }
             };
-            let committed = checked.and_then(|(c, souls, classes, mut reserved, maps)| {
+            let committed = checked.and_then(|(c, souls, classes, mut reserved, maps, places)| {
+                if let Some(b) = &self.bodies {
+                    places.check(&b.slots)?;
+                }
                 let current = self
                     .bodies
                     .as_ref()
@@ -1919,7 +1923,7 @@ impl Clock {
                         current_classes.as_ref().unwrap_or(&classes),
                     )
                 };
-                match (&mut self.bodies, maps) {
+                let done = match (&mut self.bodies, maps) {
                     (Some(b), Some(maps)) => b.commit_map(maps, commit),
                     // Every edit a world with walkers commits reaches their town: none without its maps.
                     (Some(_), None) => Err(Refused {
@@ -1928,10 +1932,17 @@ impl Clock {
                         detail: "no walkers' map was prepared for the edit".into(),
                     }),
                     (None, _) => commit(),
-                }
+                };
+                done.map(|c| (c, places))
             });
             match committed {
-                Ok(c) => {
+                Ok((c, places)) => {
+                    if let Some(b) = &mut self.bodies
+                        && let Err(e) = places.install(&mut b.slots, &c.names)
+                    {
+                        self.faults += 1;
+                        eprintln!("worldd: edit places {}", e.name);
+                    }
                     self.unsealed = true;
                     // The edit checker's town is built again from a copy with this edit (G1e).
                     if let Some(w) = &self.walkers {
@@ -4009,6 +4020,7 @@ pub fn start<S: Storage + 'static>(
                 m,
                 events.clone(),
                 edit_kinds,
+                rules.kinds.clone(),
             )
         })
         .transpose()?;
@@ -4356,6 +4368,7 @@ fn edit_checker(
     walkers: Arc<buildsafe::Moving>,
     events: Sender<Event>,
     kinds: BTreeMap<String, replica::world_model::Kind>,
+    entries: replica::rules::json::Value,
 ) -> R<Sender<CheckJob>> {
     let (tx, rx) = channel::<CheckJob>();
     thread::Builder::new()
@@ -4520,6 +4533,7 @@ fn edit_checker(
                         )
                     })
                     .and_then(|p| {
+                        let places = crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
                         let tree = buildsafe::souls(&copy, &world.kinds);
                         let souls = buildsafe::judged(tree, &snapshot.bodies);
                         let maps = source
@@ -4535,7 +4549,7 @@ fn edit_checker(
                                 )
                             })
                             .transpose()?;
-                        Ok((p, souls, snapshot.classes.clone(), reserved, maps))
+                        Ok((p, souls, snapshot.classes.clone(), reserved, maps, places))
                     });
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
                     break;

@@ -526,7 +526,8 @@ impl<S: Store> Worlds<S> {
 
 /// The one creator of the world `lineage`/`zone`, as its directory record names it (G1e, #3532): its row in the list
 /// gives its name, and the validated mutable authority its current creator. `None` when pending or no row
-/// for it, or the name record is not this world's.
+/// for it, or the name record is missing, malformed or not this world's: authority that does not validate names no
+/// creator (refused closed), while a failed store read is an error.
 pub fn creator_of<S: Store>(store: &S, lineage: &[u8; 16], zone: Id) -> R<Option<Id>> {
     let (_, rows) = read_rows(store)?;
     let (l, z) = (to_hex(lineage), principal_text(zone));
@@ -536,7 +537,11 @@ pub fn creator_of<S: Store>(store: &S, lineage: &[u8; 16], zone: Id) -> R<Option
     }) else {
         return Ok(None);
     };
-    Ok(handoff::ownership(store, row)?.creator)
+    match handoff::ownership(store, row) {
+        Ok(o) => Ok(o.creator),
+        Err(e) if e.name.starts_with("handoff-authority") => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 fn read_rows<S: Store>(store: &S) -> R<(String, Vec<Json>)> {
