@@ -712,7 +712,16 @@ fn ops_of(text: &str) -> Result<Vec<Op>, String> {
                         },
                     }
                 }
-                _ => return Err("op is place, move, set, remove, doorway or link".into()),
+                // #3728: rows into an array field (a land edit's changed terrain tiles).
+                Some("rows") => Op::Rows {
+                    node: node()?,
+                    field: uint_of(o.get("field"), "the rows' field")?,
+                    rows: match field_value(o.get("rows").ok_or("the rows")?)? {
+                        Value::Array(rows) => rows,
+                        _ => return Err("rows are an array".into()),
+                    },
+                },
+                _ => return Err("op is place, move, set, remove, doorway, link or rows".into()),
             })
         })
         .collect()
@@ -1080,6 +1089,15 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                         return Err((
                             "edit.doorway-geometry",
                             "owned geometry is written only by the doorway operation".into(),
+                        ));
+                    }
+                    named(*node).map(|_| ())
+                }
+                Op::Rows { node, field, .. } => {
+                    if *field == crate::edit::DOOR_GEOMETRY || *field == 7 {
+                        return Err((
+                            "edit.rows",
+                            "a door's link and owned geometry are not rows".into(),
                         ));
                     }
                     named(*node).map(|_| ())
