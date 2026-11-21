@@ -2114,6 +2114,11 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
     for w in walkers {
         let _ = w.join();
     }
+    // The recorded world, for the public writer's byte-for-byte regression (V2_RECORDED_WORLD).
+    if let Ok(keep) = std::env::var("V2_KEEP_WORLD") {
+        let _ = std::fs::remove_dir_all(&keep);
+        copy_dir(&dir, Path::new(&keep));
+    }
     let _ = std::fs::remove_dir_all(&dir);
     println!(
         "A5: {n} walkers, {secs} s: walks done {}, refused {}; public parts written {written:.2}/s, played \
@@ -2125,4 +2130,116 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
     );
     assert!(samples > 0, "the stream carries motion");
     assert!(lag.unwrap_or(0) <= 2, "the reader keeps up");
+}
+
+/// Every file of a served world's public stream that a reader fetches by name and that never changes: the headers,
+/// each generation's baseline and its numbered parts and words. The pointer and the recovery store are left out.
+fn stream_files(views: &Path) -> BTreeMap<String, Vec<u8>> {
+    fn walk(root: &Path, d: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
+        for e in std::fs::read_dir(d).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(root, &p, out);
+                continue;
+            }
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            let stem = name.trim_end_matches(".text");
+            let keep = stem == "baseline"
+                || stem.chars().all(|c| c.is_ascii_digit())
+                || p.parent().is_some_and(|q| q.ends_with("headers"));
+            if keep && !name.ends_with(".tmp") {
+                let rel = p.strip_prefix(root).unwrap().to_string_lossy().into_owned();
+                out.insert(rel, std::fs::read(&p).unwrap());
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(views, views, &mut out);
+    out
+}
+
+/// #3799: the public writer cuts a part that only moves nodes by their rows, and any other whole; the stream is the
+/// same, byte for byte, as when every part is worked out whole (`SOULS_STREAM_WHOLE`). A recorded world
+/// (`V2_RECORDED_WORLD`, e.g. kept by the A5 run with `V2_KEEP_WORLD`) is served twice from copies with no stream: the
+/// stream is written again from the whole log at start-up, once each way; the two are compared file by file, and
+/// the time each start-up took to write it is printed.
+#[test]
+#[ignore = "needs a recorded world (V2_RECORDED_WORLD) and a built worldd (see the module doc)"]
+fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
+    let recorded = PathBuf::from(std::env::var("V2_RECORDED_WORLD").expect("V2_RECORDED_WORLD"));
+    let mut runs = Vec::new();
+    for (tag, whole) in [("rows", false), ("whole", true)] {
+        let dir = std::env::temp_dir().join(format!("m3799r-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        copy_dir(&recorded, &dir);
+        for gone in ["views", ".stream-recovery-store", "gateway.sock"] {
+            let p = dir.join(gone);
+            let _ = std::fs::remove_dir_all(&p);
+            let _ = std::fs::remove_file(&p);
+        }
+        let mut c = Command::new(env!("CARGO_BIN_EXE_worldd"));
+        c.args(["serve", "--dir"])
+            .arg(&dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        if whole {
+            c.env("SOULS_STREAM_WHOLE", "1");
+        }
+        let mut child = c.spawn().unwrap();
+        let mut out = BufReader::new(child.stdout.take().unwrap());
+        let (mut line, mut before, mut written) = (String::new(), None, None);
+        while out.read_line(&mut line).unwrap() > 0 {
+            let ms = |l: &str| -> Option<u64> {
+                l.trim()
+                    .strip_suffix(" ms")?
+                    .rsplit(' ')
+                    .next()?
+                    .parse()
+                    .ok()
+            };
+            if line.starts_with("start-up: before replay") {
+                before = ms(&line);
+            }
+            if line.starts_with("start-up: public stream") {
+                written = ms(&line);
+                break;
+            }
+            line.clear();
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        let files = stream_files(&dir.join("views"));
+        let _ = std::fs::remove_dir_all(&dir);
+        let parts = files
+            .keys()
+            .filter(|k| {
+                k.rsplit('/')
+                    .next()
+                    .is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
+            })
+            .count();
+        let ms = written.unwrap_or(0).saturating_sub(before.unwrap_or(0));
+        println!(
+            "{tag}: {parts} parts written from the log at start-up in about {ms} ms ({:.1} ms a part)",
+            ms as f64 / parts.max(1) as f64
+        );
+        assert!(written.is_some(), "{tag}: the start-up wrote its stream");
+        runs.push(files);
+    }
+    let (rows, whole) = (&runs[0], &runs[1]);
+    let both: Vec<&String> = rows.keys().filter(|k| whole.contains_key(*k)).collect();
+    let differ: Vec<&&String> = both.iter().filter(|k| rows[**k] != whole[**k]).collect();
+    println!(
+        "{} files in both, {} differ; {} only by rows, {} only whole",
+        both.len(),
+        differ.len(),
+        rows.len() - both.len(),
+        whole.len() - both.len()
+    );
+    assert!(both.len() > 100, "a recorded world of many parts");
+    assert!(
+        differ.is_empty(),
+        "byte for byte: {:?}",
+        &differ[..differ.len().min(5)]
+    );
 }

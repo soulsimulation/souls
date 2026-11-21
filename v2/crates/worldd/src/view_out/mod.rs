@@ -1268,7 +1268,8 @@ impl<S: ObjectStore> PublicWriter<S> {
             migration_state: None,
             legacy: None,
             force_remainder: false,
-            incremental: true,
+            // SOULS_STREAM_WHOLE set: every cut worked out whole, the reference a recorded log is compared with.
+            incremental: std::env::var_os("SOULS_STREAM_WHOLE").is_none(),
             structural: true,
             touched: std::collections::BTreeSet::new(),
             refs: None,
@@ -2010,13 +2011,7 @@ impl<S: ObjectStore> PublicWriter<S> {
     }
     pub fn push(&mut self, record: u64, raw: &[u8]) -> R<()> {
         let window = self.window;
-        let t0 = std::time::Instant::now();
         self.apply_record(record, raw)?;
-        eprintln!(
-            "TIMING apply_record {} bytes {:.1} ms",
-            raw.len(),
-            t0.elapsed().as_secs_f64() * 1e3
-        );
         if let (Some(before), Some(last)) = (window, self.records.last())
             && stream_effect(&self.header, last.clone())?
                 .envelope
@@ -2043,7 +2038,6 @@ impl<S: ObjectStore> PublicWriter<S> {
         if self.chunks.is_empty() && !self.force_remainder {
             return Ok(());
         }
-        let tf = std::time::Instant::now();
         // A cut of motion and fields set only (#3799): the published state with the touched nodes' rows replaced, its
         // digest worked out in place; any other cut, the public state whole. The same bytes either way.
         let delta = if self.incremental
@@ -2073,11 +2067,6 @@ impl<S: ObjectStore> PublicWriter<S> {
                 (Some(a), h)
             }
         };
-        eprintln!(
-            "TIMING project {:.1} ms fast {}",
-            tf.elapsed().as_secs_f64() * 1e3,
-            delta.is_some()
-        );
         if self.records.is_empty()
             && let Some(after) = &after
         {
@@ -2199,10 +2188,6 @@ impl<S: ObjectStore> PublicWriter<S> {
                 }
             }
         }
-        eprintln!(
-            "TIMING to-flying {:.1} ms",
-            tf.elapsed().as_secs_f64() * 1e3
-        );
         let changed = self
             .changes
             .iter()
@@ -2231,10 +2216,6 @@ impl<S: ObjectStore> PublicWriter<S> {
         let mut value = object_map(&sp.to_bytes()?)?;
         value.insert(10, Value::Bytes(context));
         let bytes = wire(Value::Map(value))?;
-        eprintln!(
-            "TIMING to-context {:.1} ms",
-            tf.elapsed().as_secs_f64() * 1e3
-        );
         // Validate exactly as the native/WASM reader before storing or publishing bytes.
         let number = self.player.next();
         let chunk = wire(Value::Map(BTreeMap::from([
@@ -2253,9 +2234,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         let part_hash = self.put(&bytes)?;
         let text = self.words_after(after.as_ref(), delta.as_ref())?;
         let text_hash = self.put(&text)?;
-        eprintln!("TIMING to-words {:.1} ms", tf.elapsed().as_secs_f64() * 1e3);
         self.player.play(&bytes)?;
-        eprintln!("TIMING to-play {:.1} ms", tf.elapsed().as_secs_f64() * 1e3);
         let manifest = wire(Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.seed.clone())),
             (2, Value::Bytes(self.head.clone().unwrap_or_default())),
@@ -2271,10 +2250,6 @@ impl<S: ObjectStore> PublicWriter<S> {
         immutable(&self.generation_dir().join(number.to_string()), &bytes)?;
         immutable(&self.generation_dir().join(format!("{number}.text")), &text)?;
         self.last_to = Some(sp.to);
-        eprintln!(
-            "TIMING flush total {:.1} ms",
-            tf.elapsed().as_secs_f64() * 1e3
-        );
         self.clear_pending();
         self.pointer(None)
     }
