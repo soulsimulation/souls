@@ -56,7 +56,7 @@ jobs:
         if: env.SKIP_REVIEW != '1'
         # The PR's tree could carry one; only what Claude writes in this run may be posted.
         run: rm -rf .local/claude-review && mkdir -p .local/claude-review
-      - uses: anthropics/claude-code-action@61a9c274fa7110a66dfafc1bbbced03833eb25fe # v1.0.269
+      - uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
         if: env.SKIP_REVIEW != '1'
         id: claude
         with:
