@@ -385,7 +385,10 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
     )
     .await;
     let taken = terminal(&mut other).await;
-    assert_eq!(taken.kind, 2, "the occupied slot refuses a second Soul: {taken:?}");
+    assert_eq!(
+        taken.kind, 2,
+        "the occupied slot refuses a second Soul: {taken:?}"
+    );
     let mut buried = host_solids();
     // The chair stands at (2 m, -0.509 m) of the building's frame: the inner room's middle, back 0.509 m.
     buried.push(row(&[2000, -509, 400, 400, 0, 0, 2500, 1, 0]));
