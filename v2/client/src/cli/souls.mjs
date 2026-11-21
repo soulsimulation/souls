@@ -143,6 +143,7 @@ export const OPS = [
   'quit',
   'receipt',
   'say',
+  'set-down',
   'shout',
   'stats',
   'status',
@@ -265,6 +266,8 @@ export function requestOf(argv) {
     try { args = argsOf(more); } catch (e) { return { refused: e.code, detail: e.message }; }
     Object.assign(req, { this: id, ...(action !== undefined ? { action, args } : {}) });
   }
+  // #3716: put the held thing down where you stand (`here`) or by a thing (`next_to <id>`): the daemon's set-down (#3604).
+  if (op === 'set-down') { const [id, word, anchor] = rest; Object.assign(req, { this: id, ...(word ? { word } : {}), ...(anchor ? { anchor } : {}) }); }
   if (op === 'pending' && rest[0] !== '--check') req.list = true;
   if (op === 'whatson' && opts.hours !== undefined) req.hours = Number(opts.hours);
   if (op === 'calendar') {
