@@ -384,6 +384,13 @@ const PUNT_REF: &str = "core-rowing-punt@1";
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
     let facts = &with_punts(facts)?;
     let mut im = import_eden::load(facts)?;
+    for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
+        println!(
+            "punt: rowing-punt-{} is {}",
+            k + 1,
+            replica::world_model::show(id)
+        );
+    }
     let mut activities = vec![conversation()?];
     activities.extend(activity_kinds(entries)?);
     for a in &activities {
