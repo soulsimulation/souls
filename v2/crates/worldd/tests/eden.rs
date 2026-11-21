@@ -1101,6 +1101,7 @@ fn measure(
                 point: Name::new(&point).unwrap(),
                 at,
                 on: None,
+                approach: false,
             }];
             if turned {
                 skills::form_runner::turn(&mut steps, place.orientation).unwrap();
@@ -3190,6 +3191,123 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     );
     let d = ((x - px).powi(2) + (z - pz).powi(2)).sqrt();
     assert!(d < 1.5, "out at the plank: {d:.2} m from it");
+}
+
+/// 0.131 parity C25 (#3688): one Soul, born at `at` (`x,z` m), does each `(today's id, form, ending)` in turn on a
+/// served full Eden, by the form's own entry, from wherever the one before left it. Each ending: `done`, or the
+/// refusal's or failure's name. Printed; each that differs from the one today's game gives is returned.
+fn served_family(at: &str, tag: &str, cases: &[(&str, &str, &str)]) -> Vec<String> {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (served, mut soul, dir) = serve(&facts, at, tag, im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .unwrap();
+    let mut got = Vec::new();
+    for (today, form, _) in cases {
+        let ended = match soul.act(
+            &format!("eden:{form}"),
+            Some(im.nodes[*today]),
+            BTreeMap::new(),
+        ) {
+            Ok(_) => "done".to_owned(),
+            Err(name) => name,
+        };
+        let body = track(&dir).last().map(|b| (b.2, b.3));
+        println!("{tag}: {form} at {today}: {ended} (the body at {body:?})");
+        got.push(ended);
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    cases
+        .iter()
+        .zip(&got)
+        .filter(|((_, _, want), ended)| ended != want)
+        .map(|((today, form, want), ended)| format!("{tag} {form} at {today}: {ended}, not {want}"))
+        .collect()
+}
+
+/// C25 (#3688) A1: lights, fire, doors and locks from outside, on a served full Eden. Born outside the library's
+/// door, a Soul knocks, opens and closes it; it is not the door's owner, so its lock and unlock are refused
+/// `not-permitted`, as today's game refuses them. Through the opened door it switches the library's floor lamp on,
+/// brighter, dimmer and off, a pendant by its pull cord and the desk lamp. Outside the café it opens the door and
+/// lights and puts out the candle on a table, and switches a pendant; at the dining green it lights the campfire and
+/// puts it out, and switches the string lights and a bollard light; by the pond, the twinkle lights. No form has a
+/// walk of its own: each walks to its point first, as today's game walks to the hand's point.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c25_lights_fire_doors_and_locks_from_outside() {
+    let mut wrong = served_family(
+        "74.0,-1.0",
+        "c25lib",
+        &[
+            ("e_89d82b59", "knock", "done"),
+            ("e_89d82b59", "open", "done"),
+            ("e_89d82b59", "close", "done"),
+            ("e_89d82b59", "lock", "not-permitted"),
+            ("e_89d82b59", "unlock", "not-permitted"),
+            ("e_89d82b59", "open", "done"),
+            ("e_19f5a481", "switch_on", "done"),
+            ("e_19f5a481", "switch_off", "done"),
+            ("e_f20d2d83", "switch_on", "done"),
+            ("e_f20d2d83", "switch_off", "done"),
+            ("e_e608452b", "switch_on", "done"),
+            ("e_e608452b", "switch_off", "done"),
+        ],
+    );
+    wrong.extend(served_family(
+        "96.5,25.0",
+        "c25cafe",
+        &[
+            ("e_61537992", "open", "done"),
+            ("e_63d14e62", "light", "done"),
+            ("e_63d14e62", "put_out", "done"),
+            ("e_daca0b8d", "switch_on", "done"),
+            ("e_daca0b8d", "switch_off", "done"),
+        ],
+    ));
+    wrong.extend(served_family(
+        "27.0,-3.0",
+        "c25green",
+        &[
+            ("e_14db400b", "light", "done"),
+            ("e_14db400b", "put_out", "done"),
+            ("e_718cb3ea", "switch_on", "done"),
+            ("e_718cb3ea", "switch_off", "done"),
+            ("e_c1f76c60", "switch_on", "done"),
+            ("e_c1f76c60", "switch_off", "done"),
+        ],
+    ));
+    wrong.extend(served_family(
+        "-38.0,-17.0",
+        "c25pond",
+        &[
+            ("e_68df95e8", "switch_on", "done"),
+            ("e_68df95e8", "switch_off", "done"),
+        ],
+    ));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// C25 (#3688) A1: a cottage's inner door, its bedroom's, on a served full Eden. Born outside the cottage, the Soul
+/// walks in to the bedroom's rug, then opens and closes the door from there: each form first walks to the door's
+/// point, as today's game walks to the hand's point. Left open (#3688): from outside, a form's approach walks in
+/// through the front door and approaches again from the cottage's floor, but its walk on the ground ends
+/// `walk.blocked` on the way there (the route lane's); a knock from the bedroom ends `out-of-reach`, as no place a
+/// body may stand on the bedroom's side is within an arm of the door's panel.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c25_a_cottages_inner_door_from_its_bedroom() {
+    let wrong = served_family(
+        "-99.0,-93.0",
+        "c25cottage",
+        &[
+            ("e_7ff72484", "walk", "done"),
+            ("e_00385aae", "open", "done"),
+            ("e_00385aae", "close", "done"),
+        ],
+    );
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// A body's logged frame, height and stance: `(node, slot, y µm, stance)`.

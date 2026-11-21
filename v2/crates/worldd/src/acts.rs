@@ -324,6 +324,8 @@ struct Sight<'a> {
     context: BTreeMap<Id, (Id, usize, usize)>,
     /// Each run's walk in progress to a named point: its step, the point's node and the point's name (C34, #3599).
     walks: BTreeMap<Id, (usize, Id, Name)>,
+    /// The bodies whose walk in progress is an approach to a move's point (#3688).
+    approaches: BTreeSet<Id>,
     /// Each run's walk in progress right before a sit into a slot the places hold: its step, the seat's floor and its
     /// stand point on that floor (moved clear at registration when the entry's point is blocked).
     sit_walks: BTreeMap<Id, (usize, Id, Vec3)>,
@@ -381,6 +383,24 @@ impl Sight<'_> {
             }
         }
         None
+    }
+
+    /// Point `at` of node `node`'s frame carried onto the floor of `node` nearest its height (#3688), when `node` has
+    /// floors: `None` when it has none.
+    fn floor_of(&self, node: Id, at: Vec3) -> Option<(Id, Vec3)> {
+        use import_eden::FLOOR;
+        let floor = self
+            .tree
+            .children(self.tree.handle(node)?)?
+            .iter()
+            .filter_map(|&c| self.tree.node(c))
+            .filter(|f| plain(f.kind()) == FLOOR)
+            .filter_map(|f| Some((f.id(), f.place()?)))
+            .min_by_key(|(_, p)| (p.position.y - at.y).abs())?;
+        let [w, x, y, z] = floor.1.orientation.parts();
+        let back = replica::pose::Quat::new(w, -x, -y, -z).ok()?;
+        let local = back.rotate(at.minus(floor.1.position).ok()?).ok()?;
+        Some((floor.0, local))
     }
 
     /// A walk to a building's named area, resolved onto the building's own room and floor (C34, #3599). `body`'s run
@@ -527,6 +547,27 @@ impl Geometry for Sight<'_> {
             Some(None) => return WalkPlan::Legs(Vec::new()),
             None => (node, at),
         };
+        // An approach to a move's point (#3688): a point of a thing on a building with floors (an inner door) is on
+        // the building's floor nearest its height, so the walk goes in to it, and once in through a link the runner
+        // approaches again from that floor; on the floor the body stands on, it is aimed short of the point, on the
+        // body's side.
+        let (node, at) = if self.approaches.contains(&body) {
+            let (node, at) = self.floor_of(node, at).unwrap_or((node, at));
+            self.with_view(body, |v| {
+                let (floor, p, _) = v.on_floor(node, at)?;
+                (floor == sim::walk::node_of(me)).then(|| {
+                    let short = skills::form_runner::APPROACH_SHORT;
+                    (
+                        floor,
+                        skills::form_runner::short_of(p, me.pose.position, short),
+                    )
+                })
+            })
+            .flatten()
+            .unwrap_or((node, at))
+        } else {
+            (node, at)
+        };
         let mut planning = self.planning.borrow_mut();
         match planning.ask(key, *me, FormQuery::Walk { node, at, reach }, &self.map) {
             Some(FormResult::Walk(legs)) => {
@@ -623,9 +664,18 @@ impl Sight<'_> {
                 if own_floor {
                     return Some([p.x, p.z]);
                 }
-                view.on_floor(target, p)
-                    .filter(|(f, ..)| *f == floor)
-                    .map(|(_, p, _)| [p.x, p.z])
+                if let Some(on) = view.on_floor(target, p).filter(|(f, ..)| *f == floor) {
+                    return Some([on.1.x, on.1.z]);
+                }
+                // A thing of a building with floors (an inner door, #3688), from a body on that building's floor.
+                let place = n.place()?;
+                let up = place
+                    .position
+                    .plus(place.orientation.rotate(p).ok()?)
+                    .ok()?;
+                self.floor_of(n.parent()?, up)
+                    .filter(|(f, _)| *f == floor)
+                    .map(|(_, p)| [p.x, p.z])
             };
             let q = [from.x, from.z];
             let named = um(entry
@@ -961,6 +1011,7 @@ impl Acts {
     ) -> T {
         let context = self.forms.planning_context();
         let walks = self.forms.walks();
+        let approaches = self.forms.approaches();
         self.planning.borrow_mut().keep(&context);
         let mut sit_walks = BTreeMap::new();
         let (controller, split, slots, map, questions) = match bodies {
@@ -1019,6 +1070,7 @@ impl Acts {
             asked: RefCell::new(BTreeMap::new()),
             context,
             walks,
+            approaches,
             sit_walks,
             planning: &self.planning,
             map,
