@@ -674,7 +674,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
 const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
@@ -1028,6 +1028,13 @@ async function answer(req) {
 
     }
     case 'converse': return converse(req);
+    case 'wear': {
+      const body = String(req.body ?? '');
+      if (!/^[A-Za-z0-9_.:@-]{1,80}$/.test(body)) return { ok: false, code: 'wear-names-a-body', detail: 'wear <preset>' };
+      const basis = shownVersion ?? state.cursor;
+      const { sequence, sent } = sendIntent(['life:wear'], { words: body, basis });
+      return closing({ ok: true, sequence, sent, verb: 'life:wear', basis: sequenceOf(basis) }, null, { now: true });
+    }
     case 'history': return historyAnswer(req);
     case 'read': return { ok: true, events: events.splice(0) };
     case 'stats': return stats(trace.read(), { transcript: transcriptOf(home) });

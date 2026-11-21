@@ -69,7 +69,7 @@ fn ask(key: &str, name: &str, label: &str) -> Ask {
 const DAY: u64 = 24 * 3600;
 
 #[test]
-fn a2_the_list_is_one_read_of_the_cached_copy() {
+fn a2_the_list_is_one_fresh_authoritative_read() {
     let (store, gets, forks) = (
         Memory::default(),
         AtomicUsize::new(0),
@@ -78,7 +78,7 @@ fn a2_the_list_is_one_read_of_the_cached_copy() {
     let w = worlds(&store, &gets, forks);
     w.create(&ask("k1", "first", "Ann"), person(1), 0, 10 * DAY)
         .expect("made");
-    // A second machine, cold: its first list reads the one object, and every list after reads nothing.
+    // Each list reads the same one object, so a root operator's archive/restore cannot leave a stale list.
     let (gets2, forks2) = (AtomicUsize::new(0), Arc::new(AtomicUsize::new(0)));
     let cold = worlds(&store, &gets2, forks2);
     let first = cold.list().expect("a list");
@@ -90,7 +90,11 @@ fn a2_the_list_is_one_read_of_the_cached_copy() {
     for _ in 0..10 {
         assert_eq!(cold.list().expect("a list"), first);
     }
-    assert_eq!(gets2.load(Ordering::SeqCst), 1, "no read when cached");
+    assert_eq!(
+        gets2.load(Ordering::SeqCst),
+        11,
+        "one authoritative read per list"
+    );
     let rows = first["worlds"].as_array().expect("rows");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["name"], "first");
@@ -100,10 +104,10 @@ fn a2_the_list_is_one_read_of_the_cached_copy() {
         rows[0]["awake"], false,
         "this machine has not seen its record: no world was asked"
     );
-    // On the machine that made it, its claimed record is cached: awake, with no read.
+    // Its cached claim supplies awake without waking the world; the list itself is still one fresh read.
     let before = gets.load(Ordering::SeqCst);
     assert_eq!(w.list().expect("a list")["worlds"][0]["awake"], true);
-    assert_eq!(gets.load(Ordering::SeqCst), before);
+    assert_eq!(gets.load(Ordering::SeqCst), before + 1);
 }
 
 #[test]
@@ -504,4 +508,179 @@ fn w16_handoff_hash_only_named_expiry_pending_restart_and_round_trip() {
         cold.ownership("garden").unwrap_err().name,
         "handoff-authority-mismatch"
     );
+}
+
+#[test]
+fn w17_current_creator_confirmation_archive_restore_and_reservations_survive_reload() {
+    let (store, gets, forks) = (
+        Memory::default(),
+        AtomicUsize::new(0),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let w = worlds(&store, &gets, forks.clone());
+    let request = ask("archive", "garden", "Garden");
+    let row = w.create(&request, person(1), 0, 10 * DAY).unwrap()["world"].clone();
+    let immutable = store
+        .get(&NameRecord::key("garden"))
+        .unwrap()
+        .unwrap()
+        .bytes;
+    let offer = w.offer_handoff("garden", person(1), None, 10).unwrap();
+    assert_eq!(
+        archive::begin(&store, "garden", Some(person(1)), "garden", false)
+            .unwrap_err()
+            .name,
+        "archive-handoff-pending"
+    );
+    let pending = w
+        .begin_handoff(
+            "garden",
+            offer["code"].as_str().unwrap(),
+            "recipient",
+            person(2),
+            11,
+        )
+        .unwrap();
+    w.finish_handoff(&pending).unwrap();
+    assert_eq!(
+        archive::begin(&store, "garden", Some(person(1)), "garden", false)
+            .unwrap_err()
+            .name,
+        "not-the-creator"
+    );
+    assert_eq!(
+        archive::begin(&store, "garden", Some(person(2)), "Garden", false)
+            .unwrap_err()
+            .name,
+        "archive-confirmation"
+    );
+    let phase = archive::begin(&store, "garden", Some(person(2)), "garden", false).unwrap();
+    assert_eq!(phase.creator, person(2));
+    assert_eq!(phase.creator_generation, 1);
+    assert_eq!(
+        archive::begin(&store, "garden", Some(person(2)), "garden", false).unwrap(),
+        phase
+    );
+    assert!(w.list().unwrap()["worlds"].as_array().unwrap().is_empty());
+    assert_eq!(
+        w.offer_handoff("garden", person(2), None, 12)
+            .unwrap_err()
+            .name,
+        "world-archived"
+    );
+    assert_eq!(
+        w.create(&request, person(1), 0, 11 * DAY).unwrap_err().name,
+        "world-archived"
+    );
+    assert_eq!(forks.load(Ordering::SeqCst), 1);
+    let cold = worlds(&store, &gets, forks);
+    let archived = archive::finish(&store, &phase).unwrap();
+    assert_eq!(archived.state, "archived");
+    assert!(
+        cold.list().unwrap()["worlds"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let restore = archive::begin(&store, "garden", None, "", true).unwrap();
+    assert_eq!(
+        archive::begin(&store, "garden", None, "", true).unwrap(),
+        restore
+    );
+    assert_eq!(
+        archive::finish(&store, &phase).unwrap_err().name,
+        "archive-stale"
+    );
+    assert_eq!(archive::finish(&store, &restore).unwrap().state, "active");
+    assert_eq!(
+        archive::retry_restore(&store, "garden", &phase.request)
+            .unwrap_err()
+            .name,
+        "archive-stale"
+    );
+    let contained = archive::retry_restore(&store, "garden", &restore.request).unwrap();
+    assert_eq!(contained.request, restore.request);
+    assert_eq!(contained.generation, restore.generation);
+    assert!(
+        cold.list().unwrap()["worlds"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(archive::finish(&store, &contained).unwrap().state, "active");
+    let returned = cold.list().unwrap()["worlds"][0].clone();
+    assert_eq!(returned["lineage"], row["lineage"]);
+    assert_eq!(returned["zone"], row["zone"]);
+    assert_eq!(returned["creator"], principal_text(person(2)));
+    assert!(returned.get(archive::FIELD).is_none());
+    assert_eq!(
+        store
+            .get(&NameRecord::key("garden"))
+            .unwrap()
+            .unwrap()
+            .bytes,
+        immutable
+    );
+    assert_eq!(cold.ownership("garden").unwrap().creator, Some(person(2)));
+    let back = cold.offer_handoff("garden", person(2), None, 20).unwrap();
+    let pending = cold
+        .begin_handoff(
+            "garden",
+            back["code"].as_str().unwrap(),
+            "return-owner",
+            person(1),
+            21,
+        )
+        .unwrap();
+    cold.finish_handoff(&pending).unwrap();
+    let next = archive::begin(&store, "garden", Some(person(1)), "garden", false).unwrap();
+    assert_eq!(next.generation, phase.generation);
+    assert_eq!(next.creator_generation, 2);
+    assert_eq!(next.creator, person(1));
+    assert_ne!(next.request, phase.request);
+}
+
+#[test]
+fn w17_archive_revalidates_creator_inside_the_conditional_write() {
+    use std::sync::atomic::AtomicBool;
+    struct Raced<'a> {
+        memory: &'a Memory,
+        armed: AtomicBool,
+    }
+    impl Store for Raced<'_> {
+        fn get(&self, key: &str) -> R<Option<Object>> {
+            self.memory.get(key)
+        }
+        fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+            if key == KEY && self.armed.swap(false, Ordering::SeqCst) {
+                let current = self.memory.get(KEY)?.unwrap();
+                let mut value: Json = serde_json::from_slice(&current.bytes).unwrap();
+                value["worlds"][0]["creator"] = json!(principal_text(person(2)));
+                value["worlds"][0]["_creator_generation"] = json!(1);
+                self.memory.put(
+                    KEY,
+                    &serde_json::to_vec(&value).unwrap(),
+                    When::Is(&current.etag),
+                )?;
+            }
+            self.memory.put(key, bytes, when)
+        }
+    }
+    let (memory, gets) = (Memory::default(), AtomicUsize::new(0));
+    let w = worlds(&memory, &gets, Arc::new(AtomicUsize::new(0)));
+    w.create(&ask("race", "garden", "Garden"), person(1), 0, 10 * DAY)
+        .unwrap();
+    let raced = Raced {
+        memory: &memory,
+        armed: AtomicBool::new(true),
+    };
+    assert_eq!(
+        archive::begin(&raced, "garden", Some(person(1)), "garden", false)
+            .unwrap_err()
+            .name,
+        "not-the-creator"
+    );
+    let row = read_rows(&memory).unwrap().1.remove(0);
+    assert!(row.get(archive::FIELD).is_none());
+    assert_eq!(row["creator"], principal_text(person(2)));
 }

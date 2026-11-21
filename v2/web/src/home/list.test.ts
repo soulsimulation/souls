@@ -21,3 +21,26 @@ test('sign-in goes to the primary\'s bridge and returns to the page it left', ()
   assert.equal(new URL(href!).searchParams.get('redirect_url'), 'https://soul.game/?a=1#b');
   assert.equal(signInHref({}, 'https://soul.game/'), null);
 });
+
+
+import { canonicalRows } from './list.ts';
+
+test('W17 legacy fallback cannot resurrect archived or unlisted native worlds, without exposing an archive list', async () => {
+  const counts = new Map<string, number>();
+  const get = (async (url: string | URL | Request, init?: RequestInit) => {
+    assert.equal(init?.credentials, 'omit'); assert.equal(init?.redirect, 'error'); assert.ok(init?.signal);
+    const slug = /\/w\/([^/]+)/.exec(String(url))![1]; counts.set(slug, (counts.get(slug) ?? 0) + 1);
+    if (slug === 'eden') return Response.json({ refused: 'world-archived' }, { status: 410 });
+    if (slug === 'unlisted') return Response.json({ world: slug, stream: '/s/unlisted/', directory: '/', gateway: `/w/${slug}/v2/ws`, creatorToken: `/w/${slug}/v2/creator-token` });
+    if (slug === 'visible') return Response.json({ world: slug, stream: '/s/visible/', directory: '/', gateway: `/w/${slug}/v2/ws`, creatorToken: `/w/${slug}/v2/creator-token` });
+    if (slug === 'malformed') return Response.json({ world: slug, gateway: 'https://untrusted.example.invalid/' });
+    if (slug === 'offline') throw Error('fixture bootstrap unavailable');
+    if (slug === 'unknown') return Response.json({ refused: 'unrelated' }, { status: 410 });
+    return new Response(null, { status: 404 });
+  }) as typeof fetch;
+  const today = { worlds: ['eden', 'unlisted', 'preview', 'legacy', 'unknown', 'malformed', 'offline', 'visible'].map(slug => ({ slug })) };
+  const result = await canonicalRows({ worlds: [{ name: 'eden' }, { name: 'preview' }, { name: 'visible' }] }, today, 'https://example.invalid', get);
+  assert.deepEqual(result.map(w => w.slug), ['visible', 'preview', 'legacy', 'unknown', 'malformed', 'offline']);
+  assert.deepEqual([...counts.values()], [1, 1, 1, 1, 1, 1, 1, 1], 'each already-public slug is probed once');
+  assert.deepEqual((await canonicalRows(null, { worlds: [{ slug: 'unlisted' }] }, 'https://example.invalid', get)), []);
+});

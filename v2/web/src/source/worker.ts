@@ -67,6 +67,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(25)) rec.tiles = (f.get(25) as unknown[][]).map((t) => [num(t[0]), num(t[1]), t[2] as Uint8Array, t[3] as Uint8Array]);
   if (f.has(NAME)) rec.name = refOf(f.get(NAME));
   if (f.has(DESCRIPTION)) rec.description = refOf(f.get(DESCRIPTION));
+  if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array);
   const placeName = f.get(PLACE_NAME);
   if (placeName instanceof Uint8Array && placeName.length === 32) rec.placeName = nameKey(placeName);
   const sky = skyFields(f); // V19: the world node's day, night and weather

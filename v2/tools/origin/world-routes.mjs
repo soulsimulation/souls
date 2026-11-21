@@ -13,10 +13,10 @@ export function readWorldRoutes(file) {
   if (!value || value.schema !== 'souls/world-routes/1' || !value.worlds || Array.isArray(value.worlds)) throw Error('world-routing-unconfigured');
   const worlds = Object.create(null);
   for (const [world, entry] of Object.entries(value.worlds)) {
-    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(world) || !entry || !publicPath(entry.stream) || (entry.history !== undefined && !publicPath(entry.history)) || (entry.canonical !== undefined && typeof entry.canonical !== 'boolean')) throw Error('world-routing-unconfigured');
+    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(world) || !entry || !publicPath(entry.stream) || (entry.history !== undefined && !publicPath(entry.history)) || (entry.canonical !== undefined && typeof entry.canonical !== 'boolean') || (entry.archived !== undefined && typeof entry.archived !== 'boolean')) throw Error('world-routing-unconfigured');
     const gateway = new URL(entry.gateway);
     if (gateway.protocol !== 'http:' || !local(gateway.hostname) || gateway.username || gateway.password || gateway.search || gateway.hash || gateway.pathname !== '/' || entry.gateway !== gateway.origin) throw Error('world-routing-unconfigured');
-    worlds[world] = { gateway: gateway.origin, stream: entry.stream, ...(entry.history ? { history: entry.history } : {}), canonical: entry.canonical === true };
+    worlds[world] = { gateway: gateway.origin, stream: entry.stream, ...(entry.history ? { history: entry.history } : {}), canonical: entry.canonical === true, archived: entry.archived === true };
   }
   return worlds;
 }
@@ -34,6 +34,7 @@ export function worldRoutes(file = process.env.SOULS_WORLD_ROUTES || WORLD_ROUTE
     let entry;
     try { entry = readWorldRoutes(file)[world]; } catch { return { status: 503, refused: 'world-routing-unconfigured' }; }
     if (!entry) return { status: 404, refused: 'world-not-routed' };
+    if (entry.archived) return { status: 410, refused: 'world-archived' };
     if (!preview && !entry.canonical) return { status: 404, refused: 'world-preview-only' };
     if (url.search) return { status: 400, refused: 'world-route-query' };
     const protocol = req.headers['x-forwarded-proto'] === 'https' ? 'https:' : 'http:';
