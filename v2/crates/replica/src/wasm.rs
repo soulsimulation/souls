@@ -519,15 +519,45 @@ fn spot_of(o: &json::Value) -> Result<Spot, String> {
         None | Some(json::Value::Null) => None,
         v => Some(uint_of(v, "slot")?),
     };
+    // #3695: a move that keeps a thing's facing and support (a landform lifting what rests on it) gives both, as the
+    // pose writes them: `orientation` [w, x, y, z] and `support` {"which": 0 to 4, "node": id, "height": µm}.
+    let orientation = match o.get("orientation").and_then(json::Value::arr) {
+        None => Quat::IDENTITY,
+        Some(q) if q.len() == 4 => Quat::new(
+            int_of(q.first(), "orientation's numbers")?,
+            int_of(q.get(1), "orientation's numbers")?,
+            int_of(q.get(2), "orientation's numbers")?,
+            int_of(q.get(3), "orientation's numbers")?,
+        )
+        .map_err(|e| format!("orientation: {e:?}"))?,
+        Some(_) => return Err("orientation is [w, x, y, z]".into()),
+    };
+    let support = match o.get("support") {
+        None | Some(json::Value::Null) if slot.is_some() => Support::Slot,
+        None | Some(json::Value::Null) => Support::None,
+        Some(v) => {
+            let node = || match ref_of(v.get("node"))? {
+                Ref::Node(id) => Ok(id),
+                Ref::New(_) => Err("a support's node is an id".to_owned()),
+            };
+            match uint_of(v.get("which"), "a support's which")? {
+                0 => Support::None,
+                1 => Support::Surface {
+                    surface: node()?,
+                    height: int_of(v.get("height"), "a surface's height")?,
+                },
+                2 => Support::Slot,
+                3 => Support::Volume { volume: node()? },
+                4 => Support::Track,
+                n => return Err(format!("a support's which is 0 to 4, not {n}")),
+            }
+        }
+    };
     Ok(Spot {
         slot,
         position: Vec3::new(axis(0)?, axis(1)?, axis(2)?),
-        orientation: Quat::IDENTITY,
-        support: if slot.is_some() {
-            Support::Slot
-        } else {
-            Support::None
-        },
+        orientation,
+        support,
     })
 }
 
@@ -558,8 +588,15 @@ fn field_value(v: &json::Value) -> Result<Value, String> {
             .map(field_value)
             .collect::<Result<Vec<_>, _>>()
             .map(Value::Array),
+        // #3695: bytes (a landform's parameters, the ground's tiles) as {"hex": "<hex>"}.
+        json::Value::Obj(_) if v.get("hex").is_some() => v
+            .get("hex")
+            .and_then(json::Value::str)
+            .ok_or_else(|| "bytes are {\"hex\": \"<hex>\"}".to_owned())
+            .and_then(|h| from_hex(h).map_err(|e| format!("bytes: {e}")))
+            .map(Value::Bytes),
         _ => {
-            Err("a field's value is an integer, true or false, a name, or an array of these".into())
+            Err("a field's value is an integer, true or false, a name, bytes as {\"hex\": ..}, or an array of these".into())
         }
     }
 }
@@ -735,7 +772,8 @@ pub fn wire_edit(
         reflex: false,
     };
     let bytes = encode(&intent.to_value()).map_err(js)?;
-    crate::intent_decode::decode(&bytes).map_err(js)?;
+    // A creator's edit over the frame limit goes by the gateway's creator route (#3695), read as the world reads it.
+    crate::intent_decode::decode_bulk(&bytes).map_err(js)?;
     Ok(bytes)
 }
 

@@ -647,6 +647,38 @@ fn a4_upload_then_place_through_g1s_gate() {
         ops: vec![place(&kind, root, receipt.reference)],
     };
     placeable(&edit, &s).expect("an allowed upload is placeable");
+
+    // Hidden by the creator (#3698): not served, not placed, kept; shown again, as before.
+    assert_eq!(
+        s.hide(Actor::World, receipt.reference)
+            .expect_err("not the creator")
+            .code,
+        "upload.not-the-creator"
+    );
+    assert_eq!(
+        s.show(creator(), receipt.reference)
+            .expect_err("not hidden")
+            .code,
+        "upload.not-hidden"
+    );
+    assert_eq!(
+        s.hide(creator(), receipt.reference).expect("hidden").state,
+        State::Hidden
+    );
+    assert_eq!(s.served(receipt.reference), None);
+    assert_eq!(
+        placeable(&edit, &s).expect_err("hidden").name,
+        "upload.not-placeable"
+    );
+    assert_eq!(
+        s.hide(creator(), receipt.reference)
+            .expect_err("already hidden")
+            .code,
+        "upload.not-allowed"
+    );
+    s.show(creator(), receipt.reference).expect("shown");
+    assert_eq!(s.served(receipt.reference), Some(&file[..]));
+    placeable(&edit, &s).expect("shown again, placeable");
     let copy = live.frozen();
     let checked = check_edit(edit, &copy, &world).expect("checked");
     let planned = plan(checked, &copy, None).expect("planned");
@@ -723,6 +755,11 @@ fn a5_hold_point() {
             "{answer}: the record is kept"
         );
         assert_eq!(s.served(r.reference), None, "{answer}: not served");
+        assert_eq!(
+            s.hide(creator(), r.reference).expect_err("held").code,
+            "upload.not-allowed",
+            "{answer}: a held upload waits for its release"
+        );
         let edit = Edit {
             claim: None,
             intent: Id::new(Scope([0x11; 16]), 0).expect("an id"),
