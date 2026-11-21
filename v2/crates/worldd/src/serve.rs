@@ -847,9 +847,26 @@ fn bodies(
             at.push(a);
         }
     }
+    // The things on a course (today's punts, #3603): their seats are boarded and left only at their home stop.
+    let mut moving = Vec::new();
+    if let Some(gh) = town.tree.handle(ground) {
+        for &c in town.tree.children(gh).unwrap_or(&[]) {
+            if let Some(n) = town.tree.node(c)
+                && let Some(course) = n
+                    .fields()
+                    .get(&replica::schedule::F_COURSE)
+                    .and_then(replica::schedule::course::Course::read)
+            {
+                moving.push((n.id(), course));
+            }
+        }
+    }
     let mut b = Bodies::with_planner(town, planner, 50_000)?;
     for s in places {
         b.add_place(s)?;
+    }
+    for (thing, course) in moving {
+        b.slots.moving(thing, &course)?;
     }
 
     for a in at {

@@ -162,6 +162,9 @@ pub struct Slots {
     changed: Vec<Id>,
     /// Each body's admitted build, as its adapter gave it; [`STANDARD_BUILD`] when none was.
     builds: BTreeMap<Id, Build>,
+    /// The things that move on a course (a punt, #3603): their loaded tracks. A seat on one is taken only while it
+    /// stands at its home stop (station 0) with time to cross left, and left only there.
+    moving: BTreeMap<Id, crate::courses::Table>,
 }
 
 impl Slots {
@@ -177,6 +180,28 @@ impl Slots {
     /// `body`'s standing reach, µm: its admitted build's, else the standard body's.
     pub fn reach_of(&self, body: Id) -> i64 {
         standing_reach(self.builds.get(&body).copied().unwrap_or(STANDARD_BUILD))
+    }
+
+    /// Thing `thing` moves on `course` (#3603, N12's boarding rule): its seats are boarded only while it stands at its
+    /// home stop with [`crate::links::boarding::CROSSING`] of the dwell left, and left only while it stands there;
+    /// else `boarding-frame-away`, and nobody moves. A course that does not load is refused by its own name.
+    pub fn moving(&mut self, thing: Id, course: &crate::courses::Course) -> R<()> {
+        self.moving.insert(thing, course.load()?);
+        Ok(())
+    }
+
+    /// `boarding-frame-away` unless the moving `thing` stands at its home stop at `now` with `left` of it to spare.
+    fn at_home(&self, thing: Id, now: Micros, left: Micros) -> R<()> {
+        let Some(t) = self.moving.get(&thing) else {
+            return Ok(());
+        };
+        match t.stopped(now) {
+            Ok(Some(s)) if s.station == 0 && s.left >= left => Ok(()),
+            _ => refuse(
+                "boarding-frame-away",
+                format!("{} is not at its stop", show(thing)),
+            ),
+        }
     }
 
     /// Seat ownership changes, drained by the world to wake standing queues.
@@ -343,6 +368,7 @@ impl Slots {
         r: &Request,
         now: Micros,
     ) -> R<Instance> {
+        self.at_home(r.thing, now, crate::links::boarding::CROSSING)?;
         let slot = match r.slot {
             Some(s) => s,
             None => match self.free(c, r.body, r.thing) {
@@ -498,6 +524,7 @@ impl Slots {
         let State::Seated(driver) = hold.state else {
             return not_seated();
         };
+        self.at_home(key.0, now, 0)?;
         if let Some(d) = driver {
             c.release(body, d)?;
         }
