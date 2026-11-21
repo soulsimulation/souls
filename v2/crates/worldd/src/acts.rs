@@ -231,7 +231,6 @@ fn nearest_selected(tree: &Tree, node: Id, take: &Json) -> Option<Id> {
         if n.id() == node || plain(n.kind()) != kind {
             continue;
         }
-
         let Ok(p) = replica::select::position(tree, n.id()) else {
             continue;
         };
