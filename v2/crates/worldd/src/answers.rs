@@ -1781,16 +1781,20 @@ impl Clock {
                     )
                 };
                 match (&mut self.bodies, maps) {
-                    (Some(b), Some(maps)) => b.commit_map(maps, commit),
-                    _ => commit(),
+                    (Some(b), Some(mut maps)) => {
+                        let mine = maps.checker.take();
+                        b.commit_map(maps, commit).map(|c| (c, mine))
+                    }
+                    _ => commit().map(|c| (c, None)),
                 }
             });
             match committed {
-                Ok(c) => {
+                Ok((c, mine)) => {
                     self.unsealed = true;
-                    // The edit checker's town is built again from a copy with this edit (G1e).
+                    // The edit checker's town installs the ground prepared for this edit (#3743), or is built again
+                    // from a copy with it (G1e).
                     if let Some(w) = &self.walkers {
-                        w.committed(Arc::clone(&c.part), self.replica.version());
+                        w.committed(Arc::clone(&c.part), self.replica.version(), mine);
                     }
                     self.receipts.index(&c.part.effects);
                     self.effects.extend(c.part.effects.iter().cloned());
@@ -4239,13 +4243,13 @@ fn edit_checker(
                     next => next,
                 };
                 // Each edit committed since, on the town; a copy that holds them all, for a town built whole.
-                let committed = walkers.take();
+                town.add(walkers.take());
                 let edited = walkers.edited();
                 let job = match next {
                     Ok(job) => job,
                     Err(_) => {
                         let copy = publisher.wait_for(edited, Duration::from_secs(1));
-                        town.on(&copy, buildsafe::open_ground(&copy), &committed);
+                        town.on(&copy, buildsafe::open_ground(&copy), true);
                         continue;
                     }
                 };
@@ -4268,7 +4272,7 @@ fn edit_checker(
                 let Some(world) = world.as_mut() else {
                     // No edit waits: the town is built, or kept, ahead of the next.
                     let copy = publisher.wait_for(edited, Duration::from_secs(1));
-                    town.on(&copy, buildsafe::open_ground(&copy), &committed);
+                    town.on(&copy, buildsafe::open_ground(&copy), true);
                     continue;
                 };
                 let snapshot = walkers.current();
@@ -4298,16 +4302,19 @@ fn edit_checker(
                 };
                 let checked = checked
                     .and_then(|c| {
-                        let known = town.on(&copy, ground, &committed).map(Known::of);
+                        let known = town.on(&copy, ground, false).map(Known::of);
+                        // Planned with the ids the commit will mint, so its guard's ground is the map's (#3743).
                         sim::edit::plan_classes(
                             c,
                             &copy,
                             ground,
                             known.as_ref(),
                             snapshot.classes.values().copied(),
+                            reserved.clone(),
                         )
                     })
-                    .and_then(|p| {
+                    .and_then(|mut p| {
+                        let kept = p.take_map();
                         let tree = buildsafe::souls(&copy, &world.kinds);
                         let souls = buildsafe::judged(tree, &snapshot.bodies);
                         let maps = source
@@ -4315,6 +4322,7 @@ fn edit_checker(
                                 buildsafe::PreparedMaps::prepare_classes(
                                     &copy,
                                     &p,
+                                    kept,
                                     reserved.clone(),
                                     &souls,
                                     source,
