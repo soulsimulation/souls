@@ -959,14 +959,28 @@ impl Acts {
             }
             // A body's slot the caller left out, which the form selects from the thing's free slots, is the free one
             // whose stand point is nearest the body (C19's pick); a thing with none free is refused by name (#3802).
-            let (mut picked, mut none_free) = (false, None);
+            // One the caller named that another body holds is refused `place-taken`, also before any walk.
+            let (mut picked, mut none_free, mut taken) = (false, None, None);
             if let (Some(b), Some(f)) = (
                 bodies.as_deref().filter(|b| b.slots.place(*node).is_some()),
                 entry.get("forms").and_then(|f| f.get(form)),
             ) {
                 let names = entry.get("slots").and_then(Json::obj).unwrap_or(&[]);
                 for (key, _) in f.get("takes").and_then(Json::obj).unwrap_or(&[]) {
-                    if all.contains_key(key) || !selects_body_slot(f, key) {
+                    if !selects_body_slot(f, key) {
+                        continue;
+                    }
+                    if let Some(skills::form_runner::Arg::Name(n)) = all.get(key) {
+                        let slot = names.iter().position(|(m, _)| m == n).map(|i| i as u64 + 1);
+                        if slot
+                            .and_then(|s| b.slots.holder_in(*node, s))
+                            .is_some_and(|h| h != body)
+                        {
+                            taken = Some(n.clone());
+                        }
+                        continue;
+                    }
+                    if all.contains_key(key) {
                         continue;
                     }
                     let free = b.slots.free(&b.runner.controller, body, *node);
@@ -978,6 +992,10 @@ impl Acts {
                         None => none_free = Some(key.clone()),
                     }
                 }
+            }
+            if let Some(name) = taken {
+                first.get_or_insert(refusal("place-taken", name));
+                continue;
             }
             if let Some(key) = none_free {
                 first.get_or_insert(refusal(sim::commit::bind::NONE_FREE, key));

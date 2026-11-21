@@ -2982,9 +2982,9 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
             .filter(|(_, f)| f.0 != stage)
             .collect()
     };
+    let before = off(&dir);
     let taken = souls[40].act("eden:step_up", Some(stage), spot(1));
     println!("Soul 41: step up onto a taken spot {taken:?}");
-    let before = off(&dir);
     let full = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
     println!("Soul 41: step up onto the full stage {full:?}");
     let all = on_stage(&dir);
