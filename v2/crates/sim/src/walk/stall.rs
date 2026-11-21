@@ -5,12 +5,23 @@
 //!   the world gives the walker's place, the corner and the leg's end to [`Watch::seen`]. A tick in which the walk
 //!   does not ask (it waits its turn at a narrow link, it is carried across one, it stands for its spot) is no tick of
 //!   walking: its watch starts again ([`Watch::keep`]).
-//! - **Progress** is either of two gains over the last [`WINDOW`] of world time, each at least [`GAIN`]: the least
-//!   distance left through the corner aimed at (`|here - corner| + |corner - leg's end|`, never more than the way
-//!   left), or, while it aimed at one corner the whole window, the least distance to that corner. A walker going round
-//!   a building gains on its corner; one pushed against a thing or an edge, turning this way and that, gains on
-//!   neither. A new leg's end starts the watch again. A tick aimed at its own place (standing for the planner's
-//!   line, the first tick or two of each leg) is no tick of walking and is not sampled (C22, #3485).
+//! - **Progress** is any of three gains over the last [`WINDOW`] of world time, each at least [`GAIN`]:
+//!   1. the least way left: the least, so far on this leg, of the distance through the corner aimed at
+//!      (`|here - corner| + |corner - leg's end|`, never more than the way left);
+//!   2. while it aimed at one corner the whole window, the least distance to that corner;
+//!   3. the distance to the corner aimed at now, from where the window began to where the walker stands: a line that
+//!      turns away from the leg's end at a corner reached within the window makes the way through the new corner
+//!      longer than the least before it, though the walker goes on at full speed (#1960).
+//!
+//!   A walker going round a building gains on its corner; one pushed against a thing or an edge, turning this way and
+//!   that, gains on none. A new leg's end starts the watch again. A tick aimed at its own place (standing for the
+//!   planner's line, the first tick or two of each leg) is no tick of walking and is not sampled (C22, #3485).
+//! - **The backstop.** Measures 2 and 3 are taken against whatever corner is aimed at, so a walker circling a block or
+//!   orbiting a leg's end it cannot reach, its corner always ahead, gains on them for ever. The least way left
+//!   (measure 1) must also shrink by [`GAIN`] at least once every [`LONG`] on the leg, or the walk is stalled: a
+//!   circling or to-and-fro walker comes back no nearer, while a walk round a corner that turns away from its leg's
+//!   end makes the way through the new corner longer by less than it walks in [`LONG`] (up to about 16 m at walking
+//!   speed).
 //! - **The blocker** ([`blocker`]): the thing on the walker's ground whose solids are nearest it, within [`NEAR`],
 //!   or else the edge of the walked ground where it stands.
 //!
@@ -31,6 +42,8 @@ use crate::ground::scene::{F_SOLIDS, xform_to};
 pub const WINDOW: Micros = 3_000_000;
 /// The least gain toward its goal over [`WINDOW`] that is progress, µm.
 pub const GAIN: i64 = 250_000;
+/// The longest a walk may go without its least way left shrinking by [`GAIN`], world time µs: the backstop.
+pub const LONG: Micros = 4 * WINDOW;
 /// A thing whose solids are this near the walker is named as what blocks it, µm.
 pub const NEAR: i64 = 1_000_000;
 
@@ -50,6 +63,8 @@ struct Track {
     to: [i64; 2],
     /// When it began aiming at its corner.
     aimed: Micros,
+    /// The least way left when it last shrank by [`GAIN`], and when (the backstop).
+    mark: (i64, Micros),
     samples: VecDeque<Sample>,
 }
 
@@ -91,16 +106,17 @@ impl Watch {
         if aim == here {
             return false;
         }
+        let left = len(here, aim).saturating_add(len(aim, to));
         let t = self.walkers.entry(who).or_insert(Track {
             to,
             aimed: now,
+            mark: (left, now),
             samples: VecDeque::new(),
         });
         if t.to != to {
-            (t.to, t.aimed) = (to, now);
+            (t.to, t.aimed, t.mark) = (to, now, (left, now));
             t.samples.clear();
         }
-        let left = len(here, aim).saturating_add(len(aim, to));
         let near = len(here, aim);
         let s = match t.samples.back() {
             Some(b) if b.aim == aim => Sample {
@@ -129,6 +145,12 @@ impl Watch {
             },
         };
         t.samples.push_back(s);
+        if t.mark.0 - s.left >= GAIN {
+            t.mark = (s.left, now);
+        }
+        if now - t.mark.1 >= LONG {
+            return true;
+        }
         // The newest sample a window or more old stays as the window's start.
         while t.samples.len() > 1 && t.samples[1].at <= now - WINDOW {
             t.samples.pop_front();
@@ -139,9 +161,6 @@ impl Watch {
         }
         let on_left = first.left - s.left >= GAIN;
         let on_corner = t.aimed <= first.at && first.near - s.near >= GAIN;
-        // Or nearer the corner it aims at now than where the window began, by its place: a line that turns away from
-        // the leg's end at a corner reached within the window makes the way left through the new corner longer than
-        // the least before it, though the walker goes on at full speed (#1960).
         let on_aim = len(first.here, aim).saturating_sub(len(here, aim)) >= GAIN;
         !(on_left || on_corner || on_aim)
     }
@@ -344,6 +363,83 @@ mod tests {
             };
             assert!(!w.seen(fixture(9), here, aim, to, t * TICK), "tick {t}");
         }
+    }
+
+    /// Walks `who` round and round the closed line `ring` at 1.4 m/s, aiming at the corner `ahead` corners on from
+    /// the one it last passed, its leg's end `to`, for `ticks` ticks: the tick it was found stalled, if any.
+    fn round(w: &mut Watch, ring: &[[i64; 2]], ahead: usize, to: [i64; 2], ticks: u32) -> Option<u32> {
+        let (mut k, mut p) = (0, ring[0]);
+        for t in 0..ticks {
+            let aim = ring[(k + ahead) % ring.len()];
+            if w.seen(fixture(9), p, aim, to, Micros::from(t) * TICK) {
+                return Some(t);
+            }
+            // On 70 mm toward the next corner, and past it toward the one after.
+            let mut go = 70_000;
+            while go > 0 {
+                let next = ring[(k + 1) % ring.len()];
+                let d = len(p, next);
+                if d <= go {
+                    (p, k, go) = (next, (k + 1) % ring.len(), go - d);
+                } else {
+                    p = [p[0] + (next[0] - p[0]) * go / d, p[1] + (next[1] - p[1]) * go / d];
+                    go = 0;
+                }
+            }
+        }
+        None
+    }
+
+    /// #1960 review: a walker going round and round, its corner always ahead, gains on that corner for ever; the
+    /// backstop ends it, [`LONG`] after its least way left last shrank.
+    #[test]
+    fn circling_orbiting_and_to_and_fro_end_stalled() {
+        let block = [
+            [0, 0],
+            [10_000_000, 0],
+            [10_000_000, 10_000_000],
+            [0, 10_000_000],
+        ];
+        // Round a 10 m block, its leg's end 50 m off: once round (about 29 s), and no nearer for 12 s.
+        let found = round(&mut Watch::new(), &block, 1, [50_000_000, 50_000_000], 4000);
+        assert_eq!(found, Some(733));
+        // Round a 10 m block whose middle is its leg's end.
+        let found = round(&mut Watch::new(), &block, 1, [5_000_000, 5_000_000], 4000);
+        assert_eq!(found, Some(240));
+        // Orbiting 0.6 m round a leg's end it cannot reach, aiming two corners of a twelve-sided ring ahead.
+        let (a, b) = (300_000, 519_615);
+        let orbit = [
+            [600_000, 0],
+            [b, a],
+            [a, b],
+            [0, 600_000],
+            [-a, b],
+            [-b, a],
+            [-600_000, 0],
+            [-b, -a],
+            [-a, -b],
+            [0, -600_000],
+            [a, -b],
+            [b, -a],
+        ];
+        let found = round(&mut Watch::new(), &orbit, 2, [0, 0], 4000);
+        assert_eq!(found, Some(240));
+        // To and fro between two corners 10 m apart, its leg's end 20 m to the side.
+        let pair = [[0, 0], [10_000_000, 0]];
+        let found = round(&mut Watch::new(), &pair, 1, [5_000_000, 20_000_000], 4000);
+        assert_eq!(found, Some(240));
+        // To and fro along 1.5 m of a wall, aiming at a corner 30 m off one way, then the other.
+        let mut w = Watch::new();
+        let found = (0..4000u32).find(|&t| {
+            let (leg, f) = ((t / 21) % 2, i64::from(t % 21) * 70_000);
+            let (x, aim) = if leg == 0 {
+                (f, [30_000_000, -1_000_000])
+            } else {
+                (1_470_000 - f, [-30_000_000, -1_000_000])
+            };
+            w.seen(fixture(9), [x, 0], aim, [0, -40_000_000], Micros::from(t) * TICK)
+        });
+        assert!(found.is_some_and(|t| t <= 240), "{found:?}");
     }
 
     #[test]
