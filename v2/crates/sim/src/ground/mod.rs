@@ -120,8 +120,10 @@ const CELL: i32 = 1_000;
 pub const HUMAN_RADIUS: i64 = Size::Standard.radius_mm();
 /// A doorway's depth either side of its middle when no wall flanks it, mm.
 const DOOR_HALF_DEPTH: i64 = 100;
-/// How far the passage through a doorway runs past the grown wall, so that it overlaps the patch on each side, mm.
-const PASSAGE_REACH: i64 = 40;
+/// How far the passage through a doorway runs past the grown wall, so that it overlaps the patch on each side, mm. A
+/// modelled floor may stop short of its wall's inner face (the Mars campus's Mimos: 100 mm), and its door must still
+/// meet it.
+const PASSAGE_REACH: i64 = 150;
 
 type P = IntPoint<i32>;
 

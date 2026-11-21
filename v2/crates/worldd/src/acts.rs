@@ -44,8 +44,11 @@
 //!   ends `walk.blocked` in that tick, its body's driver released, and the act's ending entry names the nearest thing
 //!   or edge in its way ([`sim::walk::stall::blocker`]).
 //!
-//! Not here: R2's needs checked again at commit (the checkers read bodies from the tree, which does not hold them
-//! yet); a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
+//! - **Needs at commit** (#3888). After who may, every need of the form is decided by R2's one evaluator on the
+//!   world's own state, links, seats and hands included ([`crate::needs`]): an unmet need is refused by its reason's
+//!   name and index before any walk or effect. Reach is the move's own, measured at its start (C22).
+//!
+//! Not here: a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
 //! nodes); resuming a run after a restart.
 
 use replica::host::WalkPlan;
@@ -80,10 +83,11 @@ use crate::bodies::Bodies;
 
 type R<T> = Result<T, Refusal>;
 
-/// The longest a form's walk may take, µs (C20, #3469): about 250 m at a body's free speed (1.4 m/s), most of the way
-/// across Eden's town round its buildings, through doors and up stairs. A walk that cannot go on ends by its own name,
-/// or `deadline-passed` by then.
-pub const WALK_MOST: Micros = 180_000_000;
+/// The longest a form's walk may take, µs (C20, #3469), its route not yet planned when its timer is set: 30 minutes,
+/// about 2.5 km at a body's free speed (1.4 m/s), twice the longest way across Eden. It is a bound, not a pace: as in
+/// today's game, a walk that stops making progress ends `walk.blocked` by C21's watch ([`BLOCKED`]), and one that
+/// cannot go on by its own name. It was 180 s, and every walk over about 250 m ended `act.timed-out` while moving.
+pub const WALK_MOST: Micros = 1_800_000_000;
 
 /// The ending of a form's walk that stopped making progress (C21, #3484).
 pub const BLOCKED: &str = "walk.blocked";
@@ -105,8 +109,13 @@ pub(crate) struct Walk {
     started: Micros,
     planned: bool,
     watch: Watch,
+    /// The leg's end last seen on the walk's line.
+    leg: Option<[i64; 2]>,
 }
 
+/// A gateway walk's time once its route is planned: the route at walking speed, plus half again for bends and yielding
+/// (at least 5 s), plus 5 s per crossing or door. No total cap: a long walk that keeps moving ends done, never by the
+/// clock; C21's watch ends one that stalls, and the intent's expiry still bounds it.
 fn walk_span(length_mm: u64, links: usize) -> Micros {
     let speed = i128::from(crate::bodies::WALK);
     let travel = (i128::from(length_mm) * 1_000_000_000 + speed - 1) / speed;
@@ -119,7 +128,6 @@ fn walk_span(length_mm: u64, links: usize) -> Micros {
                 .unwrap_or(i64::MAX)
                 .saturating_mul(5_000_000),
         )
-        .min(WALK_MOST)
 }
 
 impl Walk {
@@ -130,6 +138,7 @@ impl Walk {
             started,
             planned: false,
             watch: Watch::new(),
+            leg: None,
         }
     }
 
@@ -154,22 +163,26 @@ impl Walk {
         let fields = b.runner.fields.get(&self.body);
         let waiting = sim::host::waiting(fields).is_some()
             || fields.is_some_and(|f| f.contains_key(&replica::host::F_HELD));
+        // The corner and the leg's end its line goes toward, as a form's walk asks them: never the walk's granted
+        // place, which on a route with crossings lies past the leg's end, so a leg heading away from it gained nothing
+        // and a Soul walking at full speed was ended `walk.blocked` (#1960).
         let aim = b
             .town
-            .next_corner(self.body)
-            .filter(|(node, _)| *node == sim::walk::node_of(&me));
-        if waiting || b.runner.controller.carrying(self.body).is_some() || aim.is_none() {
+            .next_corner_toward(self.body)
+            .filter(|(node, _, _)| *node == sim::walk::node_of(&me));
+        let Some((_, aim, to)) =
+            aim.filter(|_| !waiting && b.runner.controller.carrying(self.body).is_none())
+        else {
             self.watch.keep(&BTreeSet::new());
             return (due, false);
-        }
-        let (node, aim) = aim.unwrap();
-        let to = b
-            .runner
-            .asks
-            .get(&self.body)
-            .filter(|(t, _)| t.node == node)
-            .and_then(|_| b.runner.granted.get(&self.body))
-            .map_or(aim, |p| [p.x, p.z]);
+        };
+        // A line forgotten while the planner finds the next one keeps its corner, not its leg's end: the last leg's
+        // end seen stands for it (the new line goes toward the same one), so a walk trapped between lines is still
+        // watched.
+        let to = match to {
+            Some(t) => *self.leg.insert(t),
+            None => self.leg.unwrap_or(aim),
+        };
         let here = [me.pose.position.x, me.pose.position.z];
         (due, self.watch.seen(self.body, here, aim, to, now))
     }
@@ -318,6 +331,8 @@ struct Sight<'a> {
     context: BTreeMap<Id, (Id, usize, usize)>,
     /// Each run's walk in progress to a named point: its step, the point's node and the point's name (C34, #3599).
     walks: BTreeMap<Id, (usize, Id, Name)>,
+    /// The bodies whose walk in progress is an approach to a move's point (#3688).
+    approaches: BTreeSet<Id>,
     /// Each run's walk in progress right before a sit into a slot the places hold: its step, the seat's floor and its
     /// stand point on that floor (moved clear at registration when the entry's point is blocked).
     sit_walks: BTreeMap<Id, (usize, Id, Vec3)>,
@@ -375,6 +390,24 @@ impl Sight<'_> {
             }
         }
         None
+    }
+
+    /// Point `at` of node `node`'s frame carried onto the floor of `node` nearest its height (#3688), when `node` has
+    /// floors: `None` when it has none.
+    fn floor_of(&self, node: Id, at: Vec3) -> Option<(Id, Vec3)> {
+        use import_eden::FLOOR;
+        let floor = self
+            .tree
+            .children(self.tree.handle(node)?)?
+            .iter()
+            .filter_map(|&c| self.tree.node(c))
+            .filter(|f| plain(f.kind()) == FLOOR)
+            .filter_map(|f| Some((f.id(), f.place()?)))
+            .min_by_key(|(_, p)| (p.position.y - at.y).abs())?;
+        let [w, x, y, z] = floor.1.orientation.parts();
+        let back = replica::pose::Quat::new(w, -x, -y, -z).ok()?;
+        let local = back.rotate(at.minus(floor.1.position).ok()?).ok()?;
+        Some((floor.0, local))
     }
 
     /// A walk to a building's named area, resolved onto the building's own room and floor (C34, #3599). `body`'s run
@@ -521,8 +554,42 @@ impl Geometry for Sight<'_> {
             Some(None) => return WalkPlan::Legs(Vec::new()),
             None => (node, at),
         };
+        // An approach to a move's point (#3688): a point of a thing on a building with floors (an inner door) is on
+        // the building's floor nearest its height, so the walk goes in to it, and once in through a link the runner
+        // approaches again from that floor; on the floor the body stands on, it is aimed short of the point, on the
+        // body's side.
+        let (node, at) = if self.approaches.contains(&body) {
+            let (node, at) = self.floor_of(node, at).unwrap_or((node, at));
+            self.with_view(body, |v| {
+                let (floor, p, _) = v.on_floor(node, at)?;
+                (floor == sim::walk::node_of(me)).then(|| {
+                    let short = skills::form_runner::APPROACH_SHORT;
+                    (
+                        floor,
+                        skills::form_runner::short_of(p, me.pose.position, short),
+                    )
+                })
+            })
+            .flatten()
+            .unwrap_or((node, at))
+        } else {
+            (node, at)
+        };
         let mut planning = self.planning.borrow_mut();
-        match planning.ask(key, *me, FormQuery::Walk { node, at, reach }, &self.map) {
+        // An approach's move acts on the run's own thing: when that is a doorway's door, the walk may end in its
+        // doorway (#3688).
+        let door = self
+            .approaches
+            .contains(&body)
+            .then(|| self.walks.get(&body).map(|w| w.1))
+            .flatten();
+        let query = FormQuery::Walk {
+            node,
+            at,
+            reach,
+            door,
+        };
+        match planning.ask(key, *me, query, &self.map) {
             Some(FormResult::Walk(legs)) => {
                 // A later stage may start in this same call before Sight's context is refreshed: it must request its
                 // own answer, even when its step number and target repeat the preceding stage.
@@ -617,9 +684,18 @@ impl Sight<'_> {
                 if own_floor {
                     return Some([p.x, p.z]);
                 }
-                view.on_floor(target, p)
-                    .filter(|(f, ..)| *f == floor)
-                    .map(|(_, p, _)| [p.x, p.z])
+                if let Some(on) = view.on_floor(target, p).filter(|(f, ..)| *f == floor) {
+                    return Some([on.1.x, on.1.z]);
+                }
+                // A thing of a building with floors (an inner door, #3688), from a body on that building's floor.
+                let place = n.place()?;
+                let up = place
+                    .position
+                    .plus(place.orientation.rotate(p).ok()?)
+                    .ok()?;
+                self.floor_of(n.parent()?, up)
+                    .filter(|(f, _)| *f == floor)
+                    .map(|(_, p)| [p.x, p.z])
             };
             let q = [from.x, from.z];
             let named = um(entry
@@ -782,6 +858,164 @@ pub struct Acts {
     /// What blocked each body whose walk ended [`BLOCKED`], until its run's ending is read.
     blocked: BTreeMap<Id, String>,
     planning: RefCell<Planning>,
+    /// The code hatches' modules this world ships (F8, #3713), loaded and checked once, by their SHA-256 multihash.
+    hatches: BTreeMap<Vec<u8>, replica::hatch::Loaded>,
+}
+
+/// The refusal of a thing argument the caller left out whose selector finds nothing (#3914): `form-rules` names the
+/// same end `none_selected`.
+pub const NONE_SELECTED: &str = "thing.none-selected";
+
+/// How far from the anchor a thing `here` may be, mm: today's reach for a thing a form uses nearby (a tap for a
+/// kettle, `TAP_REACH` in today's tea).
+pub const HERE_REACH_MM: i64 = 20_000;
+
+/// How near a body stands to a thing to be within a form's reach of it, mm, beyond the thing's own half size.
+const NEAR_MM: i64 = 1_500;
+
+/// A node's place in the zone's frame, µm: its position carried up the tree through each parent's place, turns
+/// included.
+fn world_at(tree: &Tree, node: Id) -> Option<Vec3> {
+    let n = tree.node(tree.handle(node)?)?;
+    carried(
+        tree,
+        n.parent(),
+        n.place().map_or(Vec3::ZERO, |p| p.position),
+    )
+}
+
+/// A position in node `frame`'s frame carried into the zone's: through each node's place up the tree, turns included
+/// (a seated body's controller pose is in its seat's frame).
+fn carried(tree: &Tree, frame: Option<Id>, local: Vec3) -> Option<Vec3> {
+    let mut at = local;
+    let mut up = frame;
+    for _ in 0..64 {
+        let Some(p) = up else { return Some(at) };
+        let pn = tree.node(tree.handle(p)?)?;
+        if let Some(pp) = pn.place() {
+            at = pp.orientation.rotate(at).ok()?.plus(pp.position).ok()?;
+        }
+        up = pn.parent();
+    }
+    None
+}
+
+/// Whether `body` stands within a form's reach of `node`: within its half size (its entry's bounds) and
+/// [`NEAR_MM`], across x and z, in the zone's frame (`body_at` when the body is not a node of the tree).
+fn within_reach(tree: &Tree, entry: &Json, body: Id, body_at: Option<Vec3>, node: Id) -> bool {
+    let (Some(b), Some(n)) = (world_at(tree, body).or(body_at), world_at(tree, node)) else {
+        return false;
+    };
+    let half = entry
+        .get("geometry")
+        .and_then(|g| g.get("bounds_mm"))
+        .and_then(Json::arr)
+        .map_or(0, |b| {
+            [b.first(), b.get(2)]
+                .into_iter()
+                .flatten()
+                .filter_map(|v| match v {
+                    Json::Int(n) => i64::try_from(*n).ok(),
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(0)
+                / 2
+        });
+    let reach = i128::from((half + NEAR_MM) * 1_000);
+    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+    d(b.x, n.x) + d(b.z, n.z) <= reach * reach
+}
+
+/// Binds a `thing` argument the caller left out by its `select` (E2's closed list, the entry format's `select`;
+/// `form-rules`' `selectThing` reads it the same way, #3914). `Ok(Some(thing))` binds it, `Ok(None)` finds nothing
+/// that qualifies, and `Err(())` is a selector this does not read (the argument stays missing).
+///
+/// - **The set** (`in`): `this` the children of the act's node; `here` those of the node the actor's body is in
+///   (the act's node's parent when the body is not in the tree) and what the body holds, within [`HERE_REACH_MM`]
+///   of the anchor; `parent` those of the act's node's parent. Never the act's node, the actor's body, a body (a
+///   node linked `souls:body-of`) or a node of a private audience; with `kind`, only that kind.
+/// - **The order**: by squared distance in the zone's frame (x, y and z) from the `anchor` (`me` the body, `this`
+///   the act's node), `nearest` first or `furthest` first, ties by id; a thing with no place goes after every placed
+///   one, by id.
+/// - **The rank**: 1, 2, ... or `last`. Too few is nothing.
+pub(crate) fn select_thing(
+    tree: &Tree,
+    select: &Json,
+    node: Id,
+    body: Id,
+    body_at: Option<Vec3>,
+) -> Result<Option<Id>, ()> {
+    if select.get("of").and_then(Json::str) != Some("things") {
+        return Err(());
+    }
+    let parent = |id: Id| tree.node(tree.handle(id)?)?.parent();
+    let here = select.get("in").and_then(Json::str) == Some("here");
+    let sets: Vec<Id> = match select.get("in").and_then(Json::str) {
+        Some("this") => vec![node],
+        Some("here") => parent(body)
+            .or_else(|| parent(node))
+            .into_iter()
+            .chain([body])
+            .collect(),
+        Some("parent") => parent(node).into_iter().collect(),
+        _ => return Err(()),
+    };
+    let anchor = match select.get("anchor").and_then(Json::str) {
+        Some("me") => world_at(tree, body).or(body_at),
+        Some("this") => world_at(tree, node),
+        _ => return Err(()),
+    };
+    let furthest = match select.get("order").and_then(Json::str) {
+        Some("nearest") => false,
+        Some("furthest") => true,
+        _ => return Err(()),
+    };
+    let rank = match select.get("rank") {
+        Some(Json::Int(n)) if *n >= 1 => Some(usize::try_from(*n).map_err(|_| ())?),
+        Some(Json::Str(l)) if l == "last" => None,
+        _ => return Err(()),
+    };
+    let kind = select.get("kind").and_then(Json::str);
+    let is_body = |id: Id| {
+        tree.links_at(id)
+            .iter()
+            .any(|e| plain(tree.ty(e)) == "souls:body-of")
+    };
+    let d2 = |a: Vec3, p: Vec3| {
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        d(a.x, p.x) + d(a.y, p.y) + d(a.z, p.z)
+    };
+    let reach = i128::from(HERE_REACH_MM * 1_000) * i128::from(HERE_REACH_MM * 1_000);
+    let mut ranked: Vec<(Option<i128>, Id)> = sets
+        .iter()
+        .filter_map(|s| tree.children(tree.handle(*s)?))
+        .flatten()
+        .filter_map(|&h| tree.node(h))
+        .filter(|n| n.id() != node && n.id() != body)
+        .filter(|n| n.audience() == replica::world_model::Audience::Everyone)
+        .filter(|n| kind.is_none_or(|k| plain(n.kind()) == k))
+        .filter(|n| !is_body(n.id()))
+        .map(|n| {
+            let d = anchor.zip(world_at(tree, n.id())).map(|(a, p)| d2(a, p));
+            (d, n.id())
+        })
+        .filter(|(d, _)| !here || d.is_some_and(|d| d <= reach))
+        .collect();
+    ranked.sort_by(|(da, a), (db, b)| {
+        let by = match (da, db) {
+            (Some(x), Some(y)) if furthest => y.cmp(x),
+            (Some(x), Some(y)) => x.cmp(y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        };
+        by.then(a.cmp(b))
+    });
+    Ok(match rank {
+        Some(r) => ranked.get(r - 1).map(|(_, id)| *id),
+        None => ranked.last().map(|(_, id)| *id),
+    })
 }
 
 /// The moves a form's step may name: every move content declares, and the body's own (C23, [`crate::moves`]).
@@ -887,7 +1121,60 @@ impl Acts {
             watch: Watch::new(),
             blocked: BTreeMap::new(),
             planning: RefCell::new(Planning::default()),
+            hatches: BTreeMap::new(),
         }
+    }
+
+    /// Loads the code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713), each named by the hash of
+    /// its bytes: a module refused at load is refused here by its name, before the world serves.
+    pub fn hatches(&mut self, modules: &[Vec<u8>]) -> Result<usize, Refusal> {
+        for bytes in modules {
+            let mut named = vec![replica::ids::SHA2_256, 32];
+            named.extend(replica::ids::sha256(bytes));
+            let loaded = replica::hatch::Loaded::load(bytes, &named)?;
+            self.hatches.insert(named, loaded);
+        }
+        Ok(self.hatches.len())
+    }
+
+    /// The sets form `form`'s code hatch answers for `node`, if the form has one (F8, #3713): its declared reads from
+    /// the node's fields and the act's arguments, run in the module the world ships under its hash. A no refuses the
+    /// act `hatch-said-no` with the hatch's `why`; a module the world does not ship is `hatch-module-missing`.
+    fn hatch_sets(
+        &self,
+        tree: &Tree,
+        node: Id,
+        entry: &Json,
+        form: &str,
+        args: &skills::form_runner::Args,
+    ) -> Result<Option<Vec<skills::form_runner::Effect>>, Refusal> {
+        let Some(hatch) = skills::form_runner::bind_hatch(entry, form)? else {
+            return Ok(None);
+        };
+        let Some(module) = self.hatches.get(&hatch.module) else {
+            return Err(refusal("hatch-module-missing", form));
+        };
+        let empty = BTreeMap::new();
+        let fields = tree
+            .handle(node)
+            .and_then(|h| tree.node(h))
+            .map(|n| n.fields().clone());
+        let reads = skills::form_runner::hatch_reads(
+            entry,
+            &hatch,
+            fields.as_ref().unwrap_or(&empty),
+            args,
+        )?;
+        let v = skills::form_runner::run_hatch(&hatch, module, entry, &reads)?;
+        if !v.yes {
+            return Err(skills::form_runner::hatch_no(&hatch));
+        }
+        Ok(Some(
+            v.sets
+                .into_iter()
+                .map(|(field, to)| skills::form_runner::Effect::Set { field, to })
+                .collect(),
+        ))
     }
 
     /// Runs `f` on the world the runner reaches.
@@ -900,6 +1187,7 @@ impl Acts {
     ) -> T {
         let context = self.forms.planning_context();
         let walks = self.forms.walks();
+        let approaches = self.forms.approaches();
         self.planning.borrow_mut().keep(&context);
         let mut sit_walks = BTreeMap::new();
         let (controller, split, slots, map, questions) = match bodies {
@@ -958,6 +1246,7 @@ impl Acts {
             asked: RefCell::new(BTreeMap::new()),
             context,
             walks,
+            approaches,
             sit_walks,
             planning: &self.planning,
             map,
@@ -982,6 +1271,53 @@ impl Acts {
             out.extend(std::mem::take(&mut self.planning.borrow_mut().queued));
         }
         result
+    }
+
+    /// Whether the words an act of form `verb` (`<namespace>:<form>`) on `node` carries are everyone's (#3712): the
+    /// node's entry has the form, and the form sets a field whose audience is everyone from one of its `text`
+    /// arguments (words written on a board for all to read). Words in any other act stay their sender's (T8).
+    pub fn public_words(&self, tree: &Tree, node: Id, verb: &str) -> bool {
+        let Some(form) = verb.split_once(':').map(|(_, f)| f) else {
+            return false;
+        };
+        let Some(entry) = tree
+            .handle(node)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| self.kinds.get(plain(n.kind())))
+        else {
+            return false;
+        };
+        let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
+            return false;
+        };
+        let text = |a: &str| {
+            f.get("takes")
+                .and_then(|t| t.get(a))
+                .and_then(|t| t.get("type"))
+                .and_then(Json::str)
+                == Some("text")
+        };
+        let everyone = |field: &str| {
+            entry
+                .get("state")
+                .and_then(|s| s.get(field))
+                .and_then(|d| d.get("audience"))
+                .and_then(|a| a.get("rule"))
+                .and_then(Json::str)
+                == Some("everyone")
+        };
+        f.get("effects")
+            .and_then(Json::arr)
+            .unwrap_or(&[])
+            .iter()
+            .any(|e| {
+                e.get("change").and_then(Json::str) == Some("set")
+                    && e.get("to")
+                        .and_then(|t| t.get("arg"))
+                        .and_then(Json::str)
+                        .is_some_and(text)
+                    && e.get("field").and_then(Json::str).is_some_and(everyone)
+            })
     }
 
     /// Starts the act's first candidate that starts (`(node, form)` in rank order) for intent `intent` on `body`, or
@@ -1018,13 +1354,39 @@ impl Acts {
                 first.get_or_insert(refusal("arg-ambiguous", key));
                 continue;
             }
-            let mut all = match skills::form_runner::args_in(entry, &args.things, &args.slots) {
+            // A number for an argument the form takes as a count or an int is that number, not a slot (#3713).
+            let takes = entry
+                .get("forms")
+                .and_then(|f| f.get(form))
+                .and_then(|f| f.get("takes"));
+            let counted = |k: &String| {
+                matches!(
+                    takes
+                        .and_then(|t| t.get(k))
+                        .and_then(|t| t.get("type"))
+                        .and_then(Json::str),
+                    Some("count" | "int")
+                )
+            };
+            let slots: BTreeMap<String, u64> = args
+                .slots
+                .iter()
+                .filter(|(k, _)| !counted(k))
+                .map(|(k, n)| (k.clone(), *n))
+                .collect();
+            let mut all = match skills::form_runner::args_in(entry, &args.things, &slots) {
                 Ok(all) => all,
                 Err(e) => {
                     first.get_or_insert(e);
                     continue;
                 }
             };
+            for (k, n) in args.slots.iter().filter(|(k, _)| counted(k)) {
+                all.insert(
+                    k.clone(),
+                    skills::form_runner::Arg::Int(i64::try_from(*n).unwrap_or(i64::MAX)),
+                );
+            }
             let mut ambiguous = None;
             for (key, value) in &args.values {
                 if all.insert(key.clone(), value.clone()).is_some() {
@@ -1080,6 +1442,57 @@ impl Acts {
                 first.get_or_insert(refusal(sim::commit::bind::NONE_FREE, key));
                 continue;
             }
+            // A thing the caller left out, which the form describes by a selector, is bound by it now (#3914); a
+            // selector that finds nothing is refused by name, before any walk.
+            let mut none_selected = None;
+            // The body's place in the zone's frame when it is not a node of the tree: its controller's pose carried
+            // up from its frame (a seat's, when seated).
+            let body_at = bodies
+                .as_deref()
+                .and_then(|b| b.runner.controller.body(body))
+                .and_then(|b| carried(tree, Some(b.pose.frame.node), b.pose.position));
+            if let Some(f) = entry.get("forms").and_then(|f| f.get(form)) {
+                for (key, take) in f.get("takes").and_then(Json::obj).unwrap_or(&[]) {
+                    if all.contains_key(key)
+                        || take.get("type").and_then(Json::str) != Some("thing")
+                    {
+                        continue;
+                    }
+                    let Some(select) = take.get("select") else {
+                        continue;
+                    };
+                    match select_thing(tree, select, *node, body, body_at) {
+                        Ok(Some(t)) => {
+                            all.insert(key.clone(), skills::form_runner::Arg::Node(t));
+                            picked = true;
+                        }
+                        Ok(None) => {
+                            none_selected = Some(key.clone());
+                            break;
+                        }
+                        Err(()) => {}
+                    }
+                }
+            }
+            // Nothing selected is told only to one who may do the form and stands within its reach, so a far act
+            // is never a way to learn what a hiding place holds.
+            if let Some(key) = none_selected {
+                let none = BTreeMap::<Id, BTreeSet<Id>>::new();
+                let named: Result<(), Refusal> =
+                    sim::forms::may(tree, &none, &|_| None, body, *node, entry, form).and_then(
+                        |()| {
+                            if within_reach(tree, entry, body, body_at, *node) {
+                                Err(refusal(NONE_SELECTED, key.clone()))
+                            } else {
+                                Err(refusal("out-of-reach", key.clone()))
+                            }
+                        },
+                    );
+                if let Err(e) = named {
+                    first.get_or_insert(e);
+                }
+                continue;
+            }
             let incompatible = entry
                 .get("forms")
                 .and_then(|f| f.get(form))
@@ -1120,6 +1533,48 @@ impl Acts {
                     continue;
                 }
             };
+            // Who may, then every need of the form, decided by the world on its own state (#3888): an act whose
+            // intent the forms already hold is its run or its receipt, never checked again.
+            if !self.forms.known(intent.id) {
+                let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
+                // The binder's refusals and who may's come first, from the run's own path below: a form the binder or who
+                // may refuses is left to it, so its refusal is the same as before.
+                let bound = match sim::forms::bind_stages(&entry, form) {
+                    Ok(Some(_)) => true,
+                    Ok(None) => skills::form_runner::bind_with(&entry, form, &all)
+                        .and_then(|_| skills::form_runner::bind_effects_args(&entry, form, &all))
+                        .is_ok(),
+                    Err(_) => false,
+                };
+                let permitted = bound
+                    && sim::forms::may(tree, &audiences, &|_| None, body, *node, &entry, form)
+                        .is_ok();
+                if permitted
+                    && let Err(e) = crate::needs::check(
+                        tree,
+                        bodies.as_deref(),
+                        &self.kinds,
+                        body,
+                        *node,
+                        &entry,
+                        form,
+                        &all,
+                        now,
+                    )
+                {
+                    first.get_or_insert(e);
+                    continue;
+                }
+            }
+            // A form's code hatch (F8, #3713) checks the act before any walk, and its answered fields are written
+            // with the form's effects, in place of the form's own sets of those fields.
+            let hatched = match self.hatch_sets(tree, *node, &entry, form, &all) {
+                Ok(h) => h,
+                Err(e) => {
+                    first.get_or_insert(e);
+                    continue;
+                }
+            };
             let was = match thing {
                 Some(t) => self.toward.insert(body, t),
                 None => self.toward.remove(&body),
@@ -1131,6 +1586,7 @@ impl Acts {
             let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
             let r = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
                 if !picked
+                    && hatched.is_none()
                     && args.things.is_empty()
                     && args.slots.is_empty()
                     && args.values.is_empty()
@@ -1150,7 +1606,14 @@ impl Acts {
                 }
                 // Thing, slot and value arguments (F4, C12, C24, C25): bound here, as `Forms::commit` binds none yet.
                 let steps = skills::form_runner::bind_with(&entry, form, &all)?;
-                let effects = skills::form_runner::bind_effects_args(&entry, form, &all)?;
+                let mut effects = skills::form_runner::bind_effects_args(&entry, form, &all)?;
+                if let Some(sets) = hatched {
+                    effects.retain(|e| {
+                        !matches!(e, skills::form_runner::Effect::Set { field, .. }
+                            if sets.iter().any(|s| matches!(s, skills::form_runner::Effect::Set { field: f, .. } if f == field)))
+                    });
+                    effects.extend(sets);
+                }
                 sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
                 forms.start(w, body, *node, intent, steps, effects, limits(), now)
             });
@@ -1299,6 +1762,20 @@ impl Acts {
         out
     }
 
+    /// Entries [`Acts::out`] handed back that the world refused to write: the timers they set come off the due list.
+    pub fn unwritten(&mut self, effects: &[Effect]) {
+        for e in effects {
+            let Body::Timers(ts) = &e.body else { continue };
+            for t in ts {
+                if let TimerRec::Set { timer, .. } = t
+                    && self.timers.remove(timer).is_some()
+                {
+                    let _ = self.due.clear(e.envelope.node, *timer);
+                }
+            }
+        }
+    }
+
     /// Runs that ended since the last call: each one's intent, its ending's name and, for [`BLOCKED`], what blocked
     /// its walk.
     pub fn ended(&mut self) -> Vec<(Id, String, Option<String>)> {
@@ -1328,12 +1805,14 @@ mod gateway_walk_tests {
     use super::*;
 
     #[test]
-    fn a_gateway_walks_route_time_includes_margin_links_and_the_same_ceiling() {
+    fn a_gateway_walks_route_time_includes_margin_and_links_with_no_ceiling() {
         assert_eq!(walk_span(14_000, 0), 15_000_000);
         assert_eq!(walk_span(14_000, 2), 25_000_000);
         assert!(walk_span(20_000, 0) > 14_000_000);
         assert!(walk_span(70_000, 0) >= 75_000_000);
-        assert_eq!(walk_span(u64::MAX, usize::MAX), WALK_MOST);
+        // A 600 m route is not capped at the old 180 s: 429 s of walking, plus half again.
+        assert!(walk_span(600_000, 0) > 600_000_000);
+        assert_eq!(walk_span(u64::MAX, usize::MAX), Micros::MAX);
     }
 }
 

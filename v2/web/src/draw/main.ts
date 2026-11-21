@@ -13,7 +13,8 @@ import { SocketSource, chooseFollow, exchange, type Session } from '../source/so
 import { browserSession, localTestSignIn } from '../source/signin.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
 import { WorldHover } from '../crowd/hover.ts';
-import { browserQuality } from './quality-tier.ts';
+import { browserQuality, pageMeshLod } from './quality-tier.ts';
+import { GroundLod, workerLevels, type Levels } from './lod.ts';
 import { WorldView } from './world.ts';
 import { support } from './support.ts';
 import { pageThings } from '../things/page.ts';
@@ -22,7 +23,7 @@ import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
 import { mountOwnerBox } from '../owner/box.ts';
 import { arrive } from '../worlds/arrive.ts';
-import { mountArrival } from '../arrival/card.ts';
+import { mountArrival, welcomeOf } from '../arrival/card.ts';
 import { WorldSky } from '../sky/sky.ts';
 import { Lightning } from '../sky/lightning.ts';
 import { tickWater } from '../water/water.ts';
@@ -102,7 +103,7 @@ const fauna = pageFauna(scene, world, q); // N-V7: birds, gulls, ducks and butte
 const souls = pageSouls(canvas, world, new URLSearchParams(location.search)); // W4: chips, status, speech, a Soul's page
 const director = new CameraDirector(cam, canvas, world, souls, new URLSearchParams(location.search), moment !== null); // V20: broadcast, follow, find
 director.shots = new ViewShots(renderer, scene, () => things.layer?.settled ?? true); // #3738: Explore's pictures, from this page's own draw
-const hover = new WorldHover(canvas, () => cam.camera, { world, things: () => things.layer, name: (id) => souls.copy.souls.get(id)?.name ?? null, chipShown: (id) => souls.placed.some((p) => p.id === id) }); scene.add(hover.ring); // N-V20
+const hover = new WorldHover(canvas, () => cam.camera, { world, things: () => things.layer, name: (id) => souls.copy.souls.get(id)?.name ?? null, chipShown: (id) => souls.placed.some((p) => p.id === id), inspect: (h) => h.kind === 'soul' && souls.open(h.id) }); scene.add(hover.ring); // N-V20
 Object.assign(globalThis, { v2: { renderer, scene, sky, fauna, cam, director, world, things, fx, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 installCapture(globalThis as any, q, document); // G10: `shoot` names a place, Soul or thing and the camera goes there
 const shot = shotSignal(q, globalThis as any); // #3795: `?shot`'s ready signal, as today's page gives it
@@ -132,6 +133,8 @@ cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 const firstFrame = arrive(worldName, status);
 // #3780: today's arrival card, the world's name on black and a light that grows with the stream, until the first frame.
 const card = mountArrival(document, worldName ?? installed?.world ?? 'Souls', q.has('shot') || moment !== null);
+// #3702: the world's welcome, its creator's words in the directory's list, on the card while it loads.
+if (installed) fetch(new URL('/v1/worlds', installed.directory), { credentials: 'omit' }).then((r) => r.json()).then((l) => card.greet(welcomeOf(l, installed.world)), () => {});
 let arrived = false, failedWith = '';
 const live = (address: string) => new StreamSource(address).start({
   pointer: (p) => ((pointer = p), card.reach('pointer')),
@@ -197,6 +200,19 @@ else if (worldName && !addressError) resolveWorld(worldName, new URLSearchParams
 );
 else card.fail(status.textContent = addressError || 'no stream: open this page with ?stream=<the stream directory> or ?world=<name>');
 
+// #3785: the ground drawn in sectors, simplified at a distance, once it has arrived (levels built in a worker).
+const meshLod = pageMeshLod();
+let groundLevels: Promise<Levels | null> | null = null, groundLod: GroundLod | null = null;
+function groundLodFrame(): void {
+  if (!meshLod) return;
+  if (!groundLod && world.terrainMesh) {
+    groundLevels ??= workerLevels(() => new Worker(new URL('./lod.worker.ts', import.meta.url), { type: 'module' }));
+    groundLod = new GroundLod(world.terrainMesh, world.terrainTiles, meshLod, (input) => groundLevels!.then((l) => (l ? l(input) : [])));
+    Object.assign((globalThis as any).v2, { groundLod });
+  }
+  groundLod?.update(cam.camera, canvas.clientHeight);
+}
+
 const secs = (us: number) => (us / 1e6).toFixed(2);
 const clockText = (us: number) => {
   const s = Math.floor(us / 1e6);
@@ -229,6 +245,7 @@ renderer.setAnimationLoop((now) => {
   if (t !== null) {
     drawn = world.draw(t, cam.camera);
     things.follow(); // #3603: what rides a course, where it is now
+    things.drawKinds(t); // #3871: things drawn from their kinds, in their state now
     hover.update(now, t);
     if (!framed && drawn > 0) {
       framed = true;
@@ -238,6 +255,7 @@ renderer.setAnimationLoop((now) => {
       if (at) cam.look(at, 0.6, -0.6, 55);
     }
   }
+  groundLodFrame();
   renderer.render(scene, cam.camera);
   shot.frame(t !== null && world.nodes.size > 0 && sky.recordAt(t) !== null && (things.layer?.settled ?? true)); // a world with no Souls draws no bodies, and is still ready
   if (!arrived && t !== null && world.nodes.size > 0) (arrived = true), card.reach('drawn');

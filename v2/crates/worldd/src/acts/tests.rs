@@ -138,6 +138,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
             node: ground,
             at: goal,
             reach: 0,
+            door: None,
         },
     };
     let line = FormQuestion {
@@ -173,6 +174,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         asked: RefCell::new(BTreeMap::new()),
         context: BTreeMap::from([(id, (intent, 0, 0))]),
         walks: BTreeMap::new(),
+        approaches: Default::default(),
         sit_walks: BTreeMap::new(),
         planning: &planning,
         map: Arc::clone(&map),
@@ -259,6 +261,7 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
         node: ground,
         at,
         reach: 0,
+        door: None,
     };
     planning.ask(key, body, question(Vec3::ZERO), &map);
     let old = FormAnswer {
@@ -362,6 +365,7 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         asked: RefCell::new(BTreeMap::new()),
         context: BTreeMap::new(),
         walks: BTreeMap::from([(id, (2, building, Name::new(point).unwrap()))]),
+        approaches: Default::default(),
         sit_walks: BTreeMap::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
@@ -396,5 +400,96 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         sight("r1a").area_floor(id, 3, ground, at),
         None,
         "another step: as before"
+    );
+}
+
+#[test]
+/// #3914: a thing argument left out is bound by its selector: the nearest (or furthest) of the set, never the act's
+/// node itself; a kind no thing has finds nothing; a selector off the closed list is not read.
+fn a_thing_selector_binds_the_nearest_of_its_set() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let tree = &imported.tree;
+    let ground = imported.nodes["ground"];
+    let kids: Vec<Id> = tree
+        .children(tree.handle(ground).unwrap())
+        .unwrap()
+        .iter()
+        .filter_map(|&h| tree.node(h))
+        .filter(|n| n.place().is_some())
+        .map(|n| n.id())
+        .collect();
+    assert!(kids.len() >= 3, "things on the ground");
+    let this = kids[0];
+    let nobody = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let sel = |order: &str, rank: Json, kind: Option<&str>| {
+        let mut o = vec![
+            ("of".into(), Json::Str("things".into())),
+            ("in".into(), Json::Str("parent".into())),
+            ("anchor".into(), Json::Str("this".into())),
+            ("order".into(), Json::Str(order.into())),
+            ("rank".into(), rank),
+        ];
+        if let Some(k) = kind {
+            o.push(("kind".into(), Json::Str(k.into())));
+        }
+        Json::Obj(o)
+    };
+    let at = |id: Id| world_at(tree, id).unwrap();
+    let d2 = |id: Id| {
+        let (a, p) = (at(this), at(id));
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        (d(a.x, p.x) + d(a.y, p.y) + d(a.z, p.z), id)
+    };
+    let mut by: Vec<(i128, Id)> = tree
+        .children(tree.handle(ground).unwrap())
+        .unwrap()
+        .iter()
+        .filter_map(|&h| tree.node(h))
+        .map(|n| n.id())
+        .filter(|&id| id != this && world_at(tree, id).is_some())
+        .map(d2)
+        .collect();
+    by.sort();
+    let nearest = select_thing(
+        tree,
+        &sel("nearest", Json::Int(1), None),
+        this,
+        nobody,
+        None,
+    );
+    assert_eq!(nearest, Ok(Some(by[0].1)), "the nearest other thing");
+    assert_ne!(nearest, Ok(Some(this)), "never the act's own node");
+    let last = select_thing(
+        tree,
+        &sel("nearest", Json::Str("last".into()), None),
+        this,
+        nobody,
+        None,
+    );
+    let furthest = select_thing(
+        tree,
+        &sel("furthest", Json::Int(1), None),
+        this,
+        nobody,
+        None,
+    );
+    assert_eq!(last, furthest, "the last nearest is the first furthest");
+    assert_eq!(
+        select_thing(
+            tree,
+            &sel("nearest", Json::Int(1), Some("test:no_such_kind")),
+            this,
+            nobody,
+            None
+        ),
+        Ok(None),
+        "nothing of the kind: nothing selected"
+    );
+    let off = Json::Obj(vec![("of".into(), Json::Str("free_slots".into()))]);
+    assert_eq!(
+        select_thing(tree, &off, this, nobody, None),
+        Err(()),
+        "not a thing selector"
     );
 }
