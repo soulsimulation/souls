@@ -348,12 +348,12 @@ fn slot_point(tree: &Tree, h: Handle, n: u64) -> Option<Vec3> {
 
 /// Each slot of node `h` and its point in the frame of its ancestor `frame`, µm (none when it has no slots).
 pub fn slot_points(tree: &Tree, h: Handle, frame: Handle) -> Result<Vec<(u64, Vec3)>, String> {
-    let Some(rows) = tree.node(h).and_then(|n| n.fields().get(&F_SLOTS)).map(row) else {
+    let Some(v) = tree.node(h).and_then(|n| n.fields().get(&F_SLOTS).cloned()) else {
         return Ok(Vec::new());
     };
     let x = xform_to(tree, h, frame)?;
     let mut out = Vec::new();
-    for r in rows.iter().map(row) {
+    for r in row(&v).iter().map(row) {
         let Some(n) = r.first().and_then(int).and_then(|n| u64::try_from(n).ok()) else {
             continue;
         };
