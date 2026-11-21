@@ -12,7 +12,7 @@
       "who": "anyone",
       "starts": "act",
       "needs": [{ "need": "hand", "free": true }],
-      "steps": [{ "step": "walk_to", "point": "front" }, { "step": "take" }],
+      "steps": [{ "step": "walk_to", "point": "front" }, { "step": "move", "move": "press", "at": "notices" }],
       "effects": [{ "change": "create", "kind": "eden:calendar_entry", "into": "actor_hand", "event": "notice_taken" }]
     }
   },

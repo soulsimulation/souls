@@ -802,13 +802,14 @@ function actsOf(words) {
       const c = out.at(-1), args = (c.args ??= {});
       // #3603: a carrier verb's point is in metres, a decimal allowed.
       if (arg && c.carrier) { c.args[arg[1]] = /^-?\d{1,7}(\.\d{1,6})?$/.test(arg[2]) ? Number(arg[2]) : arg[2]; continue; }
-      // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`); #3712: a form's
+      // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`, or a world time in
+      // µs, 16 digits: #3703); #3712: a form's
       // `text` argument is words, sent as T8's `{23: words}` for the world's text store, never logged as they are.
       if (arg) {
         kinds ??= kindsIn(join(home, 'kinds'));
         rows ??= rowsOf(copy);
         const take = kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
-        args[arg[1]] = take?.type === 'text' ? { 23: arg[2] } : /^-?\d{1,15}$/.test(arg[2]) ? Number(arg[2]) : arg[2];
+        args[arg[1]] = take?.type === 'text' ? { 23: arg[2] } : /^-?\d{1,16}$/.test(arg[2]) && Number.isSafeInteger(Number(arg[2])) ? Number(arg[2]) : arg[2];
         continue;
       }
       kinds ??= kindsIn(join(home, 'kinds'));
