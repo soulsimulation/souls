@@ -7,7 +7,7 @@
 import * as THREE from 'three';
 import type { NodeRec, PartRec } from '../source/source.ts';
 import type { WorldView } from '../draw/world.ts';
-import { SoulsCopy, TestMark, label, wrap, type Status } from './souls.ts';
+import { SoulsCopy, TestMark, label, spoken, TALK_MM, wrap, type Status } from './souls.ts';
 import { SPEECH_W, measurer, paint, place, type Candidate, type Ctx, type Placed } from './layer.ts';
 import { mountCard, nowText, readNow, type NowLine } from './mine.ts';
 
@@ -109,7 +109,7 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     ui.status.textContent = p.status;
     ui.list.replaceChildren(...p.recent.map((r) => {
       const li = document.createElement('li');
-      li.textContent = `${clock(r.at)} said “${r.words}”`;
+      li.textContent = `${clock(r.at)} ${r.reach > TALK_MM ? 'shouted' : 'said'} “${r.words}”`;
       return li;
     }));
     if (!p.recent.length) {
@@ -166,7 +166,7 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
         if (v.z > 1 || v.z < -1) continue;
         const said = speaking.get(s.id);
         const status: Status = copy.status(s.id, t, world, speaking);
-        cands.push({ id: s.id, x: (v.x + 1) * 0.5 * vw, y: (1 - v.y) * 0.5 * vh, dist, chip: label(s), status, speech: said?.words ?? null });
+        cands.push({ id: s.id, x: (v.x + 1) * 0.5 * vw, y: (1 - v.y) * 0.5 * vh, dist, chip: label(s), status, speech: said ? spoken(said) : null });
       }
       out.placed = place(cands, width, lines, vw, vh);
       paint(ctx, out.placed);

@@ -17,6 +17,7 @@ import { skyLook, type SkyLook } from './palette.ts';
 import { Rain, hash01 } from './rain.ts';
 import { civil, localAt, readSky, type SkyFields, type SkyRecord } from './record.ts';
 import { daylightFactors, sunAt } from './sun.ts';
+import { setWind } from './wind.ts';
 
 const WHITE = new THREE.Color(1, 1, 1);
 const smooth = (a: number, b: number, x: number) => {
@@ -121,6 +122,7 @@ export function setDome(d: SkyDome, s: SkyState, r: SkyRecord | null, t: number,
   u.uCloud.value.set(Math.min(1, 0.18 + 0.82 * s.cloud + s.rain * 0.1), Math.cos(a) * drift * 2.2, Math.sin(a) * drift * 2.2, day);
   ATMOS.value.z = -Math.cos(a) * drift;
   ATMOS.value.w = -Math.sin(a) * drift;
+  setWind(seconds, s.wind, a); // C9: plants and cloth sway with the wind, along today's bearing for the day
   u.uSunDir.value.copy(sunDir);
   u.uBow.value.set(0, (1 - smooth(0.05, 0.3, day)) * (1 - smooth(0.3, 0.75, s.cloud)) * (1 - fog) * (1 - s.mist * 0.5), seconds % 600, Math.min(0.9, fog * 0.9 * layer + s.rain * 0.25));
   if (!bodies) {
