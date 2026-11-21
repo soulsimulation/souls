@@ -1111,18 +1111,30 @@ async function answer(req) {
     case 'edit': case 'redo': return editOnce(req);
     case 'undo': {
       if (req.build === undefined) return editOnce(req);
-      // A whole build, undone step by step (#3694): while the newest of this daemon's edits is that build's.
+      // A whole build, undone step by step (#3694): while the newest of this daemon's edits is that build's. With
+      // `to`, a rewind (#3727, today's build rewind): only its edits after the last of that step.
       const newest = () => (state.edits ??= { done: [], undone: [] }).done.at(-1);
-      if (newest()?.build !== String(req.build)) {
+      const build = String(req.build), to = req.to === undefined ? null : String(req.to);
+      const done = state.edits?.done ?? [];
+      if (to !== null) {
+        const last = done.findLastIndex((e) => e.build === build && e.step === to);
+        if (last < 0) return closing({ ok: false, code: 'rewind.no-step', sent: false, detail: `build ${build} has no step ${to} among this daemon's edits` }, null, { now: true });
+        const after = done.slice(last + 1);
+        const foreign = after.findIndex((e) => e.build !== build);
+        if (foreign >= 0) return closing({ ok: false, code: 'undo.not-the-build', sent: false, detail: `an edit that is not build ${build}'s came after step ${to}: undo it first` }, null, { now: true });
+        if (req.dry) return closing({ ok: true, dry: true, build, to, steps: after.length, would: after.map((e) => e.step) }, null, { now: true });
+      }
+      if (newest()?.build !== build) {
         return closing({ ok: false, code: 'undo.not-the-build', sent: false, detail: `the newest edit is ${newest()?.build ? `build ${newest().build}'s` : 'not a build\'s'}` }, null, { now: true });
       }
       let steps = 0, last = null;
-      while (newest()?.build === String(req.build)) {
+      while (newest()?.build === build && !(to !== null && newest().step === to)) {
         last = await editOnce({ op: 'undo' });
         if (!last.ok) break;
         steps++;
       }
-      return { ...last, ok: last.ok, build: String(req.build), steps };
+      if (!last) return closing({ ok: true, build, to, steps: 0 }, null, { now: true });
+      return { ...last, ok: last.ok, build, steps, ...(to !== null ? { to } : {}) };
     }
     case 'pray': case 'answer': {
       const words = String(req.words ?? '').trim(), most = req.op === 'pray' ? PRAYER_MOST : ANSWER_MOST;

@@ -54,6 +54,8 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `redo` | the newest undo done again, with the same ids; a new edit clears it |
 | `<edit verb> ... --build <name> --step <name>` | one step of a build: the world keeps that batch under the build's name |
 | `undo --build <name>` | the whole build undone, step by step, while its steps are your newest edits |
+| `build claim <part> --area x0,z0,x1,z1 --helper [--ttl <minutes>]` | a claim with a helper: prints the helper's home (`SOULS_HOME=<folder>`); a sub-agent run there builds only inside that claim, until it lapses (default 120 minutes) |
+| `build rewind <build> --to <step> [--dry]` | undoes every edit of that build after the step, newest first (`--dry` lists them) |
 | `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
 | `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
 

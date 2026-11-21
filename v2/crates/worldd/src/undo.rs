@@ -124,6 +124,8 @@ pub fn check(a: Ask<'_>, town: &mut TownCopy) -> Result<Checked, Refused> {
             ));
         }
     }
+    // A live claim's area is its holder's: the lead's undo may not reach into it (#3727).
+    replica::edit::claims::judge_effects(a.copy, &a.effects)?;
     let part = part_on(a.copy, a.effects.clone())?;
     let souls = buildsafe::judged(buildsafe::souls(a.copy, a.kinds), a.moving);
     let ground = buildsafe::open_ground(a.copy);

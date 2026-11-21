@@ -229,11 +229,11 @@ struct New {
 
 /// Checks `edit` on `copy` (see the module's notes). Runs off the clock thread.
 pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refused> {
-    if edit.actor != Actor::Creator(world.creator) {
+    if !claims::admits(&edit, copy, world.creator) {
         return refuse(
             None,
             "edit.not-the-creator",
-            "only the world's creator edits it",
+            "only the world's creator edits it, or a claim's helper under that claim",
         );
     }
     if edit.ops.len() > OPS_MOST {

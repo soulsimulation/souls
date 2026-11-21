@@ -438,6 +438,55 @@ test('pairing asks for the creator scope and keeps the creator\'s token', async 
   assert.deepEqual(seat.grant, { actor: 'creator', scope: 'ab'.repeat(16), counter: 4n });
 });
 
+test('#3727: helper and rewind words', () => {
+  assert.deepEqual(buildOf(['claim', 'house', '--area', '0,0,10,10', '--helper', '--ttl', '30']), { act: 'claim', part: 'house', area: [0, 0, 10, 10], helper: true, ttl: 30 });
+  assert.throws(() => buildOf(['claim', 'house', '--area', '0,0,10,10', '--ttl', '30']), /needs --helper/);
+  assert.deepEqual(buildOf(['rewind', 'hut', '--to', 'shell', '--dry']), { act: 'rewind', build: 'hut', to: 'shell', dry: true });
+  assert.throws(() => buildOf(['rewind', 'hut']), /--to <step>/);
+});
+
+test('#3727: a helper builds only inside its claim, never undoes, and a build rewinds to a step', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  const claimed = await god('build', 'claim', 'yard', '--area', '40000,0,50000,10000', '--helper', '--ttl', '5');
+  assert.equal(claimed.ok, true, JSON.stringify(claimed));
+  assert.match(claimed.claim.helper, /^[0-9a-f]{32}-\d+$/);
+  const helperHome = claimed.helper.home;
+  const helperToken = JSON.parse(readFileSync(join(helperHome, 'credentials.json'), 'utf8')).souls[`c_${claimed.claim.helper}`].local.token;
+  assert.ok(!JSON.stringify(claimed).includes(helperToken.split('.')[1]), 'the helper token is not printed');
+  // The helper's own home: every edit goes under its claim, so inside builds and outside is refused by the world.
+  const helper = (...args) => new Promise((ok) => {
+    execFile(process.execPath, [GOD, ...args], { env: { PATH: process.env.PATH, SOULS_HOME: helperHome, SOULS_REPLICA_PKG: PKG } }, (_, stdout) => {
+      printed.push(stdout);
+      ok(JSON.parse(stdout.trim().split('\n').at(-1)));
+    });
+  });
+  for (const until = Date.now() + 15_000; !(await helper('status')).connected && Date.now() < until;) await new Promise((r) => setTimeout(r, 100));
+  const inside = await helper('place', 'room', '--in', place.id, '--at', '45000,0,5000');
+  assert.equal(inside.ok, true, JSON.stringify(inside));
+  const outside = await helper('place', 'room', '--in', place.id, '--at', '60000,0,5000');
+  assert.deepEqual([outside.ok, outside.code], [false, 'edit.outside-claim'], JSON.stringify(outside));
+  assert.equal((await helper('undo')).code, 'edit.not-the-creator', 'an undo is the lead\'s');
+  // The lead may not undo into the helper's claim: the helper's room is in it.
+  await helper('stop');
+  assert.equal((await god('build', 'release', claimed.claim.id)).ok, true);
+  // A build of three steps, rewound to its first: the two later steps go, newest first.
+  const shell = await god('place', 'room', '--in', place.id, '--at', '70000,0,0', '--build', 'barn', '--step', 'shell');
+  assert.equal(shell.ok, true, JSON.stringify(shell));
+  const roof = await god('place', 'lamp', '--in', shell.names['1'], '--at', '0,0,0', '--build', 'barn', '--step', 'roof');
+  const door = await god('place', 'lamp', '--in', shell.names['1'], '--at', '500,0,0', '--build', 'barn', '--step', 'door');
+  assert.equal(roof.ok && door.ok, true);
+  assert.deepEqual((await god('build', 'rewind', 'barn', '--to', 'shell', '--dry')).would, ['roof', 'door']);
+  const rewound = await god('build', 'rewind', 'barn', '--to', 'shell');
+  assert.equal(rewound.ok, true, JSON.stringify(rewound));
+  assert.equal(rewound.steps, 2);
+  const d = await god('describe');
+  assert.ok(d.nodes.some((n) => n.id === shell.names['1']), 'the shell stays');
+  assert.ok(!d.nodes.some((n) => n.id === roof.names['1'] || n.id === door.names['1']), 'its later steps are gone');
+  assert.equal((await god('build', 'rewind', 'barn', '--to', 'porch')).code, 'rewind.no-step');
+  console.log(`helper ${claimed.claim.helper}: built inside its claim, refused outside, no undo; barn rewound 2 steps to shell`);
+});
+
 test('no output, log or trace holds the token', () => {
   const runtime = join(home, 'souls', ME, 'runtime');
   const files = readdirSync(runtime).filter((f) => statSync(join(runtime, f)).isFile()).map((f) => readFileSync(join(runtime, f), 'utf8'));

@@ -341,7 +341,10 @@ pub fn parameters_under(ops: &[Op], claim: Option<&Name>) -> BTreeMap<u64, Value
 }
 
 /// `parameters` with the claim they are sent under, when there is one.
-pub fn with_claim(mut parameters: BTreeMap<u64, Value>, claim: Option<&Name>) -> BTreeMap<u64, Value> {
+pub fn with_claim(
+    mut parameters: BTreeMap<u64, Value>,
+    claim: Option<&Name>,
+) -> BTreeMap<u64, Value> {
     if let Some(c) = claim {
         parameters.insert(CLAIM, Value::Text(c.clone()));
     }

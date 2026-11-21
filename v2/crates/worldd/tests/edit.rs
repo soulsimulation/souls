@@ -896,6 +896,107 @@ fn a2_a_move_carries_every_node_below_it_and_a_late_claim_still_binds() {
 }
 
 #[test]
+fn a3727_a_helper_builds_only_under_its_own_claim_and_an_undo_stays_out_of_claims() {
+    use replica::edit::claims::{F_CLAIMS, judge_effects};
+    let mut w = W::new();
+    let room = kind(&w.header, "souls:room");
+    let helper = Id::new(Scope([0xc0; 16]), (1 << 44) + 7).expect("an id");
+    let stranger = Id::new(Scope([0xc0; 16]), (1 << 44) + 8).expect("an id");
+    let name = |h: Id| {
+        text(&format!(
+            "helper:h{}-{}",
+            replica::encode::to_hex(&h.scope().0),
+            h.counter()
+        ))
+    };
+    // A room the lead places at x 5 mm, before any claim: its creation is what a redo would write again.
+    let v = w.live.version();
+    let lead = w
+        .edit(
+            w.creator(),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(5_000, None))],
+        )
+        .expect("the lead's room");
+    let mut row = match claim_row("c:house", "part:house", [0, -10, 10, 10]) {
+        Value::Array(r) => r,
+        _ => unreachable!(),
+    };
+    row.push(name(helper));
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![set_root(
+            w.root,
+            F_CLAIMS,
+            Value::Array(vec![Value::Array(row)]),
+        )],
+    )
+    .expect("claimed with a helper");
+    let v = w.live.version();
+    let as_ = |h: Id| Actor::Creator(h);
+    // The helper, under its claim, inside: built.
+    w.edit_under(
+        as_(helper),
+        v,
+        vec![place(1, &room, Ref::Node(w.root), spot(6_000, None))],
+        Some("c:house"),
+    )
+    .expect("the helper builds inside its claim");
+    let v = w.live.version();
+    // Outside its area: refused by the claim check; with no claim, or as a stranger: not an editor at all.
+    let r = w
+        .edit_under(
+            as_(helper),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(20_000, None))],
+            Some("c:house"),
+        )
+        .expect_err("outside");
+    assert_eq!(r.name, "edit.outside-claim", "{r:?}");
+    let r = w
+        .edit(
+            as_(helper),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(30_000, None))],
+        )
+        .expect_err("no claim");
+    assert_eq!(r.name, "edit.not-the-creator", "{r:?}");
+    let r = w
+        .edit_under(
+            as_(stranger),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(6_000, None))],
+            Some("c:house"),
+        )
+        .expect_err("another helper");
+    assert_eq!(r.name, "edit.not-the-creator", "{r:?}");
+    // The lead's undo or redo may not write inside a live claim: the room's creation again, at x 5 mm, is refused.
+    let r = judge_effects(&w.live, &lead.part.effects).expect_err("inside a claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    // Malformed helpers are refused with the claim list.
+    let mut bad = match claim_row("c:yard", "part:yard", [20, -10, 30, 10]) {
+        Value::Array(r) => r,
+        _ => unreachable!(),
+    };
+    bad.push(text("helper:hnot-hex"));
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![set_root(
+                w.root,
+                F_CLAIMS,
+                Value::Array(vec![Value::Array(bad)]),
+            )],
+        )
+        .expect_err("a bad helper");
+    assert_eq!(r.name, "edit.claim-malformed");
+    w.close();
+}
+
+#[test]
 fn a1_a2_plans_and_claims_are_checked_before_they_are_recorded() {
     use replica::edit::claims::{F_CLAIMS, F_DISTRICTS};
     let mut w = W::new();

@@ -26,6 +26,11 @@
 //   souls-god.mjs build claims | build release <claim>    the live claims (ids c:k<8 hex>); a claim released
 //   place, move, set, remove, batch, check ... --claim <claim>   sent under a build claim: it builds only inside it,
 //                                                and others stay out of it until it is released
+//   souls-god.mjs build claim ... --helper [--ttl <minutes>]   the claim with a helper (#3727): a scoped token for a
+//                                                sub-agent, kept in a home of its own (SOULS_HOME=<that folder>);
+//                                                it builds only under that claim, and lapses after --ttl (default 120)
+//   souls-god.mjs build rewind <build> --to <step> [--dry]   undoes every edit of the build after that step, newest
+//                                                first, while they are this daemon's newest (today's build rewind)
 //   souls-god.mjs status | stop                  the daemon
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
 //   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
@@ -239,7 +244,16 @@ const mdegOf = (rad) => Math.round(((Number(rad ?? 0) * 180) / Math.PI) * 1000);
 export function buildOf(words) {
   const args = [...words];
   const file = takeOpt(args, '--file'), area = takeOpt(args, '--area'), district = takeOpt(args, '--district'), plots = takeOpt(args, '--plots');
+  const ttl = takeOpt(args, '--ttl'), to = takeOpt(args, '--to');
+  const flag = (f) => { const k = args.indexOf(f); if (k >= 0) args.splice(k, 1); return k >= 0; };
+  const helper = flag('--helper'), dry = flag('--dry');
   const [what, id] = args;
+  if (what === 'rewind') {
+    if (!id || to === undefined) throw usage('build rewind <build> --to <step> [--dry]');
+    return { act: 'rewind', build: id, to, ...(dry ? { dry } : {}) };
+  }
+  if (ttl !== undefined && (!helper || !/^\d+$/.test(ttl) || Number(ttl) < 1 || Number(ttl) > 720)) throw usage('build claim --ttl <minutes> (1..720) needs --helper');
+  const helped = helper ? { helper: true, ...(ttl !== undefined ? { ttl: Number(ttl) } : {}) } : {};
   if (what === 'district') {
     if (id === undefined) return { act: 'districts' };
     return file === undefined ? { act: 'district', id } : { act: 'record', id, file };
@@ -251,11 +265,11 @@ export function buildOf(words) {
     if (area !== undefined) {
       const a = area.split(',').map(Number);
       if (a.length !== 4 || a.some((n) => !Number.isInteger(n)) || a[0] >= a[2] || a[1] >= a[3]) throw usage(`--area x0,z0,x1,z1 in whole mm, x0 < x1 and z0 < z1, not ${area}`);
-      return { act: 'claim', part: id, area: a };
+      return { act: 'claim', part: id, area: a, ...helped };
     }
-    return { act: 'claim', part: id, district, ...(plots ? { plots: plots.split(',') } : {}) };
+    return { act: 'claim', part: id, district, ...(plots ? { plots: plots.split(',') } : {}), ...helped };
   }
-  throw usage('build district [<id>] [--file plan.json] | build claim <part> ... | build claims | build release <claim>');
+  throw usage('build district [<id>] [--file plan.json] | build claim <part> ... [--helper] | build claims | build release <claim> | build rewind <build> --to <step>');
 }
 
 /** Today's plan file (metres, radians: `apps/server/src/god/districts.ts`) as the world's plan row. */
@@ -301,8 +315,10 @@ export function districtView(row, claims) {
 }
 
 const fail = (code, detail) => ({ ok: false, code, detail });
-/** Runs a build request through the daemon's `fields` and `edit`; the answer to print. */
-export async function runBuild(b, ask) {
+/** Runs a build request through the daemon's `fields` and `edit`; the answer to print. `mint(minutes)` asks the
+ * gateway for a helper (#3727): `{ helper, token, home }`, the helper's home written with its token. */
+export async function runBuild(b, ask, mint) {
+  if (b.act === 'rewind') return ask({ op: 'undo', build: b.build, to: b.to, ...(b.dry ? { dry: true } : {}) });
   const root = await ask({ op: 'fields' });
   if (root.ok === false) return root;
   const plans = rowsIn(root.fields[F_DISTRICTS]), claims = claimsIn(root.fields[F_CLAIMS]);
@@ -332,8 +348,15 @@ export async function runBuild(b, ask) {
     area = areaOf(rows);
   }
   const id = `c:k${randomBytes(4).toString('hex')}`; // a name part starts with a letter
-  const out = await set(F_CLAIMS, [...rowsIn(root.fields[F_CLAIMS]), [id, named('part', b.part), ...area]]);
-  return out.ok === false ? out : { ...out, claim: { id, part: slug(b.part), area }, then: `send its edits with --claim ${id}` };
+  // A helper (#3727): minted first, so the claim names it; its token goes to its own home, never to this output.
+  const h = b.helper ? await mint(b.ttl, id) : null;
+  const out = await set(F_CLAIMS, [...rowsIn(root.fields[F_CLAIMS]), [id, named('part', b.part), ...area, ...(h ? [`helper:h${h.helper}`] : [])]]);
+  if (out.ok === false) return out;
+  return {
+    ...out, claim: { id, part: slug(b.part), area, ...(h ? { helper: h.helper } : {}) },
+    then: h ? `give the helper SOULS_HOME=${h.home}: its souls-god sends every edit under ${id}, inside it only, for ${h.minutes} minutes` : `send its edits with --claim ${id}`,
+    ...(h ? { helper: { home: h.home, expires_in: h.expires_in } } : {}),
+  };
 }
 
 /**
@@ -355,6 +378,35 @@ async function askDirectory(home, creator, path, body) {
 
 /** An answer with its fix, when it is a refusal the table knows. */
 export const withFix = (out) => (out?.ok === false && FIX[out.code] ? { ...out, fix: FIX[out.code] } : out);
+
+/**
+ * A helper for a claim (#3727): the gateway mints a creator-scope token that lapses after `minutes`, and it is kept in
+ * a home of its own beside this one (`helpers/<claim>/`, as `.souls` is): its config, the world's kinds, the token and
+ * the claim it builds under. The token is printed nowhere.
+ */
+async function mintHelper(home, creator, minutes, claim) {
+  const seat = readSeat(home, creator);
+  const config = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'));
+  const world = config.worlds?.[seat.world];
+  if (typeof world?.gateway !== 'string') throw Object.assign(new Error(`no gateway kept for ${seat.world}; pair again`), { code: 'no-gateway' });
+  const url = new URL('/v2/creator-helper', world.gateway.replace(/^ws/, 'http'));
+  if (minutes !== undefined) url.searchParams.set('minutes', String(minutes));
+  const r = await fetch(url, { method: 'POST', headers: { authorization: `Bearer ${seat.token}` }, signal: AbortSignal.timeout(15_000) });
+  const got = await r.json().catch(() => ({}));
+  if (!r.ok || typeof got.token !== 'string') throw Object.assign(new Error(`the gateway refused a helper (${r.status})`), { code: got.refused ?? 'helper-refused' });
+  const at = join(home, 'helpers', bare(claim));
+  mkdirSync(join(at, 'kinds'), { recursive: true, mode: 0o700 });
+  writeFileSync(join(at, 'config.json'), JSON.stringify({ worlds: { [seat.world]: world } }));
+  writeFileSync(join(at, 'credentials.json'), JSON.stringify({ souls: { [`c_${got.helper}`]: { [seat.world]: { token: got.token } } } }), { mode: 0o600 });
+  writeFileSync(join(at, 'helper.json'), JSON.stringify({ claim, creator, expires_in: got.expires_in }));
+  try { writeFileSync(join(at, 'kinds', `${seat.world}.kinds`), readFileSync(join(home, 'kinds', `${seat.world}.kinds`))); } catch { /* no kinds kept */ }
+  return { helper: got.helper, home: at, expires_in: got.expires_in, minutes: Math.round(got.expires_in / 60) };
+}
+
+/** The claim a helper's home builds under (#3727), if this is one. */
+function helperClaim(home) {
+  try { return JSON.parse(readFileSync(join(home, 'helper.json'), 'utf8')).claim; } catch { return undefined; }
+}
 
 /** W2's pairing for a creator, detached as souls.mjs's is: its first line (the link and code, or the refusal). */
 async function pairing(home, url, grant, { within = 15_000 } = {}) {
@@ -393,8 +445,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const pkg = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
     const ask = (req, ms = 60_000) => call(home, creator, req, { pkg, ms });
     // A relation is resolved on the daemon's copy: describe first, then the batch with its places filled in.
-    const req = asked.relation ? resolve(asked.req, asked.relation, await ask({ op: 'describe' }, 15_000)) : asked.req;
-    const answer = asked.build ? await runBuild(asked.build, ask) : await ask(req);
+    let req = asked.relation ? resolve(asked.req, asked.relation, await ask({ op: 'describe' }, 15_000)) : asked.req;
+    // A helper's home sends every edit under its claim (#3727).
+    const scoped = helperClaim(home);
+    if (scoped && req && (req.op === 'edit' || req.op === 'check') && req.claim === undefined) req = { ...req, claim: scoped };
+    const answer = asked.build ? await runBuild(asked.build, ask, (minutes, claim) => mintHelper(home, creator, minutes, claim)) : await ask(req);
     out(withFix(answer));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {
