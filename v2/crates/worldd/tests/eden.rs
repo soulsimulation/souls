@@ -1510,6 +1510,12 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
                     Ok(how.unwrap_or_else(|| "never-ended".to_owned()))
                 }
             };
+            if std::env::var("SWEEP_DEBUG").is_ok_and(|k| label.contains(&k)) {
+                let n = tree.handle(thing).and_then(|h| tree.node(h));
+                let parent = n.and_then(|n| n.parent());
+                let pk = parent.and_then(|p| tree.handle(p)).and_then(|h| tree.node(h)).map(|p| p.kind().as_str().to_owned());
+                println!("DEBUG {label}: {how:?} floor {} at {at:?}; thing at {:?} parent {pk:?}; body now {:?}", show(floor), n.and_then(|n| n.place()).map(|p| p.position), bodies.runner.controller.get(body).map(|b| (sim::index::place_of(b).0, b.pose.position)));
+            }
             // The body out, and its seat freed, before the next form.
             let _ = bodies.slots.release_body(body);
             bodies.runner.controller.remove(body);
