@@ -11,8 +11,10 @@ import * as THREE from 'three';
 import type { NodeRec, PartRec } from '../source/source.ts';
 import type { WorldView } from '../draw/world.ts';
 import { SoulsCopy, TestMark, label, spoken, TALK_MM, wrap, type Status } from './souls.ts';
-import { Conversations, SPEECH_W, groupShot, measurer, paint, place, type Candidate, type Ctx, type Placed, type Thread } from './layer.ts';
+import { Conversations, SPEECH_W, groupShot, measurer, paint, place, placeOf, type Candidate, type Ctx, type Placed, type Thread } from './layer.ts';
+import { placeWords } from '../places/places.ts';
 import { mountCard, nowText, readNow, type NowLine } from './mine.ts';
+import { enters, inside, solidsNear } from '../camera/follow.ts';
 
 const UM = 1e-6, HEAD = 2.1, FAR = 150;
 /** How often an open Soul page reads its status line again. */
@@ -56,9 +58,13 @@ function dock(onClose: () => void, onFollow: () => void) {
   list.setAttribute('aria-label', 'Lines, newest last');
   list.tabIndex = 0;
   list.style.cssText = 'margin:0;padding:0;list-style:none;overflow:auto;flex:1 1 auto;min-height:0';
-  el.append(close, who, hear, list);
+  // Lines that arrived while the reader was scrolled up, and a jump to the newest (#3777, today's `dlg-new`).
+  const more = document.createElement('button');
+  more.hidden = true;
+  more.style.cssText = 'align-self:center;margin:6px 0 0;padding:3px 10px;border:0;border-radius:12px;background:#2f6f9f;color:#fff;font:12px system-ui,sans-serif;cursor:pointer';
+  el.append(close, who, hear, list, more);
   document.body.append(el);
-  return { el, who, hear, list };
+  return { el, who, hear, list, more };
 }
 
 /** The Soul page's panel: one element, its fields set as text. */
@@ -125,8 +131,20 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
   const frame = (id: string): boolean => {
     const t = talk.threads.get(id), camera = lastCamera as THREE.PerspectiveCamera | null;
     if (!t || !camera || lastT === null || !out.framer) return false;
-    const heads = Conversations.members(t).flatMap((m) => { const p = where(m, lastT!); return p ? [p.setY(p.y + HEAD)] : []; });
-    const shot = groupShot(heads, camera.fov ?? 50, camera.aspect ?? innerWidth / innerHeight, camera.getWorldPosition(new THREE.Vector3()));
+    const members = Conversations.members(t).filter((m) => where(m, lastT!));
+    const heads = members.map((m) => { const p = where(m, lastT!)!; return p.setY(p.y + HEAD); });
+    if (!heads.length) return false;
+    // The scene (#3774): where each member faces (a body's model faces +z), and the things' solids near them, so the
+    // shot is never from inside or behind a wall. A solid a member is in (a chair) does not hide them.
+    const faces = members.map((m) => { const f = new THREE.Vector3(0, 0, 1).transformDirection(world.frame(m)); return { x: f.x, z: f.z }; });
+    const mid = heads.reduce((a, h) => a.add(h), new THREE.Vector3()).multiplyScalar(1 / heads.length);
+    const boxes = solidsNear(world, mid, 80), e = new THREE.Vector3(), h = new THREE.Vector3();
+    const clear = (eye: { x: number; y: number; z: number }, at: { x: number; y: number; z: number }[]) => {
+      e.set(eye.x, eye.y, eye.z);
+      return !inside(boxes, e) && at.every((p) => (h.set(p.x, p.y, p.z), boxes.every((b) => inside([b], h) || enters(b, e, h) === null)));
+    };
+    const ground = (x: number, z: number) => world.heightAt?.(x, z) ?? -Infinity;
+    const shot = groupShot(heads, camera.fov ?? 50, camera.aspect ?? innerWidth / innerHeight, camera.getWorldPosition(new THREE.Vector3()), { faces, clear, ground });
     if (!shot) return false;
     out.framer(new THREE.Vector3(shot.eye.x, shot.eye.y, shot.eye.z), new THREE.Vector3(shot.target.x, shot.target.y, shot.target.z));
     return true;
@@ -144,8 +162,29 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     document.body.append(b);
     return (markers[i] = b);
   };
+  /** Where a line was said (#3776): the named place, read again at most once a second so a rename shows; null when none. */
+  let saidAt: { key: string; ms: number; at: ReturnType<typeof placeOf> } | null = null;
+  const whereSaid = (l: { key: string; speaker: string; at: number } | undefined) => {
+    if (!l) return null;
+    const ms = performance.now();
+    if (saidAt?.key !== l.key || ms - saidAt.ms > 1000) saidAt = { key: l.key, ms, at: placeOf(l.speaker, where(l.speaker, l.at), world.nodes, placeWords) };
+    return saidAt.at;
+  };
   /** A thread's line as text: the speaker's name, then the words. */
   const lineText = (l: { speaker: string; words: string }) => `${nameOf(l.speaker)}: ${l.words}`;
+  type Scrolled = HTMLOListElement & { scrollTop: number; scrollHeight: number; clientHeight: number };
+  const dockList = d.list as Scrolled;
+  const atBottom = () => !(dockList.scrollHeight > 0) || dockList.scrollTop + dockList.clientHeight >= dockList.scrollHeight - 12;
+  /** Lines shown in the dock's thread, and how many arrived while the reader was scrolled up. */
+  let shownLines = 0, shownLast = '', unread = 0;
+  const setUnread = (n: number) => {
+    unread = n;
+    d.more.hidden = n === 0;
+    d.more.textContent = `${n} new line${n === 1 ? '' : 's'} ↓`;
+  };
+  const jump = () => ((dockList.scrollTop = dockList.scrollHeight ?? 0), setUnread(0));
+  d.more.onclick = jump;
+  dockList.addEventListener('scroll', () => unread && atBottom() && setUnread(0));
   const showDock = (t: number) => {
     const th = focus ? talk.threads.get(focus) : undefined;
     const said = th ? Conversations.by(th, t) : [];
@@ -154,10 +193,11 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     const members = Conversations.members(th).map(nameOf);
     const speakers = new Set(Conversations.members(th));
     const also = [...th.hearers].filter(([id, at]) => !speakers.has(id) && th.lastAt - at < 240_000_000).map(([id]) => nameOf(id));
+    const at = whereSaid(said.at(-1));
     const since = ago(Math.max(0, t - (said.at(-1)?.at ?? t)));
-    // A private conversation (#3775): who is in it, never what they say.
+    // A private conversation (#3775): who is in it, never what they say. A public one names where it was said (#3776).
     const hear = th.members ? `🔒 private — only they hear · ${since}`
-      : `💬 aloud · anyone near hears${also.length ? ` · also heard by ${joinNames(also, 2)}` : ''} · ${since}`;
+      : `${at?.inside ? `🏠 inside · ${at.name}` : `💬 aloud${at ? ` · ${at.name}` : ''}`} · anyone near hears${also.length ? ` · also heard by ${joinNames(also, 2)}` : ''} · ${since}`;
     const key = `${th.id}\u0000${said.length}\u0000${talk.version}\u0000${members.join()}\u0000${hear}`;
     if (key === dockShown) return;
     const fresh = !dockShown.startsWith(`${th.id}\u0000`);
@@ -166,9 +206,13 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     d.who.textContent = joinNames(members);
     d.who.setAttribute('aria-label', `Frame the conversation with ${joinNames(members)}`);
     d.hear.textContent = hear;
-    const l = d.list as HTMLOListElement & { scrollTop: number; scrollHeight: number; clientHeight: number };
-    // Follows the newest line unless the reader scrolled up.
-    const stick = fresh || !(l.scrollHeight > 0) || l.scrollTop + l.clientHeight >= l.scrollHeight - 12;
+    const l = dockList;
+    // Follows the newest line unless the reader scrolled up; then counts what arrived (#3777).
+    const stick = fresh || atBottom();
+    const last = said.at(-1)?.key ?? '';
+    // A thread keeps its newest lines only, so a new last line counts at least one, as today's dock does.
+    setUnread(stick ? 0 : last === shownLast ? unread : unread + Math.max(1, said.length - shownLines));
+    (shownLines = said.length), (shownLast = last);
     l.replaceChildren(...said.map((line) => {
       const li = document.createElement('li');
       li.style.cssText = 'margin:0 0 4px';

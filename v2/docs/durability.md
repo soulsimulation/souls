@@ -83,10 +83,14 @@ and rolling builds (O1, O7) are not here.
     alarm, pinned build, a Soul's place and the claim holder's ship, each decided by the store, never the cache; a
     real S3-compatible store client) and the records in `v2/crates/replica/src/directory`.
 13. **Checkpoints are taken by amount of log,** so restart time does not grow with the world. K5 builds them in
-    `v2/crates/sim/src/checkpoint/`: one file per checkpoint, the last two kept, the log never cut; the hashes in
+    `v2/crates/sim/src/checkpoint/`: one file per checkpoint, the last two kept; the hashes in
     `v2/crates/replica/src/tree/seal.rs`. Trimming the takeovers (rule 8) waits for the real directory (W8). Each
     checkpoint also keeps the log's durable place and the writer's minter (K4b), so a restart opens the log from
-    there and mints no id twice.
+    there and mints no id twice. A served world (#3837) restarts its towns and views from the newest checkpoint too,
+    and compacts its log (`sim::log` rule 9, `v2/crates/worldd/src/compactor.rs`): once the oldest checkpoint kept,
+    the public stream's published parts and, with a store, the shipper's mark and the archive's closed objects have
+    all passed 64 MiB of it, those bytes become a hole in the file (the same offsets after it) and `log.cut` names
+    where it is read from. The log's copy off the machine (O3) and the archive stay the world's whole history.
 
 **Step 0, the paused writer as a timeline** (`a2_...`): a holds epoch 1, writes 0 to 2 and ships them (mark 2); a
 pauses past its lease; b claims epoch 2 from sequence 3, writes 3 and ships it (mark 3); a resumes and writes 3 to its
