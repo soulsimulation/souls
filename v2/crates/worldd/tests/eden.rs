@@ -1946,29 +1946,52 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     let facts = facts_path();
     let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
     let lineage = im.nodes["world"].scope();
-    let moorings = sim::courses::punts::moorings_of(&im.tree, im.nodes["ground"]).unwrap();
-    // The commons shore pond's punt: home (-57.5, -6.0) m, plank (-57.5, -9.1) m.
-    let (k, m) = moorings
-        .iter()
-        .enumerate()
-        .min_by_key(|(_, m)| (m.home.x + 57_500_000).abs() + (m.home.z + 6_000_000).abs())
+    // The commons shore pond's punt, the punt nearest (-57.5, -6.0) m, as the server's search placed it: its home, its
+    // plank, its loop's period and start, from the lines `worldd serve` printed.
+    let seen = |l: &str| -> Option<(u64, [f64; 4], i64, i64)> {
+        let l = l
+            .trim()
+            .trim_start_matches("seed: ")
+            .strip_prefix("punt: rowing-punt-")?;
+        let (k, rest) = l.split_once(" on ")?;
+        let nums: Vec<f64> = rest
+            .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+            .filter_map(|w| w.parse().ok())
+            .collect();
+        let [.., hx, hz, px, pz, period, t0] = nums[..] else {
+            return None;
+        };
+        Some((k.parse().ok()?, [hx, hz, px, pz], period as i64, t0 as i64))
+    };
+    // Born by the commons punt's plank: found from the seed's own lines.
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let seeded = std::process::Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["seed", "--facts", &facts, "--dir"])
+        .arg(std::env::temp_dir().join(format!("eden-p1-probe-{}", std::process::id())))
+        .args([
+            "--entries",
+            &format!("{root}/content/kinds"),
+            "--souls",
+            "0",
+        ])
+        .output()
         .unwrap();
-    let table = m.course.load().unwrap();
+    let probe = String::from_utf8_lossy(&seeded.stdout).to_string();
+    let _ = std::fs::remove_dir_all(
+        std::env::temp_dir().join(format!("eden-p1-probe-{}", std::process::id())),
+    );
+    let (k1, [hx, hz, px, pz], period, t0) = probe
+        .lines()
+        .filter_map(seen)
+        .min_by_key(|(_, h, _, _)| (((h[0] + 57.5).abs() + (h[1] + 6.0).abs()) * 1000.0) as i64)
+        .expect("a punt on Eden");
+    let k = (k1 - 1) as usize;
     println!(
-        "the commons punt: rowing-punt-{}, home ({:.1}, {:.1}) m, plank ({:.1}, {:.1}) m, lap {:.1} s",
-        k + 1,
-        m.home.x as f64 / 1e6,
-        m.home.z as f64 / 1e6,
-        m.door.x as f64 / 1e6,
-        m.door.z as f64 / 1e6,
-        table.period as f64 / 1e6
+        "the commons punt: rowing-punt-{k1}, home ({hx:.1}, {hz:.1}) m, plank ({px:.2}, {pz:.2}) m, lap {:.1} s",
+        period as f64 / 1e6
     );
     // Born 1 m east of the plank's dry end.
-    let at = format!(
-        "{:.2},{:.2}",
-        m.door.x as f64 / 1e6 - 1.0,
-        m.door.z as f64 / 1e6
-    );
+    let at = format!("{:.2},{:.2}", px - 1.0, pz);
     let (served, mut soul, dir, lines) = serve_lines(&facts, &at, "p1", lineage);
     let tag = format!("punt: rowing-punt-{} is ", k + 1);
     let shown = lines
@@ -1986,10 +2009,10 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     let ashore = soul.act("carrier:steer", Some(punt), point(-59.8, 0.0));
     println!("steer from the bank: {ashore:?}");
     // Board in the punt's boarding stop (its first 30 s each lap): wait for the next when less than 20 s are left.
-    let phase = |t: i64| (t - table.t0).rem_euclid(table.period);
+    let phase = |t: i64| (t - t0).rem_euclid(period);
     let p = phase(answers::now());
     if p > 10_000_000 {
-        let wait = table.period - p + 500_000;
+        let wait = period - p + 500_000;
         println!(
             "waiting {:.1} s for the punt's boarding stop",
             wait as f64 / 1e6
@@ -2067,7 +2090,7 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     off.expect("rose at the plank");
     let (_, node, x, z) = stood.expect("a place");
     assert_eq!(node, im.nodes["ground"], "on the ground again");
-    let d = ((x - m.door.x as f64 / 1e6).powi(2) + (z - m.door.z as f64 / 1e6).powi(2)).sqrt();
+    let d = ((x - px).powi(2) + (z - pz).powi(2)).sqrt();
     assert!(d < 1.5, "at the plank: {d:.2} m from it");
     let shapes: Vec<u64> = logged.iter().map(|c| c.1).collect();
     assert_eq!(shapes, vec![3, 3, 1], "steered, landed, its own loop again");

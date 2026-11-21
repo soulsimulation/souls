@@ -281,7 +281,18 @@ fn with_punts(facts: &str) -> R<String> {
     let Some(&ground) = im.nodes.get("ground") else {
         return Ok(facts.to_owned());
     };
-    let moorings = sim::courses::punts::moorings_of(&im.tree, ground)?;
+    // Planks and exits only where a body can stand on the ground as the walk cuts it (C15's `stand_near`).
+    let (waters, terrain) = sim::courses::punts::waters_of(&im.tree, ground)?;
+    let root = *im.nodes.get("world").ok_or("the facts have no world")?;
+    let header = import_eden::header(root, &im.rules)?;
+    let next = im.tree.to_state().next;
+    let mut town = Town::new(im.tree, ground, Doors::new(header, im.rules, next))
+        .map_err(|e| format!("the town: {e:?}"))?;
+    let view = town.view();
+    let moorings = sim::courses::punts::moorings(&waters, terrain.as_ref(), |p| {
+        view.stand_near(ground, p, 0, None).is_some()
+    });
+    drop(view);
     if moorings.is_empty() {
         return Ok(facts.to_owned());
     }
@@ -311,14 +322,15 @@ fn with_punts(facts: &str) -> R<String> {
             let (ox, oz) = (m.out[0] as f64, m.out[1] as f64);
             let yaw = (oz.atan2(-ox).to_degrees().round() as i64).rem_euclid(360) * 1000;
             println!(
-                "punt: rowing-punt-{} on {} at {:.1},{:.1} m, plank at {:.1},{:.1} m, loop {} s",
+                "punt: rowing-punt-{} on {} at {:.3},{:.3} m, plank at {:.3},{:.3} m, loop {} us from {} us",
                 k + 1,
                 replica::world_model::show(m.water),
                 m.home.x as f64 / 1e6,
                 m.home.z as f64 / 1e6,
                 m.door.x as f64 / 1e6,
                 m.door.z as f64 / 1e6,
-                m.course.load().map_or(0, |t| t.period / 1_000_000)
+                m.course.load().map_or(0, |t| t.period),
+                m.course.t0
             );
             let mm = |v: i64| int(v / 1000);
             let pose = Json::Arr(vec![mm(m.home.x), mm(m.home.y), mm(m.home.z), int(yaw)]);

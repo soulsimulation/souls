@@ -52,35 +52,5 @@ fn eden_waters_and_their_punts() {
             m.door.z as f64 / 1e6
         );
     }
-    // Whether a body can stand at each plank and exit, on the ground as the walk cuts it (C15's `stand_near`).
-    let im2 =
-        import_eden::load(&std::fs::read_to_string(std::env::var("EDEN_FACTS").unwrap()).unwrap())
-            .unwrap();
-    let header = import_eden::header(im2.nodes["world"], &im2.rules).unwrap();
-    let next = im2.tree.to_state().next;
-    let mut town = sim::walk::town::Town::new(
-        im2.tree,
-        ground,
-        sim::links::Doors::new(header, im2.rules, next),
-    )
-    .expect("the town");
-    let view = town.view();
-    for m in &found {
-        for (what, p) in [
-            ("plank", m.door),
-            ("exit a", m.exits[0]),
-            ("exit b", m.exits[1]),
-        ] {
-            let near = view.stand_near(ground, p, 0, None);
-            let within = view.stand_near(ground, p, 1_000_000, None);
-            println!(
-                "  {what} ({:.2}, {:.2}): stands there {:?}, within 1 m {:?}",
-                p.x as f64 / 1e6,
-                p.z as f64 / 1e6,
-                near.map(|q| (q.x as f64 / 1e6, q.z as f64 / 1e6)),
-                within.map(|q| (q.x as f64 / 1e6, q.z as f64 / 1e6))
-            );
-        }
-    }
     assert!(!found.is_empty(), "Eden has a punt, as today");
 }
