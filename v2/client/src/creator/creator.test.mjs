@@ -120,6 +120,11 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(opsOf('set', ['aa-3', '1', 'true']), [{ op: 'set', node: 'aa-3', field: 1, value: true }]);
   assert.deepEqual(requestOf(['check', 'remove', 'aa-3']).req, { op: 'check', ops: [{ op: 'remove', node: 'aa-3' }] });
   assert.throws(() => opsOf('move', ['aa-3']), /move <id> --at/);
+  // A creator's look is G10's shot of a place, thing or Soul by name or id; its usage is checked before anything runs.
+  assert.deepEqual(requestOf(['look', 'market', '--out', 'm.jpg', '--size', '640x360']), { look: ['market', '--out', 'm.jpg', '--size', '640x360'], creator: undefined });
+  assert.throws(() => requestOf(['look']), (e) => e.code === 'usage');
+  assert.throws(() => requestOf(['look', 'market', '--out', 'm.gif']), /png or .jpg/);
+  assert.throws(() => requestOf(['look', 'picture', 'f.png']), /look <place/);
 });
 
 test('a creator describes, checks on its copy alone, and builds a room with a thing in it', async () => {

@@ -14,6 +14,9 @@
 //                                                later op names an earlier place by its "name" number
 //   souls-god.mjs check <any of the four, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs status | stop                  the daemon
+//   souls-god.mjs look <place|thing|soul|id> [--eyes] [--out f.png|.jpg] [--size WxH] [--page <url>]
+//                                                a picture of it, drawn here from the public stream (souls.mjs shoot);
+//                                                with no browser here, the copy's words for it instead
 //   any of them [--creator <c_id>]               which creator, when the home holds more than one
 //
 // A refusal prints its code, the operation that failed (`op`, its place in the batch) and a fix. The home is
@@ -27,8 +30,9 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
+import { parseShoot, runShoot } from '../shoot/shoot.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'status', 'stop'];
+export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'status', 'stop', 'look'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
@@ -97,6 +101,13 @@ export function requestOf(argv) {
   const [verb = 'status', ...rest] = args;
   if (!VERBS.includes(verb)) throw Object.assign(new Error(`one of ${VERBS.join(', ')}`), { code: 'unknown-command' });
   if (verb === 'pair') return { pair: rest[0], creator };
+  // A creator's look (#3699 reads; today's `look --at <ref>`): G10's shot, checked here so a usage is answered at once.
+  if (verb === 'look') {
+    const how = 'look <place|thing|soul|id> [--eyes] [--out f.png|.jpg] [--size WxH] [--page <url>]';
+    if (rest[0] === 'picture') throw usage(how);
+    try { parseShoot(rest); } catch (e) { throw usage(e.message.startsWith('shoot <') || /needs a value|unknown/.test(e.message) ? how : e.message); }
+    return { look: rest, creator };
+  }
   if (verb === 'status' || verb === 'stop' || verb === 'describe') return { req: { op: verb }, creator };
   if (verb === 'check') return { req: { op: 'check', ops: opsOf(rest[0], rest.slice(1)) }, creator };
   return { req: { op: 'edit', ops: opsOf(verb, rest) }, creator };
@@ -130,6 +141,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const asked = requestOf(process.argv.slice(2));
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
     if (asked.pair !== undefined) { out(await pairing(home, asked.pair, asked.creator)); process.exit(0); }
+    if (asked.look) {
+      // The picture needs no creator; the words without a browser come from the creator's daemon when there is one.
+      const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
+      const who = asked.creator ?? (creators.length === 1 ? creators[0] : null);
+      const ask = who ? (r) => call(home, who, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
+      out(await runShoot(asked.look, { home, env: process.env, ask }));
+      process.exit(0);
+    }
     const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
     const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
     if (!creator) throw Object.assign(new Error(`creators here: ${creators.join(', ') || 'none; pair first'}`), { code: 'which-creator' });

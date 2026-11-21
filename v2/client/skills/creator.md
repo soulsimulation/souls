@@ -47,6 +47,7 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `batch '<json list>'` | several operations at once: all happen, or none |
 | `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
 | `describe` | what is there, and what each kind admits |
+| `look <name or id> [--out f.png] [--eyes]` | a picture of a place, thing or Soul, drawn on this machine from the public stream; open the file it names. With no browser here it answers in words |
 
 A kind may be written as its bare name (`room`) when only one kind has that name, or as `namespace:name`.
 
