@@ -306,9 +306,9 @@ async function pairing(home, url, grant, { within = 15_000 } = {}) {
 
 // ---------------------------------------------------------------- #3700: ownership, access and land-use zones
 // Today's `own`, `access`, `zone`, `zone-suggest`, `layers` and `secret` (tools/god-skill/lib/layers.mjs). Owner and
-// access are two fields of the thing (replica `who_may::F_OWNER`, `F_ACCESS`); zones are a root field (92). Each is an
+// access are two fields of the thing (replica `who_may::F_OWNER`, `F_ACCESS`); zones are a root field (142). Each is an
 // ordinary edit, so undo takes it back. Secret places are off on soul.game today (#1262), so `secret` says so.
-export const F_OWNER = 97, F_ACCESS = 98, F_ZONES = 92;
+export const F_OWNER = 143, F_ACCESS = 144, F_ZONES = 142;
 export const LAYER_VERBS = ['own', 'access', 'zone', 'zone-suggest', 'layers', 'secret'];
 export const USES = ['residential', 'commercial', 'park', 'farm', 'civic', 'industrial', 'wild'];
 /** Today's catalogue categories for each use (apps/server/src/god/layers.ts ZONE_SUGGEST). */

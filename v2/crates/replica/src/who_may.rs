@@ -328,9 +328,9 @@ pub fn who_may_decide(input: &str) -> String {
 // are today without LAYERS), so a group's private thing refuses everyone. No marks anywhere: nothing changes.
 
 /// A node's owner: an id (a Soul's), `group:<name>`, `owner:god`, or 0 for none.
-pub const F_OWNER: u64 = 97;
+pub const F_OWNER: u64 = 143;
 /// A node's access: 0 none (its ancestors' holds), 1 public, 2 private.
-pub const F_ACCESS: u64 = 98;
+pub const F_ACCESS: u64 = 144;
 
 /// Who owns a marked thing.
 #[derive(Clone, Debug, PartialEq, Eq)]

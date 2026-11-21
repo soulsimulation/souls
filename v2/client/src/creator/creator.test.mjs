@@ -270,7 +270,7 @@ test('#3700: a creator marks a room private to a Soul, zones the land, and secre
   assert.equal((await god('access', id, 'public')).ok, true);
   assert.equal((await god('describe')).nodes.find((n) => n.id === id).marks.access, 1);
   // A mark that does not read is the world's refusal, with a fix.
-  const bad = await god('set', id, '98', '7');
+  const bad = await god('set', id, '144', '7');
   assert.deepEqual([bad.ok, bad.code], [false, 'edit.owner-malformed'], JSON.stringify(bad));
   assert.match(bad.fix, /access <id>/);
 

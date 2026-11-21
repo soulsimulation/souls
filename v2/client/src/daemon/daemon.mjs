@@ -725,11 +725,11 @@ function fullKind(kinds, k) {
   if (hit.length === 1) return hit[0];
   throw Object.assign(new Error(`${s}: ${hit.length ? 'ambiguous; copy a full pinned name from describe' : `not pinned; describe lists ${Object.keys(kinds).join(', ')}`}`), { code: 'edit.kind-unknown' });
 }
-/** #3700: a node's owner and access marks (replica `who_may::F_OWNER` 97, `F_ACCESS` 98), when it carries either. */
+/** #3700: a node's owner and access marks (replica `who_may::F_OWNER` 143, `F_ACCESS` 144), when it carries either. */
 function marksOf(row) {
   const pairs = JSON.parse(row.own).find(([k]) => Number(k) === 6)?.[1] ?? [];
   const get = (n) => pairs.find(([k]) => Number(k) === n)?.[1];
-  const owner = get(97), access = get(98);
+  const owner = get(143), access = get(144);
   if (owner === undefined && access === undefined) return {};
   const who = Array.isArray(owner) ? `${owner[0]}-${owner[1]}` : owner === 0 ? 'none' : owner;
   return { marks: { ...(owner !== undefined ? { owner: who } : {}), ...(access !== undefined ? { access: Number(access) } : {}) } };

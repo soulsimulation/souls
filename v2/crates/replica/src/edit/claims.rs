@@ -232,7 +232,7 @@ pub fn read_districts(v: &Value) -> Result<(), String> {
 
 /// The root's field holding the land-use zones (#3700): `[[name, use, [x, z, x, z, ...]], ...]`, a name `zone:<x>`,
 /// a use one of [`USES`] as `use:<use>`, an outline of 3 to [`ZONE_POINTS_MOST`] points in mm, at most [`ZONES_MOST`].
-pub const F_ZONES: u64 = 92;
+pub const F_ZONES: u64 = 142;
 pub const ZONES_MOST: usize = 64;
 pub const ZONE_POINTS_MOST: usize = 64;
 /// Today's land uses.
