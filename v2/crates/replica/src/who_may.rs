@@ -380,28 +380,83 @@ pub fn check_mark(field: u64, v: &crate::encode::Value) -> Result<(), String> {
 }
 
 /// A node's ownership as it holds: its own marks, else its nearest marked ancestor's: the owner, whether it is
-/// private, and the node that carries the mark. `None` when nothing above it is marked.
-pub fn ownership(
-    tree: &crate::tree::Tree,
+/// private, and the node that carries the mark. `None` when nothing above it is marked. `fields` and `parent` read a
+/// node, so the world's tree and a checker's copy share this one walk.
+pub fn ownership_by(
     node: crate::ids::Id,
+    fields: impl Fn(crate::ids::Id) -> Option<std::collections::BTreeMap<u64, crate::encode::Value>>,
+    parent: impl Fn(crate::ids::Id) -> Option<crate::ids::Id>,
 ) -> Option<(Option<Owner>, bool, crate::ids::Id)> {
-    let mut at = tree.handle(node).and_then(|h| tree.node(h));
-    while let Some(n) = at {
-        let f = n.fields();
+    let mut at = Some(node);
+    let mut steps = 0;
+    while let Some(id) = at {
+        let f = fields(id)?;
         let owner = f.get(&F_OWNER).and_then(|v| Owner::read(v).ok()).flatten();
         let access = match f.get(&F_ACCESS) {
             Some(crate::encode::Value::Uint(a)) => *a,
             _ => 0,
         };
         if owner.is_some() || access != 0 {
-            return Some((owner, access == 2, n.id()));
+            return Some((owner, access == 2, id));
         }
-        at = n
-            .parent()
-            .and_then(|p| tree.handle(p))
-            .and_then(|h| tree.node(h));
+        steps += 1;
+        if steps > crate::world_model::DEPTH_LIMIT as usize {
+            return None;
+        }
+        at = parent(id);
     }
     None
+}
+
+/// [`ownership_by`] on the world's tree.
+pub fn ownership(
+    tree: &crate::tree::Tree,
+    node: crate::ids::Id,
+) -> Option<(Option<Owner>, bool, crate::ids::Id)> {
+    let n = |id| tree.handle(id).and_then(|h| tree.node(h));
+    ownership_by(
+        node,
+        |id| n(id).map(|x| x.fields().clone()),
+        |id| n(id).and_then(|x| x.parent()),
+    )
+}
+
+/// [`ownership_by`] on a copy read through [`crate::read::Read`] (a checker's): a node's record keeps its fields at
+/// 6 and its parent at 3.
+pub fn ownership_read(
+    copy: &impl crate::read::Read,
+    node: crate::ids::Id,
+) -> Option<(Option<Owner>, bool, crate::ids::Id)> {
+    use crate::encode::Value as V;
+    let rec = |id| match copy.node(id) {
+        Some(V::Map(m)) => Some(m),
+        _ => None,
+    };
+    ownership_by(
+        node,
+        |id| {
+            rec(id).map(|m| match m.get(&6) {
+                Some(V::Map(f)) => f.clone(),
+                _ => std::collections::BTreeMap::new(),
+            })
+        },
+        |id| rec(id).and_then(|m| m.get(&3).and_then(|p| crate::effects::read_id(p).ok())),
+    )
+}
+
+/// The refusal's words when a marked thing is private to someone other than `soul`, else `None`.
+pub fn refusal_of(
+    found: Option<(Option<Owner>, bool, crate::ids::Id)>,
+    soul: crate::ids::Id,
+) -> Option<String> {
+    let (owner, private, _) = found?;
+    if !private || owner == Some(Owner::Soul(soul)) {
+        return None;
+    }
+    Some(match owner {
+        Some(o) => format!("it is {} and private", o.words()),
+        None => "it is private".to_owned(),
+    })
 }
 
 /// Whether `node` is private to someone other than `soul` (the asker's Soul, or its body with none): the refusal's
@@ -411,14 +466,7 @@ pub fn private_to(
     node: crate::ids::Id,
     soul: crate::ids::Id,
 ) -> Option<String> {
-    let (owner, private, _) = ownership(tree, node)?;
-    if !private || owner == Some(Owner::Soul(soul)) {
-        return None;
-    }
-    Some(match owner {
-        Some(o) => format!("it is {} and private", o.words()),
-        None => "it is private".to_owned(),
-    })
+    refusal_of(ownership(tree, node), soul)
 }
 
 #[cfg(test)]

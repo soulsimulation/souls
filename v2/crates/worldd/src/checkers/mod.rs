@@ -207,7 +207,7 @@ fn prepare(this: Id, entry: &Value, form: &str) -> Result<Vec<Change>, &'static 
 }
 
 /// Checks one candidate on `copy`.
-fn candidate(copy: &impl Read, rules: &Rules, body: Id, c: &Candidate) -> Checked {
+fn candidate(copy: &impl Read, rules: &Rules, body: Id, soul: Id, c: &Candidate) -> Checked {
     off_clock();
     let r = Recording::new(copy);
     let this = r.node(c.this);
@@ -224,6 +224,11 @@ fn candidate(copy: &impl Read, rules: &Rules, body: Id, c: &Candidate) -> Checke
     let Some(entry) = plain_kind(&this).and_then(|k| rules.kinds.get(k)) else {
         return no("no_such_kind", r);
     };
+    // #3700: a private thing (its own mark or its nearest marked ancestor's) is its owner's alone, read here so its
+    // marks are in the read set.
+    if replica::who_may::refusal_of(replica::who_may::ownership_read(&r, c.this), soul).is_some() {
+        return no("object.private", r);
+    }
     let (this_id, body_id) = (show(c.this), show(body));
     let mut nodes = vec![(this_id.clone(), thing(&this, entry))];
     if let (Some(a), Some(t)) = (position(&actor), position(&this)) {
@@ -275,7 +280,13 @@ pub fn check(copy: &impl Read, rules: &Rules, act: &Act) -> Checks {
         candidates: act
             .candidates
             .iter()
-            .map(|c| candidate(copy, rules, act.body, c))
+            .map(|c| {
+                let soul = match act.actor {
+                    Actor::Soul(s) => s,
+                    _ => act.body,
+                };
+                candidate(copy, rules, act.body, soul, c)
+            })
             .collect(),
     }
 }

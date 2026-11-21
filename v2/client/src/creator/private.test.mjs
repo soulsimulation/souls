@@ -1,9 +1,9 @@
-// A private thing is its owner's alone (0.131 parity, #3700), walked with real input: N2's test world served by a
-// world with a creator (`worldd gateway-link --testworld --creator`) through the real gateway, its one Soul driven by
-// the thin command (`souls.mjs`) and the creator by `souls-god.mjs`, each through its own daemon. The creator makes a
-// chair the god's and private; the Soul's sit on it is refused `object.private` by the world; made public again, the
-// same sit ends with its receipt. Run from v2/ after `cargo build -p gatewayd -p worldd --locked`, with replica's
-// wasm-bindgen package in target/wasm-load/pkg.
+// A private thing is its owner's alone (0.131 parity, #3700), walked with real input: the lamps world served by a
+// world with a creator (`worldd gateway-link --creator`) through the real gateway, its first body's Soul acting
+// through its daemon and the creator through `souls-god.mjs` and its own. The creator makes the Soul's lamp the god's
+// and private, and the Soul's press is refused `object.private` by the world; marks pass down from the room it is in;
+// made public again, the same press ends with its receipt. Run from v2/ after `cargo build -p gatewayd -p worldd
+// --locked`, with replica's wasm-bindgen package in target/wasm-load/pkg.
 
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
@@ -70,26 +70,22 @@ const answerOf = (rt, sequence) => waitFor(async () => {
   return got.find((e) => e.sequence === sequence);
 }, 60_000);
 
-let named, soulHome, godHome, soulRt;
+// `worldd gateway-link`'s world mints from scope 2b: the place, its room, the first body (the Soul) and its lamp.
+const SCOPE = '2b'.repeat(16), BODY = `${SCOPE}-2`, LAMP = `${SCOPE}-3`;
+let soulHome, godHome, soulRt;
 before(async () => {
   const world = join(dir, 'w.sock');
-  const w = spawn(bin('worldd'), ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1', '--rooms', '1', '--bodies', '1', '--testworld', '--creator', `${creatorScope}-1`, '--no-measures'], { stdio: ['ignore', 'pipe', 'ignore'] });
-  procs.push(w);
-  let out = '';
-  w.stdout.on('data', (d) => { out += d; });
+  procs.push(spawn(bin('worldd'), ['gateway-link', '--socket', world, '--lineage', randomBytes(16).toString('hex'), '--epoch', '1', '--rooms', '1', '--bodies', '1', '--creator', `${creatorScope}-1`, '--no-measures'], { stdio: 'ignore' }));
   await waitFor(() => { try { return statSync(world).isSocket(); } catch { return false; } });
-  await waitFor(() => out.includes('testworld'));
-  await sleep(100);
-  named = Object.fromEntries(out.trim().split('\n').map((l) => l.split(' ')).filter((p) => p[0] === 'testworld').map(([, id, ...n]) => [n.join(' '), id]));
-  const soulGrant = `soul-${named.soul}`, soulToken = `${soulGrant}.${randomBytes(32).toString('hex')}`;
+  const soulGrant = `soul-${BODY}`, soulToken = `${soulGrant}.${randomBytes(32).toString('hex')}`;
   const godGrant = `creator-${creatorScope}-1`, godToken = `${godGrant}.${randomBytes(32).toString('hex')}`;
   const tokens = join(dir, 'tokens.txt');
   writeFileSync(tokens, [[soulGrant, soulToken], [godGrant, godToken]].map(([g, t]) => `${g} ${createHash('sha256').update(t).digest('hex')}\n`).join(''));
   const { m } = await run(bin('gatewayd'), ['--listen', '127.0.0.1:0', '--world', world, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
   const gateway = `ws://${m[1]}/v2/ws`;
-  soulHome = homeFor('soul', `s_${named.soul}`, soulToken, gateway);
+  soulHome = homeFor('soul', `s_${BODY}`, soulToken, gateway);
   godHome = homeFor('god', `c_${creatorScope}-1`, godToken, gateway);
-  soulRt = runtimeOf(soulHome, `s_${named.soul}`);
+  soulRt = runtimeOf(soulHome, `s_${BODY}`);
   const godRt = runtimeOf(godHome, `c_${creatorScope}-1`);
   daemons.push(soulRt, godRt);
   cli(SOULS, soulHome, ['status']);
@@ -104,26 +100,32 @@ after(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('#3700: a Soul is refused a private chair by name, and sits once it is public again', async () => {
-  // The chairs of N2's test world are the Soul's to sit on, not nodes of the creator's tree; the lamp beside the
-  // Soul's body is. Both are tried: the chair when the creator's copy holds it, the lamp's switch always.
-  const nodes = cli(GOD, godHome, ['describe']).nodes;
-  const chair = named['the west chair'];
-  const lamp = nodes.find((n) => n.kind.startsWith('r2:lamp'))?.id;
-  assert.ok(lamp, JSON.stringify(nodes));
-  const target = nodes.some((n) => n.id === chair) ? { id: chair, acts: [`sit:${chair}`] } : { id: lamp, acts: [`switch_on:${lamp}`, `switch_off:${lamp}`] };
-  console.log(`target: ${target.id === chair ? 'the west chair' : 'the lamp'}`);
-  if (target.id === chair) assert.equal((await answerOf(soulRt, cli(SOULS, soulHome, ['act', chair]).sequence)).answer, 1, 'the Soul walks to the chair');
+/** The Soul presses its lamp's switch, either way: the answer of the one that holds (on, else off). */
+async function press() {
+  const on = await request(soulRt.socket, { op: 'act', verb: 'r2:switch_on', target: LAMP });
+  const a = await answerOf(soulRt, on.sequence);
+  console.log(`soul: act r2:switch_on ${LAMP} -> ${JSON.stringify({ answer: a.answer, reason: a.reason })}`);
+  if (a.answer === 1 || a.reason === 'object.private') return a;
+  const off = await request(soulRt.socket, { op: 'act', verb: 'r2:switch_off', target: LAMP });
+  const b = await answerOf(soulRt, off.sequence);
+  console.log(`soul: act r2:switch_off ${LAMP} -> ${JSON.stringify({ answer: b.answer, reason: b.reason })}`);
+  return b;
+}
 
-  const owned = cli(GOD, godHome, ['own', target.id, 'god', '--private']);
+test('#3700: a Soul is refused its lamp by name once the creator makes it the god\'s and private, and uses it once public', async () => {
+  assert.ok(cli(GOD, godHome, ['describe']).nodes.some((n) => n.id === LAMP), 'the lamp is in the creator\'s copy');
+  assert.equal((await press()).answer, 1, 'unmarked: the Soul may');
+  const owned = cli(GOD, godHome, ['own', LAMP, 'god', '--private']);
   assert.equal(owned.ok, true, JSON.stringify(owned));
-  const refused = cli(SOULS, soulHome, ['act', ...target.acts]);
-  assert.equal(refused.ok, true, JSON.stringify(refused));
-  const no = await answerOf(soulRt, refused.sequence);
-  assert.ok(no.answer > 1, `refused: ${JSON.stringify(no)}`);
-  assert.equal(no.reason, 'object.private', JSON.stringify(no));
-
-  assert.equal(cli(GOD, godHome, ['access', target.id, 'public']).ok, true);
-  const yes = await answerOf(soulRt, cli(SOULS, soulHome, ['act', ...target.acts]).sequence);
-  assert.equal(yes.answer, 1, `used once public: ${JSON.stringify(yes)}`);
+  const no = await press();
+  assert.deepEqual([no.answer > 1, no.reason], [true, 'object.private'], JSON.stringify(no));
+  // The room made the Soul's own and private: the lamp in it, public again, follows its own mark; the room's owner may.
+  assert.equal(cli(GOD, godHome, ['access', LAMP, 'none']).ok, true);
+  assert.equal(cli(GOD, godHome, ['own', LAMP, 'none']).ok, true);
+  assert.equal(cli(GOD, godHome, ['own', `${SCOPE}-1`, BODY, '--private']).ok, true);
+  assert.equal((await press()).answer, 1, 'the Soul owns the room it is in');
+  assert.equal(cli(GOD, godHome, ['own', `${SCOPE}-1`, 'god']).ok, true);
+  assert.equal((await press()).reason, 'object.private', 'the god\'s private room: its lamp is private too');
+  assert.equal(cli(GOD, godHome, ['access', `${SCOPE}-1`, 'public']).ok, true);
+  assert.equal((await press()).answer, 1, 'public again');
 });
