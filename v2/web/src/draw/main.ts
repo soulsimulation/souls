@@ -25,6 +25,7 @@ import { WorldSky } from '../sky/sky.ts';
 import { tickWater } from '../water/water.ts';
 import { installNightLighting, nightPools, paintNightSources, setNightStrength } from './night.ts';
 import { installCapture } from '../capture/capture.ts';
+import { mountFullscreen, startWakeLock } from './screen.ts';
 
 installNightLighting(); // V19b: the lamps' night pools, before any lit material compiles
 
@@ -92,6 +93,9 @@ loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').the
 // V21: the world heard, from the same parts and history the picture plays.
 const where = (id: string, local?: [number, number, number]) => (world.nodes.has(id) ? (local ? new THREE.Vector3(...local).multiplyScalar(1e-6) : new THREE.Vector3()).applyMatrix4(world.frame(id)).toArray() : null);
 const sound = new WorldSound({ where, kindOf: (id) => world.nodes.get(id)?.kind, heightAt: (x, z) => world.heightAt(x, z) });
+// C1 (#3673): a Full screen toggle beside the sound switch, and the screen kept awake while the page is watched.
+mountFullscreen(document.getElementById('sound-bar') ?? document.body);
+startWakeLock();
 
 let pointer: Pointer | null = null;
 let newestTo: number | null = null;
