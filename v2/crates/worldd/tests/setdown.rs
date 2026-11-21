@@ -643,6 +643,8 @@ fn a1_take_walk_and_set_down_one_receipt_one_parent_kept_across_a_restart() {
         "kept across the restart"
     );
     // The restarted world still answers the Soul: a second set-down of what is already down is refused.
+    // (A fresh sequence: the restarted world keeps the Soul's answered ones.)
+    a2.2 = 100;
     let twice = a2.act(SET_DOWN, Some(vessel()), word("here"));
     println!("A1 after restart, again: {twice:?}");
     assert_eq!(twice, Err("not-held".to_owned()));
