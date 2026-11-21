@@ -5066,7 +5066,7 @@ mod no_brick_tests {
                 .map(|_| alphabet[(next() % alphabet.len() as u64) as usize] as char)
                 .collect();
             if near {
-                word.insert_str(0, "a");
+                word.insert(0, 'a');
                 word.insert(1 + (next() % len as u64) as usize, ':');
             }
             let text = Value::Text(Name::new(&word).expect("the alphabet is names' bytes"));
