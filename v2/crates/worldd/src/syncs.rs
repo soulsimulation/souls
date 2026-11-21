@@ -14,6 +14,8 @@
 //! Requests reach it from the [`crate::answers::Door`] directly, so they never wait in the clock thread's queue.
 
 use crate::answers::Reply;
+#[cfg(test)]
+use crate::closed::MADE_MOST;
 use crate::closed::{Closed, Redaction, Withhold, actor_of_key};
 use crate::views::names::{self, PublicNames};
 use replica::apply::Replica;
@@ -162,7 +164,7 @@ impl Source for Withheld<'_> {
             .iter()
             .map(|h| {
                 // A record rewritten for an asker is served from those made; the real one it replaces never is.
-                if let Some(b) = self.withhold.made(h) {
+                if let Some(b) = self.withhold.made(self.asker, h) {
                     return Ok(b.clone());
                 }
                 if self.redaction.is_some_and(|r| r.replaced(h)) {
@@ -180,5 +182,116 @@ impl Source for Withheld<'_> {
                 })
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use replica::rules::json::parse;
+    use replica::world_model::plain;
+
+    /// A test world whose building is a closed kind (creator only), sealed, and the records its seal gave.
+    fn world() -> (Tree, Records, Withhold, Id) {
+        let generated = testworld::generate(1, 0).expect("the synthetic world");
+        let mut im = import_eden::load(&generated.text).expect("the imported world");
+        let building = im.nodes["building"];
+        let kind = plain(
+            im.tree
+                .node(im.tree.handle(building).unwrap())
+                .unwrap()
+                .kind()
+                .as_str(),
+        )
+        .to_owned();
+        let sealed = im.tree.seal().expect("sealed");
+        let mut kept = Records::default();
+        kept.keep(&sealed);
+        let entry =
+            parse(r#"{"closed": {"audience": {"rule": "creator"}, "fields": []}}"#).unwrap();
+        (
+            im.tree,
+            kept,
+            Withhold::new(Closed::of(&[(kind, entry)])),
+            building,
+        )
+    }
+
+    fn sync_as(tree: &Tree, kept: &Records, w: &mut Withhold, asker: Option<Actor>) -> sync::Copy {
+        {
+            let served = Served {
+                tree,
+                records: kept,
+            };
+            let mut read = |h: &[u8]| {
+                Served {
+                    tree: served.tree,
+                    records: served.records,
+                }
+                .records(&[h.to_vec()])
+                .ok()
+                .and_then(|mut v| v.pop())
+            };
+            w.prepare(tree, 1, asker, &mut read);
+        }
+        let mut src = Withheld {
+            served: Served {
+                tree,
+                records: kept,
+            },
+            withhold: w,
+            redaction: w.redaction(asker),
+            asker,
+        };
+        let root = tree.node(tree.root()).unwrap().id();
+        let mut copy = sync::Copy::default();
+        copy.sync(&[root], &mut src).expect("the sync finishes");
+        copy
+    }
+
+    #[test]
+    /// #3915: a Soul outside a closed container's audience syncs a copy that holds neither the container's children
+    /// nor their hashes (the container's record and its ancestors' are rewritten for it, and check); the creator's
+    /// copy holds them. A store of past records filled past its bound never fails the Soul's current sync.
+    fn a_souls_redacted_sync_holds_after_the_past_store_is_filled() {
+        let (tree, kept, mut w, building) = world();
+        let kids: Vec<Vec<u8>> = tree
+            .children(tree.handle(building).unwrap())
+            .unwrap()
+            .iter()
+            .filter_map(|&h| tree.node(h)?.sealed())
+            .map(|h| h.to_bytes())
+            .collect();
+        assert!(!kids.is_empty(), "the building holds floors");
+        let real = tree
+            .node(tree.handle(building).unwrap())
+            .unwrap()
+            .sealed()
+            .unwrap()
+            .to_bytes();
+        let soul = Some(Actor::Soul(Id::new(Scope([9; 16]), 1).unwrap()));
+        let copy = sync_as(&tree, &kept, &mut w, soul);
+        for k in &kids {
+            assert!(
+                copy.record(k).is_none(),
+                "a withheld child is not in the Soul's copy"
+            );
+        }
+        assert!(
+            copy.record(&real).is_none(),
+            "nor the building's real record, which names them"
+        );
+        // The store of past records, filled past its bound: the Soul's current redaction is untouched.
+        w.fill_past(MADE_MOST + 10);
+        let again = sync_as(&tree, &kept, &mut w, soul);
+        assert_eq!(again.roots(), copy.roots(), "the same redacted copy");
+        let creator = Some(Actor::Creator(Id::new(Scope([9; 16]), 2).unwrap()));
+        let full = sync_as(&tree, &kept, &mut w, creator);
+        for k in &kids {
+            assert!(
+                full.record(k).is_some(),
+                "the creator's copy holds the building's children"
+            );
+        }
     }
 }
