@@ -2259,7 +2259,8 @@ fn stream_files(views: &Path) -> BTreeMap<String, Vec<u8>> {
 /// same, byte for byte, as when every part is worked out whole (`SOULS_STREAM_WHOLE`). A recorded world
 /// (`V2_RECORDED_WORLD`, e.g. kept by the A5 run with `V2_KEEP_WORLD`) is served twice from copies with no stream: the
 /// stream is written again from the whole log at start-up, once each way; the two are compared file by file, and
-/// the time each start-up took to write it is printed.
+/// the time each start-up took to write it is printed. Both runs roll the stream over to a new generation every
+/// `V2_GENERATION_PARTS` (100) parts (#3825), so the rollovers' baselines are compared too.
 #[test]
 #[ignore = "needs a recorded world (V2_RECORDED_WORLD) and a built worldd (see the module doc)"]
 fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
@@ -2282,6 +2283,10 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
         if whole {
             c.env("SOULS_STREAM_WHOLE", "1");
         }
+        c.env(
+            "SOULS_STREAM_GENERATION_PARTS",
+            std::env::var("V2_GENERATION_PARTS").unwrap_or_else(|_| "100".into()),
+        );
         let mut child = c.spawn().unwrap();
         let mut out = BufReader::new(child.stdout.take().unwrap());
         let (mut line, mut before, mut written) = (String::new(), None, None);
@@ -2334,6 +2339,12 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
         whole.len() - both.len()
     );
     assert!(both.len() > 100, "a recorded world of many parts");
+    let generations: std::collections::BTreeSet<&str> = rows
+        .keys()
+        .filter_map(|k| k.split("/g/").nth(1)?.split('/').next())
+        .collect();
+    println!("{} generations", generations.len());
+    assert!(generations.len() > 1, "the stream rolled over (#3825)");
     assert!(
         differ.is_empty(),
         "byte for byte: {:?}",
