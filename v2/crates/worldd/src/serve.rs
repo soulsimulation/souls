@@ -809,10 +809,9 @@ fn seed_in(args: &[String]) -> R<String> {
         println!("entries: {}", found.len());
         // The code hatches' modules shipped beside the entries (#3713), each kept under the hash it is named by.
         let mut modules = Vec::new();
-        wasm_files(
-            Path::new(arg(args, "--entries").unwrap_or_default()),
-            &mut modules,
-        )?;
+        if let Some(e) = arg(args, "--entries") {
+            wasm_files(Path::new(e), &mut modules)?;
+        }
         if !modules.is_empty() {
             std::fs::create_dir_all(dir.join("hatches")).map_err(io(&dir))?;
         }
