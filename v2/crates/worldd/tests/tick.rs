@@ -915,10 +915,25 @@ fn malformed_words_are_refused_and_the_world_restarts() {
     let malformed = [
         // The world bricked on Saturn: a thin client's act word with an `undefined` in it.
         intent(body, 1, "sit_down:undefined", Some(chair()), None),
-        intent_params(body, 2, "speech:say", vec![(1, words), (2, text("Loud:Voice"))]),
-        intent_params(body, 3, "r2:switch_on", vec![(1, Value::Array(vec![arg("thing", text("lamp:Main_1"))]))]),
+        intent_params(
+            body,
+            2,
+            "speech:say",
+            vec![(1, words), (2, text("Loud:Voice"))],
+        ),
+        intent_params(
+            body,
+            3,
+            "r2:switch_on",
+            vec![(1, Value::Array(vec![arg("thing", text("lamp:Main_1"))]))],
+        ),
         intent_params(body, 4, "souls:edit", vec![(1, text("eden:Chair"))]),
-        intent_params(body, 5, "hands:set-down", vec![(1, text("place:on_floor:x"))]),
+        intent_params(
+            body,
+            5,
+            "hands:set-down",
+            vec![(1, text("place:on_floor:x"))],
+        ),
     ];
     let store = Mem::with(Vec::new());
     let w = start(store.clone(), false);
@@ -930,20 +945,45 @@ fn malformed_words_are_refused_and_the_world_restarts() {
     let switch = at(&w, 9, intent(body, 6, "r2:switch_on", Some(lamp), None));
     let ran = run_to(&w, 60);
     for (k, rx) in asked.iter().enumerate() {
-        assert_eq!(
-            answer(rx),
-            Err("intent.text-not-a-name".to_owned()),
-            "malformed word {k} is refused by name"
-        );
+        // Refused (2) at intake, or unread (5) as the edit is when its batch is no batch: by name either way.
+        let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+        let Value::Map(m) = decode(&frame).unwrap().value else {
+            panic!("a frame")
+        };
+        let Some(Value::Map(a)) = m.get(&2) else {
+            panic!("an answer")
+        };
+        let reason = match (a.get(&3), a.get(&4)) {
+            (Some(Value::Uint(2 | 5)), Some(Value::Text(t))) => t.as_str().to_owned(),
+            other => panic!("malformed word {k} answered {other:?}"),
+        };
+        let expected = if k == 3 {
+            "edit-not-a-batch"
+        } else {
+            "intent.text-not-a-name"
+        };
+        assert_eq!(reason, expected, "malformed word {k} is refused by name");
     }
-    assert!(answer(&switch).is_ok(), "the world goes on: a later act lands");
+    assert!(
+        answer(&switch).is_ok(),
+        "the world goes on: a later act lands"
+    );
     assert!(ran.tick >= 60, "the clock ran on");
     let log = bytes(&store);
-    for r in recover(&log).unwrap().records.iter().filter(|r| !recorder::is_input(r)) {
+    for r in recover(&log)
+        .unwrap()
+        .records
+        .iter()
+        .filter(|r| !recorder::is_input(r))
+    {
         Part::read(r).expect("every record the world wrote reads back");
     }
     let before = last_state(&log);
     let k = start(Mem::with(log), false);
     let restarted = run_to(&k, 0);
-    assert_eq!(restarted.state.to_vec(), before, "it restarts with its last state");
+    assert_eq!(
+        restarted.state.to_vec(),
+        before,
+        "it restarts with its last state"
+    );
 }

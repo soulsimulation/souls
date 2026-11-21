@@ -1043,7 +1043,9 @@ fn logged_intent(intent: Value) -> Value {
     match replica::effects::not_a_name(&intent) {
         None => intent,
         Some(t) => {
-            eprintln!("worldd: an answered intent holds text-not-a-name {t:?}: logged as its bytes");
+            eprintln!(
+                "worldd: an answered intent holds text-not-a-name {t:?}: logged as its bytes"
+            );
             Value::Bytes(encode(&intent).unwrap_or_default())
         }
     }
@@ -5074,7 +5076,10 @@ mod no_brick_tests {
                     4,
                     Value::Map(BTreeMap::from([(
                         1,
-                        Value::Array(vec![Value::Array(vec![Value::Bytes(b"thing".to_vec()), text])]),
+                        Value::Array(vec![Value::Array(vec![
+                            Value::Bytes(b"thing".to_vec()),
+                            text,
+                        ])]),
                     )])),
                 ),
             ]));
@@ -5082,14 +5087,22 @@ mod no_brick_tests {
             let raw = Part::read(&record(intent.clone()));
             let refused = replica::effects::not_a_name(&intent).is_some();
             assert_eq!(raw.is_err(), refused, "intake and reader agree on {word:?}");
-            if refused { not_names += 1 } else { names += 1 }
+            if refused {
+                not_names += 1
+            } else {
+                names += 1
+            }
             // The writer never logs what the reader refuses, and keeps a name as it is.
             let logged = logged_intent(intent.clone());
-            Part::read(&record(logged.clone())).unwrap_or_else(|r| panic!("{word:?} logged unreadable: {r}"));
+            Part::read(&record(logged.clone()))
+                .unwrap_or_else(|r| panic!("{word:?} logged unreadable: {r}"));
             if !refused {
                 assert_eq!(logged, intent, "a name is logged as written");
             }
         }
-        assert!(names > 100 && not_names > 100, "both kinds tried: {names} names, {not_names} not");
+        assert!(
+            names > 100 && not_names > 100,
+            "both kinds tried: {names} names, {not_names} not"
+        );
     }
 }
