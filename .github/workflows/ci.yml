@@ -136,7 +136,10 @@ jobs:
     runs-on: ${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || matrix.light && vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     # The recursive server inventory (about an hour of tests in all) runs in duration-balanced shards of ~10 minutes each.
     # a launcher leg passes in about 9 min on hosted runners; 40 fails a hung test file in time to keep the merge queue moving.
-    timeout-minutes: ${{ matrix.kind == 'server' && 45 || matrix.kind == 'launcher' && 40 || 60 }}
+    # Every other kind gets 2-3x its slowest green time (40 green runs, 21 Nov: native 15, v2 legs 12, packages 9 and
+    # heavy, web 8, soul-actions 21 unsharded, the rest under 2), so a hang fails fast instead of holding the merge
+    # queue for its 120 minutes (merge group run 44871673267: native hung in `pnpm test:mars`).
+    timeout-minutes: ${{ matrix.kind == 'server' && 45 || matrix.kind == 'launcher' && 40 || matrix.kind == 'soul-actions' && 45 || matrix.kind == 'native' && 30 || matrix.kind == 'v2' && 30 || matrix.kind == 'packages' && 30 || matrix.kind == 'web' && 20 || 15 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
@@ -441,6 +444,7 @@ jobs:
     runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     needs: [scope, repo, qualify, smoke]
     if: always()
+    timeout-minutes: 5
     steps:
       - name: Full CI deferred
         if: needs.scope.outputs.deferred == 'true'
