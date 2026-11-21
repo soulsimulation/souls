@@ -40,9 +40,11 @@
 //!   timer ([`Acts::fired`]). A form's value arguments ([`Args::values`]: a value by name, words by reference) reach
 //!   its sets.
 //! - **A walk that stalls** (C21, #3484). Each tick, every form's walk that asked its way is watched
-//!   ([`sim::walk::stall::Watch`]): one that gains less than a quarter metre toward its goal over 3 s of world time
-//!   ends `walk.blocked` in that tick, its body's driver released, and the act's ending entry names the nearest thing
-//!   or edge in its way ([`sim::walk::stall::blocker`]).
+//!   ([`sim::walk::stall::Watch`]) against the corner its line aims at and that line's leg's end (never the walk's
+//!   goal, which on a route with crossings lies past the leg's end): one that gains less than a quarter metre on
+//!   them over 3 s of world time, or whose least way left to the leg's end has not shrunk by a quarter metre in 12 s
+//!   (it circles or goes to and fro), ends `walk.blocked` in that tick, its body's driver released, and the act's
+//!   ending entry names the nearest thing or edge in its way ([`sim::walk::stall::blocker`]).
 //!
 //! Not here: R2's needs checked again at commit (the checkers read bodies from the tree, which does not hold them
 //! yet); a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are

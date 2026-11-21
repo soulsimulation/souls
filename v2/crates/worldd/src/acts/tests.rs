@@ -398,3 +398,95 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         "another step: as before"
     );
 }
+
+/// A skill that holds its body and does nothing: what a gateway walk's runner reads as running.
+struct Holds;
+
+impl replica::host::Skill for Holds {
+    fn shape(&self) -> replica::bodies::SkillShape {
+        replica::bodies::SkillShape {
+            name: Name::new("test:holds").unwrap(),
+            claims: Vec::new(),
+            blocks: Vec::new(),
+            cancelled_by: Vec::new(),
+        }
+    }
+
+    fn step(&mut self, _: &mut dyn replica::host::Host) -> replica::host::Progress {
+        replica::host::Progress::Running
+    }
+}
+
+/// #1960 cause 1: the gateway walk's stall watch measures against its line's leg's end, never the walk's granted
+/// place, which on a route with crossings lies past the leg's end. Here the granted place lies 20 m west and the
+/// line goes east round N2's hall to its leg's end: walking it at 1.4 m/s, the walk is never found stalled. Measured
+/// against the granted place (or its corner alone), its least way left stops shrinking at the hall's first corner
+/// and the backstop ends it there 12 s on.
+#[test]
+fn a_gateway_walk_is_watched_against_its_legs_end_not_its_granted_place() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let ground = imported.nodes["ground"];
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let town =
+        Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).expect("the town");
+    let id = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let place = |town: &Town, at: Vec3| {
+        town.surfaces[&ground]
+            .place(id, frame.clone(), at, Quat::IDENTITY)
+            .unwrap()
+    };
+    let start = place(&town, Vec3::new(-20_000_000, 0, 50_000_000));
+    let mut b = Bodies::new(town, 50_000).unwrap();
+    let legs = |n: &str| replica::bodies::Resource {
+        name: Name::new(n).unwrap(),
+        class: replica::bodies::Class::Locomotion,
+        slot: None,
+    };
+    b.add_body(
+        replica::bodies::Family {
+            name: Name::new("souls:humanoid").unwrap(),
+            resources: vec![legs("souls:leg-left"), legs("souls:leg-right")],
+        },
+        start,
+    )
+    .unwrap();
+    b.runner.start(id, Box::new(Holds)).unwrap();
+    b.runner
+        .granted
+        .insert(id, Vec3::new(-40_000_000, 0, 50_000_000));
+    let leg_end = Vec3::new(20_000_000, 0, 50_000_000);
+    let mut walk = Walk::new(id, Id::new(Scope([0xc9; 16]), 2).unwrap(), 0);
+    let mut corners = BTreeSet::new();
+    for t in 0..2_000i64 {
+        let me = *b.runner.controller.body(id).unwrap();
+        let p = me.pose.position;
+        if (p.x - leg_end.x).abs() + (p.z - leg_end.z).abs() < 100_000 {
+            assert!(corners.len() >= 2, "it went round the hall: {corners:?}");
+            println!("walked to the leg's end in {} ticks round {corners:?}", t);
+            return;
+        }
+        let c = b.town.view().corner(&me, leg_end).unwrap();
+        corners.insert(c);
+        let (_, stalled) = walk.step(&mut b, t * 50_000);
+        assert!(!stalled, "found stalled at tick {t}, at {p:?}");
+        // On 70 mm toward its corner.
+        let d = i64::try_from(
+            (i128::from(c[0] - p.x).pow(2) + i128::from(c[1] - p.z).pow(2)).isqrt(),
+        )
+        .unwrap();
+        let go = d.min(70_000);
+        let next = Vec3::new(
+            p.x + (c[0] - p.x) * go / d.max(1),
+            0,
+            p.z + (c[1] - p.z) * go / d.max(1),
+        );
+        let moved = place(&b.town, next);
+        b.runner.controller.regrounded(id, Some(moved)).unwrap();
+    }
+    panic!("it never reached its leg's end");
+}
