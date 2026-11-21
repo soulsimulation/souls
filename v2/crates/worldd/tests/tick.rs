@@ -922,14 +922,20 @@ fn malformed_words_are_refused_and_the_world_restarts() {
     // `sit_down:undefined` is no form here, and its row logs the intent as bytes; a text that passes every check
     // is refused `intent.text-not-a-name` before anything is written.
     let malformed = [
+        // As on Saturn, with no node: its own refusal, the row logging the intent as bytes.
         (
-            intent(body, 1, "sit_down:undefined", Some(chair()), None),
+            intent(body, 1, "sit_down:undefined", None, None),
             "intent.not-a-form-on-a-node",
+        ),
+        // On a node it passes every intake check: the backstop.
+        (
+            intent(body, 2, "sit_down:undefined", Some(chair()), None),
+            "intent.text-not-a-name",
         ),
         (
             intent_params(
                 body,
-                2,
+                3,
                 "speech:say",
                 None,
                 vec![(1, words), (2, text("Loud:Voice"))],
@@ -939,7 +945,7 @@ fn malformed_words_are_refused_and_the_world_restarts() {
         (
             intent_params(
                 body,
-                3,
+                4,
                 "r2:switch_on",
                 Some(lamp),
                 vec![(1, Value::Array(vec![arg("thing", text("lamp:Main_1"))]))],
@@ -947,24 +953,24 @@ fn malformed_words_are_refused_and_the_world_restarts() {
             "intent.text-not-a-name",
         ),
         (
-            intent_params(body, 4, "souls:edit", None, vec![(1, text("eden:Chair"))]),
+            intent_params(body, 5, "souls:edit", None, vec![(1, text("eden:Chair"))]),
             "edit-not-a-batch",
         ),
         (
             intent_params(
                 body,
-                5,
+                6,
                 "hands:set-down",
                 None,
                 vec![(1, text("place:on_floor:x"))],
             ),
-            "SETDOWN?",
+            "setdown-off",
         ),
         // A part that is not UTF-8 stays `arg-malformed`, though its value `top` is no name either.
         (
             intent_params(
                 body,
-                6,
+                7,
                 "r2:switch_on",
                 Some(lamp),
                 vec![(
@@ -985,7 +991,7 @@ fn malformed_words_are_refused_and_the_world_restarts() {
         .enumerate()
         .map(|(k, (b, why))| (at(&w, 2 + k as i64, b), why.to_owned()))
         .unzip();
-    let switch = at(&w, 9, intent(body, 7, "r2:switch_on", Some(lamp), None));
+    let switch = at(&w, 10, intent(body, 8, "r2:switch_on", Some(lamp), None));
     let ran = run_to(&w, 60);
     let reasons: Vec<String> = asked
         .iter()
