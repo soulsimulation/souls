@@ -4,6 +4,8 @@
 // approved once and joined with `life:join`, as the served e2e gate does it. Everything goes through the thin command.
 //
 //   A: `calendar add` takes a blank notice from the board, writes it and puts it up; its `wait` says posted.
+// With CALENDAR_FACTS set to Eden's facts file, the same journey runs on full Eden and its own notice boards.
+//
 //   B: `whatson` reads A's event, with A as its poster; `calendar interest` says B will come, and both Souls'
 //      `whatson` count one coming (B's says it is B); `calendar not-coming` takes it back.
 //
@@ -88,7 +90,8 @@ async function world() {
 
 test('#3703: a Soul announces from the notice board; another reads it in whatson, comes, and takes it back', { timeout: 400_000 }, async () => {
   const t0 = Date.now(), stage = (s) => console.log(`calendar: ${s} at ${((Date.now() - t0) / 1000).toFixed(1)} s`);
-  const w = await world(), folder = join(dir, 'world');
+  // CALENDAR_FACTS=<Eden's facts> serves full Eden with every entry in content/kinds instead (the A5 walk).
+  const w = process.env.CALENDAR_FACTS ? { facts: process.env.CALENDAR_FACTS, entries: content } : await world(), folder = join(dir, 'world');
   const seeded = await run(bin('worldd'), ['seed', '--facts', w.facts, '--dir', folder, '--souls', '0', '--at', '0,0', '--entries', w.entries]);
   assert.equal(seeded.code, 0, seeded.out);
   const served = run(bin('worldd'), ['serve', '--dir', folder], /listening /);
@@ -135,7 +138,8 @@ test('#3703: a Soul announces from the notice board; another reads it in whatson
   stage(`joined: ${A.body}, ${B.body}`);
 
   // A announces. The board is in A's copy; the add answers at once and its outcome arrives in wait.
-  const board = await waitFor('the board in A\'s copy', async () => (await A.cli('find', 'notice', 'board')).found?.find((r) => r.kind?.startsWith('eden:notice_board')));
+  const board = await waitFor('the board in A\'s copy', async () => (await A.cli('find', 'notice', 'board', '--limit', '20')).found?.find((r) => r.kind?.startsWith('eden:notice_board')));
+  console.log('board:', JSON.stringify(board));
   const add = await A.cli('calendar', 'add', 'Bread at the oven', '--place', board.id, '--in', '30', '--for', '60', 'bring a loaf');
   console.log('calendar add:', JSON.stringify(add));
   assert.equal(add.ok, true, JSON.stringify(add));

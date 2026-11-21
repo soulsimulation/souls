@@ -686,7 +686,12 @@ fn obj_mut<'a>(v: &'a mut Json, key: &str) -> Option<&'a mut Json> {
 /// `kinds` (entries by kind) with each form's `create` kind written as `pinned` names it (`<kind>@<hash>`), where it
 /// pins one; any other is left as it is, and its make is refused by name (`name-not-pinned`).
 fn pin_made(kinds: Json, pinned: &[Name]) -> Json {
-    let pin = |k: &str| pinned.iter().find(|n| plain(n) == k).map(|n| n.as_str().to_owned());
+    let pin = |k: &str| {
+        pinned
+            .iter()
+            .find(|n| plain(n) == k)
+            .map(|n| n.as_str().to_owned())
+    };
     let Json::Obj(entries) = kinds else {
         return kinds;
     };
@@ -737,7 +742,9 @@ fn numbers(
     let (mut counts, mut slots) = (skills::form_runner::Args::new(), BTreeMap::new());
     for (k, &n) in given {
         match (takes(k), i64::try_from(n)) {
-            (Some("int" | "duration"), Ok(v)) => drop(counts.insert(k.clone(), skills::form_runner::Arg::Int(v))),
+            (Some("int" | "duration"), Ok(v)) => {
+                drop(counts.insert(k.clone(), skills::form_runner::Arg::Int(v)))
+            }
             _ => drop(slots.insert(k.clone(), n)),
         }
     }
@@ -1379,13 +1386,13 @@ mod number_tests {
     #[test]
     fn whole_numbers_a_form_takes_as_counts_are_values_and_others_slots() {
         let entry = replica::rules::json::parse(
-            r#"{"forms":{"post":{"takes":{"start":{"type":"duration"},"n":{"type":"int"},"seat":{"type":"slot"}}}}}"#,
+            r#"{"forms":{"post":{"takes":{"start":{"type":"duration"},"n":{"type":"int"},"spot":{"type":"slot"}}}}}"#,
         )
         .expect("an entry");
         let given = BTreeMap::from([
             ("start".to_owned(), 1_800_000_000_000_000u64),
             ("n".to_owned(), 3),
-            ("seat".to_owned(), 2),
+            ("spot".to_owned(), 2),
             ("other".to_owned(), 1),
         ]);
         let (counts, slots) = numbers(&entry, "post", &given);
@@ -1393,12 +1400,15 @@ mod number_tests {
             counts,
             skills::form_runner::Args::from([
                 ("n".to_owned(), skills::form_runner::Arg::Int(3)),
-                ("start".to_owned(), skills::form_runner::Arg::Int(1_800_000_000_000_000)),
+                (
+                    "start".to_owned(),
+                    skills::form_runner::Arg::Int(1_800_000_000_000_000)
+                ),
             ])
         );
         assert_eq!(
             slots,
-            BTreeMap::from([("other".to_owned(), 1), ("seat".to_owned(), 2)])
+            BTreeMap::from([("other".to_owned(), 1), ("spot".to_owned(), 2)])
         );
         // A number past i64 stays a slot number, refused there by name.
         let huge = BTreeMap::from([("n".to_owned(), u64::MAX)]);

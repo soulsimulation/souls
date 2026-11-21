@@ -411,7 +411,11 @@ fn with_made(facts: &str, entries: &[(String, Json)]) -> R<String> {
         .and_then(Json::arr)
         .unwrap_or(&[])
         .iter()
-        .filter_map(|k| k.get("name").and_then(Json::str).map(import_eden::kind_name))
+        .filter_map(|k| {
+            k.get("name")
+                .and_then(Json::str)
+                .map(import_eden::kind_name)
+        })
         .collect();
     let known: BTreeSet<&str> = entries.iter().map(|(k, _)| k.as_str()).collect();
     let made: BTreeSet<String> = entries
@@ -435,7 +439,10 @@ fn with_made(facts: &str, entries: &[(String, Json)]) -> R<String> {
             Json::Obj(
                 [
                     ("ref", Json::s(&format!("made-{}@1", k.replace(':', "-")))),
-                    ("hash", Json::s(&to_hex(&sha256(format!("souls/made/{k}").as_bytes())))),
+                    (
+                        "hash",
+                        Json::s(&to_hex(&sha256(format!("souls/made/{k}").as_bytes()))),
+                    ),
                     ("name", Json::s(k)),
                     ("form", Json::s("point")),
                     ("layer", Json::s("decor")),
