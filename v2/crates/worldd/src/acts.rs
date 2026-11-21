@@ -546,6 +546,15 @@ impl Geometry for Sight<'_> {
         } else {
             (node, at, reach)
         };
+        if self.approaches.contains(&body) {
+            self.with_view(body, |v| {
+                for r in [600_000, 900_000, 1_200_000] {
+                    let a = v.stand_near(node, at, r, Some(me));
+                    let b = v.stand_near(node, at, r, None);
+                    eprintln!("DBG near r {r}: with-from {a:?} no-from {b:?}");
+                }
+            });
+        }
         let mut planning = self.planning.borrow_mut();
         match planning.ask(key, *me, FormQuery::Walk { node, at, reach }, &self.map) {
             Some(FormResult::Walk(legs)) => {
