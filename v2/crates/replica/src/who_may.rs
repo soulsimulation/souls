@@ -329,7 +329,7 @@ pub fn who_may_decide(input: &str) -> String {
 
 /// A node's owner: an id (a Soul's), `group:<name>`, `owner:god`, or 0 for none.
 pub const F_OWNER: u64 = 143;
-/// A node's access: 0 none (its ancestors' holds), 1 public, 2 private.
+/// A node's access: 0 unmarked (the nearest marked ancestor's marks hold), 1 public, 2 private.
 pub const F_ACCESS: u64 = 144;
 
 /// Who owns a marked thing.

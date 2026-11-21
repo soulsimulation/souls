@@ -550,13 +550,9 @@ fn field_value(v: &json::Value) -> Result<Value, String> {
             .map(Value::Nint)
             .map_err(|e| e.to_string()),
         json::Value::Bool(b) => Ok(Value::Uint(u64::from(*b))),
-        // #3700: an id as text (`<32 hex>-<counter>`, a Soul's to own a thing) is written as an id.
-        json::Value::Str(t) => match id_of_text(t) {
-            Some(id) => Ok(id.to_value()),
-            None => Name::new(t)
-                .map(Value::Text)
-                .ok_or_else(|| format!("{t:?} is not a name (ASCII, at most 64)")),
-        },
+        json::Value::Str(t) => Name::new(t)
+            .map(Value::Text)
+            .ok_or_else(|| format!("{t:?} is not a name (ASCII, at most 64)")),
         json::Value::Arr(items) => items
             .iter()
             .map(field_value)
@@ -632,11 +628,26 @@ fn ops_in(v: &json::Value) -> Result<Vec<Op>, String> {
                     node: node()?,
                     at: spot_of(o)?,
                 },
-                Some("set") => Op::Set {
-                    node: node()?,
-                    field: uint_of(o.get("field"), "a set's field")?,
-                    to: field_value(o.get("value").ok_or("a set's value")?)?,
-                },
+                Some("set") => {
+                    let field = uint_of(o.get("field"), "a set's field")?;
+                    let raw = o.get("value").ok_or("a set's value")?;
+                    // #3700: an owner written as an id's text (`<32 hex>-<counter>`, a Soul's) is written as an id;
+                    // any other field keeps text as a name.
+                    let to = match raw {
+                        json::Value::Str(t) if field == crate::who_may::F_OWNER => {
+                            match id_of_text(t) {
+                                Some(id) => id.to_value(),
+                                None => field_value(raw)?,
+                            }
+                        }
+                        _ => field_value(raw)?,
+                    };
+                    Op::Set {
+                        node: node()?,
+                        field,
+                        to,
+                    }
+                }
                 Some("remove") => Op::Remove { node: node()? },
                 Some("doorway") => {
                     let integer = |v: &json::Value| match v {
