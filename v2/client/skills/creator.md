@@ -44,6 +44,7 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `move <id> --at x,y,z [--slot n]` | to another spot in the same parent |
 | `set <id> <field> <value>` | one numbered field: an integer, `true`, `false` or a name |
 | `remove <id>` | it and everything in it |
+| `about <id> --title '<t>' [--alias '<a>' ...]` | a place's title and aliases, kept as words for everyone; Souls' `find` matches either. `--set '{"title":"..","aliases":[".."]}'` sets both, `--clear` clears both |
 | `batch '<json list>'` | several operations at once: all happen, or none |
 | `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
 | `describe` | what is there, and what each kind admits |

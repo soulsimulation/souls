@@ -13,6 +13,9 @@
 //   souls-god.mjs batch '<json list>'            several at once, all or none: [{"op":"place","name":1,...}, ...]; a
 //                                                later op names an earlier place by its "name" number
 //   souls-god.mjs check <any of the four, or batch> ...   the same, checked on the copy only; nothing is sent
+//   souls-god.mjs about <id> --title '<t>' [--alias '<a>' ...] | --set '{"title":..,"aliases":[..]}' | --clear
+//                                                a place's title and aliases (today's `about`), kept by the world as
+//                                                words for everyone; Souls' find matches either
 //   souls-god.mjs status | stop                  the daemon
 //   any of them [--creator <c_id>]               which creator, when the home holds more than one
 //
@@ -28,7 +31,7 @@ import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'status', 'stop'];
+export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'status', 'stop', 'about'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
@@ -83,11 +86,47 @@ export function opsOf(verb, words) {
     if (args.length !== 3 || !/^\d+$/.test(args[1])) throw usage('set <id> <field number> <value>');
     return [{ op: 'set', node: node(args[0]), field: Number(args[1]), value: valueOf(args[2]) }];
   }
+  if (verb === 'about') return aboutOps(args);
   if (verb === 'remove') {
     if (!args[0]) throw usage('remove <id>');
     return [{ op: 'remove', node: node(args[0]) }];
   }
   throw usage(`one of ${VERBS.join(', ')}`);
+}
+
+/** A place's title and aliases (`brief/copy.mjs` F_TITLE, F_ALIASES): the words, or false to clear. */
+export const ABOUT = { title: 4, aliases: 90 };
+const ALIASES_MOST = 64;
+
+/** `about`'s batch: today's `about <ref> --set JSON | --clear`, or its `--title` and `--alias` parts. */
+export function aboutOps(words) {
+  const args = [...words];
+  const how = 'about <id> --title \'<t>\' [--alias \'<a>\' ...] | --set \'{"title":"..","aliases":[".."]}\' | --clear';
+  const clear = args.indexOf('--clear');
+  if (clear >= 0) args.splice(clear, 1);
+  const set = takeOpt(args, '--set'), title = takeOpt(args, '--title'), alias = takeAll(args, '--alias');
+  if (args.length !== 1 || [clear >= 0, set !== undefined, title !== undefined || alias.length > 0].filter(Boolean).length !== 1) throw usage(how);
+  const id = node(args[0]);
+  const setTo = (field, value) => ({ op: 'set', node: id, field, value });
+  if (clear >= 0) return [setTo(ABOUT.title, false), setTo(ABOUT.aliases, false)];
+  let about = { title, aliases: alias.length ? alias : undefined };
+  if (set !== undefined) {
+    try { about = JSON.parse(set); } catch { throw usage('--set takes a JSON object'); }
+    if (!about || typeof about !== 'object' || Array.isArray(about) || Object.keys(about).some((k) => k !== 'title' && k !== 'aliases')) throw usage('--set takes {"title": "..", "aliases": [".."]}');
+  }
+  const line = (t) => (typeof t === 'string' && t.trim() && !/[\r\n]/.test(t) ? t.trim() : null);
+  const ops = [];
+  if (about.title !== undefined) {
+    if (!line(about.title)) throw usage('a title is one line of words');
+    ops.push(setTo(ABOUT.title, { words: line(about.title) }));
+  }
+  if (about.aliases !== undefined) {
+    const list = Array.isArray(about.aliases) ? about.aliases.map(line) : [null];
+    if (list.some((a) => a === null) || list.length > ALIASES_MOST) throw usage(`aliases are 1 to ${ALIASES_MOST} lines of words`);
+    ops.push(setTo(ABOUT.aliases, list.length ? { words: [...new Set(list)].join('\n') } : false));
+  }
+  if (!ops.length) throw usage(how);
+  return ops;
 }
 
 /** The daemon request the arguments make, and the creator named. */

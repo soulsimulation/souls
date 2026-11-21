@@ -97,6 +97,13 @@ export function rememberPublicWords(copy, bytes) {
   }
 }
 
+/** A field's public words given beside its record (`{21: id}`, key 27), or null when there are none. */
+function wordsAt(copy, fields, n) {
+  const v = fields.get(n) ?? fields.get(BigInt(n));
+  const ref = v instanceof Map && Array.isArray(v.get(21)) ? idText(v.get(21)) : null;
+  return (ref && publicWordsOf(copy).get(ref)?.trim()) || null;
+}
+
 /** Current reachable public records, never a dictionary or records retained outside the Copy's roots. */
 export function publicNameRecords(copy, missingOnly = true) {
   const todo = Object.values(JSON.parse(copy.roots())), seen = new Set(), found = [];
@@ -117,6 +124,10 @@ export const idText = (v) => `${hex(v[0])}-${v[1]}`;
 /** A kind `namespace:name@hash` as its plain name. */
 /** A node's course field (replica `schedule::F_COURSE`): a thing that moves on its own track. */
 export const F_COURSE = 80;
+/** A place's title (#3699): field 4, a public name's hash (named at import) or a creator's words (`{21: id}`). */
+export const F_TITLE = 4;
+/** A place's aliases (#3699): a creator's words (`{21: id}`), one alias a line; `find` scores them. */
+export const F_ALIASES = 90;
 export const plainKind = (k) => String(k).replace(/@.*$/, '');
 /** A version `[lineage, zone, epoch, sequence]`'s bytes in hex, as its sequence. */
 export const sequenceOf = (versionHex) => (versionHex ? Number(decode(Buffer.from(versionHex, 'hex'))[3]) : 0);
@@ -156,13 +167,14 @@ export function rowsOf(copy) {
     const { m } = d, id = idText(m.get(1)), kind = plainKind(m.get(2));
     const fields = m.get(6) instanceof Map ? m.get(6) : new Map();
     const text = [...fields.values()].filter((v) => typeof v === 'string');
-    const name = namesOf(copy).get(publicRef(m)) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
+    const name = namesOf(copy).get(publicRef(m)) ?? wordsAt(copy, fields, F_TITLE) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
+    const aliases = wordsAt(copy, fields, F_ALIASES)?.split('\n').map((a) => a.trim()).filter(Boolean) ?? [];
     const children = (m.get(10) ?? []).map(hex);
     // C30 (#3556): a body born by a join (C3) owns its `souls:body-of` link to its Soul: the row names that Soul.
     const of = (m.get(9) ?? []).map(([, l]) => l).find((l) => l instanceof Map && plainKind(l.get(1)) === 'souls:body-of');
     // #3603: a thing on a course (replica's F_COURSE, field 80) moves by itself; a rider in it may steer it.
     const moving = fields.has(F_COURSE) || fields.has(BigInt(F_COURSE));
-    rows.set(id, { id, name, kind, parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), own: d.own });
+    rows.set(id, { id, name, kind, parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), ...(aliases.length ? { aliases } : {}), own: d.own });
     for (const c of children) todo.push([c, [...path, name]]);
   }
   return rows;
