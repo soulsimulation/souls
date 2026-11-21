@@ -93,7 +93,7 @@ before(async () => {
   const tokens = join(dir, 'tokens.txt');
   writeFileSync(tokens, `${grant} ${createHash('sha256').update(token).digest('hex')}\n`);
   const lineage = randomBytes(16).toString('hex');
-  procs.push(spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', lineage, '--epoch', '1', '--rooms', '1', '--bodies', '1', '--creator', `${creatorScope}-1`, '--no-measures'], { stdio: 'ignore' }));
+  procs.push(spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', lineage, '--epoch', '1', '--rooms', '1', '--bodies', '1', '--creator', `${creatorScope}-1`, '--sky', String(Date.UTC(2026, 10, 21) * 1000), '3695', '--no-measures'], { stdio: 'ignore' }));
   for (const until = Date.now() + 10_000; ;) {
     try { if (statSync(world).isSocket()) break; } catch { /* not yet */ }
     if (Date.now() > until) throw new Error('no world socket');
@@ -123,6 +123,41 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(opsOf('hours', ['aa-3', '--open', '09:00-13:00@sat,sun']), [{ op: 'set', node: 'aa-3', field: 81, value: [[2, 96, 9 * 3_600_000_000, 13 * 3_600_000_000]] }]);
   assert.deepEqual(opsOf('hours', ['aa-3', '--closed']), [{ op: 'set', node: 'aa-3', field: 81, value: [] }]);
   assert.throws(() => opsOf('hours', ['aa-3']), /hours <id> --open/);
+  // #3695: the world's verbs go to the daemon as words; it makes their sets on the world node from its copy.
+  assert.deepEqual(requestOf(['weather', '--kind', 'storm', '--minutes', '30']).req, { op: 'edit', world: { verb: 'weather', kind: 'storm', minutes: '30' } });
+  assert.deepEqual(requestOf(['check', 'strike', '12,-4']).req, { op: 'check', world: { verb: 'strike', at: '12,-4' } });
+  assert.deepEqual(requestOf(['sky', '--palette', 'dusk']).req, { op: 'edit', world: { verb: 'sky', palette: 'dusk' } });
+  assert.throws(() => requestOf(['weather', '--fog', '1']), /unknown words/);
+});
+
+test('#3695: a creator sets the weather and the sky palette and strikes lightning; each has a dry run and a refusal', async () => {
+  await connected();
+  const dry = await god('check', 'weather', '--kind', 'storm', '--minutes', '30');
+  assert.equal(dry.ok, true, JSON.stringify(dry));
+  assert.equal(dry.local, true);
+  assert.match(dry.would, /storm: clouds 100%, rain 90%, wind 80% for 30 world minutes/);
+  assert.deepEqual(dry.ops.map((o) => o.field), [75, 76, 77, 78, 65]);
+  const storm = await god('weather', '--kind', 'storm', '--minutes', '30');
+  assert.equal(storm.ok, true, JSON.stringify(storm));
+  const softer = await god('weather', '--rain', '0.4');
+  assert.equal(softer.ok, true, JSON.stringify(softer));
+  assert.match(softer.did, /storm: clouds 100%, rain 40%/, 'the kind in force is kept');
+  for (const [args, code] of [[['weather', '--clouds', '2'], 'weather.level'], [['weather', '--kind', 'snow'], 'weather.kind-unknown'], [['weather', '--kind', 'rain', '--minutes', '600'], 'weather.minutes']]) {
+    const r = await god(...args);
+    assert.equal(r.code, code, JSON.stringify(r));
+    assert.ok(r.fix && r.detail, 'a refusal says why and what to do');
+  }
+  assert.equal((await god('check', 'sky', '--palette', 'dusk')).ok, true);
+  const sky = await god('sky', '--palette', 'mars-desert');
+  assert.equal(sky.ok, true, JSON.stringify(sky));
+  assert.equal((await god('sky', '--palette', 'purple')).code, 'sky.palette-unknown');
+  assert.equal((await god('sky', '--palette', 'dusk', '--sun', '0.3')).code, 'sky.sun-follows-time');
+  const dryStrike = await god('check', 'strike', '12,-4');
+  assert.equal(dryStrike.ok, true, JSON.stringify(dryStrike));
+  assert.deepEqual(dryStrike.ops[0].value.slice(0, 2), [12000, -4000]);
+  const strike = await god('strike', '12,-4');
+  assert.equal(strike.ok, true, JSON.stringify(strike));
+  assert.equal((await god('strike', 'nowhere')).code, 'strike.where');
 });
 
 test('a creator describes, checks on its copy alone, and builds a room with a thing in it', async () => {
