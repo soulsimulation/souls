@@ -97,6 +97,9 @@ export function batchValue(v, ids) {
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+/** The world node's fields an import carries: the sky's palette. Its clock, calendar and weather are the world's own
+ *  (E6 runs them, and its weather is set whole by the weather verb). */
+const ROOT_CARRIED = [89];
 /** Ids as they are: a target's own values, compared with a file's mapped ones. */
 const SELF = { get: (id) => id };
 
@@ -135,7 +138,11 @@ export function importOf(file, target) {
   const drop = (n, k) => { counts.dropped++; const key = `${n.kind.replace(/@.*/, '')} ${k}`; counts.droppedFields.set(key, (counts.droppedFields.get(key) ?? 0) + 1); };
   const fieldsOf = (n) => {
     const out = {};
-    for (const [k, v] of Object.entries(n.fields ?? {})) { const b = batchValue(v, ids); if (b === null) drop(n, k); else out[k] = b; }
+    for (const [k, v] of Object.entries(n.fields ?? {})) {
+      if (n.parent === null && !ROOT_CARRIED.includes(Number(k))) continue;
+      const b = batchValue(v, ids);
+      if (b === null) drop(n, k); else out[k] = b;
+    }
     return out;
   };
   // The matched nodes' fields that differ, one set each (the open ground's tiles are one large set).
