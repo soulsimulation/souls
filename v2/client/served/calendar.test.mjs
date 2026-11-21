@@ -91,7 +91,8 @@ test('#3703: a Soul announces from the notice board; another reads it in whatson
   const w = await world(), folder = join(dir, 'world');
   const seeded = await run(bin('worldd'), ['seed', '--facts', w.facts, '--dir', folder, '--souls', '0', '--at', '0,0', '--entries', w.entries]);
   assert.equal(seeded.code, 0, seeded.out);
-  await run(bin('worldd'), ['serve', '--dir', folder], /listening /);
+  const served = run(bin('worldd'), ['serve', '--dir', folder], /listening /);
+  await served;
   const gwPort = await freePort(), gateway = `ws://127.0.0.1:${gwPort}/v2/ws`;
   await run(bin('gatewayd'), ['--listen', `127.0.0.1:${gwPort}`, '--world', join(folder, 'gateway.sock'), '--tokens', join(folder, 'tokens'),
     '--build', `1220${'ab'.repeat(32)}`, '--entries', join(folder, 'entries')], /listening (\S+)\n/);
@@ -149,6 +150,9 @@ test('#3703: a Soul announces from the notice board; another reads it in whatson
     console.log('A find notice:', JSON.stringify(await A.cli('find', 'notice', '--limit', '20')));
     console.log('A inspect board:', JSON.stringify(await A.cli('inspect', board.id)));
     console.log('A look:', JSON.stringify(await A.cli('look')));
+    console.log('A events:', JSON.stringify(await A.cli('events')).slice(0, 3000));
+    console.log('B calendar:', JSON.stringify(await B.cli('calendar')));
+    console.log('worldd:', served.text().slice(-3000));
   }
   assert.equal(posted.what, 'posted', `A's notice: ${JSON.stringify(posted)}`);
   stage(`posted ${posted.item}`);
