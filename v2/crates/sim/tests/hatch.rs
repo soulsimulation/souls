@@ -156,7 +156,7 @@ fn a1_a2_the_chess_check_through_the_form_runner_and_its_table_for_the_daemon_an
     let hatch = bind_hatch(&entry, "move_white")
         .unwrap()
         .expect("move_white has a hatch");
-    assert_eq!((hatch.reads.len(), hatch.steps_most), (7, 20_000));
+    assert_eq!((hatch.reads.len(), hatch.steps_most), (7, 1_000_000));
     let module = Loaded::load(CHESS, &hatch.module).expect("the check loads by its hash");
 
     // A few known positions first: the check is a chess-move check.
@@ -469,16 +469,12 @@ fn a_hatch_answers_several_fields_checked_against_their_definitions() {
         Err("hatch-module-shape")
     );
 
-    // The entry's form names the fields it answers.
-    let text = entry.to_json().replacen(
-        "\"answers\":\"verdict\"",
-        "\"answers\":{\"fields\":[\"pieces\",\"turn\"]}",
-        1,
+    // The entry's move names the fields it answers.
+    let bound = bind_hatch(&entry, "move_white").unwrap().unwrap();
+    assert_eq!(
+        bound.answers,
+        Answers::Fields(vec![pieces, turn, en_passant, castling, 29, 30, 34])
     );
-    let bound = bind_hatch(&json::parse(&text).unwrap(), "move_white")
-        .unwrap()
-        .unwrap();
-    assert_eq!(bound.answers, Answers::Fields(vec![pieces, turn]));
     println!(
         "fields: echo of {} bytes answered pieces, turn and castling as their values in {} steps; \
          misfits refused hatch-answer-malformed",
