@@ -3,8 +3,15 @@
 // the rest (one-off shapes) go into one `BatchedMesh` per material. A thing whose model has not arrived is a box in
 // one instanced draw until it does; models load nearest the camera first. State is per-instance data: switching a
 // light writes its glow parts' colour slots and nothing else, so it uploads a few bytes and no geometry.
+//
+// Distance detail (C12, #3683), today's WorldDistanceDetail rules per part: a part whose bounding sphere would be
+// smaller than `minRadiusPx` CSS pixels of radius is not drawn, and a small part farther than `shadowNear +
+// shadowPerMetre·radius` metres is drawn into the same model's batch that casts no shadow. A building's window frames
+// and fittings go first, its walls last, as today. A part moves between its batches (near, far, hidden) only when the
+// eye has moved or things changed, with a margin so it does not flicker at the line.
 import * as THREE from 'three';
 import { glowOf, partsOf, type ModelIndex, type Part } from './models.ts';
+import { pageDetail, type DistanceDetail } from '../draw/quality-tier.ts';
 
 /** A model shared by at least this many things in the index is instanced; the rest are batched by material. */
 export const SHARED = 8;
@@ -12,14 +19,24 @@ export const SHARED = 8;
 const LOADING = 6;
 const OFF = new THREE.Color(0.22, 0.22, 0.22), ON = new THREE.Color(1, 1, 1), WHITE = new THREE.Color(1, 1, 1);
 
-/** Where one part of one thing is drawn. */
-type Slot = { batch: Batch; index: number; glow: boolean };
+/** A part's detail band: drawn and casting, drawn without a shadow, or not drawn. */
+export const NEAR = 0, FAR = 1, HIDDEN = 2;
+/** The eye moves this far (m) before parts are sorted into bands again; and they are, at least every PASS_FRAMES. */
+const MOVE = 1, PASS_FRAMES = 60, MIN_GAP = 4;
+/** Where one part of one thing is drawn: its batch and index (null and -1 while hidden), and what it needs to be
+ *  drawn again: its geometry, material and matrix, and its world sphere for the bands. */
+type Slot = {
+  batch: Batch | null; index: number; glow: boolean; band: number;
+  part: Part | null; matrix: THREE.Matrix4; centre: THREE.Vector3; radius: number;
+};
 type Thing = { id: string; model: string | null; matrix: THREE.Matrix4; boxes: THREE.Matrix4[]; slots: Slot[]; on: boolean };
 
 /** An instanced draw whose instances are packed: removing one moves the last into its place. */
 class Batch {
   mesh: THREE.InstancedMesh;
   owners: Slot[] = [];
+  /** False for a FAR batch: drawn without a shadow (kept when it grows). */
+  shadow = true;
   /** A whole upload of the colours is pending (an add or a remove); a light's one slot then rides on it. */
   private whole = false;
   readonly layer: ThingLayer;
@@ -31,7 +48,8 @@ class Batch {
     const mesh = new THREE.InstancedMesh(g, m, n);
     mesh.count = 0;
     mesh.frustumCulled = false;
-    mesh.castShadow = mesh.receiveShadow = true;
+    mesh.castShadow = this.shadow;
+    mesh.receiveShadow = true;
     mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3);
     mesh.onAfterRender = () => void (this.whole = false);
     this.layer.group.add(mesh);
@@ -116,6 +134,10 @@ class Shapes {
     this.mesh.setColorAt(i, color);
     return i;
   }
+  /** A light's colour on a one-off model's glow part (a `Batch` has the same). */
+  color(i: number, c: THREE.Color): void {
+    this.mesh.setColorAt(i, c);
+  }
 }
 
 export type ThingLayerOptions = {
@@ -125,14 +147,29 @@ export type ThingLayerOptions = {
   /** Each thing drawn this many times, each copy `spacing` metres further along x (V8's measure: Eden doubled). */
   copies?: number;
   spacing?: number;
+  /** C12: distance detail; default the page's tier (`pageDetail`), none outside a browser. */
+  detail?: DistanceDetail | null;
+  /** The view's height in CSS pixels and vertical field of view in degrees; default the window's and the page camera's 50. */
+  view?: () => { height: number; fov: number };
 };
 
 export class ThingLayer {
   readonly group = new THREE.Group();
   readonly things = new Map<string, Thing>();
-  private readonly boxes: Batch;
-  private readonly instanced = new Map<string, Batch[]>();
-  private readonly batched = new Map<THREE.Material, Shapes>();
+  /** Boxes, instanced models and one-off shapes, one set a band: NEAR casts a shadow, FAR does not. */
+  private readonly boxes: [Batch, Batch];
+  private readonly instanced = [new Map<string, Batch[]>(), new Map<string, Batch[]>()];
+  private readonly batched = [new Map<THREE.Material, Shapes>(), new Map<THREE.Material, Shapes>()];
+  private readonly boxGeometry = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
+  private boxSlots = 0;
+  readonly detail: DistanceDetail | null;
+  private eye: THREE.Vector3 | null = null;
+  private passEye = new THREE.Vector3();
+  private frame = 0;
+  private lastPass = -Infinity;
+  private changed = false;
+  /** The last band pass: parts in each band, parts moved, CPU ms. */
+  readonly stats = { near: 0, far: 0, hidden: 0, moved: 0, cpuMs: 0 };
   private readonly users = new Map<string, Set<Thing>>();
   private readonly models = new Map<string, Part[]>();
   private readonly pending = new Set<string>();
@@ -150,7 +187,35 @@ export class ThingLayer {
     this.copies = opts.copies ?? 1;
     this.spacing = opts.spacing ?? 0;
     for (const h of Object.values(opts.index.things)) this.share.set(h, (this.share.get(h) ?? 0) + 1);
-    this.boxes = new Batch(this, new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), new THREE.MeshLambertMaterial({ color: 0xb8b2a6 }), 1024);
+    this.detail = opts.detail === undefined ? pageDetail() : opts.detail;
+    const boxMaterial = new THREE.MeshLambertMaterial({ color: 0xb8b2a6 });
+    this.boxes = [new Batch(this, this.boxGeometry, boxMaterial, 1024), this.far(new Batch(this, this.boxGeometry, boxMaterial, 16))];
+  }
+
+  /** A FAR batch: drawn, no shadow. */
+  private far<B extends Batch | Shapes>(b: B): B {
+    if (b instanceof Batch) b.shadow = false;
+    b.mesh.castShadow = false;
+    return b;
+  }
+
+  /** Pixels per metre at one metre: a sphere of radius r at distance d is r·k/d pixels. */
+  private pixels(): number {
+    const g = globalThis as { innerHeight?: number };
+    const v = this.opts.view?.() ?? { height: g.innerHeight ?? 720, fov: 50 };
+    return v.height / (2 * Math.tan((v.fov * Math.PI) / 360));
+  }
+
+  /** The band for a part at its sphere, given its band now (a margin keeps it from flickering at the line). */
+  private bandOf(s: Slot, k: number): number {
+    const o = this.detail, eye = this.eye;
+    if (!o || !eye) return NEAR;
+    const d = s.centre.distanceTo(eye) - s.radius;
+    if (d <= 0) return NEAR;
+    const px = (s.radius * k) / d;
+    if (px < o.minRadiusPx * (s.band === HIDDEN ? 1.15 : 1)) return HIDDEN;
+    const line = o.shadowNear + o.shadowPerMetre * s.radius;
+    return s.radius < o.shadowMaxRadius && d > line * (s.band === FAR ? 0.95 : 1) ? FAR : NEAR;
   }
 
   /** Places (or moves) a thing: its frame in the world, its origin (today's id), and its boxes (one or a box a solid)
@@ -190,7 +255,7 @@ export class ThingLayer {
     t.on = on;
     let n = 0;
     for (const s of t.slots) if (s.glow) {
-      s.batch.color(s.index, on ? ON : OFF);
+      s.batch?.color(s.index, on ? ON : OFF);
       n++;
     }
     return n;
@@ -198,39 +263,87 @@ export class ThingLayer {
 
   private clear(t: Thing): void {
     for (const s of t.slots) {
-      if (s.batch instanceof Batch) s.batch.remove(s.index);
-      else (s.batch as unknown as Shapes).mesh.deleteInstance(s.index);
+      this.unplace(s);
+      if (!s.part) this.boxSlots--;
     }
     t.slots = [];
+  }
+
+  /** Takes a part out of its batch. */
+  private unplace(s: Slot): void {
+    if (s.batch instanceof Batch) s.batch.remove(s.index);
+    else if (s.batch) (s.batch as unknown as Shapes).mesh.deleteInstance(s.index);
+    s.batch = null;
+    s.index = -1;
+  }
+
+  /** Puts a part into its band's batch (none while hidden). */
+  private place(t: Thing, s: Slot): void {
+    if (s.band === HIDDEN) return;
+    const color = s.glow ? (t.on ? ON : OFF) : WHITE, band = s.band;
+    if (!s.part) {
+      s.batch = this.boxes[band];
+      s.index = this.boxes[band].add(s, s.matrix, color);
+      return;
+    }
+    const parts = this.models.get(t.model!)!, k = parts.indexOf(s.part);
+    if ((this.share.get(t.model!) ?? 0) >= SHARED) {
+      const all = this.instanced[band];
+      const batches = all.get(t.model!) ?? all.set(t.model!, parts.map((q) => {
+        const b = new Batch(this, q.geometry, q.material, band === NEAR ? (this.share.get(t.model!) ?? 1) * this.copies : 16);
+        return band === NEAR ? b : this.far(b);
+      })).get(t.model!)!;
+      s.batch = batches[k];
+      s.index = batches[k].add(s, s.matrix, color);
+    } else {
+      const all = this.batched[band];
+      const shapes = all.get(s.part.material) ?? all.set(s.part.material, band === NEAR ? new Shapes(this, s.part.material) : this.far(new Shapes(this, s.part.material))).get(s.part.material)!;
+      s.batch = shapes as unknown as Batch;
+      s.index = shapes.add(s.part.geometry, s.matrix, color);
+    }
+  }
+
+  /** A new part: its world sphere and band, then its batch. */
+  private slot(t: Thing, part: Part | null, matrix: THREE.Matrix4, glow: boolean, k: number): void {
+    const g = part?.geometry ?? this.boxGeometry;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    const centre = g.boundingSphere!.center.clone().applyMatrix4(matrix), radius = g.boundingSphere!.radius * matrix.getMaxScaleOnAxis();
+    const s: Slot = { batch: null, index: -1, glow, band: NEAR, part, matrix, centre, radius };
+    s.band = this.bandOf(s, k);
+    if (!part) this.boxSlots++;
+    t.slots.push(s);
+    this.place(t, s);
+  }
+
+  /** Sorts every part into its band for the eye now; moves only those whose band changed. */
+  private pass(): void {
+    const t0 = performance.now(), k = this.pixels();
+    const n = [0, 0, 0];
+    let moved = 0;
+    for (const t of this.things.values()) for (const s of t.slots) {
+      const band = this.bandOf(s, k);
+      if (band !== s.band) {
+        this.unplace(s);
+        s.band = band;
+        this.place(t, s);
+        moved++;
+      }
+      n[s.band]++;
+    }
+    Object.assign(this.stats, { near: n[NEAR], far: n[FAR], hidden: n[HIDDEN], moved, cpuMs: performance.now() - t0 });
   }
 
   /** Draws a thing from its model when it has arrived, as a box otherwise. */
   private draw(t: Thing): void {
     const parts = t.model ? this.models.get(t.model) : undefined;
+    const k = this.detail && this.eye ? this.pixels() : 0;
+    this.changed = true;
     if (!parts) {
       if (t.model && !this.pending.has(t.model) && !this.models.has(t.model)) this.pending.add(t.model);
-      for (const b of t.boxes) {
-        const s: Slot = { batch: this.boxes, index: 0, glow: false };
-        s.index = this.boxes.add(s, b, WHITE);
-        t.slots.push(s);
-      }
+      for (const b of t.boxes) this.slot(t, null, b, false, k);
       return;
     }
-    const shared = (this.share.get(t.model!) ?? 0) >= SHARED;
-    const m = new THREE.Matrix4();
-    parts.forEach((p, k) => {
-      m.multiplyMatrices(t.matrix, p.matrix);
-      const color = p.glow ? (t.on ? ON : OFF) : WHITE;
-      if (shared) {
-        const batches = this.instanced.get(t.model!) ?? this.instanced.set(t.model!, parts.map((q) => new Batch(this, q.geometry, q.material, (this.share.get(t.model!) ?? 1) * this.copies))).get(t.model!)!;
-        const s: Slot = { batch: batches[k], index: 0, glow: p.glow };
-        s.index = batches[k].add(s, m, color);
-        t.slots.push(s);
-      } else {
-        const shapes = this.batched.get(p.material) ?? this.batched.set(p.material, new Shapes(this, p.material)).get(p.material)!;
-        t.slots.push({ batch: shapes as unknown as Batch, index: shapes.add(p.geometry, m, color), glow: p.glow });
-      }
-    });
+    for (const p of parts) this.slot(t, p, new THREE.Matrix4().multiplyMatrices(t.matrix, p.matrix), p.glow, k);
   }
 
   /** A model has arrived: its things leave their boxes for it. */
@@ -246,6 +359,18 @@ export class ThingLayer {
 
   /** Starts loading the pending models nearest `eye`, a few at a time. Call once a frame. */
   update(eye: THREE.Vector3): void {
+    this.frame++;
+    if (this.detail) {
+      const first = !this.eye;
+      this.eye = (this.eye ?? new THREE.Vector3()).copy(eye);
+      const since = this.frame - this.lastPass;
+      if (first || (since >= MIN_GAP && (this.changed || since >= PASS_FRAMES || this.passEye.distanceTo(eye) > MOVE))) {
+        this.passEye.copy(eye);
+        this.lastPass = this.frame;
+        this.changed = false;
+        this.pass();
+      }
+    }
     while (this.loading < LOADING && this.pending.size) {
       let best: string | null = null, near = Infinity;
       const p = new THREE.Vector3();
@@ -267,9 +392,10 @@ export class ThingLayer {
 
   /** The draws this layer makes, for the measure: instanced batches, material batches and the boxes. */
   get draws(): number {
-    let n = this.boxes.mesh.count ? 1 : 0;
-    for (const bs of this.instanced.values()) for (const b of bs) if (b.mesh.count) n++;
-    for (const s of this.batched.values()) if (s.mesh.instanceCount) n++;
+    let n = 0;
+    for (const b of this.boxes) if (b.mesh.count) n++;
+    for (const m of this.instanced) for (const bs of m.values()) for (const b of bs) if (b.mesh.count) n++;
+    for (const m of this.batched) for (const s of m.values()) if (s.mesh.instanceCount) n++;
     return n;
   }
 
@@ -280,6 +406,6 @@ export class ThingLayer {
 
   /** How many things are boxes: waiting for their model, or with none (V17's list: drapes, stored files). */
   get waiting(): number {
-    return this.boxes.mesh.count;
+    return this.boxSlots;
   }
 }

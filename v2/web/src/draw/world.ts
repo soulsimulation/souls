@@ -8,6 +8,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { CrowdBodies } from '../crowd/bodies.ts';
 import { DECKS, DRAPES, WATER, drapeMesh, drapeName, type Area } from './drapes.ts';
 import { asWater } from '../water/water.ts';
+import { backdropMesh, type Backdrop } from './backdrop.ts';
 
 const UM = 1e-6, MM = 1e-3;
 export const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway']);
@@ -38,7 +39,9 @@ export class WorldView {
   private crowdBodies: CrowdBodies | null = null;
   private terrainDone = false;
   /** The drawn ground's tiles, for `heightAt`. */
-  private ground: { side: number; tiles: Map<string, { n: number; k: number; h: DataView }> } | null = null;
+  private ground: { side: number; tiles: Map<string, { n: number; k: number; h: DataView; c: ArrayLike<number> }> } | null = null;
+  /** C12 (#3683): the far backdrop beyond the ground's edge. */
+  backdrop: Backdrop | null = null;
   /** The open ground's node: what a ground-laid thing's heights are above. */
   groundId: string | null = null;
   extent: [number, number, number, number] | null = null;
@@ -122,7 +125,7 @@ export class WorldView {
       const hv = new DataView(heights.buffer, heights.byteOffset, heights.byteLength);
       const k = Math.max(1, Math.floor(n / Math.max(1, Math.round(n / TERRAIN_STEP))));
       const m = Math.floor(n / k);
-      this.ground.tiles.set(`${tx},${tz}`, { n, k, h: hv });
+      this.ground.tiles.set(`${tx},${tz}`, { n, k, h: hv, c: classes });
       const pos = new Float32Array((m + 1) * (m + 1) * 3), col = new Float32Array((m + 1) * (m + 1) * 3);
       const c = new THREE.Color();
       for (let j = 0; j <= m; j++) for (let i = 0; i <= m; i++) {
@@ -151,7 +154,22 @@ export class WorldView {
       mesh.receiveShadow = true;
       this.group.add(mesh);
     }
-    if (Number.isFinite(ext[0])) this.extent = ext;
+    if (Number.isFinite(ext[0])) {
+      this.extent = ext;
+      this.backdrop = backdropMesh(ext, (x, z) => this.heightAt(x, z), (x, z) => this.colourAt(x, z));
+      this.group.add(this.backdrop.mesh);
+    }
+  }
+
+  /** The drawn ground's class colour at world `x, z`; null off the tiles. */
+  colourAt(x: number, z: number): THREE.Color | null {
+    const g = this.ground;
+    if (!g) return null;
+    const tx = Math.floor(x / g.side), tz = Math.floor(z / g.side), t = g.tiles.get(`${tx},${tz}`);
+    if (!t) return null;
+    const i = Math.min(t.n - 1, Math.max(0, Math.floor(((x - tx * g.side) / g.side) * t.n)));
+    const j = Math.min(t.n - 1, Math.max(0, Math.floor(((z - tz * g.side) / g.side) * t.n)));
+    return new THREE.Color(CLASS_COLOURS[t.c[j * t.n + i] % CLASS_COLOURS.length]);
   }
 
   /** The drawn ground's height at world `x, z` (m), on the same triangles the mesh draws; null off the tiles. */
