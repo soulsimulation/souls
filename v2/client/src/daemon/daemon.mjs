@@ -738,7 +738,48 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['query', 'catalog', 'context', 'batch', 'status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'export', 'import', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object', 'whatson', 'calendar']);
+const OPS = new Set([
+  'ack',
+  'act',
+  'answer',
+  'batch',
+  'calendar',
+  'can',
+  'catalog',
+  'check',
+  'context',
+  'converse',
+  'describe',
+  'edit',
+  'event',
+  'events',
+  'export',
+  'find',
+  'halt',
+  'history',
+  'import',
+  'inspect',
+  'lie',
+  'look',
+  'now',
+  'object',
+  'pending',
+  'pray',
+  'prayers',
+  'query',
+  'read',
+  'receipt',
+  'reflex',
+  'say',
+  'stats',
+  'status',
+  'stop',
+  'wait',
+  'wake',
+  'wear',
+  'whatson',
+  'whisper',
+]);
 const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
