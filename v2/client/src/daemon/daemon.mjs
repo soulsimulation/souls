@@ -96,11 +96,14 @@
 //   and G7's (#2796), for a world's creator (a `creator-` token), the world's kinds text from `<home>/kinds/<world>.kinds`:
 //     {"op":"describe"}                   the copy's nodes (id, kind, parent) and what each kind admits
 //     {"op":"check","ops":[...]}          G1's checks of a batch on the copy as it is: asks the world nothing
+//     {"op":"fields","node":"<id>"}       a node's fields as the copy holds them, the zone's root when no node
+//                                         (#3701: district plans and build claims are root fields 140 and 141)
 //     {"op":"edit","ops":[...]}           the copy brought current, checked, sent as T10's edit intent (G1b) planned at
 //                                         its version, and its answer awaited: the ids of the names placed, or the
 //                                         refusal and the operation that failed. An op is {op: place, name, kind,
 //                                         in, at: [x, y, z] mm, slot, fields}, {op: move, node, at}, {op: set, node,
-//                                         field, value} or {op: remove, node}; a kind by its plain name
+//                                         field, value} or {op: remove, node}; a kind by its plain name. With "claim":"<claim
+//                                         id>" (check too), the batch is sent under that build claim (#3701)
 //     {"op":"act","verbs":[{"verb":"..","this":"<id>","form":".."}, "..."]}   each candidate with a form is checked
 //       again at send time on a copy brought current; a current `no` drops it; none left is `stopped-locally`, with
 //       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
@@ -707,7 +710,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['query', 'catalog', 'context', 'batch', 'status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
+const OPS = new Set(['query', 'catalog', 'context', 'batch', 'status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'fields', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
 const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
@@ -727,11 +730,12 @@ function fullKind(kinds, k) {
   throw Object.assign(new Error(`${s}: ${hit.length ? 'ambiguous; copy a full pinned name from describe' : `not pinned; describe lists ${Object.keys(kinds).join(', ')}`}`), { code: 'edit.kind-unknown' });
 }
 /** The batch as replica's `ops_of` reads it: kinds by full name, positions in µm (a creator writes mm). */
-function batchOf(ops) {
+function batchOf(ops, claim) {
   if (!Array.isArray(ops) || ops.length === 0) throw Object.assign(new Error('ops: a list of operations'), { code: 'edit.batch' });
   const kinds = pinned();
   const um = (at) => (Array.isArray(at) ? at.map((n) => Math.round(Number(n) * 1000)) : undefined);
-  return JSON.stringify(ops.map((o) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}) })));
+  const list = ops.map((o) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}) }));
+  return JSON.stringify(claim === undefined ? list : { claim: String(claim), ops: list });
 }
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
@@ -1040,12 +1044,22 @@ async function answer(req) {
     }));
     case 'check': {
       // On the copy as it is: no sync, no frame to the world (A4).
-      const v = JSON.parse(wire.editCheck(copy, batchOf(req.ops), kindsText()));
+      const v = JSON.parse(wire.editCheck(copy, batchOf(req.ops, req.claim), kindsText()));
       return closing({ ...v, local: true }, null, { now: true });
+    }
+    case 'fields': {
+      // #3701: a node's fields from its record in the copy (`own` holds the record but its children).
+      return closing({ ok: true }, (rows) => {
+        const all = [...rows.values()], roots = all.filter((r) => r.parent === null);
+        const row = req.node !== undefined ? rows.get(String(req.node)) : roots.length === 1 ? roots[0] : undefined;
+        if (!row) return { ok: false, code: req.node !== undefined ? 'edit.node-missing' : 'which-root', detail: req.node !== undefined ? `${req.node} is not in the copy` : `${roots.length} roots: name one with node` };
+        const pairs = JSON.parse(row.own).find(([k]) => Number(k) === 6)?.[1] ?? [];
+        return { id: row.id, fields: Object.fromEntries(pairs.map(([k, v]) => [String(k), v])) };
+      }, { now: true });
     }
     case 'edit': {
       if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
-      const batch = batchOf(req.ops);
+      const batch = batchOf(req.ops, req.claim);
       const age = await ageAfter();
       const v = JSON.parse(wire.editCheck(copy, batch, kindsText()));
       if (!v.ok) return closing({ ...v, sent: false, local: true }, null, { age });

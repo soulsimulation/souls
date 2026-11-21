@@ -22,6 +22,7 @@
 //!   reverses by its cause, `Cause::Effect(first)`, where `first` is the sequence of that batch's first effect, with a
 //!   creator acting ([`reverses`]).
 
+pub mod claims;
 pub mod wire;
 
 use crate::apply::Replica;
@@ -118,6 +119,8 @@ pub struct Edit {
     pub actor: Actor,
     pub planned: u64,
     pub ops: Vec<Op>,
+    /// The build claim it is sent under, by id (#3701, [`claims`]); none for the lead's own edits.
+    pub claim: Option<Name>,
 }
 
 /// What an edit is checked against: the world's one creator, and the kinds it pins by full name.
@@ -637,6 +640,7 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
             );
         }
     }
+    claims::judge(&edit, copy)?;
     Ok(Checked {
         edit,
         reads,
@@ -662,7 +666,9 @@ pub fn confirm(live: &Replica, c: &Checked) -> Result<(), Refused> {
             return refuse(Some(*i), "edit.stale", format!("{id:?} is gone"));
         }
     }
-    Ok(())
+    // The claim check reads the root's claims and every ancestor's pose, which the read set does not hold: run it
+    // again on the live copy, so a claim committed since the check still binds (#3879 review). Cheap and deterministic.
+    claims::judge(&c.edit, live)
 }
 
 /// The batch an undo or redo reverses, by the sequence of its first effect: a creator's effect caused by an earlier
