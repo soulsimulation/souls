@@ -279,7 +279,7 @@ impl World {
                 ..pose(punt, 0)
             },
         };
-        let part = self.part(vec![(self.root, create), (punt, seat)]);
+        let part = self.part(vec![(self.root, create), (body, seat)]);
         self.replica
             .apply(&part)
             .unwrap_or_else(|e| panic!("the punt applies: {e}"));
