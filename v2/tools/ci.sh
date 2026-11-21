@@ -104,6 +104,8 @@ step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit
 }
 web_steps() {
 step web-deps npm ci --prefix web --no-audit --no-fund
+# #3871: every content kind's entry draws (web/kind-entries.test.ts, beside src/, so web-unit does not find it).
+step web-kind-entries node --test web/kind-entries.test.ts
 # B15: acquire only the released inputs and exercise the actual prepared artifact, after the locked page dependencies.
 step body-presets bash -c 'node tools/import-body/prepare.mjs --out .local/ci-body-assets --test'
 # Every page unit test, found by name (web/src/**/*.test.ts and *.test.mjs), so a new one runs here with no edit. A
