@@ -2384,9 +2384,17 @@ impl Clock {
         if now == self.states {
             return;
         }
-        let mut changed: Vec<(Id, &'static str)> =
-            now.iter().filter(|(s, w)| self.states.get(s) != Some(w)).map(|(s, w)| (*s, *w)).collect();
-        changed.extend(self.states.keys().filter(|s| !now.contains_key(s)).map(|s| (*s, "awake")));
+        let mut changed: Vec<(Id, &'static str)> = now
+            .iter()
+            .filter(|(s, w)| self.states.get(s) != Some(w))
+            .map(|(s, w)| (*s, *w))
+            .collect();
+        changed.extend(
+            self.states
+                .keys()
+                .filter(|s| !now.contains_key(s))
+                .map(|s| (*s, "awake")),
+        );
         self.states = now;
         let frame = states_frame(&changed);
         self.states_to.retain(|r| r.send(frame.clone()).is_ok());
@@ -4929,7 +4937,10 @@ pub fn states_frame(words: &[(Id, &str)]) -> Vec<u8> {
                 replica::encode::to_hex(&soul.scope().0),
                 soul.counter()
             );
-            Some(Value::Array(vec![Value::Bytes(grant.into_bytes()), Value::Text(Name::new(word)?)]))
+            Some(Value::Array(vec![
+                Value::Bytes(grant.into_bytes()),
+                Value::Text(Name::new(word)?),
+            ]))
         })
         .collect();
     encode(&Value::Map(BTreeMap::from([(STATES, Value::Array(rows))]))).unwrap_or_default()

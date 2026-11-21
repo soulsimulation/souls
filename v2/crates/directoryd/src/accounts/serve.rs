@@ -420,7 +420,11 @@ fn mailbox(req: &Request, app: &App) -> Option<(u16, Value, String)> {
             let words: Vec<(&str, &str)> = b
                 .get("states")
                 .and_then(Value::as_object)
-                .map(|m| m.iter().filter_map(|(g, w)| Some((g.as_str(), w.as_str()?))).collect())
+                .map(|m| {
+                    m.iter()
+                        .filter_map(|(g, w)| Some((g.as_str(), w.as_str()?)))
+                        .collect()
+                })
                 .unwrap_or_default();
             Some(match app.store.states_set(words, now()) {
                 Ok(n) => (200, json!({"ok": true, "n": n}), format!("states {n}")),

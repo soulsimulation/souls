@@ -228,8 +228,14 @@ pub fn states_body(frame: &[u8]) -> Option<String> {
             let (Some(Value::Bytes(g)), Some(Value::Text(w))) = (r.first(), r.get(1)) else {
                 return None;
             };
-            let grant = std::str::from_utf8(g).ok().filter(|g| Grant::parse(g).is_some())?;
-            Some(format!("{}:{}", json_string(grant), json_string(w.as_str())))
+            let grant = std::str::from_utf8(g)
+                .ok()
+                .filter(|g| Grant::parse(g).is_some())?;
+            Some(format!(
+                "{}:{}",
+                json_string(grant),
+                json_string(w.as_str())
+            ))
         })
         .collect();
     Some(format!("{{\"states\":{{{}}}}}", words.join(",")))
@@ -243,7 +249,10 @@ pub fn on_states(gw: &Arc<Gateway>, frame: &[u8]) -> bool {
         return false;
     };
     if let Some(mb) = gw.mailbox.get() {
-        let mb = Mailbox { addr: mb.addr.clone(), key: mb.key.clone() };
+        let mb = Mailbox {
+            addr: mb.addr.clone(),
+            key: mb.key.clone(),
+        };
         tokio::spawn(async move {
             let _ = http(&mb, "POST", "/v1/mailbox/state", "", &body).await;
         });
@@ -296,14 +305,26 @@ mod states_tests {
     #[test]
     fn a3784_the_worlds_words_become_the_directorys_body() {
         let grant = format!("soul-{}-3", "4d".repeat(16));
-        let row = |g: &str, w: &str| Value::Array(vec![Value::Bytes(g.as_bytes().to_vec()), Value::Text(Name::new(w).unwrap())]);
+        let row = |g: &str, w: &str| {
+            Value::Array(vec![
+                Value::Bytes(g.as_bytes().to_vec()),
+                Value::Text(Name::new(w).unwrap()),
+            ])
+        };
         let frame = encode(&Value::Map(BTreeMap::from([(
             STATES,
             Value::Array(vec![row(&grant, "asleep"), row("not-a-grant", "zombie")]),
         )])))
         .unwrap();
-        assert_eq!(states_body(&frame).unwrap(), format!("{{\"states\":{{\"{grant}\":\"asleep\"}}}}"));
+        assert_eq!(
+            states_body(&frame).unwrap(),
+            format!("{{\"states\":{{\"{grant}\":\"asleep\"}}}}")
+        );
         let answer = encode(&Value::Map(BTreeMap::from([(1, Value::Uint(1))]))).unwrap();
-        assert_eq!(states_body(&answer), None, "an answer is not a states frame");
+        assert_eq!(
+            states_body(&answer),
+            None,
+            "an answer is not a states frame"
+        );
     }
 }

@@ -824,13 +824,25 @@ fn c14_a1_a_soul_sets_its_status_line_through_the_gateway_and_anyone_reads_it() 
         s.read_to_string(&mut out).unwrap();
         out[9..12].parse::<u16>().unwrap()
     };
-    assert_eq!(states("gateway-key", json!({ &a: "asleep", &b: "zombie" })), 200);
+    assert_eq!(
+        states("gateway-key", json!({ &a: "asleep", &b: "zombie" })),
+        200
+    );
     let got = read(json!([a, b])).2;
-    assert_eq!((got["state"][&a].as_str(), got["state"][&b].as_str()), (Some("asleep"), Some("zombie")));
+    assert_eq!(
+        (got["state"][&a].as_str(), got["state"][&b].as_str()),
+        (Some("asleep"), Some("zombie"))
+    );
     assert_eq!(states("gateway-key", json!({ &b: "awake" })), 200);
-    assert!(read(json!([b])).2["state"].as_object().unwrap().is_empty(), "awake: no word");
+    assert!(
+        read(json!([b])).2["state"].as_object().unwrap().is_empty(),
+        "awake: no word"
+    );
     assert_eq!(states("not-the-key", json!({ &b: "asleep" })), 401);
-    assert!(read(json!([b])).2["state"].as_object().unwrap().is_empty(), "only the gateway tells");
+    assert!(
+        read(json!([b])).2["state"].as_object().unwrap().is_empty(),
+        "only the gateway tells"
+    );
 
     let (s5, r5) = set("not-the-key", &a, json!("Hi"));
     assert_eq!((s5, r5["refused"].as_str()), (401, Some("mailbox-key")));
