@@ -379,7 +379,15 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
         was_up = true;
         let (mut read, mut write) = stream.into_split();
         let mut queue = gw.link.connected();
+        // #3784: with a directory, ask the world for its Souls' wind-down words (now, and each change after).
+        let ask = gw.mailbox.get().map(|_| crate::mailbox::states_ask());
         let writer = tokio::spawn(async move {
+            if let Some(ask) = ask {
+                let len = u32::try_from(ask.len()).unwrap_or(u32::MAX).to_be_bytes();
+                if write.write_all(&len).await.is_err() || write.write_all(&ask).await.is_err() {
+                    return;
+                }
+            }
             while let Some(frame) = queue.recv().await {
                 let len = u32::try_from(frame.len()).unwrap_or(u32::MAX).to_be_bytes();
                 if write.write_all(&len).await.is_err() || write.write_all(&frame).await.is_err() {

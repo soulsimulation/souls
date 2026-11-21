@@ -4923,9 +4923,18 @@ fn applied(replica: &mut Replica, mut effects: Vec<Effect>) -> R<Part> {
 }
 
 /// The key of a frame to the gateway that carries Souls' wind-down words (#3784; gatewayd's `world_link` reads it):
-/// `{30: [[grant bytes, word], ..]}`, the grant `soul-<scope hex>-<counter>` as the tokens file writes it, the word
+/// `{30: [[grant bytes, word], ..]}`, sent only on a connection that asked with [`states_ask`]; the grant `soul-<scope hex>-<counter>` as the tokens file writes it, the word
 /// `idle`, `zombie`, `asleep` or `awake`.
 pub const STATES: u64 = 30;
+
+/// The frame a gateway sends to be told the Souls' words: `{30: []}`.
+pub fn states_ask() -> Vec<u8> {
+    encode(&Value::Map(BTreeMap::from([(
+        STATES,
+        Value::Array(Vec::new()),
+    )])))
+    .unwrap_or_default()
+}
 
 /// A frame of Souls' words ([`STATES`]).
 pub fn states_frame(words: &[(Id, &str)]) -> Vec<u8> {
@@ -4955,8 +4964,7 @@ pub fn serve(world: Door, mut stream: UnixStream) {
         return;
     };
     let (reply, answers) = channel::<Vec<u8>>();
-    // #3784: this connection is told the Souls' wind-down words, now and on each change.
-    let _ = world.events.send(Event::States(reply.clone()));
+    let ask = states_ask();
     std::thread::spawn(move || {
         for frame in answers {
             delivery_trace(trace, "native-write-start", &frame, "ready");
@@ -4980,6 +4988,13 @@ pub fn serve(world: Door, mut stream: UnixStream) {
         let mut bytes = vec![0u8; len];
         if stream.read_exact(&mut bytes).is_err() {
             return;
+        }
+        // #3784: a gateway with a directory asks to be told the Souls' wind-down words, now and on each change.
+        if bytes == ask {
+            if world.events.send(Event::States(reply.clone())).is_err() {
+                return;
+            }
+            continue;
         }
         if !world.arrive(bytes, reply.clone()) {
             return;

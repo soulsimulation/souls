@@ -212,6 +212,16 @@ pub fn json_string(text: &str) -> String {
 /// The key of the world's frame of Souls' wind-down words (#3784; worldd's `answers::STATES`).
 pub const STATES: u64 = 30;
 
+/// The frame that asks the world for its Souls' words (worldd's `answers::states_ask`): `{30: []}`. Sent on each
+/// connection to the world when a mailbox is set.
+pub fn states_ask() -> Vec<u8> {
+    replica::encode::encode(&Value::Map(std::collections::BTreeMap::from([(
+        STATES,
+        Value::Array(Vec::new()),
+    )])))
+    .unwrap_or_default()
+}
+
 /// The body the directory takes for a frame of Souls' wind-down words, `{"states": {grant: word}}`, or None when the
 /// frame is not one. Rows whose grant or word does not read are passed over.
 pub fn states_body(frame: &[u8]) -> Option<String> {
@@ -248,7 +258,7 @@ pub fn on_states(gw: &Arc<Gateway>, frame: &[u8]) -> bool {
     let Some(body) = states_body(frame) else {
         return false;
     };
-    if let Some(mb) = gw.mailbox.get() {
+    if let Some(mb) = gw.mailbox.get().filter(|_| body != "{\"states\":{}}") {
         let mb = Mailbox {
             addr: mb.addr.clone(),
             key: mb.key.clone(),
@@ -325,6 +335,11 @@ mod states_tests {
             states_body(&answer),
             None,
             "an answer is not a states frame"
+        );
+        assert_eq!(
+            states_body(&states_ask()).as_deref(),
+            Some("{\"states\":{}}"),
+            "the ask reads as no words"
         );
     }
 }
