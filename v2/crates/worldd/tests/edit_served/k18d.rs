@@ -326,8 +326,9 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
     );
     assert!(!seated.entries.is_empty());
     durable(&w, Actor::Soul(w.souls[0]), 2, &seated);
+    let body = born_body(&w, w.souls[0]);
     assert!(
-        poses(&w).iter().any(|(body, pose)| *body == w.souls[0]
+        poses(&w).iter().any(|(b, pose)| *b == body
             && pose.frame.node == chair
             && pose.frame.slot == Some(1)
             && pose.support == Support::Slot),
@@ -372,7 +373,7 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
     )
     .await;
     assert_eq!((in_use.kind, in_use.reason.as_str()), (2, "edit.in-use"));
-    assert!(poses(&w).iter().any(|(body, pose)| *body == w.souls[0]
+    assert!(poses(&w).iter().any(|(b, pose)| *b == body
         && pose.frame.node == chair
         && pose.frame.slot == Some(1)
         && pose.support == Support::Slot));
@@ -380,6 +381,17 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
         "K18d creator batches {:?}/{:?}; new door/room/chair exact slot sit {:?}; unrelated walk {:?}; occupied cutoff {} and seat {}",
         made.entries, opened.entries, seated.entries, walked.entries, blocked.reason, in_use.reason
     );
+}
+
+/// The body born for `soul` when it joined (C3): log rows name bodies, not Souls. Found by its `souls:body-of` link.
+fn born_body(w: &Seeded, soul: Id) -> Id {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    t.links_at(soul)
+        .iter()
+        .filter(|e| t.ty(e).as_str() == "souls:body-of")
+        .find_map(|e| Some(t.link(e.link)?.1[0]))
+        .expect("the Soul's born body")
 }
 
 fn poses(w: &Seeded) -> BTreeMap<Id, replica::pose::Pose> {
