@@ -11,16 +11,22 @@ import { Fauna } from './fauna.ts';
 const MM = 1e-3, RECHECK_MS = 2000;
 
 /** What the anchors read from the world view: its extent, height, water areas and sounding things. */
-export function anchorInput(world: WorldView): { extent: WorldView['extent']; heightAt: (x: number, z: number) => number | null; water: Water[]; sources: Source[] } {
-  const water: Water[] = [], sources: Source[] = [], v = new THREE.Vector3();
+export function anchorInput(world: WorldView): { extent: WorldView['extent']; heightAt: (x: number, z: number) => number | null; water: Water[]; sources: Source[]; things: [number, number][] } {
+  const water: Water[] = [], sources: Source[] = [], things: [number, number][] = [], v = new THREE.Vector3();
+  let k = 0;
   for (const n of world.nodes.values()) {
+    if (n.origin && k++ % 16 === 0) (v.setFromMatrixPosition(world.frame(n.id)), things.push([v.x, v.z]));
     if (n.waterLevel !== undefined && n.outline) water.push({ level: n.waterLevel * MM, points: n.outline.map(([x, z]) => [x * MM, z * MM]) });
     const specs = kindSounds(n.kind);
     if (!specs.some((s) => s.kind === 'birds' || s.kind === 'bees' || s.kind === 'waterfowl')) continue;
-    v.setFromMatrixPosition(world.frame(n.id));
+    // An area (a flower garden, wildflowers) is placed by its outline (world mm), a thing by its frame.
+    if (n.outline?.length) {
+      const [x, z] = n.outline.reduce(([a, b], [x, z]) => [a + x * MM, b + z * MM], [0, 0]).map((c) => c / n.outline!.length);
+      v.set(x, world.heightAt(x, z) ?? 0, z);
+    } else v.setFromMatrixPosition(world.frame(n.id));
     sources.push({ pos: [v.x, v.y, v.z], sounds: specs.map((s) => s.kind) });
   }
-  return { extent: world.extent, heightAt: (x, z) => world.heightAt(x, z), water, sources };
+  return { extent: world.extent, heightAt: (x, z) => world.heightAt(x, z), water, sources, things };
 }
 
 export type PageFauna = { fauna: Fauna; update(now: number, t: number | null, sky: SkyState): void };

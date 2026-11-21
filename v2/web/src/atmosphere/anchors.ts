@@ -34,6 +34,9 @@ export type AnchorInput = {
   heightAt: (x: number, z: number) => number | null;
   water: readonly Water[];
   sources: readonly Source[];
+  /** Where the world's things stand (x, z m; a sample is enough): flocks circle over them, as today's flocks circled
+   *  over Eden's town rather than its empty hills. */
+  things?: readonly [number, number][];
 };
 
 /** Today's flock count over Eden's ~200 m town (six); a larger world gets more, a small one at least two. */
@@ -68,11 +71,13 @@ export function faunaAnchors(input: AnchorInput): Anchors {
   let k = 0;
   const r = () => hash01(seed, k++);
   const land = (x: number, z: number) => heightAt(x, z) !== null && !inWater(water, x, z);
-  // Flocks circle over land, within the world's ground (kept a radius in from its edge).
+  // Flocks circle over land where the world's things are (else anywhere on its ground, a radius in from its edge).
   const flocks = Math.max(MIN_FLOCKS, Math.min(MAX_FLOCKS, Math.round(Math.sqrt(w * d) / FLOCK_SPACING)));
+  const built = input.things ?? [];
   for (let f = 0, tries = 0; f < flocks && tries < flocks * 12; tries++) {
     const radius = 14 + r() * 12, mx = Math.min(radius, w / 4), mz = Math.min(radius, d / 4);
-    const x = x0 + mx + r() * (w - 2 * mx), z = z0 + mz + r() * (d - 2 * mz);
+    const at = built.length ? built[Math.floor(r() * built.length)] : null;
+    const x = at ? at[0] + (r() - 0.5) * radius : x0 + mx + r() * (w - 2 * mx), z = at ? at[1] + (r() - 0.5) * radius : z0 + mz + r() * (d - 2 * mz);
     const alt = 12 + r() * 12, birds = 5 + Math.floor(r() * 3);
     if (!land(x, z)) continue;
     out.flocks.push([x, z, radius, alt, birds]);

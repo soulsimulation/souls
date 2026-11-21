@@ -30,6 +30,9 @@ test('A1: flocks circle over the land of any world, from its extent, the same ea
   // A bigger world gets more flocks; a world with no ground yet gets none.
   assert.ok(faunaAnchors(world({ extent: [-400, -400, 400, 400], heightAt: () => 0 })).flocks.length > a.flocks.length);
   assert.deepEqual(faunaAnchors(world({ extent: null })).flocks, []);
+  // With things standing in one corner, every flock circles near them.
+  const town = faunaAnchors(world({ things: [[70, 50], [75, 55], [80, 60]] }));
+  assert.ok(town.flocks.length >= 2 && town.flocks.every(([x, z]) => Math.hypot(x - 75, z - 55) < 30), JSON.stringify(town.flocks));
 });
 
 test('A2: birds land where birds are heard, butterflies where bees are, ducks and gulls on the water', () => {
