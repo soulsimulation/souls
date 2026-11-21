@@ -495,13 +495,25 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
     );
     let mut on_things: Vec<Id> = mine.iter().map(|s| s.thing).collect();
     on_things.dedup();
+    // The world adds today's rowing punts to the facts it is built from (#3603), each with its entry's riders' seats:
+    // the facts read here have none.
+    let punts = lines
+        .iter()
+        .filter(|l| l.starts_with("punt: rowing-punt-") && l.contains(" is "))
+        .count();
+    let riders = found
+        .iter()
+        .find(|(k, _)| k == "eden:rowing_punt")
+        .and_then(|(_, e)| e.get("slots").and_then(|s| s.obj()))
+        .map_or(0, <[_]>::len);
+    println!("{punts} rowing punts added by the world, {riders} seats each");
     assert_eq!(
-        mine.len(),
+        mine.len() + punts * riders,
         registered,
         "the world registers every slot the entries declare"
     );
     assert_eq!(left, 0, "every seat placed on a floor");
-    assert_eq!(on, on_things.len(), "the things they are on");
+    assert_eq!(on, on_things.len() + punts, "the things they are on");
     assert_eq!(registered, declared, "every declared body slot registered");
     // Every def today seats has at least today's slots, but those whose entries declare no body slot with a stand
     // point (C17: the campfire's and the piano's).

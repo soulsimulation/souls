@@ -771,6 +771,13 @@ pub fn load(text: &str) -> R<Import> {
             let (lo, hi) = (int(st, "from")?, int(st, "to")?);
             let a = b.node(&format!("{id}/floor-{lo}"))?;
             let z = b.node(&format!("{id}/floor-{hi}"))?;
+            // A step between two surfaces of one level (a deck's pieces a few mm apart) joins a floor to itself: the
+            // floor already holds both surfaces, so there is nothing to link.
+            if a == z {
+                b.notes
+                    .push(format!("{id}: a stair on floor {lo} to itself, not linked"));
+                continue;
+            }
             let link = b.id()?;
             let ty = match s(st, "kind")? {
                 "stairs" => "eden:stairs",
