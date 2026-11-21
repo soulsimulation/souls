@@ -894,7 +894,7 @@ const worldNowOrReal = () => worldNow(clockOf(copy)) ?? Date.now() * 1000;
  *  verbs load today's ground model (`packages/ground`, zod) only when used. */
 async function worldBatch(req) {
   if (!req.world) return { ops: req.ops };
-  if (req.world.verb === 'land') {
+  if (req.world.verb === 'land' || req.world.verb === 'expand') {
     let land;
     try { land = await import('../creator/terrain/land.mjs'); } catch (e) {
       return { ok: false, code: 'land.unavailable', detail: `the land verbs need Node 22.18 or later, and packages/ground and zod beside this client: ${String(e.message ?? e).slice(0, 160)}` };

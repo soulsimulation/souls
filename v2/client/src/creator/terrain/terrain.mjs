@@ -103,3 +103,48 @@ export function expand({ ground, landform, water, things = [], placeKind, outlin
   }
   return { ops, patched: patched.length, tiles };
 }
+
+/** The tiles' range [tx0, tz0, tx1, tz1] (inclusive), grown to cover `bounds` ([x0, z0, x1, z1] m) if given. */
+export function tileRange(tiles, tileMm, bounds) {
+  const txs = tiles.map((t) => t.tx), tzs = tiles.map((t) => t.tz);
+  const r = [Math.min(...txs), Math.min(...tzs), Math.max(...txs), Math.max(...tzs)];
+  if (!bounds) return r;
+  const side = tileMm / 1000, lo = (v) => Math.floor(v / side + 1e-9), hi = (v) => Math.ceil(v / side - 1e-9) - 1;
+  return [Math.min(r[0], lo(bounds[0])), Math.min(r[1], lo(bounds[1])), Math.max(r[2], hi(bounds[2])), Math.max(r[3], hi(bounds[3]))];
+}
+
+/**
+ * The open ground grown to cover `bounds` ([x0, z0, x1, z1] m), as today's `expand` grows a world (#3728): a tile
+ * wherever the bounds reach and there was none, flat outward from the old ground's edge (each sample the height of the
+ * nearest sample on that edge, each cell the class of the nearest cell), so the new ground meets the old with no step.
+ * Only the new tiles; the old are kept as they are.
+ */
+export function grownTiles(tiles, tileMm, bounds) {
+  if (!tiles.length) return [];
+  const n = samplesOf(tiles[0]), w = n + 1;
+  const keys = new Map(tiles.map((t) => [`${t.tx},${t.tz}`, t]));
+  const [a0, b0, a1, b1] = tileRange(tiles);
+  const [x0, z0, x1, z1] = tileRange(tiles, tileMm, bounds);
+  const clamp = (v, l, h) => (v < l ? l : v > h ? h : v);
+  const sample = (gi, gj) => {
+    gi = clamp(gi, a0 * n, (a1 + 1) * n); gj = clamp(gj, b0 * n, (b1 + 1) * n);
+    const tx = Math.min(Math.floor(gi / n), a1), tz = Math.min(Math.floor(gj / n), b1), t = keys.get(`${tx},${tz}`);
+    return t ? t.heights[(gj - tz * n) * w + (gi - tx * n)] : 0;
+  };
+  const cell = (ci, cj) => {
+    ci = clamp(ci, a0 * n, (a1 + 1) * n - 1); cj = clamp(cj, b0 * n, (b1 + 1) * n - 1);
+    const tx = Math.floor(ci / n), tz = Math.floor(cj / n), t = keys.get(`${tx},${tz}`);
+    return t ? t.classes[(cj - tz * n) * n + (ci - tx * n)] : 0;
+  };
+  const out = [];
+  for (let tz = z0; tz <= z1; tz++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      if (keys.has(`${tx},${tz}`)) continue;
+      const heights = new Int32Array(w * w), classes = new Uint8Array(n * n);
+      for (let j = 0; j < w; j++) for (let i = 0; i < w; i++) heights[j * w + i] = sample(tx * n + i, tz * n + j);
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) classes[j * n + i] = cell(tx * n + i, tz * n + j);
+      out.push({ tx, tz, heights, classes });
+    }
+  }
+  return out;
+}
