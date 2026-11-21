@@ -460,7 +460,10 @@ fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
     );
     assert_ne!(text, SMALL);
     let im = load(&text).expect("loads");
-    let n = im.tree.node(im.tree.handle(im.nodes["e_chair"]).unwrap()).unwrap();
+    let n = im
+        .tree
+        .node(im.tree.handle(im.nodes["e_chair"]).unwrap())
+        .unwrap();
     assert_eq!(
         import_eden::entry_name(n.kind().as_str(), n.fields()),
         "eden:sofa"
@@ -487,10 +490,17 @@ fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
     );
     // The same thing without field 27 is a `core:chair`, found by its own name: the sofa entry is not its.
     let im = load(SMALL).expect("loads");
-    let n = im.tree.node(im.tree.handle(im.nodes["e_chair"]).unwrap()).unwrap();
+    let n = im
+        .tree
+        .node(im.tree.handle(im.nodes["e_chair"]).unwrap())
+        .unwrap();
     assert_eq!(
         import_eden::entry_name(n.kind().as_str(), n.fields()),
         "eden:chair"
     );
-    assert!(import_eden::body_slots(&im.tree, &[("eden:sofa".into(), sofa)]).0.is_empty());
+    assert!(
+        import_eden::body_slots(&im.tree, &[("eden:sofa".into(), sofa)])
+            .0
+            .is_empty()
+    );
 }

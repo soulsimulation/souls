@@ -1543,7 +1543,10 @@ pub fn body_slots(
         out.extend(found.iter().filter_map(|&(slot, lie, at, stand)| {
             let (at, stand) = if borrowed {
                 let own = slot_point(n.fields(), slot)?;
-                (own, Vec3::new(own.x + stand.x - at.x, stand.y, own.z + stand.z - at.z))
+                (
+                    own,
+                    Vec3::new(own.x + stand.x - at.x, stand.y, own.z + stand.z - at.z),
+                )
             } else {
                 (at, stand)
             };
