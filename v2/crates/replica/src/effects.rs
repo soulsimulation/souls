@@ -1169,7 +1169,8 @@ fn place(pose: &Pose) -> Value {
     }
 }
 
-fn node_value(n: &NodeState) -> Value {
+/// A node in the state layout (`State::to_value`), as [`NodeState::read`] reads it.
+pub fn node_value(n: &NodeState) -> Value {
     let mut m = BTreeMap::from([
         (1, Value::Text(n.kind.clone())),
         (4, audience(n.audience)),
@@ -1182,7 +1183,8 @@ fn node_value(n: &NodeState) -> Value {
     Value::Map(m)
 }
 
-fn link_value(l: &LinkState) -> Value {
+/// A link in the state layout (`State::to_value`), as [`LinkState::read`] reads it.
+pub fn link_value(l: &LinkState) -> Value {
     Value::Map(BTreeMap::from([
         (1, Value::Text(l.ty.clone())),
         (
@@ -1233,6 +1235,27 @@ impl LinkState {
         r.closed("a link")?;
         Ok(l)
     }
+}
+
+/// A flight in the state layout (`State::to_value`).
+pub fn flight_value(f: &Flight) -> Value {
+    Value::Map(BTreeMap::from([
+        (1, f.root.to_value()),
+        (2, Value::Bytes(f.lineage.0.to_vec())),
+        (3, f.zone.to_value()),
+        (4, f.pose.to_value()),
+        (5, pairs(&f.nodes, node_value)),
+        (6, pairs(&f.links, link_value)),
+    ]))
+}
+
+/// A timer in the state layout (`State::to_value`).
+pub fn timer_value(t: &TimerState) -> Value {
+    Value::Map(BTreeMap::from([
+        (1, t.node.to_value()),
+        (2, int(t.due)),
+        (3, Value::Text(t.name.clone())),
+    ]))
 }
 
 fn pairs<T>(m: &BTreeMap<Id, T>, f: impl Fn(&T) -> Value) -> Value {
@@ -1695,16 +1718,7 @@ impl State {
         if !self.in_flight.is_empty() {
             m.insert(
                 4,
-                pairs(&self.in_flight, |f| {
-                    Value::Map(BTreeMap::from([
-                        (1, f.root.to_value()),
-                        (2, Value::Bytes(f.lineage.0.to_vec())),
-                        (3, f.zone.to_value()),
-                        (4, f.pose.to_value()),
-                        (5, pairs(&f.nodes, node_value)),
-                        (6, pairs(&f.links, link_value)),
-                    ]))
-                }),
+                pairs(&self.in_flight, flight_value),
             );
         }
         if !self.arrived.is_empty() {
@@ -1716,13 +1730,7 @@ impl State {
         if !self.timers.is_empty() {
             m.insert(
                 6,
-                pairs(&self.timers, |t| {
-                    Value::Map(BTreeMap::from([
-                        (1, t.node.to_value()),
-                        (2, int(t.due)),
-                        (3, Value::Text(t.name.clone())),
-                    ]))
-                }),
+                pairs(&self.timers, timer_value),
             );
         }
         if !self.time.is_empty() {
