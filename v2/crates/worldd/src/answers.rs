@@ -867,6 +867,8 @@ enum CheckJob {
     Reprepare(Box<(Id, Checked, Vec<sim::controller::BuildBasis>)>),
     /// B12b: kept surfaces the clock is done with, dropped here rather than on the clock.
     Release(Vec<sim::walk::town::RebindSurfaces>),
+    /// A Soul's set-down (#3604), checked on the same town with the engine's rules.
+    SetDown(crate::setdown::Ask),
 }
 
 #[derive(Clone, PartialEq)]
@@ -1028,12 +1030,6 @@ enum Taken {
     Move(Asked),
     Edit(Edit),
     Engine(engine::Act),
-    SetDown(crate::setdown::Ask),
-}
-
-/// What the edit checker's thread checks off the clock: a creator's edit (G1b), or a Soul's set-down (#3604).
-enum Check {
-    Edit(Id, Edit),
     SetDown(crate::setdown::Ask),
 }
 
@@ -4448,7 +4444,7 @@ fn edit_checker(
                 };
                 let checked = checked
                     .and_then(|c| {
-                        let known = town.on(&copy, ground, &committed).map(Known::of);
+                        let known = town.on(&copy, ground, &committed).map(|t| Known::of(t));
                         sim::edit::plan_classes(
                             c,
                             &copy,
