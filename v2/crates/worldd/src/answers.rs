@@ -229,14 +229,24 @@ fn motion_effects(
                 }),
             ));
         }
-        out.push(entry(
-            node,
-            s,
-            Body::Changes(vec![ChangeRec {
-                change: Change::Motion(s.handoff),
+        // A sample at rest (a stop, a seat taken, a still body set somewhere new) leaves the node still where it is: the
+        // same frame and pose again as a reparent, so the tree holds it as a still node's place (its record's pose, R5)
+        // and not as a motion that never ends.
+        let mut changes = vec![ChangeRec {
+            change: Change::Motion(s.handoff),
+            rest: Rest::new(),
+        }];
+        if s.handoff.linear == Vec3::ZERO {
+            changes.push(ChangeRec {
+                change: Change::Reparent {
+                    node,
+                    from: s.handoff.pose.frame,
+                    pose: s.handoff.pose,
+                },
                 rest: Rest::new(),
-            }]),
-        ));
+            });
+        }
+        out.push(entry(node, s, Body::Changes(changes)));
     }
     out
 }

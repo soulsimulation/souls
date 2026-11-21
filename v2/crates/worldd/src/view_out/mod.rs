@@ -1850,12 +1850,14 @@ impl<S: ObjectStore> PublicWriter<S> {
                 && !part.effects.is_empty()
                 && part.header == self.header.hash().to_bytes()
                 && part.effects.iter().all(|e| match &e.body {
-                    Body::Changes(cs) => cs.iter().all(|c| {
-                        matches!(
-                            c.change,
-                            replica::effects::Change::Motion(_)
-                                | replica::effects::Change::Set { .. }
-                        )
+                    Body::Changes(cs) => cs.iter().all(|c| match &c.change {
+                        replica::effects::Change::Motion(_)
+                        | replica::effects::Change::Set { .. } => true,
+                        // A body set still where it is: its frame unchanged.
+                        replica::effects::Change::Reparent { from, pose, .. } => {
+                            *from == pose.frame
+                        }
+                        _ => false,
                     }),
                     Body::Timers(_) => true,
                     _ => false,
@@ -1947,7 +1949,8 @@ impl<S: ObjectStore> PublicWriter<S> {
                     .retain(|(seq, _)| self.migration_cut.is_none_or(|cut| *seq >= cut));
                 self.canonical = checked;
             }
-            // What the cut can be published from (#3799): only motion and fields set on nodes touch only their rows.
+            // What the cut can be published from (#3799): motion, fields set and a node set still in its own
+            // frame touch only their rows.
             for e in &part.effects {
                 match &e.body {
                     Body::Changes(cs) => {
@@ -1957,6 +1960,11 @@ impl<S: ObjectStore> PublicWriter<S> {
                                     self.touched.insert(h.node);
                                 }
                                 replica::effects::Change::Set { node, .. } => {
+                                    self.touched.insert(*node);
+                                }
+                                replica::effects::Change::Reparent { node, from, pose }
+                                    if *from == pose.frame =>
+                                {
                                     self.touched.insert(*node);
                                 }
                                 _ => self.structural = true,
