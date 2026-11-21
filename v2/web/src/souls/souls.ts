@@ -84,6 +84,11 @@ export class SoulsCopy {
   }
 }
 
+/** Talk's reach, mm (`worldd::words::SAY_REACH_MM`): a line that carries farther is a shout (C26, #3689). */
+export const TALK_MM = 5_000;
+/** A line as its bubble shows it: a shout marked as one. */
+export const spoken = (s: SaidRec) => (s.reach > TALK_MM ? `(shouts) ${s.words}` : s.words);
+
 /** A Soul's chip text: its public name, or its id's counter while the name is unknown. */
 export const label = (s: Soul) => s.name ?? `Soul ${s.id.split('.').pop()}`;
 
