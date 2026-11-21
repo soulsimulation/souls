@@ -15,7 +15,8 @@
 //!    record the root reaches. The writer keeps them in memory, so it writes the whole tree with one sync; a sync per
 //!    node file costs about 5 ms each on macOS (`F_FULLFSYNC`), seconds for the thousand nodes a busy interval moves.
 //! 4. **Written whole or not at all:** a temporary name, a sync, a rename, a sync of the directory. The last two are
-//!    kept, the older deleted. The log is never cut here: it is the archive (T7).
+//!    kept, the older deleted. The log is never cut here; a served world compacts it once every reader has passed
+//!    it (`log` rule 9, #3837).
 //! 5. **Restart** ([`restore`]) reads the newest checkpoint that verifies (its CRC-32C, then every record against the
 //!    hash that names it), else the one before, naming each it rejected; [`replay`] then applies the log after it.
 //!    It brings back what the log holds: nodes, parents, links, holds, motion, timers, transfers and time. A skill in

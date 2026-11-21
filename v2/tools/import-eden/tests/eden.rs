@@ -425,3 +425,22 @@ fn a_second_thing_in_a_held_slot_is_left_out_of_it_and_reported() {
     let s = a.slice(&im.tree, 1 << 20);
     assert!(s.pass_ended && s.faults.is_empty(), "{:?}", s.faults);
 }
+
+#[test]
+fn a_stair_from_a_floor_to_itself_is_noted_not_linked() {
+    // A step between two surfaces of one level (the Mars campus's Chiba deck) once refused the whole import (link-self).
+    let text = SMALL.replace(
+        r#"{"id": "stairs", "kind": "stairs", "from": 0, "to": 1, "path": [[3000, -2000], [3000, 2000]], "width": 900, "y0": 100, "y1": 2900}"#,
+        r#"{"id": "stairs", "kind": "stairs", "from": 0, "to": 1, "path": [[3000, -2000], [3000, 2000]], "width": 900, "y0": 100, "y1": 2900},
+     {"id": "step", "kind": "stairs", "from": 1, "to": 1, "path": [[0, 0], [0, 500]], "width": 900, "y0": 2900, "y1": 2916}"#,
+    );
+    assert_ne!(text, SMALL);
+    let im = load(&text).expect("loads");
+    assert_eq!(
+        im.notes,
+        vec!["e_house: a stair on floor 1 to itself, not linked".to_owned()]
+    );
+    let (rows, ..) = count(&im);
+    let stairs = rows.iter().find(|r| r.what == "stairs (links)").unwrap();
+    assert_eq!(stairs.tree, 1);
+}

@@ -1260,3 +1260,43 @@ fn w16_scoped_handoff_revokes_creator_preserves_souls_other_world_and_reopens() 
     assert!(p.reconcile_current_authority().is_err());
     assert_eq!(std::fs::read(&file).unwrap(), before);
 }
+
+/// #3702: a world's creator reads its recent visitors (no account or device), and a creator's token names its grant.
+#[test]
+fn n_g8_visitors_are_the_souls_paired_for_the_world_newest_first() {
+    let (p, _) = store();
+    let (_, first) = pair_in(&p, "acct_a", "mars");
+    let (secret, code) = ask(&p, "phone", None, false, T0 + 60);
+    p.ask_world(&code, "mars").expect("a world");
+    assert_eq!(p.world_by_secret(&secret).as_deref(), Some("mars"));
+    let second = p.approve("acct_b", &code, T0 + 60).expect("approved");
+    let Poll::Token { .. } = p.poll(&secret, T0 + 60 + INTERVAL) else {
+        panic!("a token")
+    };
+    let (_, elsewhere) = pair_in(&p, "acct_a", "venus");
+    p.set_profile(
+        "acct_b",
+        &second,
+        &souls::Profile {
+            name: Some("Rowan".into()),
+            description: None,
+        },
+    )
+    .expect("named");
+    let v = p.visitors("mars", 20).expect("visitors");
+    assert_eq!(
+        v.iter().map(|v| v.soul.as_str()).collect::<Vec<_>>(),
+        [second.as_str(), first.as_str()],
+        "newest first, this world's alone"
+    );
+    assert_eq!(v[0].name.as_deref(), Some("Rowan"));
+    assert_eq!(v[0].arrived, T0 + 60);
+    assert!(v[0].connected);
+    assert!(!v.iter().any(|v| v.soul == elsewhere));
+    assert_eq!(p.visitors("mars", 1).expect("one").len(), 1);
+    p.revoke("acct_a", &first).expect("revoked");
+    assert!(!p.visitors("mars", 20).expect("visitors")[1].connected);
+    // A Soul's token is not a creator's.
+    let (token, _) = pair_in(&p, "acct_a", "mars");
+    assert_eq!(p.creator_by_token(&token), None);
+}
