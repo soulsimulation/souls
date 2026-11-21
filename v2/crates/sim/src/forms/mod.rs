@@ -547,6 +547,11 @@ impl Forms {
         f
     }
 
+    /// Whether intent `intent` is one the forms hold: its run in progress, or its effects applied.
+    pub fn known(&self, intent: Id) -> bool {
+        self.by_intent.contains_key(&intent) || self.applied.contains_key(&intent)
+    }
+
     /// Marks `node` as ground: a form done there reserves nothing (E21).
     pub fn shared(&mut self, node: Id) {
         self.shared.insert(node);
