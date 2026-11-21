@@ -45,6 +45,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use replica::bodies::Family;
+use replica::bodies::{Class, SkillShape, Want};
+use replica::effects::Effect;
 use replica::effects::{Actor, Refusal, fixture_bytes};
 use replica::encode::{Name, Value, decode};
 use replica::host::Progress;
@@ -52,6 +54,7 @@ use replica::ids::{Id, Minter, Scope};
 use replica::intents::Intent;
 use replica::move_check::{self, Seen, Verdict};
 use replica::moves::{Effector, Move};
+use replica::pose::Frame;
 use replica::pose::{Pose, Support, Vec3};
 use replica::select::{self, Spot};
 use replica::speech::Said;
@@ -59,6 +62,7 @@ use replica::time::Micros;
 use sim::commit::bind::{Bound, Slot, bind};
 use sim::commit::spot;
 use sim::controller::Stance;
+use sim::controller::{Driver, Part};
 use sim::host::Runner;
 use sim::host::{Planned, ReachKey, ReachQuestion, Wants};
 use sim::life::{Born, Life, Retired, Standing};
@@ -70,10 +74,6 @@ use sim::speech::{self, Hearing};
 use sim::spots::Target;
 use sim::timers::DueList;
 use sim::walk::town::Town;
-use replica::bodies::{Class, SkillShape, Want};
-use replica::effects::Effect;
-use replica::pose::Frame;
-use sim::controller::{Driver, Part};
 use skills::route::Route;
 use skills::wind_down::{self, Do, Ground, Order, Phase, WindDown};
 
@@ -1007,11 +1007,12 @@ impl Ground for WindGround<'_> {
     }
 
     fn aboard(&self, body: Id) -> bool {
-        self.b
-            .runner
-            .controller
-            .body(body)
-            .is_some_and(|m| matches!(m.pose.support, Support::Track | Support::Volume { .. } | Support::None))
+        self.b.runner.controller.body(body).is_some_and(|m| {
+            matches!(
+                m.pose.support,
+                Support::Track | Support::Volume { .. } | Support::None
+            )
+        })
     }
 
     fn clear(&self, p: [i64; 2], lying: bool) -> bool {
@@ -1032,8 +1033,13 @@ impl Ground for WindGround<'_> {
                 node: ground,
                 slot: None,
             };
-            s.place(ground, frame, Vec3::new(p[0], 0, p[1]), replica::pose::Quat::IDENTITY)
-                .is_ok()
+            s.place(
+                ground,
+                frame,
+                Vec3::new(p[0], 0, p[1]),
+                replica::pose::Quat::IDENTITY,
+            )
+            .is_ok()
         })
     }
 
@@ -1194,7 +1200,8 @@ impl Bodies {
                 && matches!(pose.support, Support::Surface { .. })
                 && self.wind.state(*body).is_some_and(|s| s.wander.is_none())
             {
-                self.wind.asleep(*body, [pose.position.x, pose.position.z], now);
+                self.wind
+                    .asleep(*body, [pose.position.x, pose.position.z], now);
             }
         }
         for body in ids {

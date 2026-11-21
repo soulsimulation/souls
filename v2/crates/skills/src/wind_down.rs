@@ -25,8 +25,8 @@ use std::collections::BTreeMap;
 use replica::effects::{Actor, Body, Cause, Effect, Envelope, Event, Rest};
 use replica::encode::{Name, Value};
 use replica::ids::Id;
-use replica::world_model::Audience;
 use replica::time::{MICROS_PER_SECOND, Micros};
+use replica::world_model::Audience;
 
 /// The rule's name, as today's.
 pub const RULE: &str = "wind-down/1";
@@ -114,9 +114,15 @@ impl Phase {
         }
     }
     fn read(s: &str) -> Option<Phase> {
-        [Phase::Wander, Phase::Leg, Phase::Zombie, Phase::Asleep, Phase::Woken]
-            .into_iter()
-            .find(|p| p.as_str() == s)
+        [
+            Phase::Wander,
+            Phase::Leg,
+            Phase::Zombie,
+            Phase::Asleep,
+            Phase::Woken,
+        ]
+        .into_iter()
+        .find(|p| p.as_str() == s)
     }
 }
 
@@ -266,18 +272,23 @@ impl WindDown {
     /// Clocks from text `wander,zombie,leg_min,leg_max,bound` in seconds (a test world's setting); the distances are
     /// the defaults. `None` when it does not read.
     pub fn knobs_from(text: &str) -> Option<Knobs> {
-        let n: Vec<i64> = text.split(',').map(|t| t.trim().parse().ok()).collect::<Option<_>>()?;
+        let n: Vec<i64> = text
+            .split(',')
+            .map(|t| t.trim().parse().ok())
+            .collect::<Option<_>>()?;
         let [wander, zombie, leg_min, leg_max, bound] = n[..] else {
             return None;
         };
-        (wander > 0 && zombie > 0 && leg_min > 0 && leg_max >= leg_min && bound > zombie).then_some(Knobs {
-            wander: wander * S,
-            zombie: zombie * S,
-            leg_min: leg_min * S,
-            leg_max: leg_max * S,
-            bound: bound * S,
-            ..KNOBS
-        })
+        (wander > 0 && zombie > 0 && leg_min > 0 && leg_max >= leg_min && bound > zombie).then_some(
+            Knobs {
+                wander: wander * S,
+                zombie: zombie * S,
+                leg_min: leg_min * S,
+                leg_max: leg_max * S,
+                bound: bound * S,
+                ..KNOBS
+            },
+        )
     }
 
     /// A body the rule looks after from `now` (a birth, an arrival), Owned as of now unless it has a state.
@@ -366,7 +377,9 @@ impl WindDown {
     fn leg(&self, body: Id, wander: Micros, k: u64) -> Micros {
         let kn = &self.knobs;
         let span = (kn.leg_max - kn.leg_min + 1).max(1);
-        (1..=k).fold(wander, |t, j| t + kn.leg_min + pick(mix(body, b'l', wander, j), span))
+        (1..=k).fold(wander, |t, j| {
+            t + kn.leg_min + pick(mix(body, b'l', wander, j), span)
+        })
     }
 
     /// When the rule next acts on this body at or after `from`; `None` asleep.
@@ -393,10 +406,18 @@ impl WindDown {
         if s.zombie.is_none() {
             let n = up((from - zombie_at).max(0), kn.leg_min.max(1));
             let t = zombie_at + n * kn.leg_min;
-            return Some(if from >= stop_at { from.max(lie_at) } else { t.min(stop_at) });
+            return Some(if from >= stop_at {
+                from.max(lie_at)
+            } else {
+                t.min(stop_at)
+            });
         }
         let look = up(from, LOOK) * LOOK;
-        Some(if from <= stop_at { look.min(stop_at) } else { look.max(lie_at) })
+        Some(if from <= stop_at {
+            look.min(stop_at)
+        } else {
+            look.max(lie_at)
+        })
     }
 
     /// The moves due at `now`, in body order. A body held by something else waits `leg_min` and is not moved.
@@ -435,7 +456,9 @@ impl WindDown {
         };
         let stop_at = wander + kn.bound - SETTLE;
         if now < wander + kn.zombie {
-            return self.wander_leg(body, now, g).and_then(|p| order(Phase::Leg, vec![Do::Walk(p)]));
+            return self
+                .wander_leg(body, now, g)
+                .and_then(|p| order(Phase::Leg, vec![Do::Walk(p)]));
         }
         if s.zombie.is_none() && now < stop_at {
             let at = g.at(body).filter(|_| !g.walking(body) && !g.aboard(body))?;
@@ -448,11 +471,19 @@ impl WindDown {
             return order(Phase::Zombie, vec![Do::Walk(spot)]);
         }
         if s.zombie.is_some() && now < stop_at {
-            return if g.walking(body) { None } else { self.lie(body, s, now, g) };
+            return if g.walking(body) {
+                None
+            } else {
+                self.lie(body, s, now, g)
+            };
         }
         if now < stop_at + SETTLE / 2 {
             // The bound: a walk still going stops where it is.
-            return g.walking(body).then(|| Order { body, phase: Phase::Zombie, what: vec![Do::Stop] });
+            return g.walking(body).then(|| Order {
+                body,
+                phase: Phase::Zombie,
+                what: vec![Do::Stop],
+            });
         }
         self.lie(body, s, now, g)
     }
@@ -463,8 +494,16 @@ impl WindDown {
         if s.spot.is_none() {
             s.spot = g.at(body);
         }
-        let what = if g.aboard(body) { Vec::new() } else { vec![Do::Stop, Do::Lie] };
-        Some(Order { body, phase: Phase::Asleep, what })
+        let what = if g.aboard(body) {
+            Vec::new()
+        } else {
+            vec![Do::Stop, Do::Lie]
+        };
+        Some(Order {
+            body,
+            phase: Phase::Asleep,
+            what,
+        })
     }
 
     /// One walk of `leg_min_um` to `leg_max_um` whose end is farther from the centre than its start.
@@ -485,10 +524,15 @@ impl WindDown {
         for n in 0..12u64 {
             let h = mix(body, b'a', now, n);
             let dir = match out {
-                Some(o) => usize::try_from(i64::try_from(o).unwrap_or(0) + 64 + pick(h, 29) - 14).unwrap_or(0),
+                Some(o) => usize::try_from(i64::try_from(o).unwrap_or(0) + 64 + pick(h, 29) - 14)
+                    .unwrap_or(0),
                 None => usize::try_from(pick(h, 64)).unwrap_or(0),
             };
-            let d = kn.leg_min_um + pick(mix(body, b'd', now, n), (kn.leg_max_um - kn.leg_min_um + 1).max(1));
+            let d = kn.leg_min_um
+                + pick(
+                    mix(body, b'd', now, n),
+                    (kn.leg_max_um - kn.leg_min_um + 1).max(1),
+                );
             let p = ahead(at, dir, d);
             if d2(p, c) > d0 && g.clear(p, false) {
                 return Some(p);
@@ -593,7 +637,11 @@ pub fn read(e: &Effect) -> Option<(Id, State)> {
     if e.envelope.actor != Actor::World {
         return None;
     }
-    let ev = e.events.as_ref()?.iter().find(|v| EVENTS.contains(&v.name.as_str()))?;
+    let ev = e
+        .events
+        .as_ref()?
+        .iter()
+        .find(|v| EVENTS.contains(&v.name.as_str()))?;
     let f = &ev.fields;
     let phase = match f.get(&1)? {
         Value::Text(t) => Phase::read(t.as_str())?,
@@ -680,8 +728,7 @@ const DIRS: [[i64; 2]; 64] = [
     [923880, -382683],
     [956940, -290285],
     [980785, -195090],
-    [995185, -98017]
-,
+    [995185, -98017],
 ];
 
 #[cfg(test)]

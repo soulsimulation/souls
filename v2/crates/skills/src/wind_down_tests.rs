@@ -75,7 +75,9 @@ impl Town {
                 Do::Walk(p) => {
                     let from = self.at(o.body).unwrap();
                     let um = i64::try_from(d2(from, *p).isqrt()).unwrap();
-                    self.walks.borrow_mut().insert(o.body, (*p, now + um * S / 1_400_000));
+                    self.walks
+                        .borrow_mut()
+                        .insert(o.body, (*p, now + um * S / 1_400_000));
                 }
                 Do::Stop => {
                     self.walks.borrow_mut().remove(&o.body);
@@ -99,7 +101,12 @@ fn run(w: &mut WindDown, t: &Town, from: Micros, to: Micros) -> (Vec<&'static st
         t.tick(now);
         for o in w.step(now, t) {
             t.apply(&o);
-            records.push(record(&o, w.state(o.body).unwrap(), now, records.len() as u64));
+            records.push(record(
+                &o,
+                w.state(o.body).unwrap(),
+                now,
+                records.len() as u64,
+            ));
         }
         for b in t.at.borrow().keys() {
             let word = w.word(*b).unwrap().as_str();
@@ -129,7 +136,11 @@ fn a1_a3_a4_silent_soul_wanders_walks_out_lies_down_and_sleeps() {
     assert!(t.outdoors(at), "{at:?}");
     assert!(d2(at, [0, 0]) > d2([5 * M, 2 * M], [0, 0]));
     // A3: every record's cause and actor are the world; the phases in order.
-    assert!(records.iter().all(|e| e.envelope.actor == Actor::World && e.envelope.cause == Cause::World));
+    assert!(
+        records
+            .iter()
+            .all(|e| e.envelope.actor == Actor::World && e.envelope.cause == Cause::World)
+    );
     let phases: Vec<Phase> = records.iter().map(read_phase).collect();
     assert_eq!(phases.first(), Some(&Phase::Wander));
     assert!(phases.contains(&Phase::Leg) && phases.contains(&Phase::Zombie));
@@ -190,7 +201,11 @@ fn records_rebuild_the_rule_after_a_restart() {
     assert_eq!(again.next(), None);
     // An agent act after the last record is the newer state.
     let soul_act = Effect {
-        envelope: Envelope { actor: Actor::Soul(b), at: 65 * S, ..records[0].envelope },
+        envelope: Envelope {
+            actor: Actor::Soul(b),
+            at: 65 * S,
+            ..records[0].envelope
+        },
         ..records[0].clone()
     };
     let mut later = WindDown::new(SHORT);
@@ -209,13 +224,18 @@ fn choices_are_the_same_every_run_and_spots_keep_apart() {
             w.add(soul(n), 0);
         }
         run(&mut w, &t, 0, 60 * S);
-        (10..14).map(|n| w.state(soul(n)).unwrap().spot.unwrap()).collect::<Vec<_>>()
+        (10..14)
+            .map(|n| w.state(soul(n)).unwrap().spot.unwrap())
+            .collect::<Vec<_>>()
     };
     let spots = go();
     assert_eq!(spots, go());
     for (i, a) in spots.iter().enumerate() {
         for c in &spots[i + 1..] {
-            assert!(d2(*a, *c) >= i128::from(3 * M) * i128::from(3 * M), "{a:?} {c:?}");
+            assert!(
+                d2(*a, *c) >= i128::from(3 * M) * i128::from(3 * M),
+                "{a:?} {c:?}"
+            );
         }
     }
 }

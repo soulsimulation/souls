@@ -3358,7 +3358,15 @@ pub fn start<S: Storage + 'static>(
         restart.applied += 1;
         receipts.index(&part.effects);
         remember_orders(&mut order_records, &part.effects);
-        wind_records.extend(part.effects.iter().filter(|e| matches!(e.envelope.actor, Actor::Soul(_)) || skills::wind_down::read(e).is_some()).cloned());
+        wind_records.extend(
+            part.effects
+                .iter()
+                .filter(|e| {
+                    matches!(e.envelope.actor, Actor::Soul(_))
+                        || skills::wind_down::read(e).is_some()
+                })
+                .cloned(),
+        );
         read_back(&part, &mut placed, &mut last);
         // Nodes an edit placed took their ids on the intents' counter (G1b): never give one out again.
         for e in &part.effects {
@@ -3730,7 +3738,12 @@ pub fn start<S: Storage + 'static>(
                         if let Err(r) = crate::orders::resume(&mut b, &order_parts, at) {
                             eprintln!("worldd: standing orders were not restored: {r}");
                         }
-                        b.wind_resume(&wind_records, |s| c.life.as_ref().and_then(|l| l.life.body_of(s)), &placed, at);
+                        b.wind_resume(
+                            &wind_records,
+                            |s| c.life.as_ref().and_then(|l| l.life.body_of(s)),
+                            &placed,
+                            at,
+                        );
                         c.bodies = Some(b);
                         // The activities the log holds, so their members speak in them and leave them again (E26).
                         if let (Some(e), Some(b)) = (c.engine.as_mut(), c.bodies.as_mut())

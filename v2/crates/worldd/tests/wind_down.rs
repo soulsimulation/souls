@@ -34,9 +34,18 @@ fn run(b: &mut Bodies, from: i64, to: i64) -> Vec<String> {
     while now <= to {
         b.step(now);
         for e in std::mem::take(&mut b.wind_log) {
-            assert_eq!((e.envelope.actor, e.envelope.cause), (Actor::World, Cause::World), "A3");
+            assert_eq!(
+                (e.envelope.actor, e.envelope.cause),
+                (Actor::World, Cause::World),
+                "A3"
+            );
             assert!(wind_down::read(&e).is_some());
-            names.extend(e.events.unwrap().into_iter().map(|v| v.name.as_str().to_owned()));
+            names.extend(
+                e.events
+                    .unwrap()
+                    .into_iter()
+                    .map(|v| v.name.as_str().to_owned()),
+            );
         }
         now += TICK;
     }
@@ -54,27 +63,49 @@ fn b16_a_silent_soul_walks_out_sleeps_and_wakes_on_its_agents_act() {
     let names = run(&mut b, 0, 120 * S);
     let mut words = names.clone();
     words.dedup();
-    assert_eq!(words, ["souls:idle", "souls:zombie", "souls:asleep"], "{names:?}");
-    assert!(names.iter().filter(|n| *n == "souls:idle").count() > 1, "legs: {names:?}");
+    assert_eq!(
+        words,
+        ["souls:idle", "souls:zombie", "souls:asleep"],
+        "{names:?}"
+    );
+    assert!(
+        names.iter().filter(|n| *n == "souls:idle").count() > 1,
+        "legs: {names:?}"
+    );
     assert_eq!(b.wind.word(soul), Some(Word::Asleep));
     // It lies where it walked to: its spot, out of the square and farther out than it began.
     let at = ground_xz(&b);
     let s = *b.wind.state(soul).unwrap();
     let spot = s.spot.unwrap();
     let apart = |a: [i64; 2], c: [i64; 2]| ((a[0] - c[0]) as f64).hypot((a[1] - c[1]) as f64);
-    assert!(apart(at, spot) < 1_000_000.0, "lies at its spot: {at:?} {spot:?}");
-    assert!(apart(at, from) > 5_000_000.0, "walked out: {from:?} -> {at:?}");
+    assert!(
+        apart(at, spot) < 1_000_000.0,
+        "lies at its spot: {at:?} {spot:?}"
+    );
+    assert!(
+        apart(at, from) > 5_000_000.0,
+        "walked out: {from:?} -> {at:?}"
+    );
     let placed = b.placed();
     let (pose, stance) = placed[&soul];
-    assert!(matches!(pose.support, Support::Surface { .. }), "on the open ground");
+    assert!(
+        matches!(pose.support, Support::Surface { .. }),
+        "on the open ground"
+    );
     assert_eq!(stance, Some(Stance::Lie), "lying");
 
     // A5: BUILDSAFE judges the sleeping body as it judges any body standing on the open ground (the edit checker's
     // hand-off, `buildsafe::moving`): an edit that would cover its spot is refused `edit.would-bury`, never left over it.
-    let judged: Vec<_> = worldd::buildsafe::moving(&b).into_iter().filter(|w| w.body == soul).collect();
+    let judged: Vec<_> = worldd::buildsafe::moving(&b)
+        .into_iter()
+        .filter(|w| w.body == soul)
+        .collect();
     assert_eq!(judged.len(), 1, "judged once, not walking");
     assert_eq!(judged[0].pose, pose);
-    assert!(matches!(judged[0].pose.support, Support::Surface { height: 0, .. }));
+    assert!(matches!(
+        judged[0].pose.support,
+        Support::Surface { height: 0, .. }
+    ));
 
     // A4: asleep, it is on no due list, and a long while issues nothing.
     assert_eq!(b.wind.next(), None);
@@ -108,7 +139,11 @@ fn b16_a_silent_soul_walks_out_sleeps_and_wakes_on_its_agents_act() {
     let mut t = now;
     while done.is_none() && t < now + 30 * S {
         t += TICK;
-        done = b.step(t).into_iter().find(|(id, _)| *id == intent).map(|(_, r)| r);
+        done = b
+            .step(t)
+            .into_iter()
+            .find(|(id, _)| *id == intent)
+            .map(|(_, r)| r);
     }
     assert_eq!(done, Some(Ok(())), "the agent's walk ran");
     assert!(apart(ground_xz(&b), [at[0] + 3_000_000, at[1]]) < 500_000.0);
@@ -134,12 +169,23 @@ mod served {
     struct Client(UnixStream, Id, u64, Scope);
 
     impl Client {
-        fn act(&mut self, verb: &str, target: Option<Id>, parameters: BTreeMap<u64, Value>) -> Result<Vec<u64>, String> {
+        fn act(
+            &mut self,
+            verb: &str,
+            target: Option<Id>,
+            parameters: BTreeMap<u64, Value>,
+        ) -> Result<Vec<u64>, String> {
             self.send(verb, target, parameters, false)
         }
 
         /// An intent; `reflex`: marked as its client's reflex (#3764), not its agent's.
-        fn send(&mut self, verb: &str, target: Option<Id>, parameters: BTreeMap<u64, Value>, reflex: bool) -> Result<Vec<u64>, String> {
+        fn send(
+            &mut self,
+            verb: &str,
+            target: Option<Id>,
+            parameters: BTreeMap<u64, Value>,
+            reflex: bool,
+        ) -> Result<Vec<u64>, String> {
             self.2 += 1;
             let i = Intent {
                 actor: Actor::Soul(self.1),
@@ -147,7 +193,13 @@ mod served {
                 target: target.map(Target::Node),
                 parameters,
                 sequence: self.2,
-                basis: Version { lineage: self.3, zone: Id::new(self.3, 0).unwrap(), epoch: 1, sequence: 0 }.to_value(),
+                basis: Version {
+                    lineage: self.3,
+                    zone: Id::new(self.3, 0).unwrap(),
+                    epoch: 1,
+                    sequence: 0,
+                }
+                .to_value(),
                 expiry: answers::now() + 120_000_000,
                 resources: Vec::new(),
                 fallbacks: Vec::new(),
@@ -156,23 +208,33 @@ mod served {
                 reflex,
             };
             let bytes = encode(&i.to_value()).unwrap();
-            self.0.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes()).unwrap();
+            self.0
+                .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+                .unwrap();
             self.0.write_all(&bytes).unwrap();
             let a = loop {
                 let mut len = [0u8; 4];
                 self.0.read_exact(&mut len).expect("an answer");
                 let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
                 self.0.read_exact(&mut frame).unwrap();
-                let Value::Map(mut m) = decode(&frame).unwrap().value else { panic!("a frame") };
-                let Some(Value::Map(a)) = m.remove(&2) else { panic!("an answer") };
-                if !matches!((a.get(&3), a.get(&answers::LEFT)), (Some(Value::Uint(3)), Some(_))) {
+                let Value::Map(mut m) = decode(&frame).unwrap().value else {
+                    panic!("a frame")
+                };
+                let Some(Value::Map(a)) = m.remove(&2) else {
+                    panic!("an answer")
+                };
+                if !matches!(
+                    (a.get(&3), a.get(&answers::LEFT)),
+                    (Some(Value::Uint(3)), Some(_))
+                ) {
                     break a;
                 }
             };
             match (a.get(&3), a.get(&5), a.get(&4)) {
-                (Some(Value::Uint(1)), Some(Value::Array(e)), _) => {
-                    Ok(e.iter().map(|v| if let Value::Uint(n) = v { *n } else { 0 }).collect())
-                }
+                (Some(Value::Uint(1)), Some(Value::Array(e)), _) => Ok(e
+                    .iter()
+                    .map(|v| if let Value::Uint(n) = v { *n } else { 0 })
+                    .collect()),
                 (Some(Value::Uint(2)), _, Some(Value::Text(t))) => Err(t.as_str().to_owned()),
                 other => panic!("an answer: {other:?}"),
             }
@@ -218,14 +280,27 @@ mod served {
                 for ev in e.events.iter().flatten() {
                     let n = ev.name.as_str();
                     if skills::wind_down::EVENTS.contains(&n) {
-                        out.push(Seen::Record(e.envelope.at, e.envelope.node, n.to_owned(), e.envelope.actor, e.envelope.cause));
+                        out.push(Seen::Record(
+                            e.envelope.at,
+                            e.envelope.node,
+                            n.to_owned(),
+                            e.envelope.actor,
+                            e.envelope.cause,
+                        ));
                     }
                 }
             }
             if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
                 for (id, pose, st) in rows.iter().filter_map(worldd::bodies::read_row) {
                     let lying = st == Some(sim::controller::Stance::Lie);
-                    out.push(Seen::Row(at, id, pose.frame.node, pose.position.x, pose.position.z, lying));
+                    out.push(Seen::Row(
+                        at,
+                        id,
+                        pose.frame.node,
+                        pose.position.x,
+                        pose.position.z,
+                        lying,
+                    ));
                 }
             }
         }
@@ -248,10 +323,15 @@ mod served {
         let (facts, entries, at) = if test_world {
             let f = std::env::temp_dir().join(format!("b16-facts-{}.json", std::process::id()));
             std::fs::write(&f, testworld::generate(1, 0).expect("the test world").text).unwrap();
-            (f.display().to_string(), format!("{root}/content/kinds/doors"), "-40,30".to_owned())
+            (
+                f.display().to_string(),
+                format!("{root}/content/kinds/doors"),
+                "-40,30".to_owned(),
+            )
         } else {
             (
-                std::env::var("EDEN_FACTS").unwrap_or_else(|_| format!("{root}/.local/import-eden/eden-2026.facts.json")),
+                std::env::var("EDEN_FACTS")
+                    .unwrap_or_else(|_| format!("{root}/.local/import-eden/eden-2026.facts.json")),
                 format!("{root}/content/kinds"),
                 std::env::var("B16_AT").unwrap_or_else(|_| "67.5,-12".to_owned()),
             )
@@ -263,7 +343,11 @@ mod served {
             .args(["--entries", &entries, "--souls", "0", "--at", &at])
             .output()
             .unwrap();
-        assert!(seeded.status.success(), "{}", String::from_utf8_lossy(&seeded.stderr));
+        assert!(
+            seeded.status.success(),
+            "{}",
+            String::from_utf8_lossy(&seeded.stderr)
+        );
         let mut child = Command::new(worldd)
             .args(["serve", "--dir"])
             .arg(&dir)
@@ -293,9 +377,16 @@ mod served {
                 _ => None,
             })
             .expect("a body row");
-        let point = |x: i64, z: i64| BTreeMap::from([(1, Value::Array(vec![int(x), Value::Uint(0), int(z)]))]);
-        soul.act("eden:walk", Some(ground), point(x0 + 3_000_000, z0)).expect("the agent's walk");
-        say(&format!("agent walked 3 m from ({:.1}, {:.1}) m; the agent goes", x0 as f64 / 1e6, z0 as f64 / 1e6));
+        let point = |x: i64, z: i64| {
+            BTreeMap::from([(1, Value::Array(vec![int(x), Value::Uint(0), int(z)]))])
+        };
+        soul.act("eden:walk", Some(ground), point(x0 + 3_000_000, z0))
+            .expect("the agent's walk");
+        say(&format!(
+            "agent walked 3 m from ({:.1}, {:.1}) m; the agent goes",
+            x0 as f64 / 1e6,
+            z0 as f64 / 1e6
+        ));
         let seq = soul.2;
         drop(soul);
 
@@ -304,14 +395,23 @@ mod served {
         let mut shown = 0;
         loop {
             let log = read_log(&dir);
-            let recs: Vec<&Seen> = log.iter().filter(|s| matches!(s, Seen::Record(..))).collect();
+            let recs: Vec<&Seen> = log
+                .iter()
+                .filter(|s| matches!(s, Seen::Record(..)))
+                .collect();
             for s in &recs[shown..] {
                 if let Seen::Record(t, _, n, a, c) = s {
-                    say(&format!("record {n} at world {:.1} s, actor {a:?}, cause {c:?}", *t as f64 / 1e6));
+                    say(&format!(
+                        "record {n} at world {:.1} s, actor {a:?}, cause {c:?}",
+                        *t as f64 / 1e6
+                    ));
                 }
             }
             shown = recs.len();
-            if recs.iter().any(|s| matches!(s, Seen::Record(_, _, n, ..) if n == "souls:asleep")) {
+            if recs
+                .iter()
+                .any(|s| matches!(s, Seen::Record(_, _, n, ..) if n == "souls:asleep"))
+            {
                 break;
             }
             assert!(Instant::now() < deadline, "not asleep in time");
@@ -348,18 +448,34 @@ mod served {
             first.2 as f64 / 1e6,
             last.1 as f64 / 1e6,
             last.2 as f64 / 1e6,
-            if last.3 == ground { "the open ground" } else { "another node" },
+            if last.3 == ground {
+                "the open ground"
+            } else {
+                "another node"
+            },
             last.4
         ));
         for r in rows.iter().step_by((rows.len() / 25).max(1)) {
-            say(&format!("  world {:7.1} s  ({:7.2}, {:7.2}) m  lying {}", r.0 as f64 / 1e6, r.1 as f64 / 1e6, r.2 as f64 / 1e6, r.4));
+            say(&format!(
+                "  world {:7.1} s  ({:7.2}, {:7.2}) m  lying {}",
+                r.0 as f64 / 1e6,
+                r.1 as f64 / 1e6,
+                r.2 as f64 / 1e6,
+                r.4
+            ));
         }
         assert_eq!(last.3, ground, "asleep on the open ground");
         assert!(last.4, "lying");
         // Every step of the way was a walk's: no row jumps more than a walk could go between ticks (no teleport).
         for w in rows.windows(2) {
-            let (dt, d) = (w[1].0 - w[0].0, ((w[1].1 - w[0].1) as f64).hypot((w[1].2 - w[0].2) as f64));
-            assert!(d <= 2.0 * 1.4 * dt.max(50_000) as f64 + 50_000.0, "a jump of {d} µm in {dt} µs");
+            let (dt, d) = (
+                w[1].0 - w[0].0,
+                ((w[1].1 - w[0].1) as f64).hypot((w[1].2 - w[0].2) as f64),
+            );
+            assert!(
+                d <= 2.0 * 1.4 * dt.max(50_000) as f64 + 50_000.0,
+                "a jump of {d} µm in {dt} µs"
+            );
         }
         // A4: asleep, it writes no row and no record for 10 s.
         let before = read_log(&dir).len();
@@ -372,19 +488,29 @@ mod served {
         let said = soul.send(
             "eden:say",
             None,
-            BTreeMap::from([(1, Value::Map([(worldd::words::WORDS, Value::Bytes(b"zzz".to_vec()))].into()))]),
+            BTreeMap::from([(
+                1,
+                Value::Map([(worldd::words::WORDS, Value::Bytes(b"zzz".to_vec()))].into()),
+            )]),
             true,
         );
         say(&format!("a reflex says a line: {said:?}"));
         std::thread::sleep(Duration::from_secs(2));
         let log = read_log(&dir);
-        let awake = |log: &[Seen]| log.iter().any(|s| matches!(s, Seen::Record(_, b, n, ..) if *b == body && n == "souls:awake"));
+        let awake = |log: &[Seen]| {
+            log.iter()
+                .any(|s| matches!(s, Seen::Record(_, b, n, ..) if *b == body && n == "souls:awake"))
+        };
         assert!(!awake(&log), "a reflex does not wake it");
         let still = log.iter().rev().find_map(|s| match s {
             Seen::Row(_, b, _, x, z, l) if *b == body => Some((*x, *z, *l)),
             _ => None,
         });
-        assert_eq!(still, Some((last.1, last.2, true)), "still lying where it slept");
+        assert_eq!(
+            still,
+            Some((last.1, last.2, true)),
+            "still lying where it slept"
+        );
         say("after the reflex: still asleep, not written awake");
 
         // A2: the agent comes back and walks: the world writes it awake, then the walk runs.
@@ -401,9 +527,16 @@ mod served {
                 _ => None,
             })
             .unwrap();
-        say(&format!("now at ({:.2}, {:.2}) m, lying {}", after.0 as f64 / 1e6, after.1 as f64 / 1e6, after.2));
+        say(&format!(
+            "now at ({:.2}, {:.2}) m, lying {}",
+            after.0 as f64 / 1e6,
+            after.1 as f64 / 1e6,
+            after.2
+        ));
         assert!(!after.2);
-        assert!(((after.0 - (last.1 - 2_000_000)) as f64).hypot((after.1 - last.2) as f64) < 600_000.0);
+        assert!(
+            ((after.0 - (last.1 - 2_000_000)) as f64).hypot((after.1 - last.2) as f64) < 600_000.0
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
