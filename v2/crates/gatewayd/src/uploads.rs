@@ -258,8 +258,9 @@ pub async fn serve(State(gw): State<Arc<Gateway>>, UrlPath(hash): UrlPath<String
     {
         return StatusCode::NOT_FOUND.into_response();
     }
-    match tokio::fs::read(up.dir.join(&hash)).await {
-        Ok(bytes) => (
+    let path = up.dir.join(&hash);
+    match tokio::task::spawn_blocking(move || std::fs::read(path)).await {
+        Ok(Ok(bytes)) => (
             StatusCode::OK,
             [
                 (header::CONTENT_TYPE, content_type(&bytes)),
@@ -268,6 +269,6 @@ pub async fn serve(State(gw): State<Arc<Gateway>>, UrlPath(hash): UrlPath<String
             bytes,
         )
             .into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
+        _ => StatusCode::NOT_FOUND.into_response(),
     }
 }
