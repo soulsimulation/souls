@@ -8,7 +8,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import {spa
 import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 
-async function stopWithWriteInFlight(t:import('node:test').TestContext,port:number,extra:Record<string,string>){
+async function stopWithWriteInFlight(t:import('node:test').TestContext,port:number,extra:Record<string,string>,o:{restAfterExit?:boolean}={}){
  const data=mkdtempSync(join(tmpdir(),'write-drain-')),logs:string[]=[];
  const child=spawn(process.execPath,[new URL('./main.ts',import.meta.url).pathname],{env:{PATH:process.env.PATH,DATA_DIR:data,WORLD_ID:'write-drain-fixture',WORLD_KEY:'toy',ENGINE:'toy',SEED_NATIVES:'0',BRAIN_MODE:'fake',BRAIN_BUDGET_USD_PER_DAY:'0',PORT:String(port),HOST:'127.0.0.1',WRITE_DRAIN_TRACE:'1',...extra},stdio:['ignore','pipe','pipe']});
  child.stdout!.on('data',d=>logs.push(String(d)));child.stderr!.on('data',d=>logs.push(String(d)));
@@ -37,6 +37,9 @@ async function stopWithWriteInFlight(t:import('node:test').TestContext,port:numb
  });
  at.sigterm=performance.now();child.kill('SIGTERM');
  assert.ok(await draining,`the world began its drain: ${logs.join('')}`);
+ // without a drain the world must exit with the write unanswered: the rest is sent only once it has exited, so a world that
+ // is quick enough to read it first (CI server-2, #3810: a 400 to the half-read body) cannot answer the write instead
+ if(o.restAfterExit){await exited;assert.equal(answer,'',`no answer before the exit: ${logs.join('')}`);}
  sock.write(body.slice(half));at.rest=performance.now();
  await Promise.race([closed,delay(5000)]);sock.destroy();
  const ms=(x:number)=>Math.round(x-at.sigterm);
@@ -51,7 +54,7 @@ test('a write in flight at SIGTERM is answered before the world exits',async t=>
 });
 
 test('without the drain (WRITE_DRAIN_MS=0) the same write gets no answer',async t=>{
- const r=await stopWithWriteInFlight(t,5823,{WRITE_DRAIN_MS:'0'});
+ const r=await stopWithWriteInFlight(t,5823,{WRITE_DRAIN_MS:'0'},{restAfterExit:true});
  assert.equal(r.answer,'','the connection closed under it');
  assert.equal(r.code,0);
 });
