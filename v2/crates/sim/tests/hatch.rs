@@ -19,6 +19,7 @@ use skills::form_runner::{Arg, Args, bind_hatch, hatch_no, hatch_reads, hatch_wo
 use std::collections::BTreeMap;
 
 const CHESS: &[u8] = include_bytes!("../../../../content/kinds/games/chess_table.wasm");
+const CHECKERS: &[u8] = include_bytes!("../../../../content/kinds/games/checkers_board.wasm");
 const SEED: u64 = 2823;
 const CASES: usize = 1000;
 /// A budget every case exceeds, for A2.
@@ -562,5 +563,98 @@ fn the_chess_table_sets_up_moves_its_pieces_and_ends_in_checkmate() {
     );
     println!(
         "chess table: setup and the fool's mate in {steps:?} steps; e1e3 refused hatch-said-no (why_chess)"
+    );
+}
+
+#[test]
+fn the_checkers_board_sets_up_takes_jumps_crowns_and_ends() {
+    let text = fs::read_to_string(kit().join("games/checkers_board.json"))
+        .expect("the kit's checkers board");
+    assert!(
+        text.contains(&format!("prov-{}", hex(&named(CHECKERS)))),
+        "the kit names the module it ships"
+    );
+    let entry = json::parse(&text).unwrap();
+    let module =
+        Loaded::load(CHECKERS, &named(CHECKERS)).expect("the kit's module loads by its hash");
+    let (turn, phase, winner, pieces, chain) = (28, 29, 30, 31, 32);
+    let named_value = |s: &str| V::Text(replica::encode::Name::new(s).unwrap());
+    let act = |form: &str, mv: Option<(&str, &str)>, state: &mut BTreeMap<u64, V>| {
+        let h = bind_hatch(&entry, form).unwrap().expect("a hatch");
+        let mut args = Args::new();
+        if let Some((from, to)) = mv {
+            args.insert("from".into(), Arg::Int(sq(from)));
+            args.insert("to".into(), Arg::Int(sq(to)));
+        }
+        let reads = hatch_reads(&entry, &h, state, &args).map_err(|r| r.name)?;
+        let v = run_hatch(&h, &module, &entry, &reads).map_err(|r| r.name)?;
+        if !v.yes {
+            return Err(hatch_no(&h).name);
+        }
+        for (f, value) in v.sets {
+            state.insert(f, value);
+        }
+        Ok(v.steps)
+    };
+    let on = |state: &BTreeMap<u64, V>, square: &str| match &state[&pieces] {
+        V::Array(rs) => rs.iter().find_map(|r| match r {
+            V::Map(m) if m[&1] == V::Uint(sq(square) as u64) => Some(m[&2].clone()),
+            _ => None,
+        }),
+        _ => None,
+    };
+    let mut state = BTreeMap::new();
+    act("begin", None, &mut state).unwrap();
+    assert!(
+        matches!(&state[&pieces], V::Array(rs) if rs.len() == 24),
+        "twelve a side"
+    );
+    assert_eq!(
+        (on(&state, "a1"), on(&state, "h8"), on(&state, "b2")),
+        (Some(V::Uint(1)), Some(V::Uint(9)), Some(V::Uint(1)))
+    );
+    assert_eq!(
+        act("move_x", Some(("c3", "c4")), &mut state),
+        Err("hatch-said-no"),
+        "only diagonally"
+    );
+    act("move_x", Some(("c3", "d4")), &mut state).unwrap();
+    assert_eq!(state[&turn], named_value("eden:o"));
+    act("move_o", Some(("f6", "e5")), &mut state).unwrap();
+    assert_eq!(
+        act("move_x", Some(("a3", "b4")), &mut state),
+        Err("hatch-said-no"),
+        "a jump is open, so it must be taken"
+    );
+    act("move_x", Some(("d4", "f6")), &mut state).unwrap();
+    assert_eq!(
+        (on(&state, "e5"), on(&state, "f6")),
+        (None, Some(V::Uint(1))),
+        "e5 is taken"
+    );
+    assert_eq!(
+        (state[&turn].clone(), state[&chain].clone()),
+        (named_value("eden:o"), V::Uint(64))
+    );
+
+    // A man reaching the far rank is crowned, and a side left with no move has lost.
+    let mut end = BTreeMap::from([
+        (
+            pieces,
+            V::Array(vec![
+                V::Map([(1, V::Uint(sq("c7") as u64)), (2, V::Uint(1))].into()),
+                V::Map([(1, V::Uint(sq("a1") as u64)), (2, V::Uint(9))].into()),
+            ]),
+        ),
+        (phase, named_value("eden:playing")),
+    ]);
+    act("move_x", Some(("c7", "d8")), &mut end).unwrap();
+    assert_eq!(on(&end, "d8"), Some(V::Uint(2)), "crowned");
+    assert_eq!(
+        (end[&phase].clone(), end[&winner].clone()),
+        (named_value("eden:won"), named_value("eden:x"))
+    );
+    println!(
+        "checkers board: setup, c3d4 f6e5 d4xf6 (c3c4 and a3b4 refused hatch-said-no), c7d8 crowned and won"
     );
 }
