@@ -666,7 +666,9 @@ pub fn confirm(live: &Replica, c: &Checked) -> Result<(), Refused> {
             return refuse(Some(*i), "edit.stale", format!("{id:?} is gone"));
         }
     }
-    Ok(())
+    // The claim check reads the root's claims and every ancestor's pose, which the read set does not hold: run it
+    // again on the live copy, so a claim committed since the check still binds (#3879 review). Cheap and deterministic.
+    claims::judge(&c.edit, live)
 }
 
 /// The batch an undo or redo reverses, by the sequence of its first effect: a creator's effect caused by an earlier

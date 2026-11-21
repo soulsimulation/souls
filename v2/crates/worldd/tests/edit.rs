@@ -811,6 +811,91 @@ fn a2_an_edit_under_a_claim_stays_inside_it_and_others_stay_out() {
 }
 
 #[test]
+fn a2_a_move_carries_every_node_below_it_and_a_late_claim_still_binds() {
+    use replica::edit::claims::F_CLAIMS;
+    let mut w = W::new();
+    let room = kind(&w.header, "souls:room");
+    let crate_ = kind(&w.header, "souls:crate");
+    // A room at x -30 mm with a crate 20 mm along it: the crate stands inside the claim's x 0..10 mm once the room
+    // moves to x -15 mm, though the room's own origin stays outside.
+    let v = w.live.version();
+    let built = w
+        .edit(
+            w.creator(),
+            v,
+            vec![
+                place(1, &room, Ref::Node(w.root), spot(-30_000, None)),
+                place(2, &crate_, Ref::New(1), spot(20_000, None)),
+            ],
+        )
+        .expect("built");
+    let (room_id, crate_id) = (built.names[&1], built.names[&2]);
+    let v = w.live.version();
+    let claims = Value::Array(vec![claim_row("c:house", "part:house", [0, -10, 10, 10])]);
+    w.edit(w.creator(), v, vec![set_root(w.root, F_CLAIMS, claims)])
+        .expect("claimed");
+    let v = w.live.version();
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Move {
+                node: Ref::Node(room_id),
+                at: spot(-15_000, None),
+            }],
+        )
+        .expect_err("the crate moves into the claim");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    // Under the claim, the same move takes the room's own origin, outside it, along.
+    let r = w
+        .edit_under(
+            w.creator(),
+            v,
+            vec![Op::Move {
+                node: Ref::Node(room_id),
+                at: spot(-15_000, None),
+            }],
+            Some("c:house"),
+        )
+        .expect_err("the room stays outside");
+    assert_eq!(r.name, "edit.outside-claim");
+    // A move that keeps everything outside passes.
+    w.edit(
+        w.creator(),
+        v,
+        vec![Op::Move {
+            node: Ref::Node(room_id),
+            at: spot(-40_000, None),
+        }],
+    )
+    .expect("all outside");
+    // An edit checked before a claim commits, committed after it: the claim binds at commit.
+    let v = w.live.version();
+    let copy = w.live.frozen();
+    let checked = check(
+        Edit {
+            claim: None,
+            intent: w.intents.mint().expect("an id"),
+            actor: w.creator(),
+            planned: v,
+            ops: vec![Op::Remove {
+                node: Ref::Node(crate_id),
+            }],
+        },
+        &copy,
+        &w.world,
+    )
+    .expect("checked before the claim");
+    let planned = plan(checked, &copy, None).expect("planned");
+    let claims = Value::Array(vec![claim_row("c:yard", "part:yard", [-100, -10, -1, 10])]);
+    w.edit(w.creator(), v, vec![set_root(w.root, F_CLAIMS, claims)])
+        .expect("claimed since");
+    let r = w.commit(&planned).expect_err("the late claim binds");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    w.close();
+}
+
+#[test]
 fn a1_a2_plans_and_claims_are_checked_before_they_are_recorded() {
     use replica::edit::claims::{F_CLAIMS, F_DISTRICTS};
     let mut w = W::new();
