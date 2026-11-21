@@ -455,3 +455,88 @@ fn e26a_a_turn_into_an_activity_reaches_its_members_alone_live_and_in_a_replay()
         assert!(seen[&(replay, "public viewer")].is_empty(), "the public");
     }
 }
+
+/// C26 (#3689, A1): a shout is heard farther than a say by the same rule. The world writes both with no hearers
+/// (`worldd::words`) and the hub works them out from the reach: a Soul 3 m away hears both, one 8 m away the shout
+/// alone, one 20 m away neither; each heard line carries its words and the public audience.
+#[test]
+fn c26_a_shout_is_heard_farther_than_a_say_by_the_same_rule() {
+    let (hall, speaker, near, mid, far) = (id(1), id(10), id(11), id(12), id(13));
+    let store = Arc::new(worldd::words::in_memory(IdScope([9; 16])).expect("a store"));
+    let line = |w: &str| {
+        store
+            .write(w.as_bytes(), Audience::Everyone, speaker)
+            .expect("kept")
+    };
+    let (talk, shout) = (line("anyone for bread"), line("the bridge is out"));
+    let utter = |w: &mut W, words: Id, reach_mm: u64| {
+        let said = Said {
+            words,
+            reach_mm,
+            audience: Audience::Everyone,
+            hearers: BTreeSet::new(),
+            length: 1_000_000,
+        };
+        let mut e = w.entry(speaker, Change::Unlink { link: id(999) });
+        e.body = Body::Changes(Vec::new());
+        e.events = Some(vec![said.event()]);
+        e
+    };
+    const { assert!(worldd::words::SHOUT_REACH_MM > worldd::words::SAY_REACH_MM) };
+    assert_eq!(
+        worldd::words::SHOUT_REACH_MM as i64,
+        replica::speech::Radii::default().loud / 1_000,
+        "a shout carries as far as a raised voice"
+    );
+    let mut w = w();
+    let bodies = vec![
+        w.body(speaker, hall, 0),
+        w.body(near, hall, 3_000_000),
+        w.body(mid, hall, 8_000_000),
+        w.body(far, hall, 20_000_000),
+    ];
+    let first = w.part(bodies);
+    let a = utter(&mut w, talk, worldd::words::SAY_REACH_MM);
+    let b = utter(&mut w, shout, worldd::words::SHOUT_REACH_MM);
+    let spoken = w.part(vec![a, b]);
+    let mut hub = Hub::with_words(store.clone());
+    hub.tick(&first).expect("a tick");
+    let follow = |hub: &mut Hub, b: Id| {
+        let r = Request {
+            scopes: vec![Scope::Follow(b)],
+            level: Level::Full,
+            budget: 64_000,
+        };
+        hub.subscribe(r).expect("subscribed")
+    };
+    let subs: Vec<(Id, usize)> = [near, mid, far]
+        .into_iter()
+        .map(|b| (b, follow(&mut hub, b)))
+        .collect();
+    hub.tick(&spoken).expect("a tick");
+    let mut got = BTreeMap::new();
+    for (b, s) in subs {
+        let lines: Vec<(Audience, u64, Option<String>)> = hub
+            .drain(s)
+            .iter()
+            .filter_map(|o| heard(&o.bytes).expect("an item"))
+            .map(|h| {
+                let w = h.words.map(|w| String::from_utf8(w).expect("utf-8"));
+                (h.said.audience, h.said.reach_mm, w)
+            })
+            .collect();
+        println!("C26 A1: {} heard {lines:?}", show(b));
+        got.insert(b, lines);
+    }
+    let said = |reach, w: &str| (Audience::Everyone, reach, Some(w.to_string()));
+    let (say_mm, shout_mm) = (worldd::words::SAY_REACH_MM, worldd::words::SHOUT_REACH_MM);
+    assert_eq!(
+        got[&near],
+        vec![
+            said(say_mm, "anyone for bread"),
+            said(shout_mm, "the bridge is out")
+        ]
+    );
+    assert_eq!(got[&mid], vec![said(shout_mm, "the bridge is out")]);
+    assert!(got[&far].is_empty(), "beyond a shout's reach");
+}
