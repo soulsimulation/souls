@@ -290,6 +290,16 @@ pub fn read_zones(v: &Value) -> Result<(), String> {
     Ok(())
 }
 
+/// The value a field of this module reads as unset (an empty list; 0 for an owner or access mark), so an undo can take back a batch that added the
+/// field: T6 has no unset, and a set to this value reads the same as none (#3879 review).
+pub fn neutral(field: u64) -> Option<Value> {
+    match field {
+        F_DISTRICTS | F_CLAIMS | F_ZONES => Some(Value::Array(Vec::new())),
+        crate::who_may::F_OWNER | crate::who_may::F_ACCESS => Some(Value::Uint(0)),
+        _ => None,
+    }
+}
+
 /// The live claims on a copy: those its root holds.
 pub fn live(copy: &Replica) -> Vec<Claim> {
     let tree = copy.tree();
@@ -385,15 +395,68 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                 placed.insert(*name, (p, *parent));
                 add(&mut t, p);
             }
-            Op::Move { node, at } => {
-                add(&mut t, origin(&placed, *node));
-                let p = parent_of(&placed, *node).and_then(|q| point_in(&placed, q, at.position));
-                if let Ref::New(n) = node
-                    && let Some(e) = placed.get_mut(n)
-                {
-                    e.0 = p;
+            Op::Move { node, at: spot } => {
+                // Everything below the moved node moves with it: each node's point before and after (#3879 review).
+                let before = origin(&placed, *node);
+                let after = match node {
+                    Ref::Node(id) => crate::select::to_root_point_moved(
+                        tree,
+                        *id,
+                        Vec3::ZERO,
+                        (*id, spot.slot, spot.position, spot.orientation),
+                    ),
+                    Ref::New(_) => {
+                        parent_of(&placed, *node).and_then(|q| point_in(&placed, q, spot.position))
+                    }
+                };
+                let shift = before.zip(after).and_then(|(b, a)| a.minus(b).ok());
+                let mut stack = vec![*node];
+                while let Some(r) = stack.pop() {
+                    match r {
+                        Ref::Node(d) => {
+                            add(&mut t, at(d, Vec3::ZERO));
+                            add(
+                                &mut t,
+                                match node {
+                                    Ref::Node(id) => crate::select::to_root_point_moved(
+                                        tree,
+                                        d,
+                                        Vec3::ZERO,
+                                        (*id, spot.slot, spot.position, spot.orientation),
+                                    ),
+                                    Ref::New(_) => None,
+                                },
+                            );
+                            if let Some(cs) = tree.handle(d).and_then(|h| tree.children(h)) {
+                                stack.extend(
+                                    cs.iter()
+                                        .filter_map(|c| tree.node(*c))
+                                        .map(|n| Ref::Node(n.id())),
+                                );
+                            }
+                        }
+                        Ref::New(n) => {
+                            // A node placed in this batch: its point shifts with the move.
+                            let was = placed.get(&n).and_then(|(o, _)| *o);
+                            let now = if r == *node {
+                                after
+                            } else {
+                                was.zip(shift).and_then(|(w, s)| w.plus(s).ok())
+                            };
+                            add(&mut t, was);
+                            add(&mut t, now);
+                            if let Some(e) = placed.get_mut(&n) {
+                                e.0 = now;
+                            }
+                        }
+                    }
+                    stack.extend(
+                        placed
+                            .iter()
+                            .filter(|(_, (_, p))| *p == r)
+                            .map(|(n, _)| Ref::New(*n)),
+                    );
                 }
-                add(&mut t, p);
             }
             Op::Set { node, .. } => {
                 if *node == root.map_or(Ref::New(u64::MAX), Ref::Node) {
@@ -423,7 +486,23 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                     );
                 }
             }
-            Op::Doorway { door, .. } => add(&mut t, origin(&placed, *door)),
+            Op::Doorway {
+                door,
+                from,
+                to,
+                at: spot,
+                wall,
+                ..
+            } => {
+                // The leaf's spot (in its owning end's axes), the leaf, the wall and both ends (#3879 review).
+                add(
+                    &mut t,
+                    point_in(&placed, *from, Vec3::new(spot[0] * 1000, 0, spot[1] * 1000)),
+                );
+                for r in [*door, *wall, *from, *to] {
+                    add(&mut t, origin(&placed, r));
+                }
+            }
         }
         match mine {
             Some(c) => {

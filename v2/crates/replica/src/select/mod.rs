@@ -504,6 +504,21 @@ pub(crate) fn to_root_point(tree: &Tree, id: Id, p: Vec3) -> Option<Vec3> {
     View { tree }.to_root(id).ok()?.point(p).ok()
 }
 
+/// [`to_root_point`] as it would be once `moved` (`id` or one of its ancestors) stands in its slot `slot` at
+/// `position` and `orientation`, in the same parent: where a move takes `id`'s point.
+pub(crate) fn to_root_point_moved(
+    tree: &Tree,
+    id: Id,
+    p: Vec3,
+    moved: (Id, Option<u64>, Vec3, Quat),
+) -> Option<Vec3> {
+    View { tree }
+        .to_root_with(id, Some(moved))
+        .ok()?
+        .point(p)
+        .ok()
+}
+
 /// The tree as this module reads it.
 struct View<'a> {
     tree: &'a Tree,
@@ -525,6 +540,11 @@ impl View<'_> {
     /// The move from `id`'s frame into the root's: the poses on its path, composed from the top down, a slot's own
     /// point and turn between a thing in a slot and its parent.
     fn to_root(&self, id: Id) -> R<Xform> {
+        self.to_root_with(id, None)
+    }
+
+    /// [`Self::to_root`] with one node's slot and place taken from `moved` instead of the tree.
+    fn to_root_with(&self, id: Id, moved: Option<(Id, Option<u64>, Vec3, Quat)>) -> R<Xform> {
         let mut chain = Vec::new();
         let mut at = id;
         loop {
@@ -537,13 +557,14 @@ impl View<'_> {
                 detail: show(at),
             })?;
             let Some(parent) = n.parent() else { break };
-            if let Some(p) = n.place() {
-                chain.push(Xform {
-                    pos: p.position,
-                    rot: p.orientation,
-                });
+            let (slot, place) = match moved {
+                Some((m, slot, pos, rot)) if m == at => (slot, Some((pos, rot))),
+                _ => (n.slot(), n.place().map(|p| (p.position, p.orientation))),
+            };
+            if let Some((pos, rot)) = place {
+                chain.push(Xform { pos, rot });
             }
-            if let Some(slot) = n.slot()
+            if let Some(slot) = slot
                 && let Some(r) = self.fields(parent)?.get(&F_SLOTS).and_then(|v| {
                     row(v)
                         .iter()
