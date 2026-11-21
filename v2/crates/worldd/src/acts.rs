@@ -44,8 +44,11 @@
 //!   ends `walk.blocked` in that tick, its body's driver released, and the act's ending entry names the nearest thing
 //!   or edge in its way ([`sim::walk::stall::blocker`]).
 //!
-//! Not here: R2's needs checked again at commit (the checkers read bodies from the tree, which does not hold them
-//! yet); a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
+//! - **Needs at commit** (#3888). After who may, every need of the form is decided by R2's one evaluator on the
+//!   world's own state, links, seats and hands included ([`crate::needs`]): an unmet need is refused by its reason's
+//!   name and index before any walk or effect. Reach is the move's own, measured at its start (C22).
+//!
+//! Not here: a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
 //! nodes); resuming a run after a restart.
 
 use replica::host::WalkPlan;
@@ -80,10 +83,11 @@ use crate::bodies::Bodies;
 
 type R<T> = Result<T, Refusal>;
 
-/// The longest a form's walk may take, µs (C20, #3469): about 250 m at a body's free speed (1.4 m/s), most of the way
-/// across Eden's town round its buildings, through doors and up stairs. A walk that cannot go on ends by its own name,
-/// or `deadline-passed` by then.
-pub const WALK_MOST: Micros = 180_000_000;
+/// The longest a form's walk may take, µs (C20, #3469), its route not yet planned when its timer is set: 30 minutes,
+/// about 2.5 km at a body's free speed (1.4 m/s), twice the longest way across Eden. It is a bound, not a pace: as in
+/// today's game, a walk that stops making progress ends `walk.blocked` by C21's watch ([`BLOCKED`]), and one that
+/// cannot go on by its own name. It was 180 s, and every walk over about 250 m ended `act.timed-out` while moving.
+pub const WALK_MOST: Micros = 1_800_000_000;
 
 /// The ending of a form's walk that stopped making progress (C21, #3484).
 pub const BLOCKED: &str = "walk.blocked";
@@ -105,8 +109,13 @@ pub(crate) struct Walk {
     started: Micros,
     planned: bool,
     watch: Watch,
+    /// The leg's end last seen on the walk's line.
+    leg: Option<[i64; 2]>,
 }
 
+/// A gateway walk's time once its route is planned: the route at walking speed, plus half again for bends and yielding
+/// (at least 5 s), plus 5 s per crossing or door. No total cap: a long walk that keeps moving ends done, never by the
+/// clock; C21's watch ends one that stalls, and the intent's expiry still bounds it.
 fn walk_span(length_mm: u64, links: usize) -> Micros {
     let speed = i128::from(crate::bodies::WALK);
     let travel = (i128::from(length_mm) * 1_000_000_000 + speed - 1) / speed;
@@ -119,7 +128,6 @@ fn walk_span(length_mm: u64, links: usize) -> Micros {
                 .unwrap_or(i64::MAX)
                 .saturating_mul(5_000_000),
         )
-        .min(WALK_MOST)
 }
 
 impl Walk {
@@ -130,6 +138,7 @@ impl Walk {
             started,
             planned: false,
             watch: Watch::new(),
+            leg: None,
         }
     }
 
@@ -154,22 +163,26 @@ impl Walk {
         let fields = b.runner.fields.get(&self.body);
         let waiting = sim::host::waiting(fields).is_some()
             || fields.is_some_and(|f| f.contains_key(&replica::host::F_HELD));
+        // The corner and the leg's end its line goes toward, as a form's walk asks them: never the walk's granted
+        // place, which on a route with crossings lies past the leg's end, so a leg heading away from it gained nothing
+        // and a Soul walking at full speed was ended `walk.blocked` (#1960).
         let aim = b
             .town
-            .next_corner(self.body)
-            .filter(|(node, _)| *node == sim::walk::node_of(&me));
-        if waiting || b.runner.controller.carrying(self.body).is_some() || aim.is_none() {
+            .next_corner_toward(self.body)
+            .filter(|(node, _, _)| *node == sim::walk::node_of(&me));
+        let Some((_, aim, to)) =
+            aim.filter(|_| !waiting && b.runner.controller.carrying(self.body).is_none())
+        else {
             self.watch.keep(&BTreeSet::new());
             return (due, false);
-        }
-        let (node, aim) = aim.unwrap();
-        let to = b
-            .runner
-            .asks
-            .get(&self.body)
-            .filter(|(t, _)| t.node == node)
-            .and_then(|_| b.runner.granted.get(&self.body))
-            .map_or(aim, |p| [p.x, p.z]);
+        };
+        // A line forgotten while the planner finds the next one keeps its corner, not its leg's end: the last leg's
+        // end seen stands for it (the new line goes toward the same one), so a walk trapped between lines is still
+        // watched.
+        let to = match to {
+            Some(t) => *self.leg.insert(t),
+            None => self.leg.unwrap_or(aim),
+        };
         let here = [me.pose.position.x, me.pose.position.z];
         (due, self.watch.seen(self.body, here, aim, to, now))
     }
@@ -1313,6 +1326,39 @@ impl Acts {
                     continue;
                 }
             };
+            // Who may, then every need of the form, decided by the world on its own state (#3888): an act whose
+            // intent the forms already hold is its run or its receipt, never checked again.
+            if !self.forms.known(intent.id) {
+                let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
+                // The binder's refusals and who may's come first, from the run's own path below: a form the binder or who
+                // may refuses is left to it, so its refusal is the same as before.
+                let bound = match sim::forms::bind_stages(&entry, form) {
+                    Ok(Some(_)) => true,
+                    Ok(None) => skills::form_runner::bind_with(&entry, form, &all)
+                        .and_then(|_| skills::form_runner::bind_effects_args(&entry, form, &all))
+                        .is_ok(),
+                    Err(_) => false,
+                };
+                let permitted = bound
+                    && sim::forms::may(tree, &audiences, &|_| None, body, *node, &entry, form)
+                        .is_ok();
+                if permitted
+                    && let Err(e) = crate::needs::check(
+                        tree,
+                        bodies.as_deref(),
+                        &self.kinds,
+                        body,
+                        *node,
+                        &entry,
+                        form,
+                        &all,
+                        now,
+                    )
+                {
+                    first.get_or_insert(e);
+                    continue;
+                }
+            }
             // A form's code hatch (F8, #3713) checks the act before any walk, and its answered fields are written
             // with the form's effects, in place of the form's own sets of those fields.
             let hatched = match self.hatch_sets(tree, *node, &entry, form, &all) {
@@ -1509,6 +1555,20 @@ impl Acts {
         out
     }
 
+    /// Entries [`Acts::out`] handed back that the world refused to write: the timers they set come off the due list.
+    pub fn unwritten(&mut self, effects: &[Effect]) {
+        for e in effects {
+            let Body::Timers(ts) = &e.body else { continue };
+            for t in ts {
+                if let TimerRec::Set { timer, .. } = t
+                    && self.timers.remove(timer).is_some()
+                {
+                    let _ = self.due.clear(e.envelope.node, *timer);
+                }
+            }
+        }
+    }
+
     /// Runs that ended since the last call: each one's intent, its ending's name and, for [`BLOCKED`], what blocked
     /// its walk.
     pub fn ended(&mut self) -> Vec<(Id, String, Option<String>)> {
@@ -1538,12 +1598,14 @@ mod gateway_walk_tests {
     use super::*;
 
     #[test]
-    fn a_gateway_walks_route_time_includes_margin_links_and_the_same_ceiling() {
+    fn a_gateway_walks_route_time_includes_margin_and_links_with_no_ceiling() {
         assert_eq!(walk_span(14_000, 0), 15_000_000);
         assert_eq!(walk_span(14_000, 2), 25_000_000);
         assert!(walk_span(20_000, 0) > 14_000_000);
         assert!(walk_span(70_000, 0) >= 75_000_000);
-        assert_eq!(walk_span(u64::MAX, usize::MAX), WALK_MOST);
+        // A 600 m route is not capped at the old 180 s: 429 s of walking, plus half again.
+        assert!(walk_span(600_000, 0) > 600_000_000);
+        assert_eq!(walk_span(u64::MAX, usize::MAX), Micros::MAX);
     }
 }
 

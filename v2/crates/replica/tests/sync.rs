@@ -216,3 +216,30 @@ fn a_sync_cut_off_mid_descent_leaves_the_copy_as_it_was_and_the_next_one_complet
     assert!(s.held > 1, "the place and what is below it: {}", s.held);
     assert_eq!(copy.reach().unwrap().len(), s.held);
 }
+
+#[test]
+/// #3915: a record the world withholds (empty bytes: under a closed container the asker may not see into) is held as
+/// withheld, a leaf: the sync finishes, and the copy never reads it.
+fn a_withheld_record_is_a_leaf_the_copy_never_reads() {
+    let mut copy = Copy::default();
+    let h = Hash::of(replica::ids::Purpose::StatePublic, b"a hidden thing").to_bytes();
+    let mut d = copy.compare(&[world_id(1)], vec![Some(h.clone())]);
+    let asked = copy.ask(&mut d, usize::MAX);
+    assert_eq!(asked, vec![h.clone()]);
+    copy.take(&mut d, &asked, vec![Vec::new()]).unwrap();
+    assert!(
+        copy.ask(&mut d, usize::MAX).is_empty(),
+        "nothing below a withheld record"
+    );
+    let s = copy.finish(d).unwrap();
+    assert_eq!(s.held, 1);
+    assert_eq!(copy.record(&h), None, "a withheld record is never read");
+    assert!(copy.reach().is_ok());
+    // Whether it may be seen is not in its hash: the next sync asks for it again.
+    let mut d = copy.compare(&[world_id(1)], vec![Some(h.clone())]);
+    assert_eq!(
+        copy.ask(&mut d, usize::MAX),
+        vec![h],
+        "a withheld record is asked for again"
+    );
+}

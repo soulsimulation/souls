@@ -1,8 +1,9 @@
 // W15: computer account connections. Tokens and pending poll credentials never leave credentials.json.
 import { randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { CREDENTIALS, Refused } from '../home/home.mjs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { request } from '../daemon/client.mjs';
+import { CREDENTIALS, Refused, runtimeOf } from '../home/home.mjs';
 import { pairAddress } from '../pair/address.mjs';
 import { localId } from '../pair/pair.mjs';
 import { writeGuide } from '../home/guide.mjs';
@@ -152,6 +153,98 @@ export async function accountPair(home, named, url, { as, move = false, fresh = 
   return { ok: true, paired: true, soul, alias: a.alias, guide, memoryTransferred: false, say: 'Credentials are on this computer. Existing memory here is unchanged; use export/import to move memory from another computer.' };
 }
 export const hasAccount = (home) => connectedAccounts(home).accounts.length > 0;
+
+// #3707: the agent's own profile, retire and revoke, as today's client has them.
+const grantOf = (soul) => (soul.startsWith('s_') ? `soul-${soul.slice(2)}` : soul);
+const PICTURE_MOST = 262_144;
+/** A Soul this home holds a token for: its token and the directory it was paired at. */
+function seatOf(home, soul) {
+  const worlds = read(home, CREDENTIALS).souls?.[soul] ?? {}, config = read(home, 'config.json');
+  const key = Object.keys(worlds).find((k) => typeof worlds[k]?.token === 'string');
+  if (!key) return null;
+  let directory; try { directory = new URL(config.worlds?.[key]?.url).origin; } catch { fail('soul-world-unknown', 'this home does not know where the Soul was paired; adopt it again'); }
+  return { token: worlds[key].token, address: { directory } };
+}
+/** A Soul of the connected account, by its local id, grant or name: its row in `list --account`. */
+async function accountSoul(home, named, as, io) {
+  const a = await connection(home, as, io), listed = await post(a.address, '/v1/agent/account', {}, a.token, io.send);
+  if (listed.account?.id !== a.meta.accountId) fail('account-mismatch', 'this account connection no longer matches');
+  const rows = (listed.souls ?? []).filter((s) => s.id === grantOf(named) || s.name?.toLowerCase() === String(named).toLowerCase());
+  if (rows.length > 1) fail('which-soul', 'choose exactly one Soul from list --account, by its id');
+  return { a, row: rows[0] ?? null };
+}
+/** `profile` | `profile name "<Name>"` | `profile description "<text>"` | `profile photo <file.png|.jpg>|auto`. */
+export async function soulProfile(home, soul, args, io = {}) {
+  const seat = seatOf(home, soul);
+  if (!seat) fail('not-paired', 'this Soul has no token here; adopt it first');
+  const [field, ...rest] = args, value = rest.join(' ').trim(), body = { token: seat.token };
+  if (field !== undefined) {
+    if (!['name', 'description', 'photo'].includes(field) || !value) fail('profile-usage', 'profile | profile name "Name" | profile description "Text" | profile photo <file.png|file.jpg|auto>');
+    if (field === 'photo' && value === 'auto') body.picture = null;
+    else if (field === 'photo') {
+      const file = resolve(value);
+      let st; try { st = lstatSync(file); } catch { fail('profile-photo', 'no such file'); }
+      if (!st.isFile() || st.size > PICTURE_MOST || !/\.(png|jpe?g)$/i.test(file)) fail('profile-photo', 'profile photo takes a local PNG or JPEG of at most 256 KiB, max 512×512');
+      body.picture = readFileSync(file).toString('base64url');
+    } else body[field] = value;
+  }
+  const b = await post(seat.address, '/v1/pair/profile', body, null, io.send);
+  // The home knows the Soul by its new name too (list, and a retire by name).
+  if (body.name && b.profile?.name) { const c = read(home, 'config.json'); c.souls = { ...c.souls, [soul]: { ...c.souls?.[soul], id: soul, name: b.profile.name } }; put(home, 'config.json', c); }
+  return { ok: true, soul, profile: { name: b.profile?.name ?? null, description: b.profile?.description ?? null, photo: b.profile?.picture ?? 'auto', retireAsked: !!b.profile?.retire_asked } };
+}
+/** `retire <name|id>` asks; the owner's click on their Souls page decides. `retire wait` waits for that click. */
+export async function soulRetire(home, soul, named, { as, ...io } = {}) {
+  const seat = soul ? seatOf(home, soul) : null;
+  let grant;
+  if (seat) grant = (await post(seat.address, '/v1/pair/retire', { token: seat.token }, null, io.send), grantOf(soul));
+  else {
+    const { a, row } = await accountSoul(home, named, as, io);
+    if (!row) fail('not-yours', 'choose a Soul from list --account');
+    await post(a.address, '/v1/agent/account/retire', { soul: row.id }, a.token, io.send);
+    grant = row.id;
+  }
+  const c = read(home, 'config.json'); c.pendingRetire = { soul: soul ?? null, grant, account: seat ? null : aliasOf(c, as) }; put(home, 'config.json', c);
+  return { ok: true, retire: 'asked', soul: soul ?? grant, next: 'Ask your person to confirm it on their Souls page. Nothing is retired until they click. Then: retire wait' };
+}
+export async function soulRetireWait(home, { within = 600_000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), ...io } = {}) {
+  const p = read(home, 'config.json').pendingRetire;
+  if (!p) fail('no-retire', 'no retire waits here; ask for one: retire <name>');
+  const clear = (c = read(home, 'config.json')) => { delete c.pendingRetire; put(home, 'config.json', c); };
+  for (const until = Date.now() + within; ;) {
+    let state;
+    if (p.account) {
+      const { row } = await accountSoul(home, p.grant, p.account, io);
+      state = !row ? 'retired' : row.retireAsked ? 'pending' : 'declined';
+    } else {
+      const seat = seatOf(home, p.soul);
+      try { state = seat ? ((await post(seat.address, '/v1/pair/profile', { token: seat.token }, null, io.send)).profile?.retire_asked ? 'pending' : 'declined') : 'retired'; } catch (e) { if (e.code !== 'unknown-token') throw e; state = 'retired'; }
+    }
+    if (state === 'retired') {
+      const creds = read(home, CREDENTIALS);
+      if (p.soul && creds.souls?.[p.soul]) { delete creds.souls[p.soul]; put(home, CREDENTIALS, creds); }
+      const c = read(home, 'config.json');
+      if (p.soul) c.souls = { ...c.souls, [p.soul]: { ...c.souls?.[p.soul], retiredAt: new Date().toISOString() } };
+      clear(c);
+      return { ok: true, retire: 'done', soul: p.soul ?? p.grant, retired: true, ...(p.soul ? { here: 'its token is gone; its memory stays here' } : {}) };
+    }
+    if (state === 'declined') { clear(); return { ok: true, retire: 'declined', soul: p.soul ?? p.grant, retired: false, why: 'Your person did not retire it. Nothing changed.' }; }
+    if (Date.now() > until) return { ok: true, retire: 'pending', soul: p.soul ?? p.grant, next: 'retire wait' };
+    await sleep(3000);
+  }
+}
+/** `revoke <name|id>`: the Soul's agent is disconnected wherever it runs. If this home held it, it stays here unpaired. */
+export async function soulRevoke(home, named, { as, ...io } = {}) {
+  const { a, row } = await accountSoul(home, named, as, io);
+  if (!row) fail('not-yours', 'choose a Soul from list --account');
+  await post(a.address, '/v1/agent/account/revoke', { soul: row.id }, a.token, io.send);
+  const id = `s_${row.id.slice('soul-'.length)}`, creds = read(home, CREDENTIALS), held = !!creds.souls?.[id];
+  if (held) {
+    await request(runtimeOf(home, id).socket, { op: 'stop' }).catch(() => {});
+    delete creds.souls[id]; put(home, CREDENTIALS, creds);
+  }
+  return { ok: true, revoked: true, soul: { id: row.id, name: row.name ?? null }, account: a.alias, ...(held ? { here: 'unpaired; its memory stays here' } : {}), next: `adopt ${row.name ?? row.id}   (brings it back here)` };
+}
 export async function accountCommand(home, command, args = [], io = {}) {
   if (command === 'login') return login(home, args, io);
   if (command === 'accounts') {

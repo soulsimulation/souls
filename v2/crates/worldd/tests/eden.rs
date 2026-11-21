@@ -38,6 +38,17 @@ impl Client {
         target: Option<Id>,
         parameters: BTreeMap<u64, Value>,
     ) -> Result<Vec<u64>, String> {
+        self.act_within(verb, target, parameters, 120_000_000)
+    }
+
+    /// [`Client::act`], its intent expiring `within` µs from now.
+    fn act_within(
+        &mut self,
+        verb: &str,
+        target: Option<Id>,
+        parameters: BTreeMap<u64, Value>,
+        within: i64,
+    ) -> Result<Vec<u64>, String> {
         self.2 += 1;
         let i = Intent {
             actor: Actor::Soul(self.1),
@@ -52,7 +63,7 @@ impl Client {
                 sequence: 0,
             }
             .to_value(),
-            expiry: answers::now() + 120_000_000,
+            expiry: answers::now() + within,
             resources: Vec::new(),
             fallbacks: Vec::new(),
             replaces: None,
@@ -781,6 +792,75 @@ fn c20_a3_a_soul_walks_across_the_town_and_uses_a_thing_by_its_form() {
         walk_across_and_build(&format!("{root}/content/kinds"), 20_000_000, "c20w");
     assert!(walk > 20_000_000, "a walk over 20 s");
     assert!(all > 40_000_000);
+}
+
+/// A gateway walk of over 600 m across Eden, from the births to a point 650 to 900 m away by the map, ends done (#1960): its
+/// deadline follows its planned route, with no 180 s cap. Before, every walk over about 250 m ended `act.timed-out`
+/// while still moving. Takes about ten minutes of world time at 1/1.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_600_m_walk_across_eden_ends_done() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (ground, lineage) = (im.nodes["ground"], im.nodes["world"].scope());
+    // The far point: the first on a 50 m grid of the open ground whose route from the births is 650 to 900 m by the map.
+    let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
+    let next = im.tree.to_state().next;
+    let mut town = sim::walk::town::Town::new(
+        im.tree,
+        ground,
+        sim::links::Doors::new(header, im.rules, next),
+    )
+    .expect("the town");
+    let v = |x: i64, z: i64| replica::pose::Vec3::new(x * 1_000_000, 0, z * 1_000_000);
+    let from = town
+        .map
+        .spot(ground, v(74, -1))
+        .expect("the births on the map");
+    let (fx, fz, length) = (-10..=10)
+        .flat_map(|i| (-10..=10).map(move |j| (i * 50, j * 50)))
+        .find_map(|(x, z)| {
+            let to = town.map.spot(ground, v(x, z))?;
+            let r = town
+                .map
+                .route(&town.tree, from, to, sim::routes::ALL)
+                .ok()?;
+            (650_000..900_000)
+                .contains(&r.length)
+                .then_some((x, z, r.length))
+        })
+        .expect("a point 650 to 900 m away by the map");
+    println!("to ({fx}, {fz}) m, {:.0} m by the map", length as f64 / 1e3);
+    let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "long", lineage);
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(1_500)))
+        .unwrap();
+    let um = |m: f64| {
+        let v = (m * 1e6) as i64;
+        u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
+    };
+    let to = Value::Array(vec![um(fx as f64), um(0.0), um(fz as f64)]);
+    let t0 = answers::now();
+    let walked = soul.act_within(
+        "eden:walk",
+        Some(ground),
+        BTreeMap::from([(1, to)]),
+        1_500_000_000,
+    );
+    let secs = (answers::now() - t0) as f64 / 1e6;
+    let track = track(&dir);
+    let path: f64 = track
+        .windows(2)
+        .filter(|w| w[0].1 == w[1].1)
+        .map(|w| ((w[1].2 - w[0].2).powi(2) + (w[1].3 - w[0].3).powi(2)).sqrt())
+        .sum();
+    let last = track.last().map(|t| (t.2, t.3));
+    println!("walked {path:.0} m in {secs:.0} s, to {last:?}: {walked:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    walked.expect("the long walk ends done");
+    assert!(path > 600.0, "a walk of over 600 m: {path:.0} m");
+    assert!(secs > 180.0, "longer than the old cap: {secs:.0} s");
 }
 
 /// Copies folder `from` into `to`, file by file.
@@ -3434,4 +3514,175 @@ fn i3802_a_form_with_no_slot_takes_the_nearest_free_one() {
     );
     assert_eq!(fourth, Err("place.none-free".to_owned()));
     assert_eq!(after, before, "the fourth stays where it stood");
+}
+
+/// Every course in a public projection `v` (field 80 of any node).
+fn projected_courses(v: &Value, out: &mut Vec<replica::schedule::course::Course>) {
+    match v {
+        Value::Map(m) => {
+            for (k, x) in m {
+                if *k == replica::schedule::F_COURSE
+                    && let Some(c) = replica::schedule::course::Course::read(x)
+                {
+                    out.push(c);
+                }
+                projected_courses(x, out);
+            }
+        }
+        Value::Array(a) => a.iter().for_each(|x| projected_courses(x, out)),
+        _ => {}
+    }
+}
+
+/// #3691: the rides Eden's entries declare get their courses from their `ride` data at serve. The three festival
+/// balloons (`ride` stops one point, the air, no line back) each fly a loop aloft round their homes and their courses
+/// are in the public stream's baseline; the rides with two stops get none. A Soul born by the first balloon's door
+/// boards it in its boarding stop by the balloon's own `ride` form, is carried aloft in its slot (a rise there is
+/// refused `boarding-frame-away`), and rises at its home once the balloon is back.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+// A real process on the real clock: its waits and rates are real time.
+#[allow(clippy::disallowed_methods)]
+fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
+    use replica::pose::Owner;
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    // The festival balloon at (290, 65) m; its door 1.6 m toward -x. Born 1 m beyond the door.
+    let (served, mut soul, dir, lines) = serve_lines(&facts, "287.40,65.00", "i3691", lineage);
+    let rides: Vec<(String, [f64; 2], i64, i64)> = lines
+        .iter()
+        .filter_map(|l| {
+            let l = l.trim().strip_prefix("ride: ")?;
+            let (name, rest) = l.split_once(" at ")?;
+            let n: Vec<f64> = rest
+                .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+                .filter_map(|w| w.parse().ok())
+                .collect();
+            let [x, z, period, t0] = n[..] else {
+                return None;
+            };
+            Some((name.to_owned(), [x, z], period as i64, t0 as i64))
+        })
+        .collect();
+    println!("the rides with a course: {rides:?}");
+    let (_, home, period, t0) = rides
+        .iter()
+        .find(|r| r.0 == "festival-balloon")
+        .cloned()
+        .expect("the festival balloon has a course");
+    let balloon = im.nodes["e_a2ef2904"];
+    // The public stream, played from its baseline through its newest part, carries each ride's course.
+    let mut projected = Vec::new();
+    {
+        use replica::stream::{Pointer, public::PublicPlayer};
+        let world = replica::rules::json::parse(
+            &std::fs::read_to_string(dir.join("views/world.json")).unwrap(),
+        )
+        .unwrap();
+        let stream = dir.join(world.get("stream").and_then(|v| v.str()).unwrap());
+        let pointer = Pointer::read(&std::fs::read(stream.join("pointer")).unwrap()).unwrap();
+        let headers = stream.ancestors().nth(3).unwrap().join("headers");
+        let header = std::fs::read(headers.join(replica::encode::to_hex(&pointer.header))).unwrap();
+        let Value::Map(fields) = decode(&std::fs::read(stream.join("pointer")).unwrap())
+            .unwrap()
+            .value
+        else {
+            panic!("the pointer is a map")
+        };
+        let Some(Value::Bytes(generation)) = fields.get(&8) else {
+            panic!("a baseline")
+        };
+        let parts = stream.join("g").join(replica::encode::to_hex(generation));
+        let mut player =
+            PublicPlayer::start(&header, &std::fs::read(parts.join("baseline")).unwrap())
+                .expect("the public reader");
+        for n in 0..=pointer.newest.expect("a published part") {
+            player
+                .play(&std::fs::read(parts.join(n.to_string())).unwrap())
+                .expect("the public reader plays the part");
+        }
+        projected_courses(player.state(), &mut projected);
+    }
+    println!(
+        "the public stream's courses (first station, period µs): {:?}",
+        projected
+            .iter()
+            .map(|c| (c.stations[0].at, c.load().map_or(0, |t| t.period)))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        projected.len() >= 3,
+        "the balloons' courses (and the punts') are in the public stream"
+    );
+    // Board in the balloon's boarding stop (its first 30 s each lap): wait for the next when less than 20 s are left.
+    let phase = |t: i64| (t - t0).rem_euclid(period);
+    let p = phase(answers::now());
+    if p > 10_000_000 {
+        let wait = period - p + 500_000;
+        println!("waiting {:.1} s for the balloon's stop", wait as f64 / 1e6);
+        std::thread::sleep(Duration::from_micros(wait as u64));
+    }
+    let boarded = soul.act("eden:ride", Some(balloon), BTreeMap::new());
+    println!("board it by its own form: {boarded:?}");
+    let seated_in = last_frames(&dir).into_values().find(|f| f.0 == balloon);
+    println!("the rider's frame: {seated_in:?}");
+    // Aloft: 60 s into the lap it is on its ring, and its rider with it.
+    let p = phase(answers::now());
+    if p < 60_000_000 {
+        std::thread::sleep(Duration::from_micros((60_000_000 - p) as u64));
+    }
+    let aloft = soul.act("eden:rise", None, BTreeMap::new());
+    // Where its course has the balloon now, as the page reads it from the public stream.
+    let up = projected
+        .iter()
+        .find(|c| c.stations[0].at.x == 290_000_000 && c.stations[0].at.z == 65_000_000)
+        .and_then(|c| c.load().ok()?.at(answers::now()).ok())
+        .map(|(p, _)| (p.x as f64 / 1e6, p.y as f64 / 1e6, p.z as f64 / 1e6));
+    println!("rise aloft: {aloft:?}; the balloon, its rider in it, at {up:?} m");
+    // Back at its home: rise there.
+    let p = phase(answers::now());
+    std::thread::sleep(Duration::from_micros((period - p + 2_000_000) as u64));
+    let off = soul.act("eden:rise", None, BTreeMap::new());
+    println!("rise at its home: {off:?}");
+    std::thread::sleep(Duration::from_secs(3));
+    let samples = public_samples(&dir);
+    let into = samples
+        .iter()
+        .find(|(_, h)| h.to == Owner::Slot && h.pose.frame.node == balloon)
+        .map(|s| s.1);
+    let out = samples
+        .iter()
+        .rev()
+        .find(|(_, h)| h.from == Owner::Slot)
+        .map(|s| s.1);
+    println!("the public stream: into the balloon {into:?}, out of it {out:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(rides.len(), 3, "the three festival balloons fly loops");
+    for (name, [x, z], period, _) in &rides {
+        assert!(
+            projected
+                .iter()
+                .any(|c| c.stations[0].at.x == (x * 1e6).round() as i64
+                    && c.stations[0].at.z == (z * 1e6).round() as i64
+                    && c.load().is_ok_and(|t| t.period == *period)),
+            "{name}'s course is in the public stream"
+        );
+    }
+    assert!((home[0] - 290.0).abs() < 1e-3 && (home[1] - 65.0).abs() < 1e-3);
+    boarded.expect("boarded at its door by the balloon's own form");
+    assert!(
+        matches!(seated_in, Some((n, Some(_))) if n == balloon),
+        "in the balloon's slot"
+    );
+    assert_eq!(aloft, Err("boarding-frame-away".to_owned()));
+    assert!(up.is_some_and(|p| p.1 > 30.0), "aloft: {up:?}");
+    off.expect("rose at its home");
+    assert!(
+        into.is_some(),
+        "the public stream carries the rider into the balloon"
+    );
+    let h = out.expect("and out of it");
+    assert_eq!(h.pose.frame.node, im.nodes["ground"], "out onto the ground");
 }

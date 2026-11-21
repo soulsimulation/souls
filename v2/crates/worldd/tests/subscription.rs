@@ -540,3 +540,89 @@ fn c26_a_shout_is_heard_farther_than_a_say_by_the_same_rule() {
     assert_eq!(got[&mid], vec![said(shout_mm, "the bridge is out")]);
     assert!(got[&far].is_empty(), "beyond a shout's reach");
 }
+
+#[test]
+/// #3915: an entry that puts a thing into a closed container is sent to its actor alone; a Soul standing by is not
+/// sent it, and so is never handed the thing's id or its new place.
+fn a_hide_into_a_closed_container_reaches_its_actor_alone() {
+    use replica::effects::TransferRec;
+    use replica::rules::json::parse;
+    use worldd::closed::Closed;
+    const STUMP: &str =
+        "test:stump@1220ee1ad75a34f067112ef6d2a095fe5bd3e121a75611a1a95ba85198efcb131cb3";
+    const APPLE: &str =
+        "test:apple@1220ee1ad75a34f067112ef6d2a095fe5bd3e121a75611a1a95ba85198efcb131cb4";
+    let entry = parse(
+        r#"{"kind": "test:stump", "closed": {"audience": {"rule": "creator"}, "fields": []}}"#,
+    )
+    .unwrap();
+    let (room, stump, apple, hider, seeker, hider_soul, seeker_soul) =
+        (id(1), id(2), id(3), id(10), id(11), id(20), id(21));
+    let mut w = w();
+    let mut hub = Hub::new();
+    hub.closed(&Closed::of(&[("test:stump".to_owned(), entry)]));
+    let thing = |w: &mut W, n: Id, kind: &str| {
+        w.entry(
+            room,
+            Change::Create {
+                node: n,
+                kind: Name::new(kind).unwrap(),
+                pose: pose(room, 0),
+                audience: Audience::Everyone,
+                fields: BTreeMap::new(),
+            },
+        )
+    };
+    let e = vec![
+        w.body(hider, room, 0),
+        w.body(seeker, room, 500_000),
+        thing(&mut w, stump, STUMP),
+        thing(&mut w, apple, APPLE),
+    ];
+    let p = w.part(e);
+    hub.tick(&p).unwrap();
+    let sub = |hub: &mut Hub, body: Id, soul: Id| {
+        hub.subscribe_as(
+            Request {
+                scopes: vec![Scope::Follow(body)],
+                level: Level::Full,
+                budget: 64_000,
+            },
+            BTreeSet::from([soul]),
+        )
+        .unwrap()
+    };
+    let (sa, sb) = (
+        sub(&mut hub, hider, hider_soul),
+        sub(&mut hub, seeker, seeker_soul),
+    );
+    let e = vec![w.walk(hider, room, 100_000), w.walk(seeker, room, 400_000)];
+    let p = w.part(e);
+    hub.tick(&p).unwrap();
+    assert!(
+        hub.interest(sb).unwrap().contains(&hider),
+        "the seeker stands by the hider"
+    );
+    hub.drain(sa);
+    hub.drain(sb);
+    // The hide: the hider's entry moves the apple into the stump.
+    let mut hide = w.entry(hider, Change::Remove { node: id(99) });
+    hide.envelope.actor = Actor::Soul(hider_soul);
+    hide.body = Body::Transfer(TransferRec::Leave {
+        transfer: id(50),
+        node: apple,
+        lineage: IdScope([7; 16]),
+        zone: room,
+        pose: pose(stump, 0),
+    });
+    let p = w.part(vec![hide]);
+    hub.tick(&p).unwrap();
+    let entries = |hub: &mut Hub, s| {
+        hub.drain(s)
+            .into_iter()
+            .filter(|o| o.kind == Kind::Entry)
+            .count()
+    };
+    assert_eq!(entries(&mut hub, sa), 1, "the hider is sent its own entry");
+    assert_eq!(entries(&mut hub, sb), 0, "the Soul standing by is not");
+}

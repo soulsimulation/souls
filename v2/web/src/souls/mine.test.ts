@@ -47,3 +47,14 @@ test('#3784: the status line dims while the Soul is asleep or a zombie, never wh
   // The line itself stays plain text: dimming is a style, the words are the same.
   assert.equal(nowText({ text: '<b>Asleep</b>', at: 1000 }, 1000_000), '“<b>Asleep</b>” · just now');
 });
+
+test('#3784: My Souls reads each Soul\'s word with its line, and dims a zombie or asleep Soul\'s line only', async () => {
+  const [awake, zombie, asleep] = [1, 2, 3].map((k) => `soul-${'ab'.repeat(16)}-${k}`);
+  const post = (async () => new Response(JSON.stringify({
+    now: { [awake]: { text: 'Fishing', at: 1000 }, [zombie]: { text: 'Fishing', at: 1000 }, [asleep]: { text: 'Fishing', at: 1000 } },
+    state: { [zombie]: 'zombie', [asleep]: 'asleep', 'soul-x': 'asleep' },
+  }))) as typeof fetch;
+  const got = await readNow([awake, zombie, asleep], post);
+  assert.deepEqual([awake, zombie, asleep].map((s) => [got.get(s)?.state, nowDims(got.get(s)?.state)]), [[undefined, false], ['zombie', true], ['asleep', true]]);
+  assert.equal(got.get(asleep)!.text, 'Fishing', 'the words stay as they are: plain text');
+});
