@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as THREE from 'three';
-import { containingPlace, pickAt, rayBody, thingName, tooltipText, type HoverOptions, type HoverPlace } from './hover.ts';
+import { containingPlace, hoverPlaces, pickAt, pickPlace, rayBody, thingName, tooltipText, type HoverOptions, type HoverPlace } from './hover.ts';
 import { ThingLayer, rayUnitBox } from '../things/things.ts';
 import type { NodeRec } from '../source/source.ts';
 
@@ -109,4 +109,13 @@ test('#3779 resting on the ground in a named place shows its name and a ring sca
   nodes.set('box', node('box', 'eden:lamp'));
   assert.equal(pickAt(eye, down(0.5, 0.5), 0, opts)!.kind, 'thing', 'and a thing');
   assert.equal(tooltipText('market square', 'open 8:00 to 18:00'), 'market square · open 8:00 to 18:00');
+});
+
+test('#3779 a sunken place (a pond, its middle below its frame) is ground level, not an upper floor', () => {
+  const mm = (p: [number, number][]) => p.map(([x, z]) => [x * 1000, z * 1000]);
+  const nodes = new Map<string, NodeRec>([['pond', node('pond', 'eden:pond', { placeName: 'reeds', outline: mm(sq(-10, -10, 20)) })]]);
+  const world = { nodes, tracks: new Map(), frame: () => new THREE.Matrix4(), heightAt: (x: number, z: number) => (Math.hypot(x, z) < 8 ? -3.5 : 0) };
+  assert.equal([...hoverPlaces(world)][0].level, null);
+  const eye = new THREE.Vector3(-10, 20, 10);
+  assert.equal(pickPlace(eye, new THREE.Vector3(0, -3.5, 0).sub(eye).normalize(), world)?.id, 'pond', 'its sunken middle is in it');
 });

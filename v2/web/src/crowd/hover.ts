@@ -65,7 +65,8 @@ export function containingPlace(point: THREE.Vector3, places: Iterable<HoverPlac
 }
 
 /** The world's named places, from the copy: every node with a public name and an outline. A place stands raised (an
- *  upper floor) when its frame is more than LEVEL_M above the ground under its outline's middle. Kept per node record. */
+ *  upper floor) when its frame is more than LEVEL_M above the highest ground under its outline (its corners and middle),
+ *  so a pond or a hollow, whose middle lies below its frame, is not taken for an upper floor. Kept per node record. */
 const placeCache = new WeakMap<NodeRec, HoverPlace>();
 export function* hoverPlaces(world: HoverWorld): Generator<HoverPlace> {
   for (const n of world.nodes.values()) {
@@ -74,7 +75,8 @@ export function* hoverPlaces(world: HoverWorld): Generator<HoverPlace> {
     if (!p) {
       const outline = n.outline.map(([x, z]) => [x * MM, z * MM] as [number, number]);
       const cx = outline.reduce((s, q) => s + q[0], 0) / outline.length, cz = outline.reduce((s, q) => s + q[1], 0) / outline.length;
-      const y = new THREE.Vector3().applyMatrix4(world.frame(n.id)).y, ground = world.heightAt?.(cx, cz) ?? 0;
+      const y = new THREE.Vector3().applyMatrix4(world.frame(n.id)).y;
+      const ground = Math.max(...[[cx, cz], ...outline].map(([x, z]) => world.heightAt?.(x, z) ?? 0));
       p = { id: n.id, name: placeWords(n.placeName), outline, level: y - ground > LEVEL_M ? y : null };
       placeCache.set(n, p);
     }
