@@ -932,9 +932,12 @@ impl Bundler {
         .map(Some)
     }
     fn feed_based(&mut self, header: &Header, record: u64, bytes: &[u8]) -> R<Vec<Bundle>> {
+        let tw = std::time::Instant::now();
+        let mut tp = std::time::Duration::ZERO; let mut ts = std::time::Duration::ZERO; let mut ta = std::time::Duration::ZERO; let mut td = std::time::Duration::ZERO;
         let part = Part::read(bytes)?;
         let mut whole = self.before.clone();
         whole.apply(header, &part)?;
+        eprintln!("PROF feed record {record}: {} effects, whole {} ms", part.effects.len(), tw.elapsed().as_millis());
         let mut mode = self.based.take().ok_or_else(|| Refusal {
             name: "archive-base",
             detail: "based builder missing".into(),
@@ -942,9 +945,12 @@ impl Bundler {
         let result = (|| {
             let mut done = Vec::new();
             for (offset, e) in part.effects.iter().enumerate() {
+                let t = std::time::Instant::now();
                 self.after.apply_entry(header, e)?;
+                ta += t.elapsed(); let t = std::time::Instant::now();
                 let old = self.projected(header, &self.before)?;
                 let after = self.projected(header, &self.after)?;
+                tp += t.elapsed();
                 let start = match mode.anchor {
                     Some(anchor) => e
                         .envelope
@@ -976,7 +982,9 @@ impl Bundler {
                     probe.as_mut().expect("candidate view")
                 };
                 let prior = view.output().records.len();
+                let t = std::time::Instant::now();
                 view.step(&self.before, e, &self.after, &self.redactions)?;
+                ts += t.elapsed();
                 let kept = view.output().records.len() != prior;
                 let mut old_visible = old.clone();
                 let mut after_visible = after.clone();
@@ -989,6 +997,7 @@ impl Bundler {
                 let thinned = matches!(&e.body,replica::effects::Body::Changes(cs) if !cs.is_empty() && cs.iter().all(|c|matches!(&c.change,replica::effects::Change::Motion(_))))
                     && !kept;
                 let observe = kept || (!thinned && old_visible != after_visible);
+                let t = std::time::Instant::now();
                 if observe {
                     mode.anchor.get_or_insert(e.envelope.at);
                     if !same {
@@ -1022,8 +1031,10 @@ impl Bundler {
                     ]));
                     open.observed = after;
                 }
+                td += t.elapsed();
                 self.before.apply_entry(header, e)?;
             }
+            eprintln!("PROF feed record {record}: apply {} project {} step {} observe {} total {} ms", ta.as_millis(), tp.as_millis(), ts.as_millis(), td.as_millis(), tw.elapsed().as_millis());
             Ok(done)
         })();
         self.based = Some(mode);
