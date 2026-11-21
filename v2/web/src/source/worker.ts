@@ -64,10 +64,13 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
     at: moved ? num(moved.get(1)) : null,
     soul: publicSoul(v.get(9)),
   };
-  if (f.has(1)) rec.origin = new TextDecoder().decode(f.get(1) as Uint8Array);
-  if (f.has(11)) rec.outline = rows(f.get(11));
-  if (f.has(12)) rec.solids = rows(f.get(12));
-  if (f.has(13)) rec.slots = rows(f.get(13));
+  // The importer's fields share numbers with a kind's own state fields (a fridge's `open` is field 1): each is read
+  // only in the shape the importer writes it.
+  const o = f.get(1);
+  if (o instanceof Uint8Array) rec.origin = new TextDecoder().decode(o);
+  if (Array.isArray(f.get(11))) rec.outline = rows(f.get(11));
+  if (Array.isArray(f.get(12))) rec.solids = rows(f.get(12));
+  if (Array.isArray(f.get(13))) rec.slots = rows(f.get(13));
   if (f.has(14)) rec.surfaces = (f.get(14) as unknown[][]).map((r) => [num(r[0]), rows(r[1])!]);
   if (f.has(18)) rec.waterLevel = num(f.get(18));
   if (f.has(23)) rec.scale = num(f.get(23));
