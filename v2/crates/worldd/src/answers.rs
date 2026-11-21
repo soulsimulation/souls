@@ -598,6 +598,8 @@ pub struct Config {
     pub join: Option<Join>,
     /// Existing B15 recorded body catalogue and birth choices.
     pub wear: Option<Wearing>,
+    /// The code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713): its forms' hatches run in them.
+    pub hatches: Vec<Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -694,6 +696,7 @@ impl Config {
             engine: None,
             join: None,
             wear: None,
+            hatches: Vec::new(),
         }
     }
 }
@@ -1591,8 +1594,21 @@ impl Clock {
             // The words go to the store and the intent is logged with their references (V1b); refused, it is logged
             // without its intent.
             let r = match self.body_of(&intent) {
-                Ok(b) => words::keep(value, &self.text, words::audience(form, b), b, &mut kept)
-                    .map_err(|r| r.name),
+                Ok(b) => {
+                    // Words a form writes into a field everyone reads are everyone's (#3712).
+                    let public =
+                        match (form, &intent.target) {
+                            (words::Form::Other, Some(Target::Node(node))) => self
+                                .forms
+                                .public_words(self.replica.tree(), *node, intent.verb.as_str()),
+                            _ => false,
+                        };
+                    let audience = match public {
+                        true => Audience::Everyone,
+                        false => words::audience(form, b),
+                    };
+                    words::keep(value, &self.text, audience, b, &mut kept).map_err(|r| r.name)
+                }
                 Err(e) => Err(e),
             };
             value = match r {
@@ -1773,11 +1789,11 @@ impl Clock {
         }
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
-            Some(_) => self
+            Some(_) if !self.forms.fixture_sit(self.replica.tree(), &intent) => self
                 .body_of(&intent)
                 .ok()
                 .and_then(|b| bodies::read(&intent, b)),
-            None => None,
+            _ => None,
         };
         let spotted = match self.bodies {
             Some(_) => spot_of(
@@ -4000,6 +4016,16 @@ pub fn start<S: Storage + 'static>(
     let mut order_records = Vec::new();
     // B16: the wind-down's records and the Souls' acts replayed, to rebuild it.
     let mut wind_records: Vec<Effect> = Vec::new();
+    // A compacted log (#3837) holds no records before its cut: only a checkpoint at or after it can start the world.
+    let held_from = found.first;
+    if held_from > restored.as_ref().map_or(0, |r| r.root.record) {
+        return Err(Refusal {
+            name: "log-compacted-past-checkpoint",
+            detail: format!(
+                "the log is kept from record {held_from}, and no checkpoint that verifies starts there or later"
+            ),
+        });
+    }
     let records: &[Vec<u8>] = match restored {
         Some(r) => {
             let logged = found.first + found.records.len() as u64;
@@ -4390,6 +4416,7 @@ pub fn start<S: Storage + 'static>(
     let sky = Heavens::of(&world, cfg.sky.take());
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
+    let hatches = std::mem::take(&mut cfg.hatches);
     let build = move || Clock {
         replica: world,
         publisher,
@@ -4424,7 +4451,12 @@ pub fn start<S: Storage + 'static>(
         set_down: Vec::new(),
         edited: Vec::new(),
         walkers,
-        forms: Acts::new(kinds, library, header, forms_scope),
+        forms: {
+            let mut acts = Acts::new(kinds, library, header, forms_scope);
+            // Checked at boot by `serve` (`Acts::hatches` refuses a module by name); a refused one is not loaded.
+            let _ = acts.hatches(&hatches);
+            acts
+        },
         forming: Vec::new(),
         engine: engine_parts
             .map(|(rules, kinds)| Engine::new(engine_header, rules, kinds, engine_scope)),

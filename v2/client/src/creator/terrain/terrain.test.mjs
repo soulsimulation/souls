@@ -60,3 +60,21 @@ test('#3695: a Soul standing where the ground changes is found before anything i
   const on = { id: 'on', position: [16n * M, 0n, 16n * M] }, off = { id: 'off', position: [2n * M, 0n, 2n * M] };
   assert.deepEqual(bodiesUnder(changed, [on, off], 350_000).map((b) => b.id), ['on']);
 });
+
+test('#3695: the land verbs make today\'s landforms from today\'s flags and defaults, and refuse by name', async () => {
+  const { landformOf } = await import('./land.mjs');
+  const flat = () => 2;
+  const hill = landformOf('hill', { at: '10,20' }, flat, 'x');
+  assert.deepEqual(hill.landform, { id: 'x', kind: 'bump', c: [10, 20], r: 80, h: 25, peak: 1 });
+  assert.equal(landformOf('knoll', { path: '[[0,0],[10,0]]' }, flat, 'x').landform.kind, 'ridge');
+  const pond = landformOf('pond', { circle: '0,0,5' }, flat, 'x');
+  assert.equal(pond.landform.kind, 'carve');
+  assert.equal(pond.water.level, 1.8, 'just under the ground there');
+  assert.equal(pond.landform.bed, 0.6);
+  const ditch = landformOf('ditch', { path: '[[0,0],[9,0]]' }, flat, 'x').landform;
+  assert.ok(ditch.levels.every((l) => l === 1), 'cut a metre below the ground along it');
+  assert.equal(landformOf('flatten', { at: '0,0' }, flat, 'x').landform.level, 2);
+  for (const [verb, a, code] of [['smooth', { at: '0,0' }, 'land.smooth'], ['hill', { at: '0,0', height: '900' }, 'land.flag'], ['dig', {}, 'land.verb'], ['plateau', {}, 'land.flag']]) {
+    assert.throws(() => landformOf(verb, a, flat, 'x'), (e) => e.code === code, `${verb}: ${code}`);
+  }
+});
