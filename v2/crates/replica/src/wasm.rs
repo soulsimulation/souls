@@ -1331,3 +1331,23 @@ impl WasmCopy {
         Ok(format!("{{{}}}", out.join(",")))
     }
 }
+
+/// Where a moving node is at world time `t` (#3603): `field` is the node's course field ([`crate::schedule::F_COURSE`],
+/// 80) as its record holds it (the value's canonical bytes), `t` world µs. Gives `[x, y, z, vx, vy, vz]`: its
+/// position in its parent's frame, µm, and its velocity, µm a second, read by the same formula the world reads
+/// ([`crate::schedule::course::place_at`]). Throws (`schedule-malformed`, the track's load refusals,
+/// `before-track-start`) when the field is not a course the world would move the node by; the node then stands where
+/// it was placed.
+#[wasm_bindgen(js_name = courseAt)]
+pub fn course_at(field: &[u8], t: i64) -> Result<Vec<f64>, JsError> {
+    use crate::schedule::course::Course;
+    let v = decode(field).map_err(js)?.value;
+    let course =
+        Course::read(&v).ok_or_else(|| JsError::new("schedule-malformed: not a course"))?;
+    let table = course.load().map_err(js)?;
+    let (p, v) = table.at(t).map_err(js)?;
+    Ok([p.x, p.y, p.z, v.x, v.y, v.z]
+        .into_iter()
+        .map(|n| n as f64)
+        .collect())
+}
