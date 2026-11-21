@@ -27,7 +27,7 @@ const FIRE_WORDS = /(^|[^a-z])(fire|campfire|bonfire|firepit|fire-pit|fire-bowl|
 /** What a kind may draw, by its name and its state table (V17's `models.json`): flames are confirmed by the model. */
 export function fxKind(kind: string, states?: Record<string, string[]>): FxKind | null {
   const k = kind.split('@')[0].toLowerCase(), name = k.slice(k.indexOf(':') + 1);
-  if (/lighthouse/.test(name)) return 'lighthouse';
+  if (/(^|[_-])lighthouse$/.test(name)) return 'lighthouse'; // the tower, not its painted bands
   if (/fountain/.test(name)) return /drinking/.test(name) ? null : 'fountain';
   if (/(^|[_-])kettle($|[_-])/.test(name)) return 'kettle';
   if (/(^|[_-])(cup|mug|teacup|tea-cup)($|[_-])/.test(name) && !/pack/.test(name)) return 'cup';

@@ -26,6 +26,7 @@ test('kinds: fires, fountains, kettles and cups, by name or by a lit state', () 
   assert.equal(fxKind('eden:lamp', { on: ['light'] }), 'light'); // a lamp glows (A2, #3724), with no flame
   assert.equal(fxKind('eden:screen', { on: ['screen'] }), null); // a screen's `on` is not a light
   assert.equal(fxKind('eden:lighthouse'), 'lighthouse');
+  assert.equal(fxKind('eden:lighthouse_bands'), null); // Eden's tower stripes are a thing of their own
 });
 
 test("fires: today's reaches and catch-up; the phone tier keeps flames but drops embers and smoke", () => {
