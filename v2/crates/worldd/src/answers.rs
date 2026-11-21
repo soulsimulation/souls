@@ -135,7 +135,7 @@ use replica::effects::{
 };
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
-use replica::intents::{Answer, INTENT_MOST, Intent, Kind, Target};
+use replica::intents::{Answer, BULK_MOST, Intent, Kind, Target};
 use replica::pose::Pose;
 use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::select::Answer as Answered;
@@ -600,6 +600,8 @@ pub struct Config {
     pub join: Option<Join>,
     /// Existing B15 recorded body catalogue and birth choices.
     pub wear: Option<Wearing>,
+    /// The code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713): its forms' hatches run in them.
+    pub hatches: Vec<Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -696,6 +698,7 @@ impl Config {
             engine: None,
             join: None,
             wear: None,
+            hatches: Vec::new(),
         }
     }
 }
@@ -1603,8 +1606,21 @@ impl Clock {
             // The words go to the store and the intent is logged with their references (V1b); refused, it is logged
             // without its intent.
             let r = match self.body_of(&intent) {
-                Ok(b) => words::keep(value, &self.text, words::audience(form, b), b, &mut kept)
-                    .map_err(|r| r.name),
+                Ok(b) => {
+                    // Words a form writes into a field everyone reads are everyone's (#3712).
+                    let public =
+                        match (form, &intent.target) {
+                            (words::Form::Other, Some(Target::Node(node))) => self
+                                .forms
+                                .public_words(self.replica.tree(), *node, intent.verb.as_str()),
+                            _ => false,
+                        };
+                    let audience = match public {
+                        true => Audience::Everyone,
+                        false => words::audience(form, b),
+                    };
+                    words::keep(value, &self.text, audience, b, &mut kept).map_err(|r| r.name)
+                }
                 Err(e) => Err(e),
             };
             value = match r {
@@ -4571,6 +4587,7 @@ pub fn start<S: Storage + 'static>(
     let sky = Heavens::of(&world, cfg.sky.take());
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
+    let hatches = std::mem::take(&mut cfg.hatches);
     let build = move || Clock {
         replica: world,
         publisher,
@@ -4608,7 +4625,12 @@ pub fn start<S: Storage + 'static>(
         steps: BTreeMap::new(),
         undone: Vec::new(),
         walkers,
-        forms: Acts::new(kinds, library, header, forms_scope),
+        forms: {
+            let mut acts = Acts::new(kinds, library, header, forms_scope);
+            // Checked at boot by `serve` (`Acts::hatches` refuses a module by name); a refused one is not loaded.
+            let _ = acts.hatches(&hatches);
+            acts
+        },
         forming: Vec::new(),
         engine: engine_parts
             .map(|(rules, kinds)| Engine::new(engine_header, rules, kinds, engine_scope)),
@@ -5178,7 +5200,9 @@ pub fn serve(world: Door, mut stream: UnixStream) {
             return;
         }
         let len = u32::from_be_bytes(len) as usize;
-        if len > INTENT_MOST as usize {
+        // A creator's bulk edit (#3695) is the largest frame the gateway hands on; `Intent::read` keeps every other
+        // intent to the frame limit.
+        if len > BULK_MOST as usize {
             return;
         }
         let mut bytes = vec![0u8; len];
