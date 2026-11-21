@@ -2340,3 +2340,47 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
         &differ[..differ.len().min(5)]
     );
 }
+
+/// A Soul walks to a bed and lies in it through the gateway, then gets up, as today's soul.game lets it (parity ledger,
+/// "lying in bed", #2835): the beds of the houses west of the library, from eden-house-2's living room. A bed's side
+/// stand point beside its room's door is one the spot tables never stop a walker on; it is moved out of the doorway at
+/// the start (`worldd serve`'s places), so the walk ends within the lie's reach. Each bed: the walk, the lie into
+/// one of its slots (the body's logged frame), the rise.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+// A real process on the real clock: its waits are real time.
+#[allow(clippy::disallowed_methods)]
+fn a_soul_walks_to_a_bed_lies_in_it_and_gets_up() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (served, mut soul, dir) = serve(&facts, "48.2,18.9", "bedlie", im.nodes["world"].scope());
+    let mut ends = Vec::new();
+    for b in ["e_9857eaa7", "e_09de188a", "e_6487ccc5", "e_c57cbb07"] {
+        let bed = im.nodes[b];
+        let walked = soul.act("eden:walk", Some(bed), BTreeMap::new());
+        let lay = soul.act("eden:lie", Some(bed), BTreeMap::new());
+        // The log is written behind the clock: wait (at most 10 s) for the lie's frame.
+        let at = std::time::Instant::now();
+        let mut frame = last_frames(&dir).into_values().next();
+        while lay.is_ok()
+            && frame.map(|f| f.0) != Some(bed)
+            && at.elapsed() < Duration::from_secs(10)
+        {
+            std::thread::sleep(Duration::from_millis(250));
+            frame = last_frames(&dir).into_values().next();
+        }
+        let up = soul.act("eden:rise", None, BTreeMap::new());
+        println!("bed {b}: walk {walked:?}, lie {lay:?} in {frame:?}, rise {up:?}");
+        ends.push((b, bed, walked, lay, frame, up));
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    for (b, bed, walked, lay, frame, up) in ends {
+        walked.unwrap_or_else(|e| panic!("walked to {b}: {e}"));
+        lay.unwrap_or_else(|e| panic!("lay in {b}: {e}"));
+        let (node, slot) = frame.expect("the body's logged frame");
+        assert_eq!(node, bed, "in {b}");
+        assert!(slot.is_some(), "in one of {b}'s slots");
+        up.unwrap_or_else(|e| panic!("rose from {b}: {e}"));
+    }
+}
