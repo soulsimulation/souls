@@ -1178,14 +1178,25 @@ impl Bodies {
 
     /// Restart (B16): the rule rebuilt from the records and agent acts replayed (`body_of` names a Soul's body), every
     /// body in the controller; a body asleep lies down again where it was.
+    /// A body `placed` has lying on the ground (only the rule lays one there) with no record since the checkpoint is
+    /// asleep.
     pub fn wind_resume<'a>(
         &mut self,
         effects: impl IntoIterator<Item = &'a Effect>,
         body_of: impl Fn(Id) -> Option<Id>,
+        placed: &Placed,
         now: Micros,
     ) {
         let ids: Vec<Id> = self.runner.controller.ids().collect();
         self.wind.resume(effects, body_of, ids.iter().copied(), now);
+        for (body, (pose, stance)) in placed {
+            if *stance == Some(Stance::Lie)
+                && matches!(pose.support, Support::Surface { .. })
+                && self.wind.state(*body).is_some_and(|s| s.wander.is_none())
+            {
+                self.wind.asleep(*body, [pose.position.x, pose.position.z], now);
+            }
+        }
         for body in ids {
             if self.wind.state(body).is_some_and(|s| s.slept) {
                 self.lie_ground(body);

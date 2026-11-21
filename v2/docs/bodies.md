@@ -174,7 +174,8 @@ state); a restart rebuilds the rule from those records. Choices come from a hash
 random source. It never moves a body something else holds (an open act, an order, a carry). A sleeping body is on no
 due list. BUILDSAFE judges it as any body on the ground, so an edit cannot bury it. `WORLDD_WIND_DOWN=wander,zombie,
 leg_min,leg_max,bound` (seconds) shortens the clocks in a test world. The page's Soul card reads its word from the
-records. Not carried by a checkpoint yet: a restart from one starts each body's hour again.
+records. A restart rebuilds it from the records after its checkpoint; a body the checkpoint has lying on the ground
+sleeps on, and one wandering or walking out starts its hour again.
 
 ## The code hatch, shape only
 

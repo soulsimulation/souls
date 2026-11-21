@@ -3730,7 +3730,7 @@ pub fn start<S: Storage + 'static>(
                         if let Err(r) = crate::orders::resume(&mut b, &order_parts, at) {
                             eprintln!("worldd: standing orders were not restored: {r}");
                         }
-                        b.wind_resume(&wind_records, |s| c.life.as_ref().and_then(|l| l.life.body_of(s)), at);
+                        b.wind_resume(&wind_records, |s| c.life.as_ref().and_then(|l| l.life.body_of(s)), &placed, at);
                         c.bodies = Some(b);
                         // The activities the log holds, so their members speak in them and leave them again (E26).
                         if let (Some(e), Some(b)) = (c.engine.as_mut(), c.bodies.as_mut())

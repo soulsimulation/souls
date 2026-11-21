@@ -349,6 +349,19 @@ impl WindDown {
         }
     }
 
+    /// A body a restart found lying on the ground where the rule left it, with no record of the rule since the
+    /// checkpoint: asleep at `spot` from `now`, until its agent acts.
+    pub fn asleep(&mut self, body: Id, spot: [i64; 2], now: Micros) {
+        let s = State {
+            last: now - self.knobs.wander,
+            wander: Some(now),
+            zombie: Some(now),
+            slept: true,
+            spot: Some(spot),
+        };
+        self.souls.insert(body, (s, None));
+    }
+
     /// The tick of Wander's k-th leg (k ≥ 1).
     fn leg(&self, body: Id, wander: Micros, k: u64) -> Micros {
         let kn = &self.knobs;
