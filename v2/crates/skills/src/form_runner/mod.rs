@@ -148,6 +148,11 @@ pub enum Step {
 /// (the longest reach a move may state) and a body, as today's engine counts a stand point's reach.
 pub const REACH: i64 = replica::moves::REACH_MOST + 600_000;
 
+/// How far from a move's point the place an approach walk ([`approach`]) goes to may be, µm: an arm (a move's
+/// usual reach, `content/moves`), as today's game looks for clear ground about the hand's point. With no place that
+/// near (a door's handle, whose doorway the spot tables keep walkers out of), the walk goes to the point itself.
+pub const APPROACH_REACH: i64 = 600_000;
+
 /// How far from a seat's stand point the place a walk before a `sit` or `lie` step goes to may be (C17, #3453), µm:
 /// the sit's and the lie's own reach (B2's data, a body's 0.6 m) less how near the walk comes to its end
 /// ([`crate::route::AT_GOAL`]), so the seat is in reach where the walk stops.
@@ -1512,6 +1517,7 @@ impl Runner {
                 // the nearest place within reach (C15), else to the point itself, on the ground the body stands on.
                 let reach = match self.steps.get(self.at + 1) {
                     Some(Step::Sit { .. }) => SIT_REACH,
+                    _ if approach => APPROACH_REACH,
                     _ => REACH,
                 };
                 let plan = node.parent.map_or(replica::host::WalkPlan::Unplanned, |p| {
