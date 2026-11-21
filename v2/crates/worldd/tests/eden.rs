@@ -88,7 +88,10 @@ impl Client {
                 .iter()
                 .map(|v| if let Value::Uint(n) = v { *n } else { 0 })
                 .collect()),
-            (Some(Value::Uint(2)), _, Some(Value::Text(t))) => Err(t.as_str().to_owned()),
+            (Some(Value::Uint(2)), _, Some(Value::Text(t))) => {
+                println!("{verb}: refused {a:?}");
+                Err(t.as_str().to_owned())
+            }
             other => panic!("an answer: {other:?}"),
         }
     }
