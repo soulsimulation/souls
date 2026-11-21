@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { fieldsOf, kindState, type StateDef } from './state.ts';
+import { fieldsOf, kindState, listOf, type StateDef } from './state.ts';
 
 const entry = (path: string) => JSON.parse(readFileSync(join(import.meta.dirname, '../../../../content/kinds', path), 'utf8')) as { state: Record<string, StateDef> };
 
@@ -35,4 +35,15 @@ test('a planter: an enum by its value, counts as numbers, its water read at the 
   assert.equal(at(10_000_000).fruit, 2);
   assert.equal(at(10_000_000).weeds, true, 'unset: the default');
   assert.deepEqual(kindState(fields, planter).water, fields[28], 'no time yet: the stored numbers');
+});
+
+test('#3726: a list field keeps its records, named by the entry (the chess table\'s pieces)', () => {
+  const pieces = entry('games/chess_table.json').state.pieces;
+  const f = new Map<number, unknown>([[pieces.n, [new Map([[1, 4], [2, 6]]), new Map<number, unknown>([[1, 60n], [2, 14]])]], [12, [[0, 0, 1, 1, 0, 0, 10]]]]);
+  const fields = fieldsOf(f);
+  assert.deepEqual(fields, { [pieces.n]: [[4, 6], [60, 14]] });
+  assert.deepEqual(listOf(fields, pieces), [{ square: 4, piece: 6 }, { square: 60, piece: 14 }]);
+  assert.deepEqual(listOf(fieldsOf(new Map([[pieces.n, []]])), pieces), []);
+  assert.deepEqual(listOf(undefined, pieces), []);
+  assert.equal('pieces' in kindState(fields, { pieces }), false);
 });
