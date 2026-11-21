@@ -152,6 +152,7 @@ import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { clockOf, worldNow } from '../clock/clock.mjs';
 import { worldOps } from '../creator/world.mjs';
 import { exportOf, importOf } from '../creator/genesis.mjs';
+import { furnishOps } from '../creator/furnish.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
@@ -890,6 +891,27 @@ const summary = (plan, edits, started) => ({
  *  (`worldd::answers::now`). For the creator's weather end and strike time (#3695). */
 const worldNowOrReal = () => worldNow(clockOf(copy)) ?? Date.now() * 1000;
 
+/** #3728: today's furnish recipes on the copy (`creator/furnish.mjs`), as one edit. A piece the world's own check
+ *  refuses (its admission, its slot) is dropped with the refusal's name and the rest checked again, as today drops a
+ *  piece that does not fit. */
+function furnishBatch(w) {
+  const out = furnishOps(exportOf(copy).nodes, w.ref, { style: w.style, kinds: pinned(), entries: kindsIn(join(home, 'kinds')) });
+  if (out.ok === false) return out;
+  let { ops } = out;
+  for (let k = 0; k < 64 && ops.length; k++) {
+    const v = JSON.parse(wire.editCheck(copy, batchOf(ops), kindsText()));
+    if (v.ok || v.op === undefined || !ops[v.op]) break;
+    const gone = new Set([ops[v.op].name]);
+    for (const o of ops) if (gone.has(o.in)) gone.add(o.name);
+    out.dropped.push(...out.placed.filter((_, i) => gone.has(ops[i]?.name)).map((p) => ({ name: p.name, why: v.code })));
+    out.placed = out.placed.filter((_, i) => !gone.has(ops[i]?.name));
+    ops = ops.filter((o) => !gone.has(o.name));
+  }
+  if (!ops.length) return { ok: false, code: 'furnish.nothing', detail: `nothing to furnish: ${out.notes.concat(out.dropped.map((d) => `${d.name} (${d.why})`)).slice(0, 8).join('; ')}` };
+  const why = out.dropped.slice(0, 8).map((d) => `${d.name} (${d.why})`);
+  return { ops, says: `${out.says.replace(/\d+ pieces/, `${ops.length} pieces`).replace(/\d+ dropped/, `${out.dropped.length} dropped`)}${why.length ? `; dropped: ${why.join(', ')}` : ''}` };
+}
+
 /** The batch an edit or a check carries: its own ops, or a world verb's (#3695) made from the copy now. The land
  *  verbs load today's ground model (`packages/ground`, zod) only when used. */
 async function worldBatch(req) {
@@ -901,6 +923,7 @@ async function worldBatch(req) {
     }
     return land.landOps(copy, req.world);
   }
+  if (req.world.verb === 'furnish') return furnishBatch(req.world);
   return worldOps(copy, req.world, worldNowOrReal());
 }
 
