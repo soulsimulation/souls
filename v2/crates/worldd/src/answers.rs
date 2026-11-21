@@ -3617,6 +3617,8 @@ impl Clock {
                 ]));
                 encode(&v).unwrap_or_default()
             });
+        // The next tick's writes start with a whole record's room.
+        sim::commit::open_room(sim::commit::TICK_PARTS_MOST);
         if record.is_some() {
             self.unsealed = true;
         }
@@ -3810,6 +3812,7 @@ fn answer_loop<S: Storage + 'static>(
         let mut last = None;
         let mut appended = Vec::new();
         let mut durable_part = None;
+        let mut skipped = false;
         for (k, bytes) in [t.inputs, t.record].into_iter().enumerate() {
             let Some(bytes) = bytes else { continue };
             // Parts only (not the recorder's input records) go to the view tier and to what follows the world.
@@ -3837,11 +3840,23 @@ fn answer_loop<S: Storage + 'static>(
                         });
                     }
                 }
+                // A record the log will not take (`record-size`, refused before a byte is written) is this tick's
+                // alone: the clock's write rule keeps it from happening (`sim::commit`'s room), and should one get
+                // past, the world keeps answering the ticks after it. Its answers are dropped, not sent: they are not
+                // on the disk.
+                Err(e) if e.name == "record-size" => {
+                    eprintln!("worldd: a tick's record was refused, its answers dropped: {e}");
+                    skipped = true;
+                    break;
+                }
                 Err(e) => {
                     eprintln!("worldd: the log failed, nothing more is answered: {e}");
                     return;
                 }
             }
+        }
+        if skipped {
+            continue;
         }
         if trace {
             for (_, frame, _) in &t.replies {
@@ -4496,6 +4511,9 @@ pub fn start<S: Storage + 'static>(
         .name("clock".into())
         .spawn(move || {
             mark_clock_thread();
+            // A tick's parts fit its one log record: a write over the room left is refused `part.too-large` before
+            // it reaches the live world (`sim::commit`), so the log never meets a record it refuses.
+            sim::commit::open_room(sim::commit::TICK_PARTS_MOST);
             let beat = thread_beat;
             let mut c = build();
             // With joins (C3), a body the log placed is stood again only while its node is in the tree: a retired

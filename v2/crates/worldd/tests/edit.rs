@@ -8,7 +8,9 @@
 //! who, size and kind. A5: an edit planned against an older version.
 
 use replica::apply::Replica;
-use replica::edit::{Edit, NODES_MOST, OPS_MOST, Op, Ref, Refused, Spot, World, check};
+use replica::edit::{
+    Edit, NODES_MOST, OPS_MOST, Op, Ref, Refused, Spot, WRITTEN_MOST, World, check,
+};
 use replica::effects::{
     Actor, Body, Cause, Effect, FIXTURE_HEADER, Header, Part, State, fixture_bytes,
 };
@@ -27,6 +29,8 @@ use std::time::Duration;
 use worldd::views::{Delivery, Subscriber, Tier};
 
 const FIELD: u64 = 1;
+/// A tick's room in the test of the write rule's room.
+const ROOM: usize = 1 << 20;
 
 fn spot(x: i64, slot: Option<u64>) -> Spot {
     Spot {
@@ -522,6 +526,137 @@ fn a4_another_actor_an_oversized_batch_and_an_unknown_kind_are_refused_by_name()
         .expect_err("refused");
     assert_eq!((r.op, r.name), (Some(0), "edit.too-many-nodes"));
     assert_eq!(w.log_hash(), log);
+    w.close();
+}
+
+// --- #3956: no batch outgrows a log record -------------------------------------------------------------------------
+
+/// A set over the batch limit, and rows that would grow a field past it, are refused `edit.too-large`; a rows
+/// operation with no rows is refused `edit.rows`. Nothing refused reaches the log.
+#[test]
+fn a_batch_writing_more_than_a_record_holds_and_empty_rows_are_refused_by_name() {
+    let mut w = W::new();
+    let (room, cr, _) = w.furnish();
+    let log = w.log_hash();
+    let v = w.live.version();
+    let big = Value::Bytes(vec![1; WRITTEN_MOST + 1]);
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Set {
+                node: Ref::Node(cr),
+                field: FIELD,
+                to: big,
+            }],
+        )
+        .expect_err("refused");
+    assert_eq!((r.op, r.name), (Some(0), "edit.too-large"), "{r:?}");
+    // Two halves, each under the limit, over it together; and rows merged into a field already near it.
+    let half = || Value::Bytes(vec![2; WRITTEN_MOST / 2 + 1]);
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![
+                Op::Set {
+                    node: Ref::Node(cr),
+                    field: FIELD,
+                    to: half(),
+                },
+                Op::Set {
+                    node: Ref::Node(room),
+                    field: FIELD,
+                    to: half(),
+                },
+            ],
+        )
+        .expect_err("refused");
+    assert_eq!((r.op, r.name), (Some(1), "edit.too-large"), "{r:?}");
+    let row = |k: u64, len: usize| {
+        Value::Array(vec![
+            Value::Uint(k),
+            Value::Uint(0),
+            Value::Bytes(vec![3; len]),
+        ])
+    };
+    let rows = |rows: Vec<Value>| Op::Rows {
+        node: Ref::Node(cr),
+        field: FIELD,
+        rows,
+    };
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![
+                Op::Set {
+                    node: Ref::Node(cr),
+                    field: FIELD,
+                    to: Value::Array(Vec::new()),
+                },
+                rows(Vec::new()),
+            ],
+        )
+        .expect_err("refused");
+    assert_eq!((r.op, r.name), (Some(1), "edit.rows"), "{r:?}");
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![
+                Op::Set {
+                    node: Ref::Node(cr),
+                    field: FIELD,
+                    to: Value::Array(vec![row(0, WRITTEN_MOST / 2)]),
+                },
+                rows(vec![row(1, WRITTEN_MOST / 2)]),
+            ],
+        )
+        .expect_err("refused");
+    assert_eq!((r.op, r.name), (Some(1), "edit.too-large"), "{r:?}");
+    assert_eq!(w.log_hash(), log, "nothing refused reached the log");
+    w.close();
+}
+
+/// Defence in depth: a tick's writes that together would outgrow its one log record are refused `part.too-large` on
+/// the write path, before they reach the live world, even when each batch passed its check; the next tick's room
+/// takes the same batch. A small room stands in for a record's (`sim::commit::TICK_PARTS_MOST`), as the rule is the
+/// same.
+#[test]
+fn writes_past_a_ticks_record_are_refused_before_the_live_world() {
+    let mut w = W::new();
+    let (_, cr, _) = w.furnish();
+    sim::commit::open_room(ROOM);
+    let set = |n: u8| Op::Set {
+        node: Ref::Node(cr),
+        field: FIELD,
+        to: Value::Bytes(vec![n; ROOM / 3]),
+    };
+    let mut n = 0u8;
+    let (r, before) = loop {
+        n += 1;
+        let before = (
+            w.log_hash(),
+            state_hash(w.live.tree()).expect("a hash"),
+            w.live.version(),
+        );
+        match w.edit(w.creator(), w.live.version(), vec![set(n)]) {
+            Ok(_) => assert!(n < 8, "a tick's room is bounded"),
+            Err(r) => break (r, before),
+        }
+    };
+    assert_eq!(r.name, "part.too-large", "{r:?}");
+    assert!(n > 1, "the first batch fits");
+    let after = (
+        w.log_hash(),
+        state_hash(w.live.tree()).expect("a hash"),
+        w.live.version(),
+    );
+    assert_eq!(after, before, "nothing reached the log or the live world");
+    sim::commit::open_room(ROOM);
+    w.edit(w.creator(), w.live.version(), vec![set(n)])
+        .expect("the next tick takes it");
     w.close();
 }
 

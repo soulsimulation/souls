@@ -95,9 +95,10 @@ node souls-god.mjs batch '[{"op":"place","name":1,"kind":"room","in":"<place id>
 - `node souls-god.mjs expand <m>` grows the world's ground to a square `m` metres a side, centred on the middle.
 - `node souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres <m>` grows it one way, or
   `--bounds x0,z0,x1,z1` (metres) to cover a box.
-- The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. Only the new
-  tiles are sent, so one grow adds at most about 390 of Eden's 64 m tiles; a larger one is refused
-  `expand.too-large`: grow it in steps.
+- The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. Your upload
+  carries only the new tiles, so one grow adds at most about 390 of Eden's 64 m tiles; a larger one is refused
+  `expand.too-large`: grow it in steps. The world still writes the whole ground to its log and to viewers on every
+  land edit, so a ground past about 16 MB is refused `edit.too-large`.
 
 ## Answers and refusals
 
@@ -114,6 +115,7 @@ node souls-god.mjs batch '[{"op":"place","name":1,"kind":"room","in":"<place id>
 | `edit.name-unknown` | the batch uses a name no earlier place gave |
 | `edit.stale` | someone changed that thing after your copy saw it: `describe`, then send again |
 | `edit.not-the-creator` | this token is not the creator's |
+| `edit.too-large` | the fields the batch sets come to over 16 MB: split it, or the field has grown as large as it can |
 
 ## Good habits
 

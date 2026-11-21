@@ -164,6 +164,30 @@ pub fn merged_rows(now: Option<&Value>, rows: &[Value]) -> Option<Value> {
 /// The most values a link's row carries.
 pub const LINK_ROW_MOST: usize = 16;
 
+/// The most encoded bytes the fields a batch sets may hold, all together (`edit.too-large` above it). Each set and
+/// each rows operation writes its whole field, so a grown field can outgrow what one log record holds (64 MB,
+/// `sim::log::record::MAX_RECORD`); this keeps a batch's part well under it, with room for the rest of its tick.
+pub const WRITTEN_MOST: usize = 16 << 20;
+
+/// `written` and the encoded size of `to` together, or `edit.too-large` over [`WRITTEN_MOST`].
+pub(crate) fn write_size(
+    here: Option<usize>,
+    written: usize,
+    to: &Value,
+) -> Result<usize, Refused> {
+    let total = crate::encode::encode(to)
+        .map_or(usize::MAX, |b| b.len())
+        .saturating_add(written);
+    if total > WRITTEN_MOST {
+        return refuse(
+            here,
+            "edit.too-large",
+            format!("the fields this batch sets come to {total} bytes, over {WRITTEN_MOST}"),
+        );
+    }
+    Ok(total)
+}
+
 /// An edit intent: who sends it, its id (the cause of every effect it commits), the version of the zone it was planned
 /// against, and its operations in order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -305,6 +329,7 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
     let mut geometry = BTreeMap::new();
     let mut fields: BTreeMap<(Ref, u64), Value> = BTreeMap::new();
     let mut owned: BTreeMap<Ref, OwnedDoor> = BTreeMap::new();
+    let mut written = 0usize;
     for (i, op) in edit.ops.iter().enumerate() {
         let here = Some(i);
         // The kind of a node the batch names, and its parent, as the batch has left it so far.
@@ -470,6 +495,7 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                     );
                 }
                 named(*node)?;
+                written = write_size(here, written, to)?;
                 if let Ref::Node(id) = node {
                     reads.push((i, *id));
                 }
@@ -491,6 +517,13 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                         "a door's link and owned geometry are not rows",
                     );
                 }
+                if rows.is_empty() {
+                    return refuse(
+                        here,
+                        "edit.rows",
+                        "a rows operation carries at least one row",
+                    );
+                }
                 named(*node)?;
                 let Some(to) = merged_rows(value(*node, *field).as_ref(), rows) else {
                     return refuse(
@@ -499,6 +532,7 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                         "rows go into a field of rows, each at least two values",
                     );
                 };
+                written = write_size(here, written, &to)?;
                 if let Ref::Node(id) = node {
                     reads.push((i, *id));
                 }

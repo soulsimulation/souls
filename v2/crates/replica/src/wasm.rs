@@ -902,10 +902,12 @@ struct Held {
     kind: String,
     parent: Option<Id>,
     doorway: bool,
+    /// The fields asked for by number, as the copy holds them (the fields a rows operation merges into).
+    fields: BTreeMap<u64, Value>,
 }
 
-/// The copy's nodes, read from its roots down by the records' hashes.
-fn held(copy: &Copy) -> Result<BTreeMap<Id, Held>, String> {
+/// The copy's nodes, read from its roots down by the records' hashes, each with the fields `wanted` names for it.
+fn held(copy: &Copy, wanted: &BTreeSet<(Id, u64)>) -> Result<BTreeMap<Id, Held>, String> {
     let mut out = BTreeMap::new();
     // A door is in a doorway while the link its field 7 names is there (`edit::check` asks the tree the same): a door
     // whose room was removed keeps a field naming a link that is gone (#3728).
@@ -940,10 +942,17 @@ fn held(copy: &Copy) -> Result<BTreeMap<Id, Held>, String> {
                 _ => None,
             }));
         }
-        if let Some(Value::Map(fields)) = m.get(&6)
-            && let Some(link) = fields.get(&7).and_then(|v| read_id(v).ok())
-        {
-            names_link.insert(id, link);
+        let mut kept = BTreeMap::new();
+        if let Some(Value::Map(fields)) = m.get(&6) {
+            if let Some(link) = fields.get(&7).and_then(|v| read_id(v).ok()) {
+                names_link.insert(id, link);
+            }
+            kept.extend(
+                fields
+                    .iter()
+                    .filter(|(f, _)| wanted.contains(&(id, **f)))
+                    .map(|(f, v)| (*f, v.clone())),
+            );
         }
         out.insert(
             id,
@@ -951,6 +960,7 @@ fn held(copy: &Copy) -> Result<BTreeMap<Id, Held>, String> {
                 kind,
                 parent,
                 doorway: false,
+                fields: kept,
             },
         );
     }
@@ -998,7 +1008,22 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
             Err(e) => return no(None, "edit.kinds-text", &format!("{e:?}")),
         }
     };
-    let nodes = match held(&copy.copy) {
+    // The fields a rows operation merges into, read as the copy holds them and as the batch leaves them (`edit::check`).
+    let targets: BTreeSet<(Ref, u64)> = ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Rows { node, field, .. } => Some((*node, *field)),
+            _ => None,
+        })
+        .collect();
+    let wanted = targets
+        .iter()
+        .filter_map(|(r, f)| match r {
+            Ref::Node(id) => Some((*id, *f)),
+            Ref::New(_) => None,
+        })
+        .collect();
+    let nodes = match held(&copy.copy, &wanted) {
         Ok(n) => n,
         Err(e) => return no(None, "edit.copy", &e),
     };
@@ -1011,6 +1036,8 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
         .map(|(id, _)| Ref::Node(*id))
         .collect();
     let mut gone: BTreeSet<Ref> = BTreeSet::new();
+    let mut fields: BTreeMap<(Ref, u64), Value> = BTreeMap::new();
+    let mut written = 0usize;
     for (i, op) in ops.iter().enumerate() {
         let named = |r: Ref| -> Result<(String, Option<Ref>), Why> {
             if gone.contains(&r) {
@@ -1048,7 +1075,7 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
             );
             Err(("edit.child-not-admitted", d))
         };
-        let step = || -> Result<(), Why> {
+        let mut step = || -> Result<(), Why> {
             match op {
                 Op::Place {
                     name,
@@ -1084,23 +1111,47 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                     let (pk, _) = named(parent)?;
                     admits(&pk, &k, at.slot)
                 }
-                Op::Set { node, field, .. } => {
+                Op::Set { node, field, to } => {
                     if *field == crate::edit::DOOR_GEOMETRY {
                         return Err((
                             "edit.doorway-geometry",
                             "owned geometry is written only by the doorway operation".into(),
                         ));
                     }
-                    named(*node).map(|_| ())
+                    named(*node)?;
+                    written = crate::edit::write_size(None, written, to)
+                        .map_err(|r| (r.name, r.detail))?;
+                    if targets.contains(&(*node, *field)) {
+                        fields.insert((*node, *field), to.clone());
+                    }
+                    Ok(())
                 }
-                Op::Rows { node, field, .. } => {
+                Op::Rows { node, field, rows } => {
                     if *field == crate::edit::DOOR_GEOMETRY || *field == 7 {
                         return Err((
                             "edit.rows",
                             "a door's link and owned geometry are not rows".into(),
                         ));
                     }
-                    named(*node).map(|_| ())
+                    if rows.is_empty() {
+                        return Err((
+                            "edit.rows",
+                            "a rows operation carries at least one row".into(),
+                        ));
+                    }
+                    named(*node)?;
+                    let now = fields.get(&(*node, *field)).or_else(|| match node {
+                        Ref::Node(id) => nodes.get(id).and_then(|h| h.fields.get(field)),
+                        Ref::New(_) => None,
+                    });
+                    let to = crate::edit::merged_rows(now, rows).ok_or((
+                        "edit.rows",
+                        "rows go into a field of rows, each at least two values".to_owned(),
+                    ))?;
+                    written = crate::edit::write_size(None, written, &to)
+                        .map_err(|r| (r.name, r.detail))?;
+                    fields.insert((*node, *field), to);
+                    Ok(())
                 }
                 Op::Doorway {
                     name,
@@ -1235,12 +1286,17 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                 name,
                 kind,
                 parent,
-                fields,
+                fields: placed,
                 ..
             } => {
                 new.insert(*name, (kind.as_str().to_owned(), *parent));
-                if fields.get(&7).is_some_and(|v| read_id(v).is_ok()) {
+                if placed.get(&7).is_some_and(|v| read_id(v).is_ok()) {
                     doorways.insert(Ref::New(*name));
+                }
+                for (f, v) in placed {
+                    if targets.contains(&(Ref::New(*name), *f)) {
+                        fields.insert((Ref::New(*name), *f), v.clone());
+                    }
                 }
             }
             Op::Set { node, field: 7, to } => {
