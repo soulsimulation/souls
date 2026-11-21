@@ -3312,7 +3312,10 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
 /// C25 (#3688) A1: a cottage's inner door, its bedroom's, on a served full Eden. Born outside the cottage, the Soul
 /// walks in to the bedroom's rug, then closes and opens the door from there: each form first walks to the door's
 /// point, as today's game walks to the hand's point. Eden's cottage doors are seeded open (the facts' `door.open`), so
-/// the world, deciding a form's needs at commit (#3888), refuses an `open` first by its need `field_differs`. Left open (#3688): from outside, a form's approach walks in
+/// the world, deciding a form's needs at commit (#3888), refuses an `open` first by its need `field_differs`. Open
+/// (#1960): the `close` from the bedroom ends `out-of-reach`: no place to stand within an arm of the aim short of the
+/// door's `leaf` point is found on the bedroom's side, so the body does not move. Before #3888 the `open` first, then
+/// done on the open door, walked the body to its handle, from where the `close` reached the leaf. Left open (#3688): from outside, a form's approach walks in
 /// through the front door and approaches again from the cottage's floor, but its walk on the ground ends
 /// `walk.blocked` on the way there (the route lane's); a knock from the bedroom ends `out-of-reach`, as no place a
 /// body may stand on the bedroom's side is within an arm of the door's panel.
