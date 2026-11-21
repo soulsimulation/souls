@@ -311,6 +311,8 @@ pub enum Event {
     /// A set-down checked off the clock thread by the edit checker's thread (E4's caller, #3604), with the walkers'
     /// maps prepared from its part when it changes what walkers go round, or its refusal.
     SetDown(Box<(Id, R<SetDownChecked>)>),
+    /// An undo or a redo checked off the clock thread (G4 served, #3694), or its refusal.
+    Undone(Box<(Id, Result<crate::undo::Checked, Refused>)>),
     /// The directory's Souls file as it now reads, and where the answers to the intents it causes go (W11b).
     Directory(Box<(Directory, Reply)>),
     /// A gateway connection that is told each Soul's wind-down word (#3784): now, all of them, then each change.
@@ -898,6 +900,12 @@ struct Clock {
     set_down: Vec<(Id, R<SetDownChecked>)>,
     /// Edits checked since the last tick, committed (or refused) at the next.
     edited: Vec<(Id, Result<Checked, Refused>)>,
+    /// The creator's edit history (G4, #3694): each committed edit's before-values, for undo and redo.
+    history: sim::edit::undo::History,
+    /// The build step each open edit is, when it is one.
+    steps: BTreeMap<Id, sim::edit::undo::Step>,
+    /// Undos and redos checked since the last tick, committed (or refused) at the next.
+    undone: Vec<(Id, Result<crate::undo::Checked, Refused>)>,
     /// Where the edit checker reads the bodies the controller holds, handed off each tick (G1d).
     walkers: Option<Arc<buildsafe::Moving>>,
     /// Soul Actions (C2, #3366): the forms in progress, and the form acts taken since the last tick, committed at
@@ -956,6 +964,8 @@ struct Clock {
 
 enum CheckJob {
     Edit(Id, Edit, Minter),
+    /// A creator's undo or redo (#3694): the asker, whether a redo, and the effects the clock's history previewed.
+    Undo(Box<(Id, Actor, bool, Vec<Effect>)>),
     /// A Soul's set-down (#3604).
     SetDown(crate::setdown::Ask),
     Wear(Box<WearRequest>),
@@ -1124,6 +1134,8 @@ enum Taken {
     Form(Act),
     Move(Asked),
     Edit(Edit),
+    /// An undo (false) or a redo (true).
+    Undo(bool),
     Engine(engine::Act),
     SetDown(crate::setdown::Ask),
 }
@@ -1836,10 +1848,22 @@ impl Clock {
             }),
             // An edit (G1b): checked off the clock thread, committed at a tick through `sim::edit`.
             (None, None, None, Ok(Kind::Edit)) => {
-                match (self.editing, edit::wire::edit_of(&intent, id)) {
-                    (true, Some(e)) => Ok(Taken::Edit(e)),
+                match (self.editing, edit::wire::asked(&intent.parameters)) {
                     (false, _) => Err("edit.not-the-creator"),
-                    (_, None) => Err("intent.not-an-edit"),
+                    (true, Ok(edit::wire::Asked::Undo)) => Ok(Taken::Undo(false)),
+                    (true, Ok(edit::wire::Asked::Redo)) => Ok(Taken::Undo(true)),
+                    (true, Ok(edit::wire::Asked::Batch(_, step))) => {
+                        match edit::wire::edit_of(&intent, id) {
+                            Some(e) => {
+                                if let Some((build, name)) = step {
+                                    self.steps.insert(id, sim::edit::undo::Step { build, name });
+                                }
+                                Ok(Taken::Edit(e))
+                            }
+                            None => Err("intent.not-an-edit"),
+                        }
+                    }
+                    (true, Err(_)) => Err("intent.not-an-edit"),
                 }
             }
             // A Soul puts its held thing down (E4, #3604): checked off the clock thread, committed at a tick.
@@ -1885,6 +1909,10 @@ impl Clock {
             Taken::Move(m) => m.body,
             // An edit drives no body: its deadline is kept under its actor.
             Taken::Edit(e) => match e.actor {
+                Actor::Soul(a) | Actor::Creator(a) => a,
+                Actor::World => self.zone,
+            },
+            Taken::Undo(_) => match actor {
                 Actor::Soul(a) | Actor::Creator(a) => a,
                 Actor::World => self.zone,
             },
@@ -1943,6 +1971,31 @@ impl Clock {
                 }
                 Err(r) => self.end(id, |c| c.edit_refusal(actor, sequence, &r)),
             },
+            // Previewed on the history here (lookups only), judged and mapped off the clock, written at a tick.
+            Taken::Undo(redo) => {
+                let world = edit::World {
+                    creator: match actor {
+                        Actor::Creator(c) => c,
+                        _ => self.zone,
+                    },
+                    kinds: BTreeMap::new(),
+                };
+                match self
+                    .history
+                    .preview(redo, &self.replica, &world, actor, now)
+                {
+                    Ok(effects) => {
+                        if let Some(tx) = &self.edits
+                            && tx
+                                .send(CheckJob::Undo(Box::new((id, actor, redo, effects))))
+                                .is_ok()
+                        {
+                            self.outstanding += 1;
+                        }
+                    }
+                    Err(r) => self.end(id, |c| c.edit_refusal(actor, sequence, &r)),
+                }
+            }
             Taken::SetDown(a) => {
                 if let Some(tx) = &self.edits
                     && tx.send(CheckJob::SetDown(a)).is_ok()
@@ -2056,6 +2109,116 @@ impl Clock {
         }
     }
 
+    /// The tick's checked undos and redos (#3694): each still open is written through the history at this tick, whose
+    /// rule finds the very effects checked off the clock and judges G2's guard against the bodies as they stand
+    /// (lookups only); with walkers, through their prepared maps as an edit is. Else refused by name, nothing written.
+    fn undos(&mut self, now: Micros) {
+        let mut kept = Vec::new();
+        for (id, checked) in std::mem::take(&mut self.undone) {
+            let mut checked = checked;
+            let mut keep = |c: &mut Result<crate::undo::Checked, Refused>| {
+                if let Ok(crate::undo::Checked {
+                    maps: Some(maps), ..
+                }) = c
+                {
+                    kept.push(std::mem::take(&mut maps.surfaces));
+                }
+            };
+            let Some(o) = self.open.get(&id) else {
+                keep(&mut checked);
+                continue;
+            };
+            let (actor, sequence) = (o.actor, o.sequence);
+            if expired(o.expiry, now) {
+                keep(&mut checked);
+                self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
+                continue;
+            }
+            let done = checked.and_then(|k| {
+                let crate::undo::Checked {
+                    redo,
+                    effects,
+                    guard,
+                    classes,
+                    souls,
+                    maps,
+                } = k;
+                let sizes = self
+                    .bodies
+                    .as_ref()
+                    .map(Bodies::classes)
+                    .unwrap_or_default();
+                let bodies = match &self.bodies {
+                    Some(b) => buildsafe::judged(souls, &buildsafe::moving(b)),
+                    None => souls,
+                };
+                let world = edit::World {
+                    creator: match actor {
+                        Actor::Creator(c) => c,
+                        _ => self.zone,
+                    },
+                    kinds: BTreeMap::new(),
+                };
+                let (history, replica) = (&mut self.history, &mut self.replica);
+                let mut write = || {
+                    let mut rule = |_: &Replica, list: &[Effect]| {
+                        if !crate::undo::same(list, &effects) {
+                            return Err(Refused {
+                                op: None,
+                                name: "edit.stale",
+                                detail: "the world changed since the undo was checked".into(),
+                            });
+                        }
+                        crate::undo::judge(&guard, &classes, &sizes, &bodies)
+                    };
+                    let r = if redo {
+                        history.redo(replica, &world, actor, now, &mut rule)
+                    } else {
+                        history.undo(replica, &world, actor, now, &mut rule)
+                    };
+                    r.map(|r| sim::edit::Committed {
+                        part: r.part,
+                        names: BTreeMap::new(),
+                    })
+                };
+                match (&mut self.bodies, maps) {
+                    (Some(b), Some(maps)) => b.commit_map(maps, write),
+                    // Every edit a world with walkers commits reaches their town: none without its maps.
+                    (Some(_), None) => Err(Refused {
+                        op: None,
+                        name: "edit.map-unchecked",
+                        detail: "no walkers' map was prepared for the undo".into(),
+                    }),
+                    (None, _) => write(),
+                }
+            });
+            match done {
+                Ok(c) => {
+                    self.unsealed = true;
+                    if let Some(w) = &self.walkers {
+                        w.committed(Arc::clone(&c.part), self.replica.version(), None);
+                    }
+                    self.receipts.index(&c.part.effects);
+                    self.effects.extend(c.part.effects.iter().cloned());
+                    self.parts.push(c.part);
+                    self.end(id, |k| Answer::Receipt {
+                        actor,
+                        sequence,
+                        intent: id,
+                        entries: k.receipts.entries(id).to_vec(),
+                        names: BTreeMap::new(),
+                    });
+                }
+                Err(r) => self.end(id, |c| c.edit_refusal(actor, sequence, &r)),
+            }
+        }
+        if !kept.is_empty()
+            && let Some(tx) = &self.edits
+        {
+            let _ = tx.send(CheckJob::Release(kept));
+        }
+    }
+
     /// The tick's checked edits (G1b): each still open is committed through `sim::edit` on the live replica, as
     /// generic effects under its intent, and answered with a receipt carrying the map from names to ids; or refused
     /// whole, naming the failing operation. Placed nodes take their ids from the world's lineage, on the counter its
@@ -2131,6 +2294,11 @@ impl Clock {
                     .as_ref()
                     .map(|b| buildsafe::judged(souls.clone(), &buildsafe::moving(b)));
                 let current_classes = self.bodies.as_ref().map(Bodies::classes);
+                // What the edit overwrites, kept for its undo (G4, #3694): read before it is written.
+                let before = sim::edit::undo::Before::of(
+                    self.replica.tree(),
+                    c.checked.reads.iter().map(|(_, id)| *id),
+                );
                 let mut commit = || {
                     sim::edit::commit_classes(
                         &mut self.replica,
@@ -2154,10 +2322,12 @@ impl Clock {
                     }),
                     (None, _) => commit().map(|c| (c, None)),
                 };
-                done.map(|(c, mine)| (c, mine, places))
+                done.map(|(c, mine)| (c, mine, places, before))
             });
+            let step = self.steps.remove(&id);
             match committed {
-                Ok((c, mine, places)) => {
+                Ok((c, mine, places, before)) => {
+                    self.history.record(&before, &self.replica, &c.part, step);
                     if let Some(b) = &mut self.bodies
                         && let Err(e) = places.install(&mut b.slots, &c.names)
                     {
@@ -3647,6 +3817,7 @@ impl Clock {
         }
         // 4b. Checked edits (G1b): committed through `sim::edit`, or refused whole.
         self.edits(now);
+        self.undos(now);
         self.wears(now);
         // 4c. Checked set-downs (#3604): committed with lookups only, or refused by name.
         self.set_downs(now);
@@ -4526,6 +4697,9 @@ pub fn start<S: Storage + 'static>(
         editing,
         set_down: Vec::new(),
         edited: Vec::new(),
+        history: sim::edit::undo::History::default(),
+        steps: BTreeMap::new(),
+        undone: Vec::new(),
         walkers,
         forms: {
             let mut acts = Acts::new(kinds, library, header, forms_scope);
@@ -4677,6 +4851,10 @@ pub fn start<S: Storage + 'static>(
                     Event::SetDown(k) => {
                         c.outstanding = c.outstanding.saturating_sub(1);
                         c.set_down.push(*k);
+                    }
+                    Event::Undone(k) => {
+                        c.outstanding = c.outstanding.saturating_sub(1);
+                        c.undone.push(*k);
                     }
                     Event::Directory(d) => {
                         let (d, reply) = *d;
@@ -4864,6 +5042,47 @@ fn edit_checker(
                 };
                 let (id, e, reserved) = match job {
                     CheckJob::Edit(id, e, reserved) => (id, e, reserved),
+                    // An undo or a redo (#3694): the creator, G2's rule and the maps on its previewed part.
+                    CheckJob::Undo(job) => {
+                        let (id, actor, redo, effects) = *job;
+                        let snapshot = walkers.current();
+                        let needed = snapshot
+                            .map
+                            .as_ref()
+                            .map_or(edited, |m| edited.max(m.version));
+                        let copy = publisher.wait_for(needed, Duration::from_secs(1));
+                        let who = match (&world, &creator) {
+                            (None, _) => None,
+                            (Some(w), c) => c.as_ref().map_or(Some(w.creator), |c| c.get()),
+                        };
+                        let checked = if copy.version() < needed {
+                            Err(Refused {
+                                op: None,
+                                name: "edit.stale",
+                                detail: "the published copy has not reached the map basis".into(),
+                            })
+                        } else {
+                            crate::undo::check(
+                                crate::undo::Ask {
+                                    actor,
+                                    creator: who,
+                                    redo,
+                                    effects,
+                                    copy: &copy,
+                                    kinds: &kinds,
+                                    moving: &snapshot.bodies,
+                                    sizes: &snapshot.classes,
+                                    source: snapshot.map.as_deref(),
+                                    movers: &snapshot.movers,
+                                },
+                                &mut town,
+                            )
+                        };
+                        if events.send(Event::Undone(Box::new((id, checked)))).is_err() {
+                            break;
+                        }
+                        continue;
+                    }
                     // A Soul's set-down (#3604): E4's plan, part and G2's rule on the town, off the clock; and, for a
                     // thing walkers go round, the walkers' maps from the same basis an edit's are prepared from.
                     CheckJob::SetDown(a) => {

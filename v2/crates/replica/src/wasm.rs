@@ -519,18 +519,26 @@ fn spot_of(o: &json::Value) -> Result<Spot, String> {
         None | Some(json::Value::Null) => None,
         v => Some(uint_of(v, "slot")?),
     };
-    // #3695: a move that keeps a thing's facing and support (a landform lifting what rests on it) gives both, as the
-    // pose writes them: `orientation` [w, x, y, z] and `support` {"which": 0 to 4, "node": id, "height": µm}.
-    let orientation = match o.get("orientation").and_then(json::Value::arr) {
-        None => Quat::IDENTITY,
-        Some(q) if q.len() == 4 => Quat::new(
+    // A turn about +y in whole millidegrees (#3694: placing facing something), or, for a move that keeps a thing's
+    // facing and support (#3695: a landform lifting what rests on it), both as the pose writes them: `orientation`
+    // [w, x, y, z] and `support` {"which": 0 to 4, "node": id, "height": µm}.
+    let orientation = match (
+        o.get("yaw"),
+        o.get("orientation").and_then(json::Value::arr),
+    ) {
+        (Some(v), _) if !matches!(v, json::Value::Null) => {
+            Quat::from_yaw_mdeg(int_of(Some(v), "yaw, in millidegrees")?)
+                .map_err(|e| format!("yaw: {e:?}"))?
+        }
+        (_, None) => Quat::IDENTITY,
+        (_, Some(q)) if q.len() == 4 => Quat::new(
             int_of(q.first(), "orientation's numbers")?,
             int_of(q.get(1), "orientation's numbers")?,
             int_of(q.get(2), "orientation's numbers")?,
             int_of(q.get(3), "orientation's numbers")?,
         )
         .map_err(|e| format!("orientation: {e:?}"))?,
-        Some(_) => return Err("orientation is [w, x, y, z]".into()),
+        (_, Some(_)) => return Err("orientation is [w, x, y, z]".into()),
     };
     let support = match o.get("support") {
         None | Some(json::Value::Null) if slot.is_some() => Support::Slot,
@@ -593,7 +601,8 @@ fn field_value(v: &json::Value) -> Result<Value, String> {
 
 /// The batch the daemon passes as JSON: `[{"op": "place", "name": 1, "kind": "<namespace:name@hash>", "in": <node>,
 /// "at": [x, y, z], "slot": n, "fields": {"<n>": value}}, {"op": "move", "node": <node>, "at": [..]}, {"op": "set",
-/// "node": <node>, "field": n, "value": v}, {"op": "remove", "node": <node>}]`, positions in micrometres.
+/// "node": <node>, "field": n, "value": v}, {"op": "remove", "node": <node>}]`, positions in micrometres; a place or
+/// a move may add `"yaw"`, a turn about +y in millidegrees.
 /// A `doorway` names its leaf, owning `from` and other `to` places, with `at: [x,z]`, `yaw`, `width` and `height`
 /// in the existing doorway row's millimetres/millidegrees, in the owning room's building frame.
 fn ops_of(text: &str) -> Result<Vec<Op>, String> {
@@ -704,6 +713,55 @@ pub fn wire_edit(
     );
     let id = Id::new(scope, counter).ok_or_else(|| JsError::new("id-counter-exhausted"))?;
     let ops = ops_of(ops).map_err(|e| JsError::new(&format!("edit-batch: {e}")))?;
+    edit_intent(
+        id,
+        creator,
+        sequence,
+        basis,
+        &crate::edit::wire::Asked::Batch(ops, None),
+    )
+}
+
+/// A creator's undo, redo or build step (G4, #3694), as [`wire_edit`] makes an edit: `asked` is `undo`, `redo` or
+/// `step`; a step carries `ops` (the JSON [`ops_of`] reads) under the names `build` and `step`.
+#[wasm_bindgen(js_name = wireEditAsked)]
+#[allow(clippy::too_many_arguments)]
+pub fn wire_edit_asked(
+    scope: &[u8],
+    counter: u64,
+    sequence: u64,
+    basis: &[u8],
+    asked: &str,
+    ops: &str,
+    build: &str,
+    step: &str,
+) -> Result<Vec<u8>, JsError> {
+    use crate::edit::wire::Asked;
+    let scope = Scope(
+        scope
+            .try_into()
+            .map_err(|_| JsError::new("scope-not-16-bytes"))?,
+    );
+    let id = Id::new(scope, counter).ok_or_else(|| JsError::new("id-counter-exhausted"))?;
+    let asked = match asked {
+        "undo" => Asked::Undo,
+        "redo" => Asked::Redo,
+        "step" => Asked::Batch(
+            ops_of(ops).map_err(|e| JsError::new(&format!("edit-batch: {e}")))?,
+            Some((build.to_owned(), step.to_owned())),
+        ),
+        _ => return Err(JsError::new("edit-asked: undo, redo or step")),
+    };
+    edit_intent(id, true, sequence, basis, &asked)
+}
+
+fn edit_intent(
+    id: Id,
+    creator: bool,
+    sequence: u64,
+    basis: &[u8],
+    asked: &crate::edit::wire::Asked,
+) -> Result<Vec<u8>, JsError> {
     let intent = Intent {
         actor: if creator {
             Actor::Creator(id)
@@ -712,7 +770,7 @@ pub fn wire_edit(
         },
         verb: Name::new(crate::edit::wire::VERB).ok_or_else(|| JsError::new("verb"))?,
         target: None,
-        parameters: crate::edit::wire::parameters(&ops),
+        parameters: crate::edit::wire::parameters_of(asked),
         sequence,
         basis: decode(basis).map_err(js)?.value,
         expiry: i64::MAX,

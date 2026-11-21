@@ -49,10 +49,17 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `remove <id>` | it and everything in it |
 | `batch '<json list>'` | several operations at once: all happen, or none |
 | `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
-| `describe` | what is there, and what each kind admits |
 | `find <words> [--category c] [--has slot:sit]` | kinds that match, best first, each with why |
 | `recommend <what you want to make>` | kinds for each need it names, the words no kind answers, and an example batch |
 | `catalog [--category c] [--has ...]` / `taxonomy` | every kind, one each / categories and what kinds offer (`--has` names) |
+| `describe` | what is there (each node's `at`, mm in its parent), and what each kind admits |
+| `place <kind> --beside <id> [--dir n\|ne\|e\|...] [--dist mm]` | beside another, in the same parent (default east, 1000 mm; north is -z) |
+| `place <kind> --on <id>` | in or on another, in its first free slot a thing may take |
+| `place ... --facing <id\|n\|e\|s\|w>`, `move <id> --facing ...` | turned to face another thing or a compass point |
+| `undo` | the newest edit taken back; the answer's `changed` says what changed |
+| `redo` | the newest undo done again, with the same ids; a new edit clears it |
+| `<edit verb> ... --build <name> --step <name>` | one step of a build: the world keeps that batch under the build's name |
+| `undo --build <name>` | the whole build undone, step by step, while its steps are your newest edits |
 | `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
 | `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
 
@@ -100,6 +107,9 @@ node souls-god.mjs batch '[{"op":"place","name":1,"kind":"room","in":"<place id>
 | `edit.name-unknown` | the batch uses a name no earlier place gave |
 | `edit.stale` | someone changed that thing after your copy saw it: `describe`, then send again |
 | `edit.not-the-creator` | this token is not the creator's |
+| `edit.would-bury`, `edit.would-cut-off`, `edit.in-use` | a Soul is there, would be shut in, or is using it: an edit or an undo is refused, never forced |
+| `undo.nothing`, `undo.nothing-to-redo` | nothing left to undo, or nothing undone to redo |
+| `undo.conflict` | something the undo would change has changed since: put it back by hand |
 
 ## Good habits
 
