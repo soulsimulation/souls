@@ -88,6 +88,8 @@ export class CameraDirector {
     cam.controls.addEventListener('start', () => ((this.panned = 0), this.follow?.touched()));
     addEventListener('keydown', (e) => /^(Key[WASD]|Arrow)/.test(e.code) && take());
     this.find = this.findBox();
+    // N-V21 (#3678): opening a conversation frames its members; the viewer's camera from there.
+    souls.framer = (eye, target) => (this.free(), this.show(eye, target));
   }
 
   /** A part's named events, for broadcast. */
