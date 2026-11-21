@@ -384,3 +384,67 @@ test('native-v2 console errors require exact owned-origin HTTP evidence and narr
   const otherOrigin=await sample({foreignResponse:true,foreignConsole:true});assert.equal(otherOrigin.status,'FAIL');assert.match(otherOrigin.error,/unexpected-network-error/);
   const unmatched=await sample({foreignConsole:true});assert.equal(unmatched.status,'FAIL');assert.match(unmatched.error,/unexpected-console-error/);
 });
+
+test('body recipe owns successful finite seed children and all three services without qualifying injection', async t => {
+  const services=[];let seed;const f=setup(t,{boot:async o=>{
+    seed=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});o.onSpawn(seed,{transient:true});seed.exitCode=0;seed.emit('exit',0);
+    for(let i=0;i<3;i++){const c=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});services.push(c);o.onSpawn(c);}
+    return {child:services[0],children:services,base:`http://example.com:${o.port}`,viewer:`http://example.com:${o.port}/?stream=/s/fixed/`,dataDir:o.data};
+  }});f.o.world.kind='v2-bodies';const report=await f.runner(f.o);
+  assert.equal(report.status,'PASS');assert.equal(report.qualified,false);assert.equal(report.injected,true);
+  assert.equal(report.teardown.children.length,4);assert(report.teardown.children.every(c=>c.exited));assert.equal(seed.exitCode,0);
+});
+
+test('body recipe aborts abnormal finite child exit before opening the browser', async t => {
+  const services=[];const f=setup(t,{boot:async o=>{
+    for(let i=0;i<3;i++){const c=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});services.push(c);o.onSpawn(c);}
+    const command=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});o.onSpawn(command,{transient:true});command.exitCode=1;command.emit('exit',1);
+    return {child:services[0],children:services,base:`http://example.com:${o.port}`,viewer:`http://example.com:${o.port}/`,dataDir:o.data};
+  }});f.o.world.kind='v2-bodies';const report=await f.runner(f.o);
+  assert.equal(report.status,'BOOT_ABORT');assert.equal(report.browserStarted,false);assert.equal(report.teardown.children.length,4);assert(report.teardown.children.every(c=>c.exited));
+});
+
+test('body recipe service death remains fatal after finite child success', async t => {
+  const services=[];const f=setup(t,{boot:async o=>{
+    for(let i=0;i<3;i++){const c=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});services.push(c);o.onSpawn(c);}
+    return {child:services[0],children:services,base:`http://example.com:${o.port}`,viewer:`http://example.com:${o.port}/`,dataDir:o.data};
+  }});f.o.world.kind='v2-bodies';f.o.journey=async c=>{services[1].exitCode=0;services[1].emit('exit',0);c.check('observed',true);};
+  const report=await f.runner(f.o);assert.equal(report.status,'FAIL');assert.equal(report.qualified,false);assert(report.teardown.children.every(c=>c.exited));
+});
+
+// Aborted requests: accepted only for a declared expected response's URL or when in flight at the driver's own goto/reload.
+async function abortSample(t, journey) {
+  const services=[];const f=setup(t,{boot:async o=>{
+    for(let i=0;i<3;i++){const c=Object.assign(new EventEmitter(),{exitCode:null,signalCode:null});services.push(c);o.onSpawn(c);}
+    return {child:services[0],children:services,base:`http://example.com:${o.port}`,viewer:`http://example.com:${o.port}/`,dataDir:o.data};
+  },browser:async(o,paths,base)=>{
+    let url=base;const page=Object.assign(new EventEmitter(),{url:()=>url,screenshot:async()=>Buffer.from('PNG'),locator:()=>({ariaSnapshot:async()=>'- bodies'}),goto:async value=>{url=value;},reload:async()=>{}});
+    return {page,close:async()=>{}};
+  }});f.o.world.kind='v2-bodies';
+  f.o.journey=async c=>{const base=new URL(c.base).origin;const request=path=>({method:()=>'GET',url:()=>base+path,failure:()=>({errorText:'net::ERR_ABORTED'})});await journey({...c,base,request});c.check('observed',true);};
+  const report=await f.runner(f.o);return {report,network:JSON.parse(readFileSync(join(report.paths.dir,'network.json')))};
+}
+test('an aborted GET of a declared expected response URL is expected', async t => {
+  const {report,network}=await abortSample(t,async({page,request,expectHttp})=>{const r=request('/s/h/w/l/bundles/00000002/index');expectHttp('/s/h/w/l/bundles/00000002/index',404,'next day at the live edge');
+    page.emit('request',r);page.emit('response',{status:()=>404,url:()=>r.url()});page.emit('requestfailed',r);});
+  assert.equal(report.status,'PASS');assert.deepEqual(network.map(e=>e.expected),[true,true]);
+});
+test('an aborted GET in flight when the driver navigates is expected, for goto and for reload', async t => {
+  for (const nav of ['goto','reload']) {
+    const {report,network}=await abortSample(t,async({page,base,request})=>{const r=request('/assets/chunk.js');page.emit('request',r);await page[nav](base+'/');page.emit('requestfailed',r);});
+    assert.equal(report.status,'PASS',nav);assert.equal(network[0].inFlightAtDriverNavigation,true);assert.equal(network[0].expected,true);
+  }
+});
+test('an undeclared abort not in flight at a driver navigation still fails, as do other errors and other origins', async t => {
+  const cases={
+    'no-navigation':async({page,request})=>{const r=request('/assets/chunk.js');page.emit('request',r);page.emit('requestfailed',r);},
+    'started-after-navigation':async({page,base,request})=>{await page.goto(base+'/');const r=request('/assets/chunk.js');page.emit('request',r);page.emit('requestfailed',r);},
+    'other-error':async({page,base,request})=>{const r={...request('/assets/chunk.js'),failure:()=>({errorText:'net::ERR_CONNECTION_RESET'})};page.emit('request',r);await page.goto(base+'/');page.emit('requestfailed',r);},
+    'other-origin':async({page,base})=>{const r={method:()=>'GET',url:()=>'https://other.example/a.js',failure:()=>({errorText:'net::ERR_ABORTED'})};page.emit('request',r);await page.goto(base+'/');page.emit('requestfailed',r);},
+    'declared-path-without-expected-response':async({page,request,expectHttp})=>{expectHttp('/assets/chunk.js',404,'declared but never answered');const r=request('/assets/chunk.js');page.emit('request',r);page.emit('requestfailed',r);},
+  };
+  for (const [name,journey] of Object.entries(cases)) {
+    const {report,network}=await abortSample(t,journey);
+    assert.equal(report.status,'FAIL',name);assert.match(report.error,/unexpected-network-error/,name);assert.equal(network[0].expected,false,name);
+  }
+});

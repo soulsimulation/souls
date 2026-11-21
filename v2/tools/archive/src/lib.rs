@@ -1073,6 +1073,34 @@ impl Bundler {
         Ok(done)
     }
 
+    /// The open window as a bundle, left open: a running world's latest minute, published before it closes.
+    pub fn open_bundle(&self) -> R<Option<Bundle>> {
+        if self.based.is_some() {
+            return self.clone_based_open();
+        }
+        let (Some((start, snapshot, view)), Some(h)) = (&self.open, &self.header) else {
+            return Ok(None);
+        };
+        let out = view.output();
+        if out.records.is_empty() {
+            return Ok(None);
+        }
+        Bundle::new(
+            h.hash().to_bytes(),
+            *start,
+            WINDOW,
+            snapshot.clone(),
+            out.to_value(),
+        )
+        .map(Some)
+    }
+    fn clone_based_open(&self) -> R<Option<Bundle>> {
+        match self.based.as_ref().and_then(|m| m.open.clone()) {
+            Some(open) => self.close_based(self.header.as_ref().expect("based header"), open),
+            None => Ok(None),
+        }
+    }
+
     /// Closes the open window (at shutdown).
     pub fn finish(&mut self) -> R<Option<Bundle>> {
         if let Some(mode) = &mut self.based {
@@ -1169,12 +1197,20 @@ impl<S: Store> Shelf<S> {
     }
 
     pub fn put(&mut self, b: &Bundle) -> R<()> {
+        self.put_keyed(b, b.observation.is_some())
+    }
+    /// An open window's bundle: written under its content hash, so a later publish of the same window (or its close)
+    /// never writes over it; the day index keeps one row per start, the newest.
+    pub fn put_open(&mut self, b: &Bundle) -> R<()> {
+        self.put_keyed(b, true)
+    }
+    fn put_keyed(&mut self, b: &Bundle, hashed: bool) -> R<()> {
         let day = day_of(b.start);
         if self.day.as_ref().is_some_and(|(ix, _)| ix.day != day) {
             self.write_index()?;
             self.day = None;
         }
-        let key = if b.observation.is_some() {
+        let key = if hashed {
             format!(
                 "{}bundles/{day:08}/{:020}-{}",
                 self.prefix,
@@ -1184,7 +1220,7 @@ impl<S: Store> Shelf<S> {
         } else {
             format!("{}bundles/{day:08}/{:020}", self.prefix, b.start)
         };
-        if b.observation.is_some() {
+        if hashed {
             immutable_store(&self.store, &key, &bundle_stored(b))?;
         } else {
             put(&self.store, &key, &bundle_stored(b), None)?;
@@ -1208,9 +1244,7 @@ impl<S: Store> Shelf<S> {
             });
         }
         let (ix, _) = self.day.as_mut().expect("day index");
-        if b.observation.is_some() {
-            ix.bundles.retain(|(start, _, _)| *start != b.start);
-        }
+        ix.bundles.retain(|(start, _, _)| *start != b.start);
         ix.bundles.push((b.start, key, b.hash()));
         if self.based {
             ix.bundles.sort_by_key(|(start, _, _)| *start);
@@ -1388,8 +1422,8 @@ impl<S: Store> Archiver<S> {
     }
     /// Publish the existing open public window/index without inventing effects or forcing a private packing cut.
     pub fn publish_open(&mut self) -> R<()> {
-        if let Some(bundle) = self.bundler.finish()? {
-            self.shelf.put(&bundle)?;
+        if let Some(bundle) = self.bundler.open_bundle()? {
+            self.shelf.put_open(&bundle)?;
         }
         for (k, v) in self.indexer.clone().finish()? {
             self.shelf.put_view(&k, &v)?;

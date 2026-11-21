@@ -1,3 +1,4 @@
+import { creatorArchive } from '../worlds/archive.ts';
 import { creatorHandoff } from '../worlds/handoff.ts';
 import { browserSession, localTestSignIn, sessionRequest } from '../source/signin.ts';
 import { worldAddress } from '../source/address.ts';
@@ -374,3 +375,5 @@ Object.assign(globalThis, { panel: { nodes, get session() { return session; }, g
 requestAnimationFrame(draw);
 
 creatorHandoff($<HTMLElement>('handoff'), installed?.world ?? null, installed?.directory ?? location.origin, () => $<HTMLInputElement>('who').value);
+
+creatorArchive($<HTMLElement>('archive'), installed?.world ?? null, installed?.directory ?? location.origin, () => $<HTMLInputElement>('who').value);

@@ -393,3 +393,67 @@ fn a3_four_kinds_of_order_and_no_intent_with_a_start_time_or_a_condition() {
         assert_eq!(r.name, "intent-not-a-record", "{what}");
     }
 }
+
+/// #3603: a track run once (a steered punt's) goes through its stations and stands at the last for good, a stop that
+/// never ends; it round-trips through the node's field; a node's place at a time is its course's, else where it was
+/// placed (no course, a course that does not load, or a time before it starts).
+#[test]
+fn a_track_run_once_stands_at_its_last_station_and_a_place_is_read_from_the_field() {
+    let once = Course {
+        stations: vec![
+            Station {
+                at: Vec3::new(0, 0, 0),
+                dwell: 0,
+            },
+            Station {
+                at: Vec3::new(6_000_000, 0, 8_000_000),
+                dwell: 0,
+            },
+        ],
+        shape: Shape::Once,
+        speed: 600_000,
+        t0: 1_000_000,
+        within: 20_000_000,
+    };
+    let table = once.load().expect("a track run once loads");
+    // 10 m at 0.6 m/s: 16.666667 s, rounded up to the microsecond.
+    let (mid, v) = table.at(1_000_000 + 8_333_334).unwrap();
+    assert_eq!(
+        (mid, v),
+        (
+            Vec3::new(3_000_000, 0, 4_000_000),
+            Vec3::new(360_000, 0, 480_000)
+        )
+    );
+    let end = 1_000_000 + 16_666_667;
+    assert_eq!(
+        table.at(end).unwrap(),
+        (Vec3::new(6_000_000, 0, 8_000_000), Vec3::ZERO)
+    );
+    let much_later = end + 365 * DAY_US;
+    assert_eq!(
+        table.at(much_later).unwrap().0,
+        Vec3::new(6_000_000, 0, 8_000_000)
+    );
+    assert_eq!(
+        table.stopped(much_later).unwrap().map(|s| s.station),
+        Some(1)
+    );
+    assert_eq!(Course::read(&once.to_value()), Some(once.clone()));
+    let placed = Vec3::new(-1, -2, -3);
+    let fields = BTreeMap::from([(F_COURSE, once.to_value())]);
+    assert_eq!(
+        super::course::place_at(&fields, placed, end).0,
+        Vec3::new(6_000_000, 0, 8_000_000)
+    );
+    assert_eq!(
+        super::course::place_at(&fields, placed, 0),
+        (placed, Vec3::ZERO),
+        "before it starts"
+    );
+    assert_eq!(
+        super::course::place_at(&BTreeMap::new(), placed, end),
+        (placed, Vec3::ZERO),
+        "no course"
+    );
+}

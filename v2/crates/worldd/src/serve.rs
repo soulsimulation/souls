@@ -284,9 +284,137 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
 }
 
 /// Loads a facts file (N1's or X6's) as the world as built, with the activity kinds of `entries` (C30).
+/// The facts with today's rowing punts added (#3603): one moored on each standing water that has room
+/// (`sim::courses::punts`), a thing of kind `core:rowing_punt` at its home, turned with its plank toward the bank, on its
+/// own loop (its course). The same facts give the same punts, so a seed and every serve of the world agree.
+fn with_punts(facts: &str) -> R<String> {
+    let im = import_eden::load(facts)?;
+    let Some(&ground) = im.nodes.get("ground") else {
+        return Ok(facts.to_owned());
+    };
+    // Planks and exits only where a body can stand on the ground as the walk cuts it (C15's `stand_near`).
+    let (waters, terrain) = sim::courses::punts::waters_of(&im.tree, ground)?;
+    let root = *im.nodes.get("world").ok_or("the facts have no world")?;
+    let header = import_eden::header(root, &im.rules)?;
+    let next = im.tree.to_state().next;
+    let mut town = Town::new(im.tree, ground, Doors::new(header, im.rules, next))
+        .map_err(|e| format!("the town: {e:?}"))?;
+    let view = town.view();
+    let moorings = sim::courses::punts::moorings(&waters, terrain.as_ref(), |p| {
+        view.stand_near(ground, p, 0, None).is_some()
+    });
+    if moorings.is_empty() {
+        return Ok(facts.to_owned());
+    }
+    let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
+    let Json::Obj(top) = &mut f else {
+        return Err("the facts are not an object".into());
+    };
+    let int = |n: i64| Json::Int(i128::from(n));
+    let obj =
+        |kv: Vec<(&str, Json)>| Json::Obj(kv.into_iter().map(|(k, v)| (k.to_owned(), v)).collect());
+    let kind = obj(vec![
+        ("ref", Json::s(PUNT_REF)),
+        ("hash", Json::s(&to_hex(&sha256(b"souls/rowing-punt/1")))),
+        ("name", Json::s("core:rowing_punt")),
+        ("form", Json::s("point")),
+        ("layer", Json::s("solid")),
+        ("door", Json::Bool(false)),
+        ("mesh", Json::Bool(false)),
+        ("slots", int(2)),
+    ]);
+    let things: Vec<Json> = moorings
+        .iter()
+        .enumerate()
+        .map(|(k, m)| {
+            // The plank (the kind's +x) toward the bank, `-out`: a yaw turns +x to (cos, -sin). Whole degrees, so no
+            // platform's last bit changes it.
+            let (ox, oz) = (m.out[0] as f64, m.out[1] as f64);
+            let yaw = (oz.atan2(-ox).to_degrees().round() as i64).rem_euclid(360) * 1000;
+            println!(
+                "punt: rowing-punt-{} on {} at {:.3},{:.3} m, plank at {:.3},{:.3} m, loop {} us from {} us",
+                k + 1,
+                replica::world_model::show(m.water),
+                m.home.x as f64 / 1e6,
+                m.home.z as f64 / 1e6,
+                m.door.x as f64 / 1e6,
+                m.door.z as f64 / 1e6,
+                m.course.load().map_or(0, |t| t.period),
+                m.course.t0
+            );
+            let mm = |v: i64| int(v / 1000);
+            let pose = Json::Arr(vec![mm(m.home.x), mm(m.home.y), mm(m.home.z), int(yaw)]);
+            let stations = m
+                .course
+                .stations
+                .iter()
+                .map(|s| Json::Arr(vec![int(s.at.x), int(s.at.y), int(s.at.z), int(s.dwell)]))
+                .collect();
+            let shape = match m.course.shape {
+                sim::courses::Shape::Loop => 1,
+                sim::courses::Shape::ThereAndBack => 2,
+                sim::courses::Shape::Once => 3,
+            };
+            // A rider's place: what the import reads of a slot (its number, point, yaw and capacity). What a body does
+            // there comes from the punt's entry, not from here.
+            let place = |n: i64, id: &str, x: i64| {
+                obj(vec![
+                    ("n", int(n)),
+                    ("id", Json::s(id)),
+                    ("at", Json::Arr(vec![int(x), int(360), int(0)])),
+                    ("yaw", int(180_000)),
+                    ("capacity", int(1)),
+                ])
+            };
+            obj(vec![
+                ("id", Json::Str(format!("e_punt{k}"))),
+                ("def", Json::s(PUNT_REF)),
+                ("ref", Json::s(PUNT_REF)),
+                ("parent", Json::Null),
+                ("pose", pose.clone()),
+                ("world", pose),
+                ("scale_ppm", int(1_000_000)),
+                ("name", Json::Str(format!("rowing-punt-{}", k + 1))),
+                (
+                    "slots",
+                    Json::Arr(vec![place(1, "rider_a", -650), place(2, "rider_b", 650)]),
+                ),
+                (
+                    "course",
+                    obj(vec![
+                        ("stations", Json::Arr(stations)),
+                        ("shape", int(shape)),
+                        ("speed", int(m.course.speed)),
+                        ("t0", int(m.course.t0)),
+                        ("within", int(m.course.within)),
+                    ]),
+                ),
+            ])
+        })
+        .collect();
+    for (key, add) in [("kinds", vec![kind]), ("things", things)] {
+        match top.iter_mut().find(|(k, _)| k == key) {
+            Some((_, Json::Arr(a))) => a.extend(add),
+            _ => return Err(format!("the facts have no '{key}' list")),
+        }
+    }
+    Ok(f.to_json())
+}
+
+/// The rowing punt's def (#3603): today's `rowing-punt`, a kind the world adds.
+const PUNT_REF: &str = "core-rowing-punt@1";
+
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
+    let facts = &with_punts(facts)?;
     let mut im = import_eden::load(facts)?;
     stamp("facts");
+    for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
+        println!(
+            "punt: rowing-punt-{} is {}",
+            k + 1,
+            replica::world_model::show(id)
+        );
+    }
     let mut activities = vec![conversation()?];
     activities.extend(activity_kinds(entries)?);
     stamp("activities");
@@ -441,6 +569,22 @@ fn public_boot(dir: &Path, header: &replica::effects::Header) -> R<Vec<u8>> {
     }
     if dir.join("entry.json").exists() {
         values.insert(6, hash(&dir.join("entry.json"))?);
+    }
+    let bodies = dir.join("bodies.json");
+    match std::fs::symlink_metadata(&bodies) {
+        Ok(metadata) => {
+            if !metadata.is_file() {
+                return Err("template-bodies-invalid: catalogue is a regular file".into());
+            }
+            let bytes = std::fs::read(&bodies).map_err(io(&bodies))?;
+            skills::wear::Catalogue::read(
+                std::str::from_utf8(&bytes).map_err(|_| "template-bodies-invalid")?,
+            )
+            .map_err(|_| "template-bodies-invalid")?;
+            values.insert(7, Value::Bytes(sha256(&bytes).to_vec()));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
     }
     encode(&Value::Map(values)).map_err(|e| e.to_string())
 }
@@ -831,12 +975,119 @@ fn born(
     Ok(out)
 }
 
+/// Fixed private migration support. It can choose only an already admitted birth, never mutate a live body.
+fn imported_births(
+    dir: &Path,
+    header: &replica::effects::Header,
+    catalogue: &skills::wear::Catalogue,
+    born: &mut BTreeMap<Id, [u8; 32]>,
+) -> R<()> {
+    let path = dir.join("births.json");
+    let metadata = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err("body-births-unavailable".into()),
+    };
+    let bad = "body-births-invalid";
+    if !metadata.is_file() || metadata.len() > 4 * 1024 * 1024 {
+        return Err(bad.into());
+    }
+    let bytes = std::fs::read(&path).map_err(|_| bad)?;
+    let value = json::parse(std::str::from_utf8(&bytes).map_err(|_| bad)?)?;
+    let fields = value.obj().ok_or(bad)?;
+    if fields.len() != 6
+        || fields.iter().any(|(k, _)| {
+            ![
+                "format",
+                "world",
+                "lineage",
+                "zone",
+                "catalogueHash",
+                "births",
+            ]
+            .contains(&k.as_str())
+        })
+    {
+        return Err(bad.into());
+    }
+    if value.get("format").and_then(Json::str) != Some("souls-births/1")
+        || value
+            .get("world")
+            .and_then(Json::str)
+            .is_none_or(str::is_empty)
+        || value.get("lineage").and_then(Json::str) != Some(to_hex(&header.lineage.0).as_str())
+        || value.get("zone").and_then(Json::str)
+            != Some(directoryd::accounts::principal_text(header.zone).as_str())
+    {
+        return Err("body-births-world".into());
+    }
+    let source = dir.join("bodies.json");
+    let metadata = std::fs::symlink_metadata(&source).map_err(|_| bad)?;
+    if !metadata.is_file() || metadata.len() > 4 * 1024 * 1024 {
+        return Err(bad.into());
+    }
+    let source = std::fs::read(&source).map_err(|_| bad)?;
+    if value.get("catalogueHash").and_then(Json::str) != Some(to_hex(&sha256(&source)).as_str()) {
+        return Err("body-births-catalogue".into());
+    }
+    let rows = value.get("births").and_then(Json::arr).ok_or(bad)?;
+    if rows.len() > 65_536 {
+        return Err(bad.into());
+    }
+    let mut seen = BTreeMap::new();
+    for row in rows {
+        let fields = row.obj().ok_or(bad)?;
+        if !(3..=4).contains(&fields.len())
+            || fields
+                .iter()
+                .any(|(k, _)| !["soul", "entry", "asked", "body"].contains(&k.as_str()))
+        {
+            return Err(bad.into());
+        }
+        let soul = row
+            .get("soul")
+            .and_then(Json::str)
+            .and_then(directoryd::accounts::principal_from_text)
+            .ok_or(bad)?;
+        if row.get("entry").and_then(Json::str) != value.get("zone").and_then(Json::str)
+            || row.get("asked") != Some(&Json::Int(0))
+        {
+            return Err(bad.into());
+        }
+        let choice = match row.get("body") {
+            None => None,
+            Some(Json::Str(text)) => Some(
+                catalogue
+                    .find(text)
+                    .filter(|p| skills::wear::hex(&p.hash) == *text)
+                    .ok_or("body-births-unknown")?
+                    .hash,
+            ),
+            Some(_) => return Err("body-births-unknown".into()),
+        };
+        if seen.insert(soul, choice).is_some() {
+            return Err("body-births-duplicate".into());
+        }
+        if let Some(held) = born.get(&soul)
+            && Some(*held) != choice
+        {
+            return Err("body-births-contradictory".into());
+        }
+    }
+    for (soul, hash) in seen {
+        if let Some(hash) = hash {
+            born.insert(soul, hash);
+        }
+    }
+    Ok(())
+}
+
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
 /// where the log last had it. The planner keeps its own town and all declared seats are registered.
 fn bodies(
     town: Town,
     planner: Town,
-    _ground: Id,
+    ground: Id,
     placed: &Placed,
     places: Vec<PlaceAt>,
     builds: &std::collections::BTreeMap<Id, replica::kinds::sizes::Build>,
@@ -888,9 +1139,27 @@ fn bodies(
         let moved = surface.place_built(*id, Frame { node, slot: None }, point, facing, build)?;
         at.push((moved, build));
     }
+    // The things on a course (today's punts, #3603): their seats are boarded and left only at their home stop.
+    let mut moving = Vec::new();
+    if let Some(gh) = town.tree.handle(ground) {
+        for &c in town.tree.children(gh).unwrap_or(&[]) {
+            if let Some(n) = town.tree.node(c)
+                && let Some(course) = n
+                    .fields()
+                    .get(&replica::schedule::F_COURSE)
+                    .and_then(replica::schedule::course::Course::read)
+            {
+                moving.push((n.id(), course));
+            }
+        }
+    }
     let mut b = Bodies::with_planner(town, planner, 50_000)?;
     for s in places {
         b.add_place(s)?;
+    }
+    for (thing, course) in moving {
+        let home = course.stations.first().map_or(Vec3::ZERO, |s| s.at);
+        b.slots.moving(thing, &course, home)?;
     }
 
     for (a, build) in at {
@@ -1158,9 +1427,7 @@ fn archiving(
                 indexed = a.shelf.writes.bundles;
             }
             if fresh && viewed.elapsed() >= VIEWS_EVERY {
-                if a.is_based() {
-                    a.publish_open()?;
-                }
+                a.publish_open()?;
                 for (k, v) in a.open_views()? {
                     a.shelf.put_view(&k, &v)?;
                 }
@@ -1508,7 +1775,7 @@ fn serve(args: &[String]) -> R<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => skills::wear::Catalogue::default(),
         Err(e) => return Err(format!("body-catalogue: {e}")),
     };
-    let born = born(&meta, &catalogue)?;
+    let mut born = born(&meta, &catalogue)?;
     let facts = dir.join("facts.json");
     let mut kinds = Vec::new();
     if dir.join("entries").is_dir() {
@@ -1685,6 +1952,7 @@ fn serve(args: &[String]) -> R<()> {
         None => None,
     };
     let (tx, synced) = channel();
+    imported_births(&dir, initial.header(), &catalogue, &mut born)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
     cfg.public_names = Arc::clone(&built.public_names);
     let every = arg(args, "--checkpoint-every").map_or(Ok(EVERY), |n| {
@@ -1983,6 +2251,113 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_boot_carries_only_a_valid_regular_catalogue() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../.local")
+            .join(format!("b15-public-boot-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("facts.json"), b"{}").unwrap();
+        let header = archive::script::world(0, 0, None).header;
+        let legacy = public_boot(&dir, &header).unwrap();
+        let Value::Map(old) = replica::encode::decode(&legacy).unwrap().value else {
+            panic!("map");
+        };
+        assert!(!old.contains_key(&7));
+        let catalogue = br#"{"format":"souls/bodies/1","bodies":[{"preset":"large","hash":"0000000000000000000000000000000000000000000000000000000000000000","size":"large","height":1800,"hover":0}]}"#;
+        std::fs::write(dir.join("bodies.json"), catalogue).unwrap();
+        let Value::Map(new) = replica::encode::decode(&public_boot(&dir, &header).unwrap())
+            .unwrap()
+            .value
+        else {
+            panic!("map");
+        };
+        assert_eq!(new.get(&7), Some(&Value::Bytes(sha256(catalogue).to_vec())));
+        for (key, value) in old {
+            assert_eq!(new.get(&key), Some(&value));
+        }
+        std::fs::write(dir.join("bodies.json"), b"{}").unwrap();
+        assert!(public_boot(&dir, &header).is_err());
+        std::fs::remove_file(dir.join("bodies.json")).unwrap();
+        assert_eq!(public_boot(&dir, &header).unwrap(), legacy);
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("facts.json", dir.join("bodies.json")).unwrap();
+            assert!(public_boot(&dir, &header).is_err());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn imported_birth_choices_are_private_bound_and_atomic() {
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../.local")
+            .join(format!("b15-import-births-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let header = archive::script::world(0, 0, None).header;
+        let hash = "11".repeat(32);
+        let text = format!(
+            r#"{{"format":"souls/bodies/1","bodies":[{{"preset":"chosen","hash":"{hash}","size":"standard","height":1750}}]}}"#
+        );
+        std::fs::write(dir.join("bodies.json"), &text).unwrap();
+        let catalogue = skills::wear::Catalogue::read(&text).unwrap();
+        let soul = Id::new(Scope([0x4b; 16]), 0).unwrap();
+        let soul_text = directoryd::accounts::principal_text(soul);
+        let zone = directoryd::accounts::principal_text(header.zone);
+        let row = format!(r#"{{"soul":"{soul_text}","entry":"{zone}","asked":0,"body":"{hash}"}}"#);
+        let make = |lineage: &str, zone: &str, digest: &str, rows: &str| {
+            format!(
+                r#"{{"format":"souls-births/1","world":"old-garden","lineage":"{lineage}","zone":"{zone}","catalogueHash":"{digest}","births":[{rows}]}}"#
+            )
+        };
+        let lineage = to_hex(&header.lineage.0);
+        let digest = to_hex(&sha256(text.as_bytes()));
+        let valid = make(&lineage, &zone, &digest, &row);
+        let mut born = BTreeMap::new();
+        imported_births(&dir, &header, &catalogue, &mut born).unwrap();
+        assert!(
+            born.is_empty(),
+            "absent private file leaves defaults unchanged"
+        );
+        std::fs::write(dir.join("births.json"), &valid).unwrap();
+        imported_births(&dir, &header, &catalogue, &mut born).unwrap();
+        assert_eq!(born.get(&soul), Some(&[0x11; 32]));
+        for invalid in [
+            make(&"00".repeat(16), &zone, &digest, &row),
+            make(&lineage, "invalid", &digest, &row),
+            make(&lineage, &zone, &"00".repeat(32), &row),
+            make(&lineage, &zone, &digest, &format!("{row},{row}")),
+            make(
+                &lineage,
+                &zone,
+                &digest,
+                &row.replace(&hash, &"22".repeat(32)),
+            ),
+        ] {
+            std::fs::write(dir.join("births.json"), invalid).unwrap();
+            let before = born.clone();
+            assert!(imported_births(&dir, &header, &catalogue, &mut born).is_err());
+            assert_eq!(born, before, "no partial installation on refusal");
+        }
+        std::fs::write(dir.join("births.json"), valid).unwrap();
+        let mut explicit = BTreeMap::from([(soul, [0x22; 32])]);
+        assert!(
+            imported_births(&dir, &header, &catalogue, &mut explicit)
+                .unwrap_err()
+                .contains("contradictory")
+        );
+        assert_eq!(explicit[&soul], [0x22; 32]);
+        std::fs::write(dir.join("facts.json"), b"{}").unwrap();
+        let boot = public_boot(&dir, &header).unwrap();
+        std::fs::remove_file(dir.join("births.json")).unwrap();
+        assert_eq!(
+            public_boot(&dir, &header).unwrap(),
+            boot,
+            "private choices never enter public boot"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn body_classes_restart_on_the_edited_canonical_geometry() {

@@ -215,6 +215,9 @@ pub struct Slots {
     changed: Vec<Id>,
     /// Each body's admitted build, as its adapter gave it; [`STANDARD_BUILD`] when none was.
     builds: BTreeMap<Id, Build>,
+    /// The things that move on a course (a punt, #3603): their loaded tracks and their homes. A seat on one is taken
+    /// only while it stands at its home with time to cross left, and left only there.
+    moving: BTreeMap<Id, (crate::courses::Table, Vec3)>,
 }
 
 impl Slots {
@@ -230,6 +233,30 @@ impl Slots {
     /// `body`'s standing reach, µm: its admitted build's, else the standard body's.
     pub fn reach_of(&self, body: Id) -> i64 {
         standing_reach(self.builds.get(&body).copied().unwrap_or(STANDARD_BUILD))
+    }
+
+    /// Thing `thing` moves on `course` (#3603, N12's boarding rule), its home at `home`: its seats are boarded only
+    /// while it stands at its home with [`crate::links::boarding::CROSSING`] of the stop left, and left only while it
+    /// stands there; else `boarding-frame-away`, and nobody moves. Called again when its course changes (a steer). A
+    /// course that does not load is refused by its own name.
+    pub fn moving(&mut self, thing: Id, course: &crate::courses::Course, home: Vec3) -> R<()> {
+        self.moving.insert(thing, (course.load()?, home));
+        Ok(())
+    }
+
+    /// `boarding-frame-away` unless the moving `thing` stands at its home at `now` with `left` of its stop to spare.
+    fn at_home(&self, thing: Id, now: Micros, left: Micros) -> R<()> {
+        let Some((t, home)) = self.moving.get(&thing) else {
+            return Ok(());
+        };
+        let here = t.at(now).map(|(p, _)| p);
+        match (t.stopped(now), here) {
+            (Ok(Some(s)), Ok(p)) if s.left >= left && p.x == home.x && p.z == home.z => Ok(()),
+            _ => refuse(
+                "boarding-frame-away",
+                format!("{} is not at its stop", show(thing)),
+            ),
+        }
     }
 
     /// Seat ownership changes, drained by the world to wake standing queues.
@@ -398,6 +425,7 @@ impl Slots {
         r: &Request,
         now: Micros,
     ) -> R<Instance> {
+        self.at_home(r.thing, now, crate::links::boarding::CROSSING)?;
         let slot = match r.slot {
             Some(s) => s,
             None => match self.free(c, r.body, r.thing) {
@@ -570,6 +598,7 @@ impl Slots {
         let State::Seated(driver) = hold.state else {
             return not_seated();
         };
+        self.at_home(key.0, now, 0)?;
         if let Some(d) = driver {
             c.release(body, d)?;
         }

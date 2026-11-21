@@ -18,6 +18,11 @@ import { FOLLOW_MAX, FOLLOW_MIN, Follow, TARGET_UP, bodyAt } from './follow.ts';
 import type { WorldView } from '../draw/world.ts';
 import type { PageSouls } from '../souls/page.ts';
 import type { NodeRec, PartRec } from '../source/source.ts';
+import { PlaceFlight } from '../places/camera.ts';
+import { PlacesPanel } from '../places/panel.ts';
+import { PlacePreviews } from '../places/previews.ts';
+import { placeFrame, placeWords } from '../places/places.ts';
+
 import { Tour } from '../welcome/tour.ts';
 import { EDEN_STOPS } from '../welcome/stops.ts';
 import { mountWelcome, worldOf, type Welcome } from '../welcome/welcome.ts';
@@ -28,7 +33,7 @@ import type { ViewShots } from '../welcome/shots.ts';
 import { Flicks, SoulSwipe, hapticTick, soulRing } from '../phone/touch.ts';
 import { touchHints } from '../phone/hints.ts';
 
-export type Mode = 'broadcast' | 'free' | 'fly' | 'follow' | 'tour' | 'view';
+export type Mode = 'broadcast' | 'free' | 'fly' | 'follow' | 'place' | 'tour' | 'view';
 /** A tap moves less than this (px); a body this near the tap (px) is the one tapped; a pan this far (m) in one gesture
  *  leaves the follow. */
 const TAP_PX = 6, HIT_PX = 36, PAN_LEAVES = 1;
@@ -65,6 +70,10 @@ export class CameraDirector {
   readonly broadcast = new Broadcast();
   follow: Follow | null = null;
   flight: Flight | null = null;
+  /** The place camera's flight to a place's framed view (#3676), and the places panel with its preview pictures. */
+  placeFlight: PlaceFlight | null = null;
+  places: PlacesPanel | null = null;
+  private previews: PlacePreviews | null = null;
   /** For the measure: the last flight asked (page ms) and when it reached its Soul. */
   flown: { id: string; asked: number; seconds: number; done: number | null } | null = null;
   private pending: string | null;
@@ -95,8 +104,9 @@ export class CameraDirector {
     this.pending = params.get('follow');
     this.mode = history || params.get('camera') === 'free' ? 'free' : 'broadcast';
     const take = () => {
-      if (this.mode === 'broadcast' || this.mode === 'fly' || this.mode === 'tour' || this.mode === 'view') this.free();
+      if (this.mode === 'broadcast' || this.mode === 'fly' || this.mode === 'place' || this.mode === 'tour' || this.mode === 'view') this.free();
       this.follow?.touched();
+      this.places?.hide();
     };
     canvas.addEventListener('pointerdown', (e) => {
       // Whether a flight to a Soul was under way: a flick then swipes on from it rather than taking the camera.
@@ -121,6 +131,11 @@ export class CameraDirector {
     cam.controls.addEventListener('start', () => ((this.panned = 0), this.follow?.touched()));
     addEventListener('keydown', (e) => /^(Key[WASD]|Arrow)/.test(e.code) && take());
     this.find = this.findBox();
+    this.places = new PlacesPanel({
+      nodes: () => this.world.nodes.values(),
+      picture: (id) => this.picture(id),
+      choose: (id) => this.place(id),
+    });
     // N-V21 (#3678): opening a conversation frames its members; the viewer's camera from there.
     souls.framer = (eye, target) => (this.free(), this.show(eye, target));
   }
@@ -171,6 +186,7 @@ export class CameraDirector {
     if (this.mode === 'broadcast') return this.onBroadcast(t, s);
     if (this.mode === 'fly') return this.onFlight(s);
     if (this.mode === 'follow') return this.onFollow(dt, s);
+    if (this.mode === 'place') return this.onPlace(s);
     this.cam.update(dt);
   }
 
@@ -183,6 +199,17 @@ export class CameraDirector {
     this.mode = 'fly';
     this.follow = this.tour = null;
     this.welcome?.frame(null);
+    return true;
+  }
+
+  /** Flies the place camera to place `id`'s framed view, then hands back the free camera; false when not drawn. */
+  place(id: string): boolean {
+    const to = this.placeView(id, this.cam.camera.aspect);
+    if (!to) return false;
+    this.placeFlight = new PlaceFlight(id, this.cam.camera.position, this.cam.controls.target, to);
+    this.mode = 'place';
+    this.follow = this.flight = null;
+    this.link(null);
     return true;
   }
 
@@ -226,7 +253,7 @@ export class CameraDirector {
   /** The free camera, from where the camera is now. */
   free(): void {
     this.mode = 'free';
-    this.follow = this.flight = this.tour = this.view = null;
+    this.follow = this.flight = this.placeFlight = this.tour = this.view = null;
     this.welcome?.frame(null);
     this.cam.controls.minDistance = 0;
     this.cam.controls.maxDistance = farLimit(this.world.extent);
@@ -239,6 +266,27 @@ export class CameraDirector {
     const n = this.world.nodes.get(id);
     if (p && n?.placeName) placeAt(n, p.y, p);
     return p && p.setY(p.y + TARGET_UP);
+  }
+
+  /** A place's framed view at `aspect`, from its node as drawn now (its frame gives its height); null when unknown. */
+  private placeView(id: string, aspect: number): { eye: THREE.Vector3; target: THREE.Vector3 } | null {
+    const n = this.world.nodes.get(id), at = this.t === null ? null : bodyAt(this.world, id, this.t);
+    return n && at ? placeFrame(n, at, aspect) : null;
+  }
+
+  /** A place's preview picture, from the page's own renderer and scene, asked lazily (#3676), and not while the place
+   *  camera flies: a picture costs a frame (the first one up to about 0.4 s on a phone), which would hitch the flight. */
+  private async picture(id: string): Promise<string | null> {
+    while (this.mode === 'place') await new Promise(requestAnimationFrame);
+    const v2 = (globalThis as { v2?: { renderer?: THREE.WebGLRenderer; scene?: THREE.Scene } }).v2;
+    if (!this.previews && v2?.renderer && v2.scene) this.previews = new PlacePreviews(v2.renderer, v2.scene);
+    return this.previews?.picture(id, () => this.placeView(id, 320 / 224)) ?? null;
+  }
+
+  private onPlace(s: number): void {
+    const pose = this.placeFlight!.step(s);
+    this.show(pose.eye, pose.target);
+    if (pose.done) this.free();
   }
 
   private watch(f: Follow): void {
@@ -338,8 +386,13 @@ export class CameraDirector {
     el.addEventListener('keydown', (e) => {
       e.stopPropagation();
       if (e.key !== 'Enter') return;
-      const id = findSoul(this.souls.copy.souls.values(), el.value) ?? findPlace(this.world.nodes.values(), el.value);
-      if (id && this.fly(id)) return void ((el.value = ''), (el.placeholder = 'find a Soul or place'), el.blur());
+      const soul = findSoul(this.souls.copy.souls.values(), el.value), place = soul ? null : findPlace(this.world.nodes.values(), el.value);
+      const n = place ? this.world.nodes.get(place) : undefined;
+      // A place with an outline gets the place camera and its preview card (#3676); a Soul or a named thing is flown to.
+      const area = !!n?.outline?.length && this.place(n.id);
+      if (area) this.places?.show({ id: n!.id, name: placeWords(n!.placeName!) });
+      const id = soul ?? place;
+      if (area || (id && this.fly(id))) return void ((el.value = ''), (el.placeholder = 'find a Soul or place'), el.blur());
       el.placeholder = `no Soul or place here named “${el.value.trim()}”`;
       el.value = '';
     });

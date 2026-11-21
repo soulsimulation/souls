@@ -6,6 +6,7 @@ publish.workspace = true
 description = "Engine v2 X11 (#2820): accounts, Souls and creators brought over from a stage's backup."
 
 [dependencies]
+skills = { path = "../../crates/skills" }
 directoryd = { path = "../../crates/directoryd" }
 replica = { path = "../../crates/replica" }
 ring = "0.17"
