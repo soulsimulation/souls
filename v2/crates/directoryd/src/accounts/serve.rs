@@ -287,8 +287,9 @@ fn handle(mut stream: TcpStream, app: &App) {
                     v => (status, "application/json", text(&v), note),
                 }
             });
-    // The world list may be cached a short while (W3, #2799); everything else is no-store.
-    let list = req.method == "GET" && req.path == "/v1/worlds" && status == 200;
+    // The public world list may be cached a short while (W3, #2799); a signed-in one and everything else is no-store.
+    let list =
+        req.method == "GET" && req.path == "/v1/worlds" && status == 200 && req.bearer.is_none();
     let cache = if list {
         crate::worlds::list::http::CACHE
     } else {
@@ -599,6 +600,8 @@ fn route(req: &Request, app: &App) -> (u16, Value, String) {
         ("OPTIONS", _) => return (204, Value::Null, "preflight".into()),
         ("GET" | "POST", "/v1/worlds") => return crate::worlds::list::http::route(req, app),
         ("POST", "/v1/worlds/settings") => return crate::worlds::list::http::settings(req, app),
+        ("POST", "/v1/worlds/welcome") => return crate::worlds::list::http::welcome(req, app),
+        ("POST", "/v1/worlds/visitors") => return crate::worlds::list::http::visitors(req, app),
         ("POST", "/v1/worlds/archive") => return crate::worlds::list::http::archive(req, app),
         ("POST", "/v1/account/now") => return now_read(req, app),
         (

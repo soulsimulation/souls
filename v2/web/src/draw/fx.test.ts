@@ -3,7 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { FxLayer, fireLevel, fireStrength, fxKind, IGNITE } from '../fx/layer.ts';
+import { FxLayer, LANTERN_UP, fireLevel, fireStrength, fxKind, haloOf, IGNITE } from '../fx/layer.ts';
+import { setNightStrength } from './night.ts';
 import { cupSteam, kettleSteam, KETTLE_CLOCK } from '../fx/steam.ts';
 import { fountainPlan, overflows } from '../fx/water-jets.ts';
 import { discsOf, modelFx } from '../fx/model.ts';
@@ -22,7 +23,10 @@ test('kinds: fires, fountains, kettles and cups, by name or by a lit state', () 
   assert.equal(fxKind('eden:cup'), 'cup');
   assert.equal(fxKind('eden:cupboard'), null);
   assert.equal(fxKind('eden:bench'), null);
-  assert.equal(fxKind('eden:lamp', { on: ['light'] }), null); // a lamp's light is the night pool, not a flame
+  assert.equal(fxKind('eden:lamp', { on: ['light'] }), 'light'); // a lamp glows (A2, #3724), with no flame
+  assert.equal(fxKind('eden:screen', { on: ['screen'] }), null); // a screen's `on` is not a light
+  assert.equal(fxKind('eden:lighthouse'), 'lighthouse');
+  assert.equal(fxKind('eden:lighthouse_bands'), null); // Eden's tower stripes are a thing of their own
 });
 
 test("fires: today's reaches and catch-up; the phone tier keeps flames but drops embers and smoke", () => {
@@ -107,13 +111,13 @@ test('layer: a lit fire burns near and stops when put out; a fountain runs; a ke
   layer.update(50, eye);
   await tick();
   layer.update(50, eye);
-  assert.deepEqual(layer.stats, { fires: 1, near: 1, steaming: 0, fountains: 1 });
+  assert.deepEqual(layer.stats, { fires: 1, near: 1, steaming: 0, fountains: 1, lights: 0, lighthouses: 0 });
   assert.deepEqual(shown, [['1', false]]); // the burning fire hides its static flame
   layer.state('1', { lit: false });
   layer.state('2', { on: false });
   layer.state('3', { heatedAt: 50 - KETTLE_CLOCK.heat - 1 });
   layer.update(50, eye);
-  assert.deepEqual(layer.stats, { fires: 1, near: 0, steaming: 1, fountains: 0 });
+  assert.deepEqual(layer.stats, { fires: 1, near: 0, steaming: 1, fountains: 0, lights: 0, lighthouses: 0 });
   assert.deepEqual(shown, [['1', false]]); // put out: no flame at all, the static one stays hidden
   layer.state('1', { lit: true });
   layer.update(50, new THREE.Vector3(0, 2, 300)); // lit but too far to animate: the static flame stands in
@@ -121,5 +125,47 @@ test('layer: a lit fire burns near and stops when put out; a fountain runs; a ke
   layer.update(50, new THREE.Vector3(0, 2, 500)); // far: nothing drawn
   assert.equal(layer.stats.steaming, 0);
   layer.apply([], ['1', '2', '3']);
-  assert.equal(layer.group.children.length, 0);
+  assert.deepEqual(layer.group.children, [layer.halos.mesh]); // only the (empty) halo draw stays
+});
+
+test("A2 (#3724): today's halos at lamp heads and fires, and the lighthouse's beams sweeping from its lantern, at night only", async () => {
+  // today's lamp is 3.4 s tall, its head 0.2 below its top: a 3.4 m lamp model is today's scale-1 lamp
+  const lamp = haloOf('lamp', new THREE.Vector3(1, 0, 3), 3.4);
+  assert.deepEqual(lamp.slice(0, 4), [1, 0, 3, 'lamp']);
+  assert.ok(Math.abs(lamp[4] - 1) < 1e-9);
+  assert.deepEqual(haloOf('fire', new THREE.Vector3(1, 2, 3), 9), [1, 2, 3, 'fire', 1]);
+  const bytes = glb(), at = (x: number) => new THREE.Matrix4().makeTranslation(x, 0, 0);
+  const layer = new FxLayer({
+    frame: (id) => at(Number(id) * 10),
+    index: () => ({ things: { a: 'h1', b: 'h2', c: 'h3' }, states: new Map<string, Record<string, string[]>>([['h1', { on: ['light'] }], ['h2', { lit: ['flame'] }]]) }),
+    fetch: async () => bytes, phone: false,
+  });
+  layer.apply([node('1', 'eden:street_lamp', 'a'), node('2', 'eden:campfire', 'b'), node('3', 'eden:lighthouse', 'c')], []);
+  const eye = new THREE.Vector3(0, 2, 10);
+  setNightStrength(1); // full day
+  layer.update(10, eye);
+  await tick();
+  for (let i = 0; i < 30; i++) layer.update(10 + i / 30, eye);
+  assert.deepEqual([layer.stats.lights, layer.stats.lighthouses], [2, 1]);
+  assert.equal(layer.halos.size, 2);
+  assert.equal(layer.halos.mesh.visible, false, 'no glow by day');
+  const beam = layer.things.get('3')!.beam!;
+  assert.equal(beam.group.visible, false, 'no beam by day');
+  assert.ok(beam.lantern.distanceTo(new THREE.Vector3(30, 1.69 * LANTERN_UP, 0)) < 1e-6, 'the lantern, up 0.83 of the tower');
+  setNightStrength(0); // night
+  layer.update(12, eye);
+  assert.ok(layer.halos.mesh.visible && beam.group.visible);
+  const sweep = beam.angle;
+  layer.update(15, eye);
+  assert.ok(Math.abs(beam.angle - sweep - Math.PI / 2) < 1e-9, "a quarter turn in 3 s: today's once every 12 s");
+  const head = new THREE.Matrix4();
+  layer.halos.mesh.getMatrixAt(0, head);
+  assert.ok(Math.abs(new THREE.Vector3().setFromMatrixPosition(head).y - (1.69 - 0.2)) < 1e-6, 'the lamp glows at its head');
+  layer.halos.mesh.getMatrixAt(1, head);
+  assert.ok(Math.abs(new THREE.Vector3().setFromMatrixPosition(head).y - 0.55) < 1e-6, "a fire glows 0.55 m up, today's");
+  layer.state('2', { lit: false }); // a fire put out gives no glow
+  for (let i = 0; i < 30; i++) layer.update(16, eye);
+  assert.equal(layer.halos.size, 1);
+  layer.apply([], ['3']);
+  assert.equal(beam.group.parent, null, 'a removed lighthouse takes its beams');
 });
