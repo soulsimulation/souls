@@ -326,8 +326,9 @@ pub fn within(
     from: Option<(Id, Vec3)>,
 ) -> Option<Vec3> {
     let t = target.point();
-    if g.stand(target.node, t).is_some() {
-        return Some(t);
+    // The place the map gives for the target itself (#3688): the point as asked may not be one a route ends at.
+    if let Some((at, _)) = g.stand(target.node, t) {
+        return Some(at);
     }
     let from = from.and_then(|(node, p)| Some((node, p, g.stand(node, p)?.1)));
     // Places by a bound below their cost: the straight way there plus the weighted gap.
