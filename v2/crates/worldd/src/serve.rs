@@ -866,7 +866,8 @@ fn bodies(
         b.add_place(s)?;
     }
     for (thing, course) in moving {
-        b.slots.moving(thing, &course)?;
+        let home = course.stations.first().map_or(Vec3::ZERO, |s| s.at);
+        b.slots.moving(thing, &course, home)?;
     }
 
     for a in at {

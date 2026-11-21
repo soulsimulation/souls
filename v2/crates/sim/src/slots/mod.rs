@@ -162,9 +162,9 @@ pub struct Slots {
     changed: Vec<Id>,
     /// Each body's admitted build, as its adapter gave it; [`STANDARD_BUILD`] when none was.
     builds: BTreeMap<Id, Build>,
-    /// The things that move on a course (a punt, #3603): their loaded tracks. A seat on one is taken only while it
-    /// stands at its home stop (station 0) with time to cross left, and left only there.
-    moving: BTreeMap<Id, crate::courses::Table>,
+    /// The things that move on a course (a punt, #3603): their loaded tracks and their homes. A seat on one is taken
+    /// only while it stands at its home with time to cross left, and left only there.
+    moving: BTreeMap<Id, (crate::courses::Table, Vec3)>,
 }
 
 impl Slots {
@@ -182,21 +182,23 @@ impl Slots {
         standing_reach(self.builds.get(&body).copied().unwrap_or(STANDARD_BUILD))
     }
 
-    /// Thing `thing` moves on `course` (#3603, N12's boarding rule): its seats are boarded only while it stands at its
-    /// home stop with [`crate::links::boarding::CROSSING`] of the dwell left, and left only while it stands there;
-    /// else `boarding-frame-away`, and nobody moves. A course that does not load is refused by its own name.
-    pub fn moving(&mut self, thing: Id, course: &crate::courses::Course) -> R<()> {
-        self.moving.insert(thing, course.load()?);
+    /// Thing `thing` moves on `course` (#3603, N12's boarding rule), its home at `home`: its seats are boarded only
+    /// while it stands at its home with [`crate::links::boarding::CROSSING`] of the stop left, and left only while it
+    /// stands there; else `boarding-frame-away`, and nobody moves. Called again when its course changes (a steer). A
+    /// course that does not load is refused by its own name.
+    pub fn moving(&mut self, thing: Id, course: &crate::courses::Course, home: Vec3) -> R<()> {
+        self.moving.insert(thing, (course.load()?, home));
         Ok(())
     }
 
-    /// `boarding-frame-away` unless the moving `thing` stands at its home stop at `now` with `left` of it to spare.
+    /// `boarding-frame-away` unless the moving `thing` stands at its home at `now` with `left` of its stop to spare.
     fn at_home(&self, thing: Id, now: Micros, left: Micros) -> R<()> {
-        let Some(t) = self.moving.get(&thing) else {
+        let Some((t, home)) = self.moving.get(&thing) else {
             return Ok(());
         };
-        match t.stopped(now) {
-            Ok(Some(s)) if s.station == 0 && s.left >= left => Ok(()),
+        let here = t.at(now).map(|(p, _)| p);
+        match (t.stopped(now), here) {
+            (Ok(Some(s)), Ok(p)) if s.left >= left && p.x == home.x && p.z == home.z => Ok(()),
             _ => refuse(
                 "boarding-frame-away",
                 format!("{} is not at its stop", show(thing)),

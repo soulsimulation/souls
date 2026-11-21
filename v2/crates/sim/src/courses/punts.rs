@@ -9,10 +9,16 @@
 //!
 //! Integer arithmetic only (T4): the loop's 16 directions are a fixed table, no platform `sin` or `cos`.
 
+use std::collections::BTreeMap;
+
 use super::{Course, Shape, Station};
 use crate::ground::{Terrain, Water};
+use replica::effects::{Refusal, read_id};
+use replica::encode::Value;
 use replica::ids::Id;
 use replica::pose::Vec3;
+use replica::sky::{as_int, int};
+use replica::time::Micros;
 
 type Xz = [i64; 2];
 
@@ -101,6 +107,15 @@ pub fn moorings(
 /// The moorings of the open ground `ground` of `tree` (#3603): its terrain and the standing waters among its places.
 /// No thing is read: a plank among furniture is not refused yet (today's obstacle check).
 pub fn moorings_of(tree: &replica::tree::Tree, ground: Id) -> Result<Vec<Mooring>, String> {
+    let (waters, terrain) = waters_of(tree, ground)?;
+    Ok(moorings(&waters, terrain.as_ref(), |_| true))
+}
+
+/// The standing and running waters among the places of the open ground `ground` of `tree`, and its terrain.
+pub fn waters_of(
+    tree: &replica::tree::Tree,
+    ground: Id,
+) -> Result<(Vec<Water>, Option<Terrain>), String> {
     let terrain = Terrain::of(tree, ground)?;
     let gh = tree.handle(ground).ok_or("no ground")?;
     let mut waters = Vec::new();
@@ -115,7 +130,7 @@ pub fn moorings_of(tree: &replica::tree::Tree, ground: Id) -> Result<Vec<Mooring
         let s = crate::ground::Scene::of_child(tree, gh, c, terrain.as_ref())?;
         waters.extend(s.waters);
     }
-    Ok(moorings(&waters, terrain.as_ref(), |_| true))
+    Ok((waters, terrain))
 }
 
 /// cos and sin of k/32 of a turn, parts per million (today's 32 plank directions).
@@ -343,6 +358,154 @@ fn shelf(
     None
 }
 
+// Steering (#3603): today's `carrier_steer` on a punt (`mars/viewer/engine/vehicles/carrier.ts`). A seated rider
+// steers toward a point: one straight leg over water deep enough to float it, ending 3 m short of the first shore on
+// the way. Landing rows it back along its wake, then on round the rest of the lap it left, to its home. Every steer is
+// a new course run once ([`Shape::Once`]) from where the punt is, so every copy reads the same positions.
+
+/// The farthest from its home a punt is steered toward, µm (today's 1200 m).
+pub const STEER_RANGE: i64 = 1_200_000_000;
+/// A steered leg ends this far short of the first shore on its way, µm (today's 3 m).
+pub const SHORT_OF_SHORE: i64 = 3_000_000;
+
+/// A punt steered off its own loop: who steers it, the loop it left (its home is the loop's first station), the world
+/// time it left it, and where each steer started (its wake), oldest first. Kept as the punt's
+/// [`replica::schedule::F_STEER`] field, `{1: by, 2: own course, 3: left µs, 4: [[x, y, z] …]}`; an empty map while it
+/// is on its own loop.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Steer {
+    pub by: Id,
+    pub own: Course,
+    pub left: Micros,
+    pub wake: Vec<Vec3>,
+}
+
+impl Steer {
+    /// The punt's home: its own loop's first station.
+    pub fn home(&self) -> Vec3 {
+        self.own.stations.first().map_or(Vec3::ZERO, |s| s.at)
+    }
+
+    pub fn to_value(&self) -> Value {
+        let xyz = |p: &Vec3| Value::Array(vec![int(p.x), int(p.y), int(p.z)]);
+        Value::Map(BTreeMap::from([
+            (1, self.by.to_value()),
+            (2, self.own.to_value()),
+            (3, int(self.left)),
+            (4, Value::Array(self.wake.iter().map(xyz).collect())),
+        ]))
+    }
+
+    /// The steer a punt's field holds; `None` for an empty map (on its own loop) or anything else.
+    pub fn read(v: &Value) -> Option<Steer> {
+        let Value::Map(m) = v else { return None };
+        let Value::Array(wake) = m.get(&4)? else {
+            return None;
+        };
+        let wake = wake
+            .iter()
+            .map(|p| match p {
+                Value::Array(p) => match p.as_slice() {
+                    [x, y, z] => Some(Vec3::new(as_int(x)?, as_int(y)?, as_int(z)?)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(Steer {
+            by: read_id(m.get(&1)?).ok()?,
+            own: Course::read(m.get(&2)?)?,
+            left: as_int(m.get(&3)?)?,
+            wake,
+        })
+    }
+}
+
+/// Whether the hull's middle at (x, z) is on water deep enough to float it, of any of `waters`.
+fn floating(waters: &[Water], terrain: Option<&Terrain>, x: i64, z: i64) -> bool {
+    let ground = terrain.and_then(|t| t.height_at(x, z)).unwrap_or(0);
+    waters
+        .iter()
+        .any(|w| w.ring.len() >= 3 && inside(&w.ring, [x, z]) && w.level - ground >= FLOAT_DEPTH)
+}
+
+/// Where a punt at `from` can row toward `to` in a straight line over water (today's `waterReach`): `to` itself, or the
+/// last whole metre of floating water [`SHORT_OF_SHORE`] short of the first shore on the way; `None` when that leaves
+/// it less than 2 m to go. Within half a metre it stays where it is.
+pub fn reach(waters: &[Water], terrain: Option<&Terrain>, from: Vec3, to: Xz) -> Option<Vec3> {
+    let (dx, dz) = (i128::from(to[0] - from.x), i128::from(to[1] - from.z));
+    let len = (dx * dx + dz * dz).isqrt() as i64;
+    if len < 500_000 {
+        return Some(from);
+    }
+    let along = |s: i64| {
+        let k = |d: i128| (d * i128::from(s) / i128::from(len)) as i64;
+        Vec3::new(from.x + k(dx), from.y, from.z + k(dz))
+    };
+    let mut ok = 0;
+    let mut s = 1_000_000;
+    while s <= len {
+        let p = along(s);
+        if !floating(waters, terrain, p.x, p.z) {
+            break;
+        }
+        ok = s;
+        s += 1_000_000;
+    }
+    if ok >= len - 1_000_000 {
+        return Some(Vec3::new(to[0], from.y, to[1]));
+    }
+    let keep = ok - SHORT_OF_SHORE;
+    (keep >= 2_000_000).then(|| along(keep))
+}
+
+/// A course rowed once at [`ROWING`] from `here` through `points` from world time `now`, standing at the last for good.
+/// It states the time to that last stop as its `within`.
+pub fn once(here: Vec3, points: &[Vec3], now: Micros) -> Result<Course, Refusal> {
+    let mut stations = vec![Station { at: here, dwell: 0 }];
+    for &p in points {
+        if stations.last().map(|s| s.at) != Some(p) {
+            stations.push(Station { at: p, dwell: 0 });
+        }
+    }
+    if stations.len() < 2 {
+        stations.push(Station { at: here, dwell: 0 });
+    }
+    let mut c = Course {
+        stations,
+        shape: Shape::Once,
+        speed: ROWING,
+        t0: now,
+        within: Micros::MAX / 8,
+    };
+    let t = c.load()?;
+    c.within = t.legs.last().map_or(0, |l| l.start).max(1);
+    c.load()?;
+    Ok(c)
+}
+
+/// The way a steered punt rows back to its home (today's return): back along its wake, then round the rest of the lap
+/// it left (none when it left from its home), ending at its home.
+pub fn back(s: &Steer) -> Vec<Vec3> {
+    let mut pts: Vec<Vec3> = s.wake.iter().rev().copied().collect();
+    if let Ok(t) = s.own.load()
+        && s.left >= t.t0
+        && !matches!(t.stopped(s.left), Ok(Some(st)) if st.station == 0)
+    {
+        let phase = (s.left - t.t0) % t.period;
+        pts.extend(
+            t.legs
+                .iter()
+                .filter(|l| l.stop.is_none() && l.start + l.dur > phase)
+                .map(|l| l.to),
+        );
+    }
+    if pts.last() != Some(&s.home()) {
+        pts.push(s.home());
+    }
+    pts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,5 +560,59 @@ mod tests {
             moorings(&[pond(20, 12)], None, |_| false).is_empty(),
             "a bank with no room to stand"
         );
+    }
+
+    /// #3603: a steer over the pond. Toward a point on the water it goes there; toward the far bank it stops 3 m short of
+    /// it, on whole metres; toward the bank beside it, with less than 2 m to go, it is refused. The course it rows is
+    /// run once at 0.6 m/s and stands at its end for good; the way back retraces the wake, then the rest of the lap.
+    #[test]
+    fn a_steer_rows_over_water_and_stops_short_of_the_shore() {
+        let m = 1_000_000;
+        let pond = Water {
+            place: Id::new(replica::ids::Scope([0x36; 16]), 1).unwrap(),
+            ring: vec![[0, 0], [40 * m, 0], [40 * m, 12 * m], [0, 12 * m]],
+            line: Vec::new(),
+            width: 0,
+            level: m,
+        };
+        let w = [pond];
+        let from = Vec3::new(5 * m, m, 6 * m);
+        assert_eq!(
+            reach(&w, None, from, [20 * m, 6 * m]),
+            Some(Vec3::new(20 * m, m, 6 * m))
+        );
+        let short = reach(&w, None, from, [60 * m, 6 * m]).expect("short of the far bank");
+        assert_eq!((short.x, short.z), (36 * m, 6 * m), "3 m short of x 40 m: {short:?}");
+        assert_eq!(
+            reach(&w, None, Vec3::new(5 * m, m, 2 * m), [5 * m, -20 * m]),
+            None,
+            "the near bank 2 m off"
+        );
+        let c = once(from, &[short], 1_000 * m).expect("a course");
+        let t = c.load().unwrap();
+        assert_eq!(c.shape, Shape::Once);
+        assert_eq!(t.at(1_000 * m).unwrap().0, from, "it starts where it is");
+        let gone = 1_000 * m + 52 * m; // 31 m at 0.6 m/s, and a little more
+        assert_eq!(t.at(gone).unwrap().0, short, "and stands at its end");
+        assert_eq!(t.stopped(gone * 2).unwrap().map(|s| s.station), Some(1));
+        let own = moorings(&w, None, |_| true).remove(0).course;
+        let home = own.stations[0].at;
+        let left_at = own.load().unwrap().legs[1].start + 1; // just after it set off round its loop
+        let s = Steer {
+            by: Id::new(replica::ids::Scope([0x36; 16]), 9).unwrap(),
+            own: own.clone(),
+            left: left_at,
+            wake: vec![from, short],
+        };
+        assert_eq!(Steer::read(&s.to_value()), Some(s.clone()));
+        let way = back(&s);
+        assert_eq!(&way[..2], &[short, from], "back along the wake");
+        assert_eq!(way.last(), Some(&home), "home last");
+        assert_eq!(way.len(), 2 + 16, "and the whole lap it had just begun");
+        let from_home = Steer {
+            left: 0,
+            ..s.clone()
+        };
+        assert_eq!(back(&from_home), vec![short, from, home], "no lap from its home stop");
     }
 }
