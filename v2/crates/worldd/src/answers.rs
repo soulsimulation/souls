@@ -219,7 +219,8 @@ pub enum Event {
         bytes: Vec<u8>,
         reply: Reply,
     },
-    /// Lockstep: run every tick up to and including `tick`, then report the zone's state on `done`.
+    /// Lockstep: run every tick up to and including `tick`, then report the zone's state on `done`, once every tick
+    /// run is on the disk and in the sync copy, as a receipt is (so a sync asked after it sees the run's changes).
     RunTo {
         tick: i64,
         done: Sender<Ran>,
@@ -229,6 +230,8 @@ pub enum Event {
     /// read from that copy (G1c), or its refusal.
     Edited(Box<(Id, Result<Checked, Refused>)>),
     Worn(Box<(WearRequest, R<sim::mover::Body>)>),
+    /// A set-down checked off the clock thread by the edit checker's thread (E4's caller, #3604), or its refusal.
+    SetDown(Box<(Id, R<crate::setdown::Checked>)>),
     /// The directory's Souls file as it now reads, and where the answers to the intents it causes go (W11b).
     Directory(Box<(Directory, Reply)>),
     /// Holds the clock thread for this long: the stuck-thread run (O4 A4).
@@ -454,7 +457,8 @@ pub struct Config {
     /// The longest an act stays open, from its arrival, when its expiry is later.
     pub deadline: Micros,
     pub checkers: usize,
-    /// `<actor hex> <sequence>` appended for each fresh intent, in the order taken (I1's restart bench).
+    /// `<actor hex> <sequence>` appended for each fresh intent, in the order taken (I1's restart bench); ` reflex`
+    /// follows when the Soul's client sent it on its own (#3764).
     pub arrivals: Option<File>,
     /// Makes the world's bodies, on the clock thread, for move intents (I4b, #3156); without them a move is refused
     /// `intent.not-a-form-on-a-node`.
@@ -757,6 +761,8 @@ struct Tick {
     parts: Vec<Arc<Part>>,
     /// Answers sent as they are, with no block: a form act's progress (C20).
     bare: Vec<(Vec<Reply>, Vec<u8>)>,
+    /// A lockstep run's report, sent after every tick before it is on the disk and in the sync copy.
+    ran: Option<(Sender<Ran>, Ran)>,
 }
 
 struct Clock {
@@ -797,8 +803,12 @@ struct Clock {
     /// Acts whose deadline passed while their sit, lie or rise was going: each ends `act.timed-out` when its move
     /// ends, so no move outlives its act.
     overdue: BTreeSet<Id>,
-    /// Where edits go to be checked off the clock thread, when the world takes edits (G1b).
+    /// Where edits, wears and set-downs go to be checked off the clock thread (G1b, #3604), and whether the world
+    /// takes edits.
     edits: Option<Sender<CheckJob>>,
+    editing: bool,
+    /// Set-downs checked since the last tick, committed (or refused) at the next (#3604).
+    set_down: Vec<(Id, R<crate::setdown::Checked>)>,
     /// Edits checked since the last tick, committed (or refused) at the next.
     edited: Vec<(Id, Result<Checked, Refused>)>,
     /// Where the edit checker reads the bodies the controller holds, handed off each tick (G1d).
@@ -861,6 +871,8 @@ enum CheckJob {
     Reprepare(Box<(Id, Checked, Vec<sim::controller::BuildBasis>)>),
     /// B12b: kept surfaces the clock is done with, dropped here rather than on the clock.
     Release(Vec<sim::walk::town::RebindSurfaces>),
+    /// A Soul's set-down (#3604), checked on the same town with the engine's rules.
+    SetDown(crate::setdown::Ask),
 }
 
 #[derive(Clone, PartialEq)]
@@ -1015,12 +1027,14 @@ fn reserve_edit(edit: &Edit, lineage: Scope, next: &mut u64) -> Result<Minter, R
     Ok(reserved)
 }
 
-/// What an intent becomes: a form's act for the checkers, a move for the bodies, or an edit for the edit checker.
+/// What an intent becomes: a form's act for the checkers, a move for the bodies, or an edit or a set-down for the
+/// edit checker.
 enum Taken {
     Form(Act),
     Move(Asked),
     Edit(Edit),
     Engine(engine::Act),
+    SetDown(crate::setdown::Ask),
 }
 
 /// A form's arguments from an intent's parameter 1: `[[name as bytes, id or slot number], ...]`, a thing by its id
@@ -1141,6 +1155,24 @@ pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: 
         [(1, version.clone()), (2, Value::Map(answer))].into(),
     ))
     .unwrap_or_default()
+}
+
+/// The backstop refusal of an intent holding a text that is not a name (#3765).
+const TEXT_NOT_A_NAME: &str = "intent.text-not-a-name";
+
+/// An answered intent as its row logs it. The writer runs the reader's check (#3765): an intent holding a text that
+/// is not a name, which every intake refuses first, is logged as its encoded bytes, never as a text the log's reader
+/// refuses, and named.
+fn logged_intent(intent: Value) -> Value {
+    match replica::effects::not_a_name(&intent) {
+        None => intent,
+        Some(t) => {
+            eprintln!(
+                "worldd: an answered intent holds text-not-a-name {t:?}: logged as its bytes"
+            );
+            Value::Bytes(encode(&intent).unwrap_or_default())
+        }
+    }
 }
 
 fn name(s: &str) -> Name {
@@ -1323,7 +1355,7 @@ impl Clock {
             row.insert(3, id.to_value());
         }
         if let Some(i) = intent {
-            row.insert(5, i);
+            row.insert(5, logged_intent(i));
         }
         self.rows.push(Value::Map(row));
         self.replies.push((waiters, frame, stamps));
@@ -1440,13 +1472,20 @@ impl Clock {
         if let Some(f) = self.arrivals.as_mut() {
             // One write per line, unbuffered, so a killed world leaves every line it took.
             let hex: String = key.iter().map(|b| format!("{b:02x}")).collect();
-            let _ = f.write_all(format!("{hex} {sequence}\n").as_bytes());
+            // A reflex (#3764) is named: its Soul's client sent it, not its agent.
+            let reflex = if intent.reflex { " reflex" } else { "" };
+            let _ = f.write_all(format!("{hex} {sequence}{reflex}\n").as_bytes());
         }
         if intent.verb.as_str() == skills::wear::VERB {
             return self.wear(&intent, key, (reply, stamps), now);
         }
         let mut value = intent.to_value();
         keep_arg_names(&mut value);
+        // Every text the intent would be logged with must be a name the log's reader takes (#3765). A malformed word
+        // (an act's `sit_down:undefined`, a form argument, an edit's or a set-down's) is a backstop: the intent's own
+        // checks keep their names, and one that passes them all is refused `intent.text-not-a-name` where it would be
+        // taken, before anything is written, logged without its intent. Words are bytes (T8), so none is a text.
+        let unnamed = replica::effects::not_a_name(&value).is_some();
         let form = words::form(&intent);
         // A turn into an activity is its members' alone: refused before its words are kept when the speaker is not one.
         let mut members = BTreeSet::new();
@@ -1487,10 +1526,20 @@ impl Clock {
             let a = self.refusal(actor, sequence, "intent.ids-exhausted");
             return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
         };
+        // B16: an agent's act (never a reflex, #3764) wakes a body the wind-down holds, on this tick; the act then runs.
+        if let (true, Ok(body)) = (intent.agent_act(), self.body_of(&intent))
+            && let Some(b) = self.bodies.as_mut()
+        {
+            b.agent_acted(body, now);
+        }
         // A leave retires the Soul's body (C3).
         if let (Actor::Soul(soul), true) =
             (actor, intent.verb.as_str() == LEAVE && self.life.is_some())
         {
+            if unnamed {
+                let a = self.refusal(actor, sequence, TEXT_NOT_A_NAME);
+                return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+            }
             return self.leave(
                 soul,
                 id,
@@ -1511,6 +1560,10 @@ impl Clock {
                 Err(e) => Some(Err(e)),
             };
             if let Some(entry) = entry {
+                if unnamed && entry.is_ok() {
+                    let a = self.refusal(actor, sequence, TEXT_NOT_A_NAME);
+                    return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+                }
                 let reason = match entry {
                     Ok(e) => self.write(e).err().map(|r| r.name),
                     Err(r) => Some(r),
@@ -1541,6 +1594,10 @@ impl Clock {
                     detail: String::new(),
                 })
                 .and_then(|body| match self.bodies.as_mut() {
+                    Some(_) if unnamed => Err(Refusal {
+                        name: TEXT_NOT_A_NAME,
+                        detail: String::new(),
+                    }),
                     Some(b) => crate::orders::accept(b, &intent, body, id, now),
                     None => Err(Refusal {
                         name: "orders-off",
@@ -1622,10 +1679,21 @@ impl Clock {
             }),
             // An edit (G1b): checked off the clock thread, committed at a tick through `sim::edit`.
             (None, None, None, Ok(Kind::Edit)) => {
-                match (&self.edits, edit::wire::edit_of(&intent, id)) {
-                    (Some(_), Some(e)) => Ok(Taken::Edit(e)),
-                    (None, _) => Err("edit.not-the-creator"),
+                match (self.editing, edit::wire::edit_of(&intent, id)) {
+                    (true, Some(e)) => Ok(Taken::Edit(e)),
+                    (false, _) => Err("edit.not-the-creator"),
                     (_, None) => Err("intent.not-an-edit"),
+                }
+            }
+            // A Soul puts its held thing down (E4, #3604): checked off the clock thread, committed at a tick.
+            (None, None, None, _) if intent.verb.as_str() == crate::setdown::VERB => {
+                match (&self.edits, self.body_of(&intent)) {
+                    (None, _) => Err("setdown-off"),
+                    (Some(_), Err(e)) => Err(e),
+                    (Some(_), Ok(body)) => {
+                        crate::setdown::read(&intent, id, body, self.replica.version(), now)
+                            .map(Taken::SetDown)
+                    }
                 }
             }
             (None, None, None, _) => self.body_of(&intent).and_then(|body| {
@@ -1651,6 +1719,10 @@ impl Clock {
         } else {
             acts::Args::default()
         };
+        if unnamed {
+            let a = self.refusal(actor, sequence, TEXT_NOT_A_NAME);
+            return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+        }
         let body = match &taken {
             Taken::Form(a) => a.body,
             Taken::Move(m) => m.body,
@@ -1660,6 +1732,7 @@ impl Clock {
                 Actor::World => self.zone,
             },
             Taken::Engine(a) => a.body,
+            Taken::SetDown(a) => a.body,
         };
         self.next_intent += 1;
         // The recorder's input (K12): the intent by id and verb; its words, were there any, by reference only.
@@ -1713,6 +1786,61 @@ impl Clock {
                 }
                 Err(r) => self.end(id, |c| c.edit_refusal(actor, sequence, &r)),
             },
+            Taken::SetDown(a) => {
+                if let Some(tx) = &self.edits
+                    && tx.send(CheckJob::SetDown(a)).is_ok()
+                {
+                    self.outstanding += 1;
+                }
+            }
+        }
+    }
+
+    /// The tick's checked set-downs (#3604): each still open, its thing still in the same hand and its new parent
+    /// still there, is judged by G2's kept guard against the bodies as they stand now (lookups only) and written as
+    /// one part under its intent, answered with one receipt; else refused by name, the thing left in the hand.
+    fn set_downs(&mut self, now: Micros) {
+        for (id, checked) in std::mem::take(&mut self.set_down) {
+            let Some(o) = self.open.get(&id) else {
+                continue;
+            };
+            let (actor, sequence) = (o.actor, o.sequence);
+            if expired(o.expiry, now) {
+                self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
+                continue;
+            }
+            let soul = match actor {
+                Actor::Soul(s) => s,
+                _ => o.body,
+            };
+            let done = checked.and_then(|c| {
+                crate::setdown::still_held(self.replica.tree(), &c)?;
+                let bodies = match &self.bodies {
+                    Some(b) => buildsafe::judged(c.souls, &buildsafe::moving(b)),
+                    None => c.souls,
+                };
+                crate::setdown::verdict(&c.guard.judge(&bodies))?;
+                let header = self.replica.header().clone();
+                let p = sim::setdown::part(&header, 0, now, soul, Cause::Intent(id), c.entries)?;
+                self.write_all(p.effects)?;
+                Ok(c.walk)
+            });
+            match done {
+                Ok(walk) => {
+                    // A thing walkers go round leaves the edit checker's town, as an edit does (G1e).
+                    if let (true, Some(w), Some(p)) = (walk, &self.walkers, self.parts.last()) {
+                        w.committed(Arc::clone(p), self.replica.version());
+                    }
+                    self.end(id, |k| Answer::Receipt {
+                        actor,
+                        sequence,
+                        intent: id,
+                        entries: k.receipts.entries(id).to_vec(),
+                        names: BTreeMap::new(),
+                    });
+                }
+                Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
+            }
         }
     }
 
@@ -2076,6 +2204,7 @@ impl Clock {
                 fallbacks: Vec::new(),
                 replaces: None,
                 body: None,
+                reflex: false,
             };
             // Only a Soul with a body here (its link after a restart included); the directory never births one.
             if self.unborn(&intent).is_some() {
@@ -2730,6 +2859,7 @@ impl Clock {
         };
         let mut ended = b.step(now);
         let orders = std::mem::take(&mut b.orders.log);
+        let wind = std::mem::take(&mut b.wind_log);
         let mut deadlines = Vec::new();
         for (id, walk) in &mut self.walks {
             let (due, blocked) = walk.step(b, now);
@@ -2750,6 +2880,9 @@ impl Clock {
         let heard = std::mem::take(&mut b.heard);
         if !orders.is_empty() {
             self.write_own(orders, "standing orders");
+        }
+        if !wind.is_empty() {
+            self.write_own(wind, "the wind-down");
         }
         for (speaker, said, at) in heard {
             let e = speech::entry(Clock::own(speaker, at), speaker, &said);
@@ -3144,6 +3277,8 @@ impl Clock {
         // 4b. Checked edits (G1b): committed through `sim::edit`, or refused whole.
         self.edits(now);
         self.wears(now);
+        // 4c. Checked set-downs (#3604): committed with lookups only, or refused by name.
+        self.set_downs(now);
         self.start_forms(now);
         self.start_moves(now);
         self.write_forms(now);
@@ -3227,6 +3362,7 @@ impl Clock {
                 handed,
                 bare: progress,
                 parts,
+                ran: None,
             });
         }
         self.records += written;
@@ -3466,6 +3602,9 @@ fn answer_loop<S: Storage + 'static>(
                 let _ = w.send(frame.clone());
             }
         }
+        if let Some((done, ran)) = t.ran {
+            let _ = done.send(ran);
+        }
         if let Some(m) = &measures {
             m.queues[measures::LOG].leave(k);
         }
@@ -3579,6 +3718,8 @@ pub fn start<S: Storage + 'static>(
     let mut restart = Restart::default();
     let mut blobs = Blobs::default();
     let mut order_records = Vec::new();
+    // B16: the wind-down's records and the Souls' acts replayed, to rebuild it.
+    let mut wind_records: Vec<Effect> = Vec::new();
     let records: &[Vec<u8>] = match restored {
         Some(r) => {
             let logged = found.first + found.records.len() as u64;
@@ -3616,18 +3757,34 @@ pub fn start<S: Storage + 'static>(
         None => &found.records,
     };
     restart.read = records.len() as u64;
-    for record in records {
+    let first = found.first + (found.records.len() - records.len()) as u64;
+    for (n, record) in (first..).zip(records) {
         // The recorder's input records are what the world was handed, not what it did (K12): passed by.
         if recorder::is_input(record) {
             continue;
         }
-        let part = Part::read(record)?;
+        // A record its reader refuses stops the restart, named with its place; the log is kept as written (#3765).
+        let part = Part::read(record).map_err(|r| Refusal {
+            name: "log-record-unreadable",
+            detail: format!(
+                "record {n} of the log: {r}; the log is kept as written, nothing is dropped or repaired"
+            ),
+        })?;
         if !part.effects.is_empty() {
             world.apply(&part)?;
         }
         restart.applied += 1;
         receipts.index(&part.effects);
         remember_orders(&mut order_records, &part.effects);
+        wind_records.extend(
+            part.effects
+                .iter()
+                .filter(|e| {
+                    matches!(e.envelope.actor, Actor::Soul(_))
+                        || skills::wind_down::read(e).is_some()
+                })
+                .cloned(),
+        );
         read_back(&part, &mut placed, &mut last);
         // Nodes an edit placed took their ids on the intents' counter (G1b): never give one out again.
         for e in &part.effects {
@@ -3868,24 +4025,24 @@ pub fn start<S: Storage + 'static>(
         .unwrap_or_default();
     let engine_parts = cfg.engine.take();
     let (events, rx) = channel();
-    let walkers =
-        (cfg.edits.is_some() || cfg.wear.is_some()).then(|| Arc::new(buildsafe::Moving::default()));
-    let creator = cfg.creator.take();
-    let edit_kinds = cfg
-        .edits
+    // The edit checker's thread checks edits (with a creator), wears, and set-downs (with the engine's rules, #3604).
+    let editing = cfg.edits.is_some();
+    let set_downs = engine_parts
         .as_ref()
-        .map(|w| w.kinds.clone())
-        .unwrap_or_default();
+        .map(|(r, _)| (r.clone(), Minter::new(scope("setdown"))));
+    let walkers = (editing || cfg.wear.is_some() || set_downs.is_some())
+        .then(|| Arc::new(buildsafe::Moving::default()));
+    let creator = cfg.creator.take();
     let edits = walkers
         .clone()
         .map(|m| {
             edit_checker(
                 cfg.edits.take(),
+                set_downs,
                 creator,
                 Arc::clone(&publisher),
                 m,
                 events.clone(),
-                edit_kinds,
                 rules.kinds.clone(),
             )
         })
@@ -3983,6 +4140,8 @@ pub fn start<S: Storage + 'static>(
         walks: BTreeMap::new(),
         overdue: BTreeSet::new(),
         edits,
+        editing,
+        set_down: Vec::new(),
         edited: Vec::new(),
         walkers,
         forms: Acts::new(kinds, library, header, forms_scope),
@@ -4060,6 +4219,12 @@ pub fn start<S: Storage + 'static>(
                         if let Err(r) = crate::orders::resume(&mut b, &order_parts, at) {
                             eprintln!("worldd: standing orders were not restored: {r}");
                         }
+                        b.wind_resume(
+                            &wind_records,
+                            |s| c.life.as_ref().and_then(|l| l.life.body_of(s)),
+                            &placed,
+                            at,
+                        );
                         if let Some(w) = &c.walkers {
                             w.offer_map(&b, c.replica.version());
                         }
@@ -4118,6 +4283,10 @@ pub fn start<S: Storage + 'static>(
                         c.outstanding = c.outstanding.saturating_sub(1);
                         c.worn.push(*k);
                     }
+                    Event::SetDown(k) => {
+                        c.outstanding = c.outstanding.saturating_sub(1);
+                        c.set_down.push(*k);
+                    }
                     Event::Directory(d) => {
                         let (d, reply) = *d;
                         c.told.extend(d.souls());
@@ -4167,7 +4336,22 @@ pub fn start<S: Storage + 'static>(
                             stop = true;
                         }
                     }
-                    let _ = done.send(c.ran());
+                    // Through the answers thread, behind the run's ticks: the report is an answer the caller holds.
+                    let ran = Tick {
+                        inputs: None,
+                        record: None,
+                        replies: Vec::new(),
+                        started: None,
+                        handed: None,
+                        parts: Vec::new(),
+                        bare: Vec::new(),
+                        ran: Some((done, c.ran())),
+                    };
+                    if let Err(e) = c.answers.send(ran)
+                        && let Some((done, ran)) = e.0.ran
+                    {
+                        let _ = done.send(ran);
+                    }
                     if stop {
                         break;
                     }
@@ -4220,16 +4404,25 @@ pub fn start<S: Storage + 'static>(
 /// bodies (lookups only), so an edit that would bury a Soul, cut it off or change what it uses is refused by name,
 /// naming the Soul. While no edit waits, the town is built (again) ahead of the next. With `creator` (G1e), the
 /// creator is the one it names now.
+///
+/// The same thread checks a Soul's set-down (#3604, [`crate::setdown::check`]) on the same town, with the engine's
+/// rules: a world with the engine and no creator has the thread for set-downs alone, and refuses every edit.
 fn edit_checker(
     mut world: Option<edit::World>,
+    set_downs: Option<(replica::tree::Rules, Minter)>,
     creator: Option<Arc<buildsafe::Creator>>,
     publisher: Arc<Publisher>,
     walkers: Arc<buildsafe::Moving>,
     events: Sender<Event>,
-    kinds: BTreeMap<String, replica::world_model::Kind>,
     entries: replica::rules::json::Value,
 ) -> R<Sender<CheckJob>> {
     let (tx, rx) = channel::<CheckJob>();
+    let kinds = match (&world, &set_downs) {
+        (Some(w), _) => w.kinds.clone(),
+        (None, Some((r, _))) => r.kinds.clone(),
+        (None, None) => BTreeMap::new(),
+    };
+    let mut set_downs = set_downs;
     thread::Builder::new()
         .name("edit-check".into())
         .spawn(move || {
@@ -4286,12 +4479,31 @@ fn edit_checker(
                         }
                         continue;
                     }
-                };
-                let Some(world) = world.as_mut() else {
-                    // No edit waits: the town is built, or kept, ahead of the next.
-                    let copy = publisher.wait_for(edited, Duration::from_secs(1));
-                    town.on(&copy, buildsafe::open_ground(&copy), &committed);
-                    continue;
+                    CheckJob::SetDown(a) => {
+                        let copy =
+                            publisher.wait_for(a.planned.max(edited), Duration::from_secs(1));
+                        let ground = buildsafe::open_ground(&copy);
+                        let checked = match &mut set_downs {
+                            Some((rules, mint)) => {
+                                let latest = walkers.latest();
+                                let souls = buildsafe::souls(&copy, &kinds);
+                                let bodies = buildsafe::judged(souls.clone(), &latest);
+                                let t = town.on(&copy, ground, &committed);
+                                crate::setdown::check(&a, &copy, t, rules, mint, &bodies, souls)
+                            }
+                            None => Err(Refusal {
+                                name: "setdown-off",
+                                detail: String::new(),
+                            }),
+                        };
+                        if events
+                            .send(Event::SetDown(Box::new((a.id, checked))))
+                            .is_err()
+                        {
+                            break;
+                        }
+                        continue;
+                    }
                 };
                 let snapshot = walkers.current();
                 let source = snapshot.map.as_ref();
@@ -4301,6 +4513,17 @@ fn edit_checker(
                     .max(e.planned);
                 let copy = publisher.wait_for(needed, Duration::from_secs(1));
                 let ground = buildsafe::open_ground(&copy);
+                let Some(world) = world.as_mut() else {
+                    let r = Err(Refused {
+                        op: None,
+                        name: "edit.not-the-creator",
+                        detail: "the world takes no edits".into(),
+                    });
+                    if events.send(Event::Edited(Box::new((id, r)))).is_err() {
+                        break;
+                    }
+                    continue;
+                };
                 let who = creator.as_ref().map_or(Some(world.creator), |c| c.get());
                 let checked = match who {
                     _ if copy.version() < needed => Err(Refused {
@@ -4320,7 +4543,7 @@ fn edit_checker(
                 };
                 let checked = checked
                     .and_then(|c| {
-                        let known = town.on(&copy, ground, &committed).map(Known::of);
+                        let known = town.on(&copy, ground, &committed).map(|t| Known::of(t));
                         sim::edit::plan_classes(
                             c,
                             &copy,
@@ -4497,6 +4720,7 @@ mod tests {
             }],
             replaces: None,
             body: None,
+            reflex: false,
         }
     }
 
@@ -4871,6 +5095,7 @@ mod tests {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         let place = Op::Place {
             name: 1,
@@ -4997,6 +5222,7 @@ mod tests {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         let cfg = || {
             let mut cfg = Config::new(LINEAGE, 1);
@@ -5642,6 +5868,90 @@ mod standing_order_carry_tests {
             active.iter().map(|e| e.envelope.node).collect::<Vec<_>>(),
             vec![b],
             "cancelled order cannot restart"
+        );
+    }
+}
+
+#[cfg(test)]
+mod no_brick_tests {
+    //! #3765 A4: the writer of an answered row against the log's reader, over many intent words.
+    use super::*;
+
+    /// Text the encoding allows (rule 6), so each word could arrive in an intent.
+    const ALPHABET: &[u8] = b"abcdefgxyzABCZ0189_-.:/@";
+
+    /// A tick record holding one answered row whose intent carries `word` as its verb and as a form argument.
+    fn record(row_intent: Value) -> Vec<u8> {
+        let row = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(vec![1])),
+            (2, Value::Uint(1)),
+            (4, Value::Bytes(vec![2])),
+            (5, row_intent),
+        ]));
+        encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(Hash::of(Purpose::Header, b"h").to_bytes())),
+            (2, Value::Array(Vec::new())),
+            (ANSWERED, Value::Array(vec![row])),
+        ])))
+        .unwrap()
+    }
+
+    #[test]
+    fn every_logged_intent_word_reads_back() {
+        let mut seed: u64 = 0x3765;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let (mut names, mut not_names) = (0, 0);
+        for _ in 0..20_000 {
+            // Half the words are near-names: lowercase parts round one colon, as a client means them.
+            let near = next() % 2 == 0;
+            let alphabet: &[u8] = if near { b"abcxyz019_-" } else { ALPHABET };
+            let len = 1 + (next() % 24) as usize;
+            let mut word: String = (0..len)
+                .map(|_| alphabet[(next() % alphabet.len() as u64) as usize] as char)
+                .collect();
+            if near {
+                word.insert(0, 'a');
+                word.insert(1 + (next() % len as u64) as usize, ':');
+            }
+            let text = Value::Text(Name::new(&word).expect("the alphabet is names' bytes"));
+            let intent = Value::Map(BTreeMap::from([
+                (2, text.clone()),
+                (
+                    4,
+                    Value::Map(BTreeMap::from([(
+                        1,
+                        Value::Array(vec![Value::Array(vec![
+                            Value::Bytes(b"thing".to_vec()),
+                            text,
+                        ])]),
+                    )])),
+                ),
+            ]));
+            // Intake's check and the reader agree: what intake passes, the reader reads as written.
+            let raw = Part::read(&record(intent.clone()));
+            let refused = replica::effects::not_a_name(&intent).is_some();
+            assert_eq!(raw.is_err(), refused, "intake and reader agree on {word:?}");
+            if refused {
+                not_names += 1
+            } else {
+                names += 1
+            }
+            // The writer never logs what the reader refuses, and keeps a name as it is.
+            let logged = logged_intent(intent.clone());
+            Part::read(&record(logged.clone()))
+                .unwrap_or_else(|r| panic!("{word:?} logged unreadable: {r}"));
+            if !refused {
+                assert_eq!(logged, intent, "a name is logged as written");
+            }
+        }
+        assert!(
+            names > 100 && not_names > 100,
+            "both kinds tried: {names} names, {not_names} not"
         );
     }
 }

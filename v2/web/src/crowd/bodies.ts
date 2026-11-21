@@ -6,6 +6,7 @@ import type * as THREE from 'three';
 import { bakeBytes, decodeBaked, loadModel } from './bake.ts';
 import type { BodyMotion } from './creature/motion.ts';
 import { Crowd } from './crowd.ts';
+import { ArrivalLights } from './arrival.ts';
 
 /** The body files of today's people (character-wire.ts's names) and the clips baked for each. */
 export const BODIES: [string, string, string][] = [
@@ -94,9 +95,12 @@ export class CrowdBodies {
   private dt = 0;
   private defaults: number;
   private requested: (string | undefined)[] = [];
+  /** N-V19 (#3677): a Soul that joins while the page watches comes down in a light. */
+  readonly arrivals = new ArrivalLights();
 
   constructor(crowd: Crowd) {
     this.crowd = crowd; this.defaults = crowd.models.length;
+    crowd.group.add(this.arrivals.mesh);
   }
 
   /** Starts a frame at world time `t` (µs). */
@@ -104,12 +108,14 @@ export class CrowdBodies {
     this.dt = this.last === null ? 0 : Math.max(0, (t - this.last) / 1e6);
     this.last = t;
     this.seen.fill(false);
+    this.arrivals.begin(t);
   }
 
   /** Body `id` stands at world `x, y, z` (m) this frame. */
-  place(id: string, x: number, y: number, z: number, body?: string): void {
+  place(id: string, x: number, y: number, z: number, body?: string, nowMs = performance.now()): void {
     const c = this.crowd;
     let i = this.index.get(id);
+    this.arrivals.place(id, x, y, z, i === undefined, nowMs);
     if (i === undefined) {
       i = c.add(hash(id) % this.defaults);
       this.index.set(id, i);
@@ -172,5 +178,6 @@ export class CrowdBodies {
     this.ids.length = this.speed.length = this.seen.length = this.requested.length = c.count;
     c.step(this.dt);
     c.draw(camera);
+    this.arrivals.draw();
   }
 }

@@ -29,7 +29,7 @@ Before starting the old launcher, install its operator-owned `/etc/souls/cutover
 {"oldWorldId":"<stable old registry worldId>","canonicalSlug":"eden","routesFile":"/var/lib/souls/routes/worlds.json","clientDir":"/usr/local/lib/souls/client"}
 ```
 
-Use the resolved old registry identity, including existing aliases, rather than assuming the public slug is the
+Today's launcher runs as `simworlds`, outside the Souls group, and reads `routesFile` on every Eden write: the install keeps `/var/lib/souls` at 751 and `routes/` at 755 so it can (check: `runuser -u simworlds -- test -r /var/lib/souls/routes/worlds.json`). Unreadable, Eden's writes answer `cutover.activation-unavailable`. Use the resolved old registry identity, including existing aliases, rather than assuming the public slug is the
 database identity. The installed client must be the release's matching served bundle. `SOULS_CUTOVER_BINDING` may
 name a different binding file; an explicitly configured missing file or invalid binding refuses launcher startup.
 An absent default binding leaves ordinary old operation enabled. Once configured, missing or damaged activation

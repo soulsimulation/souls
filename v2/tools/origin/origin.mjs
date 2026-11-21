@@ -5,7 +5,8 @@
 // - a part, and a bundle's header: `public, max-age=31536000, immutable, no-transform` (never changes once written);
 // - the pointer: `public, max-age=1, no-transform`, the shortest whole number of seconds at or above half a period
 //   (max-age takes whole seconds; half of V1's 0.5 s period would round to 0, and every read would reach here);
-// - every 404, a temporary file (`*.tmp`) and any URL with a query string: `no-store`.
+// - every 404, a temporary file (`*.tmp`) and any URL with a query string: `no-store`. A 404 a browser asked for as a
+//   page (Accept naming text/html, not an API path) carries site.mjs's "No page here" page (C1, #3673).
 //
 // Each 200 carries a strong ETag, the SHA-256 of the bytes, which the reader tool checks.
 //
@@ -18,7 +19,7 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { siteRoutes } from './site.mjs';
+import { noPage, siteRoutes, wantsPage } from './site.mjs';
 import { worldRoutes } from './world-routes.mjs';
 
 export const IMMUTABLE = 'public, max-age=31536000, immutable, no-transform';
@@ -41,6 +42,7 @@ export function createOrigin(dir, site = {}) {
   const server = createServer(async (req, res) => {
     const miss = () => {
       stats.miss++;
+      if (wantsPage(req)) return noPage(req, res); // C1 (#3673): a person gets a page, a program the empty 404
       res.writeHead(404, { 'cache-control': MISS, 'content-length': 0 }).end();
     };
     try {

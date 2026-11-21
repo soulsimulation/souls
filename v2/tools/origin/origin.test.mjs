@@ -218,3 +218,29 @@ test('W17 archived canonical and preview endpoints refuse and address markers su
     assert.deepEqual((await makeRoutes(options)).slugs,['garden'],'restoring or unlisted canonical address remains routed before the row becomes public');
   }finally{s.close();}
 });
+
+test('C1 (#3673) A3: a browser asking for an unknown page gets a 404 "No page here" linking home; programs and APIs keep theirs', async () => {
+  const at = base.slice(0, base.indexOf('/', 'http://'.length)), html = { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' };
+  for (const path of ['/nope', '/l/old-lab', '/w/eden/nope', '/preview/w/eden/no/such/page', '/nope?x=1', '/w/eden/%3Cb%3E']) {
+    const r = await fetch(`${at}${path}`, { headers: html }), body = await r.text();
+    assert.equal(r.status, 404, path);
+    assert.equal(r.headers.get('content-type'), 'text/html; charset=utf-8', path);
+    assert.equal(r.headers.get('cache-control'), 'no-store', path);
+    assert.match(body, /<h1>No page here<\/h1>/, path);
+    assert.match(body, /<a href="\/">See the worlds<\/a>/, path);
+    assert.ok(!body.includes('<b>'), 'the path is escaped');
+    const head = await fetch(`${at}${path}`, { method: 'HEAD', headers: html });
+    assert.equal(head.status, 404);
+    assert.equal(await head.text(), '');
+  }
+  // A program (no text/html in Accept) and the API paths keep their empty or JSON 404s.
+  for (const [path, headers] of [['/nope', {}], [`/${stream}/8`, {}], ['/v1/nope', html], ['/w/eden/v1/nope', html], ['/s/nope', html], ['/preview/w/eden/v2/x', html]]) {
+    const r = await fetch(`${at}${path}`, { headers });
+    assert.equal(r.status, 404, path);
+    assert.notEqual(r.headers.get('content-type'), 'text/html; charset=utf-8', path);
+    assert.equal(await r.text(), '', path);
+  }
+  // A world route's own refusal stays JSON.
+  const routed = await fetch(`${at}/w/missing/v1/bootstrap`, { headers: html });
+  assert.equal(routed.headers.get('content-type'), 'application/json');
+});
