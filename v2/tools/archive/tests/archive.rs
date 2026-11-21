@@ -1403,9 +1403,10 @@ fn w3655_legacy_empty_initial_part_keeps_named_refusals_and_store_unchanged() {
 }
 
 /// #3755: a fork's based bundles made row by row are byte-identical to the whole-state reference's, live and made
-/// again, over the rows an entry can touch: a private flight's opaque public nodes and links coming back, a public
-/// link with a private end, motion thinned and kept across windows, a field set, a timer set and cleared, an unlink,
-/// a remove that takes a link with it, and a public subtree leaving and settling.
+/// again, over the rows an entry can touch: a private flight's opaque public nodes and links going and coming back,
+/// a public link whose private end settles away (it becomes public), motion thinned and kept across windows, a field
+/// set, a timer set and cleared, an unlink, a remove that takes a link with it, and a public subtree leaving and
+/// settling with a timer of its own (which stops being public).
 #[test]
 fn w3755_rows_equal_the_whole_state_reference_on_flights_links_timers_and_removes() {
     use replica::effects::{Body, Change, ChangeRec, TimerRec, TransferRec};
@@ -1459,6 +1460,8 @@ fn w3755_rows_equal_the_whole_state_reference_on_flights_links_timers_and_remove
     };
     let [container, child, slotted, walker, inner, outer, timer, away, gone] =
         std::array::from_fn(|_| fork.minter.mint().unwrap());
+    let [far, toward, second, settled] =
+        std::array::from_fn(|_| fork.minter.mint().unwrap());
     let everyone = Audience::Everyone;
     let hidden = Audience::Of(private);
     let at = 60_000_000;
@@ -1477,11 +1480,18 @@ fn w3755_rows_equal_the_whole_state_reference_on_flights_links_timers_and_remove
     let make_walker = one(make(walker, kind("souls:body@"), script::world::pose(room, None, 1), everyone));
     w3c_fork_effect(&mut fork, at, room, everyone, make_walker);
     w3c_fork_effect(&mut fork, at, walker, everyone, one(link(outer, [walker, container])));
-    let set = Body::Timers(vec![TimerRec::Set {
-        timer,
-        due: 600_000_000,
-        name: Name::new("souls:wake").unwrap(),
-    }]);
+    let make_far = one(make(far, kind("souls:body@"), script::world::pose(room, None, 3), hidden));
+    w3c_fork_effect(&mut fork, at, room, hidden, make_far);
+    w3c_fork_effect(&mut fork, at, walker, everyone, one(link(toward, [walker, far])));
+    let set = Body::Timers(
+        [timer, second]
+            .map(|timer| TimerRec::Set {
+                timer,
+                due: 600_000_000,
+                name: Name::new("souls:wake").unwrap(),
+            })
+            .into(),
+    );
     w3c_fork_effect(&mut fork, at, walker, everyone, set);
     let leave = |transfer, node, x| {
         Body::Transfer(TransferRec::Leave {
@@ -1492,7 +1502,6 @@ fn w3755_rows_equal_the_whole_state_reference_on_flights_links_timers_and_remove
             pose: script::world::pose(room, None, x),
         })
     };
-    w3c_fork_effect(&mut fork, 61_000_000, container, hidden, leave(away, container, 0));
     let base = w3c_checkpoint(&scratch, &mut fork);
     let returned = Body::Transfer(TransferRec::Return {
         transfer: away,
@@ -1509,6 +1518,9 @@ fn w3755_rows_equal_the_whole_state_reference_on_flights_links_timers_and_remove
         (62_000_000, walker, everyone, motion(walker, 62_000_000, 2)),
         (62_100_000, walker, everyone, motion(walker, 62_100_000, 3)),
         (63_000_000, walker, everyone, set_field),
+        (64_000_000, container, hidden, leave(away, container, 0)),
+        (65_000_000, far, hidden, leave(settled, far, 3)),
+        (66_000_000, room, hidden, Body::Transfer(TransferRec::Settle { transfer: settled })),
         (119_500_000, room, hidden, returned),
         (125_000_000, walker, everyone, motion(walker, 125_000_000, 4)),
         (126_000_000, walker, everyone, one(Change::Unlink { link: outer })),
