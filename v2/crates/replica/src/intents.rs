@@ -286,15 +286,34 @@ impl Intent {
     /// `fallback-not-an-act`, `fallbacks-not-on-an-act`), each kind's shape (`order-without-target`,
     /// `cancel-without-replaces`, `cancel-not-bare`, `edit-not-bare`, `edit-not-a-batch`) and the driven body
     /// (`creator-without-body`, `body-not-a-creators`; an edit drives none).
+    /// Over [`INTENT_MOST`] bytes, only a creator's edit of at most [`BULK_MOST`] is read (#3695); anything else is
+    /// `intent-too-large`, whatever else is wrong with it.
     pub fn read(bytes: &[u8]) -> R<Intent> {
         let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-        if size > BULK_MOST {
-            return refuse(
+        if size <= INTENT_MOST {
+            return Intent::parse(bytes);
+        }
+        let too = || {
+            refuse(
                 "intent-too-large",
                 format!("{size} bytes; at most {INTENT_MOST}, or {BULK_MOST} for a creator's edit"),
-            );
+            )
+        };
+        if size > BULK_MOST {
+            return too();
         }
-        let bulk = size > INTENT_MOST;
+        match Intent::parse(bytes) {
+            Ok(i)
+                if matches!(i.actor, Actor::Creator(_))
+                    && i.verb.as_str() == crate::edit::wire::VERB =>
+            {
+                Ok(i)
+            }
+            _ => too(),
+        }
+    }
+
+    fn parse(bytes: &[u8]) -> R<Intent> {
         let v = decode(bytes)
             .or_else(|e| refuse("encoding", e.to_string()))?
             .value;
@@ -350,15 +369,6 @@ impl Intent {
                 Some(_) => return not("a reflex marker is 1, or left out"),
             },
         };
-        if bulk
-            && !(matches!(intent.actor, Actor::Creator(_))
-                && intent.verb.as_str() == crate::edit::wire::VERB)
-        {
-            return refuse(
-                "intent-too-large",
-                format!("{size} bytes; at most {INTENT_MOST} for any but a creator's edit"),
-            );
-        }
         let kind = intent.kind()?;
         if kind != Kind::Act && !intent.fallbacks.is_empty() {
             return refuse("fallbacks-not-on-an-act", intent.verb.as_str().to_owned());

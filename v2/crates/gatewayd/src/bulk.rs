@@ -57,7 +57,10 @@ impl Gauge {
 
 fn refuse(gw: &Gateway, status: StatusCode, name: &str) -> Response {
     gw.bulk.refused.fetch_add(1, Ordering::Relaxed);
-    (gw.log)(&format!("gatewayd: bulk edit refused {name}; {}", gw.bulk.line()));
+    (gw.log)(&format!(
+        "gatewayd: bulk edit refused {name}; {}",
+        gw.bulk.line()
+    ));
     (
         status,
         [(header::CACHE_CONTROL, "no-store")],
