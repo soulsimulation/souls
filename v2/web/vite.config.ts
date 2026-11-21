@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig, type Connect, type Plugin } from 'vite';
 import { bodyAssets } from './body-assets.ts';
 import { changelogHtml } from './src/changelog/page.ts';
+import { creditsHtml } from './src/credits/credits.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const pkg = resolve(here, process.env.V2_REPLICA_PKG ?? '../target/wasm-load/pkg');
@@ -60,6 +61,19 @@ function changelogPage(): Plugin {
   };
 }
 
+/** N-W7 (#3693): credits.html filled from the CDN's licence records at build time. */
+function creditsPage(): Plugin {
+  const records = resolve(here, '../../tools/cdn/approved-derivatives.json');
+  return {
+    name: 'v2-credits-page',
+    configureServer: (s) => void s.watcher.add([records]),
+    transformIndexHtml(html, ctx) {
+      if (!/(^|\/)credits\.html$/.test(ctx.path)) return;
+      return creditsHtml(html, JSON.parse(readFileSync(records, 'utf8')));
+    },
+  };
+}
+
 const proxy = {
   ...(process.env.V2_DIRECTORY ? { '/v1/': process.env.V2_DIRECTORY } : {}),
   ...(process.env.V2_GATEWAY ? { '/v2/': { target: process.env.V2_GATEWAY, ws: true } } : {}),
@@ -73,7 +87,7 @@ export default defineConfig({
   worker: { format: 'es' },
   build: {
     target: 'es2022', outDir: 'dist', assetsInlineLimit: 0, chunkSizeWarningLimit: 1024,
-    rollupOptions: { input: { main: resolve(here, 'index.html'), pairing: resolve(here, 'src/pairing/card.html'), worlds: resolve(here, 'src/worlds/index.html'), home: resolve(here, 'src/home/index.html'), account: resolve(here, 'src/account/index.html'), changelog: resolve(here, 'changelog.html'), panel: resolve(here, 'src/panel/index.html') } },
+    rollupOptions: { input: { main: resolve(here, 'index.html'), pairing: resolve(here, 'src/pairing/card.html'), worlds: resolve(here, 'src/worlds/index.html'), home: resolve(here, 'src/home/index.html'), account: resolve(here, 'src/account/index.html'), changelog: resolve(here, 'changelog.html'), credits: resolve(here, 'credits.html'), panel: resolve(here, 'src/panel/index.html') } },
   },
-  plugins: [streamFiles(), changelogPage(), bodyAssets(process.env.V2_BODY_ASSETS)],
+  plugins: [streamFiles(), changelogPage(), creditsPage(), bodyAssets(process.env.V2_BODY_ASSETS)],
 });

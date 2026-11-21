@@ -11,7 +11,7 @@ each rule does is in the header of [`soul-game.caddy`](soul-game.caddy).
 | `souls-routes.service`, `.timer` | `/etc/systemd/system/` | runs `routes.mjs` each minute as `simworlds` |
 | `standin.mjs` | not installed | the local stand-in that proves all of this (below) |
 
-The site's own pages (`/changelog`, `/changelog.md`, `/v1/feed`, `/ops`) go to the viewers' origin, which serves them
+The site's own pages (`/changelog`, `/changelog.md`, `/credits`, `/v1/feed`, `/ops`) go to the viewers' origin, which serves them
 from the page's files and the release's `news.jsonl` (`v2/tools/origin/site.mjs`, O23).
 
 `sim.eden.art` keeps today's `tools/world-launcher/deploy/caddy/sim-eden-art.caddy` (it redirects and keeps the

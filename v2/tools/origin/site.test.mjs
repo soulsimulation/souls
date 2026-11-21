@@ -25,6 +25,7 @@ before(async () => {
   for (const d of ['views', 'web', 'data', 'pkg']) mkdirSync(join(dir, d));
   writeFileSync(join(dir, 'web', 'changelog.html'), '<!doctype html><title>Changelog · Souls</title><section id="v0.140">0.140</section>');
   writeFileSync(join(dir, 'web', 'changelog.md'), '# Changelog\n\n## 0.140 (2026-11-19)\n');
+  writeFileSync(join(dir, 'web', 'credits.html'), '<!doctype html><title>Credits · Souls</title><h2>Sources and licences</h2>');
   writeFileSync(join(dir, 'pkg', 'replica.js'), 'export const test = true;');
   writeFileSync(join(dir, 'pkg', 'replica_bg.wasm'), Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]));
   build({ out: join(dir, 'client'), version: '0.0.0', pkg: join(dir, 'pkg') });
@@ -311,4 +312,13 @@ test('O23b: directory work has finite concurrency and a total deadline', async t
   for (const pending of [first, second]) { const r = await pending; assert.equal(r.status, 503); }
   assert.equal(f.requests.length, 2, 'no retry/poll/background work');
   f.mode('normal'); assert.equal((await f.data(ownerHeaders)).status, 200, 'capacity returns after deadline');
+});
+
+test('N-W7 (#3693): /credits serves the page\'s credits', async () => {
+  for (const p of ['/credits', '/credits/']) {
+    const r = await fetch(`${base}${p}`);
+    assert.equal(r.status, 200, p);
+    assert.match(r.headers.get('content-type'), /text\/html/);
+    assert.match(await r.text(), /Sources and licences/);
+  }
 });

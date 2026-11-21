@@ -21,7 +21,7 @@
 # - The visitor's address: X-Forwarded-For is replaced with {client_ip}, trusted only from cdn-trust.snippet's ranges.
 # - Pages refuse framing by other sites; API answers are not indexed. Neither replaces a header the answer already has
 #   (the sign-in bridge keeps its own CSP and DENY).
-# - The site's own pages, /changelog, /changelog.md, the feed (/v1/feed) and the owner overview (/ops), are the new
+# - The site's own pages, /changelog, /changelog.md, /credits, the feed (/v1/feed) and the owner overview (/ops), are the new
 #   system's, answered by the viewers' origin (v2/tools/origin/site.mjs; O23, #3324).
 # - /sitemap.xml is routes.mjs's: today's sitemap plus the directory's worlds; robots.txt stays today's.
 # - When an origin cannot answer, a page a browser asked for gets today's poster ("back in a moment"), as before.
@@ -143,7 +143,7 @@ https://soul.game {
 		root * /var/lib/souls-routes
 		file_server
 	}
-	@site path /changelog /changelog/ /changelog.md /v1/feed /ops /v1/auth/config
+	@site path /changelog /changelog/ /changelog.md /credits /credits/ /v1/feed /ops /v1/auth/config
 	handle @site {
 		header X-Souls-System v2
 		reverse_proxy localhost:7320 {

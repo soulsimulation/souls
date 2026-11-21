@@ -5,6 +5,8 @@
 //   GET /changelog, /changelog/   the page's changelog.html (v2/web builds it from CHANGELOG.md); with an Accept that
 //                                 prefers Markdown, changelog.md, as today's launcher negotiates it
 //   GET /changelog.md             the page's changelog.md
+//   GET /credits, /credits/       the page's credits.html: assets and their licences from the CDN's licence records
+//                                 (N-W7, #3693; v2/web builds it)
 //   GET /v1/feed?after=&limit=    the platform feed in today's shape (tools/world-launcher/feed.mjs): {items:[{id, at,
 //                                 kind, title, body, url?, ...}], next}, oldest first after the cursor, an item that a
 //                                 later one `replaces` left out. Read from <data>/news.jsonl, where O18's release writes
@@ -25,7 +27,7 @@ import { opsOverview } from './ops.mjs';
 const { answer } = await import(existsSync(new URL('./serve.mjs', import.meta.url)) ? './serve.mjs' : '../../client/served/serve.mjs');
 const CLIENT_PATH = /^\/w\/[a-z0-9][a-z0-9-]*\/(eden\.mjs|skill\.md|creator\.md|instructions\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1\/config)$/;
 
-export const SITE_PATHS = Object.freeze(['/changelog', '/changelog/', '/changelog.md', '/v1/feed', '/ops', '/v1/auth/config']);
+export const SITE_PATHS = Object.freeze(['/changelog', '/changelog/', '/changelog.md', '/credits', '/credits/', '/v1/feed', '/ops', '/v1/auth/config']);
 export const FEED_LIMITS = Object.freeze({ pageDefault: 20, pageMax: 100 });
 const ID_RE = /^f([1-9]\d{0,9})$/;
 const num = (i) => Number(ID_RE.exec(i.id)[1]);
@@ -163,6 +165,7 @@ export function siteRoutes({ web = process.env.SOULS_WEB || '/usr/local/lib/soul
       return true;
     }
     if (path === '/v1/feed') feed.serve(req, res, url);
+    else if (path === '/credits' || path === '/credits/') file(req, res, 'credits.html', 'text/html; charset=utf-8');
     else if (path === '/changelog.md' || wantsMarkdown(req.headers.accept)) file(req, res, 'changelog.md', 'text/markdown; charset=utf-8');
     else file(req, res, 'changelog.html', 'text/html; charset=utf-8');
     return true;
