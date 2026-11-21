@@ -21,5 +21,5 @@ the most expensive thing the project runs routinely, so it is used sparingly and
    layer. Don't raise it for one run.
 6. **Respect the shared cap.** Only a few gates may be in flight at once across all work. The release workflow's
    concurrency group enforces one release at a time.
-7. **Fix flaky tests.** A flaky test costs a gate each time it fires. Fix or quarantine it with a reason; never re-run
-   until green.
+7. **Fix flaky tests.** A flaky test costs a gate each time it fires. A test that fails twice gets a fix lane at once;
+   never weaken a test, quarantine it or raise a timeout, and never re-run until green.

@@ -134,7 +134,9 @@ The strict steps:
 
 A PR that fails a check leaves the train with its result in the PR; fix it and relabel.
 
-**Stacked PRs.** When a PR squash-merges, the `restack` workflow (`.github/workflows/restack.yml`,
+**Stacked PRs.** Keep stacks short-lived: a stacked branch lands within about 4 hours or merges into `main` early, and
+the integrator lands the base first, so fixes never sit off `main` while later work builds on them. When a PR
+squash-merges, the `restack` workflow (`.github/workflows/restack.yml`,
 `.github/scripts/restack.mjs`) handles the PRs stacked on it. It retargets each one to the merged PR's base (GitHub
 already does this when it deletes the merged branch) and merges that base forward. A child still carries the old
 branch's commits, so a plain `git merge main` diffs from the old `main` fork point and conflicts on files the child
@@ -142,6 +144,21 @@ never changed. The restack merge is 3-way against the child's fork point from th
 own diff doesn't touch take the squashed content. The result is an ordinary merge commit, pushed as a fast-forward with
 `MERGE_TRAIN_TOKEN` (never forced), so CI runs on it. A real conflict pushes nothing; the child gets `needs:rebase`
 and a comment naming the files. To redo one by hand, run `gh workflow run restack.yml -f pr=<merged PR>`.
+
+## PR body
+
+A green, reviewed PR is never blocked by its description. The required minimum is:
+
+- the issue link (`Closes #n`, a bare `#n` or the issue's URL);
+- a one-line summary of the change;
+- the CI run link, which the proof bot adds to its comment from the newest `ci` run at the head.
+
+`proof-ok` (`.github/workflows/proof-check.yml`, `tools/proof/acceptance.mjs`) fails only when the minimum is missing,
+when it finds device details anywhere it reads (the [publication privacy](publication-privacy.md) scan), or, at
+T3–T4, until the maintainer signs off. Everything else it reads (the Problem, Acceptance and Self-audit sections,
+evidence syntax, clips, `proof.json`) is advisory: its comment lists the advice and the workflow logs a warning.
+Rich proof is optional, and real-run evidence counts as it is. `node tools/proof/acceptance.mjs check --strict` still
+reports a full journal entry as pass or fail for anyone who wants it.
 
 ## Review
 

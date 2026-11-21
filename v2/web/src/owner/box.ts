@@ -8,7 +8,8 @@
 // - page → gateway: `put <grant>\n<words>`.
 // - gateway → page: `{"sent": {"id"}}` or `{"sent": {"refused"}}`, then for each message `{"mail": {"id", "state":
 //   "picked"}}`, `{"doing": {"seq", "verb", "phase", "outcome"}}` for each of the agent's intents while it is open,
-//   and `{"close": {"id", "state", "outcome", "reply"?}}`: `reply` is the agent's answer in words (C15, #3685).
+//   `{"note": {"id", "reply"}}` for each interim note the agent sends while it is open (#3781), and `{"close": {"id",
+//   "state", "outcome", "reply"?}}`: `reply` is the agent's answer in words (C15, #3685).
 //
 // The agent's words and the world's names are drawn as text (`textContent`), never as markup.
 
@@ -24,7 +25,12 @@ export type Message = {
   outcome: string | null;
   /** The agent's reply, sent with its close (C15: `ack <id> "<reply>"`), drawn as text. */
   reply?: string | null;
+  /** The agent's interim notes while it is open (`ack <id> "<note>"` with no `--close`, #3781), oldest first. */
+  notes?: string[];
 };
+
+/** The most interim notes kept per message: the newest. */
+export const NOTES_KEPT = 5;
 
 /** The longest reply drawn, in characters (the client's). */
 export const REPLY_MOST = 1000;
@@ -76,6 +82,11 @@ export class OwnerBox {
       if (!m) return true;
       m.state = 'doing';
       m.act = { verb: str(f.doing.verb) ?? '?', phase: str(f.doing.phase) ?? '?', outcome: str(f.doing.outcome) };
+    } else if (f.note) {
+      const m = byId(f.note.id);
+      const note = str(f.note.reply)?.trim();
+      if (!m || !note || !OPEN.has(m.state)) return true;
+      m.notes = [...(m.notes ?? []), [...note].slice(0, REPLY_MOST).join('')].slice(-NOTES_KEPT);
     } else if (f.close) {
       const m = byId(f.close.id);
       if (!m) return true;
@@ -147,6 +158,13 @@ export function mountOwnerBox(sock: BoxSocket, grant: string, title: () => strin
       doing.style.cssText = 'color:#9fb3c4;font-size:12px';
       doing.textContent = line(m);
       li.append(words, doing);
+      for (const n of m.notes ?? []) {
+        const note = document.createElement('div');
+        note.dataset.note = '';
+        note.style.cssText = 'margin:2px 0 0;padding-left:8px;border-left:2px solid #445;color:#c9d3dc;white-space:pre-wrap';
+        note.textContent = n;
+        li.append(note);
+      }
       if (m.reply) {
         const reply = document.createElement('div');
         reply.dataset.reply = '';

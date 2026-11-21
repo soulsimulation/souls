@@ -120,4 +120,13 @@ impl Store for Folder {
         self.reach()?;
         Ok(self.keys(prefix))
     }
+
+    fn delete(&self, key: &str) -> R<()> {
+        self.reach()?;
+        match std::fs::remove_file(self.root.join(key)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => refuse("store-error", format!("{key}: {e}")),
+        }
+    }
 }

@@ -38,21 +38,21 @@
         "change": "set",
         "node": "t1",
         "field": "mixed",
-        "n": 1,
+        "n": 28,
         "to": 2
        },
        {
         "change": "set",
         "node": "t1",
         "field": "coarse",
-        "n": 2,
+        "n": 29,
         "to": 1
        },
        {
         "change": "set",
         "node": "t1",
         "field": "fine",
-        "n": 3,
+        "n": 30,
         "to": 2
        }
       ],
@@ -95,21 +95,21 @@
         "change": "set",
         "node": "t1",
         "field": "mixed",
-        "n": 1,
+        "n": 28,
         "to": 1
        },
        {
         "change": "set",
         "node": "t1",
         "field": "coarse",
-        "n": 2,
+        "n": 29,
         "to": 2
        },
        {
         "change": "set",
         "node": "t1",
         "field": "fine",
-        "n": 3,
+        "n": 30,
         "to": 4
        }
       ]
@@ -128,21 +128,21 @@
         "change": "set",
         "node": "t1",
         "field": "mixed",
-        "n": 1,
+        "n": 28,
         "to": 0
        },
        {
         "change": "set",
         "node": "t1",
         "field": "coarse",
-        "n": 2,
+        "n": 29,
         "to": 3
        },
        {
         "change": "set",
         "node": "t1",
         "field": "fine",
-        "n": 3,
+        "n": 30,
         "to": 6
        }
       ]
@@ -173,21 +173,21 @@
         "change": "set",
         "node": "t1",
         "field": "coarse",
-        "n": 2,
+        "n": 29,
         "to": 2
        },
        {
         "change": "set",
         "node": "t1",
         "field": "fine",
-        "n": 3,
+        "n": 30,
         "to": 4
        },
        {
         "change": "set",
         "node": "t1",
         "field": "mixed",
-        "n": 1,
+        "n": 28,
         "to": 1
        }
       ],

@@ -38,28 +38,28 @@
         "change": "set",
         "node": "k1",
         "field": "timber",
-        "n": 1,
+        "n": 28,
         "to": 0
        },
        {
         "change": "set",
         "node": "k1",
         "field": "panels",
-        "n": 2,
+        "n": 29,
         "to": 0
        },
        {
         "change": "set",
         "node": "k1",
         "field": "covering",
-        "n": 3,
+        "n": 30,
         "to": 0
        },
        {
         "change": "set",
         "node": "k1",
         "field": "fasteners",
-        "n": 4,
+        "n": 31,
         "to": 0
        },
        {
@@ -192,7 +192,7 @@
         "change": "set",
         "node": "m1",
         "field": "deployed",
-        "n": 1,
+        "n": 28,
         "to": 1
        }
       ],
@@ -232,7 +232,7 @@
         "change": "set",
         "node": "m1",
         "field": "deployed",
-        "n": 1,
+        "n": 28,
         "to": 0
        }
       ],
@@ -315,7 +315,7 @@
         "change": "set",
         "node": "k1",
         "field": "patches",
-        "n": 2,
+        "n": 29,
         "to": 0,
         "by": -1
        },
@@ -323,7 +323,7 @@
         "change": "set",
         "node": "p1",
         "field": "patches",
-        "n": 2,
+        "n": 29,
         "to": 1,
         "by": 1
        }
@@ -356,7 +356,7 @@
         "change": "set",
         "node": "k1",
         "field": "air",
-        "n": 1,
+        "n": 28,
         "to": 2,
         "by": -1
        },
@@ -364,7 +364,7 @@
         "change": "set",
         "node": "p1",
         "field": "air",
-        "n": 1,
+        "n": 28,
         "to": 1,
         "by": 1
        }
@@ -397,7 +397,7 @@
         "change": "set",
         "node": "k1",
         "field": "air",
-        "n": 1,
+        "n": 28,
         "to": 1,
         "by": -1
        },
@@ -405,7 +405,7 @@
         "change": "set",
         "node": "p1",
         "field": "air",
-        "n": 1,
+        "n": 28,
         "to": 2,
         "by": 1
        }
@@ -428,7 +428,7 @@
         "change": "set",
         "node": "k1",
         "field": "air",
-        "n": 1,
+        "n": 28,
         "to": 0,
         "by": -1
        },
@@ -436,7 +436,7 @@
         "change": "set",
         "node": "p1",
         "field": "air",
-        "n": 1,
+        "n": 28,
         "to": 3,
         "by": 1
        }
@@ -471,7 +471,7 @@
         "change": "set",
         "node": "p1",
         "field": "air",
-        "n": 1,
+        "n": 28,
         "to": 0
        }
       ],

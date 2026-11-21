@@ -3,8 +3,8 @@
   "kind": "eden:angling_pool",
   "owner": "thing",
   "state": {
-    "fish": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
-    "bait": { "n": 2, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+    "fish": { "n": 28, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
+    "bait": { "n": 29, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
   },
   "points": {
     "bank": { "role": "stand", "at_mm": [0, 0, 1900] }
