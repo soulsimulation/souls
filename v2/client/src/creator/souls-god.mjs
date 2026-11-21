@@ -20,6 +20,12 @@
 //   souls-god.mjs land water <id> --level m | --by m      the land and its water, as today's `land` (terrain/land.mjs):
 //                                                one edit; what rests on changed ground moves with it, and a Soul
 //                                                standing there refuses it (edit.terrain-under-soul)
+//   souls-god.mjs define <record.json>          a kind of your own (#3697): a souls-entry/1 record (the format of
+//                                                content/kinds), kept in the world under the full name it answers
+//                                                (`defines`); a changed record is a new revision, and old things keep
+//                                                theirs. Your own namespace only (not souls: or eden:)
+//   souls-god.mjs define-kit <kit.json> [--ns <namespace>]   today's kit (a name and shapes in metres) as a record
+//                                                with geometry.parts (kit.mjs), then defined; namespace `kit` unless given
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs status | stop                  the daemon
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
@@ -38,8 +44,9 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
+import { kitEntry } from './kit.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'land', 'check', 'status', 'stop', 'welcome', 'visitors'];
+export const VERBS = ['pair', 'describe', 'define', 'define-kit', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'land', 'check', 'status', 'stop', 'welcome', 'visitors'];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
 export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -47,7 +54,14 @@ const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
 export const FIX = {
   'edit.not-the-creator': 'this token is not the world\'s creator\'s: pair with --creator <its creator grant>',
-  'edit.kind-unknown': 'use a kind describe lists under kinds',
+  'edit.kind-unknown': 'use a kind describe lists under kinds (your own kinds too, once defined)',
+  'kind.invalid': 'a souls-entry/1 record as content/kinds holds them: whole numbers, sections it can hold (no roles), its kind loads',
+  'kind.too-large': 'a record is at most 64 KiB: fewer parts or a shorter text',
+  'kind.namespace': 'name it in your own namespace (not souls: or eden:, nor one the world\'s own kinds use)',
+  'kind.collision': 'that kind is defined already: place it by the full name describe lists',
+  'kind.in-use': 'remove the things of that kind first, or in the same batch',
+  'kit.invalid': 'a kit is {"name", "shapes": [{"kind", "at": [x,y,z] m, ...}]}, as today\'s define-kit',
+  'kit.program': 'write each shape out: repeat, radial, mirror and $params are not carried',
   'edit.child-not-admitted': 'put it in something whose kind admits it: describe shows each kind\'s admits',
   'edit.node-missing': 'that id is not there now: describe again and use an id it lists',
   'edit.name-unknown': 'a later op names an earlier place by that place\'s "name" number',
@@ -125,7 +139,22 @@ export function opsOf(verb, words) {
     if (!args[0]) throw usage('remove <id>');
     return [{ op: 'remove', node: node(args[0]) }];
   }
+  if (verb === 'define' || verb === 'define-kit') return [{ op: 'define', name: 1, entry: definitionOf(verb, args).entry }];
   throw usage(`one of ${VERBS.join(', ')}`);
+}
+
+/** #3697: the record a define or define-kit sends, read from its file, and what a kit did not carry. */
+export function definitionOf(verb, words) {
+  const args = [...words];
+  const ns = takeOpt(args, '--ns');
+  if (args.length !== 1) throw usage(verb === 'define' ? 'define <record.json>' : 'define-kit <kit.json> [--ns <namespace>]');
+  let text;
+  try { text = readFileSync(args[0], 'utf8'); } catch (e) { throw Object.assign(new Error(`${args[0]}: ${e.code ?? e.message}`), { code: 'file-unreadable' }); }
+  let json;
+  try { json = JSON.parse(text); } catch { throw Object.assign(new Error(`${args[0]} is not JSON`), { code: verb === 'define' ? 'kind.invalid' : 'kit.invalid' }); }
+  if (verb === 'define') return { entry: text };
+  const { entry, not_carried } = kitEntry(json, ns ? { ns } : {});
+  return { entry: JSON.stringify(entry), ...(not_carried.length ? { not_carried } : {}) };
 }
 
 /** A world verb's words as the daemon reads them: `{ verb, ...flags }`, numbers as given. */
@@ -163,6 +192,10 @@ export function requestOf(argv) {
   if (verb === 'check' && WORLD_VERBS.includes(rest[0])) return { req: { op: 'check', world: worldVerbOf(rest[0], rest.slice(1)) }, creator };
   if (verb === 'check') return { req: { op: 'check', ops: opsOf(rest[0], rest.slice(1)) }, creator };
   if (WORLD_VERBS.includes(verb)) return { req: { op: 'edit', world: worldVerbOf(verb, rest) }, creator };
+  if (verb === 'define-kit') {
+    const { not_carried } = definitionOf(verb, rest);
+    return { req: { op: 'edit', ops: opsOf(verb, rest) }, creator, ...(not_carried ? { say: { not_carried } } : {}) };
+  }
   return { req: { op: 'edit', ops: opsOf(verb, rest) }, creator };
 }
 
@@ -221,7 +254,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.exit();
     }
     const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: asked.req.world?.verb === 'land' ? 130_000 : 15_000 });
-    out(withFix(answer));
+    out(withFix({ ...answer, ...(asked.say ?? {}) }));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {
     out(withFix({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }));

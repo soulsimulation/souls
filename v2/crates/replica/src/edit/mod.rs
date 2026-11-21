@@ -28,6 +28,7 @@ use crate::apply::Replica;
 use crate::effects::{Actor, Cause, Effect};
 use crate::encode::{Name, Value};
 use crate::ids::Id;
+use crate::kinds::defined;
 use crate::pose::{Frame, Pose, Quat, Support, Vec3};
 use crate::read::Read;
 use crate::world_model::{Audience, Kind, plain, show, takes};
@@ -225,7 +226,7 @@ struct New {
 }
 
 /// Checks `edit` on `copy` (see the module's notes). Runs off the clock thread.
-pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refused> {
+pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refused> {
     if edit.actor != Actor::Creator(world.creator) {
         return refuse(
             None,
@@ -241,6 +242,39 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
         );
     }
     let tree = copy.tree();
+    // Every kind the world has: its boot kinds and the creator's own, by the one loader (#3697); and the definitions
+    // this batch makes, checked and made canonical before anything else.
+    let mut kinds = world.kinds.clone();
+    kinds.extend(defined::kinds_in(tree));
+    let made = define(&mut edit, copy)?;
+    let mut defined_names: BTreeSet<String> = defined::nodes(tree)
+        .into_iter()
+        .map(|(_, full, _)| full)
+        .collect();
+    for (full, k, _) in made.values() {
+        kinds.insert(full.clone(), k.clone());
+        defined_names.insert(full.clone());
+    }
+    // A thing of a creator's kind stands as its kind's bounds say (#3697): its solids, unless the batch gives its own,
+    // so walkers go round it and the safety rule (G2) judges what it would bury, as a boot thing's.
+    let mut shapes = defined::solids_in(tree);
+    shapes.extend(
+        made.values()
+            .filter_map(|(full, _, s)| Some((full.clone(), s.clone()?))),
+    );
+    for op in &mut edit.ops {
+        if let Op::Place { kind, fields, .. } = op
+            && let Some(s) = shapes.get(kind.as_str())
+        {
+            fields.entry(SOLIDS).or_insert_with(|| s.clone());
+        }
+    }
+    let pinned = |k: &Name| {
+        copy.header().kinds.contains(k)
+            || defined::is_definition(k.as_str())
+            || defined_names.contains(k.as_str())
+    };
+    let mut definitions_gone: Vec<(usize, String)> = Vec::new();
     let mut new: BTreeMap<u64, New> = BTreeMap::new();
     let mut links = BTreeSet::new();
     let mut doorways = BTreeSet::new();
@@ -291,7 +325,7 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
         let wall_of = |wall: Ref, ends: [Ref; 2]| -> Result<(), Refused> {
             let (kind, _) = named(wall)?;
             if !copy.header().kinds.iter().any(|k| k.as_str() == kind)
-                || world.kinds.get(&kind).is_none_or(|k| k.owner != "thing")
+                || kinds.get(&kind).is_none_or(|k| k.owner != "thing")
             {
                 return refuse(
                     here,
@@ -321,7 +355,7 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
             Ok(())
         };
         let admits = |parent: &str, child: &str, slot: Option<u64>| -> Result<(), Refused> {
-            let (Some(pk), Some(ck)) = (world.kinds.get(parent), world.kinds.get(child)) else {
+            let (Some(pk), Some(ck)) = (kinds.get(parent), kinds.get(child)) else {
                 return refuse(here, "edit.kind-unknown", format!("{parent} or {child}"));
             };
             let list = match slot {
@@ -359,7 +393,9 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                     );
                 }
                 let k = kind.as_str();
-                if !world.kinds.contains_key(k) || !copy.header().kinds.contains(kind) {
+                // A kind defined later in the batch is not yet pinned here.
+                let later = made.range(i..).any(|(_, (full, _, _))| full == k);
+                if !kinds.contains_key(k) || !pinned(kind) || later {
                     return refuse(
                         here,
                         "edit.kind-unknown",
@@ -370,7 +406,10 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                     return refuse(here, "edit.name-twice", format!("{name} is placed twice"));
                 }
                 let (pk, _) = named(*parent)?;
-                admits(&pk, k, at.slot)?;
+                // A definition sits at the root, which `define` checked; nothing else admits one.
+                if !defined::is_definition(k) {
+                    admits(&pk, k, at.slot)?;
+                }
                 if let Ref::Node(p) = parent {
                     parents.push((i, *p));
                 }
@@ -415,7 +454,14 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                         "owned geometry is written only by the doorway operation",
                     );
                 }
-                named(*node)?;
+                let (k, _) = named(*node)?;
+                if defined::is_definition(&k) {
+                    return refuse(
+                        here,
+                        "kind.invalid",
+                        "a definition never changes: define the new revision",
+                    );
+                }
                 if let Ref::Node(id) = node {
                     reads.push((i, *id));
                 }
@@ -477,13 +523,13 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                     );
                 }
                 if !copy.header().kinds.iter().any(|k| k.as_str() == kind)
-                    || world.kinds.get(&kind).is_none_or(|k| k.owner != "thing")
+                    || kinds.get(&kind).is_none_or(|k| k.owner != "thing")
                 {
                     return refuse(here, "edit.kind-unknown", kind);
                 }
                 for end in [*from, *to] {
                     let (kind, _) = named(end)?;
-                    if world.kinds.get(&kind).is_none_or(|k| k.owner != "place") {
+                    if kinds.get(&kind).is_none_or(|k| k.owner != "place") {
                         return refuse(here, "edit.doorway", "a doorway joins places");
                     }
                 }
@@ -516,9 +562,22 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                 changed.extend([*door, *from]);
             }
             Op::Remove { node } => {
-                let (_, parent) = named(*node)?;
+                let (rk, parent) = named(*node)?;
                 if parent.is_none() {
                     return refuse(here, "edit.root", "the zone's root is not removed");
+                }
+                if defined::is_definition(&rk) {
+                    let full = match node {
+                        Ref::Node(id) => tree
+                            .handle(*id)
+                            .and_then(|h| tree.node(h))
+                            .and_then(|n| defined::named(n.fields()).map(str::to_owned)),
+                        Ref::New(n) => made
+                            .iter()
+                            .find(|(j, _)| matches!(&edit.ops[**j], Op::Place { name, .. } if name == n))
+                            .map(|(_, (full, _, _))| full.clone()),
+                    };
+                    definitions_gone.extend(full.map(|f| (i, f)));
                 }
                 let patch = if let Some(patch) = owned.get(node) {
                     Some(patch.clone())
@@ -637,12 +696,137 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
             );
         }
     }
+    // `kind.in-use`: a removed definition's kind is still the kind of a thing the batch leaves (#3697).
+    for (i, full) in &definitions_gone {
+        let left = |r: Ref| {
+            let mut at = Some(r);
+            for _ in 0..crate::world_model::DEPTH_LIMIT + 1 {
+                let Some(x) = at else { return true };
+                if gone.contains(&x) {
+                    return false;
+                }
+                at = match x {
+                    Ref::New(n) => new.get(&n).map(|p| p.parent),
+                    Ref::Node(id) => tree
+                        .handle(id)
+                        .and_then(|h| tree.node(h))
+                        .and_then(|n| n.parent())
+                        .map(Ref::Node),
+                };
+            }
+            true
+        };
+        let placed = new
+            .iter()
+            .filter(|(_, x)| x.kind == *full)
+            .map(|(n, _)| Ref::New(*n));
+        let mut stack = vec![tree.root()];
+        let mut users = Vec::new();
+        while let Some(h) = stack.pop() {
+            if let Some(n) = tree.node(h)
+                && n.kind().as_str() == full
+            {
+                users.push(Ref::Node(n.id()));
+            }
+            stack.extend(tree.children(h).unwrap_or(&[]).iter().copied());
+        }
+        if let Some(user) = users.into_iter().chain(placed).find(|r| left(*r)) {
+            return refuse(
+                Some(*i),
+                "kind.in-use",
+                format!(
+                    "{user:?} is still a {}; remove what uses it first",
+                    plain(full)
+                ),
+            );
+        }
+    }
     Ok(Checked {
         edit,
         reads,
         parents,
         geometry,
     })
+}
+
+/// The definitions a batch makes (#3697), each a place of `souls:kind` at the zone's root holding its record as bytes
+/// in field [`defined::ENTRY`]: checked ([`defined::read`]), and its fields made the canonical record and the full name
+/// it defines, which every replica reads. By the operation that makes each: the full name and its rules.
+/// By the operation that makes each definition: its full name, its rules and the solids a thing of it stands as.
+type Made = BTreeMap<usize, (String, Kind, Option<Value>)>;
+
+fn define(edit: &mut Edit, copy: &Replica) -> Result<Made, Refused> {
+    let tree = copy.tree();
+    let root = tree.node(tree.root()).map(|n| n.id());
+    let boot = defined::namespaces(copy.header().kinds.iter().map(Name::as_str));
+    let mut there: BTreeMap<String, Vec<u8>> = defined::nodes(tree)
+        .into_iter()
+        .map(|(_, full, bytes)| (full, bytes))
+        .collect();
+    let mut made = BTreeMap::new();
+    for (i, op) in edit.ops.iter_mut().enumerate() {
+        let Op::Place {
+            kind,
+            parent,
+            fields,
+            ..
+        } = op
+        else {
+            continue;
+        };
+        if !defined::is_definition(kind.as_str()) {
+            continue;
+        }
+        let no = |name, detail: String| Refused {
+            op: Some(i),
+            name,
+            detail,
+        };
+        if root.is_none_or(|r| *parent != Ref::Node(r)) {
+            return Err(no(
+                "kind.invalid",
+                "a kind is defined at the world's root".into(),
+            ));
+        }
+        let Some(Value::Bytes(sent)) = fields.get(&defined::ENTRY) else {
+            return Err(no(
+                "kind.invalid",
+                "the definition is its souls-entry/1 record, as bytes".into(),
+            ));
+        };
+        let d = defined::read(sent, &|ns| boot.contains(ns)).map_err(|(n, d)| no(n, d))?;
+        if fields
+            .keys()
+            .any(|k| ![defined::NAME, defined::ENTRY].contains(k))
+            || fields
+                .get(&defined::NAME)
+                .is_some_and(|n| *n != Value::Text(Name::new(&d.full).expect("a full name")))
+        {
+            return Err(no(
+                "kind.invalid",
+                format!("a definition holds its record and its full name {}", d.full),
+            ));
+        }
+        if let Some(bytes) = there.get(&d.full) {
+            let why = if *bytes == d.bytes {
+                "is defined already: place it by that name"
+            } else {
+                "names other bytes here"
+            };
+            return Err(no("kind.collision", format!("{} {why}", d.full)));
+        }
+        there.insert(d.full.clone(), d.bytes.clone());
+        *fields = BTreeMap::from([
+            (
+                defined::NAME,
+                Value::Text(Name::new(&d.full).expect("a full name")),
+            ),
+            (defined::ENTRY, Value::Bytes(d.bytes)),
+        ]);
+        let solids = defined::solids_of(&d.entry);
+        made.insert(i, (d.full, d.kind, solids));
+    }
+    Ok(made)
 }
 
 /// Whether the nodes a checked edit read are unchanged since it was planned, on `live`: the first that is not, as the

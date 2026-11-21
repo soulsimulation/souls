@@ -4708,6 +4708,43 @@ pub fn start<S: Storage + 'static>(
     })
 }
 
+/// A creator's definitions' forms (#3697) pass the entry checker content entries pass: the import check, and each form
+/// that takes no arguments binds. Refused `kind.invalid`, naming the form.
+fn definitions_form_checked(c: &edit::Checked) -> Result<(), Refused> {
+    use replica::kinds::defined;
+    for (i, op) in c.edit.ops.iter().enumerate() {
+        let edit::Op::Place { kind, fields, .. } = op else {
+            continue;
+        };
+        let Some(replica::encode::Value::Bytes(b)) = fields.get(&defined::ENTRY) else {
+            continue;
+        };
+        if !defined::is_definition(kind.as_str()) {
+            continue;
+        }
+        let no = |detail: String| Refused {
+            op: Some(i),
+            name: "kind.invalid",
+            detail,
+        };
+        let d = defined::read(b, &|_| false).map_err(|(_, why)| no(why))?;
+        skills::form_runner::check(&d.entry)
+            .map_err(|r| no(format!("{}: {}", r.name, r.detail)))?;
+        for (form, f) in d
+            .entry
+            .get("forms")
+            .and_then(replica::rules::json::Value::obj)
+            .unwrap_or(&[])
+        {
+            if f.get("takes").is_none() {
+                skills::form_runner::bind(&d.entry, form)
+                    .map_err(|r| no(format!("{form}: {}: {}", r.name, r.detail)))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The edit checker's thread (G1b): each edit is checked (`replica::edit::check`) and planned (`sim::edit::plan_on`,
 /// G2's safety guard on the town, G2b) on the newest frozen copy that stands at the version it was planned against
 /// (and after the last edit committed), or after a second whatever it stands at, never on the live tree. G2 is given
@@ -4884,6 +4921,7 @@ fn edit_checker(
                     Some(c) => {
                         world.creator = c;
                         edit::check(e, &copy, world)
+                            .and_then(|c| definitions_form_checked(&c).map(|()| c))
                     }
                     None => Err(Refused {
                         op: None,

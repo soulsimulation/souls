@@ -22,6 +22,7 @@ use crate::effects::{Actor, Body, Effect, read_id};
 use crate::encode::{Name, Value, decode, encode, from_hex, to_hex};
 use crate::ids::{Id, Scope, Version};
 use crate::intents::{Fallback, Hello, Intent, PROTOCOL, Target};
+use crate::kinds::defined;
 use crate::pose::{Quat, Support, Vec3};
 use crate::rules::json;
 use crate::sync::{Copy, Descent, read_hashes, read_records, wire};
@@ -834,6 +835,10 @@ fn creator_kinds(text: &str) -> Result<BTreeMap<String, Kind>, crate::world_mode
 #[wasm_bindgen(js_name = editKinds)]
 pub fn edit_kinds(kinds: &str) -> Result<String, JsError> {
     let kinds = creator_kinds(kinds).map_err(|e| JsError::new(&format!("kinds-text: {e:?}")))?;
+    Ok(kinds_json(&kinds))
+}
+
+fn kinds_json(kinds: &BTreeMap<String, Kind>) -> String {
     let list = |l: &BTreeSet<String>| l.iter().map(|n| json_str(n)).collect::<Vec<_>>().join(",");
     let out: Vec<String> = kinds
         .iter()
@@ -852,7 +857,7 @@ pub fn edit_kinds(kinds: &str) -> Result<String, JsError> {
             )
         })
         .collect();
-    Ok(format!("{{{}}}", out.join(",")))
+    format!("{{{}}}", out.join(","))
 }
 
 /// A node on the copy: its kind's full name and its parent.
@@ -860,6 +865,8 @@ struct Held {
     kind: String,
     parent: Option<Id>,
     doorway: bool,
+    /// A `souls:kind` node's full name and record (#3697).
+    definition: Option<(String, Vec<u8>)>,
 }
 
 /// The copy's nodes, read from its roots down by the records' hashes.
@@ -890,16 +897,81 @@ fn held(copy: &Copy) -> Result<BTreeMap<Id, Held>, String> {
             }));
         }
         let doorway = matches!(m.get(&6), Some(Value::Map(fields)) if fields.get(&7).is_some_and(|v| read_id(v).is_ok()));
+        let definition = match m.get(&6) {
+            Some(Value::Map(fields)) if defined::is_definition(&kind) => {
+                match (defined::named(fields), fields.get(&defined::ENTRY)) {
+                    (Some(full), Some(Value::Bytes(b))) => Some((full.to_owned(), b.clone())),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
         out.insert(
             id,
             Held {
                 kind,
                 parent,
                 doorway,
+                definition,
             },
         );
     }
     Ok(out)
+}
+
+/// The kinds the copy's `souls:kind` nodes at its root define (#3697), with `souls:kind` itself: the loader's reading.
+fn copy_defined(nodes: &BTreeMap<Id, Held>) -> BTreeMap<String, Kind> {
+    let root: BTreeSet<Id> = nodes
+        .iter()
+        .filter(|(_, h)| h.parent.is_none())
+        .map(|(id, _)| *id)
+        .collect();
+    let mut out = BTreeMap::from([defined::kind().clone()]);
+    for h in nodes.values() {
+        if let (Some((full, b)), Some(p)) = (&h.definition, h.parent)
+            && root.contains(&p)
+            && let Ok(d) = defined::read(b, &|_| false)
+            && d.full == *full
+        {
+            out.insert(d.full, d.kind);
+        }
+    }
+    out
+}
+
+/// The kinds a creator defined in the world (#3697), from the copy (not `souls:kind` itself), in [`edit_kinds`]'s JSON: what `describe` lists
+/// beside the boot kinds, and what a place may name.
+#[wasm_bindgen(js_name = definedKinds)]
+pub fn defined_kinds(copy: &WasmCopy) -> Result<String, JsError> {
+    let nodes = held(&copy.copy).map_err(|e| JsError::new(&e))?;
+    let mut own = copy_defined(&nodes);
+    own.remove(&defined::kind().0);
+    Ok(kinds_json(&own))
+}
+
+/// The engine's generic kind a definition is a node of (#3697): what a `define` places, never listed as a creator's.
+#[wasm_bindgen(js_name = definitionKind)]
+pub fn definition_kind() -> String {
+    defined::kind().0.clone()
+}
+
+/// A record's full name and canonical bytes as the world would keep them (#3697): `{"ok": true, "kind": "<full>",
+/// "bytes": <n>}`, or the refusal `{"ok": false, "code": "kind.<name>", "detail": ".."}`. Checks no namespace a boot kind
+/// uses; the world does.
+#[wasm_bindgen(js_name = defineName)]
+pub fn define_name(record: &str) -> String {
+    match defined::read(record.as_bytes(), &|_| false) {
+        Ok(d) => format!(
+            r#"{{"ok":true,"kind":{},"bytes":{}}}"#,
+            json_str(&d.full),
+            d.bytes.len()
+        ),
+        Err((code, detail)) => format!(
+            r#"{{"ok":false,"code":{},"detail":{}}}"#,
+            json_str(code),
+            json_str(&detail)
+        ),
+    }
 }
 
 fn ref_text(r: Ref) -> String {
@@ -930,7 +1002,7 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
         Ok(o) => o,
         Err(e) => return no(None, "edit.batch", &e),
     };
-    let kinds: Option<BTreeMap<String, Kind>> = if kinds.trim().is_empty() {
+    let mut kinds: Option<BTreeMap<String, Kind>> = if kinds.trim().is_empty() {
         None
     } else {
         match creator_kinds(kinds) {
@@ -942,6 +1014,21 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
         Ok(n) => n,
         Err(e) => return no(None, "edit.copy", &e),
     };
+    // The creator's own kinds, by the world's loader (#3697); a definition in the batch is checked as the world will.
+    let boot = defined::namespaces(kinds.iter().flat_map(|k| k.keys().map(String::as_str)));
+    let mut defines: BTreeMap<String, Vec<u8>> = nodes
+        .values()
+        .filter_map(|h| h.definition.clone())
+        .collect();
+    if let Some(k) = kinds.as_mut() {
+        k.extend(copy_defined(&nodes));
+    }
+    let root = nodes
+        .iter()
+        .find(|(_, h)| h.parent.is_none())
+        .map(|(id, _)| *id);
+    let mut made: Vec<String> = Vec::new();
+    let mut definitions_gone: Vec<(usize, String)> = Vec::new();
     // Each name placed so far, with its kind and parent, and every node the batch has removed.
     let mut new: BTreeMap<u64, (String, Ref)> = BTreeMap::new();
     let mut links = BTreeSet::new();
@@ -1013,6 +1100,28 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                     }
                     if new.contains_key(name) || links.contains(name) {
                         return Err(("edit.name-twice", format!("{name} is placed twice")));
+                    }
+                    if defined::is_definition(kind.as_str()) {
+                        if root.is_none_or(|r| *parent != Ref::Node(r)) {
+                            return Err((
+                                "kind.invalid",
+                                "a kind is defined at the world's root".into(),
+                            ));
+                        }
+                        let Some(Value::Bytes(sent)) = fields.get(&defined::ENTRY) else {
+                            return Err((
+                                "kind.invalid",
+                                "the definition is its record, as bytes".into(),
+                            ));
+                        };
+                        let d = defined::read(sent, &|ns| boot.contains(ns))?;
+                        if defines.contains_key(&d.full) {
+                            return Err((
+                                "kind.collision",
+                                format!("{} is defined already", d.full),
+                            ));
+                        }
+                        return Err(("", d.full));
                     }
                     let (pk, _) = named(*parent)?;
                     admits(&pk, kind.as_str(), at.slot)
@@ -1117,8 +1226,43 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                 },
             }
         };
-        if let Err((code, detail)) = step() {
-            return no(Some(i), code, &detail);
+        match step() {
+            // A definition that passed: its full name is pinned for the rest of the batch.
+            Err(("", full)) => {
+                if let (Some(k), Op::Place { fields, .. }) = (kinds.as_mut(), op)
+                    && let Some(Value::Bytes(b)) = fields.get(&defined::ENTRY)
+                    && let Ok(d) = defined::read(b, &|_| false)
+                {
+                    k.insert(full.clone(), d.kind);
+                }
+                defines.insert(full.clone(), Vec::new());
+                made.push(full);
+            }
+            Err((code, detail)) => return no(Some(i), code, &detail),
+            Ok(()) => {}
+        }
+        match op {
+            Op::Set { node, .. } => {
+                if let Ref::Node(id) = node
+                    && nodes
+                        .get(id)
+                        .is_some_and(|h| defined::is_definition(&h.kind))
+                {
+                    return no(
+                        Some(i),
+                        "kind.invalid",
+                        "a definition never changes: define the new revision",
+                    );
+                }
+            }
+            Op::Remove {
+                node: Ref::Node(id),
+            } => {
+                if let Some((full, _)) = nodes.get(id).and_then(|h| h.definition.clone()) {
+                    definitions_gone.push((i, full));
+                }
+            }
+            _ => {}
         }
         match op {
             Op::Doorway { name, door, .. } => {
@@ -1165,7 +1309,46 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
             _ => {}
         }
     }
-    format!(r#"{{"ok":true,"kinds":{}}}"#, kinds.is_some())
+    // `kind.in-use`: a removed definition's kind is still the kind of a thing the batch leaves.
+    for (i, full) in &definitions_gone {
+        let left = |mut r: Ref| {
+            for _ in 0..=crate::world_model::DEPTH_LIMIT {
+                if gone.contains(&r) {
+                    return false;
+                }
+                let up = match r {
+                    Ref::New(n) => new.get(&n).map(|(_, p)| *p),
+                    Ref::Node(id) => nodes.get(&id).and_then(|h| h.parent).map(Ref::Node),
+                };
+                let Some(up) = up else { return true };
+                r = up;
+            }
+            true
+        };
+        let users = nodes
+            .iter()
+            .filter(|(_, h)| h.kind == *full)
+            .map(|(id, _)| Ref::Node(*id))
+            .chain(
+                new.iter()
+                    .filter(|(_, (k, _))| k == full)
+                    .map(|(n, _)| Ref::New(*n)),
+            );
+        if let Some(u) = users.into_iter().find(|r| left(*r)) {
+            let d = format!(
+                "{} is still a {}; remove what uses it first",
+                ref_text(u),
+                plain(full)
+            );
+            return no(Some(*i), "kind.in-use", &d);
+        }
+    }
+    let defines: Vec<String> = made.iter().map(|m| json_str(m)).collect();
+    format!(
+        r#"{{"ok":true,"kinds":{},"defines":[{}]}}"#,
+        kinds.is_some(),
+        defines.join(",")
+    )
 }
 
 /// A declared bare argument name is bytes; a valid thing id keeps its existing array form.
