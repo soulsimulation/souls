@@ -6,8 +6,10 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
 ## How a world runs
 
 - **The unit** is `v2/tools/ops/units/worldd@.service`. `Type=notify`: the world says READY=1 once it ticks, then
-  WATCHDOG=1 twice a second while it owes no tick or completed one. No word for 5 s ends it (K7's own watchdog inside
-  ends a stalled tick sooner, in 0.5 s, exit 86, `tick-stalled`).
+  WATCHDOG=1 twice a second while its clock is not wedged. No word for 5 s ends it: a process frozen whole. K7's own
+  watchdog inside says a stall (no tick for 0.5 s) in the journal (`watchdog: stalled`) and in `health.json`
+  (`stalled`: `now_ms` while it lasts, `ended`, `longest_ms`), and the world runs on: a busy host's pause never
+  restarts a world. Only a clock with no tick for 15 s is wedged: exit 86, `tick-stalled`, and a restart.
 - **The launcher** (`supervisor launch <world>`, the unit's `ExecStart`) reads the world's pinned build from its
   directory record (W8). The store is `DIRECTORY_STORE_*` in `/etc/souls/directory.env`, or the folder
   `$WORLDS_ROOT/directory` on a machine without one. When the store is out of reach it uses this machine's cached
@@ -54,7 +56,7 @@ Turning `restart-loop` into a message to a person is O15's.
 | `build.mismatch` | `builds/<hash>/worldd` is not that build: put the right file there |
 | `pin.missing` | no record in the store and no cached copy: the world was never pinned here |
 | `oom-kill` | the world passed its `MemoryMax`: read its last lines in `journalctl -u worldd@<world>` |
-| `tick-stalled`, `watchdog` | a tick stopped: K7's record of the stalled tick is in the journal |
+| `tick-stalled`, `watchdog` | the clock was wedged, no tick for 15 s: K7's record of the stalled tick is in the journal |
 
 ## The runs (O1's proof)
 
