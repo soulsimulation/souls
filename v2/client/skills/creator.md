@@ -48,8 +48,13 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
 | `describe` | what is there, and what each kind admits |
 | `look <name or id> [--out f.png] [--eyes]` | a picture of a place, thing or Soul, drawn on this machine from the public stream; open the file it names. With no browser here it answers in words |
+| `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
+| `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
 
 A kind may be written as its bare name (`room`) when only one kind has that name, or as `namespace:name`.
+
+These are all the verbs there are. If you know today's god command (`eden-god`), its undo, place by relation, land,
+weather, search of kinds and the others are not here yet; do not try them. `v2/docs/creator-verbs.md` maps each one.
 
 ### Batches
 
