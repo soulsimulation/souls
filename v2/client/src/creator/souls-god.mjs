@@ -274,24 +274,6 @@ async function pairing(home, url, grant, { within = 15_000 } = {}) {
   throw Object.assign(new Error(`no answer from ${directory}`), { code: 'directory-not-answering' });
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
-  try {
-    const asked = requestOf(process.argv.slice(2));
-    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
-    if (asked.pair !== undefined) { out(await pairing(home, asked.pair, asked.creator)); process.exit(0); }
-    const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
-    const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
-    if (!creator) throw Object.assign(new Error(`creators here: ${creators.join(', ') || 'none; pair first'}`), { code: 'which-creator' });
-    const ask = (req) => call(home, creator, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: 15_000 });
-    const answer = asked.build ? await runBuild(asked.build, ask) : asked.layer ? await runLayer(asked.layer, ask) : await ask(asked.req);
-    out(withFix(answer));
-    if (answer.ok === false) process.exitCode = 1;
-  } catch (e) {
-    out(withFix({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }));
-    process.exitCode = 1;
-  }
-}
 
 // ---------------------------------------------------------------- #3700: ownership, access and land-use zones
 // Today's `own`, `access`, `zone`, `zone-suggest`, `layers` and `secret` (tools/god-skill/lib/layers.mjs). Owner and
@@ -383,4 +365,23 @@ export async function runLayer(l, ask) {
   const words = { 0: 'none', 1: 'public', 2: 'private' };
   const marked = d.nodes.filter((n) => n.marks).map((n) => ({ id: n.id, kind: n.kind, ...(n.marks.owner !== undefined ? { owner: n.marks.owner } : {}), ...(n.marks.access !== undefined ? { access: words[n.marks.access] ?? n.marks.access } : {}) }));
   return { ok: true, zones: zonesIn(zones), marked, secrets: 'off, as today' };
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
+  try {
+    const asked = requestOf(process.argv.slice(2));
+    const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
+    if (asked.pair !== undefined) { out(await pairing(home, asked.pair, asked.creator)); process.exit(0); }
+    const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
+    const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
+    if (!creator) throw Object.assign(new Error(`creators here: ${creators.join(', ') || 'none; pair first'}`), { code: 'which-creator' });
+    const ask = (req) => call(home, creator, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: 15_000 });
+    const answer = asked.build ? await runBuild(asked.build, ask) : asked.layer ? await runLayer(asked.layer, ask) : await ask(asked.req);
+    out(withFix(answer));
+    if (answer.ok === false) process.exitCode = 1;
+  } catch (e) {
+    out(withFix({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }));
+    process.exitCode = 1;
+  }
 }
