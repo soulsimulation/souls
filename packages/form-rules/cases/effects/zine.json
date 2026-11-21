@@ -53,7 +53,7 @@
                 "change": "set",
                 "node": "z1",
                 "field": "title",
-                "n": 1,
+                "n": 28,
                 "to": {
                   "text": "w0"
                 }
@@ -87,7 +87,7 @@
                 "change": "set",
                 "node": "z1",
                 "field": "page_1",
-                "n": 2,
+                "n": 29,
                 "to": {
                   "text": "w1"
                 }
@@ -121,7 +121,7 @@
                 "change": "set",
                 "node": "z1",
                 "field": "page_2",
-                "n": 3,
+                "n": 30,
                 "to": {
                   "text": "w2"
                 }
@@ -155,7 +155,7 @@
                 "change": "set",
                 "node": "z1",
                 "field": "page_3",
-                "n": 4,
+                "n": 31,
                 "to": {
                   "text": "w3"
                 }
@@ -186,14 +186,14 @@
                 "change": "set",
                 "node": "z1",
                 "field": "stage",
-                "n": 5,
+                "n": 32,
                 "to": "bound"
               },
               {
                 "change": "set",
                 "node": "z1",
                 "field": "binding",
-                "n": 6,
+                "n": 33,
                 "to": 0
               },
               {

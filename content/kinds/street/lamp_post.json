@@ -3,7 +3,7 @@
   "kind": "eden:lamp_post",
   "owner": "thing",
   "state": {
-    "on": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } }
+    "on": { "n": 28, "type": "bool", "default": true, "audience": { "rule": "everyone" } }
   },
   "geometry": { "bounds_mm": [400, 4330, 400] },
   "motion": { "how": "fixed" },

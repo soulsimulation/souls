@@ -3,7 +3,7 @@
   "kind": "eden:pendant",
   "owner": "thing",
   "state": {
-    "on": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+    "on": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
   },
   "points": {
     "pull_cord": { "role": "contact", "at_mm": [200, 1760, 0] }

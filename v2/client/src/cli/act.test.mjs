@@ -57,8 +57,8 @@ function souls(home, args) {
 }
 
 /** The answer event for `sequence`, read from the daemon. */
+const got = []; // every answer read, kept: one read may take the answers of several intents
 async function answerOf(rt, sequence) {
-  const got = [];
   return waitFor(async () => {
     got.push(...(await request(rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer'));
     return got.find((e) => e.sequence === sequence);
@@ -85,6 +85,15 @@ after(async () => {
 });
 
 test('the arguments: pair takes a world url, can and act take act words; a world url names its directory and gateway', () => {
+  // #3705: today's names: stop ends your act, quit the daemon; receipt, events --since and conversations.
+  assert.deepEqual(requestOf(['stop']).req, { op: 'halt' });
+  assert.deepEqual(requestOf(['stop', '12']).req, { op: 'halt', sequence: 12 });
+  assert.equal(requestOf(['stop', 'now']).refused, 'stop-sequence');
+  assert.deepEqual(requestOf(['quit']).req, { op: 'stop' });
+  assert.deepEqual(requestOf(['receipt', '7']).req, { op: 'receipt', sequence: 7 });
+  assert.deepEqual(requestOf(['events', '--since', '4']).req, { op: 'events', since: 4 });
+  assert.equal(requestOf(['events', '--since', 'c_4']).refused, 'events-since');
+  assert.deepEqual(requestOf(['conversations']).req, { op: 'converse', do: 'list' });
   assert.deepEqual(requestOf(['act', 'sit:ab-1', 'walk:ab-2']).req, { op: 'act', acts: ['sit:ab-1', 'walk:ab-2'] });
   assert.deepEqual(requestOf(['can', 'fill:ab-1', 'ab-2']).req, { op: 'can', acts: ['fill:ab-1', 'ab-2'] });
   assert.deepEqual(requestOf(['pair', 'https://soul.game/eden']).req, { op: 'pair', url: 'https://soul.game/eden' });
@@ -193,6 +202,35 @@ test('A1, A2: can answers from the local check; a walk to a named thing and a si
     const got = await answerOf(rt, sent.sequence);
     assert.ok(got.answer > 1 && typeof got.reason === 'string' && got.reason.length > 0, `refused by name: ${JSON.stringify(got)}`);
   }
+
+  // #3705: `stop` ends this Soul's own walk where it stands (a souls:cancel naming it); `receipt` shows its answers,
+  // `events --since` lists what came without taking it, `conversations` lists the copy's, and `quit` is the daemon's.
+  const cursor = souls(home, ['events']).cursor;
+  assert.equal(typeof cursor, 'number');
+  const far = souls(home, ['act', named['the chair in the square']]);
+  assert.equal(far.ok, true, JSON.stringify(far));
+  await sleep(300);
+  const stop = souls(home, ['stop']);
+  assert.deepEqual([stop.ok, stop.stops], [true, far.sequence], JSON.stringify(stop));
+  const stopped = await answerOf(rt, far.sequence);
+  assert.deepEqual([stopped.answer, stopped.reason], [2, 'act.stopped'], `the walk ended by the stop: ${JSON.stringify(stopped)}`);
+  assert.equal((await answerOf(rt, stop.sequence)).answer, 1, 'the stop has its receipt');
+  const r = souls(home, ['receipt', String(far.sequence)]);
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual([r.receipt.sequence, r.receipt.going, r.receipt.answers.at(-1).answer, r.receipt.answers.at(-1).reason], [far.sequence, false, 'refused', 'act.stopped']);
+  assert.equal(souls(home, ['receipt']).receipt.sequence, stop.sequence, 'the newest sent, by default');
+  assert.equal(souls(home, ['receipt', '999999']).code, 'receipt-not-found');
+  const again = souls(home, ['stop']);
+  assert.equal(again.code, 'nothing-to-stop', JSON.stringify(again));
+  assert.match(again.detail, /quit/, 'a pointer to the daemon\'s new name');
+  const since = souls(home, ['events', '--since', String(cursor)]);
+  assert.ok(since.events.length >= 2 && since.events.every((e) => e.n > cursor), JSON.stringify(since));
+  assert.ok(since.events.some((e) => e.kind === 'answer' && e.sequence === far.sequence && e.reason === 'act.stopped'));
+  assert.deepEqual(souls(home, ['events', '--since', String(since.cursor)]).events, [], 'nothing after the newest');
+  assert.equal(souls(home, ['events', '--since', String(cursor)]).events.length, since.events.length, 'a read takes nothing');
+  const talks = souls(home, ['conversations']);
+  assert.equal(talks.ok, true, JSON.stringify(talks));
+  assert.deepEqual(talks.conversations, souls(home, ['converse', 'list']).conversations, 'the same as converse list');
 
   const walk = souls(home, ['act', chair]);
   assert.equal(walk.ok, true, JSON.stringify(walk));

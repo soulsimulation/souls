@@ -3,7 +3,7 @@
   "kind": "eden:poll_board",
   "owner": "thing",
   "state": {
-    "question": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+    "question": { "n": 28, "type": "text", "default": null, "audience": { "rule": "everyone" } }
   },
   "points": {
     "front": { "role": "stand", "at_mm": [0, 0, 650], "yaw_mdeg": 180000 }

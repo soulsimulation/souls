@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "open": {
-      "n": 1,
+      "n": 28,
       "type": "bool",
       "default": false,
       "audience": {
@@ -12,7 +12,7 @@
       }
     },
     "title": {
-      "n": 2,
+      "n": 29,
       "type": "text",
       "default": null,
       "audience": {
@@ -20,7 +20,7 @@
       }
     },
     "first_page": {
-      "n": 3,
+      "n": 30,
       "type": "text",
       "default": null,
       "audience": {
