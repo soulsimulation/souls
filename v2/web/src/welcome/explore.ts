@@ -32,10 +32,10 @@ const CSS = `
 #explore h2{margin:0;font-size:18px;font-weight:600}
 #explore header button{border:0;background:none;color:#e8e6e1;font-size:22px;line-height:1;padding:2px 8px;cursor:pointer}
 #explore input{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #3a4250;border-radius:4px;background:#0f141a;color:#e8e6e1;font:14px system-ui,sans-serif;margin-bottom:10px}
-#explore .views{overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:2px}
+#explore .views{flex:1 1 auto;min-height:0;overflow-y:auto;display:grid;grid-auto-rows:max-content;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:2px}
 #explore .views button{display:flex;flex-direction:column;gap:6px;padding:6px;border:1px solid #2c3440;border-radius:6px;background:#1a2029;color:#e8e6e1;font:13px system-ui,sans-serif;text-align:left;cursor:pointer}
 #explore .views button:hover,#explore .views button:focus-visible{border-color:#5b8fd6;outline:none}
-#explore .picture{display:block;width:100%;aspect-ratio:320/224;border-radius:4px;background:#26303c;object-fit:cover}
+#explore .picture{display:block;flex:none;width:100%;aspect-ratio:320/224;border-radius:4px;background:#26303c;object-fit:cover}
 #explore .none{color:#a9b0ba;margin:8px 2px}
 @media (max-width:700px){#explore-open{left:76px;bottom:64px}#explore{top:12px;transform:translateX(-50%);max-height:calc(100dvh - 24px);width:calc(100vw - 24px)}#explore .views{grid-template-columns:repeat(2,1fr)}}
 `;
