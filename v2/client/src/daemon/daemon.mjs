@@ -1120,8 +1120,10 @@ function scheduleWorld(now = Date.now(), off = null) {
  * occurrences, so neither a sync under way nor re-reading the copy's mapping comes between the moment and the send.
  */
 function atMoment(at) {
+  const now = Date.now();
+  if (now < at) { worldTimer = setTimeout(() => atMoment(at), at - now); return; } // a timer may wake a millisecond early
   if (signedIn) {
-    const now = Date.now(), s = state.schedule;
+    const s = state.schedule;
     for (const e of scheduleNow()) {
       if (!s.marks[e.key] && s.targets[e.key]?.realMs === at && (e.until === null || now <= e.until)) fireEntry(e, now, now - at, true);
     }
