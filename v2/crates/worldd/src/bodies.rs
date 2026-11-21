@@ -315,7 +315,13 @@ impl Bodies {
             logged: BTreeMap::new(),
             hearing: Hearing::new(),
             heard: Vec::new(),
-            wind: WindDown::default(),
+            // A test world shortens the wind-down's clocks (seconds: wander, zombie, leg min, leg max, bound).
+            wind: WindDown::new(
+                std::env::var("WORLDD_WIND_DOWN")
+                    .ok()
+                    .and_then(|t| WindDown::knobs_from(&t))
+                    .unwrap_or(wind_down::KNOBS),
+            ),
             wind_log: Vec::new(),
             wind_moves: BTreeMap::new(),
             sleeping: BTreeMap::new(),

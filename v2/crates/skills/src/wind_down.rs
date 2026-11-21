@@ -252,6 +252,35 @@ impl WindDown {
         }
     }
 
+    /// Sets the clocks (a test world shortens them): every body's next move is found again from `now`.
+    pub fn set_knobs(&mut self, knobs: Knobs, now: Micros) {
+        self.knobs = knobs;
+        let bodies: Vec<Id> = self.souls.keys().copied().collect();
+        for b in bodies {
+            if let Some((s, _)) = self.souls.get(&b).copied() {
+                let due = self.due(b, &s, now);
+                self.souls.insert(b, (s, due));
+            }
+        }
+    }
+
+    /// Clocks from text `wander,zombie,leg_min,leg_max,bound` in seconds (a test world's setting); the distances are
+    /// the defaults. `None` when it does not read.
+    pub fn knobs_from(text: &str) -> Option<Knobs> {
+        let n: Vec<i64> = text.split(',').map(|t| t.trim().parse().ok()).collect::<Option<_>>()?;
+        let [wander, zombie, leg_min, leg_max, bound] = n[..] else {
+            return None;
+        };
+        (wander > 0 && zombie > 0 && leg_min > 0 && leg_max >= leg_min && bound > zombie).then_some(Knobs {
+            wander: wander * S,
+            zombie: zombie * S,
+            leg_min: leg_min * S,
+            leg_max: leg_max * S,
+            bound: bound * S,
+            ..KNOBS
+        })
+    }
+
     /// A body the rule looks after from `now` (a birth, an arrival), Owned as of now unless it has a state.
     pub fn add(&mut self, body: Id, now: Micros) {
         if !self.souls.contains_key(&body) {

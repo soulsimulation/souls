@@ -130,7 +130,7 @@ fn a1_a3_a4_silent_soul_wanders_walks_out_lies_down_and_sleeps() {
     assert!(d2(at, [0, 0]) > d2([5 * M, 2 * M], [0, 0]));
     // A3: every record's cause and actor are the world; the phases in order.
     assert!(records.iter().all(|e| e.envelope.actor == Actor::World && e.envelope.cause == Cause::World));
-    let phases: Vec<Phase> = records.iter().map(|e| read_phase(e)).collect();
+    let phases: Vec<Phase> = records.iter().map(read_phase).collect();
     assert_eq!(phases.first(), Some(&Phase::Wander));
     assert!(phases.contains(&Phase::Leg) && phases.contains(&Phase::Zombie));
     assert_eq!(phases.last(), Some(&Phase::Asleep));
