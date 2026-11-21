@@ -2936,6 +2936,7 @@ fn i3822_deferred_parts_make_the_checked_state_and_a_wrong_one_is_refused_once_v
     let mut actual = Replica::start(h.stored()).unwrap();
     let mut out = PublicWriter::open(
         PublicStart {
+            names: None,
             root: &views,
             header: &h,
             key: key(&h),
