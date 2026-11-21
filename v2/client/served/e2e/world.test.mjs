@@ -333,6 +333,8 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   assert.deepEqual(seekerSees.filter((r) => r.id === apple), [], "(e) B's find does not hold the hidden apple");
   const lookB = JSON.stringify(await B.cli('look'));
   assert.ok(!lookB.includes(apple), "(e) B's look does not name the hidden apple");
+  const streamB = JSON.stringify((await request(B.rt.socket, { op: 'read' })).events);
+  console.log(`e2e: (e) B's stream events name the hidden apple: ${streamB.includes(apple)}`);
   stage('hidden apple withheld from the seeker');
 
   // The acts. A walks to the bench and sits on it.
