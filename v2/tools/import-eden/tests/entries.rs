@@ -45,7 +45,8 @@ fn entries(dir: &Path, out: &mut BTreeMap<String, String>) {
 /// The field numbers the import writes on Eden's nodes: every `pub const F_<NAME>: u64 = <n>;` in its source, read
 /// from the file so the list cannot drift from the constants.
 fn import_fields() -> BTreeMap<u64, String> {
-    let src = std::fs::read_to_string(format!("{}/src/lib.rs", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let src =
+        std::fs::read_to_string(format!("{}/src/lib.rs", env!("CARGO_MANIFEST_DIR"))).unwrap();
     src.lines()
         .filter_map(|l| {
             let rest = l.trim().strip_prefix("pub const F_")?;
@@ -79,7 +80,11 @@ fn no_entry_state_field_takes_a_number_the_import_writes() {
             continue;
         };
         for (field, d) in state {
-            let Some(n) = d.get("n").and_then(Json::int).and_then(|n| u64::try_from(n).ok()) else {
+            let Some(n) = d
+                .get("n")
+                .and_then(Json::int)
+                .and_then(|n| u64::try_from(n).ok())
+            else {
                 continue;
             };
             if let Some(f) = reserved.get(&n)
@@ -90,7 +95,11 @@ fn no_entry_state_field_takes_a_number_the_import_writes() {
         }
     }
     assert!(found.len() > 300, "the entries are found");
-    assert!(clash.is_empty(), "state fields numbered as import fields:\n{}", clash.join("\n"));
+    assert!(
+        clash.is_empty(),
+        "state fields numbered as import fields:\n{}",
+        clash.join("\n")
+    );
 }
 
 #[test]
