@@ -538,9 +538,7 @@ impl Geometry for Sight<'_> {
                 if floor != sim::walk::node_of(me) {
                     return Some((node, at, skills::form_runner::REACH));
                 }
-                let short = skills::form_runner::APPROACH_SHORT;
-                let aim = skills::form_runner::short_of(p, me.pose.position, short);
-                Some((floor, aim, skills::form_runner::REACH))
+                Some((floor, p, skills::form_runner::REACH))
             })
             .flatten()
             .unwrap_or((node, at, reach))
