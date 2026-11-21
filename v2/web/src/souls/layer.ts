@@ -166,17 +166,39 @@ export class Conversations {
   }
 }
 
-/** A shot that frames a group (today's `conversationFrame`): their middle, from the side the camera is on, far enough
- *  back that the widest of them fits the view. Points in metres, at head height. */
-export function groupShot(points: { x: number; y: number; z: number }[], fov: number, aspect: number, from: { x: number; y: number; z: number }) {
+type P3 = { x: number; y: number; z: number };
+/** What a shot can know of the scene (#3774): the members' facings (unit, on the ground plane), whether an eye sees
+ *  every member clear of opaque scenery (not inside a solid, no solid across a sightline), and the ground's height. */
+export type ShotScene = { faces?: { x: number; z: number }[]; clear?: (eye: P3, heads: P3[]) => boolean; ground?: (x: number, z: number) => number };
+
+/** A shot that frames a group (today's `conversationFrame`, apps/web/src/WorldConversationFrame.ts): their middle,
+ *  far enough back that the widest of them fits the view, from one of twelve sides around them, the side they face
+ *  first, then 30° either way in turn. A side whose eye is inside or behind opaque scenery (`scene.clear`) is passed
+ *  over. With every side blocked, the same twelve sides are tried from steeply above, and last straight above the
+ *  group. With no facing the first side is the camera's. Points in metres, at head height. */
+export function groupShot(points: P3[], fov: number, aspect: number, from: P3, scene: ShotScene = {}) {
   if (!points.length) return null;
   const c = { x: 0, y: 0, z: 0 };
   for (const p of points) (c.x += p.x / points.length), (c.y += p.y / points.length), (c.z += p.z / points.length);
   const spread = Math.max(1, ...points.map((p) => Math.hypot(p.x - c.x, p.y - c.y, p.z - c.z)));
   const d = Math.max(5, (spread / (Math.tan((fov * Math.PI) / 360) * Math.min(1, aspect))) * 1.4);
-  let dx = from.x - c.x, dz = from.z - c.z;
-  const n = Math.hypot(dx, dz);
-  if (n < 0.01) (dx = 0), (dz = 1);
-  else (dx /= n), (dz /= n);
-  return { eye: { x: c.x + dx * d, y: c.y + Math.max(1.5, d * 0.24), z: c.z + dz * d }, target: c };
+  let fx = 0, fz = 0;
+  for (const f of scene.faces ?? []) (fx += f.x), (fz += f.z);
+  if (fx * fx + fz * fz < 0.1) (fx = from.x - c.x), (fz = from.z - c.z); // facing apart, or none: the camera's side
+  if (Math.hypot(fx, fz) < 0.01) (fx = 0), (fz = 1);
+  const base = Math.atan2(fz, fx), clear = scene.clear ?? (() => true);
+  const side = (i: number, out: number, up: number) => {
+    const a = base + (i % 2 ? -1 : 1) * Math.ceil(i / 2) * (Math.PI / 6);
+    const eye = { x: c.x + Math.cos(a) * out, y: c.y + up, z: c.z + Math.sin(a) * out };
+    if (scene.ground) eye.y = Math.max(eye.y, scene.ground(eye.x, eye.z) + 1.5);
+    return eye;
+  };
+  for (const [out, up] of [[d, Math.max(1.5, d * 0.24)], [d * 0.45, d * 0.9]]) {
+    for (let i = 0; i < 12; i++) {
+      const eye = side(i, out, up);
+      if (clear(eye, points)) return { eye, target: c };
+    }
+  }
+  // Straight above, a hair toward the first side so the view keeps its heading.
+  return { eye: side(0, 0.01, d), target: c };
 }

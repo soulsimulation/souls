@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import * as THREE from 'three';
 import type { NodeRec, SaidRec } from '../source/source.ts';
 import { Conversations, GAP_US, groupShot } from './layer.ts';
+import { enters, inside, solidsNear } from '../camera/follow.ts';
 
 const said = (speaker: string, at: number, words: string | null, ref = `r${speaker}${at}`): SaidRec => ({ speaker, at, length: 2_000_000, reach: 12_000, ref, words });
 const spots: Record<string, [number, number, number]> = { a: [0, 0, 0], b: [2, 0, 0], c: [3, 0, 1], far: [100, 0, 0] };
@@ -124,4 +125,42 @@ test('the dock and the Soul page show a thread as text, live; opening it frames 
   souls.converse(null);
   souls.draw(9.1e6, camera);
   assert.equal(dock.style.display, 'none');
+});
+
+// #3774: framing looks from the side the members face unless scenery blocks it, never from inside or behind a wall.
+test('a group beside a wall is framed from a clear side, every member in view; all blocked frames from above', () => {
+  // Two members 2 m apart facing +z, a wall 3 m in front of them (40 m wide, 6 m high, 1 m thick).
+  const heads = [{ x: 0, y: 1.6, z: 0 }, { x: 2, y: 1.6, z: 0 }];
+  const wall = { id: 'w.1', kind: 'eden:wall@1', parent: 'g.0', slot: null, pos: [0, 0, 0], rot: [1 << 30, 0, 0, 0], at: null, solids: [[1000, 3500, 20000, 500, 0, 0, 6000, 0, 0]] };
+  const world = { nodes: new Map([[wall.id, wall]]) as never, frame: () => new THREE.Matrix4() };
+  const boxes = solidsNear(world, new THREE.Vector3(1, 1.6, 0), 80);
+  assert.equal(boxes.length, 1);
+  const e = new THREE.Vector3(), h = new THREE.Vector3();
+  const clear = (eye: { x: number; y: number; z: number }, at: { x: number; y: number; z: number }[]) =>
+    (e.set(eye.x, eye.y, eye.z), !inside(boxes, e) && at.every((p) => (h.set(p.x, p.y, p.z), boxes.every((b) => inside([b], h) || enters(b, e, h) === null))));
+  const faces = [{ x: 0, z: 1 }, { x: 0, z: 1 }];
+  const open = groupShot(heads, 50, 16 / 9, { x: 0, y: 5, z: -30 }, { faces })!;
+  assert.ok(open.eye.z > 4, `with no scene known, from where they face (behind the wall here): ${JSON.stringify(open.eye)}`);
+  const s = groupShot(heads, 50, 16 / 9, { x: 0, y: 5, z: -30 }, { faces, clear })!;
+  assert.ok(clear(s.eye, heads), 'the chosen side is clear: not inside the wall, no wall across a sightline');
+  assert.ok(s.eye.z < 3, `not from behind the wall: ${JSON.stringify(s.eye)}`);
+  assert.ok(s.eye.y < s.target.y + 10, 'a side, not the fallback above');
+  const cam = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 1000);
+  cam.position.set(s.eye.x, s.eye.y, s.eye.z);
+  cam.lookAt(s.target.x, s.target.y, s.target.z);
+  cam.updateMatrixWorld();
+  for (const p of heads) {
+    const v = new THREE.Vector3(p.x, p.y, p.z).project(cam);
+    assert.ok(Math.abs(v.x) < 1 && Math.abs(v.y) < 1 && v.z < 1, 'member in view');
+  }
+  // Twelve sides: the first is where they face, then 30° either way in turn (today's order).
+  const tried: number[] = [];
+  groupShot(heads, 50, 16 / 9, { x: 0, y: 0, z: 0 }, { faces, clear: (eye) => (tried.push(Math.round((Math.atan2(eye.z, eye.x - 1) * 180) / Math.PI)), false) });
+  assert.deepEqual(tried.slice(0, 5), [90, 60, 120, 30, 150]);
+  assert.equal(tried.length, 24, 'twelve sides, then twelve from steeply above');
+  // Only steep views clear (e.g. hedges all round): the nearest clear side above; nothing clear: straight above.
+  const steep = groupShot(heads, 50, 16 / 9, { x: 0, y: 0, z: 0 }, { faces, clear: (eye) => eye.y > 4 })!;
+  assert.ok(steep.eye.y > 4 && steep.eye.z > 0, `steeply above, on their side: ${JSON.stringify(steep.eye)}`);
+  const above = groupShot(heads, 50, 16 / 9, { x: 0, y: 0, z: 0 }, { faces, clear: () => false })!;
+  assert.ok(Math.hypot(above.eye.x - 1, above.eye.z) < 0.1 && above.eye.y > 6, `straight above: ${JSON.stringify(above.eye)}`);
 });
