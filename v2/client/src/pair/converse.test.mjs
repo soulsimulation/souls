@@ -10,7 +10,7 @@
 
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer as netServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
@@ -256,6 +256,13 @@ test('A1 to A3: two joined Souls converse, a bystander hears no private turn, an
     const log = readFileSync(join(world, 'log'));
     assert.ok(!log.includes('bring the blue key'), 'the private words are not in the log');
     console.log('log', log.length, 'bytes: no private words in it');
+    // #3775: spectators see who is in the private conversation, never its words: the words are in no public part, no
+    // views/ file and no history/ file, and the public stream carries the turn's record without words.
+    const files = (root) => (existsSync(root) ? readdirSync(root, { recursive: true }).map((f) => join(root, f)).filter((f) => statSync(f).isFile()) : []);
+    const publicFiles = [...files(join(world, 'views')), ...files(join(world, 'history'))];
+    for (const f of publicFiles) assert.ok(!readFileSync(f).includes('blue key'), `the private words are in no public file: ${f.slice(world.length)}`);
+    await waitFor(() => files(join(world, 'views')).some((f) => readFileSync(f).includes('souls:said-privately')));
+    console.log('public files', publicFiles.length, ': no private words; the private turn\'s record is in the public stream');
 
     // A3: the entry's two-role activity, offered by the first to the second, joined by the second.
     const plainGame = game;
