@@ -46,6 +46,16 @@ test('A1: the backdrop meets the ground at its edge and runs past the far plane,
   assert.equal(maxX, 8 + FAR);
   assert.equal(minZ, -FAR);
   assert.ok(FAR > 1200 && SKIRT === 80, 'past the camera\'s far plane; today\'s 80 m margin');
-  // The colour is the ground's own class colour at the edge, not a fixed one.
-  assert.equal(b.colour.getHex(), new THREE.Color(0x8a7d5c).getHex());
+  // The colours are the ground's own terrain colours at the edge (C11's height and slope colour), not a fixed one.
+  const col = b.mesh.geometry.getAttribute('color'), c = new THREE.Color();
+  let matched = 0;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i);
+    if (!(x >= 0 && x <= 8 && z >= 0 && z <= 4)) continue;
+    const want = w.colourAt(Math.min(x, 8 - 1e-6), Math.min(z, 4 - 1e-6))!;
+    c.fromBufferAttribute(col, i);
+    assert.ok(Math.abs(c.r - want.r) + Math.abs(c.g - want.g) + Math.abs(c.b - want.b) < 1e-5, `the ground's colour at ${x},${z}`);
+    matched++;
+  }
+  assert.equal(matched, onEdge);
 });

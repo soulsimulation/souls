@@ -55,8 +55,14 @@ jobs:
       - name: Build the page
         working-directory: v2/web
         run: npm ci && npm run build
+      - name: Build the served client
+        # The version the client's skill declares (v2/client/skill/SKILL.md); release-v2 stamps its own later.
+        run: |
+          version=$(sed -n 's/^  version: "\([0-9.]*\)"$/\1/p' v2/client/skill/SKILL.md)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::the client's skill declares no x.y.z version"; exit 1; }
+          node v2/client/served/build.mjs --out "$RUNNER_TEMP/client" --version "$version" --pkg v2/target/wasm-load/pkg
       - name: Bundle
-        run: bash v2/tools/ops/install.sh bundle "$RUNNER_TEMP/bundle" v2/target/release v2/web/dist
+        run: bash v2/tools/ops/install.sh bundle "$RUNNER_TEMP/bundle" v2/target/release v2/web/dist "" "$RUNNER_TEMP/client"
       - name: SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}

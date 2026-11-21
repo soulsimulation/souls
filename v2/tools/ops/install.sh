@@ -6,7 +6,8 @@
 #   bash install.sh apply --from <bundle>       as root: makes it so; a second run changes nothing
 #   bash install.sh uninstall                   as root: removes what apply made, and only that
 #   bash install.sh check                       the test: nothing it writes is today's system's (a repo checkout)
-#   bash install.sh bundle <out> <cargo release dir> <page dist dir>   puts a bundle together (the workflow)
+#   bash install.sh bundle <out> <cargo release dir> <page dist dir> [<templates> [<served client>]]
+#                                               puts a bundle together (the workflow)
 #   INSTALL_TARGET=<ssh target> bash install.sh remote <plan|apply|uninstall> <bundle>
 #                                               runs it on another machine through `$INSTALL_SSH <target> <command>`
 #
@@ -172,6 +173,13 @@ install_all() {
   ensure_tree "$from/ops" "$LIB/ops"
   ensure_dir "$LIB/templates" 755 root root
   if [ -d "$from/templates" ]; then ensure_tree "$from/templates" "$LIB/templates"; fi
+  # The served client (R17; the cut-over fence's clientDir), placed once and whole: release-v2's move replaces it
+  # later, so an install never puts back an older one.
+  if [ -f "$from/client/soul-client.json" ] && [ ! -e "$R$LIB/client" ]; then
+    act "client $LIB/client (once; a release's move replaces it)" bash -c 'set -e; rm -rf "$2.install"; cp -R "$1" "$2.install"
+      chown -R root:root "$2.install"; find "$2.install" -type d -exec chmod 755 {} +; find "$2.install" -type f -exec chmod 644 {} +
+      mv "$2.install" "$2"' _ "$from/client" "$LIB/client"
+  fi
   ensure_dir "$DATA" 750 "$ACCOUNT" "$ACCOUNT" "tree $DATA"
   for p in worlds directory views; do ensure_dir "$DATA/$p" 750 "$ACCOUNT" "$ACCOUNT"; done
   ensure_dir "$DATA/worlds/directory" 750 "$ACCOUNT" "$ACCOUNT"
@@ -273,8 +281,15 @@ check() {
   mkdir -p "$tmp/root" "$tmp/bins" "$tmp/page"
   for p in "${PROGRAMS[@]}"; do printf '%s\n' "$p" > "$tmp/bins/$p"; done
   echo '<!doctype html>' > "$tmp/page/index.html"
-  bundle "$tmp/b" "$tmp/bins" "$tmp/page" > "$tmp/bundle"
+  mkdir -p "$tmp/client" && echo '{}' > "$tmp/client/soul-client.json"
+  bundle "$tmp/b" "$tmp/bins" "$tmp/page" "" "$tmp/client" > "$tmp/bundle"
   INSTALL_ROOT=$tmp/root bash "$0" plan --from "$tmp/b" > "$tmp/plan"
+  grep -qxF "would client $LIB/client (once; a release's move replaces it)" "$tmp/plan" || die "check: the served client missing from plan"
+  cp -R "$tmp/root" "$tmp/placed"
+  mkdir -p "$tmp/placed$LIB/client" "$tmp/placed$ETC"
+  printf '%s\n' "${OWNED[@]}" > "$tmp/placed$STATE"
+  INSTALL_ROOT=$tmp/placed bash "$0" plan --from "$tmp/b" > "$tmp/plan2" || die "check: the plan over a placed client refused"
+  ! grep -q "^would client" "$tmp/plan2" || die "check: an install would replace a placed client"
   for p in import-accounts import-world; do
     cmp -s "$tmp/bins/$p" "$tmp/b/bin/$p" || die "check: $p missing or changed in bundle"
     [ -n "$(find "$tmp/b/bin/$p" -prune -perm 755)" ] || die "check: $p bundle mode is not 755"
@@ -356,6 +371,11 @@ bundle() {
   cp "$HERE/place-created-world.mjs" "$HERE/place-world.sh" "$out/ops/"
   cp "$HERE/proxy/route-config.mjs" "$HERE/proxy/routes.mjs" "$out/ops/proxy/"
   if [ -n "${4:-}" ]; then cp -R "$4" "$out/templates"; fi
+  rm -rf "$out/client"
+  if [ -n "${5:-}" ]; then
+    [ -f "$5/soul-client.json" ] || die "no served client at $5 (v2/client/served/build.mjs)"
+    cp -R "$5" "$out/client"
+  fi
   cp "$HERE"/units/* "$out/units/"
   install -m 755 "$0" "$out/install.sh"
   echo "bundle: $(cd "$out" && find . -type f | wc -l | tr -d ' ') files in $out"

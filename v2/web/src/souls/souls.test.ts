@@ -5,11 +5,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as THREE from 'three';
 import { reconcileSnapshot, type NodeRec, type SaidRec } from '../source/source.ts';
-import { SoulsCopy, wrap } from './souls.ts';
+import { SoulsCopy, spoken, wrap } from './souls.ts';
 import { place } from './layer.ts';
 
 const body = (id: string, extra: Partial<NodeRec> = {}): NodeRec => ({ id, kind: 'souls:body@1', parent: 'room', slot: null, pos: [0, 0, 0], rot: [1 << 30, 0, 0, 0], at: null, ...extra });
-const said = (speaker: string, at: number, words: string | null, length = 2_000_000): SaidRec => ({ speaker, at, length, reach: 12_000, ref: `r${at}`, words });
+const said = (speaker: string, at: number, words: string | null, length = 2_000_000): SaidRec => ({ speaker, at, length, reach: 5_000, ref: `r${at}`, words });
 const none = { nodes: new Map<string, NodeRec>(), tracks: new Map() };
 
 test('names stay across parts that do not carry them; speech shows for its length; status is derived', () => {
@@ -146,4 +146,10 @@ test('A3: markup and an address in an utterance are drawn as plain text, with no
   assert.ok(texts.some((t) => t.endsWith(`said “${hostile}”`)));
   assert.deepEqual([...new Set(made)].sort(), ['aside', 'button', 'canvas', 'h2', 'li', 'ol', 'p']);
   assert.ok(!made.includes('a') && !made.includes('script') && !made.includes('img') && !made.includes('b'));
+});
+
+test('C26: a line that carries farther than talk is shown as a shout', () => {
+  const line = (reach: number): SaidRec => ({ speaker: 'a', at: 0, length: 1e6, reach, ref: 'r', words: 'the bridge is out' });
+  assert.equal(spoken(line(5_000)), 'the bridge is out');
+  assert.equal(spoken(line(12_000)), '(shouts) the bridge is out');
 });
