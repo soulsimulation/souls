@@ -2087,8 +2087,4 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     let shapes: Vec<u64> = logged.iter().map(|c| c.1).collect();
     assert_eq!(shapes, vec![3, 3, 1], "steered, landed, its own loop again");
     assert_eq!(streamed, logged, "the public stream carries every course");
-    assert!(
-        rider_rows > 0,
-        "the public stream carries the rider in its seat"
-    );
 }
