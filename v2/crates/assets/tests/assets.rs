@@ -640,6 +640,7 @@ fn a4_upload_then_place_through_g1s_gate() {
 
     // Placed through G1's gate: checked on a copy, the upload gate beside it, committed through the one write.
     let edit = Edit {
+        claim: None,
         intent: Id::new(Scope([0x11; 16]), 0).expect("an id"),
         actor: creator(),
         planned: live.version(),
@@ -723,6 +724,7 @@ fn a5_hold_point() {
         );
         assert_eq!(s.served(r.reference), None, "{answer}: not served");
         let edit = Edit {
+            claim: None,
             intent: Id::new(Scope([0x11; 16]), 0).expect("an id"),
             actor: creator(),
             planned: 0,

@@ -1572,3 +1572,52 @@ fn a_seat_one_metre_up_is_walked_to_sat_in_and_risen_from_through_the_gateway() 
     assert_eq!(r.3, w.3, "standing on the ground again");
     assert!(near(r.4, stand, 1_000), "on the stand point: {:?}", r.4);
 }
+
+/// #3700 review: a private thing is its owner's alone on the served path too. A bare lie at a bed private to another
+/// Soul is refused `object.private` before the bodies take it; a walk up to it is not; a sit on a chair private to the
+/// Soul itself is taken. The marks are the bed's and the chair's own fields 143 (owner) and 144 (access 2, private).
+#[test]
+fn a_bare_lie_at_a_private_bed_is_refused_and_the_owner_sits_on_its_own() {
+    use replica::who_may::{F_ACCESS, F_OWNER};
+    let mut w = toggles::World::build(0, 0, 0);
+    let mark =
+        |owner: Id| BTreeMap::from([(F_OWNER, owner.to_value()), (F_ACCESS, Value::Uint(2))]);
+    w.item_with(bed(), mark(soul(9_099)));
+    w.item_with(thing(), mark(body_id()));
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies_and_bed()));
+    let world = answers::start(w.replica, toggles::rules(), store, cfg).expect("the world starts");
+    let path = std::env::temp_dir().join(format!("private-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    let (ready, accepted) = channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        ready.send(()).unwrap();
+        answers::serve(door, stream);
+    });
+    let stream = UnixStream::connect(&path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    accepted.recv().unwrap();
+    let mut c = Client(stream);
+
+    c.send(1, "eden:walk", Some(bed()));
+    c.answer().expect("a walk up to a private bed uses nothing");
+    c.send(2, "eden:lie", Some(bed()));
+    assert_eq!(
+        c.answer(),
+        Err("object.private".into()),
+        "another Soul's private bed"
+    );
+    c.send(3, "eden:walk", Some(thing()));
+    c.answer().expect("the walk to its own chair");
+    c.send(4, "eden:sit", Some(thing()));
+    c.answer().expect("its own private chair");
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+}

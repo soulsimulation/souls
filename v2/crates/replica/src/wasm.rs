@@ -531,6 +531,16 @@ fn spot_of(o: &json::Value) -> Result<Spot, String> {
     })
 }
 
+/// An id written as text, `<32 hex scope>-<counter>`.
+fn id_of_text(t: &str) -> Option<Id> {
+    let (scope, n) = t.split_once('-')?;
+    if scope.len() != 32 || !n.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let scope: [u8; 16] = from_hex(scope).ok()?.try_into().ok()?;
+    Id::new(Scope(scope), n.parse().ok()?)
+}
+
 fn field_value(v: &json::Value) -> Result<Value, String> {
     match v {
         json::Value::Int(n) if *n >= 0 => u64::try_from(*n)
@@ -560,7 +570,31 @@ fn field_value(v: &json::Value) -> Result<Value, String> {
 /// A `doorway` names its leaf, owning `from` and other `to` places, with `at: [x,z]`, `yaw`, `width` and `height`
 /// in the existing doorway row's millimetres/millidegrees, in the owning room's building frame.
 fn ops_of(text: &str) -> Result<Vec<Op>, String> {
+    batch_of(text).map(|(ops, _)| ops)
+}
+
+/// A batch as [`ops_of`] reads it, or `{"claim": "<claim id>", "ops": [...]}`: the batch sent under a build claim
+/// (#3701).
+fn batch_of(text: &str) -> Result<(Vec<Op>, Option<Name>), String> {
     let v = json::parse(text)?;
+    match v.get("ops") {
+        Some(ops) => {
+            let claim = match v.get("claim") {
+                None => None,
+                Some(c) => Some(
+                    c.str()
+                        .and_then(Name::new)
+                        .filter(|n| !n.as_str().is_empty() && n.as_str().len() <= 64)
+                        .ok_or("a batch's claim is a name")?,
+                ),
+            };
+            Ok((ops_in(ops)?, claim))
+        }
+        None => Ok((ops_in(&v)?, None)),
+    }
+}
+
+fn ops_in(v: &json::Value) -> Result<Vec<Op>, String> {
     let list = v.arr().ok_or("a batch is a list of operations")?;
     if list.is_empty() || list.len() > OPS_MOST {
         return Err(format!("1 to {OPS_MOST} operations"));
@@ -594,11 +628,26 @@ fn ops_of(text: &str) -> Result<Vec<Op>, String> {
                     node: node()?,
                     at: spot_of(o)?,
                 },
-                Some("set") => Op::Set {
-                    node: node()?,
-                    field: uint_of(o.get("field"), "a set's field")?,
-                    to: field_value(o.get("value").ok_or("a set's value")?)?,
-                },
+                Some("set") => {
+                    let field = uint_of(o.get("field"), "a set's field")?;
+                    let raw = o.get("value").ok_or("a set's value")?;
+                    // #3700: an owner written as an id's text (`<32 hex>-<counter>`, a Soul's) is written as an id;
+                    // any other field keeps text as a name.
+                    let to = match raw {
+                        json::Value::Str(t) if field == crate::who_may::F_OWNER => {
+                            match id_of_text(t) {
+                                Some(id) => id.to_value(),
+                                None => field_value(raw)?,
+                            }
+                        }
+                        _ => field_value(raw)?,
+                    };
+                    Op::Set {
+                        node: node()?,
+                        field,
+                        to,
+                    }
+                }
                 Some("remove") => Op::Remove { node: node()? },
                 Some("doorway") => {
                     let integer = |v: &json::Value| match v {
@@ -666,7 +715,7 @@ pub fn wire_edit(
             .map_err(|_| JsError::new("scope-not-16-bytes"))?,
     );
     let id = Id::new(scope, counter).ok_or_else(|| JsError::new("id-counter-exhausted"))?;
-    let ops = ops_of(ops).map_err(|e| JsError::new(&format!("edit-batch: {e}")))?;
+    let (ops, claim) = batch_of(ops).map_err(|e| JsError::new(&format!("edit-batch: {e}")))?;
     let intent = Intent {
         actor: if creator {
             Actor::Creator(id)
@@ -675,7 +724,7 @@ pub fn wire_edit(
         },
         verb: Name::new(crate::edit::wire::VERB).ok_or_else(|| JsError::new("verb"))?,
         target: None,
-        parameters: crate::edit::wire::parameters(&ops),
+        parameters: crate::edit::wire::parameters_under(&ops, claim.as_ref()),
         sequence,
         basis: decode(basis).map_err(js)?.value,
         expiry: i64::MAX,

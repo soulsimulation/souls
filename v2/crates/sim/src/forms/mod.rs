@@ -1587,7 +1587,8 @@ const BODY_OF: &str = "souls:body-of";
 /// audience; the refusal names their ends only when the asker is a member of every one's audience (`audiences`, as
 /// resolved when written), and otherwise names the group alone. A refusal never holds an account id: ends are Soul or
 /// body ids, named by `names` (the directory's names), else shown as ids. Refused: `form-unknown`, `who-unknown` (a
-/// `who` outside the closed list), `not-permitted` with the sentence.
+/// `who` outside the closed list), `object.private` (a private thing not the asker's, #3700), `not-permitted` with the
+/// sentence.
 pub fn may(
     tree: &Tree,
     audiences: &BTreeMap<Id, BTreeSet<Id>>,
@@ -1610,6 +1611,10 @@ pub fn may(
         .find(|e| tree.ty(e).as_str() == BODY_OF)
         .map(|e| e.other);
     let asker = soul.unwrap_or(body);
+    // #3700: a private thing (its own mark, or its nearest marked ancestor's) is its owner's alone, whatever its form.
+    if let Some(words) = replica::who_may::private_to(tree, node, asker) {
+        return refuse("object.private", format!("who may: {words}"));
+    }
     let thing = tree.handle(node).and_then(|h| tree.node(h));
     let holds = thing.as_ref().and_then(|n| n.parent()) == Some(body);
     let (ends, seen) = match (&who, &thing) {
