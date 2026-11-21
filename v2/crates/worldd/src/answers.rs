@@ -20,7 +20,7 @@
 //! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
 //! how) and is answered: a receipt naming its entries when done, else a refusal naming how it ended
 //! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at walking
-//! speed, plus a margin and crossings, at most 180 s and never beyond the intent's expiry. Its deadline is written
+//! speed, plus a margin and crossings, with no total cap and never beyond the intent's expiry. Its deadline is written
 //! as C20's entry and it receives C20's one progress answer if still going at 10 s. C21's watch ends a stalled walk
 //! `walk.blocked`; waiting at a link and being carried do not count as stalled walking.
 //! No move outlives its act: a walk still going at its act's deadline stops in that tick and ends `act.timed-out`; a
@@ -135,7 +135,7 @@ use replica::effects::{
 };
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
-use replica::intents::{Answer, INTENT_MOST, Intent, Kind, Target};
+use replica::intents::{Answer, BULK_MOST, Intent, Kind, Target};
 use replica::pose::Pose;
 use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::select::Answer as Answered;
@@ -313,6 +313,8 @@ pub enum Event {
     SetDown(Box<(Id, R<SetDownChecked>)>),
     /// The directory's Souls file as it now reads, and where the answers to the intents it causes go (W11b).
     Directory(Box<(Directory, Reply)>),
+    /// A gateway connection that is told each Soul's wind-down word (#3784): now, all of them, then each change.
+    States(Reply),
     /// Holds the clock thread for this long: the stuck-thread run (O4 A4).
     Stall(Duration),
     Stop,
@@ -575,6 +577,8 @@ pub struct Config {
     pub text: Option<Arc<Store>>,
     /// Immutable imported public name bytes, attached only to delivered public record references off the clock.
     pub public_names: Arc<crate::views::names::PublicNames>,
+    /// The closed kinds of the world's entries: what one holds stays out of other Souls' sync answers (#3915).
+    pub closed: crate::closed::Closed,
     /// Called once at start with the log's durable mark; what it gives is handed each part record as it is appended
     /// (its number and bytes): a view tier's `offer`, so a stream writer follows the world (V1b).
     pub follow: Option<Follow>,
@@ -598,6 +602,8 @@ pub struct Config {
     pub join: Option<Join>,
     /// Existing B15 recorded body catalogue and birth choices.
     pub wear: Option<Wearing>,
+    /// The code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713): its forms' hatches run in them.
+    pub hatches: Vec<Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -689,11 +695,13 @@ impl Config {
             served: None,
             text: None,
             public_names: Arc::new(Default::default()),
+            closed: Default::default(),
             follow: None,
             rate: None,
             engine: None,
             join: None,
             wear: None,
+            hatches: Vec::new(),
         }
     }
 }
@@ -937,6 +945,10 @@ struct Clock {
     /// with it at the next tick.
     directory: Option<(Directory, Reply)>,
     told: BTreeSet<Id>,
+    /// #3784: the gateway connections told of the Souls' wind-down words, and the words they were last told (an
+    /// embodied Soul that is idle, a zombie or asleep; none is awake).
+    states_to: Vec<Reply>,
+    states: BTreeMap<Id, &'static str>,
     /// Loose things' ends (F10b, #3476), and the ends of owner's links the tick's acts ended.
     loose: Ends,
     unlinked: Vec<Id>,
@@ -1591,8 +1603,21 @@ impl Clock {
             // The words go to the store and the intent is logged with their references (V1b); refused, it is logged
             // without its intent.
             let r = match self.body_of(&intent) {
-                Ok(b) => words::keep(value, &self.text, words::audience(form, b), b, &mut kept)
-                    .map_err(|r| r.name),
+                Ok(b) => {
+                    // Words a form writes into a field everyone reads are everyone's (#3712).
+                    let public =
+                        match (form, &intent.target) {
+                            (words::Form::Other, Some(Target::Node(node))) => self
+                                .forms
+                                .public_words(self.replica.tree(), *node, intent.verb.as_str()),
+                            _ => false,
+                        };
+                    let audience = match public {
+                        true => Audience::Everyone,
+                        false => words::audience(form, b),
+                    };
+                    words::keep(value, &self.text, audience, b, &mut kept).map_err(|r| r.name)
+                }
                 Err(e) => Err(e),
             };
             value = match r {
@@ -2083,6 +2108,20 @@ impl Clock {
                     Err(r)
                 }
             };
+            // #3695: a creator's weather (plain sets on the world node) is checked here and, once committed, written
+            // through E6's weather (`sim::edit::weather::set`): its event and its timer follow the creator's record.
+            let weather = match &checked {
+                Ok((c, ..)) => self.weather_asked(&c.checked.edit.ops, now),
+                Err(_) => Ok(None),
+            };
+            let (checked, weather) = match weather {
+                Err(r) => {
+                    let mut checked = checked;
+                    keep(&mut checked);
+                    (Err(r), None)
+                }
+                Ok(w) => (checked, w),
+            };
             let committed = checked.and_then(|(c, souls, classes, mut reserved, maps, places)| {
                 if let Some(b) = &self.bodies {
                     places.check(&b.slots)?;
@@ -2134,6 +2173,9 @@ impl Clock {
                     self.receipts.index(&c.part.effects);
                     self.effects.extend(c.part.effects.iter().cloned());
                     self.parts.push(c.part);
+                    if let Some(w) = weather {
+                        self.put_weather(now, w);
+                    }
                     self.end(id, |k| Answer::Receipt {
                         actor,
                         sequence,
@@ -2356,6 +2398,42 @@ impl Clock {
             }
             None => Some(soul),
         }
+    }
+
+    /// #3784: each embodied Soul's wind-down word, compared with what the gateways were last told; only a change is
+    /// sent, as one frame ([`states_frame`]), to every gateway connection still open. A Soul now awake, or gone, is
+    /// told `awake`.
+    fn tell_states(&mut self) {
+        let (Some(l), Some(b)) = (self.life.as_ref(), self.bodies.as_ref()) else {
+            return;
+        };
+        let mut now = BTreeMap::new();
+        for (soul, body) in l.life.embodied() {
+            let word = match b.wind.word(body) {
+                Some(skills::wind_down::Word::Idle) => "idle",
+                Some(skills::wind_down::Word::Zombie) => "zombie",
+                Some(skills::wind_down::Word::Asleep) => "asleep",
+                _ => continue,
+            };
+            now.insert(soul, word);
+        }
+        if now == self.states {
+            return;
+        }
+        let mut changed: Vec<(Id, &'static str)> = now
+            .iter()
+            .filter(|(s, w)| self.states.get(s) != Some(w))
+            .map(|(s, w)| (*s, *w))
+            .collect();
+        changed.extend(
+            self.states
+                .keys()
+                .filter(|s| !now.contains_key(s))
+                .map(|s| (*s, "awake")),
+        );
+        self.states = now;
+        let frame = states_frame(&changed);
+        self.states_to.retain(|r| r.send(frame.clone()).is_ok());
     }
 
     /// The directory's word, at a tick's start after its births (W11b): each Soul told of since the last tick that has
@@ -2953,6 +3031,42 @@ impl Clock {
         self.write_own(vec![changes, timers], "the sky");
     }
 
+    /// The creator's weather a batch asks for (#3695), checked against world time `now`: none when it sets no weather
+    /// field on the world node; refused when it sets some but not all, a level is outside 0 to 100, its end is not
+    /// after now, or the world has no sky.
+    fn weather_asked(
+        &self,
+        ops: &[edit::Op],
+        now: Micros,
+    ) -> Result<Option<sim::edit::weather::Asked>, Refused> {
+        let tree = self.replica.tree();
+        let Some(world) = tree.node(tree.root()).map(|n| n.id()) else {
+            return Ok(None);
+        };
+        let Some(asked) = sim::edit::weather::asked(ops, world) else {
+            return Ok(None);
+        };
+        let asked = asked?;
+        if self.sky.is_none() {
+            return Err(Refused {
+                op: None,
+                name: sim::edit::weather::NO_SKY,
+                detail: "this world's node has no sky".into(),
+            });
+        }
+        sim::edit::weather::check(asked.levels, now, asked.until)?;
+        Ok(Some(asked))
+    }
+
+    /// After the creator's batch commits: E6's weather write (its event, and the weather timer set for its end).
+    fn put_weather(&mut self, now: Micros, w: sim::edit::weather::Asked) {
+        let Some(h) = self.sky.as_mut() else { return };
+        match sim::edit::weather::set(&mut h.daylight, w.kind, w.levels, now, w.until) {
+            Ok(write) => self.put_sky(now, write),
+            Err(r) => eprintln!("worldd: the creator's weather was not set: {}", r.name),
+        }
+    }
+
     /// The mapping this start applies, as its time effect and the zone root's fields in one part (E7b, #3516).
     fn put_clock(&mut self, now: Micros) {
         let Some((applied, latest)) = self.clock.take() else {
@@ -3183,27 +3297,39 @@ impl Clock {
     }
 
     /// Numbers and applies what the forms wrote (F2's log hook: each entry handed back as logged), then answers the
-    /// intents whose runs ended.
+    /// intents whose runs ended. One part for the tick; when the world refuses it, each intent's entries go in a part
+    /// of their own, and an act whose entries are refused is refused by that name, its run left and nothing of it
+    /// written.
     fn write_forms(&mut self, now: Micros) {
         let mut effects = self.forms.out();
         if let Some(e) = self.engine.as_mut() {
             effects.extend(e.out());
         }
-        if !effects.is_empty() {
-            for (k, e) in effects.iter_mut().enumerate() {
-                e.envelope.sequence = self.replica.version() + k as u64;
-            }
-            match sim::commit::write(&mut self.replica, &effects) {
-                Ok(part) => {
-                    self.unsealed = true;
-                    for e in &part.effects {
-                        self.forms.forms.logged(e);
-                    }
-                    self.receipts.index(&part.effects);
-                    self.effects.extend(part.effects.iter().cloned());
-                    self.parts.push(part);
+        if !effects.is_empty() && self.commit_forms(effects.clone()).is_err() {
+            let mut groups: Vec<(Option<Id>, Vec<Effect>)> = Vec::new();
+            for e in effects {
+                let of = match e.envelope.cause {
+                    Cause::Intent(id) => Some(id),
+                    _ => None,
+                };
+                match groups.iter_mut().find(|(g, _)| *g == of) {
+                    Some((_, g)) => g.push(e),
+                    None => groups.push((of, vec![e])),
                 }
-                Err(r) => eprintln!("worldd: a form's entries were not written: {r}"),
+            }
+            for (of, group) in groups {
+                let Err(r) = self.commit_forms(group.clone()) else {
+                    continue;
+                };
+                eprintln!("worldd: a form's entries were not written: {r}");
+                self.forms.unwritten(&group);
+                let Some(o) = of.and_then(|id| self.open.get(&id).map(|o| (id, o))) else {
+                    continue;
+                };
+                let (id, actor, sequence, body) = (o.0, o.1.actor, o.1.sequence, o.1.body);
+                self.forms
+                    .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+                self.end(id, |c| c.refusal(actor, sequence, r.name));
             }
         }
         for id in std::mem::take(&mut self.engine_done) {
@@ -3227,6 +3353,23 @@ impl Clock {
         for (id, how, why) in self.forms.ended() {
             self.form_ended(id, how, why, now);
         }
+    }
+
+    /// `effects` numbered from the replica's next sequence and applied as one part, each handed to the forms as
+    /// logged; or the world's refusal, nothing written.
+    fn commit_forms(&mut self, mut effects: Vec<Effect>) -> R<()> {
+        for (k, e) in effects.iter_mut().enumerate() {
+            e.envelope.sequence = self.replica.version() + k as u64;
+        }
+        let part = sim::commit::write(&mut self.replica, &effects)?;
+        self.unsealed = true;
+        for e in &part.effects {
+            self.forms.forms.logged(e);
+        }
+        self.receipts.index(&part.effects);
+        self.effects.extend(part.effects.iter().cloned());
+        self.parts.push(part);
+        Ok(())
     }
 
     /// A form's run started (C20, #3469): its act's deadline becomes the run's own, its start plus its steps' span
@@ -3401,6 +3544,7 @@ impl Clock {
         // what a script set for this one, is taken now.
         self.births(now);
         self.notices(now);
+        self.tell_states();
         for (bytes, reply, stamps) in std::mem::take(&mut self.pending) {
             self.arrival(&bytes, reply, stamps, now);
         }
@@ -4318,6 +4462,7 @@ pub fn start<S: Storage + 'static>(
         kept,
         (cfg.lineage, zone, cfg.epoch),
         Arc::clone(&cfg.public_names),
+        std::mem::take(&mut cfg.closed),
     )
     .map_err(io)?;
     let fresh = if cfg.checkpoints.is_some() {
@@ -4347,6 +4492,7 @@ pub fn start<S: Storage + 'static>(
     let sky = Heavens::of(&world, cfg.sky.take());
     let clock_measures = measures.clone();
     // Built on the clock thread: skills (in the bodies) stay on the thread that steps them.
+    let hatches = std::mem::take(&mut cfg.hatches);
     let build = move || Clock {
         replica: world,
         publisher,
@@ -4381,7 +4527,12 @@ pub fn start<S: Storage + 'static>(
         set_down: Vec::new(),
         edited: Vec::new(),
         walkers,
-        forms: Acts::new(kinds, library, header, forms_scope),
+        forms: {
+            let mut acts = Acts::new(kinds, library, header, forms_scope);
+            // Checked at boot by `serve` (`Acts::hatches` refuses a module by name); a refused one is not loaded.
+            let _ = acts.hatches(&hatches);
+            acts
+        },
         forming: Vec::new(),
         engine: engine_parts
             .map(|(rules, kinds)| Engine::new(engine_header, rules, kinds, engine_scope)),
@@ -4411,6 +4562,8 @@ pub fn start<S: Storage + 'static>(
         worn: Vec::new(),
         directory: None,
         told: BTreeSet::new(),
+        states_to: Vec::new(),
+        states: BTreeMap::new(),
         loose,
         unlinked: Vec::new(),
     };
@@ -4529,6 +4682,13 @@ pub fn start<S: Storage + 'static>(
                         let (d, reply) = *d;
                         c.told.extend(d.souls());
                         c.directory = Some((d, reply));
+                    }
+                    Event::States(r) => {
+                        let all: Vec<(Id, &'static str)> =
+                            c.states.iter().map(|(s, w)| (*s, *w)).collect();
+                        if r.send(states_frame(&all)).is_ok() {
+                            c.states_to.push(r);
+                        }
                     }
                     Event::Stall(d) => thread::sleep(d),
                     Event::RunTo { done, .. } => return Some(done),
@@ -4880,6 +5040,39 @@ fn applied(replica: &mut Replica, mut effects: Vec<Effect>) -> R<Part> {
         .and_then(|p| replica.apply(&p).map(|()| p))
 }
 
+/// The key of a frame to the gateway that carries Souls' wind-down words (#3784; gatewayd's `world_link` reads it):
+/// `{30: [[grant bytes, word], ..]}`, sent only on a connection that asked with [`states_ask`]; the grant `soul-<scope hex>-<counter>` as the tokens file writes it, the word
+/// `idle`, `zombie`, `asleep` or `awake`.
+pub const STATES: u64 = 30;
+
+/// The frame a gateway sends to be told the Souls' words: `{30: []}`.
+pub fn states_ask() -> Vec<u8> {
+    encode(&Value::Map(BTreeMap::from([(
+        STATES,
+        Value::Array(Vec::new()),
+    )])))
+    .unwrap_or_default()
+}
+
+/// A frame of Souls' words ([`STATES`]).
+pub fn states_frame(words: &[(Id, &str)]) -> Vec<u8> {
+    let rows = words
+        .iter()
+        .filter_map(|(soul, word)| {
+            let grant = format!(
+                "soul-{}-{}",
+                replica::encode::to_hex(&soul.scope().0),
+                soul.counter()
+            );
+            Some(Value::Array(vec![
+                Value::Bytes(grant.into_bytes()),
+                Value::Text(Name::new(word)?),
+            ]))
+        })
+        .collect();
+    encode(&Value::Map(BTreeMap::from([(STATES, Value::Array(rows))]))).unwrap_or_default()
+}
+
 /// Serves one connection of the gateway's local socket (I1's framing: a 4-byte big-endian length, then that many
 /// bytes): each intent read goes through `world`'s door (stamped there, O4), each answer goes back on the same
 /// connection, in the order sent.
@@ -4889,6 +5082,7 @@ pub fn serve(world: Door, mut stream: UnixStream) {
         return;
     };
     let (reply, answers) = channel::<Vec<u8>>();
+    let ask = states_ask();
     std::thread::spawn(move || {
         for frame in answers {
             delivery_trace(trace, "native-write-start", &frame, "ready");
@@ -4906,12 +5100,21 @@ pub fn serve(world: Door, mut stream: UnixStream) {
             return;
         }
         let len = u32::from_be_bytes(len) as usize;
-        if len > INTENT_MOST as usize {
+        // A creator's bulk edit (#3695) is the largest frame the gateway hands on; `Intent::read` keeps every other
+        // intent to the frame limit.
+        if len > BULK_MOST as usize {
             return;
         }
         let mut bytes = vec![0u8; len];
         if stream.read_exact(&mut bytes).is_err() {
             return;
+        }
+        // #3784: a gateway with a directory asks to be told the Souls' wind-down words, now and on each change.
+        if bytes == ask {
+            if world.events.send(Event::States(reply.clone())).is_err() {
+                return;
+            }
+            continue;
         }
         if !world.arrive(bytes, reply.clone()) {
             return;
@@ -4935,6 +5138,33 @@ mod tests {
     use replica::sync::{self, wire};
     use sim::log::{Mem, recover};
     use std::sync::{Condvar, Mutex};
+
+    /// #3784: the frame of Souls' words names each by its grant, as the tokens file does, with its word.
+    #[test]
+    fn a3784_a_states_frame_names_each_soul_by_its_grant() {
+        let soul = Id::new(Scope([0x4d; 16]), 3).unwrap();
+        let frame = states_frame(&[(soul, "asleep"), (soul, "awake")]);
+        let Value::Map(m) = decode(&frame).unwrap().value else {
+            panic!("a map")
+        };
+        let Some(Value::Array(rows)) = m.get(&STATES) else {
+            panic!("rows under STATES")
+        };
+        let grant = format!("soul-{}-3", "4d".repeat(16));
+        assert_eq!(
+            rows,
+            &vec![
+                Value::Array(vec![
+                    Value::Bytes(grant.clone().into_bytes()),
+                    Value::Text(Name::new("asleep").unwrap())
+                ]),
+                Value::Array(vec![
+                    Value::Bytes(grant.into_bytes()),
+                    Value::Text(Name::new("awake").unwrap())
+                ]),
+            ]
+        );
+    }
 
     const LINEAGE: Scope = Scope([9; 16]);
 
@@ -5446,6 +5676,146 @@ mod tests {
         run(intent(soul, 1, 0, place), 6);
         world.stop();
         (store.bytes(), kinds_seen)
+    }
+
+    /// #3695: a creator's weather is five plain sets on the world node; once committed, E6's weather event follows and
+    /// its timer is due at the creator's end. A level over 100 is refused by name and changes nothing.
+    #[test]
+    fn a_creators_weather_commits_with_e6s_event_and_its_end_on_the_timer() {
+        use replica::edit::wire::{VERB, parameters};
+        use replica::edit::{Op, Ref};
+        use replica::sky::{self, int};
+        let store = Held::new(Vec::new());
+        let w = toggles::World::build(1, 0, 0);
+        let initial = w.replica.frozen();
+        let root = w.replica.tree().node(w.replica.tree().root()).unwrap().id();
+        let creator = Id::new(Scope([0xc0; 16]), 1).unwrap();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.lockstep = true;
+        cfg.measures = false;
+        cfg.edits = Some(edit::World {
+            creator,
+            kinds: toggles::kinds(),
+        });
+        let cal = sky::Calendar {
+            day_s: 86_400,
+            origin: 0,
+            offsets: vec![(0, 0)],
+        };
+        cfg.sky = Some(sim::daylight::Config::today(cal, 3695));
+        let world = start(w.replica, toggles::rules(), store.clone(), cfg).unwrap();
+        let until: i64 = 40 * 3_600_000_000;
+        let weather = |rain: i64| {
+            [
+                (
+                    sky::F_WEATHER,
+                    Value::Text(Name::new("souls:storm").unwrap()),
+                ),
+                (sky::F_CLOUD, int(100)),
+                (sky::F_RAIN, int(rain)),
+                (sky::F_WIND, int(80)),
+                (sky::F_WEATHER_UNTIL, int(until)),
+            ]
+            .into_iter()
+            .map(|(field, to)| Op::Set {
+                node: Ref::Node(root),
+                field,
+                to,
+            })
+            .collect::<Vec<_>>()
+        };
+        let intent = |sequence: u64, planned: u64, ops: &[Op]| Intent {
+            actor: Actor::Creator(creator),
+            verb: Name::new(VERB).unwrap(),
+            target: None,
+            parameters: parameters(ops),
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: planned,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        // (kind, reason, the version the answer gives)
+        let run = |i: Intent, tick: i64| {
+            let rx = send(&world, &i);
+            let (done, ran) = channel();
+            world.events.send(Event::RunTo { tick, done }).unwrap();
+            ran.recv().unwrap();
+            let f = answer(&rx);
+            let Value::Map(m) = decode(&f).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Array(v)) = m.get(&1) else {
+                panic!("a version")
+            };
+            let Some(Value::Uint(version)) = v.get(3) else {
+                panic!("a sequence")
+            };
+            let (kind, reason, _) = read(&f);
+            (kind, reason, *version)
+        };
+        // The sky's first start wrote the world node after version 0: planned before it, the batch is stale.
+        let (kind, reason, now) = run(intent(1, 0, &weather(90)), 2);
+        assert_eq!(
+            (kind, reason),
+            (2, Value::Text(Name::new("edit.stale").unwrap()))
+        );
+        let (kind, reason, now) = run(intent(2, now, &weather(101)), 4);
+        assert_eq!(kind, 2, "a level of 101 is refused");
+        assert_eq!(
+            reason,
+            Value::Text(Name::new("edit.weather-level").unwrap())
+        );
+        let (kind, _, _) = run(intent(3, now, &weather(90)), 6);
+        assert_eq!(kind, 1, "the storm is set");
+        world.stop();
+        let mut live = initial;
+        let mut events = Vec::new();
+        for bytes in recover(&store.bytes()).unwrap().records {
+            if !recorder::is_input(&bytes) {
+                let part = replica::effects::Part::read(&bytes).unwrap();
+                for e in &part.effects {
+                    for ev in e.events.iter().flatten() {
+                        events.push((e.envelope.actor, ev.name.as_str().to_owned()));
+                    }
+                }
+                live.apply(&part).unwrap();
+            }
+        }
+        let tree = live.tree();
+        let node = tree.node(tree.root()).unwrap();
+        let f = node.fields();
+        assert_eq!(
+            f.get(&sky::F_WEATHER),
+            Some(&Value::Text(Name::new("souls:storm").unwrap()))
+        );
+        assert_eq!(f.get(&sky::F_RAIN), Some(&int(90)));
+        assert_eq!(
+            f.get(&sky::F_WEATHER_NEXT),
+            Some(&int(until)),
+            "the next change is the creator's end"
+        );
+        let due: Vec<_> = tree
+            .timers()
+            .iter()
+            .filter(|(_, t)| t.name.as_str() == sky::T_WEATHER)
+            .map(|(_, t)| t.due)
+            .collect();
+        assert_eq!(due, [until], "one weather timer, due at the end");
+        assert_eq!(
+            events.last().map(|(_, n)| n.as_str()),
+            Some(sky::EV_WEATHER),
+            "E6's weather event follows the creator's record"
+        );
     }
 
     #[test]

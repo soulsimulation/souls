@@ -44,6 +44,13 @@ function open(path: string): DatabaseSync {
 /** Today's def ref and the map's `def` name one revision the same way: `core/door@2` is `core-door@2`. */
 const mapKey = (ref: string) => ref.replace(/^core\//, 'core-');
 
+/** A world map's entry for each def ref that has one (`souls-world-map/1` rows with an `entry`). */
+export function entryMap(mapPath: string): (ref: string) => string | undefined {
+  const rows = (JSON.parse(readFileSync(mapPath, 'utf8')).rows as MapRow[]).filter((r) => r.entry);
+  const by = new Map(rows.map((r) => [mapKey(r.def), r.entry!]));
+  return (ref) => by.get(mapKey(ref));
+}
+
 /** The model, the facts file's head, and what each thing adds to its record (its uploads, its entry or why none). */
 export function fromBackup(path: string, world: string, mapPath: string) {
   const db = open(path);
