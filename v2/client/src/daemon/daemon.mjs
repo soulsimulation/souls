@@ -988,7 +988,9 @@ const SCHEDULE = join(soulDirOf(home, soul), 'memory', 'schedule.md');
 const BEAT_MS = 1000, BEAT_SAVED_MS = 10_000, GAP_MS = 15_000;
 const MISSED_NOTE = 'not sent: their moment passed while this daemon was off or asleep. Tell your owner; send what still matters yourself.';
 state.schedule = { marks: {}, targets: {}, beat: null, missed: [], dropped: 0, ...(state.schedule ?? {}) };
-let entries = [], stamp = null, beatSaved = 0, worldTimer = null;
+// A world moment's copy is brought current this long before it, so its check needs no round trip at the moment.
+const PREPARE_MS = 250;
+let entries = [], stamp = null, beatSaved = 0, worldTimer = null, prepareTimer = null, prepared = null;
 const inFlight = new Set();
 
 /** The file's entries, read again only when it changed; a line that does not parse is logged once and inert. */
@@ -1018,7 +1020,11 @@ async function fireEntry(e, now, late) {
     const candidates = actsOf(e.acts);
     let keep = candidates, dropped = [];
     if (candidates.some((c) => c.form)) {
-      const current = isCurrent(await ageAfter(), CURRENT_MS);
+      // A world moment's copy was brought current just before it (PREPARE_MS): checked as it is, the act leaves at
+      // its moment rather than one gateway round trip later. A copy not confirmed within the bound is brought current.
+      let age = await ageAfter({ now: true });
+      if (!isCurrent(age, CURRENT_MS)) age = await ageAfter();
+      const current = isCurrent(age, CURRENT_MS);
       ({ keep, dropped } = sift(candidates, current ? verdicts(candidates) : [], current));
     }
     if (state.schedule.marks[e.key]) return;
@@ -1062,10 +1068,14 @@ function beat() {
   scheduleWorld(now, off);
 }
 
-/** One deadline on the current copy's mapping. A sync/rate change and the existing file beat re-arm it; no polling. */
+/**
+ * One deadline on the current copy's mapping, and a refresh PREPARE_MS before it. A sync/rate change and the existing
+ * file beat re-arm both; no polling.
+ */
 function scheduleWorld(now = Date.now(), off = null) {
   clearTimeout(worldTimer);
-  worldTimer = null;
+  clearTimeout(prepareTimer);
+  worldTimer = prepareTimer = null;
   if (!signedIn || syncing) return;
   const s = state.schedule;
   const { fire, missed, next, resolved } = worldDue(scheduleNow(), s.marks, s.targets, clockOf(copy), calendarOf(copy), now, off);
@@ -1077,7 +1087,13 @@ function scheduleWorld(now = Date.now(), off = null) {
   }
   if (resolved || missed.length) save(); // keep the occurrence before a restart, and before any send
   for (const f of fire) fireEntry(f.e, now, f.late);
-  if (next !== null) worldTimer = setTimeout(scheduleWorld, Math.min(next - now, 2_147_483_647));
+  if (next === null) return;
+  worldTimer = setTimeout(scheduleWorld, Math.min(next - now, 2_147_483_647));
+  const prepare = () => { prepared = next; refresh(); };
+  if (prepared !== next) {
+    if (next - now <= PREPARE_MS) prepare();
+    else prepareTimer = setTimeout(prepare, Math.min(next - now - PREPARE_MS, 2_147_483_647));
+  }
 }
 
 /** The change entries an event fires, sent at once. */
