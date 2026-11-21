@@ -174,11 +174,16 @@ mod tests {
     fn a_seat_in_a_room_stands_on_the_rooms_floor() {
         let im = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
         let (room, floor) = (im.nodes["building/r0a"], im.nodes["building/floor-0"]);
-        let kind = |id| plain(im.tree.node(im.tree.handle(id).unwrap()).unwrap().kind().as_str());
-        assert_eq!(
-            (kind(room), kind(floor)),
-            (sim::ground::scene::ROOM, FLOOR)
-        );
+        let kind = |id| {
+            plain(
+                im.tree
+                    .node(im.tree.handle(id).unwrap())
+                    .unwrap()
+                    .kind()
+                    .as_str(),
+            )
+        };
+        assert_eq!((kind(room), kind(floor)), (sim::ground::scene::ROOM, FLOOR));
         let (on, ..) = on_floor(&im.tree, Some(im.nodes["ground"]), room, Vec3::ZERO)
             .expect("a floor under the room");
         assert_eq!(on, floor);
