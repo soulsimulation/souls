@@ -328,7 +328,8 @@ pub fn wire_entry(frame: &[u8]) -> Result<String, JsError> {
 /// reads it. `words`, when given, is parameter 1 as T8's `{23: words}` (a say or a whisper, V1b). C10 (#3414): `target`
 /// may be one id per verb, split by spaces; `args`, the first verb's thing arguments as `name=<id>` split by spaces, is
 /// parameter 1 as C2's `[[name, id], ...]`. E26 (#3329): `params`, a JSON object of numbered parameters for an engine
-/// act (`activity:offer`): a whole number, a name, an id (`<scope hex>-<counter>`), or a list of those.
+/// act (`activity:offer`): a whole number, a name, an id (`<scope hex>-<counter>`), or a list of those. `reflex`, when
+/// true, marks it as sent by the client on its own standing consent, not by its agent (field 12, #3764).
 #[wasm_bindgen(js_name = wireIntent)]
 // JS calls it with positional arguments; the words came last (C4, #3368), then the arguments (C10, #3414).
 #[allow(clippy::too_many_arguments)]
@@ -343,6 +344,7 @@ pub fn wire_intent(
     words: Option<String>,
     args: Option<String>,
     params: Option<String>,
+    reflex: Option<bool>,
 ) -> Result<Vec<u8>, JsError> {
     let node = |t: &str| -> Result<Option<Target>, JsError> {
         Ok(match t {
@@ -470,6 +472,7 @@ pub fn wire_intent(
         fallbacks,
         replaces: None,
         body: None,
+        reflex: reflex.unwrap_or(false),
     };
     let bytes = encode(&intent.to_value()).map_err(js)?;
     crate::intent_decode::decode(&bytes).map_err(js)?;
@@ -677,6 +680,7 @@ pub fn wire_edit(
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     let bytes = encode(&intent.to_value()).map_err(js)?;
     crate::intent_decode::decode(&bytes).map_err(js)?;
