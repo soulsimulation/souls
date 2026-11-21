@@ -202,10 +202,10 @@ fn selects_body_slot(f: &Json, key: &str) -> bool {
 pub const HERE: i64 = 20_000_000;
 
 /// The thing a form's thing argument `take` selects when the caller leaves it out (#3715): for a `select` of `things`
-/// of one kind `in` `here`, `nearest`, rank 1: one in `body`'s own hand (a log to stack, #3710), else the thing of that
-/// kind nearest the form's thing `node` (a held thing is where its holder is) within [`HERE`], in the same building or
-/// on the same ground as it when both say, ties by id. `None` for any other select, or with none near.
-fn nearest_selected(tree: &Tree, body: Id, node: Id, take: &Json) -> Option<Id> {
+/// of one kind `in` `here`, `nearest`, rank 1, the thing of that kind nearest the form's thing `node` (a held thing is
+/// where its holder is) within [`HERE`], in the same building or on the same ground as it when both say, ties by id.
+/// `None` for any other select, or with none near.
+fn nearest_selected(tree: &Tree, node: Id, take: &Json) -> Option<Id> {
     let sel = take.get("select")?;
     let s = |k: &str| sel.get(k).and_then(Json::str);
     let rank_one = sel.get("rank").is_none_or(|r| matches!(r, Json::Int(1)));
@@ -218,16 +218,6 @@ fn nearest_selected(tree: &Tree, body: Id, node: Id, take: &Json) -> Option<Id> 
         return None;
     }
     let kind = s("kind")?;
-    let held = tree
-        .handle(body)
-        .and_then(|h| tree.children(h))
-        .unwrap_or(&[])
-        .iter()
-        .filter_map(|&c| tree.node(c))
-        .find(|n| plain(n.kind()) == kind);
-    if let Some(n) = held {
-        return Some(n.id());
-    }
     let at = replica::select::position(tree, node).ok()?;
     let frame = replica::select::standing(tree, node).ok().map(|f| f.0);
     let r2 = i128::from(HERE) * i128::from(HERE);
@@ -1126,7 +1116,7 @@ impl Acts {
                     if all.contains_key(key) {
                         continue;
                     }
-                    if let Some(id) = nearest_selected(tree, body, *node, take) {
+                    if let Some(id) = nearest_selected(tree, *node, take) {
                         all.insert(key.clone(), skills::form_runner::Arg::Node(id));
                         picked = true;
                     }

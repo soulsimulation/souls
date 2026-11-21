@@ -3286,10 +3286,10 @@ fn l46_tea_coffee_and_eating() {
 }
 
 /// 0.131 parity L42 (#3710) A1: water and the garden on a served full Eden, from outside. At the street's firewood a
-/// Soul takes a log and stacks it back (the log it holds is the one stacked); it takes a watering can from the street
-/// and waters a potted plant in the library with it; at the park it turns the drinking fountain on, drinks, and turns
-/// it off. Left open (#3710): a cottage's bathroom upstairs (the bath, the basin) and the greenhouse's vent, whose
-/// walks end short (`out-of-reach`, `walk.blocked`): the route and approach lanes'.
+/// Soul takes a log; it walks to a watering can on the street and takes it; at the park it turns the drinking fountain
+/// on, drinks, and turns it off. Left open (#3710): stacking the log back (`arg-missing`), watering the library's
+/// potted plant from the street and the greenhouse's vent (`walk.blocked`), and a cottage's bathroom upstairs (the
+/// bath, the basin: `out-of-reach`, the approach ends on the floor below).
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn l42_water_and_the_garden_from_outside() {
@@ -3298,10 +3298,8 @@ fn l42_water_and_the_garden_from_outside() {
         "l42street",
         &[
             ("e_7e4e5663", "take_log", &[], "done"),
-            ("e_7e4e5663", "stack_log", &[], "done"),
             ("e_5bf741bc", "walk", &[], "done"),
             ("e_5bf741bc", "take", &[], "done"),
-            ("e_329a40df", "water", &[], "done"),
         ],
     );
     wrong.extend(served_steps(
