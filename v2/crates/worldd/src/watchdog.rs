@@ -67,7 +67,12 @@ struct Watch {
 
 impl Watch {
     fn new(soft: i64, hard: i64) -> Watch {
-        Watch { soft, hard: hard.max(soft), stalled: false, longest: 0 }
+        Watch {
+            soft,
+            hard: hard.max(soft),
+            stalled: false,
+            longest: 0,
+        }
     }
 
     /// One look: `quiet` ms since the last tick ended.
@@ -117,7 +122,9 @@ pub fn watch_to(beat: Arc<Heartbeat>, mut real: Real, limit_ms: i64, hard_ms: i6
                         "watchdog: stalled: no tick for {quiet} ms after tick {tick}; running on (ends at {} ms)",
                         w.hard
                     );
-                    eprintln!("worldd: stalled: no tick for {quiet} ms after tick {tick}; running on");
+                    eprintln!(
+                        "worldd: stalled: no tick for {quiet} ms after tick {tick}; running on"
+                    );
                     stalls.began(quiet);
                 }
                 Verdict::Again(ms) => {
@@ -259,10 +266,18 @@ mod tests {
         assert_eq!(w.look(10), Verdict::Quiet);
         assert_eq!(w.look(501), Verdict::Stalled);
         assert_eq!(w.look(600), Verdict::Quiet, "said once");
-        assert_eq!(w.look(14_999), Verdict::Quiet, "short of the hard limit it runs on");
+        assert_eq!(
+            w.look(14_999),
+            Verdict::Quiet,
+            "short of the hard limit it runs on"
+        );
         assert_eq!(w.look(3), Verdict::Again(14_999));
         assert_eq!(w.look(3), Verdict::Quiet);
-        assert_eq!(w.look(700), Verdict::Stalled, "a second stall is said again");
+        assert_eq!(
+            w.look(700),
+            Verdict::Stalled,
+            "a second stall is said again"
+        );
     }
 
     #[test]

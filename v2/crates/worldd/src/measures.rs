@@ -368,7 +368,11 @@ pub struct Stalls {
 }
 
 /// This process's stalls.
-pub static STALLS: Stalls = Stalls { now_ms: AtomicU64::new(0), count: AtomicU64::new(0), longest_ms: AtomicU64::new(0) };
+pub static STALLS: Stalls = Stalls {
+    now_ms: AtomicU64::new(0),
+    count: AtomicU64::new(0),
+    longest_ms: AtomicU64::new(0),
+};
 
 impl Stalls {
     /// A stall began, `ms` without a tick so far.
@@ -378,14 +382,16 @@ impl Stalls {
 
     /// The stall under way, `ms` without a tick so far.
     pub fn now(&self, ms: i64) {
-        self.now_ms.store(u64::try_from(ms).unwrap_or(0), Ordering::Relaxed);
+        self.now_ms
+            .store(u64::try_from(ms).unwrap_or(0), Ordering::Relaxed);
     }
 
     /// The stall ended after `ms`.
     pub fn ended(&self, ms: i64) {
         self.now_ms.store(0, Ordering::Relaxed);
         self.count.fetch_add(1, Ordering::Relaxed);
-        self.longest_ms.fetch_max(u64::try_from(ms).unwrap_or(0), Ordering::Relaxed);
+        self.longest_ms
+            .fetch_max(u64::try_from(ms).unwrap_or(0), Ordering::Relaxed);
     }
 
     /// `{"now_ms":n,"ended":n,"longest_ms":n}`: `now_ms` over 0 while the world is stalled.

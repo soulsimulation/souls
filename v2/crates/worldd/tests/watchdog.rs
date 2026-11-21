@@ -65,26 +65,51 @@ fn tick_of(line: &str) -> Option<i64> {
 
 #[test]
 fn k7_a_600_ms_stall_is_said_and_the_world_runs_on_with_no_exit() {
-    let (lines, code) = run("soft", &["--stall-at", "20", "--stall-for", "600"], |l| tick_of(l).is_some_and(|n| n >= 40));
+    let (lines, code) = run("soft", &["--stall-at", "20", "--stall-for", "600"], |l| {
+        tick_of(l).is_some_and(|n| n >= 40)
+    });
     let text = lines.join("\n");
     assert_eq!(code, None, "still running after the stall:\n{text}");
-    let said = lines.iter().position(|l| l.starts_with("watchdog: stalled: no tick for")).expect(&text);
-    let again = lines.iter().position(|l| l.starts_with("watchdog: ticking again after a stall of")).expect(&text);
+    let said = lines
+        .iter()
+        .position(|l| l.starts_with("watchdog: stalled: no tick for"))
+        .expect(&text);
+    let again = lines
+        .iter()
+        .position(|l| l.starts_with("watchdog: ticking again after a stall of"))
+        .expect(&text);
     assert!(said < again, "{text}");
     assert!(!text.contains("tick-stalled"), "{text}");
     // Every tick from the blocked one on, none skipped.
-    let after: Vec<i64> = lines.iter().filter_map(|l| tick_of(l)).filter(|n| *n >= 20).collect();
+    let after: Vec<i64> = lines
+        .iter()
+        .filter_map(|l| tick_of(l))
+        .filter(|n| *n >= 20)
+        .collect();
     assert_eq!(after, (20..=40).collect::<Vec<_>>(), "{text}");
 }
 
 #[test]
 fn k7_a_tick_held_for_good_ends_the_process_at_the_hard_limit() {
     let t = Instant::now();
-    let (lines, code) = run("hard", &["--stall-at", "20", "--watchdog-hard-ms", "1500"], |_| false);
+    let (lines, code) = run(
+        "hard",
+        &["--stall-at", "20", "--watchdog-hard-ms", "1500"],
+        |_| false,
+    );
     let text = lines.join("\n");
     assert_eq!(code, Some(86), "{text}");
-    let said = lines.iter().position(|l| l.starts_with("watchdog: stalled:")).expect(&text);
-    let ended = lines.iter().position(|l| l.starts_with("watchdog: tick-stalled: no tick for")).expect(&text);
+    let said = lines
+        .iter()
+        .position(|l| l.starts_with("watchdog: stalled:"))
+        .expect(&text);
+    let ended = lines
+        .iter()
+        .position(|l| l.starts_with("watchdog: tick-stalled: no tick for"))
+        .expect(&text);
     assert!(said < ended, "{text}");
-    assert!(t.elapsed() < Duration::from_secs(10), "ended at the given hard limit, not the default");
+    assert!(
+        t.elapsed() < Duration::from_secs(10),
+        "ended at the given hard limit, not the default"
+    );
 }
