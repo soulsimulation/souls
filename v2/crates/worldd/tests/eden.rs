@@ -2902,3 +2902,130 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     let d = ((x - px).powi(2) + (z - pz).powi(2)).sqrt();
     assert!(d < 1.5, "out at the plank: {d:.2} m from it");
 }
+
+/// Each body's last logged frame, height and stance in the world's log in `dir`: `(node, slot, y µm, stance)`.
+fn last_stances(dir: &Path) -> BTreeMap<Id, (Id, Option<u64>, i64, Option<sim::controller::Stance>)> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = BTreeMap::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        if let Some(Value::Array(rows)) = Part::read(&r).unwrap().rest.get(&answers::BODIES) {
+            for row in rows {
+                if let Some((id, pose, stance)) = worldd::bodies::read_row(row) {
+                    out.insert(
+                        id,
+                        (pose.frame.node, pose.frame.slot, pose.position.y, stance),
+                    );
+                }
+            }
+        }
+    }
+    out
+}
+
+/// #3802 A2: Souls step up onto Eden's festival stage (e_569eb676, at (265, 34) m, its steps at z 37.3 m) and stand on
+/// it, each on its own standing point (the stage's 40 spots, 0.94 m up on its boards): the first two on two points, then
+/// the stage filled. A 41st Soul is refused by name and stays where it stood. The world is stopped and served again on
+/// the same folder: the 40 are still standing on the stage in their spots, the 41st is still refused, and once one
+/// steps down the 41st steps up.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
+    use sim::controller::Stance;
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (stage, lineage) = (im.nodes["e_569eb676"], im.nodes["world"].scope());
+    let (served, first, dir) = serve(&facts, "265,39", "i3802", lineage);
+    let mut souls = vec![first];
+    for n in 2..=41 {
+        souls.push(join(&dir, n, lineage));
+    }
+    let on_stage = |dir: &Path| -> Vec<(Id, Option<u64>, i64, Option<Stance>)> {
+        let mut v: Vec<_> = last_stances(dir)
+            .into_iter()
+            .filter(|(_, f)| f.0 == stage)
+            .map(|(b, f)| (b, f.1, f.2, f.3))
+            .collect();
+        v.sort_by_key(|f| f.1);
+        v
+    };
+    for (i, soul) in souls.iter_mut().enumerate().take(2) {
+        let up = soul.act("eden:step_up", Some(stage), BTreeMap::new());
+        println!("Soul {}: step up {up:?}", i + 1);
+        up.expect("stepped up onto a free spot");
+    }
+    let two = on_stage(&dir);
+    println!("on the stage after two: {two:?}");
+    assert_eq!(two.len(), 2, "both on the stage");
+    assert_ne!(two[0].1, two[1].1, "each on its own point");
+    assert!(
+        two.iter().all(|f| f.1.is_some() && f.3 == Some(Stance::Stand)),
+        "each standing in a spot"
+    );
+    let started = std::time::Instant::now();
+    for (i, soul) in souls.iter_mut().enumerate().take(40).skip(2) {
+        let up = soul.act("eden:step_up", Some(stage), BTreeMap::new());
+        println!("Soul {}: step up {up:?}", i + 1);
+        up.expect("stepped up onto a free spot");
+    }
+    println!("38 more stepped up in {:?}", started.elapsed());
+    let before = last_stances(&dir)[&souls[40].1];
+    let full = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
+    println!("Soul 41: step up onto the full stage {full:?}");
+    let all = on_stage(&dir);
+    let slots: Vec<Option<u64>> = all.iter().map(|f| f.1).collect();
+    assert_eq!(slots, (1..=40).map(Some).collect::<Vec<_>>(), "40 spots, one each");
+    assert!(all.iter().all(|f| f.3 == Some(Stance::Stand)), "all standing");
+    assert_eq!(full, Err("place-taken".to_owned()), "a full stage refuses by name");
+    assert_eq!(
+        last_stances(&dir)[&souls[40].1],
+        before,
+        "the refused Soul stays where it stood"
+    );
+
+    // Stopped and served again on the same folder (K18c): the 40 come back standing in their spots.
+    drop(served);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let served = Served(child);
+    let mut line = String::new();
+    while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+        line.clear();
+    }
+    print!("restarted: {line}");
+    let mut souls: Vec<Client> = souls
+        .iter()
+        .enumerate()
+        .map(|(i, s)| reconnect(&dir, i as u64 + 1, s.2, lineage))
+        .collect();
+    let again = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
+    println!("after the restart, Soul 41: step up {again:?}");
+    let down = souls[0].act("eden:step_down", Some(stage), BTreeMap::new());
+    println!("after the restart, Soul 1: step down {down:?}");
+    let up = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
+    println!("after the restart, Soul 41: step up {up:?}");
+    let after = on_stage(&dir);
+    let first_after = last_stances(&dir)[&souls[0].1];
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(again, Err("place-taken".to_owned()), "still full");
+    down.expect("Soul 1 steps down");
+    up.expect("Soul 41 steps up into the freed spot");
+    assert_ne!(first_after.0, stage, "Soul 1 off the stage: {first_after:?}");
+    assert_eq!(after.len(), 40, "the stage full again: {after:?}");
+    assert!(
+        after.iter().all(|f| f.3 == Some(Stance::Stand)),
+        "all standing after the restart: {after:?}"
+    );
+    assert!(
+        after.iter().any(|f| f.0 == souls[40].1) && after.iter().any(|f| f.0 == souls[1].1),
+        "Soul 41 took the freed spot; Soul 2 kept its own"
+    );
+}
