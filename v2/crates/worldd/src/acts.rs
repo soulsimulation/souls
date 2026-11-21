@@ -1038,7 +1038,7 @@ pub(crate) fn select_thing(
         .filter(|n| !here || (same_place(n.id()) && !closed_above(n.id())))
         .filter_map(|n| {
             let p = world_at(tree, n.id());
-            if here && !anchor.zip(p).is_some_and(|(a, p)| xz(a, p) <= reach) {
+            if here && anchor.zip(p).is_none_or(|(a, p)| xz(a, p) > reach) {
                 return None;
             }
             Some((anchor.zip(p).map(|(a, p)| d2(a, p)), n.id()))
