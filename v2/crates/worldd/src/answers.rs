@@ -1964,9 +1964,6 @@ impl Clock {
                     self.receipts.index(&c.part.effects);
                     self.effects.extend(c.part.effects.iter().cloned());
                     self.parts.push(c.part);
-                    if let Some(w) = weather {
-                        self.put_weather(now, w);
-                    }
                     self.end(id, |k| Answer::Receipt {
                         actor,
                         sequence,
@@ -2043,15 +2040,14 @@ impl Clock {
                 Ok((c, ..)) => self.weather_asked(&c.checked.edit.ops, now),
                 Err(_) => Ok(None),
             };
-            let checked = match weather {
+            let (checked, weather) = match weather {
                 Err(r) => {
                     let mut checked = checked;
                     keep(&mut checked);
-                    Err(r)
+                    (Err(r), None)
                 }
-                Ok(_) => checked,
+                Ok(w) => (checked, w),
             };
-            let weather = weather.ok().flatten();
             let committed = checked.and_then(|(c, souls, classes, mut reserved, maps, places)| {
                 if let Some(b) = &self.bodies {
                     places.check(&b.slots)?;
@@ -2103,6 +2099,9 @@ impl Clock {
                     self.receipts.index(&c.part.effects);
                     self.effects.extend(c.part.effects.iter().cloned());
                     self.parts.push(c.part);
+                    if let Some(w) = weather {
+                        self.put_weather(now, w);
+                    }
                     self.end(id, |k| Answer::Receipt {
                         actor,
                         sequence,
@@ -5533,7 +5532,8 @@ mod tests {
             }
         }
         let tree = live.tree();
-        let f = tree.node(tree.root()).unwrap().fields();
+        let node = tree.node(tree.root()).unwrap();
+        let f = node.fields();
         assert_eq!(f.get(&sky::F_WEATHER), Some(&Value::Text(Name::new("souls:storm").unwrap())));
         assert_eq!(f.get(&sky::F_RAIN), Some(&int(90)));
         assert_eq!(f.get(&sky::F_WEATHER_NEXT), Some(&int(until)), "the next change is the creator's end");
