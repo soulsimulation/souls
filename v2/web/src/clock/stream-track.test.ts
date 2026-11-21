@@ -21,7 +21,8 @@ test('the page Track draws a served Soul at changing positions from the real pub
   const pkg = resolve(v2, process.env.V2_REPLICA_PKG ?? 'target/wasm-load/pkg');
   const replicaUrl = pathToFileURL(join(pkg, 'replica.js')).href;
   registerHooks({ resolve: (s, c, next) => (s === 'replica' ? { url: replicaUrl, shortCircuit: true } : next(s, c)) });
-  const stream = JSON.parse(readFileSync(join(dir, 'world.json'), 'utf8')).stream as string;
+  // world.json names the stream from the world's folder (`views/…`); V2_STREAM_DIR is the `views/` folder itself.
+  const stream = (JSON.parse(readFileSync(join(dir, 'world.json'), 'utf8')).stream as string).replace(/^views\//, '');
   const base = `https://stream.example.invalid/${stream.replace(/^\/+|\/+$/g, '')}/`;
   const parts: PartRec[] = [], errors: string[] = [], polls: (() => Promise<void>)[] = [];
   const fetchBefore = globalThis.fetch, intervalBefore = globalThis.setInterval, selfBefore = (globalThis as { self?: unknown }).self;
