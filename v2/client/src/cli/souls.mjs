@@ -80,6 +80,14 @@
 //                                             `in 10m`), a world time (`20:00`), or R9's pattern as JSON. The daemon
 //                                             sends it, with no model turn
 //   souls.mjs schedule [list] | schedule remove <id>   the entries and what became of each
+//   souls.mjs dashboard                       the home at a glance: each Soul's world and state, its daemon, accounts and
+//                                             unread news; read here, asks no world (#3708)
+//   souls.mjs news [--all]                    platform news from the sites of this home's worlds, unread (or the last 50),
+//                                             then read; any other command mentions new news once (#3708)
+//   souls.mjs profile [name "<Name>" | description "<text>" | photo <file.png|file.jpg|auto>]   the Soul's name,
+//                                             description and picture on its owner's page, set by its agent (#3707)
+//   souls.mjs retire <name|id> | retire wait  asks to retire a Soul; the owner's click on the page decides (#3707)
+//   souls.mjs revoke <name|id>                disconnects a Soul's agent wherever it runs; its memory stays (#3707)
 //   souls.mjs upgrade [--rollback]            brings today's client's Souls across, one owner approval each (R18); with
 //                                             --rollback, today's client again
 //   souls.mjs query '<json list>' [--budget <bytes>]   several reads of the copy in one call, each answered in turn
@@ -95,7 +103,7 @@
 // The home is SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG.
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -108,6 +116,7 @@ import { runShoot } from '../shoot/shoot.mjs';
 import { runView } from '../view/view.mjs';
 import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount } from '../account/account.mjs';
+import { feedDue, mention } from '../home/news.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
 export const OPS = [
@@ -316,6 +325,17 @@ async function local({ local: op, soul: named, since, refs, force, ...asked }, h
   return { ok: true, soul, ...(await consolidateIn(home, soulDirOf(home, soul), { force })) };
 }
 
+/** #3708: when an HTTPS site's news is due, one detached `news --fetch` checks it, at most every 5 minutes (as today). */
+function fetchNewsLater(home) {
+  try {
+    if (!feedDue(JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')), Date.now()).some((s) => s.startsWith('https:'))) return;
+    const mark = join(home, '.feed-check');
+    try { if (Date.now() - statSync(mark).mtimeMs < 5 * 60_000) return; } catch { /* never started */ }
+    writeFileSync(mark, '');
+    spawn(process.execPath, [fileURLToPath(import.meta.url), 'news', '--fetch'], { detached: true, stdio: 'ignore', env: { PATH: process.env.PATH ?? '', SOULS_HOME: home } }).on('error', () => {}).unref();
+  } catch { /* the next command tries */ }
+}
+
 const shq = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
 
 /**
@@ -340,7 +360,7 @@ export async function runViews(args, shootOne) {
 }
 
 function help(home, named, topic) {
-  if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
+  if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]', 'profile [name "Name" | description "Text" | photo <file.png|auto>] [--soul <id>]', 'retire <name|id> [--as alias] | retire wait', 'revoke <name|id> [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
   if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake'), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;
@@ -380,10 +400,19 @@ async function schedule(home, named, { sub, args, until, missed }) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
+  let newsHome = null;
+  // #3708: a command's answer mentions news not mentioned before, once; `news` and `dashboard` say it themselves.
+  const out = (v) => {
+    if (newsHome && v && typeof v === 'object' && v.ok !== false && !['news', 'dashboard'].includes(process.argv[2])) {
+      try { const n = mention(newsHome); if (n) v.news = n; } catch { /* no line */ }
+    }
+    process.stdout.write(JSON.stringify(v) + '\n');
+  };
   const asked = requestOf(process.argv.slice(2)), { req, soul: named, refused, detail } = asked;
   try {
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
+    newsHome = home;
+    if (process.argv[2] !== 'news') fetchNewsLater(home);
     if (process.argv[2] === 'shoot') { // G10: drawn here, in a browser, from the public stream; no daemon unless it must use words
       const souls = soulsWithTokens(home), ask = souls.length === 1 ? (r) => call(home, souls[0], r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
       out(await runShoot(process.argv.slice(3), { home, env: process.env, ask }));

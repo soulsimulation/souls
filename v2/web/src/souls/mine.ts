@@ -12,7 +12,8 @@
 //   agent's ask only marks the row.
 // - **The status line** (C14, #3684; today's `now`) is the one its agent sets (`souls.mjs now "<line>"`), read for
 //   all the listed Souls with one public request (`POST /v1/account/now`) and shown under the description, quoted,
-//   with how long ago it was set. The Soul's page (`page.ts`) reads it the same way.
+//   with how long ago it was set. The Soul's page (`page.ts`) reads it the same way. The same answer carries the
+//   world's word on each Soul whose agent has gone quiet (#3784), and the line is dimmed while it is a zombie or asleep.
 // Every field is set as text (`textContent`) or as an image's `src` from the directory's own `data:` URL.
 
 /** How often the list is read again. */
@@ -28,8 +29,9 @@ export type Mine = {
   retire_asked: boolean;
 };
 
-/** A Soul's status line as the directory keeps it: the text and when it was set, seconds since 1970. */
-export type NowLine = { text: string; at: number };
+/** A Soul's status line as the directory keeps it: the text and when it was set, seconds since 1970; and the world's
+ *  word on the Soul when its agent has gone quiet (`idle`, `zombie`, `asleep`; #3784), absent while awake. */
+export type NowLine = { text: string; at: number; state?: string };
 
 /** The status lines of these Souls (grants), from the directory; those with none are absent. Empty on any failure:
  *  a missing line never stops a page. */
@@ -40,10 +42,10 @@ export async function readNow(souls: string[], post: typeof fetch = fetch): Prom
   try {
     const r = await post('/v1/account/now', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ souls: asked }), credentials: 'omit', redirect: 'error' });
     if (!r.ok) return out;
-    const body = (await r.json()) as { now?: Record<string, unknown> };
+    const body = (await r.json()) as { now?: Record<string, unknown>; state?: Record<string, unknown> };
     for (const [soul, v] of Object.entries(body.now ?? {})) {
-      const n = v as Partial<NowLine>;
-      if (asked.includes(soul) && typeof n?.text === 'string' && typeof n.at === 'number') out.set(soul, { text: n.text, at: n.at });
+      const n = v as Partial<NowLine>, state = body.state?.[soul];
+      if (asked.includes(soul) && typeof n?.text === 'string' && typeof n.at === 'number') out.set(soul, { text: n.text, at: n.at, ...(typeof state === 'string' ? { state } : {}) });
     }
   } catch { /* no line */ }
   return out;
@@ -147,6 +149,8 @@ export function drawMine(list: HTMLElement, souls: Mine[], call: Call, said: (s:
         e.textContent = nowText(n);
         e.title = new Date(n.at * 1000).toLocaleString();
         e.hidden = false;
+        // #3784: dimmed while the Soul is asleep or a zombie, as on its page and today's card.
+        if (nowDims(n.state)) (e.setAttribute('data-dim', '1'), (e.style.color = DIM_STYLE.color), (e.style.fontSize = DIM_STYLE.fontSize));
       }
     });
   }
