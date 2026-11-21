@@ -170,7 +170,10 @@ impl<S: Storage + 'static> Log<S> {
         {
             return refuse(
                 "log-cut-bad",
-                format!("the log's cut at record {} does not continue its chain", c.record),
+                format!(
+                    "the log's cut at record {} does not continue its chain",
+                    c.record
+                ),
             );
         }
         let found = match from {

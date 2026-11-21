@@ -213,7 +213,9 @@ pub fn spawn(log: PathBuf, durable: Durable, floors: Floors, min_dead: u64) {
             }
         });
     if let Err(e) = started {
-        tell(format_args!("worldd: the log's compactor did not start: {e}"));
+        tell(format_args!(
+            "worldd: the log's compactor did not start: {e}"
+        ));
     }
 }
 

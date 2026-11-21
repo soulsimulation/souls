@@ -1704,7 +1704,10 @@ fn off_machine(
         let closed = Arc::new(std::sync::atomic::AtomicU64::new(archive_base));
         archive_floor = Some(crate::compactor::Archive::Records(Arc::clone(&closed)));
         let publish = move |n| closed.store(n, std::sync::atomic::Ordering::Relaxed);
-        report("the archiver", archiving(open, rx, Arc::clone(&text), publish));
+        report(
+            "the archiver",
+            archiving(open, rx, Arc::clone(&text), publish),
+        );
         Some(tx)
     } else if let Some(kind) = built
         .header
@@ -1942,7 +1945,13 @@ fn serve(args: &[String]) -> R<()> {
             .map_err(|e| format!("the fork's town: {e}"))?;
         stamp("town and planner");
         let resumed = initial.frozen();
-        (initial, Some((resumed, record)), observer, Some(checkpoint), towns)
+        (
+            initial,
+            Some((resumed, record)),
+            observer,
+            Some(checkpoint),
+            towns,
+        )
     } else {
         let initial = Replica::start(built.header.stored()).map_err(refusal)?;
         // The newest checkpoint that verifies (K5) is where the engine resumes (`answers::start`), so the towns and
@@ -2055,9 +2064,10 @@ fn serve(args: &[String]) -> R<()> {
         n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
     })?;
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
-    let compact_after = arg(args, "--compact-after").map_or(Ok(crate::compactor::MIN_DEAD), |n| {
-        n.parse::<u64>().map_err(|_| "--compact-after <bytes>")
-    })?;
+    let compact_after = arg(args, "--compact-after")
+        .map_or(Ok(crate::compactor::MIN_DEAD), |n| {
+            n.parse::<u64>().map_err(|_| "--compact-after <bytes>")
+        })?;
     cfg.health = Some(dir.join("health.json"));
     cfg.rate = Some(match arg(args, "--rate") {
         Some(r) => r

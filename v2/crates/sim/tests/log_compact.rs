@@ -107,7 +107,8 @@ fn i3837_a_crash_after_the_cut_file_and_before_the_rename_reopens_the_same_recor
         "the unfinished copy is removed at the open"
     );
     // A checkpoint's place before the cut is passed over for the cut; one after it is used.
-    let (log, found) = Log::open_at(FileStore::open(&path).unwrap(), 1, Some(At::default())).unwrap();
+    let (log, found) =
+        Log::open_at(FileStore::open(&path).unwrap(), 1, Some(At::default())).unwrap();
     drop(log);
     assert_eq!(found.first, 30);
 }

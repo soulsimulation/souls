@@ -531,7 +531,12 @@ fn i3837_a_compacted_world_restarts_with_the_state_of_a_full_replay() {
         let x = if seq % 2 == 0 { -40 } else { -34 };
         walk(&mut s, body, root.scope(), ground, seq, x, 30);
         assert_eq!(answer(&mut s).0, 1, "walk {seq} ends in a receipt");
-        compacted = first_line(&w.lines, &w.early, "log: compacted", Duration::from_millis(200));
+        compacted = first_line(
+            &w.lines,
+            &w.early,
+            "log: compacted",
+            Duration::from_millis(200),
+        );
         if compacted.is_some() {
             break;
         }
@@ -554,18 +559,27 @@ fn i3837_a_compacted_world_restarts_with_the_state_of_a_full_replay() {
         .filter_map(|l| l.split("(byte ").nth(1)?.trim_end_matches(')').parse().ok())
         .collect();
     let log = dir.join("log");
-    let cut = sim::log::compact::read_cut(&log).unwrap().expect("a cut file");
+    let cut = sim::log::compact::read_cut(&log)
+        .unwrap()
+        .expect("a cut file");
     // The last compaction may have finished after the last look that printed one.
     if kept.len() == cuts.len() + 2 {
         cuts.push(cut.at.offset);
     }
-    assert_eq!(kept.len(), cuts.len() + 1, "a file for each compaction: {cuts:?}");
+    assert_eq!(
+        kept.len(),
+        cuts.len() + 1,
+        "a file for each compaction: {cuts:?}"
+    );
 
     assert!(cut.at.record > 0);
     let before = last_state(&log);
     let (l, found) = Log::open(FileStore::open(&log).unwrap(), 1).unwrap();
     drop(l.close());
-    assert_eq!(found.first, cut.at.record, "a compacted log is read from its cut");
+    assert_eq!(
+        found.first, cut.at.record,
+        "a compacted log is read from its cut"
+    );
     {
         use std::os::unix::fs::MetadataExt;
         let m = std::fs::metadata(&log).unwrap();
@@ -600,17 +614,31 @@ fn i3837_a_compacted_world_restarts_with_the_state_of_a_full_replay() {
     let started = started_or_dump(&w);
     let restart = w.line("restart: ");
     println!("A1: last logged state {before}; {restart}; {started}");
-    assert!(restart.starts_with("restart: checkpoint Some("), "{restart}");
-    assert!(started.ends_with(&format!("state {before}")), "the last logged state");
-    assert!(replayed.ends_with(&format!("state {before}")), "a full replay's state");
+    assert!(
+        restart.starts_with("restart: checkpoint Some("),
+        "{restart}"
+    );
+    assert!(
+        started.ends_with(&format!("state {before}")),
+        "the last logged state"
+    );
+    assert!(
+        replayed.ends_with(&format!("state {before}")),
+        "a full replay's state"
+    );
     w.kill();
     let _ = std::fs::remove_dir_all(&d);
 }
 
 /// The start line, or every line the process printed when it never came.
 fn started_or_dump(w: &Served) -> String {
-    first_line(&w.lines, &w.early, "worldd: started at tick", Duration::from_secs(60))
-        .unwrap_or_else(|| panic!("no start: {:#?}", w.all.lock().unwrap()))
+    first_line(
+        &w.lines,
+        &w.early,
+        "worldd: started at tick",
+        Duration::from_secs(60),
+    )
+    .unwrap_or_else(|| panic!("no start: {:#?}", w.all.lock().unwrap()))
 }
 
 fn copy_tree(from: &Path, to: &Path) {
