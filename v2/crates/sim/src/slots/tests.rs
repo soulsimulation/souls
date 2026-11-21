@@ -605,7 +605,7 @@ fn a_standard_body_takes_seats_up_to_its_standing_reach() {
         let b = w.bodies[0];
         w.flat = true;
         let r = w.sit(&[0], &sit).remove(0).1;
-        assert!(r.is_ok(), "a seat {height} µm up: {r:?}");
+        assert!(r.is_ok(), "a sit {height} µm up: {r:?}");
         w.run(i64::MAX);
         assert_eq!(w.c.body(b).expect("a body").pose.support, Support::Slot);
         assert_eq!(w.slots.holder(w.chair), Some(b));
