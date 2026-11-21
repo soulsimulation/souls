@@ -34,6 +34,9 @@ test('walls hide, low things and a thing\'s own solids do not; rooms keep their 
   const inside = computeSight(base({ me: { ...ME, room: 'r.1', inside: true, roomName: 'room 1', buildingName: 'inn 3' }, bodies: [{ id: 'a.2', name: 'Bea', p: [1, 0, -3], room: 'r.1' }, { id: 'a.3', name: 'Cal', p: [-1, 0, -3], room: null }] }));
   assert.deepEqual(inside.souls.map((o) => o.name), ['Bea'], 'out of the room is out of sight');
   assert.match(inside.alt, /inside inn 3 \(room 1\), looking north \(12:00, day, indoors\)/);
+  const hall = { id: 'a.7', name: 'hall 7', p: [40, 0, -60], place: true, outlines: [[[-3, -6], [3, -6], [3, -30], [-3, -30]]], parts: ['a.8'] };
+  const by = computeSight(base({ things: [hall], blocks: [{ owner: 'a.8', poly: [[-3, -6.2], [3, -6.2], [3, -5.8], [-3, -5.8]], room: null }] }));
+  assert.deepEqual(by.things.map((t) => [t.name, t.distance]), [['hall 7', 6.7]], 'a building is seen at its nearest corner, its own walls aside');
   const upstairs = computeSight(base({ bodies: [{ id: 'a.2', name: 'Bea', p: [0, 4, -3] }] }));
   assert.equal(upstairs.souls.length, 0, 'another level');
 });

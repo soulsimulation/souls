@@ -98,6 +98,18 @@ export function gather([grant, of, reach]) {
     const p = at(n.id);
     if (near(p)) things.push({ id: n.id, name: s.name, p, room: roomOf(n.id), ...(s.role === 'place' ? { place: true } : {}) });
   }
+  // A building's rooms give it its outline: the nearest corner in view is where it is seen.
+  const rooms = new Map();
+  for (const n of w.nodes.values()) {
+    if (plain(n.kind) !== 'eden:room' || !(n.outline?.length >= 3)) continue;
+    const fl = n.parent ? w.nodes.get(n.parent) : null, b = fl?.parent ?? null;
+    if (!b) continue;
+    const r = rooms.get(b) ?? { outlines: [], parts: [fl.id] };
+    r.outlines.push(n.outline.map(([x, z]) => [x / 1000, z / 1000]));
+    r.parts.push(n.id);
+    rooms.set(b, r);
+  }
+  for (const x of things) if (x.place && rooms.has(x.id)) Object.assign(x, rooms.get(x.id));
   const d = t === null ? null : new Date(Math.floor(t / 1000));
   const clock = d && d.getUTCFullYear() > 1971 ? d.toISOString().slice(11, 16) : null;
   return { t, clock, me, eye, target: aimed.aim.target, bodies, things, areas, blocks };

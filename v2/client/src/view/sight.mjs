@@ -73,7 +73,7 @@ const art = (name) => (/^(the|a|an)\s/i.test(name) ? name : `the ${name}`);
 /**
  * What the eyes see, and today's caption of it. `input` is what `view.mjs` gathers from the page:
  * `{ clock, me: {id, name, p, room, inside, building}, eye, target, bodies: [{id, name, p, room}],
- *    things: [{id, name, p, room, place?}], areas: [{id, name, outline}], blocks: [{owner, poly, room}] }`,
+ *    things: [{id, name, p, room, place?, outlines?, parts?}], areas: [{id, name, outline}], blocks: [{owner, poly, room}] }`,
  * positions world metres `[x, y, z]`, outlines `[[x, z] …]` metres.
  */
 export function computeSight(input) {
@@ -113,7 +113,14 @@ export function computeSight(input) {
     const max = light.label === 'night' ? 40 : 120;
     for (const x of input.things ?? []) {
       if (!x.place || !x.p || (x.room ?? null) !== null) continue;
-      point(x, 'place', [x.p[0], x.p[2]], max);
+      // A building by the nearest corner of its rooms' outlines in view, else by where it stands.
+      const pts = (x.outlines?.length ? x.outlines.flat() : [[x.p[0], x.p[2]]]).filter((q) => Math.abs(rel(q)) <= half);
+      if (!pts.length) continue;
+      const aim = pts.reduce((best, q) => (Math.hypot(q[0] - e[0], q[1] - e[1]) < Math.hypot(best[0] - e[0], best[1] - e[1]) ? q : best));
+      const d = Math.hypot(aim[0] - e[0], aim[1] - e[1]);
+      if (d > max || !clear(aim, (id) => id === x.id || (x.parts ?? []).includes(id))) continue;
+      const b = rel(aim);
+      things.push({ id: x.id, name: clean(x.name), kind: 'place', distance: r1(d), bearing: r3(b), side: sideOf(b) });
     }
     for (const a of input.areas ?? []) {
       const p = a.outline;
