@@ -492,12 +492,34 @@ pub fn context(
             delta.insert(*k, v.clone());
         }
     }
+    context_with(
+        baseline,
+        &digest(before)?,
+        &digest(after)?,
+        Value::Map(delta),
+        record,
+        duplicates,
+        changed,
+    )
+}
+
+/// [`context`] from the digests of the states before and after and the delta between them, already worked out (#3799):
+/// the same bytes.
+pub fn context_with(
+    baseline: &[u8],
+    before: &[u8],
+    after: &[u8],
+    delta: Value,
+    record: u64,
+    duplicates: &[(u64, Id)],
+    changed: &[(Id, u64)],
+) -> R<Vec<u8>> {
     encoded(&Value::Map(BTreeMap::from([
         (1, Value::Uint(FORMAT)),
         (2, Value::Bytes(sha256(baseline).to_vec())),
-        (3, Value::Bytes(digest(before)?)),
-        (4, Value::Bytes(digest(after)?)),
-        (5, Value::Map(delta)),
+        (3, Value::Bytes(before.to_vec())),
+        (4, Value::Bytes(after.to_vec())),
+        (5, delta),
         (6, Value::Uint(record)),
         (
             7,
@@ -520,10 +542,75 @@ pub fn context(
     ])))
 }
 
+/// The index of `id`'s row in `rows`, a projection key's `[[id, value], ...]` in id order (#3799).
+fn row_index(rows: &[Value], id: Id) -> R<Option<usize>> {
+    let (mut lo, mut hi) = (0, rows.len());
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        let row = arr(&rows[mid])?;
+        let Some(r) = row.first() else {
+            return bad("expected an id/value pair");
+        };
+        match read_id(r)?.cmp(&id) {
+            std::cmp::Ordering::Less => lo = mid + 1,
+            std::cmp::Ordering::Greater => hi = mid,
+            std::cmp::Ordering::Equal => return Ok(Some(mid)),
+        }
+    }
+    Ok(None)
+}
+
+/// Whether `delta` can be played in place on `state` (#3799): it holds the version (key 1) and at most rows of key 2,
+/// each replacing a live node's row with one in the same frame (parent and slot), each node valid alone, and no row
+/// twice. Then the whole-state checks (frames, depth, links, timers, flights) read nothing that changes. The new
+/// version and each row's index and new row; none when the delta is any other.
+#[allow(clippy::type_complexity)]
+fn in_place(
+    header: &Header,
+    state: &Value,
+    delta: &BTreeMap<u64, Value>,
+) -> R<Option<(Value, Vec<(usize, Value)>)>> {
+    if delta.keys().any(|k| ![1, 2].contains(k)) {
+        return Ok(None);
+    }
+    let Some(v1) = delta.get(&1) else {
+        return Ok(None);
+    };
+    uint(v1)?;
+    let rows = arr(field(map(state)?, 2)?)?;
+    let mut out = Vec::new();
+    let mut ids = BTreeSet::new();
+    for row in delta.get(&2).map(arr).transpose()?.unwrap_or(&[]) {
+        let r = arr(row)?;
+        if r.len() != 2 {
+            return Ok(None);
+        }
+        let id = read_id(&r[0])?;
+        if !ids.insert(id) {
+            return Ok(None);
+        }
+        let Some(i) = row_index(rows, id)? else {
+            return Ok(None);
+        };
+        let (old, new) = (
+            NodeState::read(&arr(&rows[i])?[1])?,
+            NodeState::read(&r[1])?,
+        );
+        if old.parent != new.parent || old.slot != new.slot || id == header.zone {
+            return Ok(None);
+        }
+        validate_node(header, id, &new)?;
+        out.push((i, Value::Array(vec![id.to_value(), r[1].clone()])));
+    }
+    Ok(Some((v1.clone(), out)))
+}
+
 pub struct PublicPlayer {
     header: Header,
     baseline: Vec<u8>,
     state: Value,
+    /// `digest(&state)`, kept with it (#3799): a part's prior digest is checked against it, not worked out again.
+    digest: Vec<u8>,
     next: u64,
     changed: BTreeMap<Id, u64>,
     samples: Vec<HandOff>,
@@ -550,6 +637,7 @@ impl PublicPlayer {
         Ok(Self {
             header,
             baseline: sha256(baseline).to_vec(),
+            digest: digest(&state)?,
             state,
             next: 0,
             changed,
@@ -560,6 +648,64 @@ impl PublicPlayer {
     }
     pub fn state(&self) -> &Value {
         &self.state
+    }
+    /// The digest of [`PublicPlayer::state`].
+    pub fn digest(&self) -> &[u8] {
+        &self.digest
+    }
+    /// The delta from the state to one at version `next` whose node rows `rows` (by id) replace the live ones, the
+    /// rows equal to the live ones left out (#3799): as [`context`] works it out from the two whole states. None when it
+    /// cannot be played in place (a new or gone node, a new frame, no new version); the caller then works it out whole.
+    pub fn row_delta(&self, next: u64, mut rows: Vec<(Id, Value)>) -> R<Option<Value>> {
+        if next == self.version() {
+            return Ok(None);
+        }
+        rows.sort_by_key(|(id, _)| *id);
+        let live = arr(field(map(&self.state)?, 2)?)?;
+        let mut changed = Vec::new();
+        for (id, v) in rows {
+            let Some(i) = row_index(live, id)? else {
+                return Ok(None);
+            };
+            if arr(&live[i])?[1] != v {
+                changed.push(Value::Array(vec![id.to_value(), v]));
+            }
+        }
+        let mut delta = BTreeMap::from([(1, Value::Uint(next))]);
+        if !changed.is_empty() {
+            delta.insert(2, Value::Array(changed));
+        }
+        if in_place(&self.header, &self.state, &delta)?.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(Value::Map(delta)))
+    }
+    /// The digest of the state `delta` (from [`PublicPlayer::row_delta`]) would make, the state left as it is.
+    pub fn digest_with(&mut self, delta: &Value) -> R<Vec<u8>> {
+        let Some((v1, rows)) = in_place(&self.header, &self.state, map(delta)?)? else {
+            return bad("not an in-place delta");
+        };
+        let Value::Map(m) = &mut self.state else {
+            unreachable!("validated state")
+        };
+        let old1 = std::mem::replace(m.entry(1).or_insert(Value::Uint(0)), v1);
+        let mut undo = Vec::new();
+        if let Some(Value::Array(nodes)) = m.get_mut(&2) {
+            for (i, row) in rows {
+                undo.push((i, std::mem::replace(&mut nodes[i], row)));
+            }
+        }
+        let d = digest(&self.state);
+        let Value::Map(m) = &mut self.state else {
+            unreachable!("validated state")
+        };
+        m.insert(1, old1);
+        if let Some(Value::Array(nodes)) = m.get_mut(&2) {
+            for (i, old) in undo.into_iter().rev() {
+                nodes[i] = old;
+            }
+        }
+        d
     }
     pub fn version(&self) -> u64 {
         uint(&map(&self.state).expect("validated state")[&1]).expect("validated version")
@@ -589,7 +735,7 @@ impl PublicPlayer {
         if c.len() != 8
             || uint(field(&c, 1)?)? != FORMAT
             || bytes(field(&c, 2)?)? != self.baseline
-            || bytes(field(&c, 3)?)? != digest(&self.state)?
+            || bytes(field(&c, 3)?)? != self.digest
         {
             return bad("context identity or prior digest");
         }
@@ -597,8 +743,61 @@ impl PublicPlayer {
         if record <= self.record {
             return bad("physical cursor does not advance");
         }
+        let old_version = self.version();
+        let flying = flying_ids(&self.state)?;
+        // In place (#3799): a delta that only moves existing nodes in their own frames (the version, and rows of
+        // key 2 replacing live nodes with the same parent and slot) changes nothing the whole-state checks read but
+        // those rows, so only they are checked, and they are swapped into the state, swapped back on any refusal.
+        let plan = in_place(&self.header, &self.state, map(field(&c, 5)?)?)?;
+        let whole = match &plan {
+            Some(_) => None,
+            None => Some(self.whole_next(&c)?),
+        };
+        let mut undo = Vec::new();
+        if let Some((v1, rows)) = plan {
+            let Value::Map(m) = &mut self.state else {
+                unreachable!("validated state")
+            };
+            undo.push((
+                usize::MAX,
+                std::mem::replace(m.entry(1).or_insert(Value::Uint(0)), v1),
+            ));
+            let Some(Value::Array(nodes)) = m.get_mut(&2) else {
+                unreachable!("validated state")
+            };
+            for (i, row) in rows {
+                undo.push((i, std::mem::replace(&mut nodes[i], row)));
+            }
+        }
+        let r = self.check_next(&sp, &c, whole.as_ref(), &undo, old_version, &flying);
+        match (r, whole) {
+            (Ok((digest, changes, part, version)), whole) => {
+                if let Some(w) = whole {
+                    self.state = w;
+                }
+                self.digest = digest;
+                self.finish(sp, part, changes, record, version)
+            }
+            (Err(e), _) => {
+                let Value::Map(m) = &mut self.state else {
+                    unreachable!("validated state")
+                };
+                for (i, old) in undo.into_iter().rev() {
+                    if i == usize::MAX {
+                        m.insert(1, old);
+                    } else if let Some(Value::Array(nodes)) = m.get_mut(&2) {
+                        nodes[i] = old;
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// The next state as a whole: the delta applied to a copy, checked whole.
+    fn whole_next(&self, c: &BTreeMap<u64, Value>) -> R<Value> {
         let mut next = map(&self.state)?.clone();
-        for (k, v) in map(field(&c, 5)?)? {
+        for (k, v) in map(field(c, 5)?)? {
             if [2, 3, 4, 6, 8, 9].contains(k) {
                 let mut entries = pairs(field(&next, *k)?)?;
                 let mut ids = BTreeSet::new();
@@ -626,13 +825,28 @@ impl PublicPlayer {
         }
         let next = Value::Map(next);
         validate(&self.header, &next)?;
-        if bytes(field(&c, 4)?)? != digest(&next)?
-            || sp.hash.as_deref() != Some(bytes(field(&c, 4)?)?)
-        {
+        Ok(next)
+    }
+
+    /// The checks of a part against its next state (`whole`, or the state with `undo`'s rows swapped in): its digest,
+    /// its entries and gaps, its duplicates and its change versions. Its digest, versions, part and version.
+    #[allow(clippy::type_complexity)]
+    fn check_next(
+        &self,
+        sp: &StreamPart,
+        c: &BTreeMap<u64, Value>,
+        whole: Option<&Value>,
+        undo: &[(usize, Value)],
+        old_version: u64,
+        flying: &BTreeSet<Id>,
+    ) -> R<(Vec<u8>, BTreeMap<Id, u64>, Part, u64)> {
+        let next = whole.unwrap_or(&self.state);
+        let next_digest = digest(next)?;
+        if bytes(field(c, 4)?)? != next_digest || sp.hash.as_deref() != Some(bytes(field(c, 4)?)?) {
             return bad("context result digest");
         }
         let part = Part::read(&sp.part)?;
-        let version = uint(field(map(&next)?, 1)?)?;
+        let version = uint(field(map(next)?, 1)?)?;
         if sp.from > sp.to
             || sp.first
                 != part
@@ -645,7 +859,7 @@ impl PublicPlayer {
         if part.header != self.header.hash().to_bytes() || part.effects.len() as u64 != sp.entries {
             return bad("public part identity/count");
         }
-        let mut cursor = self.version();
+        let mut cursor = old_version;
         let mut gaps = sp.gaps.iter();
         let mut gap = gaps.next();
         for e in &part.effects {
@@ -676,11 +890,11 @@ impl PublicPlayer {
             };
             gap = gaps.next();
         }
-        if gap.is_some() || version < self.version() {
+        if gap.is_some() || version < old_version {
             return bad("unmet gaps");
         }
         let mut duplicates = BTreeSet::new();
-        for row in arr(field(&c, 7)?)? {
+        for row in arr(field(c, 7)?)? {
             let row = arr(row)?;
             if row.len() != 2 {
                 return bad("duplicate context shape");
@@ -689,24 +903,34 @@ impl PublicPlayer {
             let id = read_id(&row[1])?;
             if !duplicates.insert(seq)||!part.effects.iter().any(|e|e.envelope.sequence==seq&&matches!(&e.body,Body::Transfer(TransferRec::Arrive{transfer,..}) if *transfer==id)){return bad("duplicate context has no public arrival")}
         }
-        let old_nodes = pairs(field(map(&self.state)?, 2)?)?;
-        let new_nodes = pairs(field(map(&next)?, 2)?)?;
-        let flying = flying_ids(&self.state)?;
+        // Whole: the old state and the next, by id. In place: the same ids before and after, and the swapped rows.
+        let (old_nodes, new_nodes) = match whole {
+            Some(next) => (
+                pairs(field(map(&self.state)?, 2)?)?,
+                pairs(field(map(next)?, 2)?)?,
+            ),
+            None => (BTreeMap::new(), BTreeMap::new()),
+        };
+        let rows = arr(field(map(next)?, 2)?)?;
+        let has = |id: &Id, nodes: &BTreeMap<Id, Value>| match whole {
+            Some(_) => Ok(nodes.contains_key(id)),
+            None => row_index(rows, *id).map(|i| i.is_some()),
+        };
         let mut changes = BTreeMap::new();
-        for row in arr(field(&c, 8)?)? {
+        for row in arr(field(c, 8)?)? {
             let row = arr(row)?;
             if row.len() != 2 {
                 return bad("change version shape");
             };
             let id = read_id(&row[0])?;
             let v = uint(&row[1])?;
-            let reenters =
-                !old_nodes.contains_key(&id) && new_nodes.contains_key(&id) && flying.contains(&id);
+            let (was, is) = (has(&id, &old_nodes)?, has(&id, &new_nodes)?);
+            let reenters = !was && is && flying.contains(&id);
             // Return/Settle need not touch each carried child. A checkpoint-restored flying child has
             // canonical fallback zero; a previously observed child retains its exact known version.
             let retained = reenters && v == self.changed.get(&id).copied().unwrap_or(0);
-            if (!old_nodes.contains_key(&id) && !new_nodes.contains_key(&id))
-                || (v <= self.version() && !retained)
+            if (!was && !is)
+                || (v <= old_version && !retained)
                 || v > version
                 || changes.insert(id, v).is_some()
             {
@@ -718,6 +942,26 @@ impl PublicPlayer {
                 return bad("missing changed node version");
             }
         }
+        for (i, old) in undo.iter().filter(|(i, _)| *i != usize::MAX) {
+            let Value::Array(row) = &rows[*i] else {
+                return bad("expected an id/value pair");
+            };
+            if &rows[*i] != old && !changes.contains_key(&read_id(&row[0])?) {
+                return bad("missing changed node version");
+            }
+        }
+        Ok((next_digest, changes, part, version))
+    }
+
+    /// A checked part played: its versions, samples and events kept, the cursor moved on.
+    fn finish(
+        &mut self,
+        sp: StreamPart,
+        part: Part,
+        changes: BTreeMap<Id, u64>,
+        record: u64,
+        version: u64,
+    ) -> R<Played> {
         self.changed.extend(changes);
         self.samples = part
             .effects
@@ -751,7 +995,6 @@ impl PublicPlayer {
                 })
             })
             .collect();
-        self.state = next;
         self.record = record;
         self.next += 1;
         Ok(Played {

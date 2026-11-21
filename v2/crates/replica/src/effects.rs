@@ -1195,6 +1195,11 @@ fn link_value(l: &LinkState) -> Value {
 }
 
 impl NodeState {
+    /// The node in the state layout (`State::to_value`'s row value), as [`NodeState::read`] reads it.
+    pub fn to_value(&self) -> Value {
+        node_value(self)
+    }
+
     /// A node in the state layout (`State::to_value`), as a view's carried record holds it (T7 rule 4).
     pub fn read(v: &Value) -> R<NodeState> {
         let mut r = Rec::of(v.clone(), "a node")?;
