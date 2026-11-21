@@ -1006,7 +1006,7 @@ async function answer(req) {
     }
     case 'inspect': return inspect(req);
     // #3704 (today's `query`, `catalog`, `context` and `batch`): reads from the copy, asking the world nothing.
-    case 'query': { const q = query(rowsOf(copy), req.questions, { budget: req.budget }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
+    case 'query': { const rows = rowsOf(copy), me = [...rows.values()].find((r) => r.id === ME || r.soul === ME)?.id ?? null; const q = query(rows, req.questions, { budget: req.budget, me }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
     case 'catalog': return closing(catalog(rowsOf(copy), kindsIn(join(home, 'kinds'))), null, { now: true });
     case 'context': return closing(context(rowsOf(copy), req.words ?? '', { cursor: req.cursor }), null, { now: true });
     case 'batch': {

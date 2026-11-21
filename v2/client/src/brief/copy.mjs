@@ -1,7 +1,9 @@
 // The copy as rows (Engine v2 R7, #2701): the daemon's copy of its scope (R5's `Copy`, in WASM memory) read record by
 // record from its roots down, each record decoded once by its hash. A row is a node: its id, its name, its kind, its
 // parent and the path of names above it, its text quoted, and `own`, its record without its children's hashes, so
-// that two versions of a node compare equal when only something below it changed. A row never carries a position.
+// that two versions of a node compare equal when only something below it changed. A row carries its pose as the
+// record holds it (#3851: body motion reaches the copy, #3799): `pos`, µm in its parent's frame, and `rot`, a quaternion
+// [w, x, y, z]; a moving node's is where its last sample put it.
 //
 // The records are CBOR in T0's profile (`v2/docs/encoding.md`): unsigned and negative integers, bytes, text, arrays,
 // maps and the simple values; this reader takes those and nothing else.
@@ -135,7 +137,9 @@ export function rowsOf(copy) {
     const of = (m.get(9) ?? []).map(([, l]) => l).find((l) => l instanceof Map && plainKind(l.get(1)) === 'souls:body-of');
     // #3603: a thing on a course (replica's F_COURSE, field 80) moves by itself; a rider in it may steer it.
     const moving = fields.has(F_COURSE) || fields.has(BigInt(F_COURSE));
-    rows.set(id, { id, name, kind, parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), own: d.own });
+    const pose = m.get(7) instanceof Map ? m.get(7) : m.get(8) instanceof Map && m.get(8).get(5) instanceof Map ? m.get(8).get(5) : null;
+    const at = pose && Array.isArray(pose.get(2)) ? { pos: pose.get(2).map(Number), ...(Array.isArray(pose.get(3)) ? { rot: pose.get(3).map(Number) } : {}) } : {};
+    rows.set(id, { id, name, kind, parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...at, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), own: d.own });
     for (const c of children) todo.push([c, [...path, name]]);
   }
   return rows;
