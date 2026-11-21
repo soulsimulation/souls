@@ -26,7 +26,7 @@ fn files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
 }
 
 /// Moves forms name that no `content/moves` file declares yet: content to write (C18 #3454), not the reader's.
-const NOT_IN_CONTENT: [&str; 4] = ["crank", "fill", "pick", "steer"];
+const NOT_IN_CONTENT: [&str; 3] = ["crank", "fill", "pick"];
 
 #[test]
 fn a1_the_library_is_every_move_in_content_and_the_bodys_own() {

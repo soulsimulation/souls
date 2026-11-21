@@ -34,7 +34,11 @@ fn start(
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
     if let Some(n) = stall_at {
-        cmd.arg("--stall-at").arg(n.to_string());
+        // A blocked tick ends the process at the soft limit here, as K7 first did: this test times the restart, and
+        // the world's own hard limit (15 s) would only make it wait.
+        cmd.arg("--stall-at")
+            .arg(n.to_string())
+            .args(["--watchdog-hard-ms", "500"]);
     }
     let mut child = cmd.spawn().expect("worldd starts");
     let out = child.stdout.take().expect("its output");

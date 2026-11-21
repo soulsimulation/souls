@@ -118,7 +118,7 @@ pub fn run(args: &[String]) -> i32 {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
              [--bodies <n>] [--items <n>] [--testworld] [--punt] [--creator <32 hex>-<n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
-             [--stall-after <s> --stall-for <s>] [--www <dir>] [--watchdog-ms <ms>] [--views <path>]"
+             [--stall-after <s> --stall-for <s>] [--www <dir>] [--watchdog-ms <ms>] [--watchdog-hard-ms <ms>] [--views <path>]"
         );
         2
     };
@@ -247,7 +247,16 @@ pub fn run(args: &[String]) -> i32 {
     let limit = arg("--watchdog-ms")
         .and_then(|m| m.parse().ok())
         .unwrap_or(crate::watchdog::LIMIT_MS);
-    crate::watchdog::watch(world.beat.clone(), crate::watchdog::Real::start(), limit);
+    // `--watchdog-hard-ms` ends the process sooner than K7's hard limit: a test that a tick is never held uses it.
+    let hard = arg("--watchdog-hard-ms")
+        .and_then(|m| m.parse().ok())
+        .unwrap_or(crate::watchdog::HARD_MS);
+    crate::watchdog::watch_to(
+        world.beat.clone(),
+        crate::watchdog::Real::start(),
+        limit,
+        hard,
+    );
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,

@@ -238,6 +238,7 @@ impl Hall {
             &mut w.mint,
             &mut w.moves,
             &geo,
+            &w.floors,
             &reqs,
             now,
         )

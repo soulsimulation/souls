@@ -4,8 +4,9 @@
 // it was placed. Nothing here steps a track: each frame reads it afresh.
 import * as THREE from 'three';
 
-/** The replica's WASM `courseAt`: `[x, y, z, vx, vy, vz]`, µm and µm a second in the parent's frame; throws by name. */
-export type CourseAt = (field: Uint8Array, t: bigint) => ArrayLike<number>;
+/** The replica's WASM `courseAt`: `[x, y, z, vx, vy, vz]` in whole µm and µm a second (a `BigInt64Array`), in the
+ *  parent's frame; throws by name. */
+export type CourseAt = (field: Uint8Array, t: bigint) => ArrayLike<bigint>;
 
 /** Today's punt turns at most this fast to face its way (carrier/1, 0.5 rad a second). */
 const TURN = 0.5;
@@ -37,8 +38,9 @@ export class CoursePlace {
   /** Reads the node's place at world time `t` (µs). `placed` is its static position (µm) and `rot` its orientation;
    *  returns false when the course gave nothing (no reader yet, or it threw), so the node stands where it was placed. */
   at(read: CourseAt | null, field: Uint8Array, t: number, placed: readonly number[], rot: THREE.Quaternion): boolean {
-    let p: ArrayLike<number> | null = null;
-    if (read) try { p = read(field, BigInt(Math.floor(t))); } catch { p = null; }
+    let p: number[] | null = null;
+    // Whole µm from the replica; numbers here, still µm (exact below 2^53 µm, 9,000 km), metres only where drawn.
+    if (read) try { p = Array.from(read(field, BigInt(Math.floor(t))), Number); } catch { p = null; }
     if (!p) {
       this.pos.set(placed[0], placed[1], placed[2]);
       this.rot.copy(rot);

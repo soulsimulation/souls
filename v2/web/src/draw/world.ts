@@ -9,10 +9,14 @@ import type { CrowdBodies } from '../crowd/bodies.ts';
 import { BANKS, DECKS, DRAPES, WATER, GroundCover, drapeMesh, drapeName, turfMaterial, type Area } from './drapes.ts';
 import { asWater } from '../water/water.ts';
 import { CoursePlace, type CourseAt } from './course.ts';
+import { backdropMesh, type Backdrop } from './backdrop.ts';
 
 const UM = 1e-6, MM = 1e-3;
 export const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway']);
 const plain = (kind: string) => kind.split('@')[0];
+/** A body: one with a motion sample, or a body kind standing still since it joined (no motion published yet). */
+const BODY = /(^|:)(body|soul)$/;
+const isBody = (n: NodeRec) => n.at !== null || BODY.test(plain(n.kind));
 /** Terrain vertices kept per tile side: every one, so what stands on the ground meets the ground as drawn (an 8 m
  *  grid left things on hills up to metres above it). */
 const TERRAIN_STEP = 1;
@@ -110,6 +114,8 @@ export class WorldView {
   private terrainDone = false;
   /** The drawn ground's tiles, for `heightAt`. */
   private ground: { side: number; tiles: Map<string, { n: number; k: number; h: DataView }> } | null = null;
+  /** C12 (#3683): the far backdrop beyond the ground's edge. */
+  backdrop: Backdrop | null = null;
   /** The open ground's node: what a ground-laid thing's heights are above. */
   groundId: string | null = null;
   extent: [number, number, number, number] | null = null;
@@ -154,7 +160,7 @@ export class WorldView {
         if (!this.courses.has(n.id)) this.courses.set(n.id, new CoursePlace());
         if (this.onCourse) (this.onCourse(), (this.onCourse = null));
       } else this.courses.delete(n.id);
-      if (n.at !== null) {
+      if (isBody(n)) {
         if (!this.tracks.has(n.id)) {
           this.tracks.set(n.id, new Track());
           this.bodyIds.push(n.id);
@@ -165,7 +171,8 @@ export class WorldView {
     }
     // Every sample in entry order, then the state after the part (the newest, so a no-op when it was the last sample).
     for (const [id, parent, slot, at, x, y, z] of samples) this.tracks.get(id)?.add(at, [x, y, z], `${parent}/${slot}`);
-    for (const n of nodes) if (n.at !== null) this.tracks.get(n.id)!.add(n.at, n.pos, `${n.parent}/${n.slot}`);
+    // A still body has no sample time: its pose stands from the start of its track until a sample moves it.
+    for (const n of nodes) if (isBody(n)) this.tracks.get(n.id)!.add(n.at ?? 0, n.pos, `${n.parent}/${n.slot}`);
     for (const id of removed) {
       this.nodes.delete(id);
       this.courses.delete(id);
@@ -207,7 +214,7 @@ export class WorldView {
       }
       return false;
     };
-    return (this.movers = [...this.nodes.values()].filter((n) => n.at === null && !STRUCTURE.has(plain(n.kind)) && on(n.id)).map((n) => n.id));
+    return (this.movers = [...this.nodes.values()].filter((n) => !isBody(n) && !STRUCTURE.has(plain(n.kind)) && on(n.id)).map((n) => n.id));
   }
 
   /** A node's frame in the world: its parent's, then its slot's, then its own pose. */
@@ -288,7 +295,11 @@ export class WorldView {
       mesh.name = 'terrain';
       this.group.add(mesh);
     }
-    if (Number.isFinite(ext[0])) this.extent = ext;
+    if (Number.isFinite(ext[0])) {
+      this.extent = ext;
+      this.backdrop = backdropMesh(ext, (x, z) => this.heightAt(x, z), (x, z) => this.colourAt(x, z));
+      this.group.add(this.backdrop.mesh);
+    }
     this.cover = new GroundCover({
       heightAt: (x, z) => this.heightAt(x, z),
       colour: (c, y, slope, x, z) => terrainColour(c, y, slope, x, z),
@@ -300,6 +311,17 @@ export class WorldView {
       base: GROUND_BASE,
     });
     this.group.add(this.cover.group);
+  }
+
+  /** The drawn ground's colour at world `x, z`, as its vertex there is painted (today's terrain colour at its height,
+   *  slope and noise cell); on the far edges the height is read just inside. Null off the tiles. */
+  colourAt(x: number, z: number): THREE.Color | null {
+    const g = this.ground, e = this.extent;
+    const hx = e ? Math.min(x, e[2] - 1e-6) : x, hz = e ? Math.min(z, e[3] - 1e-6) : z, y = this.heightAt(hx, hz);
+    if (!g || y === null) return null;
+    const t = g.tiles.get(`${Math.floor(hx / g.side)},${Math.floor(hz / g.side)}`)!, cell = (g.side / t.n) * t.k;
+    const hx0 = this.heightAt(x - cell, z) ?? y, hx1 = this.heightAt(x + cell, z) ?? y, hz0 = this.heightAt(x, z - cell) ?? y, hz1 = this.heightAt(x, z + cell) ?? y;
+    return terrainColour(new THREE.Color(), y, Math.hypot((hx1 - hx0) / (2 * cell), (hz1 - hz0) / (2 * cell)), x, z);
   }
 
   /** The drawn ground's height at world `x, z` (m), on the same triangles the mesh draws; null off the tiles. */
@@ -324,7 +346,7 @@ export class WorldView {
     const tags: number[] = [];
     const moving = new Set(this.moving());
     for (const n of this.nodes.values()) {
-      if (n.at !== null || STRUCTURE.has(plain(n.kind)) || moving.has(n.id)) continue;
+      if (isBody(n) || STRUCTURE.has(plain(n.kind)) || moving.has(n.id)) continue;
       const f = this.frame(n.id);
       for (const [local, tag] of this.boxesOf(n)) {
         boxes.push(f.clone().multiply(local));
@@ -443,7 +465,7 @@ export class WorldView {
     for (const a of this.lawnAreas) file(this.lawns, a);
     const p = new THREE.Vector3();
     for (const n of this.nodes.values()) {
-      if (n.at !== null || n.parent !== this.groundId || STRUCTURE.has(plain(n.kind)) || !n.solids?.length || this.isDrape(n) || this.isDeck(n)) continue;
+      if (isBody(n) || n.parent !== this.groundId || STRUCTURE.has(plain(n.kind)) || !n.solids?.length || this.isDrape(n) || this.isDeck(n)) continue;
       const f = this.frame(n.id), s = (n.scale ?? 1_000_000) / 1_000_000;
       for (const [cx, cz, hx, hz, yaw, y0] of n.solids) {
         const a = (yaw / 1000) * (Math.PI / 180), ca = Math.cos(a), sa = Math.sin(a);

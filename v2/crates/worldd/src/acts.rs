@@ -59,6 +59,7 @@ use replica::effects::{Actor, Body, Effect, Refusal, TimerRec};
 use replica::encode::Name;
 use replica::host::{Answer, Ask, F_CROSSING, Seen};
 use replica::ids::{Id, Minter, Scope};
+use replica::kinds::sizes::Build;
 use replica::moves::{Effector, Move};
 use replica::pose::Vec3;
 use replica::rules::json::Value as Json;
@@ -71,7 +72,7 @@ use sim::mover::Body as Moved;
 use sim::moves::{Moves, Reach};
 use sim::timers::{DueList, Timer};
 use sim::walk::stall::{Watch, blocker};
-use sim::walk::town::View;
+use sim::walk::town::{Split, View};
 use skills::form_runner::Limits;
 
 use crate::bodies::Bodies;
@@ -279,7 +280,8 @@ struct Sight<'a> {
     bodies: BTreeMap<Id, Moved>,
     /// The bodies carried across a link now.
     carrying: BTreeSet<Id>,
-    view: Option<View<'a>>,
+    split: Option<RefCell<Split<'a>>>,
+    builds: BTreeMap<Id, Build>,
     tree: &'a Tree,
     kind: Name,
     /// The world's entries by kind, for a thing's points and bounds.
@@ -297,6 +299,25 @@ struct Sight<'a> {
 }
 
 impl Sight<'_> {
+    fn with_view<T>(&self, body: Id, f: impl FnOnce(&View<'_>) -> T) -> Option<T> {
+        let size = self.builds.get(&body)?.size;
+        let mut split = self.split.as_ref()?.try_borrow_mut().ok()?;
+        let Split {
+            shared,
+            scratches,
+            lines,
+            spent,
+        } = &mut *split;
+        let view = shared
+            .view_for(
+                size,
+                &mut scratches[0],
+                sim::walk::town::Lines::All(lines),
+                spent,
+            )
+            .ok()?;
+        Some(f(&view))
+    }
     fn key(&self, body: Id, step: usize, kind: FormKind) -> Option<FormKey> {
         let &(intent, stage, _) = self.context.get(&body)?;
         Some(FormKey {
@@ -397,8 +418,8 @@ impl Geometry for Sight<'_> {
         match q {
             Ask::Toward { to, .. } => {
                 let me = self.bodies.get(&body)?;
-                let [x, z] = match &self.view {
-                    Some(v) => {
+                let [x, z] = match &self.split {
+                    Some(_) => self.with_view(body, |v| {
                         let step = self.context.get(&body)?.2;
                         let key = self.key(body, step, FormKind::Line)?;
                         let found = self
@@ -429,10 +450,10 @@ impl Geometry for Sight<'_> {
                         }
                         // Waiting for the existing planner is not evidence that a physical walk stalled.
                         if !pending.is_empty() {
-                            return Some(Answer::Point(me.pose.position));
+                            return Some([me.pose.position.x, me.pose.position.z]);
                         }
-                        corner
-                    }
+                        Some(corner)
+                    })??,
                     None => [to.x, to.z],
                 };
                 let y = if [x, z] == [to.x, to.z] { to.y } else { 0 };
@@ -448,7 +469,7 @@ impl Geometry for Sight<'_> {
     }
 
     fn plan_walk(&self, body: Id, step: usize, node: Id, at: Vec3, reach: i64) -> WalkPlan {
-        if self.view.is_none() {
+        if self.split.is_none() {
             return WalkPlan::Unplanned;
         }
         let Some(key) = self.key(body, step, FormKind::Walk) else {
@@ -542,33 +563,50 @@ impl Sight<'_> {
     /// shoulder, not the feet) to the nearer of the thing's point `point` its entry names and its nearest surface, the
     /// box its entry's `geometry.bounds_mm` gives (centred on its place), each turned with the thing and carried onto
     /// that floor ([`View::on_floor`]). `None` when its entry gives neither, or the thing is not over that floor.
-    fn to_thing(&self, floor: Id, from: Vec3, target: Id, point: &Name) -> Option<i64> {
-        let view = self.view.as_ref()?;
-        let n = self.tree.node(self.tree.handle(target)?)?;
-        let entry = self.kinds.get(plain(n.kind()))?;
-        let on = |p: Vec3| {
-            view.on_floor(target, p)
-                .filter(|(f, ..)| *f == floor)
-                .map(|(_, p, _)| [p.x, p.z])
-        };
-        let q = [from.x, from.z];
-        let named = um(entry
-            .get("points")
-            .and_then(|ps| ps.get(point.as_str()))
-            .and_then(|p| p.get("at_mm")))
-        .and_then(on)
-        .map(|p| flat(q, p));
-        let surface = um(entry.get("geometry").and_then(|g| g.get("bounds_mm"))).and_then(|b| {
-            let (x, z) = (b.x / 2, b.z / 2);
-            let c = |u: i64, v: i64| on(Vec3::new(u, 0, v));
-            let ring = [c(-x, -z)?, c(x, -z)?, c(x, z)?, c(-x, z)?];
-            Some(to_ring(q, &ring))
-        });
-        let d = match (named, surface) {
-            (Some(a), Some(b)) => a.min(b),
-            (a, b) => a.or(b)?,
-        };
-        Some(d.saturating_sub(sim::ground::HUMAN_RADIUS * 1000).max(0))
+    fn to_thing(&self, body: Id, floor: Id, from: Vec3, target: Id, point: &Name) -> Option<i64> {
+        self.with_view(body, |view| {
+            let n = self.tree.node(self.tree.handle(target)?)?;
+            let entry = self.kinds.get(plain(n.kind()))?;
+            // A body on one of the thing's own floors (inside a greenhouse, C34 #3599) is in the thing's frame: a floor
+            // is placed at its building's origin. Carried up the tree, the point would land on the ground cut out under it.
+            let own_floor = self
+                .tree
+                .handle(floor)
+                .and_then(|h| self.tree.node(h))
+                .is_some_and(|f| {
+                    f.parent() == Some(target) && f.place().is_none_or(|p| p.position == Vec3::ZERO)
+                });
+            let on = |p: Vec3| {
+                if own_floor {
+                    return Some([p.x, p.z]);
+                }
+                view.on_floor(target, p)
+                    .filter(|(f, ..)| *f == floor)
+                    .map(|(_, p, _)| [p.x, p.z])
+            };
+            let q = [from.x, from.z];
+            let named = um(entry
+                .get("points")
+                .and_then(|ps| ps.get(point.as_str()))
+                .and_then(|p| p.get("at_mm")))
+            .and_then(on)
+            .map(|p| flat(q, p));
+            let surface =
+                um(entry.get("geometry").and_then(|g| g.get("bounds_mm"))).and_then(|b| {
+                    let (x, z) = (b.x / 2, b.z / 2);
+                    let c = |u: i64, v: i64| on(Vec3::new(u, 0, v));
+                    let ring = [c(-x, -z)?, c(x, -z)?, c(x, z)?, c(-x, z)?];
+                    Some(to_ring(q, &ring))
+                });
+            let d = match (named, surface) {
+                (Some(a), Some(b)) => a.min(b),
+                (a, b) => a.or(b)?,
+            };
+            Some(
+                d.saturating_sub(self.builds.get(&body)?.size.radius_mm() * 1000)
+                    .max(0),
+            )
+        })?
     }
 }
 
@@ -591,7 +629,7 @@ impl Reach for Sight<'_> {
             AT_ARG => *self.toward.get(&body)?,
             _ => target,
         };
-        if let Some(d) = self.to_thing(sim::walk::node_of(me), a, target, point) {
+        if let Some(d) = self.to_thing(body, sim::walk::node_of(me), a, target, point) {
             return Some(d);
         }
         let b = match self.bodies.get(&target) {
@@ -771,14 +809,14 @@ impl Acts {
         let context = self.forms.planning_context();
         let walks = self.forms.walks();
         self.planning.borrow_mut().keep(&context);
-        let (controller, view, slots, map, questions) = match bodies {
+        let (controller, split, slots, map, questions) = match bodies {
             Some(b) => {
                 self.planning
                     .borrow_mut()
                     .receive(std::mem::take(&mut b.form_answers));
                 (
                     &mut b.runner.controller,
-                    Some(b.town.view()),
+                    Some(b.town.split(1)),
                     Some(&mut b.slots),
                     Arc::clone(&b.form_map),
                     Some(&mut b.form_questions),
@@ -792,21 +830,26 @@ impl Acts {
                 None,
             ),
         };
-        let places = match (slots, view.as_ref()) {
-            (Some(slots), Some(v)) => Some(Places {
-                slots,
-                floors: v.surfaces(),
-            }),
+        let floors = split.as_ref().map(|s| s.shared);
+        let places = match (slots, floors.as_ref()) {
+            (Some(slots), Some(floors)) => Some(Places { slots, floors }),
             _ => None,
         };
         let sight = Sight {
-            bodies: controller.bodies().map(|b| (b.id, *b)).collect(),
+            bodies: controller
+                .ids()
+                .filter_map(|id| controller.body(id).map(|b| (id, *b)))
+                .collect(),
             carrying: controller
                 .bodies()
                 .filter(|b| controller.carrying(b.id).is_some())
                 .map(|b| b.id)
                 .collect(),
-            view,
+            builds: controller
+                .ids()
+                .filter_map(|id| controller.build(id).map(|build| (id, build)))
+                .collect(),
+            split: split.map(RefCell::new),
             tree,
             kind: Name::new("souls:body").unwrap_or_else(|| unreachable!("a literal name")),
             kinds: &self.kinds,

@@ -114,7 +114,6 @@ use skills::form_runner::{self, Limits, Next, Runner, Step, Woke};
 
 use crate::controller::{Controller, Driver};
 use crate::host::{Geometry, Run, Staged, hand_on, lend, step};
-use crate::mover::Surface;
 use crate::moves::{Fired, Instance, Moves, Reach};
 use crate::slots::{PlaceAt, Request, Slots, hands};
 use crate::timers::{DueList, Timer};
@@ -138,7 +137,7 @@ pub struct World<'a, G, R> {
 /// The places a form's sit takes (B3's table, the gateway's own) and the floors a body is set back on.
 pub struct Places<'a> {
     pub slots: &'a mut Slots,
-    pub floors: &'a BTreeMap<Id, Surface>,
+    pub floors: &'a dyn crate::mover::Floors,
 }
 
 /// A seat's reach for one body, as the gateway's sit measures it (`worldd`'s bodies): a seat is taken from its stand
@@ -1219,7 +1218,16 @@ impl Forms {
                 };
                 let taken = places
                     .slots
-                    .commit(w.controller, w.due, w.mint, w.moves, &geo, &[request], now)
+                    .commit(
+                        w.controller,
+                        w.due,
+                        w.mint,
+                        w.moves,
+                        &geo,
+                        places.floors,
+                        &[request],
+                        now,
+                    )
                     .pop()
                     .map_or_else(
                         || Err(name("place-unknown")),

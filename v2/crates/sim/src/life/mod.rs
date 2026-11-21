@@ -23,6 +23,7 @@ use replica::bodies::Family;
 use replica::effects::{Change, Refusal};
 use replica::encode::Name;
 use replica::ids::{Id, Minter, Scope};
+use replica::kinds::sizes::Build;
 use replica::pose::{Frame, Quat, Vec3};
 use replica::time::Micros;
 use replica::world_model::{Audience, End, show};
@@ -200,13 +201,28 @@ impl Life {
         standing: &impl Standing,
         family: &Family,
     ) -> Vec<Born> {
+        self.tick_built(now, runner, surfaces, standing, family, &|_| {
+            Build::STANDARD
+        })
+    }
+
+    /// The same birth queue and placement path, using the configured admitted class before placement.
+    pub fn tick_built(
+        &mut self,
+        now: Micros,
+        runner: &mut Runner,
+        floors: &dyn crate::mover::Floors,
+        standing: &impl Standing,
+        family: &Family,
+        build_of: &impl Fn(Id) -> Build,
+    ) -> Vec<Born> {
         let mut born = Vec::new();
         let mut again = Vec::new();
         while born.len() < self.per_tick {
             let Some(b) = self.waiting.pop_front() else {
                 break;
             };
-            match self.birth(b, now, runner, surfaces, standing, family) {
+            match self.birth((b, build_of(b.soul)), now, runner, floors, standing, family) {
                 Some(x) => born.push(x),
                 None => again.push(b),
             }
@@ -217,13 +233,14 @@ impl Life {
 
     fn birth(
         &mut self,
-        b: Birth,
+        (b, build): (Birth, Build),
         now: Micros,
         runner: &mut Runner,
-        surfaces: &BTreeMap<Id, Surface>,
+        floors: &dyn crate::mover::Floors,
         standing: &impl Standing,
         family: &Family,
     ) -> Option<Born> {
+        let surfaces = floors.for_build(build)?;
         let mut placed: Option<Moved> = None;
         let next = self.minter.next();
         let body = Id::new(self.minter.scope(), next)?;
@@ -233,7 +250,7 @@ impl Life {
             let (node, at) = standing.spot(b.entry, i)?;
             let frame = Frame { node, slot: None };
             if let Some(s) = surfaces.get(&node)
-                && let Ok(m) = s.place(body, frame, at, Quat::IDENTITY)
+                && let Ok(m) = s.place_built(body, frame, at, Quat::IDENTITY, build)
             {
                 placed = Some(m);
                 break;
@@ -242,7 +259,10 @@ impl Life {
         let moved = placed?;
         // Straight into the controller: the runner's grid of bodies is as of the last tick's end, and takes the body
         // in at this tick's end (a whole rebuild a birth would cost the clock about 0.2 ms with a thousand bodies).
-        runner.controller.add(family.clone(), moved).ok()?;
+        runner
+            .controller
+            .add_built(family.clone(), moved, build)
+            .ok()?;
         let body = self.minter.mint().ok()?;
         let link = self.minter.mint().ok()?;
         self.embodied.insert(b.soul, (body, link));
