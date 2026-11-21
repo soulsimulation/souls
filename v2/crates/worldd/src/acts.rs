@@ -513,7 +513,10 @@ impl Geometry for Sight<'_> {
                 let (floor, p, _) = v.on_floor(node, at)?;
                 (floor == sim::walk::node_of(me)).then(|| {
                     let short = skills::form_runner::APPROACH_SHORT;
-                    (floor, skills::form_runner::short_of(p, me.pose.position, short))
+                    (
+                        floor,
+                        skills::form_runner::short_of(p, me.pose.position, short),
+                    )
                 })
             })
             .flatten()
@@ -622,7 +625,10 @@ impl Sight<'_> {
                 }
                 // A thing of a building with floors (an inner door, #3688), from a body on that building's floor.
                 let place = n.place()?;
-                let up = place.position.plus(place.orientation.rotate(p).ok()?).ok()?;
+                let up = place
+                    .position
+                    .plus(place.orientation.rotate(p).ok()?)
+                    .ok()?;
                 self.floor_of(n.parent()?, up)
                     .filter(|(f, _)| *f == floor)
                     .map(|(_, p)| [p.x, p.z])

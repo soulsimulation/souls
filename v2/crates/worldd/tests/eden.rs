@@ -2916,7 +2916,11 @@ fn served_family(at: &str, tag: &str, cases: &[(&str, &str, &str)]) -> Vec<Strin
         .unwrap();
     let mut got = Vec::new();
     for (today, form, _) in cases {
-        let ended = match soul.act(&format!("eden:{form}"), Some(im.nodes[*today]), BTreeMap::new()) {
+        let ended = match soul.act(
+            &format!("eden:{form}"),
+            Some(im.nodes[*today]),
+            BTreeMap::new(),
+        ) {
             Ok(_) => "done".to_owned(),
             Err(name) => name,
         };

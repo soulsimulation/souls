@@ -596,12 +596,7 @@ impl Forms {
     pub fn approaches(&self) -> std::collections::BTreeSet<Id> {
         self.runs
             .values()
-            .filter(|fr| {
-                matches!(
-                    fr.runner.step(),
-                    Some(Step::WalkTo { approach: true, .. })
-                )
-            })
+            .filter(|fr| matches!(fr.runner.step(), Some(Step::WalkTo { approach: true, .. })))
             .map(|fr| fr.body)
             .collect()
     }
