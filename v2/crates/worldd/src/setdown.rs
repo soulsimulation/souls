@@ -73,7 +73,13 @@ pub struct Checked {
 }
 
 /// The ask of intent `id` driving `body`: its thing, words and facing, or the reason it is not one.
-pub fn read(intent: &Intent, id: Id, body: Id, planned: u64, at: Micros) -> Result<Ask, &'static str> {
+pub fn read(
+    intent: &Intent,
+    id: Id,
+    body: Id,
+    planned: u64,
+    at: Micros,
+) -> Result<Ask, &'static str> {
     let Some(Target::Node(thing)) = intent.target else {
         return Err("setdown.no-thing");
     };
@@ -85,7 +91,9 @@ pub fn read(intent: &Intent, id: Id, body: Id, planned: u64, at: Micros) -> Resu
     };
     let id_at = |k| match p.get(&k) {
         None => Ok(None),
-        Some(v) => replica::effects::read_id(v).map(Some).map_err(|_| "arg-malformed"),
+        Some(v) => replica::effects::read_id(v)
+            .map(Some)
+            .map_err(|_| "arg-malformed"),
     };
     let anchor = id_at(2)?;
     let facing = match p.get(&3) {
@@ -137,7 +145,14 @@ fn standing(copy: &Replica, body: Id, pose: Option<Pose>, at: Micros) -> R<Tree>
             rest: Rest::new(),
         }]),
     );
-    let p = e4::part(copy.header(), tree.next(), at, body, Cause::World, vec![entry])?;
+    let p = e4::part(
+        copy.header(),
+        tree.next(),
+        at,
+        body,
+        Cause::World,
+        vec![entry],
+    )?;
     tree.apply(copy.header(), &p)?;
     Ok(tree)
 }

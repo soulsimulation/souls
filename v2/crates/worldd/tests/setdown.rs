@@ -533,7 +533,6 @@ fn p(pairs: &[(u64, Value)]) -> BTreeMap<u64, Value> {
     pairs.iter().cloned().collect()
 }
 
-
 const SET_DOWN: &str = "hands:set-down";
 
 fn word(w: &str) -> BTreeMap<u64, Value> {
@@ -580,7 +579,8 @@ fn free(r: &Replica, body: Id) -> usize {
 }
 
 fn walk_to(c: &mut Client, x: i64, z: i64) {
-    let v = |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    let v =
+        |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
     let walked = c.act(
         "eden:walk",
         Some(ground()),
@@ -604,7 +604,11 @@ fn a1_take_walk_and_set_down_one_receipt_one_parent_kept_across_a_restart() {
     // Walk 2 m east holding it.
     let s = first_spot();
     walk_to(&mut a, s.x + 2_000_000, s.z);
-    assert_eq!(at(&run.replay(), vessel()).0, Some(body), "still in the hand");
+    assert_eq!(
+        at(&run.replay(), vessel()).0,
+        Some(body),
+        "still in the hand"
+    );
     let down = a.act(SET_DOWN, Some(vessel()), word("here"));
     println!("A1 set down: {down:?}");
     let entries = down.expect("set down: one receipt");
@@ -625,15 +629,27 @@ fn a1_take_walk_and_set_down_one_receipt_one_parent_kept_across_a_restart() {
         "supported by the ground"
     );
     let parents = parents_through(&run, vessel());
-    assert!(parents.iter().all(|&n| n == 1), "one parent throughout: {parents:?}");
-    let timers = r.tree().timers().values().filter(|t| t.node == vessel()).count();
+    assert!(
+        parents.iter().all(|&n| n == 1),
+        "one parent throughout: {parents:?}"
+    );
+    let timers = r
+        .tree()
+        .timers()
+        .values()
+        .filter(|t| t.node == vessel())
+        .count();
     assert_eq!(timers, 0, "a forever thing gets no loose timer");
     // A restart from the log: the vessel is where it was put.
     let bytes = run.bytes();
     run.stop();
     let (again, mut a2, _b2) = serve_on("a1-restart", Mem::with(bytes), None);
     let r2 = again.replay();
-    assert_eq!(at(&r2, vessel()), (parent, slot, pos), "kept across the restart");
+    assert_eq!(
+        at(&r2, vessel()),
+        (parent, slot, pos),
+        "kept across the restart"
+    );
     // The restarted world still answers the Soul: a second set-down of what is already down is refused.
     let twice = a2.act(SET_DOWN, Some(vessel()), word("here"));
     println!("A1 after restart, again: {twice:?}");
@@ -662,7 +678,10 @@ fn a2_refusals_leave_the_thing_held_and_two_hands_are_counted() {
         m
     });
     println!("A2 on the rack: {on:?}");
-    assert!(on.as_ref().is_err_and(|r| r.starts_with("setdown.")), "refused by E4's name: {on:?}");
+    assert!(
+        on.as_ref().is_err_and(|r| r.starts_with("setdown.")),
+        "refused by E4's name: {on:?}"
+    );
     assert_eq!(at(&run.replay(), vessel()), held, "still in the hand");
     // An unknown word.
     let bad = a.act(SET_DOWN, Some(vessel()), word("under"));
@@ -675,7 +694,8 @@ fn a2_refusals_leave_the_thing_held_and_two_hands_are_counted() {
     assert_eq!(at(&run.replay(), vessel()), held, "still in the hand");
     // Set down, then the same intent again (its kept answer, nothing written twice), and a fresh one for a thing no
     // longer held.
-    a.act(SET_DOWN, Some(vessel()), word("here")).expect("set down");
+    a.act(SET_DOWN, Some(vessel()), word("here"))
+        .expect("set down");
     let down = at(&run.replay(), vessel());
     a.2 -= 1;
     let stale = a.act(SET_DOWN, Some(vessel()), word("here"));
@@ -689,7 +709,11 @@ fn a2_refusals_leave_the_thing_held_and_two_hands_are_counted() {
     assert_eq!(free(&run.replay(), body), 2);
     a.act("test:take", Some(crate_()), BTreeMap::new())
         .expect("the crate is taken");
-    assert_eq!(free(&run.replay(), body), 0, "a two-handed thing fills both");
+    assert_eq!(
+        free(&run.replay(), body),
+        0,
+        "a two-handed thing fills both"
+    );
     let put = a.act(SET_DOWN, Some(crate_()), word("here"));
     println!("A2 crate set down: {put:?}");
     put.expect("set down");

@@ -3905,7 +3905,8 @@ fn edit_checker(
                     Ok(Check::Edit(id, e)) => (id, e),
                     // A Soul's set-down (#3604): E4's plan, part and G2's rule on the town, off the clock.
                     Ok(Check::SetDown(a)) => {
-                        let copy = publisher.wait_for(a.planned.max(edited), Duration::from_secs(1));
+                        let copy =
+                            publisher.wait_for(a.planned.max(edited), Duration::from_secs(1));
                         let ground = buildsafe::open_ground(&copy);
                         let checked = match &mut set_downs {
                             Some((rules, mint)) => {
@@ -3920,7 +3921,10 @@ fn edit_checker(
                                 detail: String::new(),
                             }),
                         };
-                        if events.send(Event::SetDown(Box::new((a.id, checked)))).is_err() {
+                        if events
+                            .send(Event::SetDown(Box::new((a.id, checked))))
+                            .is_err()
+                        {
                             break;
                         }
                         continue;
