@@ -83,10 +83,11 @@ use crate::bodies::Bodies;
 
 type R<T> = Result<T, Refusal>;
 
-/// The longest a form's walk may take, µs (C20, #3469): about 250 m at a body's free speed (1.4 m/s), most of the way
-/// across Eden's town round its buildings, through doors and up stairs. A walk that cannot go on ends by its own name,
-/// or `deadline-passed` by then.
-pub const WALK_MOST: Micros = 180_000_000;
+/// The longest a form's walk may take, µs (C20, #3469), its route not yet planned when its timer is set: 30 minutes,
+/// about 2.5 km at a body's free speed (1.4 m/s), twice the longest way across Eden. It is a bound, not a pace: as in
+/// today's game, a walk that stops making progress ends `walk.blocked` by C21's watch ([`BLOCKED`]), and one that
+/// cannot go on by its own name. It was 180 s, and every walk over about 250 m ended `act.timed-out` while moving.
+pub const WALK_MOST: Micros = 1_800_000_000;
 
 /// The ending of a form's walk that stopped making progress (C21, #3484).
 pub const BLOCKED: &str = "walk.blocked";
@@ -110,6 +111,9 @@ pub(crate) struct Walk {
     watch: Watch,
 }
 
+/// A gateway walk's time once its route is planned: the route at walking speed, plus half again for bends and yielding
+/// (at least 5 s), plus 5 s per crossing or door. No total cap: a long walk that keeps moving ends done, never by the
+/// clock; C21's watch ends one that stalls, and the intent's expiry still bounds it.
 fn walk_span(length_mm: u64, links: usize) -> Micros {
     let speed = i128::from(crate::bodies::WALK);
     let travel = (i128::from(length_mm) * 1_000_000_000 + speed - 1) / speed;
@@ -122,7 +126,6 @@ fn walk_span(length_mm: u64, links: usize) -> Micros {
                 .unwrap_or(i64::MAX)
                 .saturating_mul(5_000_000),
         )
-        .min(WALK_MOST)
 }
 
 impl Walk {
@@ -1509,12 +1512,14 @@ mod gateway_walk_tests {
     use super::*;
 
     #[test]
-    fn a_gateway_walks_route_time_includes_margin_links_and_the_same_ceiling() {
+    fn a_gateway_walks_route_time_includes_margin_and_links_with_no_ceiling() {
         assert_eq!(walk_span(14_000, 0), 15_000_000);
         assert_eq!(walk_span(14_000, 2), 25_000_000);
         assert!(walk_span(20_000, 0) > 14_000_000);
         assert!(walk_span(70_000, 0) >= 75_000_000);
-        assert_eq!(walk_span(u64::MAX, usize::MAX), WALK_MOST);
+        // A 600 m route is not capped at the old 180 s: 429 s of walking, plus half again.
+        assert!(walk_span(600_000, 0) > 600_000_000);
+        assert_eq!(walk_span(u64::MAX, usize::MAX), Micros::MAX);
     }
 }
 
