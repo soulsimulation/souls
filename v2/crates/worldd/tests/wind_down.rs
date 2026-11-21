@@ -135,6 +135,11 @@ mod served {
 
     impl Client {
         fn act(&mut self, verb: &str, target: Option<Id>, parameters: BTreeMap<u64, Value>) -> Result<Vec<u64>, String> {
+            self.send(verb, target, parameters, false)
+        }
+
+        /// An intent; `reflex`: marked as its client's reflex (#3764), not its agent's.
+        fn send(&mut self, verb: &str, target: Option<Id>, parameters: BTreeMap<u64, Value>, reflex: bool) -> Result<Vec<u64>, String> {
             self.2 += 1;
             let i = Intent {
                 actor: Actor::Soul(self.1),
@@ -148,6 +153,7 @@ mod served {
                 fallbacks: Vec::new(),
                 replaces: None,
                 body: None,
+                reflex,
             };
             let bytes = encode(&i.to_value()).unwrap();
             self.0.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes()).unwrap();
@@ -262,9 +268,10 @@ mod served {
         }
         let lineage = Scope([0xd1; 16]);
         let t0 = Instant::now();
-        let say = |what: &str| println!("[{:6.1} s] {what}", t0.elapsed().as_secs_f64());
+        let say = |what: &str| eprintln!("[{:6.1} s] {what}", t0.elapsed().as_secs_f64());
 
         // The agent: joins, walks 3 m east, then goes.
+        say("serving");
         let mut soul = connect(&dir, 0, lineage);
         soul.act(JOIN, None, BTreeMap::new()).expect("born");
         std::thread::sleep(Duration::from_millis(500));
@@ -349,14 +356,32 @@ mod served {
         assert_eq!(read_log(&dir).len(), before, "asleep: nothing written");
         say("asleep 10 s: nothing written");
 
-        // A2: the agent comes back and walks: the world writes it awake, then the walk runs.
+        // A reflex its client sends (#3764) runs, and leaves it asleep.
         let mut soul = connect(&dir, seq, lineage);
+        let said = soul.send(
+            "eden:say",
+            None,
+            BTreeMap::from([(1, Value::Map([(worldd::words::WORDS, Value::Bytes(b"zzz".to_vec()))].into()))]),
+            true,
+        );
+        say(&format!("a reflex says a line: {said:?}"));
+        std::thread::sleep(Duration::from_secs(2));
+        let log = read_log(&dir);
+        let awake = |log: &[Seen]| log.iter().any(|s| matches!(s, Seen::Record(_, b, n, ..) if *b == body && n == "souls:awake"));
+        assert!(!awake(&log), "a reflex does not wake it");
+        let still = log.iter().rev().find_map(|s| match s {
+            Seen::Row(_, b, _, x, z, l) if *b == body => Some((*x, *z, *l)),
+            _ => None,
+        });
+        assert_eq!(still, Some((last.1, last.2, true)), "still lying where it slept");
+        say("after the reflex: still asleep, not written awake");
+
+        // A2: the agent comes back and walks: the world writes it awake, then the walk runs.
         let walked = soul.act("eden:walk", Some(ground), point(last.1 - 2_000_000, last.2));
         say(&format!("agent back, walks 2 m: {walked:?}"));
         walked.expect("the agent's walk runs");
         let log = read_log(&dir);
-        let woke = log.iter().any(|s| matches!(s, Seen::Record(_, b, n, ..) if *b == body && n == "souls:awake"));
-        assert!(woke, "written awake");
+        assert!(awake(&log), "written awake");
         let after = log
             .iter()
             .rev()

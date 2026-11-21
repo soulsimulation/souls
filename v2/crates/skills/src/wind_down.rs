@@ -3,9 +3,8 @@
 //! has been silent for an hour; then the world walks it out of town and puts it to sleep, where it stays until its
 //! agent acts again.
 //!
-//! - **Owned** from each agent act: nothing is issued. An act is any intent whose actor is the Soul. Reads and looks
-//!   are answered by the client's copy and send none; a reflex its client sends (R9) carries no mark in the envelope
-//!   and counts as an act (a known limit, recorded on #2751).
+//! - **Owned** from each agent act: nothing is issued. An act is an intent of the Soul's that is not marked as its
+//!   client's reflex (`Intent::agent_act`, #3764). Reads and looks are answered by the client's copy and send none.
 //! - **Wander** `wander` after the last act: the body stands (out of a seat); then every `leg_min` to `leg_max` one
 //!   slow walk of `leg_min_um` to `leg_max_um` whose end is farther from the town's centre than its start.
 //! - **Zombie** `zombie` after Wander starts: one walk to its sleeping spot, the nearest open ground outside the built
@@ -332,7 +331,10 @@ impl WindDown {
                 found.insert(body, s);
             } else if let Actor::Soul(soul) = e.envelope.actor
                 && let Some(body) = body_of(soul)
+                && found.get(&body).is_none_or(|s| s.wander.is_none())
             {
+                // A Soul's entry moves on its agent's last act while the rule does not hold it; a held body is let go
+                // only by its woken record (a reflex's entry, #3764, never wakes it).
                 found.insert(body, State::owned(e.envelope.at));
             }
         }

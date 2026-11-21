@@ -1380,8 +1380,8 @@ impl Clock {
             let a = self.refusal(actor, sequence, "intent.ids-exhausted");
             return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
         };
-        // B16: an agent's act wakes a body the wind-down holds, on this tick; the act then runs.
-        if let (Actor::Soul(_), Ok(body)) = (actor, self.body_of(&intent))
+        // B16: an agent's act (never a reflex, #3764) wakes a body the wind-down holds, on this tick; the act then runs.
+        if let (true, Ok(body)) = (intent.agent_act(), self.body_of(&intent))
             && let Some(b) = self.bodies.as_mut()
         {
             b.agent_acted(body, now);
