@@ -4,6 +4,9 @@
 // find box does the same; `follow=<id>` in the address opens on that Soul, and the address carries it while following.
 // Any gesture during broadcast hands the camera to the viewer. With `camera=free`, or on a link to a past moment, the
 // page starts on the free camera. Cameras observe: none of them moves anything in the world.
+// On a phone (#3675): first-touch hints, a short vibration when a tap follows or a flight arrives, and a fast one-finger
+// sideways flick while following goes to the next (left) or previous (right) Soul; pinch and two-finger drags stay the
+// camera's.
 import * as THREE from 'three';
 import { farLimit, type FreeCamera } from './camera.ts';
 import { Broadcast, SHOT } from './broadcast.ts';
@@ -12,6 +15,8 @@ import { FOLLOW_MAX, FOLLOW_MIN, Follow, TARGET_UP, bodyAt } from './follow.ts';
 import type { WorldView } from '../draw/world.ts';
 import type { PageSouls } from '../souls/page.ts';
 import type { PartRec } from '../source/source.ts';
+import { Flicks, SoulSwipe, hapticTick, soulRing } from '../phone/touch.ts';
+import { touchHints } from '../phone/hints.ts';
 
 export type Mode = 'broadcast' | 'free' | 'fly' | 'follow';
 /** A tap moves less than this (px); a body this near the tap (px) is the one tapped; a pan this far (m) in one gesture
@@ -43,6 +48,12 @@ export class CameraDirector {
   private world: WorldView;
   private souls: PageSouls;
   readonly find: HTMLInputElement;
+  private flicks = new Flicks();
+  private swipe = new SoulSwipe();
+  /** When each body was last heard (it spoke, or a named event happened to it; µs), for the swipe's order. */
+  private heard = new Map<string, number>();
+  /** The Soul whose page a tap on its label opened (the Soul page opens it), so a swipe turns that page to the next. */
+  private card: string | null = null;
 
   constructor(cam: FreeCamera, canvas: HTMLCanvasElement, world: WorldView, souls: PageSouls, params: URLSearchParams, history: boolean) {
     this.cam = cam;
@@ -54,13 +65,26 @@ export class CameraDirector {
       if (this.mode === 'broadcast' || this.mode === 'fly') this.free();
       this.follow?.touched();
     };
-    canvas.addEventListener('pointerdown', (e) => ((this.down = [e.clientX, e.clientY]), take()));
+    canvas.addEventListener('pointerdown', (e) => {
+      // Whether a flight to a Soul was under way: a flick then swipes on from it rather than taking the camera.
+      const flying = this.mode === 'fly';
+      this.down = [e.clientX, e.clientY];
+      this.flicks.pointerdown(e);
+      if (!(flying && e.pointerType === 'touch' && this.flicks.fingers === 1)) take();  // a pinch takes it at once
+    });
+    canvas.addEventListener('pointercancel', (e) => this.flicks.cancel(e));
     canvas.addEventListener('wheel', take, { passive: true });
     canvas.addEventListener('pointerup', (e) => {
+      const dir = this.flicks.pointerup(e);
+      const on = this.mode === 'follow' ? this.follow?.id : this.mode === 'fly' ? this.flight?.id : null;
+      if (dir && on) return void this.swipeFrom(on, dir);
+      if (this.mode === 'fly' && e.pointerType === 'touch') this.free();  // a touch that was not a flick takes the camera
       if (!this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > TAP_PX) return;
       const id = this.hit(e.clientX, e.clientY);
-      if (id) this.fly(id);
+      this.card = id && this.souls.placed.some((p) => p.id === id && e.clientX >= p.x && e.clientX <= p.x + p.w && e.clientY >= p.y && e.clientY <= p.y + p.h) ? id : this.card;
+      if (id && this.fly(id)) hapticTick();
     });
+    touchHints();
     cam.controls.addEventListener('start', () => ((this.panned = 0), this.follow?.touched()));
     addEventListener('keydown', (e) => /^(Key[WASD]|Arrow)/.test(e.code) && take());
     this.find = this.findBox();
@@ -71,6 +95,25 @@ export class CameraDirector {
   /** A part's named events, for broadcast. */
   part(p: PartRec): void {
     this.broadcast.heard(p);
+    for (const s of p.said ?? []) this.heard.set(s.speaker, Math.max(this.heard.get(s.speaker) ?? 0, s.at));
+    for (const h of p.happened ?? []) if (h.name) this.heard.set(h.node, Math.max(this.heard.get(h.node) ?? 0, h.at));
+  }
+
+  /** A flick while following (or flying to) Soul `on`: flies to the next (+1) or previous (-1) Soul drawn. */
+  private swipeFrom(on: string, dir: 1 | -1): void {
+    if (this.t === null) return;
+    const t = this.t, v = new THREE.Vector3(), here: { id: string; p: [number, number, number]; walking: boolean }[] = [];
+    for (const id of this.souls.copy.souls.keys()) {
+      if (!bodyAt(this.world, id, t, v)) continue;
+      const k = this.world.tracks.get(id)?.samples;
+      here.push({ id, p: [v.x, v.y, v.z], walking: !!k && k.length > 1 && k[k.length - 1].at > t - 1_000_000 });
+    }
+    const next = this.swipe.step(on, here.map((s) => s.id), dir, performance.now(), () => soulRing(on, here, this.heard, t));
+    if (!next || !this.fly(next)) return;
+    hapticTick();
+    // The Soul's page that was open turns with the swipe, as today's follow chip names the Soul now shown.
+    const pageOpen = [...document.querySelectorAll('aside')].some((a) => a.style.display === 'block');
+    if (this.card === on && pageOpen) this.souls.open((this.card = next));
   }
 
   /** Each frame, `dt` ms on, the world drawn at `t` (µs). */
@@ -155,6 +198,7 @@ export class CameraDirector {
     if (!pose.done) return;
     if (this.flown?.id === f.id) this.flown.done = performance.now();
     this.watch(new Follow(f.id, f.offset));
+    hapticTick();  // the follow starts
   }
 
   private onFollow(dt: number, s: number): void {
