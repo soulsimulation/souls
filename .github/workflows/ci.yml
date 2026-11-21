@@ -135,7 +135,7 @@ jobs:
     # `native` is never heavy: its camera perf budget is wall time, and a shared host under load misses it (#1162).
     runs-on: ${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || matrix.light && vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     # The recursive server inventory (about an hour of tests in all) runs in duration-balanced shards of ~10 minutes each.
-    # launcher passes in 20-27 min on hosted runners; 40 fails a hung test file in time to keep the merge queue moving.
+    # a launcher leg passes in about 9 min on hosted runners; 40 fails a hung test file in time to keep the merge queue moving.
     timeout-minutes: ${{ matrix.kind == 'server' && 45 || matrix.kind == 'launcher' && 40 || 60 }}
     strategy:
       fail-fast: false
@@ -233,6 +233,7 @@ jobs:
           CHECK_KIND: ${{ matrix.kind }}
           V2_LEG: ${{ matrix.leg }}
           SERVER_SHARD: ${{ matrix.shard }}
+          TEST_LEG: ${{ matrix.shard }}
           GOD_SKILL: ${{ matrix.godSkill || false }}
         shell: bash
         run: |
@@ -282,7 +283,10 @@ jobs:
                 bunzip2 -c "$RUNNER_TEMP/restic.bz2" > "$RUNNER_TEMP/bin/restic" && chmod 755 "$RUNNER_TEMP/bin/restic"
                 export PATH="$RUNNER_TEMP/bin:$PATH"; restic version
               fi
-              node --test --test-concurrency=1 tools/world-launcher/*.test.mjs tools/world-launcher/soul/*.test.mjs
+              # this leg's share of tools/world-launcher/*.test.mjs and tools/world-launcher/soul/*.test.mjs (test-legs.mjs)
+              list=$(node .github/scripts/test-legs.mjs launcher "$TEST_LEG"); mapfile -t files <<< "$list"
+              echo "launcher leg $TEST_LEG: ${#files[@]} files"
+              node --test --test-concurrency=1 "${files[@]}"
               ;;
             client-cli)
               # V3-client-cli
@@ -293,7 +297,10 @@ jobs:
               ;;
             soul-actions)
               # #1061: not a gate step; picked by ci-scope.mjs from its own paths
-              node --test --test-concurrency=4 tools/soul-actions/*.test.mjs
+              # this leg's share of tools/soul-actions/*.test.mjs (test-legs.mjs)
+              list=$(node .github/scripts/test-legs.mjs soul-actions "$TEST_LEG"); mapfile -t files <<< "$list"
+              echo "soul-actions leg $TEST_LEG: ${#files[@]} files"
+              node --test --test-concurrency=4 "${files[@]}"
               ;;
             soul-tools)
               # #1111: not a gate step; picked by ci-scope.mjs from its own paths

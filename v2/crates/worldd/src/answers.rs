@@ -217,7 +217,8 @@ pub enum Event {
         bytes: Vec<u8>,
         reply: Reply,
     },
-    /// Lockstep: run every tick up to and including `tick`, then report the zone's state on `done`.
+    /// Lockstep: run every tick up to and including `tick`, then report the zone's state on `done`, once every tick
+    /// run is on the disk and in the sync copy, as a receipt is (so a sync asked after it sees the run's changes).
     RunTo {
         tick: i64,
         done: Sender<Ran>,
@@ -745,6 +746,8 @@ struct Tick {
     parts: Vec<Arc<Part>>,
     /// Answers sent as they are, with no block: a form act's progress (C20).
     bare: Vec<(Vec<Reply>, Vec<u8>)>,
+    /// A lockstep run's report, sent after every tick before it is on the disk and in the sync copy.
+    ran: Option<(Sender<Ran>, Ran)>,
 }
 
 struct Clock {
@@ -2941,6 +2944,7 @@ impl Clock {
                 handed,
                 bare: progress,
                 parts,
+                ran: None,
             });
         }
         self.records += written;
@@ -3179,6 +3183,9 @@ fn answer_loop<S: Storage + 'static>(
             for w in waiters {
                 let _ = w.send(frame.clone());
             }
+        }
+        if let Some((done, ran)) = t.ran {
+            let _ = done.send(ran);
         }
         if let Some(m) = &measures {
             m.queues[measures::LOG].leave(k);
@@ -3817,7 +3824,22 @@ pub fn start<S: Storage + 'static>(
                             stop = true;
                         }
                     }
-                    let _ = done.send(c.ran());
+                    // Through the answers thread, behind the run's ticks: the report is an answer the caller holds.
+                    let ran = Tick {
+                        inputs: None,
+                        record: None,
+                        replies: Vec::new(),
+                        started: None,
+                        handed: None,
+                        parts: Vec::new(),
+                        bare: Vec::new(),
+                        ran: Some((done, c.ran())),
+                    };
+                    if let Err(e) = c.answers.send(ran)
+                        && let Some((done, ran)) = e.0.ran
+                    {
+                        let _ = done.send(ran);
+                    }
                     if stop {
                         break;
                     }
