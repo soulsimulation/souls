@@ -1452,3 +1452,125 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
 
 #[path = "edit_served/k18d.rs"]
 mod k18d;
+
+/// #3697: a creator's own kind stands as its record's bounds say, through the one loader. A hedge defined by the
+/// creator is refused `edit.would-bury` where a Soul stands; placed across another Soul's way, it commits, the Soul's
+/// real walk past it ends at its goal, and on the served log (replayed whole) the hedge holds its solids and the
+/// committed town's route goes round it.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the exported Eden facts file (EDEN_FACTS)"]
+async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
+    use replica::kinds::defined;
+    let text = std::fs::read_to_string(std::env::var("EDEN_FACTS").expect("EDEN_FACTS")).unwrap();
+    let (x0, z0) = clear_row(&text);
+    let d = scratch("k3697");
+    let w = seed(&d, &text, 2, (x0, z0));
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc0);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    s.line("listening ", 300);
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let at = |x: i64, z: i64, parent: Id| Spot {
+        slot: None,
+        position: Vec3::new(x, 0, z),
+        orientation: Quat::IDENTITY,
+        support: if parent == w.ground {
+            Support::Surface {
+                surface: w.ground,
+                height: 0,
+            }
+        } else {
+            Support::None
+        },
+    };
+
+    // The creator defines a hedge: 6 m along x, 2.5 m tall, 0.4 m deep.
+    let record = r#"{"format":"souls-entry/1","kind":"garden:hedge","owner":"thing","geometry":{"bounds_mm":[6000,2500,400]},"text":{"name":"hedge"}}"#;
+    let full = defined::read(record.as_bytes(), &|_| false).unwrap().full;
+    let define = Op::Place {
+        name: 1,
+        kind: Name::new(&defined::kind().0).unwrap(),
+        parent: Ref::Node(w.root),
+        at: at(0, 0, w.root),
+        audience: Audience::Everyone,
+        fields: BTreeMap::from([(defined::ENTRY, Value::Bytes(record.as_bytes().to_vec()))]),
+    };
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 1, 0, define)).await;
+    assert_eq!(got.kind, 1, "the definition commits: {got:?}");
+    let hedge = |x: i64, z: i64| Op::Place {
+        name: 1,
+        kind: Name::new(&full).unwrap(),
+        parent: Ref::Node(w.ground),
+        at: at(x, z, w.ground),
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    };
+
+    // On the first Soul, where it stands: refused by BUILDSAFE's name, as a boot thing would be.
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, got.version, hedge(x0 * M, z0 * M)),
+    )
+    .await;
+    println!("a creator's hedge where a Soul stands: {got:?}");
+    assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
+
+    // Across the second Soul's way north: it commits, and the Soul's walk past it ends at its goal.
+    let (wx, hz, goal) = ((x0 + 2) * M, (z0 + 3) * M, (z0 + 6) * M);
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 3, got.version, hedge(wx, hz)),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the hedge across the way commits: {got:?}");
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    walk(&mut souls, &w, w.souls[1], 1, wx, goal);
+    let got = socket_answer(&mut souls);
+    println!("the second Soul's walk past the hedge: {got:?}");
+    assert_eq!(got.kind, 1, "the walk ends at its goal: {got:?}");
+
+    // The served log replays whole (a replica learns the kind from it); the hedge holds its solids; the route round.
+    let (copy, rules) = served_copy(&w);
+    let t = copy.tree();
+    let placed = t
+        .children(t.handle(w.ground).unwrap())
+        .unwrap()
+        .iter()
+        .filter_map(|h| t.node(*h))
+        .find(|n| n.kind().as_str() == full)
+        .expect("the hedge on the ground");
+    assert!(
+        placed.fields().contains_key(&import_eden::F_SOLIDS),
+        "it stands as its kind's bounds say"
+    );
+    let mut town = committed_town(&copy, rules, w.ground);
+    let who = Id::new(Scope([0xdd; 16]), 1).unwrap();
+    let frame = replica::pose::Frame {
+        node: w.ground,
+        slot: None,
+    };
+    let body = town.surfaces[&w.ground]
+        .place(who, frame, Vec3::new(wx, 0, (z0 + 1) * M), Quat::IDENTITY)
+        .unwrap();
+    let legs = town
+        .view()
+        .plan(&body, w.ground, Vec3::new(wx, 0, (z0 + 5) * M))
+        .expect("a way round the hedge");
+    let widest = legs.iter().map(|l| (l.to.x - wx).abs()).max().unwrap_or(0);
+    println!(
+        "the committed route round the hedge: {} legs, widest {} mm from the straight line",
+        legs.len(),
+        widest / 1000
+    );
+    assert!(
+        widest >= 3 * M,
+        "the route goes round the hedge's 3 m half-width: {legs:?}"
+    );
+    drop(s);
+}

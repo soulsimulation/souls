@@ -251,9 +251,23 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
         .into_iter()
         .map(|(_, full, _)| full)
         .collect();
-    for (full, k) in made.values() {
+    for (full, k, _) in made.values() {
         kinds.insert(full.clone(), k.clone());
         defined_names.insert(full.clone());
+    }
+    // A thing of a creator's kind stands as its kind's bounds say (#3697): its solids, unless the batch gives its own,
+    // so walkers go round it and the safety rule (G2) judges what it would bury, as a boot thing's.
+    let mut shapes = defined::solids_in(tree);
+    shapes.extend(
+        made.values()
+            .filter_map(|(full, _, s)| Some((full.clone(), s.clone()?))),
+    );
+    for op in &mut edit.ops {
+        if let Op::Place { kind, fields, .. } = op
+            && let Some(s) = shapes.get(kind.as_str())
+        {
+            fields.entry(SOLIDS).or_insert_with(|| s.clone());
+        }
     }
     let pinned = |k: &Name| {
         copy.header().kinds.contains(k)
@@ -380,7 +394,7 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                 }
                 let k = kind.as_str();
                 // A kind defined later in the batch is not yet pinned here.
-                let later = made.range(i..).any(|(_, (full, _))| full == k);
+                let later = made.range(i..).any(|(_, (full, _, _))| full == k);
                 if !kinds.contains_key(k) || !pinned(kind) || later {
                     return refuse(
                         here,
@@ -561,7 +575,7 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                         Ref::New(n) => made
                             .iter()
                             .find(|(j, _)| matches!(&edit.ops[**j], Op::Place { name, .. } if name == n))
-                            .map(|(_, (full, _))| full.clone()),
+                            .map(|(_, (full, _, _))| full.clone()),
                     };
                     definitions_gone.extend(full.map(|f| (i, f)));
                 }
@@ -738,7 +752,10 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
 /// The definitions a batch makes (#3697), each a place of `souls:kind` at the zone's root holding its record as bytes
 /// in field [`defined::ENTRY`]: checked ([`defined::read`]), and its fields made the canonical record and the full name
 /// it defines, which every replica reads. By the operation that makes each: the full name and its rules.
-fn define(edit: &mut Edit, copy: &Replica) -> Result<BTreeMap<usize, (String, Kind)>, Refused> {
+fn define(
+    edit: &mut Edit,
+    copy: &Replica,
+) -> Result<BTreeMap<usize, (String, Kind, Option<Value>)>, Refused> {
     let tree = copy.tree();
     let root = tree.node(tree.root()).map(|n| n.id());
     let boot = defined::namespaces(copy.header().kinds.iter().map(Name::as_str));
@@ -806,7 +823,8 @@ fn define(edit: &mut Edit, copy: &Replica) -> Result<BTreeMap<usize, (String, Ki
             ),
             (defined::ENTRY, Value::Bytes(d.bytes)),
         ]);
-        made.insert(i, (d.full, d.kind));
+        let solids = defined::solids_of(&d.entry);
+        made.insert(i, (d.full, d.kind, solids));
     }
     Ok(made)
 }

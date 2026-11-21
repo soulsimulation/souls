@@ -172,6 +172,24 @@ fn a_defined_kind_is_placed_and_a_replica_learns_it_from_the_log() {
             BTreeMap::new(),
         )])
         .expect("placed")[&1];
+    // It stands as its kind's bounds say: the walk outline, 1000 x 1200 x 1000 mm, in the solids walkers go round.
+    let t = w.live.tree();
+    let u = Value::Uint;
+    assert_eq!(
+        t.node(t.handle(bath).expect("live"))
+            .expect("a node")
+            .fields()
+            .get(&12),
+        Some(&Value::Array(vec![Value::Array(vec![
+            u(0),
+            u(0),
+            u(500),
+            u(500),
+            u(0),
+            u(0),
+            u(1200)
+        ])]))
+    );
     let mut viewer = Replica::start(&w.bytes).expect("a replica");
     for p in &w.parts {
         viewer

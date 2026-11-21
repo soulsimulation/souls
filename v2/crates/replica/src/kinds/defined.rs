@@ -178,6 +178,40 @@ pub fn read(sent: &[u8], boot: &dyn Fn(&str) -> bool) -> Result<Defined, Why> {
     })
 }
 
+/// A placed thing's solids field (N1's field 12) for a kind of this record: its walk outline, from `geometry.bounds_mm`
+/// as a boot kind's section 7 gives one ([`super::place::Geometry`]), so walkers go round it and the safety rule
+/// judges it. `None` for a record with no bounds, or a thing lower than [`super::place::FLAT`] (walked over).
+pub fn solids_of(entry: &Json) -> Option<Value> {
+    let g = entry.get("geometry")?;
+    let b: Vec<i64> = g
+        .get("bounds_mm")?
+        .arr()?
+        .iter()
+        .map(|v| match v {
+            Json::Int(n) => i64::try_from(*n).ok().filter(|n| *n >= 0),
+            _ => None,
+        })
+        .collect::<Option<_>>()?;
+    let bounds_mm = <[i64; 3]>::try_from(b).ok()?;
+    super::place::Geometry {
+        bounds_mm,
+        front: g.get("front").and_then(Json::str) != Some("none"),
+    }
+    .outlines()
+    .solids()
+}
+
+/// The solids each creator kind gives what is placed of it ([`solids_of`]), by full name: kinds with none left out.
+pub fn solids_in(tree: &Tree) -> BTreeMap<String, Value> {
+    nodes(tree)
+        .into_iter()
+        .filter_map(|(_, full, bytes)| {
+            let d = read(&bytes, &|_| false).ok().filter(|d| d.full == full)?;
+            Some((full, solids_of(&d.entry)?))
+        })
+        .collect()
+}
+
 /// The full name a `souls:kind` node's fields name, if they name one.
 pub fn named(fields: &BTreeMap<u64, Value>) -> Option<&str> {
     match fields.get(&NAME) {
