@@ -1496,12 +1496,7 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
                 now,
             );
             let how = match started {
-                Err(r) => {
-                    if r.detail.starts_with("need ") {
-                        println!("NEEDS {label}: {} {}", r.name, r.detail);
-                    }
-                    Err(r.name.to_owned())
-                }
+                Err(r) => Err(r.name.to_owned()),
                 Ok(sim::forms::Asked::Applied(_)) => Ok("done".to_owned()),
                 Ok(sim::forms::Asked::Started(run) | sim::forms::Asked::Running(run)) => {
                     let due = acts.forms.due(run).unwrap_or(now) + 1_000_000;
@@ -1556,13 +1551,6 @@ fn c22_a3_every_form_of_every_eden_entry_runs_once_from_its_stand_point() {
             println!("    {f}");
         }
     }
-    use std::sync::atomic::Ordering::Relaxed;
-    println!(
-        "needs at commit: {} checks, {} ns total, {} ns max",
-        worldd::acts::MEASURE_N.load(Relaxed),
-        worldd::acts::MEASURE_NS.load(Relaxed),
-        worldd::acts::MEASURE_MAX.load(Relaxed)
-    );
     assert!(out.contains_key("done"));
 }
 

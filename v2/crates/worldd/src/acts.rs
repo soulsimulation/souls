@@ -81,9 +81,6 @@ use skills::form_runner::Limits;
 use crate::bodies::Bodies;
 
 type R<T> = Result<T, Refusal>;
-pub static MEASURE_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-pub static MEASURE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-pub static MEASURE_MAX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// The longest a form's walk may take, µs (C20, #3469): about 250 m at a body's free speed (1.4 m/s), most of the way
 /// across Eden's town round its buildings, through doors and up stairs. A walk that cannot go on ends by its own name,
@@ -1051,7 +1048,6 @@ impl Acts {
             // intent the forms already hold is its run or its receipt, never checked again.
             if !self.forms.known(intent.id) {
                 let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
-                let t0 = std::time::Instant::now();
                 // The binder's refusals and who may's come first, from the run's own path below: a form the binder or who
                 // may refuses is left to it, so its refusal is the same as before.
                 let bound = match sim::forms::bind_stages(&entry, form) {
@@ -1061,30 +1057,22 @@ impl Acts {
                         .is_ok(),
                     Err(_) => false,
                 };
-                let checked =
-                    if !bound {
-                        Ok(())
-                    } else {
-                        sim::forms::may(tree, &audiences, &|_| None, body, *node, &entry, form)
-                            .map_or(Ok(()), |()| {
-                                crate::needs::check(
-                                    tree,
-                                    bodies.as_deref(),
-                                    &self.kinds,
-                                    body,
-                                    *node,
-                                    &entry,
-                                    form,
-                                    &all,
-                                    now,
-                                )
-                            })
-                    };
-                let us = t0.elapsed().as_nanos() as u64;
-                MEASURE_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                MEASURE_NS.fetch_add(us, std::sync::atomic::Ordering::Relaxed);
-                MEASURE_MAX.fetch_max(us, std::sync::atomic::Ordering::Relaxed);
-                if let Err(e) = checked {
+                let permitted = bound
+                    && sim::forms::may(tree, &audiences, &|_| None, body, *node, &entry, form)
+                        .is_ok();
+                if permitted
+                    && let Err(e) = crate::needs::check(
+                        tree,
+                        bodies.as_deref(),
+                        &self.kinds,
+                        body,
+                        *node,
+                        &entry,
+                        form,
+                        &all,
+                        now,
+                    )
+                {
                     first.get_or_insert(e);
                     continue;
                 }
