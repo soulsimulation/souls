@@ -39,6 +39,11 @@ export type NodeRec = {
   /** A body's public name and one-line description (fields 30, 31, by reference; V1b), null while unknown. */
   name?: string | null;
   description?: string | null;
+  /** Exact recorded body-kind hash (field32); absent is the stated default. */
+  body?: string;
+  /** A named place's (or room's, or thing's) public name: import-eden's field 4, by its hash, with the words from the
+   *  text files' `[hash, words]` rows (#3574); null while unknown. */
+  placeName?: string | null;
   /** The world node's day, night and weather fields (E6; V19, `sky/record.ts`). */
   sky?: SkyFields;
 };

@@ -16,7 +16,7 @@ const CONFIG = '/etc/souls/placement.json';
 const fail = name => { throw Error(name); };
 
 // Bounded T0 data decoder for immutable directory identity records; never evaluates or imports request data.
-function record(bytes) {
+export function record(bytes) {
   if (bytes.length > 65536) fail('placement-record-too-large');
   let at = 0;
   const item = (depth = 0) => {
@@ -48,7 +48,7 @@ function record(bytes) {
 const id = value => Array.isArray(value) && value.length === 2 && Buffer.isBuffer(value[0]) && value[0].length === 16 && Number.isSafeInteger(value[1])
   ? `${value[0].toString('hex')}:${value[1]}` : fail('placement-identity-invalid');
 
-async function beneath(root, path, { missing = false } = {}) {
+export async function beneath(root, path, { missing = false } = {}) {
   root = resolve(root); path = resolve(path);
   const rel = relative(root, path);
   if (rel.startsWith('..') || isAbsolute(rel)) fail('placement-path-escape');
@@ -61,12 +61,12 @@ async function beneath(root, path, { missing = false } = {}) {
   if (await realpath(root) !== root) fail('placement-root-symlink');
   return path;
 }
-async function data(path, max = 1 << 20) {
+export async function data(path, max = 1 << 20) {
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try { const stat = await handle.stat(); if (!stat.isFile() || stat.size > max) fail('placement-data-invalid'); return await handle.readFile(); }
   finally { await handle.close(); }
 }
-async function atomic(path, value, mode = 0o640) {
+export async function atomic(path, value, mode = 0o640) {
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.new-${randomUUID()}`, handle = await open(temp, 'wx', mode);
   try { await handle.writeFile(`${JSON.stringify(value)}\n`); await handle.sync(); }
@@ -74,7 +74,7 @@ async function atomic(path, value, mode = 0o640) {
   await rename(temp, path);
   const parent = await open(dirname(path), 'r'); try { await parent.sync(); } finally { await parent.close(); }
 }
-async function command(program, args, env = process.env) {
+export async function command(program, args, env = process.env) {
   const child = spawn(program, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.resume(); child.stderr.resume();
   const timer = setTimeout(() => child.kill('SIGTERM'), 240_000);
@@ -84,7 +84,7 @@ async function command(program, args, env = process.env) {
 const pause = ms => new Promise(yes => setTimeout(yes, ms));
 // Same safe segment contract as the origin's public stream paths, relative to this world's export.
 export const streamPath = value => typeof value === 'string' && /^views\/(?:[A-Za-z0-9._-]+\/)+$/.test(value) && !value.split('/').some(segment => segment === '.' || segment === '..');
-function checkedConfig(config) {
+export function checkedConfig(config) {
   if (config.format !== 'souls/placement/1' || !PIN.test(config.build)
       || !['worldsRoot','templates','library','placement','backup','worldRoutes','routesOut'].every(key => typeof config[key] === 'string' && isAbsolute(config[key]))
       || !Number.isInteger(config.portFirst) || !Number.isInteger(config.portLast) || config.portFirst < 1 || config.portLast > 65535 || config.portLast < config.portFirst) fail('placement-config-invalid');
@@ -222,7 +222,8 @@ export async function drain(config) {
     try {
       await rename(path, kept);
       if (!(await lstat(kept)).isFile() || !REQUEST.test(request)) fail('placement-request-invalid');
-      await placeRequest(config, request);
+      const { archiveRequest } = await import('./archive-world.mjs');
+      if (!await archiveRequest(config, request)) await placeRequest(config, request);
     } catch { console.error('placement: request refused; retained identity-bound status and world data'); }
   }
 }

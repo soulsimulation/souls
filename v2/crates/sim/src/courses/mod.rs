@@ -22,6 +22,8 @@
 //! Not here: steering a frame freely (E12), the frame's slots (B3), the timetable an agent reads
 //! (`replica::schedule::stops`, E7), a frame that turns (N14), drawing.
 
+pub mod punts;
+
 use replica::group::{Belonging, Group, Leave, Member, Outline};
 use replica::ids::Id;
 pub use replica::schedule::course::{Course, Leg, Shape, Station, Stop, Stopped, Table};

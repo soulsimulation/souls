@@ -132,12 +132,12 @@ jobs:
           cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
           cargo build -p replica --release --target wasm32-unknown-unknown --locked
           target/tools/bin/wasm-bindgen --target web --out-dir target/wasm-load/pkg target/wasm32-unknown-unknown/release/replica.wasm
-      - name: Build the page
-        working-directory: v2/web
-        # O23: the changelog page shows the release it ships (its section compiled in, as release.yml does)
+      - name: Build the page and its pinned body assets
         run: |
-          node ../../tools/changelog/compile.mjs --version "$VERSION" --date "$DATE" --out "$RUNNER_TEMP/CHANGELOG.md"
-          npm ci && V2_CHANGELOG_FILE="$RUNNER_TEMP/CHANGELOG.md" npm run build
+          node tools/changelog/compile.mjs --version "$VERSION" --date "$DATE" --out "$RUNNER_TEMP/CHANGELOG.md"
+          npm --prefix v2/web ci
+          node v2/tools/import-body/prepare.mjs --out "$RUNNER_TEMP/body-assets"
+          V2_CHANGELOG_FILE="$RUNNER_TEMP/CHANGELOG.md" V2_BODY_ASSETS="$RUNNER_TEMP/body-assets" npm --prefix v2/web run build
       - name: Bundle and its manifest
         run: |
           bash v2/tools/ops/release/release.sh bundle "$RUNNER_TEMP/bundle" "$SHA" "$VERSION" v2/target/release v2/web/dist v2/client | tee -a "$GITHUB_STEP_SUMMARY"

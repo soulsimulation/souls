@@ -13,6 +13,9 @@ import { backdropMesh, type Backdrop } from './backdrop.ts';
 const UM = 1e-6, MM = 1e-3;
 export const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway']);
 const plain = (kind: string) => kind.split('@')[0];
+/** A body: one with a motion sample, or a body kind standing still since it joined (no motion published yet). */
+const BODY = /(^|:)(body|soul)$/;
+const isBody = (n: NodeRec) => n.at !== null || BODY.test(plain(n.kind));
 /** Terrain vertices kept per tile side: every one, so what stands on the ground meets the ground as drawn (an 8 m
  *  grid left things on hills up to metres above it). */
 const TERRAIN_STEP = 1;
@@ -139,7 +142,7 @@ export class WorldView {
   apply(nodes: NodeRec[], removed: string[], samples: SampleRec[] = []): void {
     for (const n of nodes) {
       this.nodes.set(n.id, n);
-      if (n.at !== null) {
+      if (isBody(n)) {
         if (!this.tracks.has(n.id)) {
           this.tracks.set(n.id, new Track());
           this.bodyIds.push(n.id);
@@ -150,7 +153,8 @@ export class WorldView {
     }
     // Every sample in entry order, then the state after the part (the newest, so a no-op when it was the last sample).
     for (const [id, parent, slot, at, x, y, z] of samples) this.tracks.get(id)?.add(at, [x, y, z], `${parent}/${slot}`);
-    for (const n of nodes) if (n.at !== null) this.tracks.get(n.id)!.add(n.at, n.pos, `${n.parent}/${n.slot}`);
+    // A still body has no sample time: its pose stands from the start of its track until a sample moves it.
+    for (const n of nodes) if (isBody(n)) this.tracks.get(n.id)!.add(n.at ?? 0, n.pos, `${n.parent}/${n.slot}`);
     for (const id of removed) {
       this.nodes.delete(id);
       if (this.tracks.delete(id)) this.bodyIds = this.bodyIds.filter((b) => b !== id);
@@ -283,7 +287,7 @@ export class WorldView {
     const boxes: THREE.Matrix4[] = [];
     const tags: number[] = [];
     for (const n of this.nodes.values()) {
-      if (n.at !== null || STRUCTURE.has(plain(n.kind))) continue;
+      if (isBody(n) || STRUCTURE.has(plain(n.kind))) continue;
       const f = this.frame(n.id);
       const s = (n.scale ?? 1_000_000) / 1_000_000;
       const solids = n.solids?.length ? n.solids : [[0, 0, 250, 250, 0, 0, 500, 0, 0]];
@@ -374,7 +378,7 @@ export class WorldView {
     for (const a of this.lawnAreas) file(this.lawns, a);
     const p = new THREE.Vector3();
     for (const n of this.nodes.values()) {
-      if (n.at !== null || n.parent !== this.groundId || STRUCTURE.has(plain(n.kind)) || !n.solids?.length || this.isDrape(n) || this.isDeck(n)) continue;
+      if (isBody(n) || n.parent !== this.groundId || STRUCTURE.has(plain(n.kind)) || !n.solids?.length || this.isDrape(n) || this.isDeck(n)) continue;
       const f = this.frame(n.id), s = (n.scale ?? 1_000_000) / 1_000_000;
       for (const [cx, cz, hx, hz, yaw, y0] of n.solids) {
         const a = (yaw / 1000) * (Math.PI / 180), ca = Math.cos(a), sa = Math.sin(a);
@@ -413,11 +417,11 @@ export class WorldView {
     for (const id of this.bodyIds) {
       const tr = this.tracks.get(id)!;
       tr.trim(t);
-      const p = tr.at(t);
       const n = this.nodes.get(id);
-      if (!p || !n) continue;
+      if (!n) continue;
+      const p = tr.at(t) ?? n.pos;
       v.set(p[0] * UM, p[1] * UM, p[2] * UM).applyMatrix4(this.frame(n.parent));
-      if (crowd) (crowd.place(id, v.x, v.y, v.z), k++);
+      if (crowd) (crowd.place(id, v.x, v.y, v.z, n.body), k++);
       else this.bodies.setMatrixAt(k++, m.makeTranslation(v.x, v.y, v.z));
     }
     if (crowd) {
@@ -433,7 +437,7 @@ export class WorldView {
   crowd(t: number): THREE.Vector3 | null {
     const at: THREE.Vector3[] = [];
     for (const id of this.bodyIds) {
-      const p = this.tracks.get(id)!.at(t), n = this.nodes.get(id);
+      const n = this.nodes.get(id), p = this.tracks.get(id)!.at(t) ?? n?.pos;
       if (p && n) at.push(new THREE.Vector3(p[0] * UM, p[1] * UM, p[2] * UM).applyMatrix4(this.frame(n.parent)));
     }
     let best: THREE.Vector3 | null = null, most = -1;

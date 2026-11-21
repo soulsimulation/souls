@@ -46,7 +46,10 @@
 //!     the public audience reads it (`Store::read` with no ids), so a removed reference (the redaction list) and words
 //!     of any other audience are never in it. A whisper's entry is not in a public view at all, so its reference is
 //!     not either. The file is written whole and renamed (rule 4) before the part, so a reader that finds a part finds
-//!     its words.
+//!     its words. The public writer ([`PublicWriter`]) given the importer's name dictionary also writes the words of
+//!     the place names its public nodes reference (import-eden's field 4, a SHA-256 of the words; #3574) as
+//!     `[hash, words]` rows: the baseline's for its state, a part's for the nodes its records create, each checked
+//!     against its hash (#3571's rule).
 //! 11. **A still world says so** (V5b, #3460). [`follow`] is handed the world's clock and tells the writer the world's
 //!     time now ([`Writer::idle`]) after each frame, and at least every 20 ms without one. Once a stretch's time has
 //!     passed, with [`SETTLE_US`] more for its last records to be synced, the open stretch is written, so a burst after a
@@ -872,6 +875,53 @@ use replica::stream::public::{
 };
 use replica::views::{Redactions, View};
 
+/// The public place names a value's public nodes reference (#3574), under #3571's rule: a node of the public
+/// audience whose name reference (its field 4, import-eden's 32-byte hash) is in the importer's dictionary with words
+/// of exactly that hash. A node is one in the state layout (kind 1, audience 4, fields 5), as a baseline holds it, or
+/// a create in a part's records (change 1, kind 3, audience 5, fields 6). Rows go after the K16 words in a text file
+/// as `[hash, words]`, in hash order, each once; a node of any other audience, or a hash the dictionary's words do
+/// not match, adds nothing.
+fn public_names(
+    value: &Value,
+    names: &crate::views::names::PublicNames,
+) -> BTreeMap<[u8; 32], Vec<u8>> {
+    fn walk(
+        v: &Value,
+        names: &crate::views::names::PublicNames,
+        out: &mut BTreeMap<[u8; 32], Vec<u8>>,
+    ) {
+        match v {
+            Value::Map(m) => {
+                let public = |k| matches!(m.get(&k), Some(Value::Map(a)) if a.len() == 1 && a.get(&1) == Some(&Value::Uint(1)));
+                let node = matches!(m.get(&1), Some(Value::Text(_))) && public(4);
+                let create = m.get(&1) == Some(&Value::Uint(1))
+                    && matches!(m.get(&3), Some(Value::Text(_)))
+                    && public(5);
+                let fields = match (node, create) {
+                    (true, _) => m.get(&5),
+                    (_, true) => m.get(&6),
+                    _ => None,
+                };
+                if let Some(Value::Map(fields)) = fields
+                    && let Some(Value::Bytes(r)) = fields.get(&4)
+                    && let Ok(key) = <[u8; 32]>::try_from(r.as_slice())
+                    && let Some(text) = names
+                        .get(&key)
+                        .filter(|t| replica::ids::sha256(t.as_bytes()) == key)
+                {
+                    out.insert(key, text.as_bytes().to_vec());
+                }
+                m.values().for_each(|x| walk(x, names, out));
+            }
+            Value::Array(a) => a.iter().for_each(|x| walk(x, names, out)),
+            _ => {}
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(value, names, &mut out);
+    out
+}
+
 /// Public baseline stream plus exact immutable recovery records in the world's existing Store.
 /// The caller owns this off-clock follower; no engine acknowledgement or checkpoint policy changes.
 pub struct PublicWriter<S> {
@@ -896,6 +946,7 @@ pub struct PublicWriter<S> {
     window: Option<i64>,
     last_to: Option<i64>,
     text: Option<Arc<Store>>,
+    names: Option<Arc<crate::views::names::PublicNames>>,
     clock_seed: Option<Mapping>,
     migration_cut: Option<u64>,
     migration_state: Option<Value>,
@@ -1079,6 +1130,8 @@ pub struct PublicStart<'a> {
     pub record: u64,
     pub checkpoint: Option<Vec<u8>>,
     pub text: Option<Arc<Store>>,
+    /// The importer's immutable name dictionary (#3571): its words go beside the public nodes that reference them.
+    pub names: Option<Arc<crate::views::names::PublicNames>>,
     pub clock_seed: Option<Mapping>,
     pub history: Option<&'a sim::log::Recovered>,
 }
@@ -1247,6 +1300,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             record,
             checkpoint,
             text,
+            names,
             clock_seed,
             history,
         } = start;
@@ -1285,6 +1339,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             window: None,
             last_to: None,
             text,
+            names,
             clock_seed,
             migration_cut: None,
             migration_state: None,
@@ -1465,7 +1520,10 @@ impl<S: ObjectStore> PublicWriter<S> {
                 (6, legacy),
                 (7, Value::Array(legacy_files)),
                 (8, Value::Bytes(legacy_header)),
-                (9, Value::Bytes(w.put(&w.words(w.player.state())?)?)),
+                (
+                    9,
+                    Value::Bytes(w.put(&w.words(w.player.state(), w.player.state())?)?),
+                ),
             ])))?;
             w.baseline_text = obj_bytes(&object_map(&seed)?, 9)?;
             w.seed = w.put(&seed)?;
@@ -1498,7 +1556,11 @@ impl<S: ObjectStore> PublicWriter<S> {
     /// [`PublicWriter::words`] finds them in the two whole, each node row's kept from the last cut that set it.
     fn words_after(&mut self, after: Option<&Value>, delta: Option<&Value>) -> R<Vec<u8>> {
         if self.text.is_none() {
-            return wire(Value::Array(Vec::new()));
+            // No text store: no reference words to keep, but a part's own place names are still published (#3574).
+            return self.words_of(
+                std::collections::BTreeSet::new(),
+                &Value::Array(self.records.clone()),
+            );
         }
         let row_refs = |row: &Value| -> R<(Id, std::collections::BTreeSet<Id>)> {
             let Value::Array(p) = row else {
@@ -1564,12 +1626,13 @@ impl<S: ObjectStore> PublicWriter<S> {
         all.extend(replica::audience::references(&Value::Array(
             self.records.clone(),
         )));
-        self.words_of(all)
+        // A part's names are those its own records create; the baseline's text holds the rest (#3574).
+        self.words_of(all, &Value::Array(self.records.clone()))
     }
-    fn words(&self, value: &Value) -> R<Vec<u8>> {
-        self.words_of(replica::audience::references(value))
+    fn words(&self, value: &Value, named: &Value) -> R<Vec<u8>> {
+        self.words_of(replica::audience::references(value), named)
     }
-    fn words_of(&self, refs: std::collections::BTreeSet<Id>) -> R<Vec<u8>> {
+    fn words_of(&self, refs: std::collections::BTreeSet<Id>, named: &Value) -> R<Vec<u8>> {
         let words = if let Some(store) = &self.text {
             refs.into_iter()
                 .filter_map(|r| {
@@ -1582,6 +1645,12 @@ impl<S: ObjectStore> PublicWriter<S> {
         } else {
             Vec::new()
         };
+        let mut words = words;
+        if let Some(names) = &self.names {
+            words.extend(public_names(named, names).into_iter().map(|(key, text)| {
+                Value::Array(vec![Value::Bytes(key.to_vec()), Value::Bytes(text)])
+            }));
+        }
         wire(Value::Array(words))
     }
     fn generation_dir(&self) -> PathBuf {
@@ -1992,12 +2061,14 @@ impl<S: ObjectStore> PublicWriter<S> {
                 && !part.effects.is_empty()
                 && part.header == self.header.hash().to_bytes()
                 && part.effects.iter().all(|e| match &e.body {
-                    Body::Changes(cs) => cs.iter().all(|c| {
-                        matches!(
-                            c.change,
-                            replica::effects::Change::Motion(_)
-                                | replica::effects::Change::Set { .. }
-                        )
+                    Body::Changes(cs) => cs.iter().all(|c| match &c.change {
+                        replica::effects::Change::Motion(_)
+                        | replica::effects::Change::Set { .. } => true,
+                        // A body set still where it is: its frame unchanged.
+                        replica::effects::Change::Reparent { from, pose, .. } => {
+                            *from == pose.frame
+                        }
+                        _ => false,
                     }),
                     Body::Timers(_) => true,
                     _ => false,
@@ -2089,7 +2160,8 @@ impl<S: ObjectStore> PublicWriter<S> {
                     .retain(|(seq, _)| self.migration_cut.is_none_or(|cut| *seq >= cut));
                 self.canonical = checked;
             }
-            // What the cut can be published from (#3799): only motion and fields set on nodes touch only their rows.
+            // What the cut can be published from (#3799): motion, fields set and a node set still in its own
+            // frame touch only their rows.
             for e in &part.effects {
                 match &e.body {
                     Body::Changes(cs) => {
@@ -2099,6 +2171,11 @@ impl<S: ObjectStore> PublicWriter<S> {
                                     self.touched.insert(h.node);
                                 }
                                 replica::effects::Change::Set { node, .. } => {
+                                    self.touched.insert(*node);
+                                }
+                                replica::effects::Change::Reparent { node, from, pose }
+                                    if *from == pose.frame =>
+                                {
                                     self.touched.insert(*node);
                                 }
                                 _ => self.structural = true,

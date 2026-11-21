@@ -32,11 +32,39 @@ export function rows(directory: DirectoryList | null, today: TodayList | null): 
 
 /** Preview-only directory rows must not replace today's canonical world before activation. */
 export async function canonicalRows(directory: DirectoryList | null, today: TodayList | null, origin: string, get: typeof fetch = fetch): Promise<Row[]> {
+  const probes = new Map<string, Promise<{ native: boolean; archived: boolean }>>();
+  const probe = (slug: string): Promise<{ native: boolean; archived: boolean }> => {
+    let pending = probes.get(slug);
+    if (!pending) {
+      pending = (async () => {
+        let response: Response | undefined;
+        const read: typeof fetch = async (url, init) => {
+          response = await get(url, { ...init, signal: AbortSignal.timeout(15_000) });
+          return response;
+        };
+        try { return { native: !!await worldAddress(new URL(`/w/${slug}/`, origin).href, read), archived: false }; }
+        catch {
+          let archived = false;
+          if (response?.status === 410) {
+            try { archived = (await response.json() as { refused?: string }).refused === 'world-archived'; } catch { /* unknown responses keep legacy fallback */ }
+          }
+          return { native: false, archived };
+        }
+      })();
+      probes.set(slug, pending);
+    }
+    return pending;
+  };
   const candidates = (directory?.worlds ?? []).filter(w => w.ready !== false && SLUG.test(w.name));
-  const active = await Promise.all(candidates.map(async w => {
-    try { return await worldAddress(new URL(`/w/${w.name}/`, origin).href, get) ? w : null; } catch { return null; }
+  const active = await Promise.all(candidates.map(async w => (await probe(w.name)).native ? w : null));
+  const old = await Promise.all((today?.worlds ?? []).map(async w => {
+    if (w.unlisted || !SLUG.test(w.slug)) return w;
+    const status = await probe(w.slug);
+    // A native address omitted from the native public list stays omitted, even during a directory outage.
+    return status.native || status.archived ? null : w;
   }));
-  return rows(directory ? { ...directory, worlds: active.filter((w): w is NonNullable<typeof w> => w !== null) } : null, today);
+  return rows(directory ? { ...directory, worlds: active.filter((w): w is NonNullable<typeof w> => w !== null) } : null,
+    today ? { ...today, worlds: old.filter((w): w is NonNullable<typeof w> => w !== null) } : null);
 }
 
 /** The sign-in link: the primary origin's bridge, returning to `here` (the page it left). Null without a bridge. */

@@ -310,7 +310,25 @@ struct Run {
 }
 
 fn serve(tag: &str) -> (Run, Client, Client) {
-    let store = Mem::with(Vec::new());
+    serve_selected(
+        tag,
+        Wearing {
+            catalogue: catalogue(),
+            born: BTreeMap::from([(bo(), hash(TALL))]),
+        },
+        ada(),
+        entry(),
+        Mem::with(Vec::new()),
+    )
+}
+
+fn serve_selected(
+    tag: &str,
+    wearing: Wearing,
+    first: Id,
+    entry_at: Vec3,
+    store: Mem,
+) -> (Run, Client, Client) {
     let mut cfg = Config::new(LINEAGE, 1);
     // The same canonical world feeds fit, controller and planner geometry, prepared before the clock starts.
     let initial = world();
@@ -324,7 +342,7 @@ fn serve(tag: &str) -> (Run, Client, Client) {
         ),
     )
     .unwrap();
-    town.prepare_classes(catalogue().classes()).unwrap();
+    town.prepare_classes(wearing.catalogue.classes()).unwrap();
     let planner = town.copy().unwrap();
     cfg.built_bodies = Some(Box::new(move |placed, builds| {
         let mut b = Bodies::with_planner(town, planner, 50_000)?;
@@ -343,15 +361,12 @@ fn serve(tag: &str) -> (Run, Client, Client) {
         Ok(b)
     }));
     cfg.join = Some(Join {
-        entry: (ground(), entry()),
+        entry: (ground(), entry_at),
         family: humanoid(),
         kind: name(&fullname(BODY_KIND)),
         per_tick: 8,
     });
-    cfg.wear = Some(Wearing {
-        catalogue: catalogue(),
-        born: BTreeMap::from([(bo(), hash(TALL))]),
-    });
+    cfg.wear = Some(wearing);
     let rules = Rules {
         kinds: Json::Obj(Vec::new()),
         moves: Json::Obj(Vec::new()),
@@ -375,7 +390,7 @@ fn serve(tag: &str) -> (Run, Client, Client) {
         s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
         Client(s, soul, 0)
     };
-    let (a, b) = (client(ada()), client(bo()));
+    let (a, b) = (client(first), client(bo()));
     (Run { world, store, path }, a, b)
 }
 
@@ -562,4 +577,137 @@ fn a4_a_soul_world_json_names_a_body_for_is_born_wearing_it() {
     println!("A4 Bo born wearing {worn:?}");
     assert_eq!(worn, Some(Value::Bytes(hash(TALL).to_vec())));
     run.stop();
+}
+
+#[test]
+fn b15_imported_choice_ordinary_c3() {
+    let prepared = std::env::var_os("B15_BODY_ASSETS").map(std::path::PathBuf::from);
+    let required = std::env::var_os("B15_REQUIRE_PREPARED").is_some();
+    assert!(
+        !required || prepared.is_some(),
+        "the prepared caller cannot use synthetic fallback"
+    );
+    let (catalogue, soul, chosen, next, large) = if let Some(prepared) = prepared {
+        let bytes = std::fs::read(prepared.join("bodies.json")).unwrap();
+        let json = replica::rules::json::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();
+        assert_eq!(json.get("bodies").and_then(Json::arr).unwrap().len(), 20);
+        let catalogue = Catalogue::read(std::str::from_utf8(&bytes).unwrap()).unwrap();
+        let output = std::path::PathBuf::from(
+            std::env::var_os("B15_IMPORT_OUTPUT").expect("actual prior importer output"),
+        );
+        let births = replica::rules::json::parse(
+            &std::fs::read_to_string(output.join("births/garden.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            births.get("catalogueHash").and_then(Json::str),
+            Some(replica::encode::to_hex(&replica::ids::sha256(&bytes)).as_str())
+        );
+        let row = births
+            .get("births")
+            .and_then(Json::arr)
+            .unwrap()
+            .iter()
+            .find(|b| b.get("body").is_some())
+            .unwrap();
+        let soul = row
+            .get("soul")
+            .and_then(Json::str)
+            .and_then(directoryd::accounts::principal_from_text)
+            .unwrap();
+        let chosen = catalogue
+            .find(row.get("body").and_then(Json::str).unwrap())
+            .unwrap()
+            .hash;
+        let next = json
+            .get("bodies")
+            .and_then(Json::arr)
+            .unwrap()
+            .iter()
+            .filter_map(|b| catalogue.find(b.get("hash")?.str()?))
+            .find(|p| p.hash != chosen)
+            .unwrap()
+            .hash;
+        let large = json
+            .get("bodies")
+            .and_then(Json::arr)
+            .unwrap()
+            .iter()
+            .filter_map(|body| catalogue.find(body.get("hash")?.str()?))
+            .max_by_key(|preset| preset.build.size.radius_mm())
+            .filter(|preset| preset.build.size.radius_mm() > 400)
+            .expect("a released larger footprint is required")
+            .name
+            .clone();
+        (catalogue, soul, chosen, next, large)
+    } else {
+        (
+            catalogue(),
+            ada(),
+            hash(SMALL),
+            hash(TALL),
+            "big-floater".to_owned(),
+        )
+    };
+    let expected_build = catalogue.get(&chosen).unwrap().build;
+    let wearing = || Wearing {
+        catalogue: catalogue.clone(),
+        born: BTreeMap::from([(soul, chosen)]),
+    };
+    // This new import case uses open ground; the original narrow-corridor refusal case is unchanged.
+    let at = Vec3::new(-35_000_000, 0, 30_000_000);
+    let (run, mut client, _) =
+        serve_selected("imported", wearing(), soul, at, Mem::with(Vec::new()));
+    assert_eq!(
+        client.act("life:join", Some("Imported")).map(|r| r.len()),
+        Ok(1)
+    );
+    assert_eq!(run.worn(soul), Some(Value::Bytes(chosen.to_vec())));
+    assert_eq!(
+        catalogue.build_of(run.worn(soul).as_ref()).unwrap(),
+        expected_build
+    );
+    assert_eq!(
+        client
+            .act(VERB, Some(&skills::wear::hex(&next)))
+            .map(|r| r.len()),
+        Ok(1)
+    );
+    assert_eq!(run.worn(soul), Some(Value::Bytes(next.to_vec())));
+    let store = run.store.clone();
+    run.stop();
+    let (restarted, mut client, _) = serve_selected("imported-restart", wearing(), soul, at, store);
+    assert_eq!(
+        client.act("life:join", Some("Imported")).map(|r| r.len()),
+        Ok(1)
+    );
+    assert_eq!(
+        restarted.worn(soul),
+        Some(Value::Bytes(next.to_vec())),
+        "restart and birth choice cannot overwrite later wear"
+    );
+    restarted.stop();
+    // The actual released larger class uses the original 800 mm corridor and unchanged fit guard.
+    let (tight, mut client, _) = serve_selected(
+        "imported-fit",
+        Wearing {
+            catalogue: catalogue.clone(),
+            born: BTreeMap::new(),
+        },
+        ada(),
+        entry(),
+        Mem::with(Vec::new()),
+    );
+    assert_eq!(client.act("life:join", Some("Ada")).map(|r| r.len()), Ok(1));
+    let before = tight.worn(ada());
+    assert_eq!(
+        client.act(VERB, Some(&large)),
+        Err("size-would-not-fit".to_owned())
+    );
+    assert_eq!(
+        tight.worn(ada()),
+        before,
+        "refused released model preserves the old recorded body"
+    );
+    tight.stop();
 }
