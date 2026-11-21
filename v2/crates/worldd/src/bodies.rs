@@ -1466,3 +1466,181 @@ fn refusal(name: &'static str, node: Id) -> Refusal {
         detail: replica::world_model::show(node),
     }
 }
+
+#[cfg(test)]
+mod map_tests {
+    use super::*;
+    use replica::apply::Replica;
+    use replica::edit::{Edit, Op, Ref};
+    use replica::effects::{
+        Actor, Body as EffectBody, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest,
+    };
+    use replica::encode::encode;
+    use replica::world_model::Audience;
+
+    #[test]
+    fn k18d_actual_live_edit_and_town_install_refuse_atomically() {
+        let mut imported = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
+        imported.rules.kinds.extend(
+            replica::world_model::parse_kinds(&format!(
+                "{{1: \"souls:place\", 2: \"place\", 11: [\"{}\"]}}",
+                import_eden::GROUND,
+            ))
+            .unwrap(),
+        );
+        let root = imported.nodes["world"];
+        let ground = imported.nodes["ground"];
+        let floor = imported.nodes["building/floor-0"];
+        let door = imported.nodes["door-building-narrow"];
+        let rules = imported.rules;
+        let header = import_eden::header(root, &rules).unwrap();
+        let version = imported.tree.next();
+        let mut live = Replica::restored(header.clone(), imported.tree, version);
+        let town = Town::new(
+            live.tree().frozen(),
+            ground,
+            sim::links::Doors::new(header, rules.clone(), version),
+        )
+        .unwrap();
+        let mut bodies = Bodies::new(town, 50_000).unwrap();
+        let creator = Id::new(Scope([0x95; 16]), 1).unwrap();
+        let world = replica::edit::World {
+            creator,
+            kinds: rules.kinds,
+        };
+        let edit = Edit {
+            intent: Id::new(Scope([0x95; 16]), 2).unwrap(),
+            actor: Actor::Creator(creator),
+            planned: live.version(),
+            ops: vec![Op::Set {
+                node: Ref::Node(floor),
+                field: import_eden::F_STAIRS,
+                to: Value::Array(Vec::new()),
+            }],
+        };
+        let checked = replica::edit::check(edit, &live, &world).unwrap();
+        let planned =
+            sim::edit::plan_on(checked, &live, &sim::edit::safety::Known::of(&bodies.town))
+                .unwrap();
+        let minter = Minter::new(Scope([0x95; 16]));
+        let source = crate::buildsafe::MapBasis {
+            version: live.version(),
+            ground,
+            stamp: Arc::clone(&bodies.form_map),
+            basis: bodies.town.basis(),
+        };
+        let mut invalid =
+            crate::buildsafe::PreparedMaps::prepare(&live, &planned, minter.clone(), &[], &source)
+                .unwrap();
+        let refused =
+            crate::buildsafe::PreparedMaps::prepare(&live, &planned, minter.clone(), &[], &source)
+                .unwrap();
+        let stale =
+            crate::buildsafe::PreparedMaps::prepare(&live, &planned, minter.clone(), &[], &source)
+                .unwrap();
+        let mut bad = (*invalid.part).clone();
+        let EffectBody::Changes(changes) = &mut bad.effects[0].body else {
+            unreachable!()
+        };
+        changes[0].change = Change::Set {
+            node: Id::new(Scope([0x96; 16]), 999).unwrap(),
+            field: 99,
+            to: Value::Uint(1),
+            by: None,
+        };
+        invalid.part = Arc::new(Part::read(&encode(&bad.to_value()).unwrap()).unwrap());
+
+        // Independent runtime state changes after preparation, without changing the map's geometry identity.
+        let link = replica::effects::read_id(
+            &bodies
+                .town
+                .tree
+                .node(bodies.town.tree.handle(door).unwrap())
+                .unwrap()
+                .fields()[&sim::ground::scene::F_OPEN_DOOR_LINK],
+        )
+        .unwrap();
+        bodies
+            .town
+            .doors
+            .ask(door, link, Cause::World, Actor::Creator(creator));
+        bodies.town.doors.flush(&mut bodies.town.tree, 0).unwrap();
+        let live_before = live.tree().to_state();
+        let town_before = bodies.town.tree.to_state();
+        let stamp_before = Arc::clone(&bodies.form_map);
+        let called = std::cell::Cell::new(false);
+        let mut reserved = minter.clone();
+        assert!(
+            bodies
+                .commit_map(invalid, || {
+                    called.set(true);
+                    sim::edit::commit(&mut live, &mut reserved, &planned, &[], 0)
+                })
+                .is_err()
+        );
+        assert!(!called.get());
+        assert_eq!(live.tree().to_state(), live_before);
+        assert_eq!(bodies.town.tree.to_state(), town_before);
+        assert!(Arc::ptr_eq(&bodies.form_map, &stamp_before));
+        assert_eq!(bodies.planner.pending(), 0);
+
+        // A real concurrent live write changes the read stamp; the real edit's confirm refuses after staging.
+        let effect = Effect {
+            envelope: Envelope {
+                sequence: live.version(),
+                at: 0,
+                cause: Cause::World,
+                actor: Actor::Creator(creator),
+                audience: Audience::Everyone,
+                node: floor,
+            },
+            body: EffectBody::Changes(vec![ChangeRec {
+                change: Change::Set {
+                    node: floor,
+                    field: 99,
+                    to: Value::Uint(1),
+                    by: None,
+                },
+                rest: Rest::new(),
+            }]),
+            events: None,
+            rest: Rest::new(),
+        };
+        sim::commit::write(&mut live, &[effect]).unwrap();
+        let changed_live = live.tree().to_state();
+        let mut reserved = minter.clone();
+        let error = bodies
+            .commit_map(refused, || {
+                sim::edit::commit(&mut live, &mut reserved, &planned, &[], 0)
+            })
+            .unwrap_err();
+        assert_eq!(error.name, "edit.stale");
+        assert_eq!(live.tree().to_state(), changed_live);
+        assert_eq!(bodies.town.tree.to_state(), town_before);
+        assert!(Arc::ptr_eq(&bodies.form_map, &stamp_before));
+        assert_eq!(bodies.planner.pending(), 0);
+        assert_eq!(
+            bodies
+                .town
+                .tree
+                .node(bodies.town.tree.handle(door).unwrap())
+                .unwrap()
+                .fields()[&sim::links::F_OPEN],
+            Value::Uint(1)
+        );
+
+        bodies.form_map = Arc::new(bodies.town.versions.clone());
+        let mut reserved = minter;
+        let error = bodies
+            .commit_map(stale, || {
+                sim::edit::commit(&mut live, &mut reserved, &planned, &[], 0)
+            })
+            .unwrap_err();
+        assert_eq!(error.name, "edit.stale");
+        assert_eq!(live.tree().to_state(), changed_live);
+        assert_eq!(bodies.town.tree.to_state(), town_before);
+        println!(
+            "K18d: invalid staged part, real live edit.stale and obsolete map identity leave both trees/map/worker unchanged; independently opened door preserved"
+        );
+    }
+}
