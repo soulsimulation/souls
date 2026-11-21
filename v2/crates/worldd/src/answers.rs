@@ -870,6 +870,8 @@ enum CheckJob {
     Reprepare(Box<(Id, Checked, Vec<sim::controller::BuildBasis>)>),
     /// B12b: kept surfaces the clock is done with, dropped here rather than on the clock.
     Release(Vec<sim::walk::town::RebindSurfaces>),
+    /// A Soul's set-down (#3604), checked on the same town with the engine's rules.
+    SetDown(crate::setdown::Ask),
 }
 
 #[derive(Clone, PartialEq)]
@@ -4354,6 +4356,9 @@ pub fn start<S: Storage + 'static>(
 /// bodies (lookups only), so an edit that would bury a Soul, cut it off or change what it uses is refused by name,
 /// naming the Soul. While no edit waits, the town is built (again) ahead of the next. With `creator` (G1e), the
 /// creator is the one it names now.
+///
+/// The same thread checks a Soul's set-down (#3604, [`crate::setdown::check`]) on the same town, with the engine's
+/// rules: a world with the engine and no creator has the thread for set-downs alone, and refuses every edit.
 fn edit_checker(
     mut world: Option<edit::World>,
     mut set_downs: Option<(replica::tree::Rules, Minter)>,
@@ -4488,12 +4493,31 @@ fn edit_checker(
                         }
                         continue;
                     }
-                };
-                let Some(world) = world.as_mut() else {
-                    // No edit waits: the town is built, or kept, ahead of the next.
-                    let copy = publisher.wait_for(edited, Duration::from_secs(1));
-                    town.on(&copy, buildsafe::open_ground(&copy), &committed);
-                    continue;
+                    CheckJob::SetDown(a) => {
+                        let copy =
+                            publisher.wait_for(a.planned.max(edited), Duration::from_secs(1));
+                        let ground = buildsafe::open_ground(&copy);
+                        let checked = match &mut set_downs {
+                            Some((rules, mint)) => {
+                                let latest = walkers.latest();
+                                let souls = buildsafe::souls(&copy, &kinds);
+                                let bodies = buildsafe::judged(souls.clone(), &latest);
+                                let t = town.on(&copy, ground, &committed);
+                                crate::setdown::check(&a, &copy, t, rules, mint, &bodies, souls)
+                            }
+                            None => Err(Refusal {
+                                name: "setdown-off",
+                                detail: String::new(),
+                            }),
+                        };
+                        if events
+                            .send(Event::SetDown(Box::new((a.id, checked))))
+                            .is_err()
+                        {
+                            break;
+                        }
+                        continue;
+                    }
                 };
                 let snapshot = walkers.current();
                 let source = snapshot.map.as_ref();
@@ -4503,6 +4527,17 @@ fn edit_checker(
                     .max(e.planned);
                 let copy = publisher.wait_for(needed, Duration::from_secs(1));
                 let ground = buildsafe::open_ground(&copy);
+                let Some(world) = world.as_mut() else {
+                    let r = Err(Refused {
+                        op: None,
+                        name: "edit.not-the-creator",
+                        detail: "the world takes no edits".into(),
+                    });
+                    if events.send(Event::Edited(Box::new((id, r)))).is_err() {
+                        break;
+                    }
+                    continue;
+                };
                 let who = creator.as_ref().map_or(Some(world.creator), |c| c.get());
                 let checked = match who {
                     _ if copy.version() < needed => Err(Refused {
