@@ -8,6 +8,9 @@ import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs
 
 const names = files => jobsFor(files).include.map(j => j.name);
 
+/** The parallel legs of a kind split by test-legs.mjs (launcher-0 ...), in matrix order. */
+const LEGS = kind => JOBS.filter(j => j.kind === kind).map(j => j.name);
+
 test('docs and plain tools changes run no job', () => {
   assert.deepEqual(names(['README.md', 'docs/TESTING.md', 'tools/playtest/x.mjs']), []);
   assert.equal(jobsFor(['docs/a.md']).scope, 'none');
@@ -27,7 +30,7 @@ test('web changes run the typecheck/build and the web unit suite', () => {
 
 test('launcher and client-cli changes run their own unit tests', () => {
   const launcher = names(['tools/world-launcher/launcher.mjs']);
-  assert.ok(launcher.includes('launcher'), launcher.join());
+  assert.deepEqual(launcher.filter(n => n.startsWith('launcher')), ['launcher-0', 'launcher-1', 'launcher-2'], launcher.join());
   assert.ok(!launcher.includes('web') && !launcher.includes('client-cli'));
   assert.deepEqual(names(['tools/client-eval/eval.mjs']), ['client-cli']);
   assert.deepEqual(names(['tools/edge-skill/soul.mjs']), [], '#1754: no job runs the legacy client');
@@ -70,7 +73,7 @@ test('the types-web job, which runs the bundle comparison, covers what can move 
 
 test('routing: the server shards and the long legs go to CI_HEAVY_RUNNER; the short legs, native and smoke stay hosted', () => {
   const heavy = JOBS.filter(j => j.heavy).map(j => j.name).sort();
-  assert.deepEqual(heavy, ['launcher', 'packages', ...JOBS.filter(j => j.kind === 'server').map(j => j.name), 'soul-actions'].sort());
+  assert.deepEqual(heavy, [...LEGS('launcher'), 'packages', ...JOBS.filter(j => j.kind === 'server').map(j => j.name), ...LEGS('soul-actions')].sort());
   for (const job of JOBS) assert.deepEqual(runnerFor(job, '["self-hosted","souls-heavy"]'), job.heavy ? ['self-hosted', 'souls-heavy'] : 'ubuntu-latest', job.name);
   assert.equal(runnerFor(JOBS.find(j => j.kind === 'native'), '["self-hosted","souls-heavy"]'), 'ubuntu-latest');
   assert.equal(runnerFor(JOBS.find(j => j.kind === 'server'), 'souls-ci'), 'souls-ci');
@@ -97,10 +100,10 @@ test('ci.yml: qualify runs-on reads the matrix flag, and smoke stays hosted (#11
 });
 
 test('the soul-actions job runs on its own paths, full scope included, and on nothing else (#1061)', () => {
-  for (const f of ['tools/soul-actions/shared-crew.test.mjs', 'apps/server/src/edge/ledger/together.ts', 'apps/server/test/native-owner-fixture.ts', 'packages/world-compiler/src/model.ts', 'packages/engine-mars/src/x.ts']) assert.ok(names([f]).includes('soul-actions'), f);
-  for (const f of ['apps/web/src/App.tsx', 'docs/testing.md', 'tools/world-launcher/launcher.mjs', 'packages/edge-cli/x.ts']) assert.ok(!names([f]).includes('soul-actions'), f);
-  assert.ok(names(['pnpm-lock.yaml']).includes('soul-actions'));
-  assert.ok(!('paths' in jobsFor(['tools/soul-actions/x.test.mjs']).include.find(j => j.name === 'soul-actions')));
+  for (const f of ['tools/soul-actions/shared-crew.test.mjs', 'apps/server/src/edge/ledger/together.ts', 'apps/server/test/native-owner-fixture.ts', 'packages/world-compiler/src/model.ts', 'packages/engine-mars/src/x.ts']) assert.deepEqual(names([f]).filter(n => n.startsWith('soul-actions')), LEGS('soul-actions'), f);
+  for (const f of ['apps/web/src/App.tsx', 'docs/testing.md', 'tools/world-launcher/launcher.mjs', 'packages/edge-cli/x.ts']) assert.ok(!names([f]).some(n => n.startsWith('soul-actions')), f);
+  assert.ok(names(['pnpm-lock.yaml']).includes('soul-actions-0'));
+  assert.ok(!('paths' in jobsFor(['tools/soul-actions/x.test.mjs']).include.find(j => j.name === 'soul-actions-0')));
 });
 
 test('the soul-tools job runs on its own paths, full scope included, and on nothing else (#1111)', () => {
@@ -262,7 +265,7 @@ const HEAVY = JOBS.filter(j => j.heavy).map(j => j.name);
 const SERVER = ['--files', 'apps/server/src/world.ts'];
 
 test('heavy legs: pull_request, merge_group and push runs select none; the daily, manual and requested runs select them', () => {
-  assert.deepEqual(HEAVY, ['packages', 'launcher', ...Array.from({ length: JOBS.filter(j => j.kind === 'server').length }, (_, i) => `server-${i}`), 'soul-actions']);
+  assert.deepEqual(HEAVY, ['packages', ...LEGS('launcher'), ...Array.from({ length: JOBS.filter(j => j.kind === 'server').length }, (_, i) => `server-${i}`), ...LEGS('soul-actions')]);
   for (const event of ['pull_request', 'merge_group', 'push']) {
     assert.deepEqual(lightOnly(JOBS, event).daily, HEAVY, event);
     assert.equal(lightOnly(JOBS, event).include.some(j => j.heavy), false, event);
@@ -284,7 +287,7 @@ test('heavy legs: pull_request, merge_group and push runs select none; the daily
   }
   // a change whose paths pick only heavy legs has nothing of its own to run, so it is never deferred
   const only = run('--files', 'tools/soul-actions/a.test.mjs', '--event', 'pull_request', '--draft', 'true', '--labels', '[]');
-  assert.deepEqual([only.matrix, only.daily, only.deferred], [[], ['soul-actions'], 'false']);
+  assert.deepEqual([only.matrix, only.daily, only.deferred], [[], LEGS('soul-actions'), 'false']);
   assert.deepEqual(run('--files', 'tools/soul-actions/a.test.mjs', '--event', 'merge_group').matrix, []);
 });
 
@@ -366,7 +369,7 @@ test('ci.yml: the window reaches the scope step, and a deferred run fails ci-ok'
 // Low-risk paths (Gene, 17 Nov): a change confined to entry, content, form-rules, docs or changelog fragments runs no
 // server, smoke (e2e), walk (packages) or bundle (types-web) job; it keeps repo (always), the entry tests and the
 // form-rules tests (soul-tools).
-const SKIPPED = JOBS.filter(j => j.kind === 'server' || ['latency', 'packages', 'types-web', 'launcher', 'native', 'client-cli', 'soul-actions'].includes(j.name)).map(j => j.name);
+const SKIPPED = JOBS.filter(j => j.kind === 'server' || ['latency', 'packages', 'types-web', 'launcher', 'native', 'client-cli', 'soul-actions'].includes(j.kind)).map(j => j.name);
 const LOW = ['tools/entry/check.mjs', 'content/kinds/seating/bench.json', 'content/asks/a.json', 'content/moves/a.json', 'packages/form-rules/cases/kettle.json', 'docs/testing.md', 'changes/a-fragment.md', 'README.md'];
 
 test('low-risk: a diff confined to the allowlist runs soul-tools only: no server, smoke, walk or bundle job', () => {
