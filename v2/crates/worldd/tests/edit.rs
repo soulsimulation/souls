@@ -199,17 +199,17 @@ impl W {
         self.client
             .apply_bytes(&bytes)
             .expect("the client applies it");
-        self.views(checked.edit.intent, n, &c.part);
+        self.views(checked.edit.intent, checked.edit.actor, n, &c.part);
         Ok(c)
     }
 
-    /// The batch as generic effects under one cause, the creator acting; the client's replica equal to the live one;
-    /// the stream's frame for this record holding exactly the batch's effects.
-    fn views(&mut self, intent: Id, record: u64, part: &Part) {
+    /// The batch as generic effects under one cause, its editor acting (the creator, or a claim's helper); the
+    /// client's replica equal to the live one; the stream's frame for this record holding exactly the batch's effects.
+    fn views(&mut self, intent: Id, actor: Actor, record: u64, part: &Part) {
         assert!(!part.effects.is_empty());
         for e in &part.effects {
             assert_eq!(e.envelope.cause, Cause::Intent(intent));
-            assert_eq!(e.envelope.actor, self.creator());
+            assert_eq!(e.envelope.actor, actor);
             assert!(matches!(e.body, Body::Changes(_)), "generic changes");
         }
         assert_eq!(
