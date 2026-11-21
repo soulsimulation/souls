@@ -483,28 +483,6 @@
    ]
   }
  },
- "roles": {
-  "x": {
-   "need": "required",
-   "places": {
-    "in": "this",
-    "points": [
-     "x_stand"
-    ],
-    "posture": "stand"
-   }
-  },
-  "o": {
-   "need": "required",
-   "places": {
-    "in": "this",
-    "points": [
-     "o_stand"
-    ],
-    "posture": "stand"
-   }
-  }
- },
  "motion": {
   "how": "pushed_by_one"
  },
@@ -1048,7 +1026,7 @@
   }
  },
  "text": {
-  "card": "A checkers board on a small table for two: take x or o, begin, then move in turn; a jump must be taken and a man reaching the far row is crowned.",
+  "card": "A checkers board for two: take x or o, begin, then move in turn.",
   "game": "game",
   "checkers": "checkers",
   "draughts": "draughts",
