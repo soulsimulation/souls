@@ -2,7 +2,7 @@
 // rank*8 + file, 0 = a1, white's back rank 0) is drawn as pieces on its 8x8 squares, in the board's frame, and drawn
 // again whenever the node's state changes (a move). Chess pieces are today's turned tokens
 // (`mars/viewer/app/engine-view/chess.ts`, `catalog-chess.ts`): pawn 45 mm, the rest 65 mm, ivory and ebony; checkers
-// are discs, a king two stacked. The page reads the field by the entry's name; the table below is checked against the
+// are discs on the dark squares, ivory and red (the board's dark squares would hide ebony), a king two stacked. The page reads the field by the entry's name; the table below is checked against the
 // entries in `content/kinds` by its test.
 import * as THREE from 'three';
 import type { NodeRec } from '../source/source.ts';
@@ -19,12 +19,17 @@ export const BOARDS: Record<string, Board> = {
     pieces: { n: 31, type: 'list', of: { square: { type: 'int' }, piece: { type: 'int' } } } as StateDef,
     top: 724, pitch: 70, centre: [0, 0],
   },
+  'eden:checkers_board': {
+    game: 'checkers',
+    pieces: { n: 31, type: 'list', of: { square: { type: 'int' }, piece: { type: 'int' } } } as StateDef,
+    top: 724, pitch: 70, centre: [0, 0],
+  },
 };
 
 /** A piece on the board: its square and code (chess 1 pawn … 6 king, checkers 1 man 2 king; +8 for the second side). */
 export type Piece = { square: number; piece: number };
 const CHESS = ['', 'pawn', 'knight', 'bishop', 'rook', 'queen', 'king'] as const;
-const LIGHT = '#ebe5d2', DARK = '#34302a';
+const LIGHT = '#ebe5d2', DARK = '#34302a', RED = '#9e2f28';
 
 /** The pieces a node holds, read by the entry's field name; invalid records are left out. */
 export function piecesOf(n: Pick<NodeRec, 'fields'>, board: Board): Piece[] {
@@ -48,6 +53,7 @@ class Kit {
   private geos = new Map<string, THREE.BufferGeometry>();
   readonly light = new THREE.MeshStandardMaterial({ color: LIGHT, roughness: 0.55 });
   readonly dark = new THREE.MeshStandardMaterial({ color: DARK, roughness: 0.55 });
+  readonly red = new THREE.MeshStandardMaterial({ color: RED, roughness: 0.55 });
   geo(key: string, make: () => THREE.BufferGeometry): THREE.BufferGeometry {
     let g = this.geos.get(key);
     if (!g) this.geos.set(key, (g = make()));
@@ -87,6 +93,7 @@ class Kit {
     for (const g of this.geos.values()) g.dispose();
     this.light.dispose();
     this.dark.dispose();
+    this.red.dispose();
   }
 }
 
@@ -132,7 +139,7 @@ export class BoardPieces {
   private piece(board: Board, p: Piece): THREE.Group {
     const second = p.piece >= 8, code = p.piece & 7, g = new THREE.Group();
     const shapes = board.game === 'chess' ? this.kit.chess(CHESS[code]) : this.kit.checkers(code === 2);
-    const material = second ? this.kit.dark : this.kit.light;
+    const material = !second ? this.kit.light : board.game === 'chess' ? this.kit.dark : this.kit.red;
     for (const [geo, x, y, z, tilt] of shapes) {
       const m = new THREE.Mesh(geo, material);
       m.position.set(x, y, z);
