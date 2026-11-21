@@ -1,6 +1,6 @@
 // R15b (#3517): resolve a client's occurrence from the calendar published on its copy's root (E6/E7), then invert
 // E7b's clock mapping for one real deadline. This reads no clock and keeps no world clock of its own.
-import { decode } from '../brief/copy.mjs';
+import { decode, publicWordsOf } from '../brief/copy.mjs';
 import { worldNow } from '../clock/clock.mjs';
 import { due } from './schedule.mjs';
 
@@ -102,12 +102,16 @@ const hexOf = (b) => Buffer.from(b).toString('hex');
 const idOf = (v) => (Array.isArray(v) && v[0] instanceof Uint8Array ? `${hexOf(v[0])}-${v[1]}` : null);
 const plainKind = (k) => String(k).replace(/@.*$/, '');
 
-/** A text field's words when the copy was given them (`{21: ref, 23: words}`); null when withheld or removed. */
-function wordsOf(v) {
+/** A text field's words when the copy was given them (beside it, or by its reference); null when withheld or removed. */
+function wordsOf(v, words) {
   if (typeof v === 'string') return v;
   if (!(v instanceof Map)) return null;
   const w = v.get(23);
-  return w instanceof Uint8Array ? Buffer.from(w).toString('utf8') : typeof w === 'string' ? w : null;
+  if (w instanceof Uint8Array) return Buffer.from(w).toString('utf8');
+  if (typeof w === 'string') return w;
+  // #3703: the public words the world sent beside the record, by its reference.
+  const r = idOf(v.get(21));
+  return r ? words.get(r) ?? null : null;
 }
 
 /**
@@ -115,7 +119,7 @@ function wordsOf(v) {
  * the field numbers and link names `kinds` (entries by kind) gives them. A link `<name>` of kind `ns:k` is `ns:<name>`.
  */
 export function calendarItems(copy, kinds) {
-  const out = [];
+  const out = [], words = publicWordsOf(copy);
   const todo = Object.values(JSON.parse(copy.roots()));
   while (todo.length) {
     const bytes = copy.record(todo.pop());
@@ -135,7 +139,7 @@ export function calendarItems(copy, kinds) {
       if (name && other) links[name].push(other);
     }
     const num = (v) => (typeof v === 'bigint' ? Number(v) : Number.isSafeInteger(v) ? v : null);
-    out.push({ id, kind, parent: m.has(3) ? idOf(m.get(3)) : null, start: num(field('start')), end: num(field('end')), words: wordsOf(field('words')), links });
+    out.push({ id, kind, parent: m.has(3) ? idOf(m.get(3)) : null, start: num(field('start')), end: num(field('end')), words: wordsOf(field('words'), words), links });
   }
   return out;
 }
@@ -214,4 +218,25 @@ export function calendarList(items, { rows, me, clock, cal, nowMs, limit = 50 })
 export function blankAt(items, rows, place) {
   const inside = (id) => { for (let r = rows.get(id); r; r = rows.get(r.parent)) if (r.id === place) return true; return false; };
   return items.find((i) => !i.links.poster?.length && (i.links.place?.[0] === place || inside(i.id))) ?? null;
+}
+
+/**
+ * The things in the copy a blank notice can be taken from: each whose kind's entry has a form that makes a calendar
+ * item (`create` of a calendar kind), with that form's name. Those at or inside `place` come first.
+ */
+export function noticeBoards(rows, kinds, place = null) {
+  const out = [];
+  for (const r of rows.values()) {
+    const form = Object.entries(kinds[r.kind]?.forms ?? {})
+      .find(([, f]) => (f?.effects ?? []).some((e) => e?.change === 'create' && isCalendarEntry(kinds[e.kind])))?.[0];
+    if (form) out.push({ id: r.id, name: r.name, form });
+  }
+  const inside = (id) => { for (let r = rows.get(id); r; r = rows.get(r.parent)) if (r.id === place) return true; return false; };
+  return place ? [...out.filter((b) => inside(b.id)), ...out.filter((b) => !inside(b.id))] : out;
+}
+
+/** A blank notice `body` holds (an item never posted, with that body above it), or null. */
+export function heldBlank(items, rows, body) {
+  const under = (id) => { for (let r = rows.get(rows.get(id)?.parent); r; r = rows.get(r.parent)) if (r.id === body) return true; return false; };
+  return items.find((i) => !i.links.poster?.length && under(i.id)) ?? null;
 }

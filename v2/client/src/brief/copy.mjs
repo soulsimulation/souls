@@ -70,6 +70,33 @@ export function rememberPublicNames(copy, bytes, allowed = null) {
   for (const [key, text] of pending) namesOf(copy).set(key, text);
 }
 
+const WORDS = new WeakMap();
+/** #3703: the public words the world sent beside a records answer (key 27), by reference (`<scope hex>-<counter>`). */
+export const publicWordsOf = (copy) => { if (!WORDS.has(copy)) WORDS.set(copy, new Map()); return WORDS.get(copy); };
+/**
+ * Keeps the `[[reference, words], ...]` sidecar (key 27) of a records answer: only a reference some public record of
+ * the same answer holds in its fields, so words reach the copy only beside the record that names them. Anything else
+ * in it is ignored, never trusted.
+ */
+export function rememberPublicWords(copy, bytes) {
+  const frame = decode(bytes), pairs = frame.get(27), records = frame.get(22);
+  if (!Array.isArray(pairs) || !Array.isArray(records)) return;
+  const held = new Set();
+  for (const raw of records) {
+    if (!(raw instanceof Uint8Array)) continue;
+    const r = decode(raw), audience = r.get(5), fields = r.get(6);
+    if (!(audience instanceof Map && audience.get(1) === 1 && fields instanceof Map)) continue;
+    for (const v of fields.values()) if (v instanceof Map && Array.isArray(v.get(21))) held.add(idText(v.get(21)));
+  }
+  const kept = publicWordsOf(copy);
+  for (const pair of pairs) {
+    if (!Array.isArray(pair) || pair.length !== 2 || !Array.isArray(pair[0]) || !(pair[1] instanceof Uint8Array)) continue;
+    const ref = idText(pair[0]);
+    if (!held.has(ref)) continue;
+    try { kept.set(ref, new TextDecoder('utf-8', { fatal: true }).decode(pair[1])); } catch { /* not text */ }
+  }
+}
+
 /** Current reachable public records, never a dictionary or records retained outside the Copy's roots. */
 export function publicNameRecords(copy, missingOnly = true) {
   const todo = Object.values(JSON.parse(copy.roots())), seen = new Set(), found = [];
