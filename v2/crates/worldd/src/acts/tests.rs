@@ -40,6 +40,7 @@ fn fixture_sit_dispatch_uses_only_the_declared_approach_without_explicit_args() 
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         assert!(
             acts.fixture_sit(&tree, &intent),
