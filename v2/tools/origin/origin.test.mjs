@@ -2,7 +2,7 @@
 // v2/docs/viewer-cache.md states them. Run: node --test v2/tools/origin/
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { get } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -196,6 +196,27 @@ test('O19b: home keeps today during preview and advertises only valid canonical 
   const listed = await canonicalRows(directory, today, 'https://world.example.test', get);
   assert.deepEqual(listed.map(w => [w.slug, w.system]), [['new-town', 'v2'], ['eden', 'today']]);
   assert.equal(listed.some(w => w.slug === 'preview-only'), false);
+});
+
+test('W17 archived canonical and preview endpoints refuse and address markers survive without sitemap entry',async()=>{
+  const file=join(dir,'archived-routes.json'),out=join(dir,'archived-map');
+  await updateWorldRoute(file,'garden',{gateway:'http://127.0.0.1:1',stream:'/s/w/instance/views/',canonical:true});
+  const initial=readWorldRoutes(file).garden;
+  await updateWorldRoute(file,'garden',{archived:true},{expected:initial});
+  const {server:s}=createOrigin(dir,{worldRoutes:file});await new Promise(ok=>s.listen(0,'127.0.0.1',ok));const at=`http://127.0.0.1:${s.address().port}`;
+  try {
+    for(const prefix of ['', '/preview'])for(const tail of ['v1/bootstrap','views/world.json','v2/creator-token']) {
+      const response=await fetch(`${at}${prefix}/w/garden/${tail}`);assert.equal(response.status,410);assert.equal((await response.json()).refused,'world-archived');
+    }
+    const options={directory:'https://directory.example.test',launcher:'https://today.example.test',origin:'https://world.example.test',worldRoutes:file,out,
+      fetchImpl:async url=>new Response(url.endsWith('/v1/worlds')?'{}':'<?xml version="1.0"?><urlset><url><loc>https://world.example.test/w/garden/</loc></url><url><loc>https://world.example.test/about</loc></url></urlset>')};
+    assert.deepEqual((await makeRoutes(options)).slugs,['garden']);
+    assert.ok(existsSync(join(out,'slugs/garden')));assert.ok(!readFileSync(join(out,'sitemap.xml'),'utf8').includes('/w/garden/'));
+    await assert.rejects(updateWorldRoute(file,'garden',{archived:false},{expected:{...initial,gateway:'http://127.0.0.1:2'}}),/occupied/);
+    assert.equal(readWorldRoutes(file).garden.archived,true);
+    await updateWorldRoute(file,'garden',{archived:false});
+    assert.deepEqual((await makeRoutes(options)).slugs,['garden'],'restoring or unlisted canonical address remains routed before the row becomes public');
+  }finally{s.close();}
 });
 
 test('C1 (#3673) A3: a browser asking for an unknown page gets a 404 "No page here" linking home; programs and APIs keep theirs', async () => {

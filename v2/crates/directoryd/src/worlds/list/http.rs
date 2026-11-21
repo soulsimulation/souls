@@ -244,3 +244,57 @@ pub fn handoff(req: &Request, app: &App) -> Answer {
         }
     }
 }
+
+/// Creator archive requires the current authority and exact name confirmation; restore is operator-only.
+pub fn archive(req: &Request, app: &App) -> Answer {
+    let Some(worlds) = &app.worlds else {
+        return refuse(404, "no-worlds");
+    };
+    let account = match signed_in(req, app) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+    let world = body
+        .get("world")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let confirm = body
+        .get("confirm")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let inner = worlds.inner.lock().unwrap_or_else(|e| e.into_inner());
+    match super::archive::begin(
+        &inner.dir.store,
+        world,
+        Some(account.principal),
+        confirm,
+        false,
+    ) {
+        Ok(phase) => {
+            if phase.state == "archived" {
+                return (
+                    200,
+                    json!({"archived":true,"world":world}),
+                    "archive".into(),
+                );
+            }
+            match super::archive::enqueue(&phase.request) {
+                Ok(()) => (
+                    202,
+                    json!({"pending":true,"world":world}),
+                    "archive-pending".into(),
+                ),
+                Err(e) => refuse(503, e.name),
+            }
+        }
+        Err(e) => refuse(
+            if e.name == "not-the-creator" {
+                403
+            } else {
+                409
+            },
+            e.name,
+        ),
+    }
+}
