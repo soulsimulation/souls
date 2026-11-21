@@ -1248,7 +1248,7 @@ fn public_place_names_beside_public_nodes_only_and_hash_verified() {
     let Value::Array(text) = decode(&text).unwrap().value else {
         panic!("text")
     };
-    let mut want = vec![
+    let mut want = [
         (sha256(b"Plaza"), "Plaza"),
         (sha256(b"West lake"), "West lake"),
     ];
