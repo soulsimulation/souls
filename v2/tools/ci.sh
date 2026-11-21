@@ -195,6 +195,11 @@ step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p tes
   node --test client/src/pair/*.test.mjs'
 # The served client (R17, #2818): the served files against the release's manifest; the one line, upgrade, rollback.
 step client-served bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/served/*.test.mjs'
+# The served-world gate (#1960): an Eden slice served by worldd, gatewayd and directoryd, two Souls paired and joined,
+# real acts through the thin command; the page's worker on the public stream and the client's copy, across a restart.
+# Assertions that wait on an open fix are marked PENDING #<issue> in the file and printed, never skipped silently.
+step served-world-e2e bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p testworld --locked --quiet &&
+  node --test client/served/e2e/world.test.mjs'
 # The reflex table (R9, #2728): the matcher, expiry, cool-down, count, standing consent, and 1,000 events at p99.
 step client-reflex node --test client/src/reflex/*.test.mjs
 # Wake rules and the owner's messages (R13, #2753): the budget, merging with no reader, the mailbox through the gateway.

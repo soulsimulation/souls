@@ -7,6 +7,7 @@ import init, { StreamPlayer, readPointer } from 'replica';
 import { decode, encode } from 'cborg';
 import { publicSoul, type NodeRec, type PartRec, type Pointer, type SaidRec, type SnapshotRec } from './source.ts';
 import { happenedInPart } from '../sound/record.ts';
+import { readChanged } from './changed.ts';
 import { skyFields } from '../sky/record.ts';
 
 type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string };
@@ -156,11 +157,12 @@ async function run(stream: URL) {
     const played = JSON.parse(player.play(bytes));
     const changed = query(new Map<number, unknown>([[1, 5], [2, version]])) as [IdValue, number][];
     version = played.version;
-    const nodes: NodeRec[] = [], removed: string[] = [];
-    for (const [id] of changed) {
-      try { nodes.push(nodeRec(query(new Map<number, unknown>([[1, 1], [2, id]])) as Map<number, unknown>)); }
-      catch { removed.push(key(id)); }
-    }
+    const { nodes, removed } = readChanged(
+      changed.map(([id]) => id), key,
+      (id) => query(new Map<number, unknown>([[1, 1], [2, id]])) as Map<number, unknown>,
+      () => new Map((decode(player.snapshot(), { useMaps: true }) as Map<number, unknown>[]).map(v => [key(v.get(1) as IdValue), v])),
+      nodeRec,
+    );
     const samples = JSON.parse(player.samples());
     let happened: PartRec['happened'] = [];
     try { happened = happenedInPart(bytes); } catch { /* sound observes only a successfully played part */ }
