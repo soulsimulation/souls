@@ -257,6 +257,26 @@ fn entries() -> Json {
 }
 
 fn create(sequence: u64, node: Id, kind: &str, parent: Id, at: Vec3) -> Value {
+    create_with(sequence, node, kind, parent, at, BTreeMap::new())
+}
+
+/// The crate's one box (N1's solids, mm): 600 mm square, 800 mm high, so walkers go round it where it is set down.
+fn crate_box() -> BTreeMap<u64, Value> {
+    let row = [0u64, 0, 300, 300, 0, 0, 800].map(Value::Uint).to_vec();
+    BTreeMap::from([(
+        sim::ground::scene::F_SOLIDS,
+        Value::Array(vec![Value::Array(row)]),
+    )])
+}
+
+fn create_with(
+    sequence: u64,
+    node: Id,
+    kind: &str,
+    parent: Id,
+    at: Vec3,
+    fields: BTreeMap<u64, Value>,
+) -> Value {
     Effect {
         envelope: Envelope {
             sequence,
@@ -283,7 +303,7 @@ fn create(sequence: u64, node: Id, kind: &str, parent: Id, at: Vec3) -> Value {
                     },
                 },
                 audience: Audience::Everyone,
-                fields: BTreeMap::new(),
+                fields,
             },
             rest: Rest::new(),
         }]),
@@ -308,12 +328,13 @@ fn world() -> Replica {
     effects.extend([
         create(next, vessel(), VESSEL, g, Vec3::new(s.x + 300_000, 0, s.z)),
         create(next + 1, rack(), RACK, g, Vec3::new(s.x, 0, s.z + 400_000)),
-        create(
+        create_with(
             next + 2,
             crate_(),
             CRATE,
             g,
             Vec3::new(s.x - 300_000, 0, s.z),
+            crate_box(),
         ),
     ]);
     let part = encode(&Value::Map(BTreeMap::from([
@@ -714,5 +735,66 @@ fn a2_refusals_leave_the_thing_held_and_two_hands_are_counted() {
     let r = run.replay();
     assert_eq!(at(&r, crate_()).0, Some(ground()));
     assert_eq!(free(&r, body), 2, "both hands free");
+    run.stop();
+}
+
+/// Each position `body` was logged at, in order (the tick parts' moved bodies, K18), on the open ground, µm.
+fn track(run: &Run, body: Id) -> Vec<Vec3> {
+    run.log()
+        .iter()
+        .filter_map(|p| match p.rest.get(&answers::BODIES) {
+            Some(Value::Array(rows)) => Some(rows.clone()),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|r| worldd::bodies::read_row(&r))
+        .filter(|(b, _, _)| *b == body)
+        .map(|(_, pose, _)| pose.position)
+        .collect()
+}
+
+/// The walker-map follow-up of #3604: a thing walkers go round, set down across a route, reaches the walkers' town
+/// and the planner's copy in the same commit (the edits' prepared maps, `Bodies::commit_map`), so the next walk
+/// across it goes round it, never through it. Before, only the edit checker's town took it and Bo walked straight
+/// through the crate.
+#[test]
+fn a_crate_set_down_across_a_route_is_walked_round() {
+    let (run, mut a, mut b) = serve("walk-round");
+    a.act(JOIN, None, BTreeMap::new()).expect("Ada joins");
+    b.act(JOIN, None, BTreeMap::new()).expect("Bo joins");
+    let bo_body = run.body_of(bo()).expect("Bo is born");
+    a.act("test:take", Some(crate_()), BTreeMap::new())
+        .expect("the crate is taken");
+    // Ada carries it 4 m east and sets it down there; then steps 3 m north, out of the way.
+    let s = first_spot();
+    walk_to(&mut a, s.x + 4_000_000, s.z);
+    a.act(SET_DOWN, Some(crate_()), word("here"))
+        .expect("set down: one receipt");
+    let (parent, _, c) = at(&run.replay(), crate_());
+    assert_eq!(parent, Some(ground()), "the crate is on the open ground");
+    walk_to(&mut a, s.x + 4_000_000, s.z + 3_000_000);
+    // Bo goes to 3 m west of the crate, then walks to 3 m east of it: the straight line runs through its middle.
+    walk_to(&mut b, c.x - 3_000_000, c.z);
+    let from = track(&run, bo_body).len();
+    walk_to(&mut b, c.x + 3_000_000, c.z);
+    let path = &track(&run, bo_body)[from..];
+    let nearest = path
+        .iter()
+        .map(|p| ((p.x - c.x).pow(2) + (p.z - c.z).pow(2)).isqrt())
+        .min()
+        .expect("Bo moved");
+    let end = path.last().expect("Bo moved");
+    println!(
+        "walk round: crate at {c:?}; Bo walked {} samples, nearest {nearest} um to its middle, ended at {end:?}",
+        path.len()
+    );
+    assert!(
+        nearest > 300_000,
+        "Bo's walk went round the crate's box, not through it: nearest {nearest} um"
+    );
+    assert!(
+        (end.x - (c.x + 3_000_000)).abs() < 500_000,
+        "Bo got across: {end:?}"
+    );
     run.stop();
 }
