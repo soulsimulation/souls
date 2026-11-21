@@ -35,11 +35,12 @@ export function prepareDependencies() {
 function main() {
 const args = process.argv.slice(2), outAt = args.indexOf('--out'), test = args.includes('--test');
 if (outAt < 0 || !args[outAt + 1] || args.length !== (test ? 3 : 2)) throw Error('usage: prepare.mjs --out <prepared> [--test]');
-const out = resolve(args[outAt + 1]), start = performance.now(), total = 300_000;
+// The whole step's budget; a native stage compiles worldd's release tests cold on CI (1m47s seen, over 2 min under load).
+const out = resolve(args[outAt + 1]), start = performance.now(), total = 600_000;
 const cache = join(process.env.RUNNER_TEMP ?? join(repo, '.local/2750'), 'body-input-cache');
-function run(stage, argv, env = process.env, executable = process.execPath, cwd = repo) {
+function run(stage, argv, env = process.env, executable = process.execPath, cwd = repo, cap = 120_000) {
   const remaining = total - (performance.now() - start); if (remaining <= 0) throw Error('body.prepare-deadline');
-  const result = spawnSync(executable, argv, { cwd, env, timeout: Math.min(120_000, remaining), encoding: 'utf8', maxBuffer: 8 << 20 });
+  const result = spawnSync(executable, argv, { cwd, env, timeout: Math.min(cap, remaining), encoding: 'utf8', maxBuffer: 8 << 20 });
   if (result.stdout) process.stdout.write(result.stdout); if (result.stderr) process.stderr.write(result.stderr);
   if (result.error || result.signal || result.status !== 0) throw Error('body.prepare-' + stage);
   return result.stdout;
@@ -54,7 +55,7 @@ try {
     const env = { ...process.env, BRAIN_MODE: 'fake', CARGO_BUILD_JOBS: '4', B15_REQUIRE_PREPARED: '1', B15_BODY_ASSETS: out, B15_IMPORT_OUTPUT: out + '-private-import' };
     for (const [pkg, file, name] of [['import-accounts', 'owned', 'b15_mapped_released_births'], ['worldd', 'wear', 'b15_imported_choice_ordinary_c3']]) {
       const args = ['test', '--manifest-path', join(repo, 'v2/Cargo.toml'), '--release', '-p', pkg, '--test', file, name, '--locked', '--', '--exact', '--nocapture'];
-      const stdout = run('native-' + pkg, args, env, process.env.CARGO ?? 'cargo', join(repo, 'v2'));
+      const stdout = run('native-' + pkg, args, env, process.env.CARGO ?? 'cargo', join(repo, 'v2'), total);
       if (!/test result: ok\. 1 passed; 0 failed; 0 ignored;/.test(stdout)) throw Error('body.prepare-native-count');
     }
   }
