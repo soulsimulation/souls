@@ -1064,3 +1064,131 @@ fn malformed_words_are_refused_and_the_world_restarts() {
         "it restarts with its last state"
     );
 }
+
+/// #3705 (today's `stop`): a `souls:cancel` naming the Soul's own open walk stops it mid-route in the tick it is taken:
+/// the walk is refused `act.stopped`, its `souls:move-ended` says `act.stopped`, the body stays where it stopped, and
+/// the cancel has a receipt. The recorder's inputs fed back write the same effects and end in the same state, and the
+/// log restarted has its last state.
+#[test]
+fn a_cancel_naming_an_open_walk_stops_it_where_it_stands_and_replays() {
+    let walker = pairs()[0].0;
+    let cancel = |sequence: u64, replaces: u64| {
+        let i = Intent {
+            actor: Actor::Soul(walker),
+            verb: name("souls:cancel"),
+            target: None,
+            parameters: BTreeMap::new(),
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: 0,
+            }
+            .to_value(),
+            expiry: 1_000_000_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: Some(replaces),
+            body: None,
+            reflex: false,
+        };
+        encode(&i.to_value()).unwrap()
+    };
+    let store = Mem::with(Vec::new());
+    let w = start(store.clone(), false);
+    let walk = at(&w, 2, intent(walker, 1, "eden:walk", Some(chair()), None));
+    let stop = at(&w, 20, cancel(2, 1));
+    let end = run_to(&w, 120);
+    assert_eq!(
+        answer(&walk),
+        Err("act.stopped".into()),
+        "the walk ends by the stop's name"
+    );
+    assert!(answer(&stop).is_ok(), "the cancel has a receipt");
+    w.stop();
+    let log = bytes(&store);
+
+    // The walk's end, by name, and where the body is from then on.
+    let mut ended_at = None;
+    let mut positions: Vec<(usize, Vec3)> = Vec::new();
+    for (k, r) in recover(&log)
+        .unwrap()
+        .records
+        .iter()
+        .filter(|r| !recorder::is_input(r))
+        .enumerate()
+    {
+        let part = Part::read(r).unwrap();
+        for e in &part.effects {
+            for ev in e.events.iter().flatten() {
+                if ev.name.as_str() == answers::MOVE_ENDED {
+                    let how = match ev.fields.get(&2) {
+                        Some(Value::Bytes(b)) => String::from_utf8(b.clone()).unwrap(),
+                        other => panic!("a name: {other:?}"),
+                    };
+                    assert_eq!(how, answers::STOPPED);
+                    ended_at = Some(k);
+                }
+            }
+        }
+        if let Some(Value::Array(rows)) = part.rest.get(&answers::BODIES) {
+            for (b, p, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                if b == walker {
+                    positions.push((k, p.position));
+                }
+            }
+        }
+    }
+    let k = ended_at.expect("souls:move-ended act.stopped is written");
+    let stopped = positions
+        .iter()
+        .rev()
+        .find(|(n, _)| *n <= k)
+        .expect("a position by the stop")
+        .1;
+    let start_at = Vec3::new(-40_000_000, 0, 30_000_000);
+    assert!(
+        (stopped.x - start_at.x).abs() > 300_000 && (stopped.x - (-36_000_000)).abs() > 300_000,
+        "stopped mid-route: {stopped:?}"
+    );
+    for (n, p) in positions.iter().filter(|(n, _)| *n > k) {
+        assert_eq!(*p, stopped, "the body moved after its stop, at record {n}");
+    }
+    println!("#3705: stopped at {stopped:?} um in record {k}; end {end:?}");
+
+    // Replay: the recorder's inputs, the cancels with them, give the same effects and state.
+    let inputs = script(&log);
+    assert_eq!(
+        inputs.len(),
+        2,
+        "the walk and the cancel that stopped it are recorded"
+    );
+    let again = Mem::with(Vec::new());
+    let r = start(again.clone(), false);
+    let answers: Vec<_> = inputs.iter().map(|(t, b)| at(&r, *t, b.clone())).collect();
+    let replayed = run_to(&r, 120);
+    assert_eq!(answer(&answers[0]), Err("act.stopped".into()));
+    assert!(answer(&answers[1]).is_ok());
+    r.stop();
+    assert_eq!(
+        recorder::effect_hash(&recover(&log).unwrap().records),
+        recorder::effect_hash(&recover(&bytes(&again)).unwrap().records),
+        "the replay writes the same effects"
+    );
+    assert_eq!(replayed.state, end.state, "and ends in the same state");
+    // Restart: the log as written, started again, has its last state.
+    let before = last_state(&log);
+    let k = start(Mem::with(log), false);
+    let restarted = run_to(&k, 0);
+    assert_eq!(
+        restarted.state.to_vec(),
+        before,
+        "the restart has the last state"
+    );
+    // Stopped already: a second cancel of it names nothing open, and is refused as before.
+    let none = at(&k, restarted.tick + 1, cancel(3, 1));
+    run_to(&k, restarted.tick + 3);
+    assert_eq!(answer(&none), Err("order-not-open".into()));
+    k.stop();
+}

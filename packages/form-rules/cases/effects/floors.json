@@ -141,7 +141,7 @@
     },
     {
       "name": "stage_up_and_down",
-      "about": "Two Souls step up onto the stage; one cannot step up twice; each steps down, and a Soul not on it cannot.",
+      "about": "Two Souls step up onto the stage, each onto the first free spot (no spot named); one cannot step up twice; each steps down, and a Soul not on it cannot.",
       "state": {
         "actor": "b1",
         "nodes": {
@@ -158,7 +158,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"reparent","node":"b1","to":{"node":"st1","slot":"floor"}},
+              {"change":"reparent","node":"b1","to":{"node":"st1","slot":"spot_1"}},
               {"change":"link","node":"st1","link":"on_stage","n":1,"end":"b1"}
             ],
             "events": [
@@ -175,7 +175,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change":"reparent","node":"b2","to":{"node":"st1","slot":"floor"}},
+              {"change":"reparent","node":"b2","to":{"node":"st1","slot":"spot_2"}},
               {"change":"link","node":"st1","link":"on_stage","n":1,"end":"b2"}
             ],
             "events": [
@@ -231,7 +231,7 @@
       ],
       "after": {
         "room": {"loose":["st1","b1","b2"]},
-        "st1": {"kind":"eden:stage","slots":{"floor":[]},"links":{"on_stage":[]}},
+        "st1": {"kind":"eden:stage","slots":{"spot_1":[],"spot_2":[]},"links":{"on_stage":[]}},
         "b1": {"hands":{"left":null,"right":null}},
         "b2": {"hands":{"left":null,"right":null}}
       }
