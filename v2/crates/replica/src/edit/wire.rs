@@ -10,6 +10,9 @@
 //!   11: closed, 12: open}`: paired passage metadata, the leaf's backlink and its owned wall solid-row patch,
 //!   millimetres/millidegrees in the owning building's frame.
 //!
+//! An undo or a redo (G4) is the same verb with `{2: 1}` (undo) or `{2: 2}` (redo) and nothing else; a batch may carry
+//! its build's name and its step's (`{3: build, 4: step}`, both names) so the world keeps it as that build's step.
+//!
 //! A node is an id (`[scope, counter]`) or, for one placed earlier in the batch, its temporary name (an integer). A
 //! spot is `{1: position, 2: orientation, 3: support, 4: slot}` as T4's pose writes them, 4 left out when none.
 
@@ -26,6 +29,22 @@ use std::collections::BTreeMap;
 pub const VERB: &str = "souls:edit";
 /// The parameter that holds the batch.
 pub const OPS: u64 = 1;
+/// The parameter that asks for an undo ([`UNDO_ONE`]) or a redo ([`REDO_ONE`]) instead of a batch.
+pub const UNDO: u64 = 2;
+pub const UNDO_ONE: u64 = 1;
+pub const REDO_ONE: u64 = 2;
+/// A batch's build and step names (G4's builds with steps).
+pub const BUILD: u64 = 3;
+pub const STEP: u64 = 4;
+
+/// What an edit intent asks for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Asked {
+    /// A batch, with its build's name and its step's when it is a build's step.
+    Batch(Vec<Op>, Option<(Name, Name)>),
+    Undo,
+    Redo,
+}
 
 type R<T> = Result<T, String>;
 
@@ -293,10 +312,48 @@ pub fn parameters(ops: &[Op]) -> BTreeMap<u64, Value> {
     BTreeMap::from([(OPS, Value::Array(ops.iter().map(op).collect()))])
 }
 
+/// The parameters of what `asked` asks for, as [`asked`] reads them.
+pub fn parameters_of(asked: &Asked) -> BTreeMap<u64, Value> {
+    match asked {
+        Asked::Undo => BTreeMap::from([(UNDO, Value::Uint(UNDO_ONE))]),
+        Asked::Redo => BTreeMap::from([(UNDO, Value::Uint(REDO_ONE))]),
+        Asked::Batch(ops, step) => {
+            let mut p = parameters(ops);
+            if let Some((b, s)) = step {
+                p.insert(BUILD, Value::Text(b.clone()));
+                p.insert(STEP, Value::Text(s.clone()));
+            }
+            p
+        }
+    }
+}
+
 /// Reads an edit intent's parameters: one to [`OPS_MOST`] operations, each in its one byte form. The detail of a
 /// refusal says what was wrong.
 pub fn read(parameters: &BTreeMap<u64, Value>) -> R<Vec<Op>> {
-    let (Some(Value::Array(a)), 1) = (parameters.get(&OPS), parameters.len()) else {
+    match asked(parameters)? {
+        Asked::Batch(ops, _) => Ok(ops),
+        _ => Err("an undo or a redo carries no batch".into()),
+    }
+}
+
+/// Reads what an edit intent's parameters ask for: `{2: 1}` an undo, `{2: 2}` a redo, else a batch
+/// (`{1: [...]}`, with `{3: build, 4: step}` both or neither).
+pub fn asked(parameters: &BTreeMap<u64, Value>) -> R<Asked> {
+    if let Some(u) = parameters.get(&UNDO) {
+        return match (u, parameters.len()) {
+            (Value::Uint(UNDO_ONE), 1) => Ok(Asked::Undo),
+            (Value::Uint(REDO_ONE), 1) => Ok(Asked::Redo),
+            _ => Err("an undo is {2: 1} and a redo {2: 2}, alone".into()),
+        };
+    }
+    let step = match (parameters.get(&BUILD), parameters.get(&STEP)) {
+        (None, None) => None,
+        (Some(Value::Text(b)), Some(Value::Text(s))) => Some((b.clone(), s.clone())),
+        _ => return Err("a build's step is {3: build, 4: step}, both names".into()),
+    };
+    let named = if step.is_some() { 3 } else { 1 };
+    let (Some(Value::Array(a)), true) = (parameters.get(&OPS), parameters.len() == named) else {
         return Err("an edit's parameters are {1: [operation, ...]}".into());
     };
     if a.is_empty() || a.len() > OPS_MOST {
@@ -304,7 +361,7 @@ pub fn read(parameters: &BTreeMap<u64, Value>) -> R<Vec<Op>> {
     }
     let ops = a.iter().map(read_op).collect::<R<Vec<_>>>()?;
     if parameters_equal(&ops, a) {
-        Ok(ops)
+        Ok(Asked::Batch(ops, step))
     } else {
         Err("an operation is not in its one byte form".into())
     }
