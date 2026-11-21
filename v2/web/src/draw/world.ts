@@ -12,7 +12,7 @@ import { CoursePlace, type CourseAt } from './course.ts';
 import { backdropMesh, type Backdrop } from './backdrop.ts';
 
 const UM = 1e-6, MM = 1e-3;
-export const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway']);
+export const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway', 'souls:kind']);
 const plain = (kind: string) => kind.split('@')[0];
 /** A body: one with a motion sample, or a body kind standing still since it joined (no motion published yet). */
 const BODY = /(^|:)(body|soul)$/;
@@ -121,6 +121,8 @@ export class WorldView {
   extent: [number, number, number, number] | null = null;
   /** False when V8's thing layer draws the things instead of these boxes. */
   drawThings = true;
+  /** Things another layer draws while these boxes draw the rest: a creator's kinds' shapes (#3697). */
+  drawnElsewhere: ((n: NodeRec) => boolean) | null = null;
   /** #3603: the replica's `courseAt` once the page has loaded it; until then a course node stands where it was placed. */
   courseAt: CourseAt | null = null;
   /** Called once, when the first node with a course arrives (the page loads `courseAt` then). */
@@ -346,7 +348,7 @@ export class WorldView {
     const tags: number[] = [];
     const moving = new Set(this.moving());
     for (const n of this.nodes.values()) {
-      if (isBody(n) || STRUCTURE.has(plain(n.kind)) || moving.has(n.id)) continue;
+      if (isBody(n) || STRUCTURE.has(plain(n.kind)) || moving.has(n.id) || this.drawnElsewhere?.(n)) continue;
       const f = this.frame(n.id);
       for (const [local, tag] of this.boxesOf(n)) {
         boxes.push(f.clone().multiply(local));

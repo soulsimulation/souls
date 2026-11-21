@@ -10,7 +10,7 @@ import type { NodeRec } from '../source/source.ts';
 
 const UM = 1e-6, MM = 1e-3;
 /** Kinds the world view does not draw as things (`draw/world.ts`'s STRUCTURE). */
-const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway']);
+const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway', 'souls:kind']);
 /** A body for picking: a standing cylinder this wide and tall. */
 export const BODY_R = 0.45, BODY_H = 1.9;
 /** Nothing farther than this is hovered (the chips' own reach). */

@@ -5,7 +5,8 @@
 import * as THREE from 'three';
 import type { NodeRec } from '../source/source.ts';
 import { STRUCTURE, type WorldView } from '../draw/world.ts';
-import { fetchIndex } from './models.ts';
+import { fetchIndex, indexOf, type ModelIndex } from './models.ts';
+import { KindCatalogue, boundsBox, modelOf, partsOfKind, shapesKey } from '../kinds/catalogue.ts';
 import { ThingLayer } from './things.ts';
 import { setWindowLife } from './windows.ts';
 import { civil, localAt, type SkyRecord } from '../sky/record.ts';
@@ -52,27 +53,55 @@ export function windowLife(t: number | null, record: SkyRecord | null): void {
   setWindowLife(t !== null && record ? civil(localAt(record, t)).hour : null, Math.max(0, t ?? 0) / 1e6);
 }
 
-/** The page's things, from its parameters; none (the world view's boxes stay) when no `models` root is given. */
+/** The model and box a thing of a creator's kind is drawn with (#3697): the model its record names when the index knows
+ *  it, else its shapes (handed to the layer once, under their own key), else none; and the box of its solids, or of
+ *  its record's bounds. */
+export function creatorThing(n: NodeRec, kinds: KindCatalogue, layer: ThingLayer): { model: string | null; box: THREE.Matrix4 } | null {
+  const k = kinds.of(n.kind);
+  if (!k) return null;
+  const box = n.solids?.length ? boxOf(n) : boundsBox(k) ?? boxOf(n);
+  const model = modelOf(k, layer.opts.index);
+  if (model) return { model, box };
+  const key = shapesKey(k);
+  if (!layer.has(key)) {
+    const parts = partsOfKind(k);
+    if (parts.length) layer.arrive(key, parts);
+  }
+  return { model: layer.has(key) ? key : null, box };
+}
+
+const EMPTY: ModelIndex = indexOf({ kinds: [] });
+
+/** The page's things, from its parameters. With no `models` root the world view's boxes draw the things, and a layer
+ *  draws only those of a creator's kinds, from their records (#3697). */
 export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams): PageThings {
   const root = params.get('models');
-  const none: PageThings = { layer: null, apply() {}, update() {}, follow() {}, night: windowLife };
-  if (!root) return none;
-  world.drawThings = false;
-  if (params.get('things') === '0') return none;
-  const base = new URL(root, location.href);
+  const kinds = new KindCatalogue();
+  if (params.get('things') === '0' && root) {
+    world.drawThings = false;
+    return { layer: null, apply() {}, update() {}, follow() {}, night: windowLife };
+  }
   let layer: ThingLayer | null = null;
   const early: [NodeRec[], string[]][] = [];
   const out: PageThings = {
     layer: null,
     apply(nodes, removed) {
+      kinds.apply(nodes, removed);
       if (!layer) return void early.push([nodes, removed]);
       if (world.extent) layer.spacing = world.extent[2] - world.extent[0];
       for (const id of removed) layer.remove(id);
       for (const n of nodes) {
         if (n.at !== null || STRUCTURE.has(n.kind.split('@')[0])) continue;
+        const frame = () => world.frame(n.id).clone().scale(new THREE.Vector3().setScalar((n.scale ?? 1_000_000) / 1_000_000));
+        const made = creatorThing(n, kinds, layer);
+        if (made) {
+          layer.set(n.id, null, frame(), made.box, made.model);
+          continue;
+        }
+        if (!root) continue; // the world view's boxes draw it
         const model = n.origin && layer.opts.index.things[n.origin];
         const box = model ? boxOf(n) : solidBoxes(n, n.parent === world.groundId && n.pos.every((v) => v === 0) ? (x, z) => world.heightAt(x, z) : null);
-        layer.set(n.id, n.origin ?? null, world.frame(n.id).clone().scale(new THREE.Vector3().setScalar((n.scale ?? 1_000_000) / 1_000_000)), box);
+        layer.set(n.id, n.origin ?? null, frame(), box);
       }
     },
     update(eye) {
@@ -85,16 +114,23 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
     },
     night: windowLife,
   };
-  fetchIndex(base.href).then((index) => {
-    const copies = Number(params.get('copies') ?? 1);
+  const start = (index: ModelIndex, fetchModel: (h: string) => Promise<ArrayBuffer>) => {
     layer = new ThingLayer({
-      index, copies,
+      index, copies: root ? Number(params.get('copies') ?? 1) : 1,
       hideRoofs: params.has('hideRoofs') && params.get('hideRoofs') !== '0', cut: params.has('cut') ? Number(params.get('cut')) : null,
-      fetch: (h) => fetch(new URL(`worlds/models/${h}.glb`, base)).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status))))),
+      fetch: fetchModel,
     });
     out.layer = layer;
     scene.add(layer.group);
     for (const [n, r] of early.splice(0)) out.apply(n, r);
-  });
+  };
+  if (!root) {
+    world.drawnElsewhere = (n) => kinds.of(n.kind) !== null;
+    start(EMPTY, () => Promise.reject(new Error('no models root')));
+    return out;
+  }
+  world.drawThings = false;
+  const base = new URL(root, location.href);
+  fetchIndex(base.href).then((index) => start(index, (h) => fetch(new URL(`worlds/models/${h}.glb`, base)).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))));
   return out;
 }

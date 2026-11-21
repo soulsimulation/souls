@@ -62,7 +62,10 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
     at: moved ? num(moved.get(1)) : null,
     soul: publicSoul(v.get(9)),
   };
-  if (f.has(1)) rec.origin = new TextDecoder().decode(f.get(1) as Uint8Array);
+  // Field 1 is an imported thing's origin (bytes), or a creator's kind's full name (text) beside its record (#3697).
+  const f1 = f.get(1), f2 = f.get(2);
+  if (f1 instanceof Uint8Array) rec.origin = new TextDecoder().decode(f1);
+  else if (typeof f1 === 'string' && f2 instanceof Uint8Array) (rec.defines = f1, rec.entry = f2);
   if (f.has(11)) rec.outline = rows(f.get(11));
   if (f.has(12)) rec.solids = rows(f.get(12));
   if (f.has(13)) rec.slots = rows(f.get(13));
