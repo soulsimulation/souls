@@ -7,6 +7,7 @@ import type { NodeRec } from '../source/source.ts';
 import { STRUCTURE, type WorldView } from '../draw/world.ts';
 import { fetchIndex } from './models.ts';
 import { ThingLayer } from './things.ts';
+import { Displays } from './displays.ts';
 import { setWindowLife } from './windows.ts';
 import { civil, localAt, type SkyRecord } from '../sky/record.ts';
 
@@ -39,7 +40,9 @@ export function solidBoxes(n: NodeRec, ground: ((x: number, z: number) => number
 }
 
 export type PageThings = {
-  layer: ThingLayer | null; apply(nodes: NodeRec[], removed: string[]): void; update(eye: THREE.Vector3): void;
+  layer: ThingLayer | null; apply(nodes: NodeRec[], removed: string[]): void;
+  /** `camera`: the page's camera, for the displays' video (#3725). */
+  update(eye: THREE.Vector3, camera?: THREE.Camera): void;
   /** #3603: moves what rides a course to where the world view has it at the drawn time; call after `world.draw`. */
   follow(): void;
   /** C10: the world time drawn and the sky's record then, for the lit windows' share by local hour (today's
@@ -55,7 +58,12 @@ export function windowLife(t: number | null, record: SkyRecord | null): void {
 /** The page's things, from its parameters; none (the world view's boxes stay) when no `models` root is given. */
 export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams): PageThings {
   const root = params.get('models');
-  const none: PageThings = { layer: null, apply() {}, update() {}, follow() {}, night: windowLife };
+  // N-V10, N-V11 (#3725): the library's hung pictures and the classroom screen's slide, with or without models.
+  const displays = new Displays();
+  scene.add(displays.group);
+  const shown = (nodes: NodeRec[], removed: string[]) => displays.apply(nodes, removed, (id) => world.frame(id));
+  const look = (_eye: THREE.Vector3, camera?: THREE.Camera) => void (camera && displays.update(camera));
+  const none: PageThings = { layer: null, apply: shown, update: look, follow() {}, night: windowLife };
   if (!root) return none;
   world.drawThings = false;
   if (params.get('things') === '0') return none;
@@ -65,6 +73,7 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
   const out: PageThings = {
     layer: null,
     apply(nodes, removed) {
+      shown(nodes, removed);
       if (!layer) return void early.push([nodes, removed]);
       if (world.extent) layer.spacing = world.extent[2] - world.extent[0];
       for (const id of removed) layer.remove(id);
@@ -75,7 +84,8 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
         layer.set(n.id, n.origin ?? null, world.frame(n.id).clone().scale(new THREE.Vector3().setScalar((n.scale ?? 1_000_000) / 1_000_000)), box);
       }
     },
-    update(eye) {
+    update(eye, camera) {
+      look(eye, camera);
       layer?.update(eye);
     },
     follow() {
