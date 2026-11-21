@@ -444,6 +444,54 @@ impl Pairing {
             .map_err(|_| "store".to_string())
     }
 
+    /// The account and grant of the paired Soul whose agent holds `token` (#3707): `unknown-token` for none.
+    pub fn token_owner(&self, token: &str) -> Result<(String, String), &'static str> {
+        let hash = to_hex(&sha256(token.as_bytes()));
+        store(
+            self.db
+                .lock()
+                .expect("the store")
+                .query_row(
+                    "SELECT account, grant_text FROM paired_souls_v1 WHERE token_hash = ?1",
+                    params![hash],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional(),
+        )?
+        .ok_or("unknown-token")
+    }
+
+    /// `account`'s Soul as its list shows it, by its grant (#3707).
+    pub fn mine_one(&self, account: &str, grant: &str) -> Result<Mine, &'static str> {
+        self.owned(account, grant)?;
+        self.mine(account)?
+            .into_iter()
+            .find(|m| m.soul == grant)
+            .ok_or("unknown-soul")
+    }
+
+    /// `account` clears its Soul's picture: the page draws its own again (today's `profile photo auto`, #3707).
+    pub fn clear_picture(&self, account: &str, grant: &str) -> Result<(), &'static str> {
+        self.owned(account, grant)?;
+        store(self.db.lock().expect("the store").execute(
+            "DELETE FROM soul_pictures_v1 WHERE grant_text = ?1",
+            params![grant],
+        ))
+        .map(|_| ())
+    }
+
+    /// An agent signed in to `account` asks for its Soul `grant` to be retired (#3707): as [`Pairing::ask_retire`],
+    /// nothing changes but the ask, which the owner's list shows until the owner confirms.
+    pub fn ask_retire_of(&self, account: &str, grant: &str) -> Result<(), &'static str> {
+        self.owned(account, grant)?;
+        store(self.db.lock().expect("the store").execute(
+            "INSERT INTO soul_profiles_v1(grant_text, retire_asked) VALUES (?1, 1)
+             ON CONFLICT(grant_text) DO UPDATE SET retire_asked = 1",
+            params![grant],
+        ))
+        .map(|_| ())
+    }
+
     /// The agent holding a Soul's `token` asks for it to be retired. Nothing changes but the ask, which the owner's
     /// list shows until the owner confirms. The Soul's grant.
     pub fn ask_retire(&self, token: &str) -> Result<String, &'static str> {

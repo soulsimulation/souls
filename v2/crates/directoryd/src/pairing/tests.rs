@@ -1260,3 +1260,24 @@ fn w16_scoped_handoff_revokes_creator_preserves_souls_other_world_and_reopens() 
     assert!(p.reconcile_current_authority().is_err());
     assert_eq!(std::fs::read(&file).unwrap(), before);
 }
+
+#[test]
+fn n3707_the_agent_reads_and_clears_its_souls_profile_and_asks_a_retire_by_its_account() {
+    let (p, _) = store();
+    let (token, grant) = pair_in(&p, "acct_owner", "mars");
+    assert_eq!(p.token_owner("not a token"), Err("unknown-token"));
+    assert_eq!(
+        p.token_owner(&token),
+        Ok(("acct_owner".to_owned(), grant.clone()))
+    );
+    p.set_picture("acct_owner", &grant, &png(8, None))
+        .expect("a picture");
+    assert!(p.mine_one("acct_owner", &grant).unwrap().picture.is_some());
+    assert_eq!(p.clear_picture("acct_other", &grant), Err("not-yours"));
+    p.clear_picture("acct_owner", &grant).expect("cleared");
+    assert!(p.mine_one("acct_owner", &grant).unwrap().picture.is_none());
+    assert_eq!(p.ask_retire_of("acct_other", &grant), Err("not-yours"));
+    p.ask_retire_of("acct_owner", &grant).expect("asked");
+    let m = p.mine_one("acct_owner", &grant).unwrap();
+    assert!(m.retire_asked && m.device.is_some(), "only the ask");
+}
