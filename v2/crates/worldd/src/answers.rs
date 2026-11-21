@@ -4711,6 +4711,7 @@ pub fn start<S: Storage + 'static>(
         kept,
         (cfg.lineage, zone, cfg.epoch),
         Arc::clone(&cfg.public_names),
+        Arc::clone(&text),
         std::mem::take(&mut cfg.closed),
     )
     .map_err(io)?;

@@ -760,6 +760,74 @@ fn obj_mut<'a>(v: &'a mut Json, key: &str) -> Option<&'a mut Json> {
 /// argument is at [`AT_ARG`], that thing (returned). A point of this thing named by `at` stays as it is. An argument
 /// not given as a thing is refused `arg-missing`. The two points are added to the copy's points, at its origin, so the
 /// binder knows them; [`Sight`] measures them.
+/// `kinds` (entries by kind) with each form's `create` kind written as `pinned` names it (`<kind>@<hash>`), where it
+/// pins one; any other is left as it is, and its make is refused by name (`name-not-pinned`).
+fn pin_made(kinds: Json, pinned: &[Name]) -> Json {
+    let pin = |k: &str| {
+        pinned
+            .iter()
+            .find(|n| plain(n) == k)
+            .map(|n| n.as_str().to_owned())
+    };
+    let Json::Obj(entries) = kinds else {
+        return kinds;
+    };
+    Json::Obj(
+        entries
+            .into_iter()
+            .map(|(name, mut entry)| {
+                if let Some(Json::Obj(forms)) = obj_mut(&mut entry, "forms") {
+                    for (_, f) in forms.iter_mut() {
+                        if let Some(Json::Arr(effects)) = obj_mut(f, "effects") {
+                            for e in effects.iter_mut() {
+                                let made = (e.get("change").and_then(Json::str) == Some("create"))
+                                    .then(|| e.get("kind").and_then(Json::str).and_then(pin))
+                                    .flatten();
+                                if let (Some(p), Json::Obj(o)) = (made, e) {
+                                    for (k, v) in o.iter_mut() {
+                                        if k == "kind" {
+                                            *v = Json::s(&p);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                (name, entry)
+            })
+            .collect(),
+    )
+}
+
+/// An intent's whole-number arguments split for `form` of `entry`: those it `takes` as an `int` or a `duration` (a
+/// count, a start time) as values, the rest as slot numbers (#3703).
+fn numbers(
+    entry: &Json,
+    form: &str,
+    given: &BTreeMap<String, u64>,
+) -> (skills::form_runner::Args, BTreeMap<String, u64>) {
+    let takes = |k: &str| {
+        entry
+            .get("forms")
+            .and_then(|f| f.get(form))
+            .and_then(|f| f.get("takes"))
+            .and_then(|t| t.get(k))
+            .and_then(|t| t.get("type"))
+            .and_then(Json::str)
+    };
+    let (mut counts, mut slots) = (skills::form_runner::Args::new(), BTreeMap::new());
+    for (k, &n) in given {
+        match (takes(k), i64::try_from(n)) {
+            (Some("count" | "int" | "duration"), Ok(v)) => {
+                drop(counts.insert(k.clone(), skills::form_runner::Arg::Int(v)))
+            }
+            _ => drop(slots.insert(k.clone(), n)),
+        }
+    }
+    (counts, slots)
+}
+
 fn targets(entry: &Json, form: &str, args: &skills::form_runner::Args) -> R<(Json, Option<Id>)> {
     let mut e = entry.clone();
     let mut thing = None;
@@ -924,6 +992,8 @@ impl Acts {
         header: replica::effects::Header,
         scope: Scope,
     ) -> Acts {
+        // A form's `create` names its kind plainly; the world makes it as the header pins it (#3703).
+        let kinds = pin_made(kinds, &header.kinds);
         let mut forms = Forms::new();
         let mut loaded = replica::kinds::Kinds::default();
         for (_, entry) in kinds.obj().unwrap_or(&[]) {
@@ -1185,26 +1255,9 @@ impl Acts {
                 first.get_or_insert(refusal("arg-ambiguous", key));
                 continue;
             }
-            // A number for an argument the form takes as a count or an int is that number, not a slot (#3713).
-            let takes = entry
-                .get("forms")
-                .and_then(|f| f.get(form))
-                .and_then(|f| f.get("takes"));
-            let counted = |k: &String| {
-                matches!(
-                    takes
-                        .and_then(|t| t.get(k))
-                        .and_then(|t| t.get("type"))
-                        .and_then(Json::str),
-                    Some("count" | "int")
-                )
-            };
-            let slots: BTreeMap<String, u64> = args
-                .slots
-                .iter()
-                .filter(|(k, _)| !counted(k))
-                .map(|(k, n)| (k.clone(), *n))
-                .collect();
+            // A whole number the form takes as a `count`, an `int` or a `duration` is that value (#3703, #3713); any
+            // other is a slot of the node by number (C12).
+            let (counts, slots) = numbers(entry, form, &args.slots);
             let mut all = match skills::form_runner::args_in(entry, &args.things, &slots) {
                 Ok(all) => all,
                 Err(e) => {
@@ -1212,14 +1265,8 @@ impl Acts {
                     continue;
                 }
             };
-            for (k, n) in args.slots.iter().filter(|(k, _)| counted(k)) {
-                all.insert(
-                    k.clone(),
-                    skills::form_runner::Arg::Int(i64::try_from(*n).unwrap_or(i64::MAX)),
-                );
-            }
             let mut ambiguous = None;
-            for (key, value) in &args.values {
+            for (key, value) in counts.iter().chain(&args.values) {
                 if all.insert(key.clone(), value.clone()).is_some() {
                     ambiguous = Some(key.clone());
                     break;
@@ -1593,6 +1640,44 @@ mod gateway_walk_tests {
         // A 600 m route is not capped at the old 180 s: 429 s of walking, plus half again.
         assert!(walk_span(600_000, 0) > 600_000_000);
         assert_eq!(walk_span(u64::MAX, usize::MAX), Micros::MAX);
+    }
+}
+
+#[cfg(test)]
+mod number_tests {
+    use super::*;
+
+    /// #3703: a whole number a form takes as an int or a duration is a value; any other names a slot.
+    #[test]
+    fn whole_numbers_a_form_takes_as_counts_are_values_and_others_slots() {
+        let entry = replica::rules::json::parse(
+            r#"{"forms":{"post":{"takes":{"start":{"type":"duration"},"n":{"type":"int"},"spot":{"type":"slot"}}}}}"#,
+        )
+        .expect("an entry");
+        let given = BTreeMap::from([
+            ("start".to_owned(), 1_800_000_000_000_000u64),
+            ("n".to_owned(), 3),
+            ("spot".to_owned(), 2),
+            ("other".to_owned(), 1),
+        ]);
+        let (counts, slots) = numbers(&entry, "post", &given);
+        assert_eq!(
+            counts,
+            skills::form_runner::Args::from([
+                ("n".to_owned(), skills::form_runner::Arg::Int(3)),
+                (
+                    "start".to_owned(),
+                    skills::form_runner::Arg::Int(1_800_000_000_000_000)
+                ),
+            ])
+        );
+        assert_eq!(
+            slots,
+            BTreeMap::from([("other".to_owned(), 1), ("spot".to_owned(), 2)])
+        );
+        // A number past i64 stays a slot number, refused there by name.
+        let huge = BTreeMap::from([("n".to_owned(), u64::MAX)]);
+        assert_eq!(numbers(&entry, "post", &huge).1, huge);
     }
 }
 
