@@ -630,6 +630,91 @@ impl View {
         std::mem::take(&mut self.out.records)
     }
 
+    /// What the view carries from one entry to the next (#3833), its records taken: `{1: last sequence, 2: [[node,
+    /// last kept sample], ...], 3: [transfer that left, ...], 4: [second, entries, live, at]}`, 1 and 4 when it has
+    /// them. A view built at a later state and given this with [`View::carry`] goes on as one fed every entry before.
+    pub fn carried(&self) -> Value {
+        let mut m = vec![
+            (
+                2,
+                Value::Array(
+                    self.kept
+                        .iter()
+                        .map(|(n, at)| Value::Array(vec![n.to_value(), int(*at)]))
+                        .collect(),
+                ),
+            ),
+            (
+                3,
+                Value::Array(self.left.iter().map(|t| t.to_value()).collect()),
+            ),
+        ];
+        if let Some(s) = self.out.position.sequence {
+            m.push((1, Value::Uint(s)));
+        }
+        if let Some(s) = self.second {
+            m.push((
+                4,
+                Value::Array(vec![
+                    int(s.second),
+                    Value::Uint(s.entries),
+                    Value::Uint(s.live),
+                    int(s.at),
+                ]),
+            ));
+        }
+        map(m)
+    }
+
+    /// Takes back what [`View::carried`] gave (#3833).
+    pub fn carry(&mut self, v: &Value) -> R<()> {
+        let bad = || Refusal {
+            name: "view-carried",
+            detail: "not what a view carries".into(),
+        };
+        let read_int = |v: &Value| match v {
+            Value::Uint(u) => i64::try_from(*u).ok(),
+            Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+            _ => None,
+        }
+        .ok_or_else(bad);
+        let Value::Map(m) = v else { return Err(bad()) };
+        let sequence = match m.get(&1) {
+            None => None,
+            Some(Value::Uint(s)) => Some(*s),
+            Some(_) => return Err(bad()),
+        };
+        let (Some(Value::Array(kept)), Some(Value::Array(left))) = (m.get(&2), m.get(&3)) else {
+            return Err(bad());
+        };
+        let kept = kept
+            .iter()
+            .map(|row| match row {
+                Value::Array(p) if p.len() == 2 => Ok((read_id(&p[0])?, read_int(&p[1])?)),
+                _ => Err(bad()),
+            })
+            .collect::<R<BTreeMap<Id, Micros>>>()?;
+        let left = left.iter().map(read_id).collect::<R<BTreeSet<Id>>>()?;
+        let second = match m.get(&4) {
+            None => None,
+            Some(Value::Array(p)) => match p.as_slice() {
+                [s, Value::Uint(entries), Value::Uint(live), at] => Some(Second {
+                    second: read_int(s)?,
+                    entries: *entries,
+                    live: *live,
+                    at: read_int(at)?,
+                }),
+                _ => return Err(bad()),
+            },
+            Some(_) => return Err(bad()),
+        };
+        self.out.position.sequence = sequence;
+        self.kept = kept;
+        self.left = left;
+        self.second = second;
+        Ok(())
+    }
+
     /// The view so far (rule 2). A counts view's current second is its last record until a later second closes it.
     pub fn output(&self) -> Output {
         let mut out = self.out.clone();
