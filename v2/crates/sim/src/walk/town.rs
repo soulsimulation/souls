@@ -714,9 +714,18 @@ impl Town {
 
     /// The corner `body`'s line aims at next: the node it was searched on and x and z there, µm (read only).
     pub fn next_corner(&self, body: Id) -> Option<(Id, [i64; 2])> {
+        self.next_corner_toward(body).map(|(node, c, _)| (node, c))
+    }
+
+    /// [`Town::next_corner`] with the leg's end the line goes toward, x and z µm in the same node's frame: what C21's
+    /// stall watch measures a walk's progress against (a route with crossings has a leg's end short of its goal).
+    /// `None` for the leg's end of a line forgotten on a planner's thread (`Lines::forget`: aimed at no point), whose
+    /// kept corner is still given.
+    pub fn next_corner_toward(&self, body: Id) -> Option<(Id, [i64; 2], Option<[i64; 2]>)> {
         let i = self.lines.binary_search_by_key(&body, |e| e.0).ok()?;
         let l = &self.lines[i].1;
-        Some((l.node, *l.points.get(l.next)?))
+        let to = (l.to.x != i64::MIN).then_some([l.to.x, l.to.z]);
+        Some((l.node, *l.points.get(l.next)?, to))
     }
 
     /// Off the clock thread: the ground as `part` leaves the tree `base` (a copy of this town's, as it stands when
