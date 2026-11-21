@@ -1496,7 +1496,12 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
                 now,
             );
             let how = match started {
-                Err(r) => Err(r.name.to_owned()),
+                Err(r) => {
+                    if r.detail.starts_with("need ") {
+                        println!("NEEDS {label}: {} {}", r.name, r.detail);
+                    }
+                    Err(r.name.to_owned())
+                }
                 Ok(sim::forms::Asked::Applied(_)) => Ok("done".to_owned()),
                 Ok(sim::forms::Asked::Started(run) | sim::forms::Asked::Running(run)) => {
                     let due = acts.forms.due(run).unwrap_or(now) + 1_000_000;
