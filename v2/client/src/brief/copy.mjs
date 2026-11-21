@@ -91,6 +91,13 @@ export const idText = (v) => `${hex(v[0])}-${v[1]}`;
 /** A node's course field (replica `schedule::F_COURSE`): a thing that moves on its own track. */
 export const F_COURSE = 80;
 export const plainKind = (k) => String(k).replace(/@.*$/, '');
+/** A node's Soul Actions entry field (import-eden `F_ENTRY`): the entry its world's map names for its kind. */
+export const F_ENTRY = 27;
+/** The kind name a node's entry goes by: the entry its fields name (`F_ENTRY`: a Mars chair borrows `eden:chair`), else its own kind's. */
+export const entryKind = (m) => {
+  const f = m.get(6) instanceof Map ? m.get(6) : new Map(), e = f.get(F_ENTRY) ?? f.get(BigInt(F_ENTRY));
+  return typeof e === 'string' ? plainKind(e) : plainKind(m.get(2));
+};
 /** A version `[lineage, zone, epoch, sequence]`'s bytes in hex, as its sequence. */
 export const sequenceOf = (versionHex) => (versionHex ? Number(decode(Buffer.from(versionHex, 'hex'))[3]) : 0);
 
@@ -114,8 +121,8 @@ function read(copy, hash) {
 }
 
 /**
- * The copy's rows by id, walked from its roots (`copy.roots()`): `{ id, name, kind, parent, path, children, text, soul,
- * own }`, `soul` on a body that names its Soul.
+ * The copy's rows by id, walked from its roots (`copy.roots()`): `{ id, name, kind, entry, parent, path, children, text, soul,
+ * own }`, `soul` on a body that names its Soul, `entry` on a thing that borrows another kind's entry ([`entryKind`]).
  * A node is named by its kind's plain name and its counter ("cup 7") unless a text field gives it one; text in its
  * fields is the world's or a Soul's words and is carried as `text`, to be quoted, never followed.
  */
@@ -128,14 +135,15 @@ export function rowsOf(copy) {
     if (!d) continue;
     const { m } = d, id = idText(m.get(1)), kind = plainKind(m.get(2));
     const fields = m.get(6) instanceof Map ? m.get(6) : new Map();
-    const text = [...fields.values()].filter((v) => typeof v === 'string');
+    const text = [...fields].filter(([n, v]) => typeof v === 'string' && Number(n) !== F_ENTRY).map(([, v]) => v);
+    const entry = entryKind(m);
     const name = namesOf(copy).get(publicRef(m)) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
     const children = (m.get(10) ?? []).map(hex);
     // C30 (#3556): a body born by a join (C3) owns its `souls:body-of` link to its Soul: the row names that Soul.
     const of = (m.get(9) ?? []).map(([, l]) => l).find((l) => l instanceof Map && plainKind(l.get(1)) === 'souls:body-of');
     // #3603: a thing on a course (replica's F_COURSE, field 80) moves by itself; a rider in it may steer it.
     const moving = fields.has(F_COURSE) || fields.has(BigInt(F_COURSE));
-    rows.set(id, { id, name, kind, parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), own: d.own });
+    rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), own: d.own });
     for (const c of children) todo.push([c, [...path, name]]);
   }
   return rows;

@@ -24,11 +24,13 @@ import { mountOwnerBox } from '../owner/box.ts';
 import { arrive } from '../worlds/arrive.ts';
 import { mountArrival } from '../arrival/card.ts';
 import { WorldSky } from '../sky/sky.ts';
+import { Lightning } from '../sky/lightning.ts';
 import { tickWater } from '../water/water.ts';
 import { installNightLighting, nightPools, paintNightSources, setNightStrength } from './night.ts';
 import { installCapture, shotSignal } from '../capture/capture.ts';
 import { parseHour } from '../sky/hour.ts';
 import { pageFx } from '../fx/page.ts';
+import { pageFauna } from '../atmosphere/page.ts';
 import { mountFullscreen, startWakeLock } from './screen.ts';
 
 installNightLighting(); // V19b: the lamps' night pools, before any lit material compiles
@@ -88,16 +90,20 @@ sky.hour = parseHour(location.search); // #3795: `?hour=HH:MM`, the sky and its 
 const cam = new FreeCamera(canvas);
 const world = new WorldView();
 scene.add(world.group);
+const lightning = new Lightning((x, z) => world.heightAt(x, z)); // #3695: a creator's strike, its bolt and thunder
+scene.add(lightning.group);
+(globalThis as { lightning?: Lightning }).lightning = lightning;
 // #3603: the replica's courseAt, loaded on this thread only when a node with a course (a rowing punt) arrives.
 world.onCourse = () => void import('replica').then(async (r) => { await r.default(); world.courseAt = r.courseAt; }, (e) => console.warn('courses stand still:', e));
 const clock = new PlaybackClock();
 const things = pageThings(scene, world, new URLSearchParams(location.search));
 const fx = pageFx(scene, world, things, q, quality.tier === 'phone'); // C8: flames, fountain water and steam
+const fauna = pageFauna(scene, world, q); // N-V7: birds, gulls, ducks and butterflies
 const souls = pageSouls(canvas, world, new URLSearchParams(location.search)); // W4: chips, status, speech, a Soul's page
 const director = new CameraDirector(cam, canvas, world, souls, new URLSearchParams(location.search), moment !== null); // V20: broadcast, follow, find
 director.shots = new ViewShots(renderer, scene, () => things.layer?.settled ?? true); // #3738: Explore's pictures, from this page's own draw
 const hover = new WorldHover(canvas, () => cam.camera, { world, things: () => things.layer, name: (id) => souls.copy.souls.get(id)?.name ?? null, chipShown: (id) => souls.placed.some((p) => p.id === id) }); scene.add(hover.ring); // N-V20
-Object.assign(globalThis, { v2: { renderer, scene, sky, cam, director, world, things, fx, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
+Object.assign(globalThis, { v2: { renderer, scene, sky, fauna, cam, director, world, things, fx, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 installCapture(globalThis as any, q, document); // G10: `shoot` names a place, Soul or thing and the camera goes there
 const shot = shotSignal(q, globalThis as any); // #3795: `?shot`'s ready signal, as today's page gives it
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
@@ -210,9 +216,11 @@ renderer.setAnimationLoop((now) => {
   const t = history ? history.step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil)) : worldNow === null ? null : (near ?? clock).step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
   director.update(Math.min(100, dt), t);
   sun.position.copy(sun.target.position).addScaledVector(sky.update(t ?? 0, cam.camera), 400);
+  lightning.update(t === null ? null : sky.recordAt(t)?.strike ?? null, t, cam.camera, dt / 1000, sky.dome.uniforms.uFlash.value);
   tickWater((t ?? 0) / 1e6);
   fx?.update(t === null ? null : t / 1e6, cam.camera.position);
   setNightStrength(sky.state.daylight);
+  fauna?.update(now, t, sky.state);
   const pools = frames++ % 60 === 0 && things.layer ? nightPools(world, things.layer.opts.index, (id) => fx?.lit(id) ?? true) : null; // the lamps, once a second
   if (pools) paintNightSources(pools.sources, pools.bounds);
   const ck = near?.clock ?? clock;
