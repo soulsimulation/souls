@@ -3,9 +3,10 @@
 // as `replica::sky::Calendar::local` reads it: civil µs = origin + world µs · 86,400 / day length (rounded down), plus
 // the zone's offset in force. Nothing here reads the page's clock.
 
-/** E6's field numbers: the calendar (60–62), how the sky is drawn (66–68, V19c #3521: the month and day it is drawn
- *  on, the palette, the morning mist), the light (70, 71) and the weather (75–79). */
-export const F = { dayS: 60, origin: 61, offsets: 62, skyDate: 66, palette: 67, mist: 68, light: 70, lightNext: 71, weather: 75, cloud: 76, rain: 77, wind: 78, weatherNext: 79 } as const;
+/** E6's field numbers: the calendar (60–62), how the sky is drawn (88–90, V19c #3521: the month and day it is drawn
+ *  on, the palette, the morning mist; the clock's mapping holds 66–68), the creator's last strike (69, #3695), the
+ *  light (70, 71) and the weather (75–79). */
+export const F = { dayS: 60, origin: 61, offsets: 62, skyDate: 88, palette: 89, mist: 90, strike: 69, light: 70, lightNext: 71, weather: 75, cloud: 76, rain: 77, wind: 78, weatherNext: 79 } as const;
 const KEYS = Object.values(F);
 const DAY_US = 86_400_000_000;
 
@@ -41,6 +42,8 @@ export type SkyRecord = {
   skyDate: [number, number] | null;
   palette: string | null;
   mist: [number, number, number] | null;
+  /** #3695: the creator's last lightning strike, `[x mm, z mm, world µs]` on the open ground, or null. */
+  strike: [number, number, number] | null;
 };
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -58,6 +61,12 @@ const mist = (v: unknown): [number, number, number] | null => {
   return p !== null && h !== null && s !== null && p >= 0 && p < DAY_US && h > 0 && s >= 0 && s <= 100 ? [p, h, s] : null;
 };
 
+const strike = (v: unknown): [number, number, number] | null => {
+  if (!Array.isArray(v) || v.length !== 3) return null;
+  const [x, z, at] = v.map(num);
+  return x !== null && z !== null && at !== null ? [x, z, at] : null;
+};
+
 /** The record's sky, or null before the world node holds its calendar. A world with a calendar and no weather yet
  *  reads clear (levels 0). */
 export function readSky(f: SkyFields): SkyRecord | null {
@@ -69,7 +78,7 @@ export function readSky(f: SkyFields): SkyRecord | null {
     light: text(f[F.light]), lightNext: num(f[F.lightNext]),
     weather: text(f[F.weather]), cloud: num(f[F.cloud]) ?? 0, rain: num(f[F.rain]) ?? 0, wind: num(f[F.wind]) ?? 0,
     weatherNext: num(f[F.weatherNext]),
-    skyDate: pair(f[F.skyDate]), palette: text(f[F.palette]), mist: mist(f[F.mist]),
+    skyDate: pair(f[F.skyDate]), palette: text(f[F.palette]), mist: mist(f[F.mist]), strike: strike(f[F.strike]),
   };
 }
 
