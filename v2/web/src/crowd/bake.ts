@@ -125,6 +125,24 @@ export const MADE: Readonly<Record<string, { base: string; seconds: number; turn
   Bow: { base: 'Idle', seconds: 1, turns: [['Abdomen', 0.15], ['Torso', 0.2], ['Chest', 0.2], ['Neck', 0.2]] },
 };
 
+/** Clips laid out here (#3791): today's lying pose, a library clip's first frame held (`clip-library.ts`: `LayToIdle`
+ *  for a lie or nap), turned and moved as `humans.ts` lays it: the hips over the body's point, the head along its back
+ *  (local -z, so a body lies down where it stood, facing up the way it faced). */
+export const LAID: Readonly<Record<string, string>> = { Lie: 'LayToIdle' };
+
+/** The turn and shift that lay a frame out: the hips to the origin in x and z, the head from them along -z. */
+function layout(bones: THREE.Bone[]): THREE.Matrix4 {
+  const at = (names: string[]) => {
+    const b = names.map((n) => bones.find((x) => x.name === n)).find((x) => x);
+    return b ? b.getWorldPosition(new THREE.Vector3()) : null;
+  };
+  const hips = at(['Hips', 'Pelvis']), head = at(['Head', 'Neck', 'Chest']);
+  if (!hips || !head) return new THREE.Matrix4();
+  const turn = new THREE.Matrix4().makeRotationY(Math.PI - Math.atan2(head.x - hips.x, head.z - hips.z));
+  const h = hips.clone().applyMatrix4(turn);
+  return new THREE.Matrix4().makeTranslation(-h.x, 0, -h.z).multiply(turn);
+}
+
 const _q = new THREE.Quaternion(), _r = new THREE.Quaternion(), _x = new THREE.Vector3(1, 0, 0);
 
 /** Turns `bones` by `made`'s turns at `k` (0..1) of their full lean, each about the world x axis at its own joint. */
@@ -151,24 +169,29 @@ export function bakeModel(name: string, gltf: GLTF, animations: THREE.AnimationC
   const rows: Float32Array[] = [];
   const m = new THREE.Matrix4();
   for (const want of clipNames) {
-    const made = THREE.AnimationClip.findByName(animations, want) ? undefined : MADE[want];
-    const src = THREE.AnimationClip.findByName(animations, made ? made.base : want);
+    const own = THREE.AnimationClip.findByName(animations, want);
+    const laid = own ? undefined : LAID[want];
+    const made = own || laid ? undefined : MADE[want];
+    const src = THREE.AnimationClip.findByName(animations, laid ?? (made ? made.base : want));
     if (!src) throw new Error(`${name}: no clip ${want}`);
     const clip = inPlace(src, skeleton);
-    const seconds = made ? made.seconds : clip.duration;
-    const frames = Math.max(2, Math.round(seconds * BAKE_FPS));
+    const seconds = made ? made.seconds : laid ? 1 : clip.duration;
+    const frames = laid ? 2 : Math.max(2, Math.round(seconds * BAKE_FPS));
+    let lay: THREE.Matrix4 | null = null;
     clips.push({ name: want, start: rows.length, frames, seconds });
     mixer.stopAllAction();
     const action = mixer.clipAction(clip);
     action.play();
     const rest = new Map<THREE.Bone, THREE.Quaternion>();
     for (let f = 0; f < frames; f++) {
-      mixer.setTime(made ? 0 : (f / frames) * clip.duration);
+      mixer.setTime(made || laid ? 0 : (f / frames) * clip.duration);
       if (made) turn(made, skeleton.bones, Math.sin((Math.PI * f) / (frames - 1)), gltf.scene, rest);
       gltf.scene.updateMatrixWorld(true);
+      if (laid) lay ??= layout(skeleton.bones);
       const row = new Float32Array(bones * 12);
       skeleton.bones.forEach((b, i) => {
         m.multiplyMatrices(b.matrixWorld, skeleton.boneInverses[i]);
+        if (lay) m.premultiply(lay);
         const e = m.elements; // column-major; rows 0..2 go out as three texels
         row.set([e[0], e[4], e[8], e[12], e[1], e[5], e[9], e[13], e[2], e[6], e[10], e[14]], i * 12);
       });
