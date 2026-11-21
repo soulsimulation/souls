@@ -231,6 +231,7 @@ renderer.setAnimationLoop((now) => {
   if (t !== null) {
     drawn = world.draw(t, cam.camera);
     things.follow(); // #3603: what rides a course, where it is now
+    things.drawKinds(t); // #3871: things drawn from their kinds, in their state now
     hover.update(now, t);
     if (!framed && drawn > 0) {
       framed = true;
