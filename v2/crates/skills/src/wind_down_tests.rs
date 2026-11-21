@@ -152,7 +152,7 @@ fn a1_a3_a4_silent_soul_wanders_walks_out_lies_down_and_sleeps() {
 
 fn read_phase(e: &Effect) -> Phase {
     match e.events.as_ref().unwrap()[0].fields.get(&1) {
-        Some(Value::Text(t)) => Phase::read(t.as_str()).unwrap(),
+        Some(Value::Uint(n)) => Phase::from_code(*n).unwrap(),
         _ => panic!("no phase"),
     }
 }

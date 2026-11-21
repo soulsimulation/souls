@@ -40,6 +40,22 @@ fn run(b: &mut Bodies, from: i64, to: i64) -> Vec<String> {
                 "A3"
             );
             assert!(wind_down::read(&e).is_some());
+            // It is a record the log takes: a part holding it reads back (every text in it a name).
+            let part = replica::encode::Value::Map(std::collections::BTreeMap::from([
+                (
+                    1,
+                    replica::encode::Value::Bytes(
+                        replica::ids::Hash::of(replica::ids::Purpose::Fixture, b"b16").to_bytes(),
+                    ),
+                ),
+                (2, replica::encode::Value::Array(vec![e.to_value()])),
+            ]));
+            let bytes = replica::encode::encode(&part).unwrap();
+            assert!(
+                replica::effects::Part::read(&bytes).is_ok(),
+                "{:?}",
+                replica::effects::Part::read(&bytes).err()
+            );
             names.extend(
                 e.events
                     .unwrap()

@@ -113,16 +113,24 @@ impl Phase {
             Phase::Woken => "woken",
         }
     }
-    fn read(s: &str) -> Option<Phase> {
-        [
-            Phase::Wander,
-            Phase::Leg,
-            Phase::Zombie,
-            Phase::Asleep,
-            Phase::Woken,
-        ]
-        .into_iter()
-        .find(|p| p.as_str() == s)
+    const ALL: [Phase; 5] = [
+        Phase::Wander,
+        Phase::Leg,
+        Phase::Zombie,
+        Phase::Asleep,
+        Phase::Woken,
+    ];
+    /// Its number in a record: 1 wander, 2 leg, 3 zombie, 4 asleep, 5 woken.
+    pub fn code(self) -> u64 {
+        Phase::ALL
+            .iter()
+            .position(|p| *p == self)
+            .map_or(0, |i| i as u64 + 1)
+    }
+    pub fn from_code(n: u64) -> Option<Phase> {
+        Phase::ALL
+            .get(usize::try_from(n.checked_sub(1)?).ok()?)
+            .copied()
     }
 }
 
@@ -597,11 +605,11 @@ fn read_int(v: &Value) -> Option<i64> {
 }
 
 /// The record of one move: cause and actor the world, node the body, and one event named for the body's word after it
-/// ([`EVENTS`]), carrying the rule's state `{1: phase, 3: last, 4: wander, 5: zombie, 6: [x, z] spot}` (4, 5 and 6
+/// ([`EVENTS`]), carrying the rule's state `{1: phase (its [`Phase::code`]), 3: last, 4: wander, 5: zombie, 6: [x, z] spot}` (4, 5 and 6
 /// left out when none). A woken body's record is `souls:awake` with phase `woken`.
 pub fn record(o: &Order, s: &State, at: Micros, sequence: u64) -> Effect {
     let mut f = BTreeMap::new();
-    f.insert(1, Value::Text(name(o.phase.as_str())));
+    f.insert(1, Value::Uint(o.phase.code()));
     f.insert(3, int(s.last));
     if let Some(w) = s.wander {
         f.insert(4, int(w));
@@ -644,7 +652,7 @@ pub fn read(e: &Effect) -> Option<(Id, State)> {
         .find(|v| EVENTS.contains(&v.name.as_str()))?;
     let f = &ev.fields;
     let phase = match f.get(&1)? {
-        Value::Text(t) => Phase::read(t.as_str())?,
+        Value::Uint(n) => Phase::from_code(*n)?,
         _ => return None,
     };
     let spot = match f.get(&6) {
