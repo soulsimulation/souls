@@ -106,6 +106,9 @@ web_steps() {
 # The page's pose (V7, #2716): a body's bones as a function of its record and time, the same at 30 and 144 frames a
 # second, in any order and in a fresh process, with the hand on its contact point (web/src/pose/pose.test.ts).
 step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test web/src/pose/*.test.ts web/src/source/signin.test.ts web/src/crowd/creature/creature.test.ts'
+# #3871: things drawn from their kinds' entries: state by field number, timed values, today's looks cases, every
+# content kind's shape (web/src/kinds/*.test.ts).
+step web-kinds node --test web/src/kinds/*.test.ts web/kind-entries.test.ts
 # B15: acquire only the released inputs and exercise the actual prepared artifact, after the locked page dependencies.
 step body-presets bash -c 'node tools/import-body/prepare.mjs --out .local/ci-body-assets --test'
 # The words path (V1b, #3361): a local world's said sentence, and a body's name and description, through the page's
