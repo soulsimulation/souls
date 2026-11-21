@@ -3392,6 +3392,17 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
         if projected.is_empty() {
             let mut found = None;
             find_node(player.state(), &balloon.to_value(), &mut found);
+            if let Value::Map(m) = player.state()
+                && let Some(Value::Array(ns)) = m.get(&2)
+            {
+                println!("public nodes: {}", ns.len());
+                for n in ns.iter().take(400) {
+                    let t = format!("{n:?}");
+                    if t.contains("alloon") || t.contains("counter: 5786") {
+                        println!("node: {}", &t[..t.len().min(1500)]);
+                    }
+                }
+            }
             let shown = format!("{found:?}");
             println!(
                 "the balloon in the baseline: {}",
