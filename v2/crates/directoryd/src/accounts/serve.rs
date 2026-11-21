@@ -287,8 +287,8 @@ fn handle(mut stream: TcpStream, app: &App) {
                     v => (status, "application/json", text(&v), note),
                 }
             });
-    // The world list may be cached a short while (W3, #2799); everything else is no-store.
-    let list = req.method == "GET" && req.path == "/v1/worlds" && status == 200;
+    // The public world list may be cached a short while (W3, #2799); a signed-in one and everything else is no-store.
+    let list = req.method == "GET" && req.path == "/v1/worlds" && status == 200 && req.bearer.is_none();
     let cache = if list {
         crate::worlds::list::http::CACHE
     } else {

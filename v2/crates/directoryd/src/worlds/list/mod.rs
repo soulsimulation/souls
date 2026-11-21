@@ -15,7 +15,8 @@
 //! 6. **A world's settings** (W9, #2827), today's two owner switches, by its creator alone: `unlisted` takes the row
 //!    off the list (the row's flag alone: it wakes no world), and `closed` closes it to visitors (today's one travel
 //!    switch; it refuses nothing until travel exists, X9). Each is a field of the row, written on condition of the
-//!    version read, and the list shows it from this machine's copy at once.
+//!    version read, and the list shows it from this machine's copy at once. An unlisted world stays on its own
+//!    creator's list, signed in ([`Worlds::list_for`], #3698), and on nobody else's.
 //! 7. **The list's picture** (G10, #2800), set by the creator with the settings, from a shot: it passes G6's check
 //!    and hold point with [`PICTURE_BYTES`] and [`PICTURE_SIDE`], is kept stripped of metadata, and is one field of
 //!    the world's row, `picture`, a `data:` URL; a row without one lists `picture: null`.
@@ -255,10 +256,29 @@ impl<S: Store> Worlds<S> {
     /// The list (rule 1): every world's row, with whether it is awake by this machine's cached directory, and the
     /// templates a world may be made from.
     pub fn list(&self) -> R<Json> {
+        self.list_for(None)
+    }
+
+    /// The list as `viewer` sees it (#3698): the public list, and with a signed-in viewer also the unlisted worlds
+    /// that viewer created, each still marked `unlisted`. Nobody else's unlisted world is in it.
+    pub fn list_for(&self, viewer: Option<Id>) -> R<Json> {
         // Locks are taken in one order, the directory then the cached copy.
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let (_, mut rows) = read_rows(&inner.dir.store)?;
-        rows.retain(|r| r.get("unlisted") != Some(&Json::Bool(true)) && archive::active(r).is_ok());
+        let (_, rows) = read_rows(&inner.dir.store)?;
+        let mut kept = Vec::with_capacity(rows.len());
+        for r in rows {
+            if archive::active(&r).is_err() {
+                continue;
+            }
+            let shown = r.get("unlisted") != Some(&Json::Bool(true))
+                || viewer.is_some_and(|v| {
+                    handoff::ownership(&inner.dir.store, &r).is_ok_and(|o| o.creator == Some(v))
+                });
+            if shown {
+                kept.push(r);
+            }
+        }
+        let mut rows = kept;
         for row in &mut rows {
             handoff::public_row(row);
             let awake = (|| {

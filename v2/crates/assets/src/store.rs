@@ -4,7 +4,10 @@
 //! - **By reference (T8, `v2/docs/audience.md` rule 6):** an upload is kept apart under a minted reference, and a thing
 //!   names it as `{21: id}`. The record says which bytes, by their `souls/upload/1` hash; the bytes are kept once
 //!   per hash. Removing deletes the bytes and lists the reference for redaction (W9's button).
-//! - **A record's state** is allowed, held or removed. Only an allowed upload is served or placed.
+//! - **A record's state** is allowed, held, hidden or removed. Only an allowed upload is served or placed.
+//! - **Hide and show (#3698):** the world's creator hides an allowed upload: it stops being served and placed, and its
+//!   bytes and reference are kept, so showing it again makes it allowed as before. Only an allowed upload is hidden
+//!   and only a hidden one shown (`upload.not-allowed`, `upload.not-hidden`); a held upload waits for its release.
 //! - **Per world:** at most [`WorldLimits::default`]'s 10,000 uploads and 2 GB, refused by name.
 //! - **The upload call** is the creator's, as G1's gate checks an edit (`upload.not-the-creator`): one call takes the
 //!   file and answers with the reference or the refusal. Check (in a child), hold point, store.
@@ -28,6 +31,8 @@ pub enum State {
     Allowed,
     /// Kept, neither served nor placeable until released; the hold point's reason.
     Held(String),
+    /// Hidden by the world's creator: kept, neither served nor placeable until shown again.
+    Hidden,
     Removed,
 }
 
@@ -175,6 +180,42 @@ impl Store {
             hash,
             state,
         })
+    }
+
+    /// The creator hides an allowed upload (see the module's notes); answers its record.
+    pub fn hide(&mut self, actor: Actor, reference: Id) -> Result<&Record, Refused> {
+        self.switch(actor, reference, State::Allowed, State::Hidden, "upload.not-allowed")
+    }
+
+    /// The creator shows a hidden upload again; answers its record.
+    pub fn show(&mut self, actor: Actor, reference: Id) -> Result<&Record, Refused> {
+        self.switch(actor, reference, State::Hidden, State::Allowed, "upload.not-hidden")
+    }
+
+    fn switch(
+        &mut self,
+        actor: Actor,
+        reference: Id,
+        from: State,
+        to: State,
+        code: &'static str,
+    ) -> Result<&Record, Refused> {
+        if actor != Actor::Creator(self.creator) {
+            return refuse(
+                "upload.not-the-creator",
+                None,
+                None,
+                "only the world's creator hides or shows its uploads".into(),
+            );
+        }
+        let Some(r) = self.records.get_mut(&reference) else {
+            return refuse("upload.missing", None, None, format!("no upload {reference:?}"));
+        };
+        if r.state != from {
+            return refuse(code, None, None, format!("upload {reference:?} is {:?}", r.state));
+        }
+        r.state = to;
+        Ok(r)
     }
 
     pub fn record(&self, reference: Id) -> Option<&Record> {
