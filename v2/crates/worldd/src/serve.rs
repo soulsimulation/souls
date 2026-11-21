@@ -1951,6 +1951,7 @@ fn serve(args: &[String]) -> R<()> {
         record: stream_record,
         checkpoint: stream_checkpoint,
         text: stream_text,
+        names: stream_names,
         clock_seed: stream_clock,
         ..
     } = public_start;
@@ -2018,6 +2019,7 @@ fn serve(args: &[String]) -> R<()> {
                     record: stream_record,
                     checkpoint: stream_checkpoint,
                     text: stream_text,
+                    names: stream_names,
                     clock_seed: stream_clock,
                     history: Some(&*stream_found),
                 };
