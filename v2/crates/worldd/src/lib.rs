@@ -7,6 +7,7 @@ pub mod acts;
 pub mod answers;
 pub mod bodies;
 pub mod buildsafe;
+pub mod carrier;
 pub mod checkers;
 pub mod directory;
 mod edit_places;

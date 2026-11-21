@@ -5,6 +5,7 @@
 # never by the install. The install starts nothing. A world whose entries folder is missing or empty fails at start
 # (#3760): its paired clients would get none of its kinds.
 [Unit]
+ConditionPathExists=!/etc/souls/placement-data/archived/%i
 Description=Souls gateway for world %i
 After=network-online.target
 Wants=network-online.target

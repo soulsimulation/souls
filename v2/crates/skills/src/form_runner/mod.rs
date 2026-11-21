@@ -407,6 +407,7 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
+    approach_in_areas(entry, &mut bound)?;
     if let Some((_, slot)) = stand_in(entry, f, args)? {
         bound.push(Step::Sit {
             slot,
@@ -418,6 +419,44 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
         bound.insert(0, Step::Rise);
     }
     Ok(bound)
+}
+
+/// An area is a place to be in, not a point to act from (C34, #3599): a move at a point of the thing right after a walk
+/// to one of its areas first walks, within that area, to that point (the planner stops within reach of it), as
+/// today's game walks to the stand point nearest the hand's point before it acts. The added walk keeps the area's name,
+/// so the world plans it on the area's own room and floor, and aims at the move's point.
+fn approach_in_areas(entry: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal> {
+    let is_area = |n: &Name| entry.get("areas").and_then(|a| a.get(n.as_str())).is_some();
+    let mut k = 1;
+    while k < bound.len() {
+        if let (
+            Step::WalkTo {
+                point: area,
+                on: None,
+                ..
+            },
+            Step::Move {
+                at: Some(p),
+                on: None,
+                ..
+            },
+        ) = (&bound[k - 1], &bound[k])
+            && is_area(area)
+            && area != p
+        {
+            // The point across the floor, at the area's height: the floor is the area's.
+            let (to, floor) = (point(entry, p.as_str())?, point(entry, area.as_str())?);
+            let step = Step::WalkTo {
+                point: area.clone(),
+                at: Vec3::new(to.x, floor.y, to.z),
+                on: None,
+            };
+            bound.insert(k, step);
+            k += 1;
+        }
+        k += 1;
+    }
+    Ok(())
 }
 
 /// Whether slot `slot` of the kind `entry` is a standing slot (C33, #3598): it admits a body and names no posture

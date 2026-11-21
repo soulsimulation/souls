@@ -109,7 +109,7 @@ fn pending(world: &str, value: &Json) -> R<Pending> {
 
 pub(super) fn public_row(row: &mut Json) {
     if let Some(o) = row.as_object_mut() {
-        for key in [OFFER, PENDING, USED, GENERATION] {
+        for key in [OFFER, PENDING, USED, GENERATION, archive::FIELD] {
             o.remove(key);
         }
     }
@@ -158,6 +158,7 @@ impl<S: Store> Worlds<S> {
                     name: "world-missing",
                     detail: "world not found".into(),
                 })?;
+            archive::active(row)?;
             if ownership(&inner.dir.store, row)?.creator != Some(who) {
                 return refuse("not-the-creator", "only the current creator");
             }
@@ -179,6 +180,7 @@ impl<S: Store> Worlds<S> {
                     name: "world-missing",
                     detail: "world not found".into(),
                 })?;
+            archive::active(row)?;
             if ownership(&inner.dir.store, row)?.creator != Some(who) {
                 return refuse("not-the-creator", "only the current creator");
             }
@@ -216,6 +218,7 @@ impl<S: Store> Worlds<S> {
                     name: "world-missing",
                     detail: "world not found".into(),
                 })?;
+            archive::active(row)?;
             let authority = ownership(&inner.dir.store, row)?;
             if let Some(p) = row.get(PENDING) {
                 let p = pending(world, p)?;
@@ -280,6 +283,7 @@ impl<S: Store> Worlds<S> {
                     name: "world-missing",
                     detail: "world not found".into(),
                 })?;
+            archive::active(row)?;
             ownership(&inner.dir.store, row)?;
             if pending(
                 &p.world,
@@ -291,6 +295,7 @@ impl<S: Store> Worlds<S> {
             {
                 return refuse("handoff-stale", "acceptance changed");
             }
+            row.as_object_mut().unwrap().remove(archive::FIELD);
             row["creator"] = json!(principal_text(p.creator));
             row[GENERATION] = json!(p.generation);
             row[USED] = json!(p.hash);

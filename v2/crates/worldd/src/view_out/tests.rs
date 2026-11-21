@@ -19,6 +19,8 @@ use std::process::Command;
 thread_local! {
     /// Replays with the whole-state reference path instead of the tree-reading one (#3667's regression).
     pub(super) static WHOLE_STATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// How many whole-tree projections the public writer's idle has made (#3603).
+    pub(super) static IDLE_PROJECTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 fn header() -> Header {
@@ -1184,6 +1186,98 @@ fn w3e_compare_transfer_queries(public: &PublicPlayer, canonical: &Replica, auth
     }
 }
 
+/// #3574 under #3571's rule: a text file carries the dictionary words of the name references of public nodes only,
+/// each verified against its hash; a private node's name, a wrong dictionary entry and an unknown hash add nothing.
+#[test]
+fn public_place_names_beside_public_nodes_only_and_hash_verified() {
+    use replica::ids::sha256;
+    let h = header();
+    let mut actual = Replica::restored(
+        h.clone(),
+        replica::tree::Tree::start(h.zone, h.kinds[0].clone()),
+        0,
+    );
+    let d = scratch("public-names");
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let names = Arc::new(crate::views::names::PublicNames::from([
+        (sha256(b"Plaza"), "Plaza".to_string()),
+        (sha256(b"West lake"), "West lake".to_string()),
+        (sha256(b"Secret garden"), "Secret garden".to_string()),
+        (sha256(b"Harbour"), "not the harbour".to_string()),
+    ]));
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: None,
+            names: Some(Arc::clone(&names)),
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let owner = Id::new(Scope([93; 16]), 1).unwrap();
+    let named = |seq: u64, n: u64, audience: Audience, name: &[u8]| {
+        let node = Id::new(Scope([94; 16]), n).unwrap();
+        let mut e = w3e_create(&h, seq, node, h.zone, audience);
+        if let Body::Changes(changes) = &mut e.body
+            && let Change::Create { fields, .. } = &mut changes[0].change
+        {
+            fields.insert(4, Value::Bytes(sha256(name).to_vec()));
+        }
+        e
+    };
+    let bytes = w3e_packet(
+        &h,
+        vec![
+            named(0, 1, Audience::Everyone, b"West lake"),
+            named(1, 2, Audience::Everyone, b"Plaza"),
+            named(2, 3, Audience::Of(owner), b"Secret garden"),
+            named(3, 4, Audience::Everyone, b"Harbour"),
+            named(4, 5, Audience::Everyone, b"Nowhere"),
+        ],
+    );
+    actual.apply_bytes(&bytes).unwrap();
+    out.push(0, &bytes).unwrap();
+    out.flush().unwrap();
+    let text = fs::read(out.generation_dir().join("0.text")).unwrap();
+    let Value::Array(text) = decode(&text).unwrap().value else {
+        panic!("text")
+    };
+    let mut want = [
+        (sha256(b"Plaza"), "Plaza"),
+        (sha256(b"West lake"), "West lake"),
+    ];
+    want.sort();
+    assert_eq!(
+        text,
+        want.iter()
+            .map(|(k, w)| Value::Array(vec![
+                Value::Bytes(k.to_vec()),
+                Value::Bytes(w.as_bytes().to_vec())
+            ]))
+            .collect::<Vec<_>>(),
+        "only verified names of public nodes"
+    );
+    // The baseline's text is the same words of the public state (`PublicWriter::words` of the player's state).
+    let state = project(&h, &actual.tree().to_state()).unwrap();
+    assert_eq!(
+        public_names(&state, &names)
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        want.iter().map(|(k, _)| *k).collect::<Vec<_>>()
+    );
+    // The private node's name is in the source but never in the public projection's names.
+    assert!(!public_names(&state, &names).contains_key(&sha256(b"Secret garden")));
+}
+
 #[test]
 fn w3e_exact_imported_root_frontier_queries_and_whole_part_refusal() {
     let mut value = if let Value::Map(m) = header().to_value() {
@@ -1228,6 +1322,7 @@ fn w3e_exact_imported_root_frontier_queries_and_whole_part_refusal() {
             record: 0,
             checkpoint: Some(cp),
             text: Some(words),
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -1509,6 +1604,7 @@ fn w3e_public_and_private_root_flights_return_settle_arrive_and_duplicate_events
                     record: 2,
                     checkpoint: Some(cp),
                     text: None,
+                    names: None,
                     clock_seed: None,
                     history: None,
                 },
@@ -1610,6 +1706,7 @@ fn w3e_public_and_private_root_flights_return_settle_arrive_and_duplicate_events
                     record: 3,
                     checkpoint: Some(newer),
                     text: None,
+                    names: None,
                     clock_seed: None,
                     history: None,
                 },
@@ -1711,6 +1808,7 @@ fn w3e_public_and_private_root_flights_return_settle_arrive_and_duplicate_events
                         record: 5,
                         checkpoint: Some(cp),
                         text: None,
+                        names: None,
                         clock_seed: None,
                         history: None,
                     },
@@ -1787,6 +1885,7 @@ fn w3e_store_only_restart_preserves_old_bytes_cursor_and_live_reader() {
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -1821,6 +1920,7 @@ fn w3e_store_only_restart_preserves_old_bytes_cursor_and_live_reader() {
             record: 1,
             checkpoint: Some(cp),
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -1918,6 +2018,7 @@ fn w3e_complete_query_bytes_keep_nonzero_restored_baseline_and_untouched_node_ve
             record: 1,
             checkpoint: Some(cp),
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2060,6 +2161,7 @@ fn w3e_legacy_terminal_inside_source_part_keeps_exact_private_remainder() {
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: Some(&history),
         },
@@ -2092,6 +2194,7 @@ fn w3e_legacy_terminal_inside_source_part_keeps_exact_private_remainder() {
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2157,6 +2260,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2190,6 +2294,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2217,6 +2322,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2245,6 +2351,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2269,6 +2376,7 @@ fn w3e_publication_interruptions_and_corrupt_or_missing_recovery_never_publish_f
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         },
@@ -2303,6 +2411,7 @@ fn w3e_first_durable_mapping_timers_and_pending_slowdown_remain_authoritative() 
             record: 0,
             checkpoint: Some(cp),
             text: None,
+            names: None,
             clock_seed: Some(mapping),
             history: None,
         },
@@ -2487,6 +2596,7 @@ fn w3e_older_eligible_checkpoint_and_takeover_aware_original_source_bridge_legac
         record: 1,
         checkpoint: Some(newer),
         text: None,
+        names: None,
         clock_seed: None,
         history: Some(&history),
     };
@@ -2607,6 +2717,7 @@ fn w3e_bootstrap_source_diagnostics_name_missing_changed_header_and_part() {
             record: 0,
             checkpoint: Some(checkpoint.clone()),
             text: None,
+            names: None,
             clock_seed: None,
             history: None,
         }
@@ -2737,6 +2848,7 @@ fn replay_output(whole_state: bool) -> Vec<u8> {
             record: 0,
             checkpoint: None,
             text: None,
+            names: None,
             clock_seed: None,
             history: Some(&history),
         },
@@ -2815,6 +2927,120 @@ fn replay_output(whole_state: bool) -> Vec<u8> {
     all
 }
 
+/// #3603: a still world costs no projection per idle, and a change the world makes by itself (a field set by the world,
+/// no Soul's act) is never passed by the pointer's quiet time: it is published once its stretch settles, and the world
+/// is said to be still again only after it. Before, idle projected the whole tree on every call (about 170 ms on full
+/// Eden, every 20 ms), so a loaded writer fell behind the log and claimed quiet past what it had not read.
+#[test]
+fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_quiet() {
+    let h = header();
+    let d = scratch("still-at");
+    let views = d.join("views");
+    let real = 1_000_000_000_000;
+    let mapping = Mapping::new(0, real, 1, 1).unwrap();
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: None,
+            names: None,
+            clock_seed: Some(mapping),
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let thing = Id::new(Scope([58; 16]), 1).unwrap();
+    let first = w3e_packet(
+        &h,
+        vec![
+            w3e_effect(
+                0,
+                h.zone,
+                Audience::Everyone,
+                Body::Time(vec![TimeEffect::Mapping(mapping)]),
+            ),
+            w3e_create(&h, 1, thing, h.zone, Audience::Everyone),
+        ],
+    );
+    actual.apply_bytes(&first).unwrap();
+    out.push(0, &first).unwrap();
+    out.flush().unwrap();
+    let quiet = |out: &PublicWriter<_>| {
+        Pointer::read(&fs::read(out.dir.join(POINTER)).unwrap())
+            .unwrap()
+            .quiet_until
+    };
+    let projections = || tests::IDLE_PROJECTIONS.get();
+    // Still: the first idle projects once; the next ones only move the quiet time on.
+    let before = projections();
+    out.idle(real + 2_000_000).unwrap();
+    out.idle(real + 3_000_000).unwrap();
+    out.idle(real + 4_000_000).unwrap();
+    assert_eq!(
+        projections() - before,
+        1,
+        "one projection while nothing changes"
+    );
+    assert_eq!(quiet(&out), Some(4_000_000 - SETTLE_US));
+    // The world sets a field on the thing by itself at 5 s: no Soul, no intent.
+    let mut changed = w3e_effect(
+        2,
+        thing,
+        Audience::Everyone,
+        Body::Changes(vec![ChangeRec {
+            change: Change::Set {
+                node: thing,
+                field: 40,
+                to: Value::Uint(7),
+                by: None,
+            },
+            rest: Rest::new(),
+        }]),
+    );
+    changed.envelope.at = 5_000_000;
+    let world = w3e_packet(&h, vec![changed]);
+    actual.apply_bytes(&world).unwrap();
+    out.push(1, &world).unwrap();
+    // Before its stretch settles, quiet stays where it was: never past the change it has not published.
+    out.idle(real + 5_100_000).unwrap();
+    assert_eq!(quiet(&out), Some(4_000_000 - SETTLE_US));
+    assert_eq!(out.public_player().next(), 1, "not yet cut");
+    // Settled: the change is published, then the world is still again from there.
+    out.idle(real + 7_000_000).unwrap();
+    assert_eq!(
+        out.public_player().next(),
+        2,
+        "the world's change is a part"
+    );
+    assert_eq!(
+        out.public_player().state(),
+        &project(&h, &actual.tree().to_state()).unwrap()
+    );
+    let after = projections();
+    out.idle(real + 8_000_000).unwrap();
+    out.idle(real + 9_000_000).unwrap();
+    assert!(
+        projections() - after <= 1,
+        "still again: at most one projection"
+    );
+    assert_eq!(quiet(&out), Some(9_000_000 - SETTLE_US));
+    let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
+    for n in 0..2 {
+        reader
+            .play(&fs::read(out.generation_dir().join(n.to_string())).unwrap())
+            .unwrap();
+    }
+    assert_eq!(reader.state(), out.public_player().state());
+}
+
 /// #3822: parts played deferred (no digest worked out each) make the same state as parts played checked, and one
 /// `verify` refuses a deferred run whose state is not the one the newest part claims.
 #[test]
@@ -2826,6 +3052,7 @@ fn i3822_deferred_parts_make_the_checked_state_and_a_wrong_one_is_refused_once_v
     let mut actual = Replica::start(h.stored()).unwrap();
     let mut out = PublicWriter::open(
         PublicStart {
+            names: None,
             root: &views,
             header: &h,
             key: key(&h),
@@ -2953,6 +3180,7 @@ fn i3825_run(tag: &str, records: u64, restarts: &[u64], grace: Duration) -> I382
     let open = || {
         let mut w = PublicWriter::open(
             PublicStart {
+                names: None,
                 root: &views,
                 header: &h,
                 key: key(&h),

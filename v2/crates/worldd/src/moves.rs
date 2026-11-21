@@ -28,7 +28,7 @@ const OWN: [&str; 3] = [
 ];
 
 /// Every file of `content/moves`, by name. A test holds this list to the folder (`tests/content_moves.rs`).
-pub const CONTENT: [(&str, &str); 26] = [
+pub const CONTENT: [(&str, &str); 27] = [
     ("bow", include_str!("../../../../content/moves/bow.json")),
     (
         "cheer",
@@ -79,6 +79,10 @@ pub const CONTENT: [(&str, &str); 26] = [
     (
         "slump",
         include_str!("../../../../content/moves/slump.json"),
+    ),
+    (
+        "steer",
+        include_str!("../../../../content/moves/steer.json"),
     ),
     (
         "stretch",
