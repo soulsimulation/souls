@@ -13,11 +13,11 @@
 // DIRECTORYD, or v2/target/release). Fake minds; an isolated folder under the OS temp dir, removed at the end.
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { createServer as netServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { request } from '../../client/src/daemon/client.mjs';
 import { runtimeOf } from '../../client/src/home/home.mjs';
@@ -146,7 +146,16 @@ try {
   await pause(3000);
   say(`after begin, B's inspect: ${JSON.stringify(await B.cli('inspect', table.id)).slice(0, 3000)}`);
 
-  // The public stream, as the page's worker plays it.
+  // The public stream, as the page's worker plays it: the world's folder as the origin serves a placed world.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.protocol === 'file:') return new Response(readFileSync(url), { headers: { 'content-type': 'application/wasm' } });
+    if (url.host !== 'local') return realFetch(input, init);
+    const file = normalize(join(world, decodeURIComponent(url.pathname).replace(/^\/w\/eden\//, '')));
+    if (!file.startsWith(world) || !existsSync(file) || !statSync(file).isFile()) return new Response(null, { status: 404 });
+    return new Response(readFileSync(file));
+  };
   const named = JSON.parse(readFileSync(join(world, 'views/world.json'), 'utf8'));
   const stream = new URL(named.stream.replace(/\/?$/, '/'), 'http://local/w/eden/').href;
   const nodes = new Map(), errors = [];
