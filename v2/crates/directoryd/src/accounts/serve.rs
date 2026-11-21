@@ -84,10 +84,34 @@ pub fn now() -> u64 {
 
 /// Serves until the listener fails.
 pub fn run(listener: TcpListener, app: Arc<App>) {
+    if configure_current_authority(&app).is_err() {
+        eprintln!("directoryd: refusing to serve: world-authority-unavailable");
+        return;
+    }
     for stream in listener.incoming().flatten() {
         let app = app.clone();
         std::thread::spawn(move || handle(stream, &app));
     }
+}
+
+/// Startup wiring: the registry stays read-only; weak ownership avoids a callback cycle.
+pub fn configure_current_authority(app: &Arc<App>) -> Result<(), String> {
+    let Some(pairing) = &app.pairing else {
+        return Ok(());
+    };
+    if pairing.requires_world_authority() {
+        if app.worlds.is_none() {
+            return Err("world-authority-required".into());
+        }
+        let weak = Arc::downgrade(app);
+        pairing.current_owner_reader(Arc::new(move |world| {
+            let app = weak.upgrade().ok_or("world-authority-unavailable")?;
+            let worlds = app.worlds.as_ref().ok_or("world-authority-required")?;
+            worlds.ownership(world).map_err(|e| e.name.to_owned())
+        }))?;
+        pairing.reconcile_current_authority()?;
+    }
+    Ok(())
 }
 
 pub struct Request {
@@ -441,12 +465,18 @@ fn prayer_json(p: &super::prayers::Prayer) -> Value {
 
 /// The worlds a creator grant is the creator of, by the list of worlds when there is one ([`super::prayers::creator_worlds`]).
 fn creator_worlds_of(grant: &str, app: &App) -> Option<Vec<String>> {
-    let rows = app
-        .worlds
-        .as_ref()
-        .and_then(|w| w.creators().ok())
-        .unwrap_or_default();
-    super::prayers::creator_worlds(grant, &rows)
+    let Some(worlds) = &app.worlds else {
+        return super::prayers::creator_worlds(grant, &[]);
+    };
+    let rows = worlds.creators().ok()?;
+    let scope = super::prayers::scope_of(grant, "creator")?;
+    let principal = format!("{scope}:{}", grant.rsplit('-').next()?);
+    Some(
+        rows.into_iter()
+            .filter(|(_, owner)| owner == &principal)
+            .map(|(lineage, _)| lineage)
+            .collect(),
+    )
 }
 
 /// A prayer request from the gateway (G11): the socket's own frame and grant. Always a 200 whose body is the reply the
@@ -570,6 +600,10 @@ fn route(req: &Request, app: &App) -> (u16, Value, String) {
         ("GET" | "POST", "/v1/worlds") => return crate::worlds::list::http::route(req, app),
         ("POST", "/v1/worlds/settings") => return crate::worlds::list::http::settings(req, app),
         ("POST", "/v1/account/now") => return now_read(req, app),
+        (
+            "POST",
+            "/v1/worlds/handoff/offer" | "/v1/worlds/handoff/cancel" | "/v1/worlds/handoff/accept",
+        ) => return crate::worlds::list::http::handoff(req, app),
         ("POST", "/v1/account/session") => who(req, app, false),
         ("POST", "/v1/account/test-sign-in") if app.test_sign_in => who(req, app, true),
         ("POST", "/v1/account/view-token" | "/v1/account/sign-out") => {
@@ -611,10 +645,19 @@ fn route(req: &Request, app: &App) -> (u16, Value, String) {
         return refuse(404, "no-view-key");
     };
     let owned = match app.store.grants(&a.account) {
-        Ok(g) if !g.is_empty() => g,
+        Ok(g) if !g.is_empty() => g
+            .into_iter()
+            .filter(|(grant, _)| {
+                !grant.starts_with("creator-")
+                    || creator_worlds_of(grant, app).is_some_and(|worlds| !worlds.is_empty())
+            })
+            .collect::<Vec<_>>(),
         Ok(_) => return refuse(404, "nothing-owned"),
         Err(_) => return refuse(500, "store"),
     };
+    if owned.is_empty() {
+        return refuse(404, "nothing-owned");
+    }
     let expires = now() + VIEW_TTL_S;
     let grants: Vec<String> = owned.iter().map(|(g, _)| g.clone()).collect();
     let owned: Vec<Value> = owned
@@ -853,5 +896,122 @@ mod account_transport_tests {
             assert!(!rates.allow(one, path, 100));
         }
         assert!(rates.allow(one, "/v1/agent/account/login", 160));
+    }
+}
+
+#[cfg(test)]
+mod w16_current_account_tests {
+    use super::*;
+    #[test]
+    fn w16_view_and_prayers_use_current_owner_preserving_ordinary_soul() {
+        use crate::directory::store::{Memory, Store as ObjectStore, When};
+        use crate::worlds::{create::NameRecord, list::Worlds};
+        use replica::{
+            encode::{Name, to_hex},
+            ids::{Id, Scope},
+        };
+        let memory: &'static (dyn ObjectStore + Send + Sync) =
+            Box::leak(Box::new(Memory::default()));
+        let accounts = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let a = accounts.sign_in(TEST_ISSUER, "first", 0).unwrap();
+        let b = accounts.sign_in(TEST_ISSUER, "next", 0).unwrap();
+        let old = super::super::view::grant_text("creator", a.principal);
+        let new = super::super::view::grant_text("creator", b.principal);
+        let soul = super::super::view::grant_text("soul", Id::new(Scope([5; 16]), 0).unwrap());
+        accounts.own(&a.account, &old, None).unwrap();
+        accounts.own(&a.account, &soul, None).unwrap();
+        accounts.own(&b.account, &new, None).unwrap();
+        let name = NameRecord {
+            name: "eden".into(),
+            lineage: [6; 16],
+            zone: Id::new(Scope([7; 16]), 0).unwrap(),
+            creator: a.principal,
+            source: [8; 16],
+        };
+        memory
+            .put(
+                &NameRecord::key("eden"),
+                &name.to_bytes().unwrap(),
+                When::Absent,
+            )
+            .unwrap();
+        memory.put(crate::worlds::list::KEY,&serde_json::to_vec(&json!({"worlds":[{"name":"eden","lineage":to_hex(&name.lineage),"zone":super::super::principal_text(name.zone),"creator":super::super::principal_text(a.principal)}]})).unwrap(),When::Absent).unwrap();
+        let app = App {
+            store: accounts,
+            verifier: None,
+            test_sign_in: true,
+            view_key: Some(ViewKey::new(&[1; 32])),
+            origin: None,
+            mailbox_key: None,
+            pairing: None,
+            log: Mutex::new(Box::new(std::io::sink())),
+            worlds: Some(Worlds::new(
+                crate::directory::Directory::new(memory, Name::new("fixture").unwrap()),
+                std::collections::BTreeMap::new(),
+                Box::new(|_| Ok(())),
+            )),
+        };
+        let request = |who: &str| Request {
+            method: "POST".into(),
+            path: "/v1/account/view-token".into(),
+            bearer: None,
+            soul: None,
+            body: json!({"name":who}).to_string().into_bytes(),
+        };
+        assert_eq!(
+            route(&request("first"), &app).1["owned"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        let worlds = app.worlds.as_ref().unwrap();
+        let offer_request = Request {
+            method: "POST".into(),
+            path: "/v1/worlds/handoff/offer".into(),
+            bearer: Some("test:first".into()),
+            soul: None,
+            body: json!({"world":"eden"}).to_string().into_bytes(),
+        };
+        let (status, code, _) = route(&offer_request, &app);
+        assert_eq!(status, 200, "an existing reserved world may be handed over");
+        let invalid = Request {
+            body: json!({"world":"../eden"}).to_string().into_bytes(),
+            ..offer_request
+        };
+        assert_eq!(route(&invalid, &app).0, 400, "syntax is still rejected");
+        let p = worlds
+            .begin_handoff(
+                "eden",
+                code["code"].as_str().unwrap(),
+                &b.account,
+                b.principal,
+                11,
+            )
+            .unwrap();
+        assert!(creator_worlds_of(&old, &app).unwrap().is_empty());
+        assert!(creator_worlds_of(&new, &app).unwrap().is_empty());
+        let pending = route(&request("first"), &app);
+        assert_eq!(pending.0, 200);
+        assert_eq!(pending.1["owned"], json!([{"grant":soul,"follow":null}]));
+        worlds.finish_handoff(&p).unwrap();
+        assert!(creator_worlds_of(&old, &app).unwrap().is_empty());
+        assert_eq!(
+            creator_worlds_of(&new, &app).unwrap(),
+            vec![to_hex(&name.lineage)]
+        );
+        assert_eq!(
+            route(&request("first"), &app).1["owned"],
+            pending.1["owned"]
+        );
+        assert_eq!(
+            route(&request("next"), &app).1["owned"],
+            json!([{"grant":new,"follow":null}])
+        );
+        assert_eq!(
+            app.store.grants(&a.account).unwrap().len(),
+            2,
+            "global grant history was not deleted"
+        );
     }
 }

@@ -187,9 +187,12 @@ jobs:
           channel=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
           rustup toolchain install "$channel" --profile minimal --no-self-update
           cargo --version
+      # Every v2 leg restores the one cache (about 7.6 GB of the repo's 10 GB, so no cache per leg); only the rust leg,
+      # which builds most of the workspace's dependencies, saves it, on a miss, after its checks (below).
       - name: Restore cargo cache
+        id: cargo-cache
         if: matrix.kind == 'v2'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry/index
@@ -228,6 +231,7 @@ jobs:
       - name: Run assigned checks
         env:
           CHECK_KIND: ${{ matrix.kind }}
+          V2_LEG: ${{ matrix.leg }}
           SERVER_SHARD: ${{ matrix.shard }}
           GOD_SKILL: ${{ matrix.godSkill || false }}
         shell: bash
@@ -302,7 +306,7 @@ jobs:
               ;;
             v2)
               # Engine v2 (K15, #2637): not a gate step; picked by ci-scope.mjs from its own paths
-              bash v2/tools/ci.sh
+              bash v2/tools/ci.sh "$V2_LEG"
               ;;
             server)
               # The server shard, then (on the shard with `godSkill`, ci-scope.mjs) the god-skill unit tests, replay
@@ -325,6 +329,16 @@ jobs:
               ;;
             *) echo "unknown check kind: $CHECK_KIND"; exit 1 ;;
           esac
+      - name: Save cargo cache
+        if: matrix.kind == 'v2' && matrix.leg == 'rust' && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            v2/target
+          key: v2-cargo-${{ runner.os }}-${{ hashFiles('v2/rust-toolchain.toml', 'v2/Cargo.lock') }}
       - name: Retain synthetic join failure diagnostics
         if: failure() && matrix.kind == 'v2'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
