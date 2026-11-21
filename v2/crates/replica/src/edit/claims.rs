@@ -7,10 +7,11 @@
 //!
 //! - **District plans** ([`F_DISTRICTS`]): `[[id, title, plots, roads, chapters], ...]`; a plot is
 //!   `[id, x, z, width, depth, yaw]` with an optional use name, a road `[id, width, [x, z, x, z, ...]]`, a chapter a
-//!   list of plot ids. Ids and titles are names. At most [`DISTRICTS_MOST`] plans, [`PLOTS_MOST`] plots and
+//!   list of plot ids. Ids, titles and uses are names as every text in an effect is (`namespace:name`, lowercase:
+//!   `d:market`, `title:market-quarter`, `p:a`, `use:bakery`, `road:main`); the creator's command adds the prefixes. At most [`DISTRICTS_MOST`] plans, [`PLOTS_MOST`] plots and
 //!   [`ROADS_MOST`] roads a plan, [`ROAD_POINTS_MOST`] points a road (today's limits). A malformed plan is refused
 //!   `edit.district-malformed`.
-//! - **Claims** ([`F_CLAIMS`]): `[[id, part, x0, z0, x1, z1], ...]`, at most [`CLAIMS_MOST`], none overlapping,
+//! - **Claims** ([`F_CLAIMS`]): `[[id, part, x0, z0, x1, z1], ...]` (`c:house`, `part:roof`), at most [`CLAIMS_MOST`], none overlapping,
 //!   else `edit.claim-malformed`. Releasing a claim is setting the field without it.
 //!
 //! The claim check, in [`super::check`] before the safety rule: an edit sent under a claim (its parameter 2) touches
@@ -92,8 +93,18 @@ fn list<'a>(v: &'a Value, what: &str, most: usize) -> Result<&'a [Value], String
     }
 }
 
+/// Every text in `v` is a name an effect may carry (`namespace:name`), else what is not.
+fn names_only(v: &Value) -> Result<(), String> {
+    crate::effects::not_a_name(v).map_or(Ok(()), |t| {
+        Err(format!(
+            "{t:?} is not a name like c:house (lowercase namespace:name)"
+        ))
+    })
+}
+
 /// The claims a field value holds, checked: names, areas, the limit, no id twice, no overlap.
 pub fn read_claims(v: &Value) -> Result<Vec<Claim>, String> {
+    names_only(v)?;
     let mut out: Vec<Claim> = Vec::new();
     for row in list(v, "claims", CLAIMS_MOST)? {
         let Value::Array(r) = row else {
@@ -127,6 +138,7 @@ pub fn read_claims(v: &Value) -> Result<Vec<Claim>, String> {
 
 /// Checks a field value as district plans (see the module's notes).
 pub fn read_districts(v: &Value) -> Result<(), String> {
+    names_only(v)?;
     let mut ids = BTreeSet::new();
     for d in list(v, "district plans", DISTRICTS_MOST)? {
         let Value::Array(d) = d else {
@@ -415,7 +427,7 @@ mod tests {
         let ops = vec![Op::Remove {
             node: Ref::Node(Id::new(crate::ids::Scope([1; 16]), 2).expect("an id")),
         }];
-        let c = Name::new("c_house").expect("a name");
+        let c = Name::new("c:house").expect("a name");
         let p = parameters_under(&ops, Some(&c));
         assert_eq!(read(&p).expect("a batch"), ops);
         assert_eq!(claim(&p).expect("a claim"), Some(c));

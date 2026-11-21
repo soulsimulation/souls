@@ -308,7 +308,10 @@ pub fn parameters_under(ops: &[Op], claim: Option<&Name>) -> BTreeMap<u64, Value
 pub fn claim(parameters: &BTreeMap<u64, Value>) -> R<Option<Name>> {
     match parameters.get(&CLAIM) {
         None => Ok(None),
-        Some(Value::Text(n)) if !n.as_str().is_empty() && n.as_str().len() <= 64 => {
+        Some(Value::Text(n))
+            if n.as_str().len() <= 64
+                && crate::effects::not_a_name(&Value::Text(n.clone())).is_none() =>
+        {
             Ok(Some(n.clone()))
         }
         Some(_) => Err("an edit's claim is a name".into()),

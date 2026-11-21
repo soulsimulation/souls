@@ -696,7 +696,7 @@ fn a2_an_edit_under_a_claim_stays_inside_it_and_others_stay_out() {
         .expect("room");
     // The lead claims x 0..10 mm, z -10..10 mm for the house; a room inside it is placed under the claim.
     let v = w.live.version();
-    let claims = Value::Array(vec![claim_row("c_house", "house", [0, -10, 10, 10])]);
+    let claims = Value::Array(vec![claim_row("c:house", "part:house", [0, -10, 10, 10])]);
     w.edit(w.creator(), v, vec![set_root(w.root, F_CLAIMS, claims)])
         .expect("claimed");
     let v = w.live.version();
@@ -705,7 +705,7 @@ fn a2_an_edit_under_a_claim_stays_inside_it_and_others_stay_out() {
             w.creator(),
             v,
             vec![place(1, &room, Ref::Node(w.root), spot(5_000, None))],
-            Some("c_house"),
+            Some("c:house"),
         )
         .expect("inside the claim");
     let built = inside.names[&1];
@@ -717,11 +717,11 @@ fn a2_an_edit_under_a_claim_stays_inside_it_and_others_stay_out() {
             w.creator(),
             v,
             vec![place(1, &room, Ref::Node(w.root), spot(20_000, None))],
-            Some("c_house"),
+            Some("c:house"),
         )
         .expect_err("outside");
     assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
-    assert!(r.detail.contains("c_house (house)"), "{}", r.detail);
+    assert!(r.detail.contains("c:house (part:house)"), "{}", r.detail);
     // Moving the claimed room out, and writing the world's own fields, are outside too.
     let r = w
         .edit_under(
@@ -731,7 +731,7 @@ fn a2_an_edit_under_a_claim_stays_inside_it_and_others_stay_out() {
                 node: Ref::Node(built),
                 at: spot(20_000, None),
             }],
-            Some("c_house"),
+            Some("c:house"),
         )
         .expect_err("moved out");
     assert_eq!(r.name, "edit.outside-claim");
@@ -740,7 +740,7 @@ fn a2_an_edit_under_a_claim_stays_inside_it_and_others_stay_out() {
             w.creator(),
             v,
             vec![set_root(w.root, F_CLAIMS, Value::Array(vec![]))],
-            Some("c_house"),
+            Some("c:house"),
         )
         .expect_err("the root");
     assert_eq!(r.name, "edit.outside-claim");
@@ -768,7 +768,7 @@ fn a2_an_edit_under_a_claim_stays_inside_it_and_others_stay_out() {
             w.creator(),
             v,
             vec![place(1, &room, Ref::Node(w.root), spot(5_000, None))],
-            Some("c_gone"),
+            Some("c:gone"),
         )
         .expect_err("unknown");
     assert_eq!((r.op, r.name), (None, "edit.claim-unknown"));
@@ -803,7 +803,7 @@ fn a2_an_edit_under_a_claim_stays_inside_it_and_others_stay_out() {
             other,
             v,
             vec![place(1, &room, Ref::Node(w.root), spot(5_000, None))],
-            Some("c_house"),
+            Some("c:house"),
         )
         .expect_err("not the creator");
     assert_eq!(r.name, "edit.not-the-creator");
@@ -823,35 +823,41 @@ fn a1_a2_plans_and_claims_are_checked_before_they_are_recorded() {
             mm(20_000),
             mm(15_000),
             mm(0),
-            text("bakery"),
+            text("use:bakery"),
         ])
     };
     let road = Value::Array(vec![
-        text("main"),
+        text("road:main"),
         mm(6_000),
         Value::Array(vec![mm(-50_000), mm(-20_000), mm(50_000), mm(-20_000)]),
     ]);
     let plan = |plots: Vec<Value>, chapters: Vec<Value>| {
         Value::Array(vec![Value::Array(vec![
-            text("market"),
-            text("Market-quarter"),
+            text("d:market"),
+            text("title:market-quarter"),
             Value::Array(plots),
             Value::Array(vec![road.clone()]),
             Value::Array(chapters),
         ])])
     };
     let good = plan(
-        vec![plot("a", 0), plot("b", 30_000)],
-        vec![Value::Array(vec![text("a")]), Value::Array(vec![text("b")])],
+        vec![plot("p:a", 0), plot("p:b", 30_000)],
+        vec![
+            Value::Array(vec![text("p:a")]),
+            Value::Array(vec![text("p:b")]),
+        ],
     );
     w.edit(w.creator(), v, vec![set_root(w.root, F_DISTRICTS, good)])
         .expect("recorded");
     let v = w.live.version();
     for (bad, why) in [
-        (plan(vec![plot("a", 0), plot("a", 30_000)], vec![]), "twice"),
+        (
+            plan(vec![plot("p:a", 0), plot("p:a", 30_000)], vec![]),
+            "twice",
+        ),
         (plan(vec![], vec![]), "no plots"),
         (
-            plan(vec![plot("a", 0)], vec![Value::Array(vec![text("z")])]),
+            plan(vec![plot("p:a", 0)], vec![Value::Array(vec![text("p:z")])]),
             "unknown",
         ),
     ] {
@@ -862,8 +868,8 @@ fn a1_a2_plans_and_claims_are_checked_before_they_are_recorded() {
         assert!(r.detail.contains(why), "{}", r.detail);
     }
     let overlap = Value::Array(vec![
-        claim_row("c_1", "north", [0, 0, 10, 10]),
-        claim_row("c_2", "south", [5, 5, 20, 20]),
+        claim_row("c:1", "part:north", [0, 0, 10, 10]),
+        claim_row("c:2", "part:south", [5, 5, 20, 20]),
     ]);
     let r = w
         .edit(w.creator(), v, vec![set_root(w.root, F_CLAIMS, overlap)])
@@ -871,7 +877,7 @@ fn a1_a2_plans_and_claims_are_checked_before_they_are_recorded() {
     assert_eq!((r.op, r.name), (Some(0), "edit.claim-malformed"), "{r:?}");
     let nine = Value::Array(
         (0..9)
-            .map(|i| claim_row(&format!("c_{i}"), "p", [i * 10, 0, i * 10 + 5, 5]))
+            .map(|i| claim_row(&format!("c:n{i}"), "part:p", [i * 10, 0, i * 10 + 5, 5]))
             .collect(),
     );
     let r = w
