@@ -1141,6 +1141,35 @@ async fn g7b_standalone_metadata_creator_still_edits_without_a_directory() {
     );
 }
 
+/// #3923: BUILDSAFE on a served world, in CI (N2's test world, no Eden facts): a wall where a Soul stands is refused
+/// `edit.would-bury` by the record's creator, and the same wall beside it commits.
+#[tokio::test(flavor = "multi_thread")]
+async fn g1e_buildsafe_refuses_a_wall_on_a_standing_soul_on_the_test_world() {
+    let d = scratch("g1e-buildsafe");
+    let w = seed(&d, &testworld::generate(1, 0).unwrap().text, 1, (-40, 30));
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc0);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    s.line("listening ", 60);
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 1, 0, wall(&w, -40 * M, 30 * M)),
+    )
+    .await;
+    println!("a wall where the Soul stands: {got:?}");
+    assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, got.version, wall(&w, -30 * M, 30 * M)),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "a wall where no Soul stands commits: {got:?}");
+}
+
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'
 /// places east of the row (x0 + 44 to x0 + 50 m), all on the open ground.
 fn clear_row(text: &str) -> (i64, i64) {
