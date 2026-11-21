@@ -3183,27 +3183,39 @@ impl Clock {
     }
 
     /// Numbers and applies what the forms wrote (F2's log hook: each entry handed back as logged), then answers the
-    /// intents whose runs ended.
+    /// intents whose runs ended. One part for the tick; when the world refuses it, each intent's entries go in a part
+    /// of their own, and an act whose entries are refused is refused by that name, its run left and nothing of it
+    /// written.
     fn write_forms(&mut self, now: Micros) {
         let mut effects = self.forms.out();
         if let Some(e) = self.engine.as_mut() {
             effects.extend(e.out());
         }
-        if !effects.is_empty() {
-            for (k, e) in effects.iter_mut().enumerate() {
-                e.envelope.sequence = self.replica.version() + k as u64;
-            }
-            match sim::commit::write(&mut self.replica, &effects) {
-                Ok(part) => {
-                    self.unsealed = true;
-                    for e in &part.effects {
-                        self.forms.forms.logged(e);
-                    }
-                    self.receipts.index(&part.effects);
-                    self.effects.extend(part.effects.iter().cloned());
-                    self.parts.push(part);
+        if !effects.is_empty() && self.commit_forms(effects.clone()).is_err() {
+            let mut groups: Vec<(Option<Id>, Vec<Effect>)> = Vec::new();
+            for e in effects {
+                let of = match e.envelope.cause {
+                    Cause::Intent(id) => Some(id),
+                    _ => None,
+                };
+                match groups.iter_mut().find(|(g, _)| *g == of) {
+                    Some((_, g)) => g.push(e),
+                    None => groups.push((of, vec![e])),
                 }
-                Err(r) => eprintln!("worldd: a form's entries were not written: {r}"),
+            }
+            for (of, group) in groups {
+                let Err(r) = self.commit_forms(group.clone()) else {
+                    continue;
+                };
+                eprintln!("worldd: a form's entries were not written: {r}");
+                self.forms.unwritten(&group);
+                let Some(o) = of.and_then(|id| self.open.get(&id).map(|o| (id, o))) else {
+                    continue;
+                };
+                let (id, actor, sequence, body) = (o.0, o.1.actor, o.1.sequence, o.1.body);
+                self.forms
+                    .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+                self.end(id, |c| c.refusal(actor, sequence, r.name));
             }
         }
         for id in std::mem::take(&mut self.engine_done) {
@@ -3227,6 +3239,23 @@ impl Clock {
         for (id, how, why) in self.forms.ended() {
             self.form_ended(id, how, why, now);
         }
+    }
+
+    /// `effects` numbered from the replica's next sequence and applied as one part, each handed to the forms as
+    /// logged; or the world's refusal, nothing written.
+    fn commit_forms(&mut self, mut effects: Vec<Effect>) -> R<()> {
+        for (k, e) in effects.iter_mut().enumerate() {
+            e.envelope.sequence = self.replica.version() + k as u64;
+        }
+        let part = sim::commit::write(&mut self.replica, &effects)?;
+        self.unsealed = true;
+        for e in &part.effects {
+            self.forms.forms.logged(e);
+        }
+        self.receipts.index(&part.effects);
+        self.effects.extend(part.effects.iter().cloned());
+        self.parts.push(part);
+        Ok(())
     }
 
     /// A form's run started (C20, #3469): its act's deadline becomes the run's own, its start plus its steps' span
