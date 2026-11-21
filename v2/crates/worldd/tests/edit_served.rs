@@ -1454,14 +1454,14 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
 mod k18d;
 
 /// An undo or a redo (or a build's step), as souls-god sends it (#3694).
-fn asked_intent(w: &Seeded, actor: Actor, sequence: u64, asked: &Asked) -> Vec<u8> {
+fn asked_intent(w: &Seeded, actor: Actor, sequence: u64, planned: u64, asked: &Asked) -> Vec<u8> {
     let i = Intent {
         actor,
         verb: Name::new(VERB).unwrap(),
         target: None,
         parameters: parameters_of(asked),
         sequence,
-        basis: basis(w.root.scope(), 0),
+        basis: basis(w.root.scope(), planned),
         expiry: i64::MAX,
         resources: Vec::new(),
         fallbacks: Vec::new(),
@@ -1485,10 +1485,12 @@ async fn g4_undo_and_redo_on_the_wire_and_buildsafe_refuses_an_undo_onto_a_soul(
     s.line("listening ", 60);
     let (url, tokens) = gateway(&socket, &[creator]).await;
     let mut ws = sign_in(&url, &tokens[0]).await;
-    let mut sequence = 0;
+    let (mut sequence, mut version) = (0, 0);
     let mut go = async |ws: &mut Ws, asked: Asked| {
         sequence += 1;
-        send(ws, asked_intent(&w, creator, sequence, &asked)).await.0
+        let got = send(ws, asked_intent(&w, creator, sequence, version, &asked)).await.0;
+        version = got.version;
+        got
     };
 
     // Nothing to undo or redo yet.
