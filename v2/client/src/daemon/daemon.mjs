@@ -100,11 +100,14 @@
 //   and G7's (#2796), for a world's creator (a `creator-` token), the world's kinds text from `<home>/kinds/<world>.kinds`:
 //     {"op":"describe"}                   the copy's nodes (id, kind, parent) and what each kind admits
 //     {"op":"check","ops":[...]}          G1's checks of a batch on the copy as it is: asks the world nothing
+//     {"op":"fields","node":"<id>"}       a node's fields as the copy holds them, the zone's root when no node
+//                                         (#3701: district plans and build claims are root fields 140 and 141)
 //     {"op":"edit","ops":[...]}           the copy brought current, checked, sent as T10's edit intent (G1b) planned at
 //                                         its version, and its answer awaited: the ids of the names placed, or the
 //                                         refusal and the operation that failed. An op is {op: place, name, kind,
 //                                         in, at: [x, y, z] mm, slot, fields}, {op: move, node, at}, {op: set, node,
-//                                         field, value} or {op: remove, node}; a kind by its plain name
+//                                         field, value} or {op: remove, node}; a kind by its plain name. With "claim":"<claim
+//                                         id>" (check too), the batch is sent under that build claim (#3701)
 //     {"op":"act","verbs":[{"verb":"..","this":"<id>","form":".."}, "..."]}   each candidate with a form is checked
 //       again at send time on a copy brought current; a current `no` drops it; none left is `stopped-locally`, with
 //       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
@@ -754,6 +757,7 @@ const OPS = new Set([
   'edit',
   'event',
   'events',
+  'fields',
   'find',
   'halt',
   'history',
@@ -810,7 +814,7 @@ async function editOnce(req) {
   // #3695: weather, sky and strike are sets on the world node, made from the copy as it is now, after the sync.
   const w = undo ? { ops: [] } : await worldBatch(req);
   if (w.ok === false) return closing({ ...w, sent: false, local: true }, null, { age });
-  const batch = undo ? null : batchOf(w.ops);
+  const batch = undo ? null : batchOf(w.ops, req.claim);
   if (!undo) {
     const v = JSON.parse(wire.editCheck(copy, batch, kindsText()));
     if (!v.ok) return closing({ ...v, sent: false, local: true }, null, { age });
@@ -862,12 +866,13 @@ async function editOnce(req) {
   return closing(out);
 }
 
-function batchOf(ops) {
+function batchOf(ops, claim) {
   if (!Array.isArray(ops) || ops.length === 0) throw Object.assign(new Error('ops: a list of operations'), { code: 'edit.batch' });
   const kinds = pinned();
   const um = (at) => (Array.isArray(at) ? at.map((n) => Math.round(Number(n) * 1000)) : undefined);
   // #3695: a move that must land to the micrometre (a thing lifted with the ground) gives its position as `atUm`.
-  return JSON.stringify(ops.map(({ atUm, ...o }) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}), ...(atUm ? { at: atUm.map(Number) } : {}) })));
+  const list = ops.map(({ atUm, ...o }) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}), ...(atUm ? { at: atUm.map(Number) } : {}) }));
+  return JSON.stringify(claim === undefined ? list : { claim: String(claim), ops: list });
 }
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
@@ -1208,24 +1213,46 @@ async function answer(req) {
       // On the copy as it is: no sync, no frame to the world (A4). A world verb (#3695) is made into its sets first.
       const w = await worldBatch(req);
       if (w.ok === false) return closing({ ...w, local: true }, null, { now: true });
-      const v = JSON.parse(wire.editCheck(copy, batchOf(w.ops), kindsText()));
+      const v = JSON.parse(wire.editCheck(copy, batchOf(w.ops, req.claim), kindsText()));
       return closing({ ...v, local: true, ...(w.says ? { would: w.says, ops: w.ops } : {}) }, null, { now: true });
+    }
+    case 'fields': {
+      // #3701: a node's fields from its record in the copy (`own` holds the record but its children).
+      return closing({ ok: true }, (rows) => {
+        const all = [...rows.values()], roots = all.filter((r) => r.parent === null);
+        const row = req.node !== undefined ? rows.get(String(req.node)) : roots.length === 1 ? roots[0] : undefined;
+        if (!row) return { ok: false, code: req.node !== undefined ? 'edit.node-missing' : 'which-root', detail: req.node !== undefined ? `${req.node} is not in the copy` : `${roots.length} roots: name one with node` };
+        const pairs = JSON.parse(row.own).find(([k]) => Number(k) === 6)?.[1] ?? [];
+        return { id: row.id, fields: Object.fromEntries(pairs.map(([k, v]) => [String(k), v])) };
+      }, { now: true });
     }
     case 'edit': case 'redo': return editOnce(req);
     case 'undo': {
       if (req.build === undefined) return editOnce(req);
-      // A whole build, undone step by step (#3694): while the newest of this daemon's edits is that build's.
+      // A whole build, undone step by step (#3694): while the newest of this daemon's edits is that build's. With
+      // `to`, a rewind (#3727, today's build rewind): only its edits after the last of that step.
       const newest = () => (state.edits ??= { done: [], undone: [] }).done.at(-1);
-      if (newest()?.build !== String(req.build)) {
+      const build = String(req.build), to = req.to === undefined ? null : String(req.to);
+      const done = state.edits?.done ?? [];
+      if (to !== null) {
+        const last = done.findLastIndex((e) => e.build === build && e.step === to);
+        if (last < 0) return closing({ ok: false, code: 'rewind.no-step', sent: false, detail: `build ${build} has no step ${to} among this daemon's edits` }, null, { now: true });
+        const after = done.slice(last + 1);
+        const foreign = after.findIndex((e) => e.build !== build);
+        if (foreign >= 0) return closing({ ok: false, code: 'undo.not-the-build', sent: false, detail: `an edit that is not build ${build}'s came after step ${to}: undo it first` }, null, { now: true });
+        if (req.dry) return closing({ ok: true, dry: true, build, to, steps: after.length, would: after.map((e) => e.step) }, null, { now: true });
+      }
+      if (newest()?.build !== build) {
         return closing({ ok: false, code: 'undo.not-the-build', sent: false, detail: `the newest edit is ${newest()?.build ? `build ${newest().build}'s` : 'not a build\'s'}` }, null, { now: true });
       }
       let steps = 0, last = null;
-      while (newest()?.build === String(req.build)) {
+      while (newest()?.build === build && !(to !== null && newest().step === to)) {
         last = await editOnce({ op: 'undo' });
         if (!last.ok) break;
         steps++;
       }
-      return { ...last, ok: last.ok, build: String(req.build), steps };
+      if (!last) return closing({ ok: true, build, to, steps: 0 }, null, { now: true });
+      return { ...last, ok: last.ok, build, steps, ...(to !== null ? { to } : {}) };
     }
     case 'pray': case 'answer': {
       const words = String(req.words ?? '').trim(), most = req.op === 'pray' ? PRAYER_MOST : ANSWER_MOST;

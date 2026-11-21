@@ -2161,7 +2161,7 @@ impl Clock {
                 };
                 let (history, replica) = (&mut self.history, &mut self.replica);
                 let mut write = || {
-                    let mut rule = |_: &Replica, list: &[Effect]| {
+                    let mut rule = |live: &Replica, list: &[Effect]| {
                         if !crate::undo::same(list, &effects) {
                             return Err(Refused {
                                 op: None,
@@ -2169,6 +2169,8 @@ impl Clock {
                                 detail: "the world changed since the undo was checked".into(),
                             });
                         }
+                        // The claims as they stand now: one committed since the check still binds (#3727).
+                        edit::claims::judge_effects(live, list)?;
                         crate::undo::judge(&guard, &classes, &sizes, &bodies)
                     };
                     let r = if redo {

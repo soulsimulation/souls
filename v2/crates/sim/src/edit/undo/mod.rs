@@ -6,8 +6,9 @@
 //!   old pose and fields, and each removed node's whole subtree with every link at it. The inverse follows from T6's
 //!   generic layer alone: what the batch created is removed (a link it made, unlinked), what it removed is created
 //!   again with the same ids, kinds, poses, audiences, fields and links, and what it moved or set is moved or set back.
-//!   A change with no generic inverse (a field the batch added, since T6 has no unset; a node in motion; a body that is
-//!   not changes; an unlink) makes that batch's undo refused `undo.no-inverse`.
+//!   A change with no generic inverse (a field the batch added, since T6 has no unset, unless its reader has a value
+//!   that reads as unset, `replica::edit::claims::neutral`; a node in motion; a body that is not changes; an unlink)
+//!   makes that batch's undo refused `undo.no-inverse`.
 //! - **Undo, redo.** Undo reverses the newest batch not undone, redo the newest undo, and a new edit clears redo (the
 //!   rules of `apps/server/src/god/god.ts`). Each is written by the creator under `Cause::Effect(first)`, where `first`
 //!   is the sequence of the reversed batch's first effect ([`replica::edit::reverses`]).
@@ -323,8 +324,22 @@ fn inverse(before: &Before, tree: &Tree, part: &Part) -> Result<Vec<Write>, Refu
                 });
             }
         }
-        if let Some(k) = n.fields().keys().find(|k| !w.fields.contains_key(k)) {
-            return no_inverse(format!("{id:?} field {k} was added, and T6 has no unset"));
+        for k in n.fields().keys().filter(|k| !w.fields.contains_key(k)) {
+            // A field the batch added is set back to the value that reads as unset, where its reader has one (a
+            // claim list, a plan); any other has no inverse, since T6 has no unset.
+            let Some(to) = replica::edit::claims::neutral(*k) else {
+                return no_inverse(format!("{id:?} field {k} was added, and T6 has no unset"));
+            };
+            out.push(Write {
+                node: *id,
+                audience: n.audience(),
+                change: Change::Set {
+                    node: *id,
+                    field: *k,
+                    to,
+                    by: None,
+                },
+            });
         }
         for (field, to) in &w.fields {
             if n.fields().get(field) != Some(to) {

@@ -18,7 +18,7 @@ import { createServer as createHttp } from 'node:http';
 import { DEFAULT_PKG } from '../daemon/client.mjs';
 import { readSeat } from '../home/home.mjs';
 import { pair } from '../pair/pair.mjs';
-import { opsOf, requestOf, resolve as resolveRelation } from './souls-god.mjs';
+import { areaOf, buildOf, opsOf, planRow, requestOf, resolve as resolveRelation } from './souls-god.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -274,6 +274,62 @@ test('undo and redo step the world\'s history, a build is undone whole, and a re
   console.log(`undo: a build of 2 steps undone in one command; redo gave back ${beside.names['1']}`);
 });
 
+test('#3701: build words, today\'s plan file in the world\'s units, and a claim over a plan\'s plots', () => {
+  assert.deepEqual(buildOf(['district']), { act: 'districts' });
+  assert.deepEqual(buildOf(['district', 'market', '--file', 'p.json']), { act: 'record', id: 'market', file: 'p.json' });
+  assert.deepEqual(buildOf(['claim', 'house', '--area', '0,-10,10,10']), { act: 'claim', part: 'house', area: [0, -10, 10, 10] });
+  assert.deepEqual(buildOf(['claim', 'house', '--district', 'market', '--plots', 'a,b']), { act: 'claim', part: 'house', district: 'market', plots: ['a', 'b'] });
+  assert.deepEqual(buildOf(['release', 'k1a2b3c4d']), { act: 'release', claim: 'c:k1a2b3c4d' });
+  assert.throws(() => buildOf(['claim', 'house', '--area', '5,0,1,1']), /x0 < x1/);
+  assert.throws(() => buildOf(['claim', 'house']), /--area .* --district/);
+  assert.deepEqual(requestOf(['place', 'room', '--in', 'aa-0', '--claim', 'k1a2b3c4d']).req.claim, 'c:k1a2b3c4d');
+  const row = planRow('Market', { title: 'Market Quarter', plots: [{ id: 'a', at: [2, 2], size: [2, 2], use: 'Bakery' }], roads: [{ id: 'main', width: 6, path: [[-5, 0], [5, 0]] }], chapters: [['a']] });
+  assert.deepEqual(row, ['d:market', 'title:market-quarter', [['p:a', 2000, 2000, 2000, 2000, 0, 'use:bakery']], [['road:main', 6000, [-5000, 0, 5000, 0]]], [['p:a']]]);
+  assert.deepEqual(areaOf(row[2]), [1000, 1000, 3000, 3000]);
+  // A quarter turn swaps a plot's width and depth on the ground.
+  assert.deepEqual(areaOf([['p:b', 0, 0, 4000, 2000, 90_000]]), [-1000, -2000, 1000, 2000]);
+});
+
+test('#3701: a creator records a district plan, claims its first chapter, builds inside it and is refused outside', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  const file = join(dir, 'market.json');
+  writeFileSync(file, JSON.stringify({ id: 'market', title: 'Market quarter', plots: [{ id: 'a', at: [2, 2], size: [2, 2] }, { id: 'b', at: [10, 2], size: [2, 2] }], chapters: [['a'], ['b']] }));
+  const recorded = await god('build', 'district', 'market', '--file', file);
+  assert.equal(recorded.ok, true, JSON.stringify(recorded));
+  assert.equal((await god('build', 'district', 'market', '--file', file)).code, 'district.exists');
+  const plan = await god('build', 'district', 'market');
+  assert.deepEqual(plan.district.plots.map((p) => p.status), ['planned', 'planned']);
+  assert.deepEqual(plan.district.next.plots, ['a']);
+  assert.deepEqual((await god('build', 'district')).districts, [{ id: 'market', title: 'market-quarter', counts: { plots: 2, claimed: 0, planned: 2 } }]);
+
+  const claimed = await god('build', 'claim', 'house', '--district', 'market');
+  assert.equal(claimed.ok, true, JSON.stringify(claimed));
+  const c = claimed.claim.id;
+  assert.deepEqual(claimed.claim.area, [1000, 1000, 3000, 3000]);
+  const after = await god('build', 'district', 'market');
+  assert.deepEqual(after.district.plots.map((p) => p.status), ['claimed', 'planned']);
+  assert.deepEqual(after.district.next.plots, ['b']);
+
+  // Under the claim: inside builds, outside is refused by the world with the operation and a fix.
+  const inside = await god('place', 'room', '--in', place.id, '--at', '2000,0,2000', '--claim', c);
+  assert.equal(inside.ok, true, JSON.stringify(inside));
+  const outside = await god('place', 'room', '--in', place.id, '--at', '10000,0,2000', '--claim', c);
+  assert.deepEqual([outside.ok, outside.code, outside.op], [false, 'edit.outside-claim', 0], JSON.stringify(outside));
+  assert.match(outside.fix, /inside its area/);
+  // Not under it: its area is refused, the rest of the world is free.
+  const into = await god('remove', inside.names['1']);
+  assert.deepEqual([into.ok, into.code], [false, 'edit.claimed'], JSON.stringify(into));
+  assert.equal((await god('place', 'room', '--in', place.id, '--at', '20000,0,2000')).ok, true);
+  assert.equal((await god('place', 'room', '--in', place.id, '--claim', 'c:k0000000')).code, 'edit.claim-unknown');
+  // Released, the area is the lead's again.
+  assert.deepEqual((await god('build', 'claims')).claims.map((x) => x.id), [c]);
+  assert.equal((await god('build', 'release', c)).ok, true);
+  assert.deepEqual((await god('build', 'claims')).claims, []);
+  assert.equal((await god('remove', inside.names['1'])).ok, true);
+  assert.equal((await god('build', 'release', c)).code, 'claim.unknown');
+});
+
 test('boot-body admission is shared by describe and local checks without revising kind pins', async () => {
   await connected();
   const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
@@ -415,6 +471,55 @@ test('pairing asks for the creator scope and keeps the creator\'s token', async 
   assert.equal(asked[0].new, undefined);
   const seat = readSeat(at, `c_${'ab'.repeat(16)}-4`);
   assert.deepEqual(seat.grant, { actor: 'creator', scope: 'ab'.repeat(16), counter: 4n });
+});
+
+test('#3727: helper and rewind words', () => {
+  assert.deepEqual(buildOf(['claim', 'house', '--area', '0,0,10,10', '--helper', '--ttl', '30']), { act: 'claim', part: 'house', area: [0, 0, 10, 10], helper: true, ttl: 30 });
+  assert.throws(() => buildOf(['claim', 'house', '--area', '0,0,10,10', '--ttl', '30']), /needs --helper/);
+  assert.deepEqual(buildOf(['rewind', 'hut', '--to', 'shell', '--dry']), { act: 'rewind', build: 'hut', to: 'shell', dry: true });
+  assert.throws(() => buildOf(['rewind', 'hut']), /--to <step>/);
+});
+
+test('#3727: a helper builds only inside its claim, never undoes, and a build rewinds to a step', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  const claimed = await god('build', 'claim', 'yard', '--area', '40000,0,50000,10000', '--helper', '--ttl', '5');
+  assert.equal(claimed.ok, true, JSON.stringify(claimed));
+  assert.match(claimed.claim.helper, /^[0-9a-f]{32}-\d+$/);
+  const helperHome = claimed.helper.home;
+  const helperToken = JSON.parse(readFileSync(join(helperHome, 'credentials.json'), 'utf8')).souls[`c_${claimed.claim.helper}`].local.token;
+  assert.ok(!JSON.stringify(claimed).includes(helperToken.split('.')[1]), 'the helper token is not printed');
+  // The helper's own home: every edit goes under its claim, so inside builds and outside is refused by the world.
+  const helper = (...args) => new Promise((ok) => {
+    execFile(process.execPath, [GOD, ...args], { env: { PATH: process.env.PATH, SOULS_HOME: helperHome, SOULS_REPLICA_PKG: PKG } }, (_, stdout) => {
+      printed.push(stdout);
+      ok(JSON.parse(stdout.trim().split('\n').at(-1)));
+    });
+  });
+  for (const until = Date.now() + 15_000; !(await helper('status')).connected && Date.now() < until;) await new Promise((r) => setTimeout(r, 100));
+  const inside = await helper('place', 'room', '--in', place.id, '--at', '45000,0,5000');
+  assert.equal(inside.ok, true, JSON.stringify(inside));
+  const outside = await helper('place', 'room', '--in', place.id, '--at', '60000,0,5000');
+  assert.deepEqual([outside.ok, outside.code], [false, 'edit.outside-claim'], JSON.stringify(outside));
+  assert.equal((await helper('undo')).code, 'edit.not-the-creator', 'an undo is the lead\'s');
+  // The lead may not undo into the helper's claim: the helper's room is in it.
+  await helper('stop');
+  assert.equal((await god('build', 'release', claimed.claim.id)).ok, true);
+  // A build of three steps, rewound to its first: the two later steps go, newest first.
+  const shell = await god('place', 'room', '--in', place.id, '--at', '70000,0,0', '--build', 'barn', '--step', 'shell');
+  assert.equal(shell.ok, true, JSON.stringify(shell));
+  const roof = await god('place', 'lamp', '--in', shell.names['1'], '--at', '0,0,0', '--build', 'barn', '--step', 'roof');
+  const door = await god('place', 'lamp', '--in', shell.names['1'], '--at', '500,0,0', '--build', 'barn', '--step', 'door');
+  assert.equal(roof.ok && door.ok, true);
+  assert.deepEqual((await god('build', 'rewind', 'barn', '--to', 'shell', '--dry')).would, ['roof', 'door']);
+  const rewound = await god('build', 'rewind', 'barn', '--to', 'shell');
+  assert.equal(rewound.ok, true, JSON.stringify(rewound));
+  assert.equal(rewound.steps, 2);
+  const d = await god('describe');
+  assert.ok(d.nodes.some((n) => n.id === shell.names['1']), 'the shell stays');
+  assert.ok(!d.nodes.some((n) => n.id === roof.names['1'] || n.id === door.names['1']), 'its later steps are gone');
+  assert.equal((await god('build', 'rewind', 'barn', '--to', 'porch')).code, 'rewind.no-step');
+  console.log(`helper ${claimed.claim.helper}: built inside its claim, refused outside, no undo; barn rewound 2 steps to shell`);
 });
 
 test('no output, log or trace holds the token', () => {
