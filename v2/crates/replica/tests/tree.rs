@@ -430,3 +430,97 @@ fn removing_a_node_drops_its_subtrees_timers_in_the_same_commit() {
         pending.timers.len()
     );
 }
+
+#[test]
+fn k18d_paired_transaction_refusals_keep_both_writers_and_prior_fields_unchanged() {
+    use std::cell::Cell;
+    let (header, mut tree) = base();
+    let room = ee(1);
+    let prior = part_of(
+        &header,
+        vec![effect(
+            tree.next(),
+            room,
+            vec![Change::Set {
+                node: room,
+                field: 99,
+                to: Value::Uint(1),
+                by: None,
+            }],
+        )],
+    );
+    tree.commit(&header, &prior, &rules()).unwrap();
+    let before = tree.to_state();
+    let changes = part_of(
+        &header,
+        vec![effect(
+            tree.next(),
+            room,
+            vec![Change::Set {
+                node: room,
+                field: 98,
+                to: Value::Uint(7),
+                by: None,
+            }],
+        )],
+    );
+    let live = Cell::new(0);
+    let error = tree
+        .commit_then(&header, &changes, &rules(), || {
+            assert_eq!(live.get(), 0);
+            Err::<(), _>(replica::effects::Refusal {
+                name: "paired-refusal",
+                detail: "the live writer refused".into(),
+            })
+        })
+        .unwrap_err();
+    assert_eq!(error.name, "paired-refusal");
+    assert_eq!(tree.to_state(), before);
+    assert_eq!(live.get(), 0);
+    let invalid = part_of(
+        &header,
+        vec![effect(
+            tree.next(),
+            room,
+            vec![Change::Set {
+                node: ee(999_999),
+                field: 98,
+                to: Value::Uint(8),
+                by: None,
+            }],
+        )],
+    );
+    assert!(
+        tree.commit_then(&header, &invalid, &rules(), || {
+            live.set(1);
+            Ok(())
+        })
+        .is_err()
+    );
+    assert_eq!(
+        live.get(),
+        0,
+        "invalid staged tree input never reaches the live writer"
+    );
+    assert_eq!(tree.to_state(), before);
+    let mut ordinary = tree.frozen();
+    ordinary.commit(&header, &changes, &rules()).unwrap();
+    let committed = tree
+        .commit_then(&header, &changes, &rules(), || {
+            live.set(1);
+            Ok(42)
+        })
+        .unwrap();
+    assert_eq!(committed, 42);
+    assert_eq!(live.get(), 1);
+    assert_eq!(
+        tree.to_state(),
+        ordinary.to_state(),
+        "the normal run wrapper keeps identical behavior"
+    );
+    assert_eq!(
+        tree.node(tree.handle(room).unwrap()).unwrap().fields()[&99],
+        Value::Uint(1),
+        "an independently opened field survives"
+    );
+}

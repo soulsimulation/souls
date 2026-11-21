@@ -369,6 +369,29 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
     })
 }
 
+/// The normal restart's movement geometry follows the same validated durable canonical parts as its writer.
+/// The reader's initial replica, log mark, mapping and checkpoint selection remain unchanged.
+fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(Town, Town)> {
+    let mut live = initial.frozen();
+    for bytes in records {
+        if !recorder::is_input(bytes) {
+            let part = replica::effects::Part::read(bytes).map_err(refusal)?;
+            live.apply(&part).map_err(refusal)?;
+        }
+    }
+    let doors = Doors::new(
+        built.header.clone(),
+        built.rules.clone(),
+        live.tree().next(),
+    );
+    let town = Town::new(live.tree().frozen(), built.ground, doors)
+        .map_err(|e| format!("the recovered town: {e}"))?;
+    let planner = town
+        .copy()
+        .map_err(|e| format!("the recovered planner: {e}"))?;
+    Ok((town, planner))
+}
+
 /// Public, data-only serving support. Only the seed's facts, flattened public entries and optional moves are
 /// named; authority, creator metadata, logs and state are deliberately outside this manifest.
 fn public_boot(dir: &Path, header: &replica::effects::Header) -> R<Vec<u8>> {
@@ -551,6 +574,23 @@ fn seed_in(args: &[String]) -> R<String> {
         return Err(format!("world-exists: {} has a log", dir.display()));
     }
     let souls: u64 = arg(args, "--souls").map_or(Ok(1), |n| n.parse().map_err(|_| "--souls"))?;
+    let catalogue_text = arg(args, "--bodies")
+        .map(|p| std::fs::read_to_string(p).map_err(io(Path::new(p))))
+        .transpose()?;
+    let catalogue = catalogue_text
+        .as_ref()
+        .map(|text| skills::wear::Catalogue::read(text))
+        .transpose()?
+        .unwrap_or_default();
+    let body = arg(args, "--body")
+        .map(|name| {
+            catalogue
+                .find(name)
+                .map(|p| format!(r#", "{}""#, skills::wear::hex(&p.hash)))
+                .ok_or("body-unknown")
+        })
+        .transpose()?
+        .unwrap_or_default();
     let (x, z) = match arg(args, "--at") {
         Some(at) => at
             .split_once(',')
@@ -566,6 +606,9 @@ fn seed_in(args: &[String]) -> R<String> {
     let built = build(&text, &found)?;
     std::fs::create_dir_all(dir.join("entries")).map_err(io(&dir))?;
     std::fs::write(dir.join("facts.json"), &text).map_err(io(&dir))?;
+    if let Some(text) = catalogue_text {
+        std::fs::write(dir.join("bodies.json"), text).map_err(io(&dir))?;
+    }
     if arg(args, "--entries").is_some() {
         // C13: preserve the current main stand-point repair while keeping activity loading above.
         for line in import_eden::clear_stand_points(&import_eden::load(&text)?, &mut found) {
@@ -591,7 +634,7 @@ fn seed_in(args: &[String]) -> R<String> {
             (x * 1000.0) as i64 + k as i64 * APART_MM,
             (z * 1000.0) as i64,
         );
-        rows.push(format!("[{counter}, {xm}, {zm}]"));
+        rows.push(format!("[{counter}, {xm}, {zm}{body}]"));
         let mut secret = [0u8; 32];
         std::io::Read::read_exact(&mut urandom, &mut secret).map_err(|e| e.to_string())?;
         let grant = format!("soul-{}-{counter}", to_hex(&scope));
@@ -714,37 +757,90 @@ fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, us
     (out, things.len(), all, left, moved)
 }
 
+/// Original B15 birth choice reader: only admitted exact hashes enter the canonical body.
+fn born(
+    meta: &Json,
+    catalogue: &skills::wear::Catalogue,
+) -> R<std::collections::BTreeMap<Id, [u8; 32]>> {
+    let ids = souls(meta)?;
+    let rows = meta.get("souls").and_then(Json::arr).unwrap_or(&[]);
+    let mut out = std::collections::BTreeMap::new();
+    for ((id, _, _), row) in ids.iter().zip(rows) {
+        if let Some(value) = row.arr().and_then(|r| r.get(3)) {
+            let preset = value
+                .str()
+                .and_then(|s| catalogue.find(s))
+                .ok_or("body-unknown")?;
+            out.insert(*id, preset.hash);
+        }
+    }
+    Ok(out)
+}
+
 /// The world's bodies: none on a first start (each Soul's is born when it first acts, C3); on a restart, each body
 /// where the log last had it. The planner keeps its own town and all declared seats are registered.
 fn bodies(
     town: Town,
     planner: Town,
-    ground: Id,
+    _ground: Id,
     placed: &Placed,
     places: Vec<PlaceAt>,
+    builds: &std::collections::BTreeMap<Id, replica::kinds::sizes::Build>,
 ) -> Result<Bodies, Refusal> {
     let family = humanoid().map_err(|e| Refusal {
         name: "family",
         detail: e,
     })?;
-    let frame = Frame {
-        node: ground,
-        slot: None,
-    };
     let mut at = Vec::new();
     for (id, (pose, _)) in placed {
-        // Stood on the ground at its last place unless its own floor holds it there (`add_body_at`).
-        if let Ok(a) = town.surfaces[&ground].place(*id, frame, pose.position, pose.orientation) {
-            at.push(a);
-        }
+        let build = builds.get(id).copied().ok_or_else(|| Refusal {
+            name: "body-unknown",
+            detail: "recorded build missing".into(),
+        })?;
+        let (node, point, facing) = match pose.support {
+            replica::pose::Support::Surface { surface, .. } => {
+                (surface, pose.position, pose.orientation)
+            }
+            replica::pose::Support::Slot => {
+                let site = places
+                    .iter()
+                    .find(|p| {
+                        p.thing == pose.frame.node
+                            && pose.frame.slot.is_none_or(|s| s == p.place.slot)
+                    })
+                    .ok_or_else(|| Refusal {
+                        name: "place-unknown",
+                        detail: "recorded support unavailable".into(),
+                    })?;
+                (site.floor, site.stand()?, site.facing)
+            }
+            replica::pose::Support::Volume { .. }
+            | replica::pose::Support::Track
+            | replica::pose::Support::None => {
+                return Err(Refusal {
+                    name: "recorded-body-support",
+                    detail: "unsupported native body support".into(),
+                });
+            }
+        };
+        let surfaces = town.surfaces_for(build.size).ok_or_else(|| Refusal {
+            name: "body-class-unprepared",
+            detail: "recorded body".into(),
+        })?;
+        let surface = surfaces.get(&node).ok_or_else(|| Refusal {
+            name: "no-surface",
+            detail: "recorded ground".into(),
+        })?;
+        let moved = surface.place_built(*id, Frame { node, slot: None }, point, facing, build)?;
+        at.push((moved, build));
     }
     let mut b = Bodies::with_planner(town, planner, 50_000)?;
     for s in places {
         b.add_place(s)?;
     }
 
-    for a in at {
-        b.add_body_at(family.clone(), a, placed)?;
+    for (a, build) in at {
+        b.add_body_at_built(family.clone(), a, placed, build)?;
     }
     Ok(b)
 }
@@ -1351,6 +1447,12 @@ fn serve(args: &[String]) -> R<()> {
         return Err("world.json is not souls/world/1".into());
     }
     let souls = souls(&meta)?;
+    let catalogue = match std::fs::read_to_string(dir.join("bodies.json")) {
+        Ok(text) => skills::wear::Catalogue::read(&text)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => skills::wear::Catalogue::default(),
+        Err(e) => return Err(format!("body-catalogue: {e}")),
+    };
+    let born = born(&meta, &catalogue)?;
     let facts = dir.join("facts.json");
     let mut kinds = Vec::new();
     if dir.join("entries").is_dir() {
@@ -1465,13 +1567,20 @@ fn serve(args: &[String]) -> R<()> {
             .map_err(|e| format!("the fork's planner: {e}"))?;
         (initial, record, observer, Some(checkpoint))
     } else {
-        (
-            Replica::start(built.header.stored()).map_err(refusal)?,
-            0,
-            None,
-            None,
-        )
+        let initial = Replica::start(built.header.stored()).map_err(refusal)?;
+        let (town, planner) = recovered_towns(&built, &initial, &found.records)?;
+        built.town = town;
+        built.planner = planner;
+        (initial, 0, None, None)
     };
+    built
+        .town
+        .prepare_classes(catalogue.classes())
+        .map_err(|e| format!("body-classes: {e}"))?;
+    built
+        .planner
+        .prepare_classes(catalogue.classes())
+        .map_err(|e| format!("body-classes: {e}"))?;
     let (places, things, all, left, moved) = places(&mut built.town, &kinds);
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
@@ -1600,8 +1709,9 @@ fn serve(args: &[String]) -> R<()> {
         kind: Name::new(&built.body_kind).ok_or("the body's kind")?,
         per_tick: 8,
     });
-    cfg.bodies = Some(Box::new(move |placed: &Placed| {
-        bodies(town, planner, ground, placed, places.clone())
+    cfg.wear = Some(answers::Wearing { catalogue, born });
+    cfg.built_bodies = Some(Box::new(move |placed: &Placed, builds| {
+        bodies(town, planner, ground, placed, places.clone(), builds)
     }));
     // Capture and validate the public source before answers starts its K5 writer: normal pruning may remove an
     // eligible older checkpoint. The engine still starts from its newest restored state and unchanged clock.
@@ -1806,6 +1916,58 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn body_classes_restart_on_the_edited_canonical_geometry() {
+        use replica::effects::{Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Rest};
+        use replica::kinds::sizes::Size;
+        let facts = testworld::generate(1, 0).unwrap();
+        let imported = import_eden::load(&facts.text).unwrap();
+        let building = imported.nodes["building"];
+        let floor = imported.nodes["building/floor-1"];
+        let built = build(&facts.text, &[]).unwrap();
+        assert!(built.town.surfaces.contains_key(&floor));
+        let initial = Replica::start(built.header.stored()).unwrap();
+        let mut live = initial.frozen();
+        live.apply(&replica::effects::Part::read(&built.part).unwrap())
+            .unwrap();
+        let sequence = live.version();
+        let edited = sim::commit::write(
+            &mut live,
+            &[Effect {
+                envelope: Envelope {
+                    sequence,
+                    at: 0,
+                    cause: Cause::World,
+                    actor: Actor::World,
+                    audience: Audience::Everyone,
+                    node: building,
+                },
+                body: Body::Changes(vec![ChangeRec {
+                    change: Change::Remove { node: building },
+                    rest: Rest::new(),
+                }]),
+                events: None,
+                rest: Rest::new(),
+            }],
+        )
+        .unwrap();
+        let records = vec![built.part.clone(), edited.stored().to_vec()];
+        let (mut town, mut planner) = recovered_towns(&built, &initial, &records).unwrap();
+        for one in [&mut town, &mut planner] {
+            one.prepare_classes([Size::Large]).unwrap();
+            assert_eq!(one.tree.to_state(), live.tree().to_state());
+            assert!(
+                !one.surfaces_for(Size::Standard)
+                    .unwrap()
+                    .contains_key(&floor)
+            );
+            assert!(!one.surfaces_for(Size::Large).unwrap().contains_key(&floor));
+        }
+        let mut invalid = records;
+        invalid.push(vec![0xff]);
+        assert!(recovered_towns(&built, &initial, &invalid).is_err());
+    }
 
     #[test]
     fn w3c_stored_fork_base_reopens_scoped_nonempty_archive_without_local_checkpoint() {

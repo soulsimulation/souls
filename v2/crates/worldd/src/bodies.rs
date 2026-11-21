@@ -40,7 +40,7 @@
 
 use sim::ground::Versions;
 use sim::planner::{FormAnswer, FormKey, FormQuestion};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -52,6 +52,7 @@ use replica::encode::{Name, Value, decode};
 use replica::host::Progress;
 use replica::ids::{Id, Minter, Scope};
 use replica::intents::Intent;
+use replica::kinds::sizes::{Build, Size};
 use replica::move_check::{self, Seen, Verdict};
 use replica::moves::{Effector, Move};
 use replica::pose::Frame;
@@ -330,11 +331,196 @@ impl Bodies {
         })
     }
 
+    pub fn classes(&self) -> BTreeMap<Id, Size> {
+        self.runner
+            .controller
+            .ids()
+            .filter_map(|id| {
+                let size = self.runner.controller.build(id)?.size;
+                (size != Size::Standard).then_some((id, size))
+            })
+            .collect()
+    }
+
+    pub(crate) fn wear_basis(&self, body: Id) -> R<sim::controller::BuildBasis> {
+        let basis = self
+            .runner
+            .controller
+            .build_basis(body)
+            .ok_or_else(|| refusal("body-unknown", body))?;
+        self.runner.controller.check_build(&basis)?;
+        if self.runner.running(body)
+            || self.live.contains_key(&body)
+            || self.orders.open(body).is_some()
+            || self.slots.held_by(body).is_some()
+        {
+            return Err(refusal("body-change-in-use", body));
+        }
+        Ok(basis)
+    }
+    pub(crate) fn commit_wear<T>(
+        &mut self,
+        basis: &sim::controller::BuildBasis,
+        build: Build,
+        moved: Moved,
+        commit: impl FnOnce() -> R<T>,
+    ) -> R<T> {
+        self.wear_basis(basis.moved.id)?;
+        let value = self
+            .runner
+            .controller
+            .commit_build(basis, moved, build, commit)?;
+        self.town.set_class(basis.moved.id, build.size);
+        self.form_map = Arc::new(self.town.versions.clone());
+        self.planned.keep_map(&self.form_map);
+        self.reached.clear();
+        self.form_answers.clear();
+        Ok(value)
+    }
+
+    /// Confirms the exact authoritative preparation basis before any replica write.
+    pub(crate) fn check_map(
+        &self,
+        maps: &crate::buildsafe::PreparedMaps,
+    ) -> Result<(), replica::edit::Refused> {
+        match self.check_map_or_walked(maps)? {
+            None => Ok(()),
+            Some(_) => Err(replica::edit::Refused {
+                op: None,
+                name: "edit.body-stale",
+                detail: "prepared triangle differs".into(),
+            }),
+        }
+    }
+
+    /// As `check_map`, but when every guard holds and an affected body only walked out of its prepared triangle
+    /// (B12b), the current bases of exactly the prepared bodies, in order, for a reprepare off the clock.
+    pub(crate) fn check_map_or_walked(
+        &self,
+        maps: &crate::buildsafe::PreparedMaps,
+    ) -> Result<Option<Vec<sim::controller::BuildBasis>>, replica::edit::Refused> {
+        if !Arc::ptr_eq(&maps.before, &self.form_map) {
+            return Err(replica::edit::Refused {
+                op: None,
+                name: "edit.stale",
+                detail: "the prepared map changed".into(),
+            });
+        }
+        let current: BTreeSet<_> = self
+            .runner
+            .controller
+            .bodies()
+            .filter_map(|body| self.runner.controller.build_basis(body.id))
+            .filter(|b| maps.live.affects(b, self.town.ground))
+            .map(|b| b.moved.id)
+            .collect();
+        let prepared: BTreeSet<_> = maps
+            .rebinds
+            .iter()
+            .map(|target| target.before.moved.id)
+            .collect();
+        if current != prepared {
+            return Err(replica::edit::Refused {
+                op: None,
+                name: "edit.body-stale",
+                detail: "affected bodies changed".into(),
+            });
+        }
+        let certified = self
+            .runner
+            .controller
+            .certify_or_walked(&maps.rebinds)
+            .map_err(|r| replica::edit::Refused {
+                op: None,
+                name: r.name,
+                detail: r.detail,
+            })?;
+        self.town
+            .check_install(&maps.live)
+            .map_err(|r| replica::edit::Refused {
+                op: None,
+                name: r.name,
+                detail: r.detail,
+            })?;
+        match certified {
+            sim::controller::Certified::Ready(_) => Ok(None),
+            sim::controller::Certified::WalkedOn => maps
+                .rebinds
+                .iter()
+                .map(|t| self.runner.controller.build_basis(t.before.moved.id))
+                .collect::<Option<Vec<_>>>()
+                .map(Some)
+                .ok_or(replica::edit::Refused {
+                    op: None,
+                    name: "edit.body-stale",
+                    detail: "prepared body missing".into(),
+                }),
+        }
+    }
+
+    /// Pairs the town transaction with the existing live edit write. Every input refusal leaves both unchanged.
+    pub(crate) fn commit_map(
+        &mut self,
+        maps: crate::buildsafe::PreparedMaps,
+        commit: impl FnOnce() -> Result<sim::edit::Committed, replica::edit::Refused>,
+    ) -> Result<sim::edit::Committed, replica::edit::Refused> {
+        self.check_map(&maps)?;
+        let rebinds = self
+            .runner
+            .controller
+            .certify_rebinds(&maps.rebinds)
+            .map_err(|r| replica::edit::Refused {
+                op: None,
+                name: r.name,
+                detail: r.detail,
+            })?;
+        let mut refused = None;
+        let town = &mut self.town;
+        let done = self
+            .runner
+            .controller
+            .commit_rebinds(&rebinds, || {
+                town.install_then(maps.live, &maps.part, || {
+                    commit().map_err(|r| {
+                        let error = Refusal {
+                            name: r.name,
+                            detail: r.detail.clone(),
+                        };
+                        refused = Some(r);
+                        error
+                    })
+                })
+            })
+            .map_err(|r| {
+                refused.unwrap_or(replica::edit::Refused {
+                    op: None,
+                    name: r.name,
+                    detail: r.detail,
+                })
+            })?;
+        self.planner
+            .install(maps.before, maps.worker, Arc::clone(&done.part));
+        self.runner.prepared_ground(&rebinds, &self.town);
+        self.form_map = maps.after;
+        self.planned.keep_map(&self.form_map);
+        self.reached.clear();
+        self.form_answers.clear();
+        Ok(done)
+    }
+
     /// Adds a body of `family`, standing as the mover placed it.
     pub fn add_body(&mut self, family: Family, body: Moved) -> R<()> {
+        self.add_body_built(family, body, Build::STANDARD)
+    }
+    pub fn add_body_built(&mut self, family: Family, body: Moved, build: Build) -> R<()> {
+        self.town.surfaces_for(build.size).ok_or_else(|| Refusal {
+            name: "body-class-unprepared",
+            detail: "no prepared geometry".into(),
+        })?;
         let id = body.id;
-        self.runner.add_body(family, body)?;
+        self.runner.controller.add_built(family, body, build)?;
         self.wind.add(id, self.runner.now);
+        self.town.set_class(body.id, build.size);
         Ok(())
     }
 
@@ -352,18 +538,36 @@ impl Bodies {
     /// Adds a body of `family`: where the log last had it standing (`placed`, K18 #3160), else as the mover placed it.
     /// A body that sat is added standing as the mover placed it; [`Bodies::seat_placed`] then seats it.
     pub fn add_body_at(&mut self, family: Family, body: Moved, placed: &Placed) -> R<()> {
+        self.add_body_at_built(family, body, placed, Build::STANDARD)
+    }
+    pub fn add_body_at_built(
+        &mut self,
+        family: Family,
+        body: Moved,
+        placed: &Placed,
+        build: Build,
+    ) -> R<()> {
+        let surfaces = self.town.surfaces_for(build.size).ok_or_else(|| Refusal {
+            name: "body-class-unprepared",
+            detail: "no prepared geometry".into(),
+        })?;
         let body = match placed.get(&body.id) {
             Some((p, _)) => match p.support {
-                Support::Surface { surface, .. } => match self.town.surfaces.get(&surface) {
-                    Some(s) => s.place(body.id, p.frame, p.position, p.orientation)?,
-                    None => body,
+                Support::Surface { surface, .. } => match surfaces.get(&surface) {
+                    Some(s) => s.place_built(body.id, p.frame, p.position, p.orientation, build)?,
+                    None => {
+                        return Err(Refusal {
+                            name: "no-surface",
+                            detail: "recorded support is unavailable".into(),
+                        });
+                    }
                 },
                 _ => body,
             },
             None => body,
         };
         self.logged.insert(body.id, body.pose);
-        self.add_body(family, body)
+        self.add_body_built(family, body, build)
     }
 
     /// Restart, after the seats are added (K18c, #3176): each body the log last had in a seat's slot is handed back
@@ -507,6 +711,8 @@ impl Bodies {
                 p
             }
         };
+        // A previous map's route, line, reach or form result cannot enter any current cache.
+        p.keep_map(&self.form_map);
         // A replaced move's in-flight answer cannot be used by a newer order on the same body/fixture/slot.
         p.reach.retain(|(body, thing, slot, order), _| {
             self.waiting
@@ -711,6 +917,8 @@ impl Bodies {
         if !pairs.is_empty() {
             let reach = self.reach_of(pairs);
             self.planner.send(Wants {
+                form_map: Some(Arc::clone(&self.form_map)),
+                classes: self.town.body_classes.clone(),
                 reach,
                 ..Wants::default()
             });
@@ -826,7 +1034,7 @@ impl Bodies {
                     &mut self.mint,
                     &mut self.moves,
                     &reach,
-                    &self.town.surfaces,
+                    &self.town,
                     &t,
                 );
                 let Some(&(id, Live::Place(n))) = self.live.get(&t.node) else {
@@ -853,12 +1061,18 @@ impl Bodies {
             let planned = std::mem::take(&mut self.planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
             // Every body in a seat move, with its seat: its reach for the next tick's phase timers.
-            let seated: Vec<(Id, Id, Id)> = self
+            let mut seated: Vec<(Id, Id, Id)> = self
                 .live
                 .iter()
                 .filter(|(_, (_, l))| matches!(l, Live::Place(_)))
                 .filter_map(|(b, (id, _))| Some((*b, self.slots.held_by(*b)?, *id)))
                 .collect();
+            // A discarded obsolete reach is asked again for the same still-waiting move and exact slot.
+            seated.extend(
+                self.waiting
+                    .iter()
+                    .filter_map(|w| Some((w.body, w.place?, w.id))),
+            );
             wants.reach = self.reach_of(seated);
             // One metadata snapshot per map revision, shared by all form questions in the batch.
             if *self.form_map != self.town.versions {
@@ -932,6 +1146,28 @@ impl Bodies {
         let born = life.tick(now, &mut self.runner, &self.town.surfaces, standing, family);
         for b in &born {
             self.wind.add(b.body, now);
+        }
+        born
+    }
+
+    pub fn births_built(
+        &mut self,
+        life: &mut Life,
+        now: Micros,
+        standing: &impl Standing,
+        family: &Family,
+        build_of: &impl Fn(Id) -> Build,
+    ) -> Vec<Born> {
+        let born = life.tick_built(
+            now,
+            &mut self.runner,
+            &self.town,
+            standing,
+            family,
+            build_of,
+        );
+        for b in &born {
+            self.town.set_class(b.body, build_of(b.soul).size);
         }
         born
     }

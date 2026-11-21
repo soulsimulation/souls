@@ -50,6 +50,7 @@ use crate::walk::town::{Basis, Fresh, Town};
 use replica::edit::{BURIES, CUTS_OFF, IN_USE, Unsafe, Use};
 use replica::effects::{Actor, Body, Change, Header, Part, TransferRec};
 use replica::ids::Id;
+use replica::kinds::sizes::Size;
 use replica::pose::{Pose, Support, Vec3};
 use replica::tree::{Handle, Tree};
 use std::cmp::Reverse;
@@ -210,6 +211,17 @@ pub fn guard(
     ground: Option<Id>,
     part: &Part,
 ) -> Result<Guard, String> {
+    guard_for(before, header, ground, part, Size::Standard)
+}
+
+/// The identical safety rule, with both geometry sides cut for the admitted class.
+pub fn guard_for(
+    before: &Tree,
+    header: &Header,
+    ground: Option<Id>,
+    part: &Part,
+    size: Size,
+) -> Result<Guard, String> {
     // It cuts the ground on both sides of the change: never on the clock thread (G3b, #3449).
     crate::commit::off_clock();
     let mut after = before.frozen();
@@ -218,8 +230,8 @@ pub fn guard(
         .map_err(|e| format!("{}: {}", e.name, e.detail))?;
     let sides = match ground {
         Some(g) => {
-            let b = Map::build(before, g, &|_| 0)?;
-            let a = Map::build(&after, g, &|_| 0)?;
+            let b = Map::build_for(before, g, size, &|_| 0)?;
+            let a = Map::build_for(&after, g, size, &|_| 0)?;
             Some(Sides::of(before, header.zone, g, b, a))
         }
         None => None,

@@ -957,6 +957,21 @@ impl Tree {
         self.transact(header, part, Some(rules))
     }
 
+    /// The same bounded transaction, finalized only when the paired writer succeeds. A refused callback rolls
+    /// back this tree through its existing undo, including removals and independently changed fields.
+    pub fn commit_then<T>(
+        &mut self,
+        header: &Header,
+        part: &Part,
+        rules: &Rules,
+        then: impl FnOnce() -> R<T>,
+    ) -> R<T> {
+        if part.header != header.hash().to_bytes() {
+            return refuse("header-mismatch", "the part names another header");
+        }
+        self.run_then(header, &part.effects, Some(rules), then)
+    }
+
     fn transact(&mut self, header: &Header, part: &Part, rules: Option<&Rules>) -> R<()> {
         if part.header != header.hash().to_bytes() {
             return refuse("header-mismatch", "the part names another header");
@@ -971,6 +986,16 @@ impl Tree {
         effects: &[Effect],
         rules: Option<&Rules>,
     ) -> R<()> {
+        self.run_then(header, effects, rules, || Ok(()))
+    }
+
+    fn run_then<T>(
+        &mut self,
+        header: &Header,
+        effects: &[Effect],
+        rules: Option<&Rules>,
+        then: impl FnOnce() -> R<T>,
+    ) -> R<T> {
         debug_assert!(self.undo.is_empty() && self.dead.is_empty());
         self.changes += 1;
         let mut result = Ok(());
@@ -1001,18 +1026,25 @@ impl Tree {
                 ),
             );
         }
-        if result.is_err() {
+        let mut value = None;
+        if result.is_ok() {
+            match then() {
+                Ok(v) => value = Some(v),
+                Err(e) => result = Err(e),
+            }
+        }
+        if let Err(e) = result {
             while let Some(u) = self.undo.pop() {
                 u(self);
             }
             self.dead.clear();
-            return result;
+            return Err(e);
         }
         self.undo.clear();
         for slot in std::mem::take(&mut self.dead) {
             self.release(slot);
         }
-        Ok(())
+        Ok(value.expect("a successful transaction ran its paired writer"))
     }
 
     fn entry(&mut self, header: &Header, e: &Effect, rules: Option<&Rules>) -> R<()> {
