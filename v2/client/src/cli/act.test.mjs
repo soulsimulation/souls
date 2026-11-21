@@ -132,6 +132,34 @@ test('A1, A2: can answers from the local check; a walk to a named thing and a si
   assert.ok(['yes', 'no', 'unknown'].includes(can.can), 'R8\'s verdict, not unknown-command');
   assert.equal(souls(home, ['can']).code, 'act-candidate');
 
+  // #3686: inspect and object read the thing and its kind's offers from this machine; object sends one through act.
+  const sentBefore = (await request(rt.socket, { op: 'status' })).sent;
+  const bare = souls(home, ['inspect', chair]);
+  assert.equal(bare.ok, true, JSON.stringify(bare));
+  assert.deepEqual(bare.offers.map((o) => o.name), ['walk'], 'no kind entry held: the walk alone');
+  mkdirSync(join(home, 'kinds'), { recursive: true });
+  writeFileSync(join(home, 'kinds', 'chair.json'), JSON.stringify({ format: 'souls-entry/1', kind: bare.kind, owner: 'thing',
+    slots: { seat: { admits: 'body', posture: 'sit', most: 1 } },
+    forms: { tidy: { who: 'anyone', starts: 'act', takes: { pattern: { type: 'value', of: ['along'] }, grams: { type: 'count' } }, needs: [], steps: [], effects: [] } } }));
+  const seen = souls(home, ['inspect', chair]);
+  assert.deepEqual(seen.offers.map((o) => o.name), ['walk', 'sit', 'tidy'], JSON.stringify(seen));
+  assert.deepEqual(seen.offers[2].params.pattern, { type: 'value', of: ['along'] });
+  assert.deepEqual(souls(home, ['object', chair]).offers, seen.offers, 'object with no offer lists the same offers');
+  assert.equal((await request(rt.socket, { op: 'status' })).sent, sentBefore, 'inspect and object without an offer send nothing');
+  const unknownId = souls(home, ['inspect', `${named.soul.split('-')[0]}-999999`]);
+  assert.equal(unknownId.code, 'inspect.unknown-id', JSON.stringify(unknownId));
+  assert.ok(Array.isArray(unknownId.did_you_mean) && unknownId.did_you_mean.length > 0);
+  const unknownOffer = souls(home, ['object', chair, 'tdy']);
+  assert.equal(unknownOffer.code, 'object.unknown-offer', JSON.stringify(unknownOffer));
+  assert.deepEqual(unknownOffer.did_you_mean[0], 'tidy');
+  const tidy = souls(home, ['object', chair, 'tidy', 'pattern=along', 'grams=5']);
+  assert.equal(tidy.ok, true, JSON.stringify(tidy));
+  assert.ok((await answerOf(rt, tidy.sequence)).answer >= 1, 'the form went through act and was answered');
+  const walkThere = souls(home, ['object', chair, 'walk']);
+  assert.equal(walkThere.ok, true, JSON.stringify(walkThere));
+  assert.equal((await answerOf(rt, walkThere.sequence)).answer, 1, 'object <id> walk ends with its receipt');
+  rmSync(join(home, 'kinds'), { recursive: true });
+
   const walk = souls(home, ['act', chair]);
   assert.equal(walk.ok, true, JSON.stringify(walk));
   const walked = await answerOf(rt, walk.sequence);

@@ -11,6 +11,10 @@
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
 //                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; ids
 //                                             or <name>=<id> after an act are its thing arguments (C10)
+//   souls.mjs inspect <id>                    the thing as the copy holds it and its own offers, each with its parameters
+//                                             and the act that sends it; asks the world nothing (#3686)
+//   souls.mjs object <id> [<offer> [<name>=<value>... | '<params json>']]   no offer: inspect's offers; an offer:
+//                                             sent through act, `<offer>:<id>` with its arguments (#3686)
 //   souls.mjs can <act> [<arg id>...]         the daemon's local check (R8): yes, no with the reason, or unknown
 //   souls.mjs say "<words>"                   says the words out loud, to whoever is near
 //   souls.mjs whisper <body id> "<words>"     says them to that one body alone
@@ -69,7 +73,7 @@ import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount } from '../account/account.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
-export const OPS = ['status', 'pair', 'look', 'find', 'act', 'can', 'say', 'whisper', 'converse', 'lie', 'pray', 'prayers', 'wait', 'history', 'stats', 'pending', 'stop'];
+export const OPS = ['status', 'pair', 'look', 'find', 'act', 'inspect', 'object', 'can', 'say', 'whisper', 'converse', 'lie', 'pray', 'prayers', 'wait', 'history', 'stats', 'pending', 'stop'];
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = ['digest', 'consolidate', 'schedule', 'help', 'memory', 'remember'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -93,6 +97,17 @@ async function pairing(home, url, { within = 15_000 } = {}) {
     await new Promise((r) => setTimeout(r, 50));
   }
   throw Object.assign(new Error(`no answer from ${directory}`), { code: 'directory-not-answering' });
+}
+
+/** An offer's arguments as `<name>=<value>` words: given so, or as today's one JSON object (`'{"grams":50}'`). */
+export function argsOf(words) {
+  if (words.length === 1 && words[0].trim().startsWith('{')) {
+    let o;
+    try { o = JSON.parse(words[0]); } catch { throw Object.assign(new Error('params: a JSON object'), { code: 'object-params' }); }
+    if (!o || typeof o !== 'object' || Array.isArray(o)) throw Object.assign(new Error('params: a JSON object'), { code: 'object-params' });
+    return Object.entries(o).map(([n, v]) => `${n}=${v}`);
+  }
+  return words;
 }
 
 /** The daemon request the arguments make, or a refusal by name. */
@@ -119,7 +134,14 @@ export function requestOf(argv) {
   const req = { op };
   if (op === 'find') { req.words = rest.join(' '); if (opts.limit) req.limit = Number(opts.limit); }
   if (op === 'act' || op === 'can') req.acts = rest;
-  if (op === 'act' && opts.for !== undefined) req.for = opts.for;
+  if ((op === 'act' || op === 'object') && opts.for !== undefined) req.for = opts.for;
+  if (op === 'inspect') req.this = rest[0];
+  if (op === 'object') {
+    const [id, action, ...more] = rest;
+    let args;
+    try { args = argsOf(more); } catch (e) { return { refused: e.code, detail: e.message }; }
+    Object.assign(req, { this: id, ...(action !== undefined ? { action, args } : {}) });
+  }
   if (op === 'pending' && rest[0] !== '--check') return { refused: 'pending-check', detail: 'pending --check; a turn reads what waits with wait 0' };
   if (op === 'pair') { req.url = rest[0]; if (opts.as !== undefined) req.as = opts.as; if (rest.includes('--move')) req.move = true; }
   if (op === 'say' || op === 'pray') req.words = rest.join(' ');

@@ -68,6 +68,11 @@
 //       check instead, C14 #3442: `moves.mjs`)
 //     {"op":"can","acts":["sit:<id>"]}  and  {"op":"act","acts":["sit:<id>","sit:<id>"]}   C10's (#3414): the thin
 //       command's words, each candidate on its own target, thing arguments after their act (`actsOf`)
+//   and #3686's, today's inspect and object, from the copy as it is and the kind entries in `<home>/kinds/`
+//   (`../check/offers.mjs`), asking the world nothing; an unknown id or offer is refused with `did_you_mean`:
+//     {"op":"inspect","this":"<id>"}      what the thing is, its state, and its own offers with their parameters
+//     {"op":"object","this":"<id>"}       the same; with "action":"<offer>","args":["<name>=<value>",..] that offer
+//                                         goes through `act` (`acts: ["<offer>:<id>", ...args]`)
 //   and G7's (#2796), for a world's creator (a `creator-` token), the world's kinds text from `<home>/kinds/<world>.kinds`:
 //     {"op":"describe"}                   the copy's nodes (id, kind, parent) and what each kind admits
 //     {"op":"check","ops":[...]}          G1's checks of a batch on the copy as it is: asks the world nothing
@@ -114,6 +119,7 @@ import { ageOf } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
+import { nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
@@ -605,7 +611,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'inspect', 'object']);
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
 const nothingYet = () => !events.some((e) => e.kind !== 'synced');
@@ -663,9 +669,10 @@ function actsOf(words) {
   let kinds = null, rows = null;
   for (const w of words.map(String)) {
     const k = w.lastIndexOf(':'), tail = w.slice(k + 1), arg = /^([A-Za-z0-9_]+)=(.*)$/.exec(w);
-    if (out.length && (ID.test(w) || (arg && ID.test(arg[2])))) {
+    if (out.length && (ID.test(w) || arg)) {
       const c = out.at(-1), args = (c.args ??= {});
-      if (arg) { args[arg[1]] = arg[2]; continue; }
+      // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`).
+      if (arg) { args[arg[1]] = /^-?\d{1,15}$/.test(arg[2]) ? Number(arg[2]) : arg[2]; continue; }
       kinds ??= kindsIn(join(home, 'kinds'));
       rows ??= rowsOf(copy);
       const takes = Object.entries(kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
@@ -784,8 +791,11 @@ async function answer(req) {
       }
       // Each candidate on its own target (C10), else all on `target`; the first one's thing arguments in parameter 1.
       const target = Array.isArray(req.acts) ? keep.map((c) => c.this ?? '').join(' ') : req.target;
-      const args = Object.entries(keep[0].args ?? {}).map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
-      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params: req.params, basis, expiry: req.expiry });
+      // A number goes as a number, so a form's arguments then go as parameter 1's pairs (#3686).
+      const pairs = Object.entries(keep[0].args ?? {}), counted = pairs.some(([, v]) => typeof v === 'number');
+      const args = counted ? undefined : pairs.map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
+      const params = counted ? { ...(req.params ?? {}), 1: pairs } : req.params;
+      const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params, basis, expiry: req.expiry });
       if (req.for !== undefined) serving.set(sequence, req.for);
       const out = { ok: true, sequence, sent, basis: sequenceOf(basis), ...(age ? { checked: isCurrent(age, CURRENT_MS) } : {}), ...(dropped.length ? { dropped } : {}) };
       return closing(out, null, age ? { age } : { now: true });
@@ -806,6 +816,19 @@ async function answer(req) {
       const basis = shownVersion ?? state.cursor;
       const { sequence, sent } = sendIntent([f.verb], { target: f.target, words: f.words, basis });
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis) }, null, { now: true });
+    }
+    case 'inspect': return inspect(req);
+    case 'object': {
+      // #3686: today's `object <id> [action]`: no action lists the offers (as inspect); an action is that offer sent
+      // through `act` below, with its arguments, and nothing else.
+      if (req.action === undefined) return inspect(req);
+      const seen = thingOf(req.this);
+      if (!seen.ok) return closing(seen, null, { now: true });
+      const offer = offerNamed(seen.offers, req.action);
+      if (!offer) {
+        return closing({ ok: false, code: 'object.unknown-offer', detail: `${req.this} offers no ${req.action}`, did_you_mean: nearestOffers(seen.offers, req.action), offers: seen.offers.map((o) => o.name) }, null, { now: true });
+      }
+      return answer({ op: 'act', acts: [offer.act, ...(req.args ?? []).map(String)], ...(req.for !== undefined ? { for: req.for } : {}) });
     }
     case 'describe': return closing({ ok: true }, (rows) => ({
       nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...(r.text ? { text: r.text } : {}) })),
@@ -870,6 +893,33 @@ async function answer(req) {
     case 'stop': setImmediate(stop); return { ok: true };
     default: return { ok: false, code: 'unknown-op' };
   }
+}
+
+/**
+ * #3686: thing `id` as this Soul's copy holds it, with its offers from its kind's entry in `<home>/kinds/`, or a
+ * refusal naming the ids nearest it. It reads the copy as it is: no sync, nothing asked of the world.
+ */
+function thingOf(id) {
+  const rows = rowsOf(copy), row = rows.get(String(id ?? ''));
+  if (!row) {
+    return { ok: false, code: 'inspect.unknown-id', detail: `${id ?? '(none)'} is not an id this Soul's copy holds; ids come from look and find`, did_you_mean: nearestIds(rows.values(), id) };
+  }
+  const kinds = kindsIn(join(home, 'kinds')), entry = kinds[row.kind];
+  return { ok: true, row, entry, offers: offersOf(row.id, entry), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
+}
+
+/** `inspect <id>`: what the thing is, where, its state as the copy holds it, and its own offers with their parameters. */
+function inspect(req) {
+  const seen = thingOf(req.this);
+  if (!seen.ok) return closing(seen, null, { now: true });
+  const { row, entry, offers, fields } = seen;
+  return closing({
+    ok: true, id: row.id, name: row.name, kind: row.kind, ...(row.parent ? { parent: row.parent } : {}),
+    ...(row.path?.length ? { in: row.path.slice().reverse().join(', ') } : {}),
+    ...(typeof entry?.text?.[entry?.card?.text] === 'string' ? { card: entry.text[entry.card.text] } : {}),
+    ...(fields ? { state: fields } : {}), offers,
+    ...(entry ? {} : { note: 'its kind\'s entry is not on this machine: walking to it is all that is known here' }),
+  }, null, { now: true });
 }
 
 /**
