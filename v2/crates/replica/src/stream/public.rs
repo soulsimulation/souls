@@ -973,7 +973,7 @@ impl PublicPlayer {
 
     /// The checks of a part against its next state (`whole`, or the state with `undo`'s rows swapped in): its digest,
     /// its entries and gaps, its duplicates and its change versions. Its digest, versions, part and version.
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
     fn check_next(
         &self,
         sp: &StreamPart,
