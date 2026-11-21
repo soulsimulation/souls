@@ -30,6 +30,15 @@ function expectedHttp(event, report, base) {
   const url = new URL(event.url), origin = new URL(base).origin;
   return url.origin === origin && !url.search && !url.hash && report.expectedHttp.some(e => url.pathname === e.path && event.status === e.status);
 }
+// An aborted owned-origin GET is expected only when its URL got a declared expected response, or it was in flight when the
+// driver itself called page.goto or page.reload. Every other request failure still fails the attempt.
+function expectedAbort(event, report, base) {
+  if (event.kind !== 'requestfailed' || event.method !== 'GET' || event.error !== 'net::ERR_ABORTED') return false;
+  const url = new URL(event.url);
+  if (url.origin !== new URL(base).origin || url.search || url.hash) return false;
+  return event.inFlightAtDriverNavigation === true || report.network.some(e => e.url === event.url && expectedHttp(e, report, base));
+}
+const expectedNetwork = (event, report, base) => expectedHttp(event, report, base) || expectedAbort(event, report, base);
 function expectedResourceError(event, report, base) {
   if (event.kind !== 'error' || event.text !== 'Failed to load resource: the server responded with a status of 503 (Service Unavailable)' || !event.location?.url) return false;
   return report.network.some(response => response.status === 503 && response.url === event.location.url && expectedHttp(response, report, base));
@@ -254,16 +263,21 @@ async function run(o, d) {
     const page = browser.page;
     page.on('console', m => report.console.push({ kind: m.type(), text: m.text(), location: m.location?.() ?? null }));
     page.on('pageerror', e => report.console.push({ kind: 'pageerror', text: String(e) }));
-    page.on('requestfailed', request => report.network.push({ kind: 'requestfailed', method: request.method(), url: request.url(), error: request.failure()?.errorText ?? 'unknown' }));
+    const navigation = { epoch: 0 }, requested = new WeakMap();
+    page.on('request', request => requested.set(request, navigation.epoch));
+    page.on('requestfailed', request => { const at = requested.get(request);
+      report.network.push({ kind: 'requestfailed', method: request.method(), url: request.url(), error: request.failure()?.errorText ?? 'unknown', inFlightAtDriverNavigation: at !== undefined && navigation.epoch > at }); });
     page.on('response', response => { if (response.status() >= 400) report.network.push({ kind: 'http', status: response.status(), url: response.url() }); });
     observationStop = await bounded(() => driver.beforeNavigation?.({ page, base: world.base, paths, signal: controller.signal }), controller.signal, o.phaseTimeoutMs ?? 30000, 'before-navigation', timeout);
     await bounded(() => page.goto(o.world.kind === 'v2-bodies' ? world.viewer : o.world.kind === 'v2-account' ? new URL('/src/account/', world.base).href : world.base + '?dev=1', { waitUntil: 'domcontentloaded', timeout: o.navigationTimeoutMs ?? 30000 }), controller.signal, o.navigationTimeoutMs ?? 30000, 'navigation', timeout);
+    // From here on, a goto or reload is the driver's: requests in flight when one starts may be aborted by it.
+    for (const name of ['goto', 'reload']) if (typeof page[name] === 'function') { const call = page[name].bind(page); page[name] = (...args) => { navigation.epoch++; return call(...args); }; }
     await bounded(() => driver.default({ page, base: world.base, paths, signal: controller.signal, fixture, arm: slot.arm, repeat: slot.repeat,
       expectHttp(path, status, reason) { requireThat(native && path.startsWith('/') && Number.isSafeInteger(status) && status >= 400 && reason?.trim(), 'expected-http-invalid'); report.expectedHttp.push({ path, status, reason }); },
       check(key, ok, detail = '') { report.assertions.push({ key, ok: !!ok, detail }); if (!ok) throw Object.assign(new Error(detail || key), { assertion: key }); } }), controller.signal, o.journeyTimeoutMs ?? 90000, 'journey', timeout);
     requireThat(report.assertions.length && report.assertions.every(a => a.ok), 'no-passing-assertions');
     if (native) {
-      requireThat(report.network.every(event => expectedHttp(event, report, world.base)), 'unexpected-network-error');
+      requireThat(report.network.every(event => expectedNetwork(event, report, world.base)), 'unexpected-network-error');
       requireThat(!unexpectedConsole(report, world.base), 'unexpected-console-error');
     }
     requireThat(new URL(page.url()).origin === new URL(world.base).origin, 'journey-left-owned-origin');
@@ -290,7 +304,7 @@ async function run(o, d) {
       try { if (observationStop) await bounded(observationStop, null, o.cleanupTimeoutMs ?? 8000, 'observer-close'); } catch (e) { report.teardown.observerError = String(e); cleanupFailed = true; }
       try { if (browser) await bounded(() => browser.close(), null, o.cleanupTimeoutMs ?? 8000, 'browser-close'); report.teardown.browserClosed = !report.teardown.browserOpenPending; } catch (e) { report.teardown.browserError = String(e); cleanupFailed = true; }
       try {
-        for (const event of report.network) event.expected = expectedHttp(event, report, report.ownedOrigin);
+        for (const event of report.network) event.expected = expectedNetwork(event, report, report.ownedOrigin);
         for (const event of report.console) if (event.kind === 'error') event.expected = expectedResourceError(event, report, report.ownedOrigin);
         evidence('console.json', report.console);
         evidence('network.json', report.network);
