@@ -227,7 +227,7 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     mark.open(soul, (test) => { ui.test.textContent = test === true ? 'Test Soul' : test === false ? '' : 'Test status unavailable'; });
   };
   // C14: the open Soul's status line, by its grant; a late answer for another Soul is dropped.
-  let line: { soul: string; now: NowLine | null } | null = null, lineAt = 0;
+  let line: { soul: string; now: NowLine | null } | null = null, lineAt = -Infinity;
   const readLine = (soul: string) => {
     lineAt = performance.now();
     void readNow([soul]).then((got) => {
