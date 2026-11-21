@@ -202,10 +202,10 @@ fn selects_body_slot(f: &Json, key: &str) -> bool {
 pub const HERE: i64 = 20_000_000;
 
 /// The thing a form's thing argument `take` selects when the caller leaves it out (#3715): for a `select` of `things`
-/// of one kind `in` `here`, `nearest`, rank 1, the thing of that kind nearest the form's thing `node` (a held thing is
-/// where its holder is) within [`HERE`], in the same building or on the same ground as it when both say, ties by id.
-/// `None` for any other select, or with none near.
-fn nearest_selected(tree: &Tree, node: Id, take: &Json) -> Option<Id> {
+/// of one kind `in` `here`, `nearest`, rank 1: one in `body`'s own hand (a log to stack, #3710), else the thing of that
+/// kind nearest the form's thing `node` (a held thing is where its holder is) within [`HERE`], in the same building or
+/// on the same ground as it when both say, ties by id. `None` for any other select, or with none near.
+fn nearest_selected(tree: &Tree, body: Id, node: Id, take: &Json) -> Option<Id> {
     let sel = take.get("select")?;
     let s = |k: &str| sel.get(k).and_then(Json::str);
     let rank_one = sel.get("rank").is_none_or(|r| matches!(r, Json::Int(1)));
@@ -230,6 +230,9 @@ fn nearest_selected(tree: &Tree, node: Id, take: &Json) -> Option<Id> {
         };
         if n.id() == node || plain(n.kind()) != kind {
             continue;
+        }
+        if n.parent() == Some(body) {
+            return Some(n.id());
         }
         let Ok(p) = replica::select::position(tree, n.id()) else {
             continue;
@@ -1115,7 +1118,7 @@ impl Acts {
                     if all.contains_key(key) {
                         continue;
                     }
-                    if let Some(id) = nearest_selected(tree, *node, take) {
+                    if let Some(id) = nearest_selected(tree, body, *node, take) {
                         all.insert(key.clone(), skills::form_runner::Arg::Node(id));
                         picked = true;
                     }
