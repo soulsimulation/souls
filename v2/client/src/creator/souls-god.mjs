@@ -13,6 +13,9 @@
 //   souls-god.mjs batch '<json list>'            several at once, all or none: [{"op":"place","name":1,...}, ...]; a
 //                                                later op names an earlier place by its "name" number
 //   souls-god.mjs check <any of the four, or batch> ...   the same, checked on the copy only; nothing is sent
+//   souls-god.mjs event <room or ground id> '<words>' --when HH:MM|<world µs>us [--for <minutes>] [--at x,y,z]
+//                                                a calendar entry there (eden:calendar_entry), its words kept by the
+//                                                world for everyone; HH:MM is its next one on the world's calendar
 //   souls-god.mjs status | stop                  the daemon
 //   any of them [--creator <c_id>]               which creator, when the home holds more than one
 //
@@ -28,7 +31,7 @@ import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'status', 'stop'];
+export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'status', 'stop', 'event'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
@@ -48,6 +51,7 @@ export const FIX = {
   'edit.no-copy': 'the daemon has no copy yet: run status until connected is true',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'which-creator': 'name one with --creator',
+  'when.no-calendar': 'the copy has no world clock yet: run status until connected is true, or give --when <world µs>us',
 };
 
 const usage = (detail) => Object.assign(new Error(detail), { code: 'usage' });
@@ -90,6 +94,29 @@ export function opsOf(verb, words) {
   throw usage(`one of ${VERBS.join(', ')}`);
 }
 
+/** A calendar entry's kind and its fields (start, end in world µs; words): `content/kinds/calendar/entry.json`. */
+export const ENTRY = { kind: 'eden:calendar_entry', start: 28, end: 29, words: 30 };
+const MINUTE_US = 60_000_000;
+
+/** The batch that posts one event: a calendar entry placed in `into`, from `start` for `minutes`, with its words. */
+export function eventOps({ into, words, start, minutes = 60, at }) {
+  return [{ op: 'place', name: 1, kind: ENTRY.kind, in: node(into), ...(at ? { at } : {}),
+    fields: { [ENTRY.start]: start, [ENTRY.end]: start + minutes * MINUTE_US, [ENTRY.words]: { words } } }];
+}
+
+/** `event`'s words: where, what, when (HH:MM, or world µs as `<n>us`), how long and the spot. */
+export function eventOf(words) {
+  const args = [...words];
+  const when = takeOpt(args, '--when'), long = takeOpt(args, '--for'), at = takeOpt(args, '--at');
+  const how = "event <room or ground id> '<words>' --when HH:MM|<world µs>us [--for <minutes>] [--at x,y,z]";
+  if (args.length !== 2 || !args[1].trim() || !when) throw usage(how);
+  const minutes = long === undefined ? 60 : Number(long);
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 7 * 24 * 60) throw usage('--for is whole minutes, 1 to a week');
+  const us = /^(\d+)us$/.exec(when), hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(when);
+  if (!us && !hm) throw usage(how);
+  return { into: args[0], words: args[1].trim(), ...(us ? { start: Number(us[1]) } : { when }), minutes, ...(at ? { at: xyz(at) } : {}) };
+}
+
 /** The daemon request the arguments make, and the creator named. */
 export function requestOf(argv) {
   const args = [...argv];
@@ -97,6 +124,7 @@ export function requestOf(argv) {
   const [verb = 'status', ...rest] = args;
   if (!VERBS.includes(verb)) throw Object.assign(new Error(`one of ${VERBS.join(', ')}`), { code: 'unknown-command' });
   if (verb === 'pair') return { pair: rest[0], creator };
+  if (verb === 'event') return { event: eventOf(rest), creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe') return { req: { op: verb }, creator };
   if (verb === 'check') return { req: { op: 'check', ops: opsOf(rest[0], rest.slice(1)) }, creator };
   return { req: { op: 'edit', ops: opsOf(verb, rest) }, creator };
@@ -133,6 +161,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
     const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
     if (!creator) throw Object.assign(new Error(`creators here: ${creators.join(', ') || 'none; pair first'}`), { code: 'which-creator' });
+    if (asked.event) {
+      // HH:MM is its next one on the world's published calendar, read from the creator's copy.
+      const e = asked.event, ask = (r) => call(home, creator, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: 15_000 });
+      const when = e.start === undefined ? await ask({ op: 'when', at: e.when }) : { ok: true, worldUs: e.start };
+      asked.req = when.ok ? { op: 'edit', ops: eventOps({ ...e, start: when.worldUs }) } : null;
+      if (!asked.req) { out(withFix(when)); process.exit(1); }
+    }
     const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: 15_000 });
     out(withFix(answer));
     if (answer.ok === false) process.exitCode = 1;

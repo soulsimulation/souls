@@ -145,7 +145,7 @@ import { clockOf, worldNow } from '../clock/clock.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
-import { calendarOf, worldDue } from '../schedule/world.mjs';
+import { calendarOf, nextWorldTime, worldDue } from '../schedule/world.mjs';
 import { refreshEntries } from '../pair/pair.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
@@ -703,7 +703,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object', 'when']);
 const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
@@ -881,6 +881,12 @@ async function answer(req) {
       replyOf.set(id, reply);
       closeMail(id, close, 'replied');
       return { ok: true, acked: id, reply, closed: close, sent: signedIn, ...ageNow() };
+    }
+    case 'when': {
+      // #3699: the next world time at local HH:MM on the world's published calendar (a creator's event start).
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(req.at ?? ''))) return { ok: false, code: 'when.not-a-time', detail: 'HH:MM, 00:00 to 23:59' };
+      const clock = clockOf(copy), worldUs = nextWorldTime(req.at, calendarOf(copy), clock ? worldNow(clock) : null);
+      return worldUs === null ? { ok: false, code: 'when.no-calendar', detail: 'the copy has no world clock or calendar yet' } : { ok: true, worldUs };
     }
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
