@@ -147,3 +147,17 @@ test('A3: markup and an address in an utterance are drawn as plain text, with no
   assert.deepEqual([...new Set(made)].sort(), ['aside', 'button', 'canvas', 'h2', 'li', 'ol', 'p']);
   assert.ok(!made.includes('a') && !made.includes('script') && !made.includes('img') && !made.includes('b'));
 });
+
+test('B16: a Soul the world winds down reads idle, zombie, asleep from its records, and awake again when woken', () => {
+  const c = new SoulsCopy();
+  c.apply({ nodes: [body('a.1')], removed: [], to: 0 });
+  const rec = (at: number, name: string) => ({ at, node: 'a.1', name });
+  c.apply({ nodes: [], removed: [], to: 15_000_000, happened: [rec(10_000_000, 'souls:idle')] });
+  assert.equal(c.status('a.1', 15_000_000, none), 'idle');
+  c.apply({ nodes: [], removed: [], to: 22_000_000, happened: [rec(20_000_000, 'souls:zombie')] });
+  assert.equal(c.status('a.1', 22_000_000, none), 'zombie');
+  c.apply({ nodes: [], removed: [], to: 30_000_000, happened: [rec(25_000_000, 'souls:asleep')] });
+  assert.equal(c.status('a.1', 30_000_000, none), 'asleep');
+  c.apply({ nodes: [], removed: [], to: 40_000_000, happened: [rec(35_000_000, 'souls:awake'), { at: 35_000_000, node: 'a.1', name: 'souls:said' }] });
+  assert.equal(c.status('a.1', 40_000_000, none), 'standing');
+});

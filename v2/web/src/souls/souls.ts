@@ -3,17 +3,23 @@
 // fetches: every chip, line of speech and Soul page is a query on this copy. Times are world microseconds.
 //
 // A Soul's status is derived from the copy, never sent: speaking while a sentence of its own is on, seated while it is
-// in a slot, walking while its track has samples ahead of the clock or within the last second, else standing.
+// in a slot, walking while its track has samples ahead of the clock or within the last second, else standing. A Soul the
+// world is winding down (B16, #2751: its agent silent) is `idle`, `zombie` or `asleep` from the world's record of it
+// (`souls:idle`, `souls:zombie`, `souls:asleep`) until the record that it woke (`souls:awake`).
 // The page draws every utterance its view carries and no other: who may read one (its audience) and how far it carries
 // (its reach) were fixed when it was written, and the public view never holds a whisper.
 import type { NodeRec, PartRec, SaidRec } from '../source/source.ts';
+import type { Happened } from '../sound/record.ts';
 
 /** How many of a Soul's recent public events its page lists. */
 export const RECENT = 8;
 const WALKING_US = 1_000_000;
 
 export type Soul = { id: string; name: string | null; description: string | null; soul?: string | null };
-export type Status = 'speaking' | 'seated' | 'walking' | 'standing';
+export type Status = 'speaking' | 'seated' | 'walking' | 'standing' | Wound;
+/** The wind-down's public words for a body its agent left (B16). */
+export type Wound = 'idle' | 'zombie' | 'asleep';
+const WORDS = new Map<string, Wound | 'awake'>([['souls:awake', 'awake'], ['souls:idle', 'idle'], ['souls:zombie', 'zombie'], ['souls:asleep', 'asleep']]);
 /** What the copy needs from the world view to say where a Soul is and how it moves. */
 export type Bodies = { nodes: Map<string, NodeRec>; tracks: Map<string, { samples: { at: number }[] }> };
 
@@ -27,6 +33,8 @@ export class SoulsCopy {
   readonly recent = new Map<string, SaidRec[]>();
   /** Utterances that may still be on screen (their time not over at the newest part's end). */
   private live: SaidRec[] = [];
+  /** Each Soul's newest wind-down word and its world time (B16). */
+  readonly wound = new Map<string, { at: number; word: Wound | 'awake' }>();
 
   /** Reconcile authorized nodes without changing speech, event history or time. */
   snapshot(nodes: NodeRec[], removed: string[]): void {
@@ -47,8 +55,12 @@ export class SoulsCopy {
     }
   }
 
-  apply(p: Pick<PartRec, 'nodes' | 'removed' | 'said' | 'to'>): void {
+  apply(p: Pick<PartRec, 'nodes' | 'removed' | 'said' | 'to'> & { happened?: Happened[] }): void {
     this.snapshot(p.nodes, p.removed);
+    for (const h of p.happened ?? []) {
+      const word = h.name === undefined ? undefined : WORDS.get(h.name);
+      if (word && (this.wound.get(h.node)?.at ?? -Infinity) <= h.at) this.wound.set(h.node, { at: h.at, word });
+    }
     for (const s of p.said ?? []) {
       if (s.words === null) continue; // not in the public text file: not drawn
       const r = this.recent.get(s.speaker) ?? this.recent.set(s.speaker, []).get(s.speaker)!;
@@ -68,6 +80,8 @@ export class SoulsCopy {
 
   status(id: string, t: number, bodies: Bodies, speaking?: Map<string, SaidRec>): Status {
     if ((speaking ?? this.speaking(t)).has(id)) return 'speaking';
+    const w = this.wound.get(id);
+    if (w && w.at <= t && w.word !== 'awake') return w.word;
     const n = bodies.nodes.get(id);
     if (n && n.slot !== null) return 'seated';
     const s = bodies.tracks.get(id)?.samples;
