@@ -17,7 +17,7 @@ import { browserQuality } from './quality-tier.ts';
 import { WorldView } from './world.ts';
 import { support } from './support.ts';
 import { pageThings } from '../things/page.ts';
-import { HistoryPage, readMoment } from '../history/page.ts';
+import { HistoryPage, readMoment, historyLocation } from '../history/page.ts';
 import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
 import { mountOwnerBox } from '../owner/box.ts';
@@ -26,7 +26,8 @@ import { mountArrival } from '../arrival/card.ts';
 import { WorldSky } from '../sky/sky.ts';
 import { tickWater } from '../water/water.ts';
 import { installNightLighting, nightPools, paintNightSources, setNightStrength } from './night.ts';
-import { installCapture } from '../capture/capture.ts';
+import { installCapture, shotSignal } from '../capture/capture.ts';
+import { parseHour } from '../sky/hour.ts';
 import { pageFx } from '../fx/page.ts';
 import { mountFullscreen, startWakeLock } from './screen.ts';
 
@@ -42,6 +43,9 @@ const address = installed?.stream ?? (addressError ? null : new URLSearchParams(
 const worldName = new URLSearchParams(location.search).get('world');
 let worldHistory: string | null = installed?.history ?? null;
 const moment = readMoment(location.hash); // V9: a link to a moment opens history
+if (moment && installed && !addressError) {
+  try { historyLocation(moment, location.href, installed); } catch (e) { addressError = e instanceof Error ? e.message : 'history-live-refused'; }
+}
 // V13/V13b/V13c: the owner's near-live view, from the web session alone: `directory` is the directory's origin,
 // `gateway` the world's socket. The session is the provider's, its script loaded behind today's configuration
 // (`signin.ts`; a fresh token asked of it each time), or `as=<test person>` on a local world. The session exchanges for
@@ -80,6 +84,7 @@ Object.assign(sun.shadow.camera, { left: -SHADOW, right: SHADOW, top: SHADOW, bo
 sun.shadow.camera.updateProjectionMatrix();
 scene.add(sun, sun.target);
 const sky = new WorldSky(scene, hemi, sun); // V19: sky, daylight and rain from the world node's record
+sky.hour = parseHour(location.search); // #3795: `?hour=HH:MM`, the sky and its light only
 const cam = new FreeCamera(canvas);
 const world = new WorldView();
 scene.add(world.group);
@@ -94,6 +99,7 @@ director.shots = new ViewShots(renderer, scene, () => things.layer?.settled ?? t
 const hover = new WorldHover(canvas, () => cam.camera, { world, things: () => things.layer, name: (id) => souls.copy.souls.get(id)?.name ?? null, chipShown: (id) => souls.placed.some((p) => p.id === id) }); scene.add(hover.ring); // N-V20
 Object.assign(globalThis, { v2: { renderer, scene, sky, cam, director, world, things, fx, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 installCapture(globalThis as any, q, document); // G10: `shoot` names a place, Soul or thing and the camera goes there
+const shot = shotSignal(q, globalThis as any); // #3795: `?shot`'s ready signal, as today's page gives it
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
 loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './assets/bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
 
@@ -107,7 +113,7 @@ startWakeLock();
 let pointer: Pointer | null = null;
 let newestTo: number | null = null;
 let played = 0, hashes = 0, hashesEqual = 0, framed = false;
-let error = '';
+let error = addressError;
 
 const resize = () => {
   renderer.setSize(innerWidth, innerHeight, false);
@@ -157,12 +163,12 @@ async function resolveWorld(name: string, root: string, get = fetch): Promise<{ 
   if (typeof j.stream !== 'string') throw new Error(`world ${name}: world.json names no stream`);
   return { stream: new URL(j.stream.replace(/\/?$/, '/'), base).href, history: new URL(j.history ?? 'history/', base).href };
 }
-let history = moment && new HistoryPage(moment, cam, {
+let history = moment && !addressError ? new HistoryPage(moment, cam, {
   apply: (n, r, s, h) => (world.apply(n, r, s), sky.apply(n), things.apply(n, r), fx?.apply(n, r), sound.part(n, r, s, h ?? [])), live, root: () => [...world.nodes.values()].find((n) => !n.parent)?.id ?? null,
   frame: (id) => (world.nodes.has(id) ? world.frame(id) : null),
-});
+}, installed ?? undefined) : null;
 if (history) (framed = true), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, history, clock } });
-else if (address) {
+else if (address && !addressError) {
   live(address);
   const { directory, gateway } = installed ?? localAddresses(location.href);
   const ownerIntent = q.has('follow') || (localTestSignIn(location.href) && (q.has('as') || q.has('directory')));
@@ -179,7 +185,7 @@ else if (address) {
     if (own) (globalThis as any).v2.box = mountOwnerBox(near, own.grant, () => `To ${souls.copy.souls.get(follow)?.name ?? 'your Soul'}'s agent`);
   }).catch((e) => (error = e instanceof Error ? e.message : 'no view'));
 }
-else if (worldName) resolveWorld(worldName, new URLSearchParams(location.search).get('worlds') ?? './w/').then(
+else if (worldName && !addressError) resolveWorld(worldName, new URLSearchParams(location.search).get('worlds') ?? './w/').then(
   (w) => ((worldHistory = w.history), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, stream: w.stream, worldHistory } }), live(w.stream)),
   (e) => (error = String(e)),
 );
@@ -201,7 +207,7 @@ renderer.setAnimationLoop((now) => {
   const texel = (2 * SHADOW) / sun.shadow.mapSize.x, at = cam.controls.target;
   sun.target.position.set(Math.round(at.x / texel) * texel, at.y, Math.round(at.z / texel) * texel);
   const worldNow = pointer ? pointer.anchorWorld + (Date.now() - pointer.anchorWallMs) * 1000 : null;
-  const t = history ? history.step(dt, worldNow, newestTo) : worldNow === null ? null : (near ?? clock).step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
+  const t = history ? history.step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil)) : worldNow === null ? null : (near ?? clock).step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
   director.update(Math.min(100, dt), t);
   sun.position.copy(sun.target.position).addScaledVector(sky.update(t ?? 0, cam.camera), 400);
   tickWater((t ?? 0) / 1e6);
@@ -225,6 +231,7 @@ renderer.setAnimationLoop((now) => {
     }
   }
   renderer.render(scene, cam.camera);
+  shot.frame(t !== null && world.nodes.size > 0 && sky.recordAt(t) !== null && (things.layer?.settled ?? true)); // a world with no Souls draws no bodies, and is still ready
   if (!arrived && t !== null && world.nodes.size > 0) (arrived = true), card.reach('drawn');
   else if (!arrived && error && error !== failedWith) card.fail(failedWith = error);
   const c = cam.camera, fwd = c.getWorldDirection(new THREE.Vector3());

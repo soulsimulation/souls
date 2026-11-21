@@ -81,7 +81,77 @@ fn store<T>(r: rusqlite::Result<T>) -> Result<T, &'static str> {
     r.map_err(|_| "store")
 }
 
+/// One of a world's recent visitors (#3702): what its creator may read, nothing of the owner's account or device.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Visitor {
+    /// The Soul's grant, `soul-<scope hex>-<n>`.
+    pub soul: String,
+    pub name: Option<String>,
+    /// When it last arrived (its latest approved pairing for the world), seconds.
+    pub arrived: u64,
+    /// An agent holds it now.
+    pub connected: bool,
+}
+
 impl Pairing {
+    /// The Souls most recently paired for `world`, newest first, at most `most`; retired Souls are left out.
+    pub fn visitors(&self, world: &str, most: usize) -> Result<Vec<Visitor>, &'static str> {
+        let db = self.db.lock().expect("the store");
+        let mut q = store(db.prepare(
+            "SELECT r.grant_text, MAX(r.created_at), p.name, ps.device IS NOT NULL
+               FROM pair_requests_v1 r JOIN pair_request_worlds_v1 w ON w.code = r.code
+               LEFT JOIN soul_profiles_v1 p ON p.grant_text = r.grant_text
+               LEFT JOIN paired_souls_v1 ps ON ps.grant_text = r.grant_text
+              WHERE w.world = ?1 AND r.state IN ('approved', 'delivered') AND r.scope = 'soul' AND r.grant_text IS NOT NULL
+                AND p.retired_at IS NULL
+              GROUP BY r.grant_text ORDER BY 2 DESC, 1 LIMIT ?2",
+        ))?;
+        let rows = store(q.query_map(params![world, most as i64], |r| {
+            Ok(Visitor {
+                soul: r.get(0)?,
+                arrived: r.get::<_, i64>(1)?.max(0) as u64,
+                name: r.get(2)?,
+                connected: r.get(3)?,
+            })
+        }))?;
+        store(rows.collect())
+    }
+
+    /// The world the request with this poll `secret` named, if it named one (#3702: its welcome goes with the token).
+    pub fn world_by_secret(&self, secret: &str) -> Option<String> {
+        let hash = to_hex(&sha256(secret.as_bytes()));
+        self.db
+            .lock()
+            .expect("the store")
+            .query_row(
+                "SELECT w.world FROM pair_requests_v1 r JOIN pair_request_worlds_v1 w ON w.code = r.code
+                 WHERE r.secret_hash = ?1",
+                params![hash],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    /// The creator grant a paired creator's `token` is for (`creator-<scope hex>-<n>`), or none.
+    pub fn creator_by_token(&self, token: &str) -> Option<String> {
+        let hash = to_hex(&sha256(token.as_bytes()));
+        self.db
+            .lock()
+            .expect("the store")
+            .query_row(
+                "SELECT grant_text FROM paired_souls_v1 WHERE token_hash = ?1
+                 UNION SELECT grant_text FROM paired_world_tokens_v1 WHERE token_hash = ?1 LIMIT 1",
+                params![hash],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .filter(|g| g.starts_with("creator-"))
+    }
+
     /// Keeps the world a pending request (by its code) was made for.
     pub fn ask_world(&self, code: &str, world: &str) -> Result<(), &'static str> {
         if !is_world(world) {
