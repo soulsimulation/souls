@@ -549,7 +549,20 @@ impl Geometry for Sight<'_> {
             (node, at)
         };
         let mut planning = self.planning.borrow_mut();
-        match planning.ask(key, *me, FormQuery::Walk { node, at, reach }, &self.map) {
+        // An approach's move acts on the run's own thing: when that is a doorway's door, the walk may end in its
+        // doorway (#3688).
+        let door = self
+            .approaches
+            .contains(&body)
+            .then(|| self.walks.get(&body).map(|w| w.1))
+            .flatten();
+        let query = FormQuery::Walk {
+            node,
+            at,
+            reach,
+            door,
+        };
+        match planning.ask(key, *me, query, &self.map) {
             Some(FormResult::Walk(legs)) => {
                 // A later stage may start in this same call before Sight's context is refreshed: it must request its
                 // own answer, even when its step number and target repeat the preceding stage.
