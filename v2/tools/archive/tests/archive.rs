@@ -1436,7 +1436,6 @@ fn w3755_full_eden_bundles_row_by_row_equal_the_whole_state_reference() {
         .map(|r| replica::effects::Part::read(r).unwrap().effects.len())
         .sum();
     let bytes = |b: &[Bundle]| b.iter().map(|b| b.bytes().to_vec()).collect::<Vec<_>>();
-    { let __t = Instant::now(); let _b = archive::Bundler::from_base(&base).unwrap(); eprintln!("stage from_base {:.1}", __t.elapsed().as_secs_f64()*1e3); }
     let mut made = Vec::new();
     for whole in [false, true, false, true] {
         archive::whole_state_reference(whole);
