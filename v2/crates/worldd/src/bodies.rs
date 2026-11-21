@@ -1066,7 +1066,9 @@ impl Bodies {
         if self.wind.next().is_none_or(|t| t > at) {
             return;
         }
-        let orders = self.wind.step(at, &WindGround { b: self });
+        let mut wind = std::mem::take(&mut self.wind);
+        let orders = wind.step(at, &WindGround { b: self });
+        self.wind = wind;
         for o in orders {
             self.wind_do(&o, at);
         }
