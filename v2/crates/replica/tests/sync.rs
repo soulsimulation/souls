@@ -235,4 +235,11 @@ fn a_withheld_record_is_a_leaf_the_copy_never_reads() {
     assert_eq!(s.held, 1);
     assert_eq!(copy.record(&h), None, "a withheld record is never read");
     assert!(copy.reach().is_ok());
+    // Whether it may be seen is not in its hash: the next sync asks for it again.
+    let mut d = copy.compare(&[world_id(1)], vec![Some(h.clone())]);
+    assert_eq!(
+        copy.ask(&mut d, usize::MAX),
+        vec![h],
+        "a withheld record is asked for again"
+    );
 }
