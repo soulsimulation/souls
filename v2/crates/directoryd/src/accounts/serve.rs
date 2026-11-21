@@ -27,6 +27,11 @@
 //!   line `<soul> <prayer id> {"answered": {"id", "text", "answer", "at"}}`, closed by the daemon's
 //!   `{"close": {"id"}}`.
 //!
+//! - A Soul's status line (C14, #3684; [`super::now`]): `POST /v1/mailbox/now` `{"now": {"n", "text"}}`, the
+//!   gateway's, with the socket's grant in the `souls-soul` header, answered as a prayer is (`{"reply": {"n", "ok",
+//!   "now": {"text", "at"} | null}}`); and `POST /v1/account/now` `{"souls": [grant, ..]}`, public, answered
+//!   `{"now": {grant: {"text", "at"}}}` for those with a line.
+//!
 //! Answers carry `cache-control: no-store` (the world list's a short while) and may be read by the page's own origin
 //! alone (CORS). A message's text is never in a log line. The log line of a request holds its method, path, status
 //! and either the
@@ -382,10 +387,15 @@ fn mailbox(req: &Request, app: &App) -> Option<(u16, Value, String)> {
         {
             Some(prayers(req, app))
         }
+        ("POST", "/v1/mailbox/now") if gateway() => Some(now_set(req, app)),
         ("GET", "/v1/mailbox/open")
         | (
             "POST",
-            "/v1/mailbox/close" | "/v1/mailbox/pray" | "/v1/mailbox/prayers" | "/v1/mailbox/answer",
+            "/v1/mailbox/close"
+            | "/v1/mailbox/pray"
+            | "/v1/mailbox/prayers"
+            | "/v1/mailbox/answer"
+            | "/v1/mailbox/now",
         ) => refuse(401, "mailbox-key"),
         ("POST", "/v1/mailbox/put") if app.test_sign_in || gateway() => {
             let b = body();
@@ -481,6 +491,59 @@ fn prayers(req: &Request, app: &App) -> (u16, Value, String) {
     (200, json!({"reply": reply}), note)
 }
 
+fn now_json(n: &super::now::Now) -> Value {
+    json!({"text": n.text, "at": n.at})
+}
+
+/// C14 (#3684): a Soul sets its status line, from the gateway with the socket's own grant (`{"now": {"n", "text"}}`).
+/// Answered as a prayer is, a 200 whose body is the reply the gateway gives back to that socket. No text in the log.
+fn now_set(req: &Request, app: &App) -> (u16, Value, String) {
+    let grant = req.soul.clone().unwrap_or_default();
+    let frame = serde_json::from_slice::<Value>(&req.body).unwrap_or(Value::Null);
+    let b = frame.get("now").cloned().unwrap_or(Value::Null);
+    let n = b.get("n").and_then(Value::as_u64).unwrap_or(0);
+    // A null or empty text clears the line.
+    let text = match b.get("text") {
+        Some(Value::Null) => Some(""),
+        Some(Value::String(t)) => Some(t.as_str()),
+        _ => None,
+    };
+    let (mut reply, note) = match text.map(|t| app.store.now_set(&grant, t, now())) {
+        None => (json!({"refused": "now.form"}), "now.form".to_string()),
+        Some(Ok(Ok(line))) => {
+            let note = if line.is_some() { "now set" } else { "now cleared" };
+            (json!({"now": line.as_ref().map(now_json)}), note.to_string())
+        }
+        Some(Ok(Err(name))) => (json!({"refused": name}), name.to_string()),
+        Some(Err(_)) => (json!({"refused": "store"}), "store".to_string()),
+    };
+    reply["n"] = json!(n);
+    reply["ok"] = json!(reply.get("refused").is_none());
+    (200, json!({"reply": reply}), note)
+}
+
+/// C14 (#3684): the public read of Souls' status lines, `{"souls": [grant, ..]}` (at most `now::READ_MOST`), answered
+/// `{"now": {grant: {"text", "at"}}}` for those that have one. Public, as the Soul's page is; no sign-in.
+fn now_read(req: &Request, app: &App) -> (u16, Value, String) {
+    let body = serde_json::from_slice::<Value>(&req.body).unwrap_or(Value::Null);
+    let Some(souls) = body.get("souls").and_then(Value::as_array) else {
+        return (400, json!({"refused": "request"}), "request".into());
+    };
+    if souls.len() > super::now::READ_MOST {
+        return (400, json!({"refused": "now.too-many"}), "now.too-many".into());
+    }
+    let asked: Vec<&str> = souls.iter().filter_map(Value::as_str).collect();
+    match app.store.now_of(&asked) {
+        Ok(lines) => {
+            let map: serde_json::Map<String, Value> =
+                lines.iter().map(|(g, n)| (g.clone(), now_json(n))).collect();
+            let note = format!("now {} of {}", map.len(), asked.len());
+            (200, json!({"now": map}), note)
+        }
+        Err(_) => (500, json!({"refused": "store"}), "store".into()),
+    }
+}
+
 fn route(req: &Request, app: &App) -> (u16, Value, String) {
     if let Some(r) = mailbox(req, app) {
         return r;
@@ -493,6 +556,7 @@ fn route(req: &Request, app: &App) -> (u16, Value, String) {
         ("OPTIONS", _) => return (204, Value::Null, "preflight".into()),
         ("GET" | "POST", "/v1/worlds") => return crate::worlds::list::http::route(req, app),
         ("POST", "/v1/worlds/settings") => return crate::worlds::list::http::settings(req, app),
+        ("POST", "/v1/account/now") => return now_read(req, app),
         ("POST", "/v1/account/session") => who(req, app, false),
         ("POST", "/v1/account/test-sign-in") if app.test_sign_in => who(req, app, true),
         ("POST", "/v1/account/view-token" | "/v1/account/sign-out") => {
