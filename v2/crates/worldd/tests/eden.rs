@@ -3059,13 +3059,24 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
             ("e_68df95e8", "switch_off", "done"),
         ],
     ));
-    // A cottage's inner door (its bedroom's): the Soul walks in to the bedroom's rug, then opens and closes the door
-    // from there. Its knock from the bedroom still ends `out-of-reach` (#3688, left open).
+    // A cottage's inner door (its bedroom's), from outside: each form walks in through the front door, then to the
+    // inner door, and knocks, opens and closes it.
+    wrong.extend(served_family(
+        "-99.0,-93.0",
+        "c25cottageout",
+        &[
+            ("e_00385aae", "knock", "done"),
+            ("e_00385aae", "open", "done"),
+            ("e_00385aae", "close", "done"),
+        ],
+    ));
+    // The same door from inside its bedroom: the Soul walks in to the bedroom's rug, then knocks, opens and closes it.
     wrong.extend(served_family(
         "-99.0,-93.0",
         "c25cottage",
         &[
             ("e_7ff72484", "walk", "done"),
+            ("e_00385aae", "knock", "done"),
             ("e_00385aae", "open", "done"),
             ("e_00385aae", "close", "done"),
         ],
