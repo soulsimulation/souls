@@ -255,7 +255,7 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     ui.now.hidden = !said;
     // #3784: dimmed while the Soul is asleep or a zombie, as today's card.
     const dim = nowDims(p.status);
-    ui.now.dataset.dim = dim ? '1' : '';
+    ui.now.setAttribute('data-dim', dim ? '1' : '');
     ui.now.style.color = dim ? DIM_STYLE.color : '#e8e6e1';
     ui.now.style.fontSize = dim ? DIM_STYLE.fontSize : '';
     ui.status.textContent = p.status;
