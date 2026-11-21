@@ -1608,7 +1608,10 @@ impl Clock {
             };
             // The edit is read from the intent as logged, so it holds the words' references, never their bytes.
             if matches!(intent.actor, Actor::Creator(_)) {
-                match encode(&value).map_err(|r| r.name).and_then(|b| Intent::read(&b).map_err(|r| r.name)) {
+                let read = encode(&value)
+                    .map_err(|_| "intent.unread")
+                    .and_then(|b| Intent::read(&b).map_err(|r| r.name));
+                match read {
                     Ok(i) => intent = i,
                     Err(reason) => {
                         let a = self.refusal(actor, sequence, reason);
@@ -5517,7 +5520,10 @@ mod tests {
             audience: Audience::Everyone,
             fields: BTreeMap::from([(
                 30,
-                Value::Map(BTreeMap::from([(words::WORDS, Value::Bytes(SAID.to_vec()))])),
+                Value::Map(BTreeMap::from([(
+                    words::WORDS,
+                    Value::Bytes(SAID.to_vec()),
+                )])),
             )]),
         };
         let i = Intent {

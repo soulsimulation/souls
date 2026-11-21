@@ -554,7 +554,9 @@ fn field_value(v: &json::Value) -> Result<Value, String> {
             .map(Value::Array),
         // Words (#3699): T8's `{23: words}`, which the world keeps in its text store and logs as `{21: id}`.
         json::Value::Obj(pairs) => match pairs.as_slice() {
-            [(k, json::Value::Str(t))] if k == "words" && !t.is_empty() && t.len() <= WORDS_MOST => {
+            [(k, json::Value::Str(t))]
+                if k == "words" && !t.is_empty() && t.len() <= WORDS_MOST =>
+            {
                 Ok(Value::Map(BTreeMap::from([(
                     crate::audience::WORDS,
                     Value::Bytes(t.as_bytes().to_vec()),
