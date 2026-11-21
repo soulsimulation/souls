@@ -531,6 +531,10 @@ fn spot_of(o: &json::Value) -> Result<Spot, String> {
     })
 }
 
+/// The most bytes of words one field may carry in an edit (today's longest god-mode text, an event's title, is 120
+/// characters; a notice's words are longer).
+const WORDS_MOST: usize = 2_000;
+
 fn field_value(v: &json::Value) -> Result<Value, String> {
     match v {
         json::Value::Int(n) if *n >= 0 => u64::try_from(*n)
@@ -548,9 +552,22 @@ fn field_value(v: &json::Value) -> Result<Value, String> {
             .map(field_value)
             .collect::<Result<Vec<_>, _>>()
             .map(Value::Array),
-        _ => {
-            Err("a field's value is an integer, true or false, a name, or an array of these".into())
-        }
+        // Words (#3699): T8's `{23: words}`, which the world keeps in its text store and logs as `{21: id}`.
+        json::Value::Obj(pairs) => match pairs.as_slice() {
+            [(k, json::Value::Str(t))] if k == "words" && !t.is_empty() && t.len() <= WORDS_MOST => {
+                Ok(Value::Map(BTreeMap::from([(
+                    crate::audience::WORDS,
+                    Value::Bytes(t.as_bytes().to_vec()),
+                )])))
+            }
+            _ => Err(format!(
+                "words are {{\"words\": \"...\"}}, 1 to {WORDS_MOST} bytes"
+            )),
+        },
+        _ => Err(
+            "a field's value is an integer, true or false, a name, words, or an array of these"
+                .into(),
+        ),
     }
 }
 

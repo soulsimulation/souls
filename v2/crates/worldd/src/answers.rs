@@ -1498,7 +1498,7 @@ impl Clock {
         stamps: Stamps,
         now: Micros,
     ) {
-        let intent = match Intent::read(bytes) {
+        let mut intent = match Intent::read(bytes) {
             Ok(i) => i,
             Err(r) => {
                 let f = self.frame(&Answer::Unread {
@@ -1590,11 +1590,15 @@ impl Clock {
         if has_words(&value) {
             // The words go to the store and the intent is logged with their references (V1b); refused, it is logged
             // without its intent.
-            let r = match self.body_of(&intent) {
-                Ok(b) => words::keep(value, &self.text, words::audience(form, b), b, &mut kept)
-                    .map_err(|r| r.name),
-                Err(e) => Err(e),
+            // A creator's edit with no body (#3699: an event's words) keeps them for everyone, as its author.
+            let author = match (self.body_of(&intent), intent.actor) {
+                (Ok(b), _) => Ok((b, words::audience(form, b))),
+                (Err(_), Actor::Creator(c)) => Ok((c, Audience::Everyone)),
+                (Err(e), _) => Err(e),
             };
+            let r = author.and_then(|(b, seen_by)| {
+                words::keep(value, &self.text, seen_by, b, &mut kept).map_err(|r| r.name)
+            });
             value = match r {
                 Ok(v) => v,
                 Err(reason) => {
@@ -1602,6 +1606,16 @@ impl Clock {
                     return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
                 }
             };
+            // The edit is read from the intent as logged, so it holds the words' references, never their bytes.
+            if matches!(intent.actor, Actor::Creator(_)) {
+                match encode(&value).map_err(|r| r.name).and_then(|b| Intent::read(&b).map_err(|r| r.name)) {
+                    Ok(i) => intent = i,
+                    Err(reason) => {
+                        let a = self.refusal(actor, sequence, reason);
+                        return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+                    }
+                }
+            }
         }
         if expired(intent.expiry, now) {
             let a = self.refusal(actor, sequence, "intent.expired");
@@ -5462,6 +5476,81 @@ mod tests {
             replica::ids::sha256(&a),
             replica::ids::sha256(&b),
             "the same edits at the same ticks write the same log"
+        );
+    }
+
+    /// #3699: a creator's edit may carry words (an event's): the world keeps them in its text store for everyone and
+    /// logs their reference, so the edit is taken and no byte of the words reaches the log.
+    #[test]
+    fn a_creators_edit_keeps_its_words_and_logs_their_reference() {
+        use replica::edit::wire::{VERB, parameters};
+        use replica::edit::{Op, Ref, Spot};
+        use replica::pose::{Quat, Support, Vec3};
+        let store = Held::new(Vec::new());
+        let w = toggles::World::build(1, 0, 0);
+        let tree = w.replica.tree();
+        let room = tree
+            .children(tree.root())
+            .and_then(|c| c.first())
+            .and_then(|h| tree.node(*h))
+            .map(|n| n.id())
+            .expect("a room");
+        let kinds = toggles::kinds();
+        let item = Name::new(kinds.keys().find(|k| k.starts_with("souls:item@")).unwrap()).unwrap();
+        let creator = Id::new(Scope([0xc2; 16]), 1).unwrap();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.lockstep = true;
+        cfg.measures = false;
+        cfg.edits = Some(edit::World { creator, kinds });
+        let world = start(w.replica, toggles::rules(), store.clone(), cfg).unwrap();
+        const SAID: &[u8] = b"market-on-the-green at nine";
+        let place = Op::Place {
+            name: 1,
+            kind: item,
+            parent: Ref::Node(room),
+            at: Spot {
+                slot: None,
+                position: Vec3::new(1_000_000, 0, 0),
+                orientation: Quat::IDENTITY,
+                support: Support::None,
+            },
+            audience: Audience::Everyone,
+            fields: BTreeMap::from([(
+                30,
+                Value::Map(BTreeMap::from([(words::WORDS, Value::Bytes(SAID.to_vec()))])),
+            )]),
+        };
+        let i = Intent {
+            actor: Actor::Creator(creator),
+            verb: Name::new(VERB).unwrap(),
+            target: None,
+            parameters: parameters(&[place]),
+            sequence: 1,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: 0,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let rx = send(&world, &i);
+        let (done, ran) = channel();
+        world.events.send(Event::RunTo { tick: 2, done }).unwrap();
+        ran.recv().unwrap();
+        let f = answer(&rx);
+        world.stop();
+        assert_eq!(read(&f).0, 1, "taken: {:?}", decode(&f).unwrap().value);
+        let log = store.bytes();
+        assert!(
+            !log.windows(SAID.len()).any(|w| w == SAID),
+            "no byte of the words in the log"
         );
     }
 
