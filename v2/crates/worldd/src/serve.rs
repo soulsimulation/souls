@@ -1892,10 +1892,15 @@ fn serve(args: &[String]) -> R<()> {
         })
         .map_err(|e| e.to_string())?;
     if fresh && ready_rx.recv().is_err() {
-        return Err("public-stream: stopped before its first flush; the world is not servable".into());
+        return Err(
+            "public-stream: stopped before its first flush; the world is not servable".into(),
+        );
     }
     if !pointer_path.is_file() {
-        return Err(format!("public-pointer-missing: {}", pointer_path.display()));
+        return Err(format!(
+            "public-pointer-missing: {}",
+            pointer_path.display()
+        ));
     }
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).map_err(io(&socket))?;
