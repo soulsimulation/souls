@@ -976,6 +976,17 @@ fn socket_answer(s: &mut UnixStream) -> Got {
     read_answer(&decode(&frame).expect("a frame").value)
 }
 
+/// The next answer on the world's socket that ends an intent: a walk long enough to run past its tick is first
+/// answered accepted (kind 3), then at its end.
+fn socket_end(s: &mut UnixStream) -> Got {
+    loop {
+        let got = socket_answer(s);
+        if got.kind != 3 {
+            return got;
+        }
+    }
+}
+
 fn connect_socket(socket: &Path) -> UnixStream {
     let end = Instant::now() + Duration::from_secs(60);
     loop {
@@ -1161,7 +1172,7 @@ async fn g1e_buildsafe_refuses_a_wall_on_a_standing_soul_on_the_test_world() {
         .unwrap();
     let (sx, sz) = (-37 * M, 30 * M);
     walk(&mut souls, &w, w.souls[0], 1, sx, sz);
-    let got = socket_answer(&mut souls);
+    let got = socket_end(&mut souls);
     assert_eq!(got.kind, 1, "the Soul's walk ends: {got:?}");
     let (url, tokens) = gateway(&socket, &[creator]).await;
     let mut ws = sign_in(&url, &tokens[0]).await;
@@ -1254,7 +1265,7 @@ async fn g1e_a2_a3_eden_buildsafe_refuses_a_wall_on_a_soul_and_answers_fast() {
     let stander = w.souls[20];
     let (sx, sz) = ((x0 + 40) * M, z0 * M);
     walk(&mut souls, &w, stander, 1, sx, sz);
-    let got = socket_answer(&mut souls);
+    let got = socket_end(&mut souls);
     assert_eq!(got.kind, 1, "the 21st Soul's walk to its place ends: {got:?}");
     for (k, &body) in w.souls.iter().enumerate().take(20) {
         let x = (x0 + 2 * k as i64) * M;
@@ -1336,7 +1347,7 @@ async fn g1e_a2_a3_eden_buildsafe_refuses_a_wall_on_a_soul_and_answers_fast() {
     walk(&mut souls, &w, stander, 2, sx, sz + 6 * M);
     // Walks answer at their ends: all 21, the 21st's among them.
     for _ in 0..21 {
-        let got = socket_answer(&mut souls);
+        let got = socket_end(&mut souls);
         assert_eq!(got.kind, 1, "a walk ends: {got:?}");
     }
     sequence += 1;
