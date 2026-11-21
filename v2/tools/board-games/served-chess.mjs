@@ -170,7 +170,8 @@ try {
   assert.equal((await move(A, 'move_white', 'g1', 'f3')).answer, 1, 'Ng1f3');
   await pause(3000);
   say(`after e4 e5 Nf3, B's inspect: ${JSON.stringify(await B.cli('inspect', table.id)).slice(0, 3000)}`);
-  const seen = await waitFor('the table in the public stream', () => nodes.get(pageKey), 30_000);
+  const seen = await waitFor('the table in the public stream', () => nodes.get(pageKey), 30_000)
+    .catch((e) => { console.log(`stream: ${nodes.size} nodes, errors ${JSON.stringify(errors)}, e.g. ${[...nodes.keys()].slice(0, 5)}, ${[...nodes.keys()].filter((k) => k.includes('5742'))}`); throw e; });
   say(`the table in the public stream (the page's worker): ${JSON.stringify(seen, (k, v) => (typeof v === 'bigint' ? String(v) : v)).slice(0, 3000)}`);
   assert.deepEqual(errors, [], 'the worker plays the stream');
   say('done');
