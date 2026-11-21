@@ -9,8 +9,12 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { decode, idText, plainKind } from '../brief/copy.mjs';
 
-/** The `souls-entry/1` entries in `dir`, by kind name; none if the folder is missing. Unreadable files are skipped. */
-export function kindsIn(dir) {
+/**
+ * The `souls-entry/1` entries in `dir`, by kind name; none if the folder is missing. Unreadable files are skipped.
+ * `body`, a body kind with no entry of its own (a served Soul's `souls:body`), gets the family entry (owner `family`)
+ * when the folder holds exactly one: its forms are the body's (E21, #2791; replica's `kinds::entry::family_forms`).
+ */
+export function kindsIn(dir, body) {
   const kinds = {};
   let names = [];
   try { names = readdirSync(dir).filter((f) => f.endsWith('.json')); } catch { return kinds; }
@@ -20,6 +24,8 @@ export function kindsIn(dir) {
       if (e?.format === 'souls-entry/1' && typeof e.kind === 'string') kinds[e.kind] = e;
     } catch { /* not an entry */ }
   }
+  const families = Object.values(kinds).filter((e) => e.owner === 'family');
+  if (body && !kinds[body] && families.length === 1) kinds[body] = { ...families[0], kind: body };
   return kinds;
 }
 
