@@ -96,6 +96,10 @@ export function batchValue(v, ids) {
   return v;
 }
 
+/** How deep arrays nest in a batch value (bytes, `{ hex }`, are not an array). An edit intent nests at most 8 deep
+ *  (`replica` `intent_limits.txt`): a place's field value may be 3 deep, a set's 4 (one level less around it). */
+export const depthOf = (v) => (Array.isArray(v) ? 1 + Math.max(0, ...v.map(depthOf)) : 0);
+export const PLACE_DEPTH = 3, SET_DEPTH = 4;
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 /** The world node's fields an import carries: the sky's palette. Its clock, calendar and weather are the world's own
  *  (E6 runs them, and its weather is set whole by the weather verb). */
@@ -141,7 +145,7 @@ export function importOf(file, target) {
     for (const [k, v] of Object.entries(n.fields ?? {})) {
       if (n.parent === null && !ROOT_CARRIED.includes(Number(k))) continue;
       const b = batchValue(v, ids);
-      if (b === null) drop(n, k); else out[k] = b;
+      if (b === null || depthOf(b) > SET_DEPTH) drop(n, k); else out[k] = b;
     }
     return out;
   };
@@ -173,18 +177,22 @@ export function importOf(file, target) {
         return batch;
       }
       const ops = [], names = new Map();
-      for (let k = 0; k < todo.length && ops.length < OPS_MOST;) {
+      for (let k = 0; k < todo.length;) {
         const n = todo[k];
         const parent = ids.get(n.parent), sup = n.pose?.support?.node;
         if (!parent || (sup && !ids.has(sup))) { k++; continue; }
+        // A field too deep for a place (a floor's outlines) is set on the new node in the same edit.
+        const fields = fieldsOf(n), deep = Object.keys(fields).filter((f) => depthOf(fields[f]) > PLACE_DEPTH);
+        if (ops.length + 1 + deep.length > OPS_MOST) break;
         todo.splice(k, 1);
-        const name = ops.length + 1;
+        const name = names.size + 1;
         names.set(name, n.id);
-        ops.push({ op: 'place', name, kind: n.kind, in: parent, ...spot(n), fields: fieldsOf(n) });
+        const later = deep.map((f) => { const value = fields[f]; delete fields[f]; return { op: 'set', node: name, field: Number(f), value }; });
+        ops.push({ op: 'place', name, kind: n.kind, in: parent, ...spot(n), fields }, ...later);
       }
       if (!ops.length) return null;
       waiting = names;
-      counts.placed += ops.length;
+      counts.placed += names.size;
       return ops;
     },
     /** The answer's `names` (name -> id) for the batch `next` gave. */
