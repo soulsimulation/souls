@@ -5056,10 +5056,17 @@ mod no_brick_tests {
         };
         let (mut names, mut not_names) = (0, 0);
         for _ in 0..20_000 {
+            // Half the words are near-names: lowercase parts round one colon, as a client means them.
+            let near = next() % 2 == 0;
+            let alphabet: &[u8] = if near { b"abcxyz019_-" } else { ALPHABET };
             let len = 1 + (next() % 24) as usize;
-            let word: String = (0..len)
-                .map(|_| ALPHABET[(next() % ALPHABET.len() as u64) as usize] as char)
+            let mut word: String = (0..len)
+                .map(|_| alphabet[(next() % alphabet.len() as u64) as usize] as char)
                 .collect();
+            if near {
+                word.insert_str(0, "a");
+                word.insert(1 + (next() % len as u64) as usize, ':');
+            }
             let text = Value::Text(Name::new(&word).expect("the alphabet is names' bytes"));
             let intent = Value::Map(BTreeMap::from([
                 (2, text.clone()),
