@@ -1,0 +1,835 @@
+{
+ "format": "souls-entry/1",
+ "kind": "eden:frisbee",
+ "owner": "thing",
+ "state": {
+  "disc": {
+   "n": 28,
+   "type": "enum",
+   "values": [
+    "end_a",
+    "end_b",
+    "corner"
+   ],
+   "default": "end_a",
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "throws": {
+   "n": 29,
+   "type": "int",
+   "unit": "count",
+   "default": 0,
+   "min": 0,
+   "max": 1000000000,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "links": {
+  "end_a": {
+   "n": 1,
+   "from": "body",
+   "most": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "end_b": {
+   "n": 2,
+   "from": "body",
+   "most": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "corner": {
+   "n": 3,
+   "from": "body",
+   "most": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "by_end_a": {
+   "role": "stand",
+   "at_mm": [
+    -12000,
+    0,
+    0
+   ]
+  },
+  "by_end_b": {
+   "role": "stand",
+   "at_mm": [
+    12000,
+    0,
+    0
+   ]
+  },
+  "by_corner": {
+   "role": "stand",
+   "at_mm": [
+    0,
+    0,
+    10400
+   ]
+  }
+ },
+ "slots": {
+  "end_a": {
+   "admits": "body",
+   "most": 1,
+   "at_mm": [
+    -12000,
+    0,
+    0
+   ],
+   "stand": "by_end_a"
+  },
+  "end_b": {
+   "admits": "body",
+   "most": 1,
+   "at_mm": [
+    12000,
+    0,
+    0
+   ],
+   "stand": "by_end_b"
+  },
+  "corner": {
+   "admits": "body",
+   "most": 1,
+   "at_mm": [
+    0,
+    0,
+    10400
+   ],
+   "stand": "by_corner"
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   25200,
+   100,
+   21000
+  ]
+ },
+ "forms": {
+  "play_at_end_a": {
+   "who": "anyone",
+   "starts": "act",
+   "needs": [
+    {
+     "need": "unlinked",
+     "link": "end_a"
+    },
+    {
+     "need": "slot_free",
+     "slot": "end_a"
+    }
+   ],
+   "steps": [
+    {
+     "step": "walk_to",
+     "point": "end_a"
+    }
+   ],
+   "effects": [
+    {
+     "change": "link",
+     "link": "end_a",
+     "from": "actor",
+     "event": "joined_the_game"
+    },
+    {
+     "change": "reparent",
+     "what": "actor",
+     "into": "end_a",
+     "event": "took_a_place"
+    }
+   ]
+  },
+  "play_at_end_b": {
+   "who": "anyone",
+   "starts": "act",
+   "needs": [
+    {
+     "need": "unlinked",
+     "link": "end_b"
+    },
+    {
+     "need": "slot_free",
+     "slot": "end_b"
+    }
+   ],
+   "steps": [
+    {
+     "step": "walk_to",
+     "point": "end_b"
+    }
+   ],
+   "effects": [
+    {
+     "change": "link",
+     "link": "end_b",
+     "from": "actor",
+     "event": "joined_the_game"
+    },
+    {
+     "change": "reparent",
+     "what": "actor",
+     "into": "end_b",
+     "event": "took_a_place"
+    }
+   ]
+  },
+  "play_at_corner": {
+   "who": "anyone",
+   "starts": "act",
+   "needs": [
+    {
+     "need": "unlinked",
+     "link": "corner"
+    },
+    {
+     "need": "slot_free",
+     "slot": "corner"
+    }
+   ],
+   "steps": [
+    {
+     "step": "walk_to",
+     "point": "corner"
+    }
+   ],
+   "effects": [
+    {
+     "change": "link",
+     "link": "corner",
+     "from": "actor",
+     "event": "joined_the_game"
+    },
+    {
+     "change": "reparent",
+     "what": "actor",
+     "into": "corner",
+     "event": "took_a_place"
+    }
+   ]
+  },
+  "throw_from_end_a_to_end_b": {
+   "who": {
+    "link": "end_a"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "disc",
+     "is": "end_a"
+    },
+    {
+     "need": "linked",
+     "link": "end_b"
+    }
+   ],
+   "steps": [
+    {
+     "step": "move",
+     "move": "swing",
+     "at": "by_end_a"
+    }
+   ],
+   "effects": [
+    {
+     "change": "set",
+     "field": "disc",
+     "to": "end_b",
+     "event": "threw_the_frisbee"
+    },
+    {
+     "change": "set",
+     "field": "throws",
+     "by": 1,
+     "event": "caught"
+    }
+   ]
+  },
+  "throw_from_end_a_to_corner": {
+   "who": {
+    "link": "end_a"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "disc",
+     "is": "end_a"
+    },
+    {
+     "need": "linked",
+     "link": "corner"
+    }
+   ],
+   "steps": [
+    {
+     "step": "move",
+     "move": "swing",
+     "at": "by_end_a"
+    }
+   ],
+   "effects": [
+    {
+     "change": "set",
+     "field": "disc",
+     "to": "corner",
+     "event": "threw_the_frisbee"
+    },
+    {
+     "change": "set",
+     "field": "throws",
+     "by": 1,
+     "event": "caught"
+    }
+   ]
+  },
+  "throw_from_end_b_to_end_a": {
+   "who": {
+    "link": "end_b"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "disc",
+     "is": "end_b"
+    },
+    {
+     "need": "linked",
+     "link": "end_a"
+    }
+   ],
+   "steps": [
+    {
+     "step": "move",
+     "move": "swing",
+     "at": "by_end_b"
+    }
+   ],
+   "effects": [
+    {
+     "change": "set",
+     "field": "disc",
+     "to": "end_a",
+     "event": "threw_the_frisbee"
+    },
+    {
+     "change": "set",
+     "field": "throws",
+     "by": 1,
+     "event": "caught"
+    }
+   ]
+  },
+  "throw_from_end_b_to_corner": {
+   "who": {
+    "link": "end_b"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "disc",
+     "is": "end_b"
+    },
+    {
+     "need": "linked",
+     "link": "corner"
+    }
+   ],
+   "steps": [
+    {
+     "step": "move",
+     "move": "swing",
+     "at": "by_end_b"
+    }
+   ],
+   "effects": [
+    {
+     "change": "set",
+     "field": "disc",
+     "to": "corner",
+     "event": "threw_the_frisbee"
+    },
+    {
+     "change": "set",
+     "field": "throws",
+     "by": 1,
+     "event": "caught"
+    }
+   ]
+  },
+  "throw_from_corner_to_end_a": {
+   "who": {
+    "link": "corner"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "disc",
+     "is": "corner"
+    },
+    {
+     "need": "linked",
+     "link": "end_a"
+    }
+   ],
+   "steps": [
+    {
+     "step": "move",
+     "move": "swing",
+     "at": "by_corner"
+    }
+   ],
+   "effects": [
+    {
+     "change": "set",
+     "field": "disc",
+     "to": "end_a",
+     "event": "threw_the_frisbee"
+    },
+    {
+     "change": "set",
+     "field": "throws",
+     "by": 1,
+     "event": "caught"
+    }
+   ]
+  },
+  "throw_from_corner_to_end_b": {
+   "who": {
+    "link": "corner"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "disc",
+     "is": "corner"
+    },
+    {
+     "need": "linked",
+     "link": "end_b"
+    }
+   ],
+   "steps": [
+    {
+     "step": "move",
+     "move": "swing",
+     "at": "by_corner"
+    }
+   ],
+   "effects": [
+    {
+     "change": "set",
+     "field": "disc",
+     "to": "end_b",
+     "event": "threw_the_frisbee"
+    },
+    {
+     "change": "set",
+     "field": "throws",
+     "by": 1,
+     "event": "caught"
+    }
+   ]
+  },
+  "fetch_at_end_a_from_end_b": {
+   "who": {
+    "link": "end_a"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "disc",
+     "is": "end_b"
+    },
+    {
+     "need": "unlinked",
+     "link": "end_b"
+    }
+   ],
+   "steps": [],
+   "effects": [
+    {
+     "change": "set",
+     "field": "disc",
+     "to": "end_a",
+     "event": "fetched_the_frisbee"
+    }
+   ]
+  },
+  "fetch_at_end_a_from_corner": {
+   "who": {
+    "link": "end_a"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "disc",
+     "is": "corner"
+    },
+    {
+     "need": "unlinked",
+     "link": "corner"
+    }
+   ],
+   "steps": [],
+   "effects": [
+    {
+     "change": "set",
+     "field": "disc",
+     "to": "end_a",
+     "event": "fetched_the_frisbee"
+    }
+   ]
+  },
+  "fetch_at_end_b_from_end_a": {
+   "who": {
+    "link": "end_b"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "disc",
+     "is": "end_a"
+    },
+    {
+     "need": "unlinked",
+     "link": "end_a"
+    }
+   ],
+   "steps": [],
+   "effects": [
+    {
+     "change": "set",
+     "field": "disc",
+     "to": "end_b",
+     "event": "fetched_the_frisbee"
+    }
+   ]
+  },
+  "fetch_at_end_b_from_corner": {
+   "who": {
+    "link": "end_b"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "disc",
+     "is": "corner"
+    },
+    {
+     "need": "unlinked",
+     "link": "corner"
+    }
+   ],
+   "steps": [],
+   "effects": [
+    {
+     "change": "set",
+     "field": "disc",
+     "to": "end_b",
+     "event": "fetched_the_frisbee"
+    }
+   ]
+  },
+  "fetch_at_corner_from_end_a": {
+   "who": {
+    "link": "corner"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "disc",
+     "is": "end_a"
+    },
+    {
+     "need": "unlinked",
+     "link": "end_a"
+    }
+   ],
+   "steps": [],
+   "effects": [
+    {
+     "change": "set",
+     "field": "disc",
+     "to": "corner",
+     "event": "fetched_the_frisbee"
+    }
+   ]
+  },
+  "fetch_at_corner_from_end_b": {
+   "who": {
+    "link": "corner"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "disc",
+     "is": "end_b"
+    },
+    {
+     "need": "unlinked",
+     "link": "end_b"
+    }
+   ],
+   "steps": [],
+   "effects": [
+    {
+     "change": "set",
+     "field": "disc",
+     "to": "corner",
+     "event": "fetched_the_frisbee"
+    }
+   ]
+  },
+  "leave_end_a": {
+   "who": {
+    "link": "end_a"
+   },
+   "starts": "act",
+   "needs": [],
+   "steps": [],
+   "effects": [
+    {
+     "change": "unlink",
+     "link": "end_a",
+     "from": "actor",
+     "event": "left_the_game"
+    },
+    {
+     "change": "reparent",
+     "what": "actor",
+     "into": "here",
+     "event": "stepped_away"
+    }
+   ]
+  },
+  "leave_end_b": {
+   "who": {
+    "link": "end_b"
+   },
+   "starts": "act",
+   "needs": [],
+   "steps": [],
+   "effects": [
+    {
+     "change": "unlink",
+     "link": "end_b",
+     "from": "actor",
+     "event": "left_the_game"
+    },
+    {
+     "change": "reparent",
+     "what": "actor",
+     "into": "here",
+     "event": "stepped_away"
+    }
+   ]
+  },
+  "leave_corner": {
+   "who": {
+    "link": "corner"
+   },
+   "starts": "act",
+   "needs": [],
+   "steps": [],
+   "effects": [
+    {
+     "change": "unlink",
+     "link": "corner",
+     "from": "actor",
+     "event": "left_the_game"
+    },
+    {
+     "change": "reparent",
+     "what": "actor",
+     "into": "here",
+     "event": "stepped_away"
+    }
+   ]
+  }
+ },
+ "roles": {
+  "end_a": {
+   "need": "replaceable",
+   "places": {
+    "in": "this",
+    "slots": [
+     "end_a"
+    ]
+   }
+  },
+  "end_b": {
+   "need": "replaceable",
+   "places": {
+    "in": "this",
+    "slots": [
+     "end_b"
+    ]
+   }
+  },
+  "corner": {
+   "need": "optional",
+   "places": {
+    "in": "this",
+    "slots": [
+     "corner"
+    ]
+   }
+  }
+ },
+ "motion": {
+  "how": "fixed"
+ },
+ "loose": {
+  "ever": true
+ },
+ "looks": {
+  "model": "look:frisbee",
+  "shape": {
+   "round": 0,
+   "shapes": [
+    {
+     "kind": "cyl",
+     "at": [
+      -12000,
+      6,
+      0
+     ],
+     "r": 600,
+     "h": 8,
+     "segments": 16,
+     "tint": "mark"
+    },
+    {
+     "kind": "cyl",
+     "at": [
+      12000,
+      6,
+      0
+     ],
+     "r": 600,
+     "h": 8,
+     "segments": 16,
+     "tint": "mark"
+    },
+    {
+     "kind": "cyl",
+     "at": [
+      0,
+      6,
+      10400
+     ],
+     "r": 600,
+     "h": 8,
+     "segments": 16,
+     "tint": "mark"
+    },
+    {
+     "kind": "cyl",
+     "at": [
+      -11500,
+      30,
+      0
+     ],
+     "r": 135,
+     "h": 25,
+     "segments": 16,
+     "tint": "disc",
+     "when": "@disc=end_a"
+    },
+    {
+     "kind": "cyl",
+     "at": [
+      12500,
+      30,
+      0
+     ],
+     "r": 135,
+     "h": 25,
+     "segments": 16,
+     "tint": "disc",
+     "when": "@disc=end_b"
+    },
+    {
+     "kind": "cyl",
+     "at": [
+      500,
+      30,
+      9900
+     ],
+     "r": 135,
+     "h": 25,
+     "segments": 16,
+     "tint": "disc",
+     "when": "@disc=corner"
+    }
+   ],
+   "palette": {
+    "mark": "#d8e6c8",
+    "disc": "#e8462f"
+   },
+   "tags": [
+    "frisbee",
+    "game",
+    "sport",
+    "place"
+   ]
+  }
+ },
+ "text": {
+  "card": "A frisbee game for up to three: take an end, throw to a player, catch.",
+  "game": "game",
+  "sport": "sport",
+  "disc": "disc",
+  "howto_play": "Take an end; whoever has the frisbee throws it to another player; if its end is empty, fetch it."
+ },
+ "card": {
+  "text": "card",
+  "category": "game",
+  "synonyms": [
+   "disc",
+   "sport"
+  ]
+ },
+ "howtos": {
+  "play": {
+   "text": "howto_play",
+   "steps": [
+    {
+     "form": "play_at_end_a"
+    },
+    {
+     "form": "throw_from_end_a_to_end_b"
+    },
+    {
+     "form": "leave_end_a"
+    }
+   ]
+  }
+ }
+}

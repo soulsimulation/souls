@@ -1,0 +1,1331 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "A frisbee game in turn: one player alone cannot throw; three players take the ends and throw every way round; a frisbee left at an empty end is fetched from each end; everyone leaves.",
+ "cases": [
+  {
+   "name": "frisbee_three_players_every_throw_and_fetch",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "b2",
+       "b3",
+       "f1"
+      ]
+     },
+     "f1": {
+      "kind": "eden:frisbee"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b3": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "f1",
+      "form": "play_at_end_a"
+     },
+     "actor": "b1",
+     "receipt": "fr1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "f1",
+        "link": "end_a",
+        "n": 1,
+        "end": "b1"
+       },
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "f1",
+         "slot": "end_a"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:joined_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:took_a_place",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "throw_from_end_a_to_end_b"
+     },
+     "actor": "b1",
+     "receipt": "fr2",
+     "expect": {
+      "verdict": "no",
+      "reason": "not_linked"
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "play_at_end_b"
+     },
+     "actor": "b2",
+     "receipt": "fr3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "f1",
+        "link": "end_b",
+        "n": 2,
+        "end": "b2"
+       },
+       {
+        "change": "reparent",
+        "node": "b2",
+        "to": {
+         "node": "f1",
+         "slot": "end_b"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:joined_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:took_a_place",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "play_at_corner"
+     },
+     "actor": "b3",
+     "receipt": "fr4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "f1",
+        "link": "corner",
+        "n": 3,
+        "end": "b3"
+       },
+       {
+        "change": "reparent",
+        "node": "b3",
+        "to": {
+         "node": "f1",
+         "slot": "corner"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:joined_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:took_a_place",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "throw_from_end_a_to_end_b"
+     },
+     "actor": "b1",
+     "receipt": "fr5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "end_b"
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "throws",
+        "n": 29,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:threw_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:caught",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "throw_from_end_b_to_corner"
+     },
+     "actor": "b2",
+     "receipt": "fr6",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "corner"
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "throws",
+        "n": 29,
+        "to": 2
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:threw_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:caught",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "throw_from_corner_to_end_a"
+     },
+     "actor": "b3",
+     "receipt": "fr7",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "end_a"
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "throws",
+        "n": 29,
+        "to": 3
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:threw_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:caught",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "throw_from_end_a_to_corner"
+     },
+     "actor": "b1",
+     "receipt": "fr8",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "corner"
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "throws",
+        "n": 29,
+        "to": 4
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:threw_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:caught",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "throw_from_corner_to_end_b"
+     },
+     "actor": "b3",
+     "receipt": "fr9",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "end_b"
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "throws",
+        "n": 29,
+        "to": 5
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:threw_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:caught",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "throw_from_end_b_to_end_a"
+     },
+     "actor": "b2",
+     "receipt": "fr10",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "end_a"
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "throws",
+        "n": 29,
+        "to": 6
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:threw_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:caught",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "throw_from_end_b_to_end_a"
+     },
+     "actor": "b2",
+     "receipt": "fr11",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs"
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "leave_end_a"
+     },
+     "actor": "b1",
+     "receipt": "fr12",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "unlink",
+        "node": "f1",
+        "link": "end_a",
+        "n": 1,
+        "end": "b1"
+       },
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "room"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:left_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:stepped_away",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "fetch_at_end_b_from_end_a"
+     },
+     "actor": "b2",
+     "receipt": "fr13",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "end_b"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:fetched_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "play_at_end_a"
+     },
+     "actor": "b1",
+     "receipt": "fr14",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "f1",
+        "link": "end_a",
+        "n": 1,
+        "end": "b1"
+       },
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "f1",
+         "slot": "end_a"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:joined_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:took_a_place",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "leave_end_b"
+     },
+     "actor": "b2",
+     "receipt": "fr15",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "unlink",
+        "node": "f1",
+        "link": "end_b",
+        "n": 2,
+        "end": "b2"
+       },
+       {
+        "change": "reparent",
+        "node": "b2",
+        "to": {
+         "node": "room"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:left_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:stepped_away",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "fetch_at_end_a_from_end_b"
+     },
+     "actor": "b1",
+     "receipt": "fr16",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "end_a"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:fetched_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "throw_from_end_a_to_corner"
+     },
+     "actor": "b1",
+     "receipt": "fr17",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "corner"
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "throws",
+        "n": 29,
+        "to": 7
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:threw_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:caught",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "leave_corner"
+     },
+     "actor": "b3",
+     "receipt": "fr18",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "unlink",
+        "node": "f1",
+        "link": "corner",
+        "n": 3,
+        "end": "b3"
+       },
+       {
+        "change": "reparent",
+        "node": "b3",
+        "to": {
+         "node": "room"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:left_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:stepped_away",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "fetch_at_end_a_from_corner"
+     },
+     "actor": "b1",
+     "receipt": "fr19",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "end_a"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:fetched_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "play_at_corner"
+     },
+     "actor": "b3",
+     "receipt": "fr20",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "f1",
+        "link": "corner",
+        "n": 3,
+        "end": "b3"
+       },
+       {
+        "change": "reparent",
+        "node": "b3",
+        "to": {
+         "node": "f1",
+         "slot": "corner"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:joined_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:took_a_place",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "play_at_end_b"
+     },
+     "actor": "b2",
+     "receipt": "fr21",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "f1",
+        "link": "end_b",
+        "n": 2,
+        "end": "b2"
+       },
+       {
+        "change": "reparent",
+        "node": "b2",
+        "to": {
+         "node": "f1",
+         "slot": "end_b"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:joined_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:took_a_place",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "throw_from_end_a_to_corner"
+     },
+     "actor": "b1",
+     "receipt": "fr22",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "corner"
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "throws",
+        "n": 29,
+        "to": 8
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:threw_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:caught",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "leave_corner"
+     },
+     "actor": "b3",
+     "receipt": "fr23",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "unlink",
+        "node": "f1",
+        "link": "corner",
+        "n": 3,
+        "end": "b3"
+       },
+       {
+        "change": "reparent",
+        "node": "b3",
+        "to": {
+         "node": "room"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:left_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:stepped_away",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "fetch_at_end_b_from_corner"
+     },
+     "actor": "b2",
+     "receipt": "fr24",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "end_b"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:fetched_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "play_at_corner"
+     },
+     "actor": "b3",
+     "receipt": "fr25",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "link",
+        "node": "f1",
+        "link": "corner",
+        "n": 3,
+        "end": "b3"
+       },
+       {
+        "change": "reparent",
+        "node": "b3",
+        "to": {
+         "node": "f1",
+         "slot": "corner"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:joined_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:took_a_place",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "throw_from_end_b_to_end_a"
+     },
+     "actor": "b2",
+     "receipt": "fr26",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "end_a"
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "throws",
+        "n": 29,
+        "to": 9
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:threw_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:caught",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "leave_end_a"
+     },
+     "actor": "b1",
+     "receipt": "fr27",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "unlink",
+        "node": "f1",
+        "link": "end_a",
+        "n": 1,
+        "end": "b1"
+       },
+       {
+        "change": "reparent",
+        "node": "b1",
+        "to": {
+         "node": "room"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:left_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:stepped_away",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "fetch_at_corner_from_end_a"
+     },
+     "actor": "b3",
+     "receipt": "fr28",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "corner"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:fetched_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "throw_from_corner_to_end_b"
+     },
+     "actor": "b3",
+     "receipt": "fr29",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "end_b"
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "throws",
+        "n": 29,
+        "to": 10
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:threw_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:caught",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "leave_end_b"
+     },
+     "actor": "b2",
+     "receipt": "fr30",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "unlink",
+        "node": "f1",
+        "link": "end_b",
+        "n": 2,
+        "end": "b2"
+       },
+       {
+        "change": "reparent",
+        "node": "b2",
+        "to": {
+         "node": "room"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:left_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:stepped_away",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "fetch_at_corner_from_end_b"
+     },
+     "actor": "b3",
+     "receipt": "fr31",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "disc",
+        "n": 28,
+        "to": "corner"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:fetched_the_frisbee",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "leave_corner"
+     },
+     "actor": "b3",
+     "receipt": "fr32",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "unlink",
+        "node": "f1",
+        "link": "corner",
+        "n": 3,
+        "end": "b3"
+       },
+       {
+        "change": "reparent",
+        "node": "b3",
+        "to": {
+         "node": "room"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:left_the_game",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:stepped_away",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "f1": {
+     "kind": "eden:frisbee",
+     "links": {
+      "end_a": [],
+      "end_b": [],
+      "corner": []
+     },
+     "slots": {
+      "end_a": [],
+      "end_b": [],
+      "corner": []
+     },
+     "fields": {
+      "disc": "corner",
+      "throws": 10
+     }
+    }
+   }
+  }
+ ]
+}
