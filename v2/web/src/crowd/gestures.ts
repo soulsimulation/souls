@@ -50,7 +50,7 @@ export function gestureAt(moves: readonly Drawn[], t: number, seated: boolean, s
     const end = Math.min(m.cut ?? Infinity, m.ends[m.ends.length - 1]);
     if (t > end + LEAVE * 1e6) return null;
     if (!g) return null;
-    const clip = (seated && g.seated) || g.clip, len = seconds(clip);
+    const clip = seated && g.seated && seconds(g.seated) !== undefined ? g.seated : g.clip, len = seconds(clip);
     if (len === undefined) return null;
     const contact = m.ends[0];
     const weight = smooth((t - m.start) / Math.max(1, contact - m.start)) * (1 - smooth((t - end) / (LEAVE * 1e6)));
