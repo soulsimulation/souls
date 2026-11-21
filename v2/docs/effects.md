@@ -83,9 +83,10 @@ the log (K4), the in-memory tree (K2), applying and querying at speed (R1) and v
 10. **No free text.** Every text item in a part is a name, `namespace:name`, lower case, optionally pinned as
     `namespace:name@1220<64 hex digits>`; anything else is `text-not-a-name`. Words that once reach the log can
     never be taken back: an entry holds a reference (T8), never words. A return's reason is a name too. A writer
-    runs the reader's check (`effects::not_a_name`) on what it logs: the world refuses an intent holding any other
-    text at intake as `intent.text-not-a-name`, logged without its intent, so no log holds a record its reader
-    refuses (#3765). A restart that meets such a record anyway stops with `log-record-unreadable`, naming the record,
+    runs the reader's check (`effects::not_a_name`) on what it logs: an intent holding any other text keeps the
+    refusal of its own checks, and one that passes them all is refused `intent.text-not-a-name` before anything is
+    written; a logged row holds such an intent as its encoded bytes, so no log holds a record its reader refuses
+    (#3765). A restart that meets such a record anyway stops with `log-record-unreadable`, naming the record,
     and keeps the log as written.
 
 ## State and the fixtures
