@@ -227,7 +227,8 @@ fn candidate(copy: &impl Read, rules: &Rules, body: Id, soul: Id, c: &Candidate)
     // #3700: a private thing (its own mark or its nearest marked ancestor's) is its owner's alone. The ancestors are
     // read on the copy, outside the read set, so a busy room does not send every act in it to a re-check; a mark set
     // in the very tick an act commits may let that one act through, and the next is refused.
-    if replica::who_may::refusal_of(replica::who_may::ownership_read(copy, c.this), soul).is_some() {
+    if replica::who_may::refusal_of(replica::who_may::ownership_read(copy, c.this), soul).is_some()
+    {
         return no("object.private", r);
     }
     let (this_id, body_id) = (show(c.this), show(body));
