@@ -32,8 +32,9 @@ pub const HELLO_MOST: u64 = 256;
 pub const INTENT_MOST: u64 = 4096;
 /// The most fallbacks an intent may rank (rule 6).
 pub const FALLBACKS_MOST: u64 = 4;
-/// This protocol's version (rule 12). A change to any frame after the first raises it.
-pub const PROTOCOL: u64 = 1;
+/// This protocol's version (rule 12). A change to any frame after the first raises it: 2 added field 12, the reflex
+/// marker (#3764).
+pub const PROTOCOL: u64 = 2;
 
 /// The verbs that are the engine's own (rule 4): a move inside a joint activity, a cancel, and the orders.
 pub const MOVE: &str = "souls:move";
@@ -83,7 +84,8 @@ pub struct Fallback {
 }
 
 /// An intent's envelope (rules 2 and 3): `{1: actor, 2: verb, 3: target, 4: parameters, 5: sequence, 6: basis,
-/// 7: expiry, 8: resources, 9: fallbacks, 10: replaces, 11: body}`. 3, 4, 8, 9, 10 and 11 are left out when empty;
+/// 7: expiry, 8: resources, 9: fallbacks, 10: replaces, 11: body, 12: reflex}`. 3, 4, 8, 9, 10, 11 and 12 are left
+/// out when empty (12 is `1` when there);
 /// 11, the world-owned body a creator drives, is there exactly when the actor is a creator (proposed for the owner's
 /// decision at the trunk stop, rule 3). There is no field for a start time or a condition.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,6 +105,10 @@ pub struct Intent {
     pub replaces: Option<u64>,
     /// The world-owned body a creator drives; none for a Soul, whose body is its own.
     pub body: Option<Id>,
+    /// Sent by the Soul's client on its own standing consent (an R9 reflex), not by its agent (#3764): it does not
+    /// count as the agent acting, so it neither keeps a body from going idle nor wakes it (B16). Left out (`false`)
+    /// for an agent's act and by every client older than protocol 2.
+    pub reflex: bool,
 }
 
 fn map(pairs: Vec<(u64, Value)>) -> Value {
@@ -290,8 +296,8 @@ impl Intent {
         let Value::Map(m) = &v else {
             return not("an intent");
         };
-        if m.keys().any(|k| *k == 0 || *k > 11) {
-            return not("an intent's fields are 1 to 11; none is a start time or a condition");
+        if m.keys().any(|k| *k == 0 || *k > 12) {
+            return not("an intent's fields are 1 to 12; none is a start time or a condition");
         }
         let fallbacks = match m.get(&9) {
             None => Vec::new(),
@@ -333,6 +339,11 @@ impl Intent {
                 Some(_) => return not("replaces"),
             },
             body: m.get(&11).map(read_id).transpose()?,
+            reflex: match m.get(&12) {
+                None => false,
+                Some(Value::Uint(1)) => true,
+                Some(_) => return not("a reflex marker is 1, or left out"),
+            },
         };
         let kind = intent.kind()?;
         if kind != Kind::Act && !intent.fallbacks.is_empty() {
@@ -401,6 +412,12 @@ impl Intent {
         }
     }
 
+    /// Whether this intent is its Soul's agent acting (#3764): a Soul's intent not marked as a reflex. What the idle
+    /// and wind-down rule (B16) counts; a creator's intent is not a Soul's agent.
+    pub fn agent_act(&self) -> bool {
+        matches!(self.actor, Actor::Soul(_)) && !self.reflex
+    }
+
     pub fn to_value(&self) -> Value {
         let mut m = vec![
             (1, actor(self.actor)),
@@ -424,6 +441,9 @@ impl Intent {
         }
         m.extend(self.replaces.map(|r| (10, Value::Uint(r))));
         m.extend(self.body.map(|b| (11, b.to_value())));
+        if self.reflex {
+            m.push((12, Value::Uint(1)));
+        }
         map(m)
     }
 }
@@ -709,7 +729,7 @@ impl Checker {
 // --- The fixtures -------------------------------------------------------------------------------------------------
 
 /// The golden intents, as diagnostic notation (rule 14).
-pub const FIXTURES: [(&str, &str); 9] = [
+pub const FIXTURES: [(&str, &str); 10] = [
     ("act", include_str!("../fixtures/intents/act.diag")),
     ("move", include_str!("../fixtures/intents/move.diag")),
     (
@@ -722,6 +742,7 @@ pub const FIXTURES: [(&str, &str); 9] = [
     ("cancel", include_str!("../fixtures/intents/cancel.diag")),
     ("replace", include_str!("../fixtures/intents/replace.diag")),
     ("edit", include_str!("../fixtures/intents/edit.diag")),
+    ("reflex", include_str!("../fixtures/intents/reflex.diag")),
 ];
 
 /// The intents goldens, one per line, `name kind hex`, as `fixtures/intents/goldens.txt` holds them: the native test

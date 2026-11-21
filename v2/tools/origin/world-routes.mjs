@@ -24,13 +24,13 @@ export function readWorldRoutes(file) {
 const reply = (res, status, refused, head = false) => res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-robots-tag': 'noindex, nofollow', 'x-content-type-options': 'nosniff' }).end(head ? undefined : JSON.stringify({ refused }));
 const socketReply = (socket, status, refused) => socket.end(`HTTP/1.1 ${status} Refused\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n${JSON.stringify({ refused })}`);
 
-/** The public bootstrap and exactly two native gateway endpoints, on canonical and preview world paths. */
+/** The public bootstrap and exactly three native gateway endpoints (the socket, the creator token, the entries), on canonical and preview world paths. */
 export function worldRoutes(file = process.env.SOULS_WORLD_ROUTES || WORLD_ROUTES) {
   const selected = (req) => {
     const url = new URL(req.url, 'http://origin'), match = WORLD.exec(url.pathname);
     if (!match) return null;
     const [, preview = '', world, path = '/'] = match, base = `/${preview}w/${world}`;
-    if (!['/v1/bootstrap', '/views/world.json', '/v2/ws', '/v2/creator-token'].includes(path)) return null;
+    if (!['/v1/bootstrap', '/views/world.json', '/v2/ws', '/v2/creator-token', '/v2/entries'].includes(path)) return null;
     let entry;
     try { entry = readWorldRoutes(file)[world]; } catch { return { status: 503, refused: 'world-routing-unconfigured' }; }
     if (!entry) return { status: 404, refused: 'world-not-routed' };
@@ -61,9 +61,11 @@ export function worldRoutes(file = process.env.SOULS_WORLD_ROUTES || WORLD_ROUTE
       res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), 'cache-control': 'no-store', 'x-robots-tag': 'noindex, nofollow', 'x-content-type-options': 'nosniff' }).end(req.method === 'HEAD' ? undefined : body);
       return true;
     }
-    if (path !== '/v2/creator-token' || req.method !== 'POST') { reply(res, 405, path === '/v2/ws' ? 'websocket-required' : 'method'); return true; }
-    const upstream = request(new URL(path, entry.gateway), { method: 'POST', headers: headers(req), timeout: 5000 }, answer => {
-      res.writeHead(answer.statusCode, { ...answer.headers, 'cache-control': 'no-store', 'x-robots-tag': 'noindex, nofollow' }); answer.pipe(res);
+    // #3760: a paired client's kind entries (GET, revalidated by its tag) pass through as the gateway answers them.
+    const entries = path === '/v2/entries' && req.method === 'GET';
+    if (!entries && (path !== '/v2/creator-token' || req.method !== 'POST')) { reply(res, 405, path === '/v2/ws' ? 'websocket-required' : 'method'); return true; }
+    const upstream = request(new URL(path, entry.gateway), { method: req.method, headers: headers(req), timeout: 5000 }, answer => {
+      res.writeHead(answer.statusCode, { ...answer.headers, 'cache-control': entries ? 'private, no-cache' : 'no-store', 'x-robots-tag': 'noindex, nofollow' }); answer.pipe(res);
     });
     upstream.on('timeout', () => upstream.destroy());
     upstream.on('error', () => { if (res.destroyed) return; if (!res.headersSent) reply(res, 502, 'gateway-unreachable'); else res.destroy(); });

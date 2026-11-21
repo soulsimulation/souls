@@ -16,7 +16,7 @@
 //! [--items <n>] [--testworld] [--creator <32 hex>-<n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
 //! --stall-for <s>] [--www <dir>] [--views <path>]`. Subscriptions are served on `--views` (default: the socket's path with
 //! `.views`; `worldd::views::served`). With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it
-//! takes, in the order taken, so a bench can check each actor's order across restarts. With `--roots`, it appends `<version> <place hash
+//! takes (` reflex` after it for a reflex, #3764), in the order taken, so a bench can check each actor's order across restarts. With `--roots`, it appends `<version> <place hash
 //! hex>` after each tick that changed the world, so a test can check a client's copy against the place. Measures
 //! (O4, #2694) are on unless `--no-measures`; `health.json` goes to `--health` (default: the log's path with
 //! `.health.json`). `--stall-after` holds the clock thread `--stall-for` seconds, once, that many seconds after
