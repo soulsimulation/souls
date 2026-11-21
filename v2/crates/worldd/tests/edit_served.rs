@@ -1455,7 +1455,7 @@ mod k18d;
 
 /// #3697: a creator's own kind stands as its record's bounds say, through the one loader. A hedge defined by the
 /// creator, placed across a Soul's way, commits; the Soul's real walk past it ends at its goal; on the served log
-/// (replayed whole) the hedge holds its solids and the committed town's route goes round it. Placed where a Soul
+/// (replayed whole) the hedge holds its solids and the committed ground has no room for a body inside it. Placed where a Soul
 /// stands it is refused `edit.would-bury`, as g1e's boot wall is (both need BUILDSAFE's served bury check).
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs the exported Eden facts file (EDEN_FACTS)"]
@@ -1478,7 +1478,18 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     souls
         .set_read_timeout(Some(Duration::from_secs(60)))
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Since C3 a seeded Soul has a body only once it acts: each walks to where it stands, and its end is read.
+    let end = |s: &mut UnixStream| loop {
+        let got = socket_answer(s);
+        if got.kind != 3 {
+            return got;
+        }
+    };
+    for (k, &body) in w.souls.iter().enumerate() {
+        walk(&mut souls, &w, body, 1, (x0 + 2 * k as i64) * M, z0 * M);
+        let got = end(&mut souls);
+        assert_eq!(got.kind, 1, "Soul {k} stands: {got:?}");
+    }
     let at = |x: i64, z: i64, parent: Id| Spot {
         slot: None,
         position: Vec3::new(x, 0, z),
@@ -1540,8 +1551,8 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     .await;
     assert_eq!(got.kind, 1, "the hedge across the way commits: {got:?}");
     let version = got.version;
-    walk(&mut souls, &w, w.souls[1], 1, wx, goal);
-    let got = socket_answer(&mut souls);
+    walk(&mut souls, &w, w.souls[1], 2, wx, goal);
+    let got = end(&mut souls);
     println!("the second Soul's walk past the hedge: {got:?}");
     assert_eq!(got.kind, 1, "the walk ends at its goal: {got:?}");
 
@@ -1559,28 +1570,33 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
         placed.fields().contains_key(&import_eden::F_SOLIDS),
         "it stands as its kind's bounds say"
     );
-    let mut town = committed_town(&copy, rules, w.ground);
-    let who = Id::new(Scope([0xdd; 16]), 1).unwrap();
+    let town = committed_town(&copy, rules, w.ground);
     let frame = replica::pose::Frame {
         node: w.ground,
         slot: None,
     };
-    let body = town.surfaces[&w.ground]
-        .place(who, frame, Vec3::new(wx, 0, (z0 + 1) * M), Quat::IDENTITY)
-        .unwrap();
-    let legs = town
-        .view()
-        .plan(&body, w.ground, Vec3::new(wx, 0, (z0 + 5) * M))
-        .expect("a way round the hedge");
-    let widest = legs.iter().map(|l| (l.to.x - wx).abs()).max().unwrap_or(0);
+    let stand = |k: u64, x: i64, z: i64| {
+        town.surfaces[&w.ground]
+            .place(
+                Id::new(Scope([0xdd; 16]), k).unwrap(),
+                frame,
+                Vec3::new(x, 0, z),
+                Quat::IDENTITY,
+            )
+            .is_ok()
+    };
     println!(
-        "the committed route round the hedge: {} legs, widest {} mm from the straight line",
-        legs.len(),
-        widest / 1000
+        "the committed ground: inside the hedge {}, a metre in front of it {}",
+        stand(1, wx, hz),
+        stand(2, wx, hz - M)
     );
     assert!(
-        widest >= 3 * M,
-        "the route goes round the hedge's 3 m half-width: {legs:?}"
+        !stand(1, wx, hz),
+        "no body stands inside the hedge: walkers go round it"
+    );
+    assert!(
+        stand(2, wx, hz - M),
+        "a metre in front of it is open ground"
     );
     // On the first Soul, where it stands: refused by BUILDSAFE's name, as a boot thing would be.
     let (got, _) = send(
