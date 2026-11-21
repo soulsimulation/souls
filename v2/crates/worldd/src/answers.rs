@@ -4004,11 +4004,6 @@ pub fn start<S: Storage + 'static>(
     let walkers = (editing || cfg.wear.is_some() || set_downs.is_some())
         .then(|| Arc::new(buildsafe::Moving::default()));
     let creator = cfg.creator.take();
-    let edit_kinds = match (&cfg.edits, &set_downs) {
-        (Some(w), _) => w.kinds.clone(),
-        (None, Some((r, _))) => r.kinds.clone(),
-        (None, None) => BTreeMap::new(),
-    };
     let edits = walkers
         .clone()
         .map(|m| {
@@ -4019,7 +4014,6 @@ pub fn start<S: Storage + 'static>(
                 Arc::clone(&publisher),
                 m,
                 events.clone(),
-                edit_kinds,
                 rules.kinds.clone(),
             )
         })
@@ -4367,10 +4361,15 @@ fn edit_checker(
     publisher: Arc<Publisher>,
     walkers: Arc<buildsafe::Moving>,
     events: Sender<Event>,
-    kinds: BTreeMap<String, replica::world_model::Kind>,
     entries: replica::rules::json::Value,
 ) -> R<Sender<CheckJob>> {
     let (tx, rx) = channel::<CheckJob>();
+    // The Souls' kinds: the edit world's, else the engine's rules' (a world checking set-downs alone, #3604).
+    let kinds = match (&world, &set_downs) {
+        (Some(w), _) => w.kinds.clone(),
+        (None, Some((r, _))) => r.kinds.clone(),
+        (None, None) => BTreeMap::new(),
+    };
     thread::Builder::new()
         .name("edit-check".into())
         .spawn(move || {
