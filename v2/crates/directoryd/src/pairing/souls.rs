@@ -452,11 +452,39 @@ impl Pairing {
         std::fs::rename(tmp, file)
     }
 
-    /// `account` sets its Soul's name and description.
+    /// Whether `account` holds as many unretired Souls as one account may (#3720).
+    pub(super) fn at_soul_cap(&self, account: &str) -> Result<bool, &'static str> {
+        let held: i64 = store(self.db.lock().expect("the store").query_row(
+            "SELECT COUNT(*) FROM paired_souls_v1 s LEFT JOIN soul_profiles_v1 p ON p.grant_text = s.grant_text
+             WHERE s.account = ?1 AND s.grant_text LIKE 'soul-%' AND p.retired_at IS NULL",
+            params![account],
+            |r| r.get(0),
+        ))?;
+        Ok(usize::try_from(held).unwrap_or(usize::MAX) >= self.soul_cap)
+    }
+
+    /// Whether another unretired Soul of `grant`'s world is already called `name`, ignoring case (#3720, today's
+    /// `name-taken`). A Soul with no world is checked against the other Souls with none.
+    fn name_taken(&self, grant: &str, name: &str) -> Result<bool, &'static str> {
+        store(self.db.lock().expect("the store").query_row(
+            "SELECT EXISTS(SELECT 1 FROM soul_profiles_v1 o WHERE o.grant_text <> ?1 AND o.retired_at IS NULL
+               AND o.name = ?2 COLLATE NOCASE
+               AND o.world IS (SELECT world FROM soul_profiles_v1 WHERE grant_text = ?1))",
+            params![grant, name],
+            |r| r.get(0),
+        ))
+    }
+
+    /// `account` sets its Soul's name and description. A name another Soul of its world has is refused `name-taken`.
     pub fn set_profile(&self, account: &str, grant: &str, p: &Profile) -> Result<(), &'static str> {
         self.owned(account, grant)?;
         if p.name.as_deref().is_some_and(|n| !is_name(n)) {
             return Err("name");
+        }
+        if let Some(n) = p.name.as_deref()
+            && self.name_taken(grant, n)?
+        {
+            return Err("name-taken");
         }
         if p.description.as_deref().is_some_and(|d| {
             d.chars().count() > DESCRIPTION_MOST || d.chars().any(char::is_control)
