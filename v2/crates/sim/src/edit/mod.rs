@@ -9,7 +9,8 @@
 //! Operations in a row with the same writer and audience share one effect.
 //!
 //! The safety rule (G2's [`safety`], wired by #3280): [`plan`] runs off the clock after the check, writing the
-//! would-be part on the copy (placed nodes under provisional ids, [`PROVISIONAL`]) and handing it to
+//! would-be part on the copy (placed nodes under provisional ids, [`PROVISIONAL`], or, from the edit checker, the ids
+//! its commit will mint, [`plan_classes`]) and handing it to
 //! [`safety::guard`]. [`commit`] takes the plan and the bodies as they stand on its tick, and refuses the edit by the
 //! first unsafe body's name ([`safety::Guard::judge`], lookups only) before it mints or writes anything.
 //!
@@ -22,17 +23,20 @@ pub mod undo;
 pub mod weather;
 
 use crate::commit::{off_clock, write_guarded};
+use crate::ground::Versions;
 use crate::structure::Structure;
+use crate::walk::town::{Basis, Rebuilt};
 use replica::apply::Replica;
 use replica::edit::{Checked, Op, Ref, Refused, confirm};
 use replica::effects::{Body, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest};
 use replica::encode::{Name, Value, encode};
 use replica::ids::{Id, Minter, Scope};
+use replica::kinds::sizes::Size;
 use replica::pose::Frame;
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::Audience;
-use safety::{Guard, Known, Who, guard, guard_on};
+use safety::{Guard, Known, Who, guard, guard_kept, guard_on};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -51,7 +55,46 @@ pub struct Committed {
 pub struct Planned {
     pub checked: Checked,
     guard: Guard,
+    classes: BTreeMap<Size, Guard>,
     terrain: Option<terrain::Guard>,
+    map: Option<PlannedMap>,
+}
+
+/// The ground the guard built for a planned part on the checker's town (#3743), kept for the map preparation: it
+/// installs this instead of building the same ground again when the part, its open ground, versions and basis are
+/// the ones it prepares from ([`PlannedMap::reuse`]).
+pub struct PlannedMap {
+    part: Part,
+    ground: Id,
+    versions: Versions,
+    basis: Basis,
+    rebuilt: Rebuilt,
+}
+
+impl PlannedMap {
+    /// The kept ground, when it is the ground `part` leaves on `ground` with `versions` and the very `basis` (shared
+    /// handles, [`Basis::same`]): the same part byte for byte, so the same ids. Otherwise none, and the caller builds it.
+    pub fn reuse(
+        self,
+        part: &Part,
+        ground: Id,
+        versions: &Versions,
+        basis: &Basis,
+    ) -> Option<Rebuilt> {
+        let bytes = |p: &Part| encode(&p.to_value()).ok();
+        (self.ground == ground
+            && self.versions == *versions
+            && self.basis.same(basis)
+            && bytes(&self.part).is_some_and(|b| Some(b) == bytes(part)))
+        .then_some(self.rebuilt)
+    }
+}
+
+impl Planned {
+    /// The ground the guard built, taken out to be reused or dropped off the clock (#3743).
+    pub fn take_map(&mut self) -> Option<PlannedMap> {
+        self.map.take()
+    }
 }
 
 fn refused(name: &'static str, detail: impl Into<String>) -> Refused {
@@ -65,27 +108,70 @@ fn refused(name: &'static str, detail: impl Into<String>) -> Refused {
 /// Off the clock thread, after `replica::edit::check` on the same copy: the safety rule's guard for the part the edit
 /// would commit (see the module's notes). `ground` is the zone's open ground, none in a zone without one.
 pub fn plan(checked: Checked, copy: &Replica, ground: Option<Id>) -> Result<Planned, Refused> {
-    plan_with(checked, copy, ground, |part| {
-        guard(copy.tree(), copy.header(), ground, part)
+    plan_with(checked, copy, ground, Minter::new(PROVISIONAL), |part| {
+        Ok((guard(copy.tree(), copy.header(), ground, part)?, None))
     })
 }
 
 /// [`plan`] in a zone with a town (G2b, #3488): the guard cuts only what the edit can affect ([`safety::guard_on`]).
 /// `known` is the town as it stood at the copy's version.
 pub fn plan_on(checked: Checked, copy: &Replica, known: &Known) -> Result<Planned, Refused> {
-    plan_with(checked, copy, Some(known.ground), |part| {
-        guard_on(copy.tree(), copy.header(), part, known)
-    })
+    plan_with(
+        checked,
+        copy,
+        Some(known.ground),
+        Minter::new(PROVISIONAL),
+        |part| Ok((guard_on(copy.tree(), copy.header(), part, known)?, None)),
+    )
+}
+
+/// The same guarded plan, preparing every active non-default footprint off-clock. `names` is a copy of the minter
+/// the commit will mint with (#3743), so the planned part has the ids the committed one will; on a town, the ground
+/// the guard built is kept in the plan ([`Planned::take_map`]).
+pub fn plan_classes(
+    checked: Checked,
+    copy: &Replica,
+    ground: Option<Id>,
+    known: Option<&Known<'_>>,
+    sizes: impl IntoIterator<Item = Size>,
+    names: Minter,
+) -> Result<Planned, Refused> {
+    let mut classes = BTreeMap::new();
+    let planned = plan_with(checked, copy, ground, names, |part| {
+        for size in sizes {
+            if size != Size::Standard && !classes.contains_key(&size) {
+                classes.insert(
+                    size,
+                    safety::guard_for(copy.tree(), copy.header(), ground, part, size)?,
+                );
+            }
+        }
+        match known {
+            Some(k) => {
+                let (g, rebuilt) = guard_kept(copy.tree(), copy.header(), part, k)?;
+                let map = PlannedMap {
+                    part: part.clone(),
+                    ground: k.ground,
+                    versions: k.versions.clone(),
+                    basis: k.basis.clone(),
+                    rebuilt,
+                };
+                Ok((g, Some(map)))
+            }
+            None => Ok((guard(copy.tree(), copy.header(), ground, part)?, None)),
+        }
+    })?;
+    Ok(Planned { classes, ..planned })
 }
 
 fn plan_with(
     checked: Checked,
     copy: &Replica,
     ground: Option<Id>,
-    guard: impl FnOnce(&Part) -> Result<Guard, String>,
+    mut minter: Minter,
+    guard: impl FnOnce(&Part) -> Result<(Guard, Option<PlannedMap>), String>,
 ) -> Result<Planned, Refused> {
     off_clock();
-    let mut minter = Minter::new(PROVISIONAL);
     let names = names(&checked, &mut minter)?;
     let effects = effects(copy.tree(), copy.version(), &checked, &names, 0);
     let bytes = encode(&Value::Map(BTreeMap::from([
@@ -98,11 +184,13 @@ fn plan_with(
     .map_err(|e| refused("encoding", e.to_string()))?;
     let part = Part::read(&bytes).map_err(|r| refused(r.name, r.detail))?;
     let terrain = terrain::guard(copy.tree(), copy.header(), ground, &checked, &part)?;
-    let guard = guard(&part).map_err(|e| refused("edit.unchecked", e))?;
+    let (guard, map) = guard(&part).map_err(|e| refused("edit.unchecked", e))?;
     Ok(Planned {
         checked,
         guard,
+        classes: BTreeMap::new(),
         terrain,
+        map,
     })
 }
 
@@ -141,12 +229,69 @@ pub fn commit_guarded(
     at: Micros,
     structure: &Structure,
 ) -> Result<Committed, Refused> {
+    commit_guarded_classes(
+        live,
+        minter,
+        planned,
+        bodies,
+        at,
+        structure,
+        &BTreeMap::new(),
+    )
+}
+
+pub fn commit_classes(
+    live: &mut Replica,
+    minter: &mut Minter,
+    planned: &Planned,
+    bodies: &[Who],
+    at: Micros,
+    classes: &BTreeMap<Id, Size>,
+) -> Result<Committed, Refused> {
+    commit_guarded_classes(
+        live,
+        minter,
+        planned,
+        bodies,
+        at,
+        &Structure::default(),
+        classes,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn commit_guarded_classes(
+    live: &mut Replica,
+    minter: &mut Minter,
+    planned: &Planned,
+    bodies: &[Who],
+    at: Micros,
+    structure: &Structure,
+    classes: &BTreeMap<Id, Size>,
+) -> Result<Committed, Refused> {
     let checked = &planned.checked;
     confirm(live, checked)?;
     if let Some(t) = &planned.terrain {
         t.judge(bodies)?;
     }
-    let unsafe_ = planned.guard.judge(bodies);
+    let mut unsafe_ = Vec::new();
+    for body in bodies {
+        let size = classes.get(&body.body).copied().unwrap_or(Size::Standard);
+        let guard = if size == Size::Standard {
+            &planned.guard
+        } else {
+            match planned.classes.get(&size) {
+                Some(guard) => guard,
+                None if unsafe_.is_empty() => {
+                    return Err(refused(
+                        "edit.class-unchecked",
+                        "the current body's footprint was not prepared",
+                    ));
+                }
+                None => break,
+            }
+        };
+        unsafe_.extend(guard.judge(std::slice::from_ref(body)));
+    }
     if let Some(first) = unsafe_.first() {
         let detail = unsafe_.iter().map(|u| u.text()).collect::<Vec<_>>();
         return Err(refused(first.name, detail.join("\n")));

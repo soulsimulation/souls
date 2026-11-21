@@ -64,6 +64,16 @@ pub struct Recut {
     pub index: Index,
 }
 
+impl Index {
+    /// Whether `other` is this very index (the same shared handles), for [`crate::walk::town::Basis::same`].
+    pub fn same(&self, other: &Index) -> bool {
+        self.ground == other.ground
+            && Arc::ptr_eq(&self.parts, &other.parts)
+            && Arc::ptr_eq(&self.gates, &other.gates)
+            && self.widest == other.widest
+    }
+}
+
 fn grow(b: [i64; 4], d: i64) -> [i64; 4] {
     [b[0] - d, b[1] - d, b[2] + d, b[3] + d]
 }

@@ -30,10 +30,11 @@
 
 use replica::effects::{Actor, Cause, Refusal};
 use replica::ids::Id;
+use replica::kinds::sizes::Size;
 use replica::pose::{Quat, Vec3};
 use replica::time::Micros;
 use replica::world_model::show;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Between rings, and between neighbouring places on a ring, µm.
 pub const PITCH: i64 = 700_000;
@@ -56,6 +57,44 @@ pub trait Ground {
     fn passage(&self, node: Id, p: Vec3) -> bool;
     /// The walking distance from `a` on node `an` to `b` on node `bn`, never through a wall; `None` with no way there.
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64>;
+}
+
+/// The same geometry questions selected for one admitted footprint. Reservations are never stored here.
+pub trait ClassGround {
+    fn stand(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)>;
+    fn passage(&self, size: Size, node: Id, p: Vec3) -> bool;
+    fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64>;
+}
+struct Selected<'a> {
+    ground: &'a mut dyn ClassGround,
+    size: Size,
+}
+impl Ground for Selected<'_> {
+    fn stand(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.ground.stand(self.size, node, p)
+    }
+    fn passage(&self, node: Id, p: Vec3) -> bool {
+        self.ground.passage(self.size, node, p)
+    }
+    fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
+        self.ground.walk(self.size, an, a, bn, b)
+    }
+}
+struct Standard<'a>(&'a mut dyn Ground);
+impl ClassGround for Standard<'_> {
+    fn stand(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        (size == Size::Standard)
+            .then(|| self.0.stand(node, p))
+            .flatten()
+    }
+    fn passage(&self, _size: Size, node: Id, p: Vec3) -> bool {
+        self.0.passage(node, p)
+    }
+    fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
+        (size == Size::Standard)
+            .then(|| self.0.walk(an, a, bn, b))
+            .flatten()
+    }
 }
 
 /// A target: a point (µm) in the frame of a node (a floor, or the open ground).
@@ -147,9 +186,22 @@ pub struct Spots {
     pub owners: BTreeMap<Id, BTreeMap<[i64; 3], Table>>,
     pub record: Vec<Entry>,
     /// Per asker: the target and place it holds.
-    held: BTreeMap<Id, (Target, usize)>,
+    held: BTreeMap<Id, Held>,
+    /// Geometry caches only: every class uses the one held/refused/record authority below.
+    sized: BTreeMap<(Size, Target), Table>,
+    invalid_geometry: bool,
     /// Per asker: the target it was refused, and the refusal's name.
-    refused: BTreeMap<Id, (Target, &'static str)>,
+    refused: BTreeMap<Id, (Target, Size, &'static str)>,
+}
+
+#[derive(Clone, Copy)]
+struct Held {
+    target: Target,
+    index: usize,
+    size: Size,
+    at: Vec3,
+    world: Vec3,
+    place: (u16, u16),
 }
 
 /// The straight distance in x and z, µm.
@@ -201,7 +253,12 @@ impl Table {
     }
 
     /// The free place nearest `ask` (module docs), with its cost (µm), or a refusal's name.
-    fn nearest(&mut self, g: &mut dyn Ground, ask: &Ask) -> Result<(usize, i64), &'static str> {
+    fn nearest(
+        &mut self,
+        g: &mut dyn Ground,
+        ask: &Ask,
+        blocked: &BTreeSet<usize>,
+    ) -> Result<(usize, i64), &'static str> {
         if self.places.is_empty() {
             return Err("spot-none-near");
         }
@@ -215,7 +272,7 @@ impl Table {
             .places
             .iter()
             .enumerate()
-            .filter(|(_, p)| p.holder.is_none())
+            .filter(|(i, p)| p.holder.is_none() && !blocked.contains(i))
             .map(|(i, p)| (flat(p.world, a) + WEIGHT * gap(p), p.ring, p.k, i))
             .collect();
         order.sort_unstable();
@@ -322,6 +379,14 @@ impl Spots {
         Spots::default()
     }
 
+    /// Prepared geometry changed; retain shared physical holders until they are revalidated against it.
+    pub fn invalidate_geometry(&mut self) {
+        self.owners.clear();
+        self.sized.clear();
+        self.refused.clear();
+        self.invalid_geometry = true;
+    }
+
     /// The table of `target`, if its owner has made one.
     pub fn table(&self, target: &Target) -> Option<&Table> {
         self.owners.get(&target.node)?.get(&target.at)
@@ -330,13 +395,13 @@ impl Spots {
     /// What `who`, asking for `target`, was given: the place to stand (µm, the target node's frame) or a refusal's
     /// name; `None` until its ask is read.
     pub fn of(&self, who: Id, target: &Target) -> Option<Result<Vec3, &'static str>> {
-        if let Some((t, i)) = self.held.get(&who)
-            && t == target
+        if let Some(held) = self.held.get(&who)
+            && &held.target == target
         {
-            return self.table(t).map(|tb| Ok(tb.places[*i].at));
+            return Some(Ok(held.at));
         }
         match self.refused.get(&who) {
-            Some((t, name)) if t == target => Some(Err(*name)),
+            Some((t, _, name)) if t == target => Some(Err(*name)),
             _ => None,
         }
     }
@@ -344,30 +409,86 @@ impl Spots {
     /// The owners read the asks of the last tick (in id order) and write their tables for world time `at`: release
     /// what no ask holds any more, then grant each new ask its nearest free place.
     pub fn write(&mut self, g: &mut dyn Ground, asks: &[Ask], at: Micros) -> Result<(), Refusal> {
-        let asking: BTreeMap<Id, &Ask> = asks.iter().map(|a| (a.who, a)).collect();
-        // Releases: the holder asks for another target or none (it left), or has no mark (its order ended).
+        self.write_sized(
+            &mut Standard(g),
+            &asks
+                .iter()
+                .map(|a| (*a, Size::Standard))
+                .collect::<Vec<_>>(),
+            at,
+        )
+    }
+
+    /// One release/grant pass in the existing caller order, with shared physical occupancy across class caches.
+    pub fn write_sized(
+        &mut self,
+        grounds: &mut dyn ClassGround,
+        asks: &[(Ask, Size)],
+        at: Micros,
+    ) -> Result<(), Refusal> {
+        if self.invalid_geometry {
+            let holders: Vec<_> = self.held.iter().map(|(&id, &h)| (id, h)).collect();
+            for (who, h) in holders {
+                let selected = Selected {
+                    ground: grounds,
+                    size: h.size,
+                };
+                let table = if h.size == Size::Standard {
+                    self.owners
+                        .entry(h.target.node)
+                        .or_default()
+                        .entry(h.target.at)
+                        .or_insert_with(|| Table::new(&selected, h.target))
+                } else {
+                    self.sized
+                        .entry((h.size, h.target))
+                        .or_insert_with(|| Table::new(&selected, h.target))
+                };
+                match table.places.iter().position(|p| p.at == h.at) {
+                    Some(index) => {
+                        table.places[index].holder = Some(who);
+                        self.held.insert(who, Held { index, ..h });
+                    }
+                    None => {
+                        self.held.remove(&who);
+                        self.record.push(Entry::Release {
+                            at,
+                            who,
+                            target: h.target,
+                            place: h.place,
+                            why: "ground-changed",
+                        });
+                    }
+                }
+            }
+            self.invalid_geometry = false;
+        }
+        let asking: BTreeMap<Id, (&Ask, Size)> =
+            asks.iter().map(|(a, size)| (a.who, (a, *size))).collect();
         let gone: Vec<(Id, &'static str)> = self
             .held
             .iter()
-            .filter_map(|(who, (t, _))| match asking.get(who) {
+            .filter_map(|(who, held)| match asking.get(who) {
                 None => Some((*who, "order-ended")),
-                Some(a) if a.target != *t => Some((*who, "spot-left")),
+                Some((a, _)) if a.target != held.target => Some((*who, "spot-left")),
+                Some((_, size)) if *size != held.size => Some((*who, "body-class-changed")),
                 Some(_) => None,
             })
             .collect();
-        // A missing table is refused, and the other releases and the grants go on (#3275); the first is returned.
         let mut refused = None;
         for (who, why) in gone {
-            let (t, i) = self.held.remove(&who).expect("held");
-            let Some(p) = self
-                .owners
-                .get_mut(&t.node)
-                .and_then(|o| o.get_mut(&t.at))
-                .map(|tb| &mut tb.places[i])
-            else {
+            let held = self.held.remove(&who).expect("held");
+            let table = if held.size == Size::Standard {
+                self.owners
+                    .get_mut(&held.target.node)
+                    .and_then(|m| m.get_mut(&held.target.at))
+            } else {
+                self.sized.get_mut(&(held.size, held.target))
+            };
+            let Some(p) = table.and_then(|tb| tb.places.get_mut(held.index)) else {
                 refused.get_or_insert(Refusal {
                     name: "spot-table-missing",
-                    detail: show(t.node),
+                    detail: show(held.target.node),
                 });
                 continue;
             };
@@ -375,30 +496,74 @@ impl Spots {
             self.record.push(Entry::Release {
                 at,
                 who,
-                target: t,
+                target: held.target,
                 place: (p.ring, p.k),
                 why,
             });
         }
-        self.refused
-            .retain(|who, (t, _)| asking.get(who).is_some_and(|a| a.target == *t));
-        // Grants, in id order, to each ask not yet answered.
-        for a in asks {
+        self.refused.retain(|who, (t, size, _)| {
+            asking
+                .get(who)
+                .is_some_and(|(a, s)| a.target == *t && s == size)
+        });
+        for (a, size) in asks {
             if self.held.contains_key(&a.who) || self.refused.contains_key(&a.who) {
                 continue;
             }
             let t = a.target;
-            let tb = self
-                .owners
-                .entry(t.node)
-                .or_default()
-                .entry(t.at)
-                .or_insert_with(|| Table::new(g, t));
-            match tb.nearest(g, a) {
+            let mut g = Selected {
+                ground: grounds,
+                size: *size,
+            };
+            let tb = if *size == Size::Standard {
+                self.owners
+                    .entry(t.node)
+                    .or_default()
+                    .entry(t.at)
+                    .or_insert_with(|| Table::new(&g, t))
+            } else {
+                self.sized
+                    .entry((*size, t))
+                    .or_insert_with(|| Table::new(&g, t))
+            };
+            // Standard/standard keeps the existing exact table policy. Every pair involving another class
+            // must retain the existing standard clearance beyond the sum of its admitted radii.
+            let blocked = tb
+                .places
+                .iter()
+                .enumerate()
+                .filter_map(|(i, p)| {
+                    self.held
+                        .values()
+                        .any(|h| {
+                            if h.target.node != t.node
+                                || (*size == Size::Standard && h.size == Size::Standard)
+                            {
+                                return false;
+                            }
+                            let clearance = (size.radius_mm() + h.size.radius_mm() + 140) * 1000;
+                            let dx = i128::from(p.world.x - h.world.x);
+                            let dz = i128::from(p.world.z - h.world.z);
+                            dx * dx + dz * dz < i128::from(clearance) * i128::from(clearance)
+                        })
+                        .then_some(i)
+                })
+                .collect();
+            match tb.nearest(&mut g, a, &blocked) {
                 Ok((i, cost)) => {
                     let p = &mut tb.places[i];
                     p.holder = Some(a.who);
-                    self.held.insert(a.who, (t, i));
+                    self.held.insert(
+                        a.who,
+                        Held {
+                            target: t,
+                            index: i,
+                            size: *size,
+                            at: p.at,
+                            world: p.world,
+                            place: (p.ring, p.k),
+                        },
+                    );
                     self.record.push(Entry::Grant {
                         at,
                         who: a.who,
@@ -411,7 +576,7 @@ impl Spots {
                     });
                 }
                 Err(name) => {
-                    self.refused.insert(a.who, (t, name));
+                    self.refused.insert(a.who, (t, *size, name));
                     self.record.push(Entry::Refuse {
                         at,
                         who: a.who,

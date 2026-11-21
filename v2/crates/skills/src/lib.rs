@@ -14,3 +14,6 @@ pub mod orders;
 pub mod route;
 pub mod scan;
 pub mod walk;
+
+/// The existing B15 recorded body-choice and admitted catalogue interface.
+pub mod wear;

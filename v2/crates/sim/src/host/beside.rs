@@ -31,8 +31,8 @@ use replica::time::Micros;
 
 use super::{Here, Moved, Planned, Run, Staged, WorldHost, body_kind, named};
 use crate::controller::{Controller, Driver};
-use crate::routes::Scratch;
 use crate::unit::Units;
+use crate::walk::town::ClassScratch;
 use crate::walk::town::{Line, Lines, Shared, Spent, Split};
 
 /// The most consecutive side-by-side runs one thread takes at a time.
@@ -173,7 +173,7 @@ pub(super) fn step(
     let mut outs: Vec<Option<Out>> = (0..starts.len()).map(|_| None).collect();
     let queue = Mutex::new(besides.into_iter());
     let before: &Units = units;
-    let work = |scratch: &mut Scratch| -> Vec<(usize, Out)> {
+    let work = |scratch: &mut ClassScratch| -> Vec<(usize, Out)> {
         let mut done = Vec::new();
         while let Some((at, mut runs, lines)) = queue.lock().ok().and_then(|mut q| q.next()) {
             done.push((
@@ -200,7 +200,7 @@ pub(super) fn step(
             all
         }),
         Some((first, _)) => vec![work(first)],
-        None => vec![work(&mut Scratch::default())],
+        None => vec![work(&mut ClassScratch::default())],
     };
     for (at, out) in done.into_iter().flatten() {
         outs[at] = Some(out);
@@ -212,7 +212,7 @@ pub(super) fn step(
     let mut gone = BTreeSet::new();
     let mut spent = town_spent.get();
     let mut new: Vec<(Id, Line)> = Vec::new();
-    let mut own = Scratch::default();
+    let mut own = ClassScratch::default();
     let scratch = scratches.first_mut().unwrap_or(&mut own);
     let mut alones = alones.into_iter();
     // An empty slot is the next of the other skills' chunks, which come in chunk order.
@@ -297,7 +297,7 @@ pub(super) fn step(
 fn run<S: Skill + ?Sized>(
     shared: Shared<'_>,
     reads: &Reads<'_>,
-    scratch: &mut Scratch,
+    scratch: &mut ClassScratch,
     kind: &Name,
     mut minter: Option<&mut Minter>,
     draws: u64,
@@ -308,17 +308,37 @@ fn run<S: Skill + ?Sized>(
     let mut lines = Vec::new();
     let spent = Cell::new(Spent::default());
     let mut out = Vec::with_capacity(runs.len());
-    let asked;
+    let mut asked = Vec::new();
     {
-        let here = Here {
-            town: shared.view(scratch, Lines::Part(kept, &mut lines), &spent),
-            controller: reads.controller,
-            fields: reads.fields,
-            settled: reads.settled,
-            kind: kind.clone(),
-            planned: reads.planned.map(|p| (p, RefCell::new(Vec::new()))),
-        };
         for (i, body, driver, skill) in runs.iter_mut() {
+            let size = reads
+                .controller
+                .build(*body)
+                .map_or(replica::kinds::sizes::Size::Standard, |b| b.size);
+            let view = match shared.view_for(size, scratch, Lines::Part(kept, &mut lines), &spent) {
+                Ok(view) => view,
+                Err(r) => {
+                    out.push(Stepped {
+                        i: *i,
+                        body: *body,
+                        unit: skill.shape().name,
+                        staged: Staged {
+                            draws,
+                            ..Staged::default()
+                        },
+                        what: What::Stepped(Progress::Failed(named(r.name))),
+                    });
+                    continue;
+                }
+            };
+            let here = Here {
+                town: view,
+                controller: reads.controller,
+                fields: reads.fields,
+                settled: reads.settled,
+                kind: kind.clone(),
+                planned: reads.planned.map(|p| (p, RefCell::new(Vec::new()))),
+            };
             let unit = skill.shape().name;
             let mut own = Staged {
                 draws,
@@ -367,11 +387,12 @@ fn run<S: Skill + ?Sized>(
                 staged: own,
                 what,
             });
+            asked.extend(
+                here.planned
+                    .map(|(_, a)| a.into_inner())
+                    .unwrap_or_default(),
+            );
         }
-        asked = here
-            .planned
-            .map(|(_, a)| a.into_inner())
-            .unwrap_or_default();
     }
     Out {
         runs: out,

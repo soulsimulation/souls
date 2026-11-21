@@ -658,6 +658,8 @@ pub type ReachKey = (Id, Id, u64, Id);
 /// before the next tick: the route searches the clock does not run.
 #[derive(Clone, Debug, Default)]
 pub struct Wants {
+    /// Non-default admitted classes of this exact body snapshot.
+    pub classes: BTreeMap<Id, replica::kinds::sizes::Size>,
     /// The tick's end, world time: the spot tables are written for it.
     pub at: Micros,
     /// Every body's mark, for the spot tables (N9): `None` in a batch of reach questions alone, which writes none.
@@ -1028,6 +1030,19 @@ impl Runner {
         near(&self.controller, body, radius)
     }
 
+    /// The paired edit already rebound these exact bodies off-clock; ordinary reground remains for other callers.
+    pub fn prepared_ground(
+        &mut self,
+        bodies: &[(crate::controller::BuildBasis, Moved)],
+        town: &Town,
+    ) {
+        for (before, _) in bodies {
+            let node = before.moved.pose.frame.node;
+            self.stood
+                .insert(before.moved.id, (node, town.versions.of(node)));
+        }
+    }
+
     /// Changed ground (G3), at the start of a tick (once a tick): each body not carried whose node's ground version
     /// moved since it last stood (or that stood off the ground) is found again on that ground where it stands
     /// ([`Town::relocate`]), or marked off the ground and held. Nothing while no ground has changed.
@@ -1108,6 +1123,15 @@ impl Runner {
         planned: Option<&Planned>,
         wants: &mut Wants,
     ) -> Result<(), Refusal> {
+        town.body_classes = self
+            .controller
+            .ids()
+            .filter_map(|id| {
+                let size = self.controller.build(id)?.size;
+                (size != replica::kinds::sizes::Size::Standard).then_some((id, size))
+            })
+            .collect();
+        wants.classes.clone_from(&town.body_classes);
         self.reground(town);
         let at = self.now + self.tick;
         // Read on the runner's threads (N17b): each mark reads one body alone.
@@ -1228,9 +1252,20 @@ impl Runner {
             self.route_metrics.remove(who);
             self.ended.insert(*who, (self.now, p.clone()));
         }
-        let stepped = self
-            .controller
-            .step_on(&town.surfaces, self.tick, at, self.threads);
+        let surfaces = replica::kinds::sizes::Size::ALL.map(|size| town.surfaces_for(size));
+        let stepped = self.controller.step_on_selected(
+            move |_, size| {
+                surfaces[match size {
+                    replica::kinds::sizes::Size::Small => 0,
+                    replica::kinds::sizes::Size::Standard => 1,
+                    replica::kinds::sizes::Size::Large => 2,
+                    replica::kinds::sizes::Size::Giant => 3,
+                }]
+            },
+            self.tick,
+            at,
+            self.threads,
+        );
         refused.extend(stepped.refused);
         // Each refused body's run ends by its first refusal's name; the others' ticks are done already.
         for (who, r) in &refused {

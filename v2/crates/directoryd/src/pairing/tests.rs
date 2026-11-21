@@ -1095,3 +1095,168 @@ fn x11b_refused_imported_approval_never_registers_or_initializes_a_profile() {
     assert!(!tokens.exists());
     assert!(!tokens.with_file_name("tokens.txt.souls").exists());
 }
+
+#[test]
+fn w16_scoped_handoff_revokes_creator_preserves_souls_other_world_and_reopens() {
+    use crate::worlds::list::handoff::{Ownership, Pending};
+    use replica::ids::{Id, Scope};
+    use std::sync::{Arc, RwLock};
+    let (mut p, legacy) = store();
+    let root = legacy.parent().unwrap().canonicalize().unwrap();
+    let a = Id::new(Scope([1; 16]), 0).unwrap();
+    let b = Id::new(Scope([2; 16]), 0).unwrap();
+    let zone = Id::new(Scope([3; 16]), 1).unwrap();
+    let owner = Arc::new(RwLock::new(Ownership {
+        founder: a,
+        creator: Some(a),
+        generation: 0,
+        lineage: [4; 16],
+        zone,
+    }));
+    let instance = format!(
+        "{}-{}",
+        to_hex(&[4; 16]),
+        crate::accounts::principal_text(zone).replace(':', "-")
+    );
+    let other = format!(
+        "{}-{}",
+        to_hex(&[5; 16]),
+        crate::accounts::principal_text(zone).replace(':', "-")
+    );
+    for instance in [&instance, &other] {
+        std::fs::create_dir_all(root.join("worlds").join(instance)).unwrap();
+        std::fs::write(root.join("worlds").join(instance).join("tokens"), "").unwrap();
+    }
+    let registry = root.join("authority.json");
+    let registry_bytes=serde_json::to_vec(&serde_json::json!({"format":"souls/world-authority/1","worldsRoot":root,"worlds":{"garden":{"instance":instance,"creator":crate::accounts::principal_text(a)},"forest":{"instance":other,"creator":crate::accounts::principal_text(a)}},"aliases":{"old-garden":"garden"}})).unwrap();
+    std::fs::write(&registry, &registry_bytes).unwrap();
+    p.authority_file = Some(registry.clone());
+    let reader_owner = owner.clone();
+    p.current_owner_reader(Arc::new(move |world| {
+        let mut value = reader_owner.read().unwrap().clone();
+        if world == "forest" {
+            value.creator = Some(a);
+            value.generation = 0;
+            value.lineage = [5; 16];
+        }
+        Ok(value)
+    }))
+    .unwrap();
+    let old = format!(
+        "creator-{}",
+        crate::accounts::principal_text(a).replace(':', "-")
+    );
+    let soul = format!("soul-{}-0", to_hex(&[6; 16]));
+    p.register(&old, "acct_first").unwrap();
+    p.register(&soul, "acct_soul").unwrap();
+    {
+        let db = p.db.lock().unwrap();
+        for (grant, world, hash) in [
+            (&old, "garden", "a1".repeat(32)),
+            (&old, "forest", "b2".repeat(32)),
+            (&soul, "garden", "c3".repeat(32)),
+        ] {
+            db.execute("INSERT INTO paired_world_tokens_v1(grant_text,world,device,token_hash) VALUES(?1,?2,'studio laptop',?3)",params![grant,world,hash]).unwrap();
+        }
+    }
+    p.reconcile_current_authority().unwrap();
+    let file = root.join("worlds").join(&instance).join("tokens");
+    let other_file = root.join("worlds").join(&other).join("tokens");
+    let untouched = std::fs::read(&other_file).unwrap();
+    let request_secret = "16".repeat(32);
+    let request = Ask {
+        secret_hash: sha256(request_secret.as_bytes()),
+        device: "waiting agent".into(),
+        label: "creator".into(),
+        soul: Some(old.clone()),
+        scope: "creator".into(),
+        force: false,
+    };
+    let code = p.ask(&request, T0).unwrap().code;
+    p.ask_world(&code, "old-garden").unwrap();
+    {
+        let mut current = owner.write().unwrap();
+        current.creator = None;
+        current.generation = 1;
+    }
+    let pending = Pending {
+        world: "garden".into(),
+        account: "acct_next".into(),
+        creator: b,
+        generation: 1,
+        hash: "aa".repeat(32),
+    };
+    // Startup/reconciliation of a durable pending acceptance never republishes the founder.
+    p.reconcile_current_authority().unwrap();
+    let fenced = std::fs::read_to_string(&file).unwrap();
+    assert!(fenced.contains("# souls-creator/1 1 none"));
+    assert!(!fenced.contains(&old));
+    assert!(fenced.contains(&format!("{soul} {}", "c3".repeat(32))));
+    assert_eq!(std::fs::read(&other_file).unwrap(), untouched);
+    // Fail after SQL commit but before the token-file rename; retain the same pending identity and retry.
+    let blocked = file.with_extension("tmp");
+    std::fs::create_dir(&blocked).unwrap();
+    assert!(p.materialize_handoff(&pending).is_err());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), fenced);
+    assert_eq!(owner.read().unwrap().creator, None);
+    assert_eq!(std::fs::read(&other_file).unwrap(), untouched);
+    std::fs::remove_dir(blocked).unwrap();
+    p.materialize_handoff(&pending).unwrap();
+    assert_eq!(
+        owner.read().unwrap().creator,
+        None,
+        "marker handover alone does not commit edit authority"
+    );
+    assert!(std::fs::read_to_string(&file).unwrap().contains(&format!(
+        "# souls-creator/1 1 {}",
+        crate::accounts::principal_text(b)
+    )));
+    // A crash before final CAS is reconciled back to no gateway creator, then the same recipient retries.
+    p.reconcile_current_authority().unwrap();
+    assert!(
+        std::fs::read_to_string(&file)
+            .unwrap()
+            .contains("# souls-creator/1 1 none")
+    );
+    p.materialize_handoff(&pending).unwrap();
+    {
+        owner.write().unwrap().creator = Some(b);
+    }
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains(&format!(
+        "# souls-creator/1 1 {}",
+        crate::accounts::principal_text(b)
+    )));
+    assert!(!text.contains(&old));
+    assert!(text.contains(&format!("{soul} {}", "c3".repeat(32))));
+    assert_eq!(std::fs::read(&other_file).unwrap(), untouched);
+    assert_eq!(p.soul_of(&soul).unwrap().unwrap().0, "acct_soul");
+    assert_eq!(
+        p.poll(&request_secret, T0 + INTERVAL),
+        Poll::Refused("not-the-creator".into(), None)
+    );
+    assert_eq!(p.check_world(&code, &old), Err("not-the-creator"));
+    assert_eq!(std::fs::read(&registry).unwrap(), registry_bytes);
+    let database = root.join("pairing.sqlite");
+    drop(p);
+    let mut p = Pairing::open(&database, Some(legacy), "http://127.0.0.1:1").unwrap();
+    p.authority_file = Some(registry.clone());
+    let reader_owner = owner.clone();
+    p.current_owner_reader(Arc::new(move |world| {
+        let mut value = reader_owner.read().unwrap().clone();
+        if world == "forest" {
+            value.creator = Some(a);
+            value.generation = 0;
+            value.lineage = [5; 16];
+        }
+        Ok(value)
+    }))
+    .unwrap();
+    p.reconcile_current_authority().unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+    assert_eq!(std::fs::read(&other_file).unwrap(), untouched);
+    let before = std::fs::read(&file).unwrap();
+    owner.write().unwrap().founder = b;
+    assert!(p.reconcile_current_authority().is_err());
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+}
