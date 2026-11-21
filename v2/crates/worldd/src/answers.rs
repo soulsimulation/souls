@@ -1779,11 +1779,11 @@ impl Clock {
         }
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
-            Some(_) => self
+            Some(_) if !self.forms.fixture_sit(self.replica.tree(), &intent) => self
                 .body_of(&intent)
                 .ok()
                 .and_then(|b| bodies::read(&intent, b)),
-            None => None,
+            _ => None,
         };
         let spotted = match self.bodies {
             Some(_) => spot_of(
@@ -3990,6 +3990,16 @@ pub fn start<S: Storage + 'static>(
     let mut order_records = Vec::new();
     // B16: the wind-down's records and the Souls' acts replayed, to rebuild it.
     let mut wind_records: Vec<Effect> = Vec::new();
+    // A compacted log (#3837) holds no records before its cut: only a checkpoint at or after it can start the world.
+    let held_from = found.first;
+    if held_from > restored.as_ref().map_or(0, |r| r.root.record) {
+        return Err(Refusal {
+            name: "log-compacted-past-checkpoint",
+            detail: format!(
+                "the log is kept from record {held_from}, and no checkpoint that verifies starts there or later"
+            ),
+        });
+    }
     let records: &[Vec<u8>] = match restored {
         Some(r) => {
             let logged = found.first + found.records.len() as u64;

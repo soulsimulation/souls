@@ -219,6 +219,30 @@ test('W17 archived canonical and preview endpoints refuse and address markers su
   }finally{s.close();}
 });
 
+
+test('V9b: only public history/live refreshes its cache and strong ETag across epoch changes', async () => {
+  const folder = join(dir, 'w', 'native-instance', 'history');
+  mkdirSync(folder, { recursive: true });
+  const url = `${new URL(base).origin}/w/native-instance/history/live`;
+  const first = JSON.stringify({ format: 'souls/history-live/1', world: 'native-instance', lineage: 'ab'.repeat(16), stream: '../views/epoch-7/' });
+  const next = first.replace('epoch-7', 'epoch-8');
+  writeFileSync(join(folder, 'live'), first);
+  const a = await fetch(url);
+  assert.equal(a.status, 200); assert.equal(await a.text(), first);
+  assert.equal(a.headers.get('cache-control'), 'public, max-age=1, no-transform');
+  const old = a.headers.get('etag');
+  assert.equal(old, `"${createHash('sha256').update(first).digest('hex')}"`);
+  writeFileSync(join(folder, 'live'), next);
+  const b = await fetch(url, { headers: { 'if-none-match': old } });
+  assert.equal(b.status, 200); assert.equal(await b.text(), next);
+  assert.equal(b.headers.get('cache-control'), 'public, max-age=1, no-transform');
+  assert.equal(b.headers.get('etag'), `"${createHash('sha256').update(next).digest('hex')}"`);
+  assert.notEqual(b.headers.get('etag'), old);
+  writeFileSync(join(dir, 'live'), first);
+  assert.equal((await fetch(`${new URL(base).origin}/live`)).headers.get('cache-control'), 'public, max-age=31536000, immutable, no-transform');
+  assert.equal((await fetch(`${url}.tmp`)).status, 404);
+});
+
 test('C1 (#3673) A3: a browser asking for an unknown page gets a 404 "No page here" linking home; programs and APIs keep theirs', async () => {
   const at = base.slice(0, base.indexOf('/', 'http://'.length)), html = { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' };
   for (const path of ['/nope', '/l/old-lab', '/w/eden/nope', '/preview/w/eden/no/such/page', '/nope?x=1', '/w/eden/%3Cb%3E']) {
