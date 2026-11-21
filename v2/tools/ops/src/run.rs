@@ -75,6 +75,7 @@ fn toggle(body: Id, thing: Id, sequence: u64, expiry_us: i64) -> Intent {
         }],
         replaces: None,
         body: None,
+        reflex: false,
     }
 }
 

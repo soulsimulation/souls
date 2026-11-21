@@ -345,6 +345,7 @@ impl OperatorProbe {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         let bytes =
             encode(&intent.to_value()).map_err(|e| format!("canary.probe-encoding: {e}"))?;

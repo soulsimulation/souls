@@ -430,7 +430,7 @@ impl TownCopy {
     /// The town as of `copy` (whose open ground is `ground`) with the edits added since the last call installed;
     /// built whole from `copy` when there is none yet (unless `idle`: then it waits for its seed or an edit), the ground
     /// differs, or an edit can't be installed. `copy` holds every edit committed. Off the clock thread.
-    pub fn on(&mut self, copy: &Replica, ground: Option<Id>, idle: bool) -> Option<&Town> {
+    pub fn on(&mut self, copy: &Replica, ground: Option<Id>, idle: bool) -> Option<&mut Town> {
         if idle && self.built.is_none() {
             return None;
         }
@@ -481,7 +481,7 @@ impl TownCopy {
             });
             self.built = Some((copy.version(), ground, town));
         }
-        self.built.as_ref().and_then(|(_, _, t)| t.as_ref())
+        self.built.as_mut().and_then(|(_, _, t)| t.as_mut())
     }
 }
 /// Clock thread: each body the controller holds, as G2 judges it: where it stands, sits or lies, the link it is being

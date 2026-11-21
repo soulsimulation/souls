@@ -12,8 +12,10 @@
 //! - [`serve`]: the two sign-in requests over HTTP, and the mailbox's.
 //! - [`mailbox`]: the owner's messages to a Soul (R13, #2753), in the same file, never in a world's log.
 //! - [`prayers`]: a Soul's prayers to its world's creator and the answers (G11, #3335), the mailbox's other direction.
+//! - [`now`]: a Soul's public status line, set by its agent (C14, #3684).
 
 pub mod mailbox;
+pub mod now;
 pub mod prayers;
 pub mod serve;
 pub mod session;
