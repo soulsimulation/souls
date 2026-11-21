@@ -14,7 +14,7 @@
 //! Requests reach it from the [`crate::answers::Door`] directly, so they never wait in the clock thread's queue.
 
 use crate::answers::Reply;
-use crate::closed::{Closed, Withhold, actor_of_key};
+use crate::closed::{Closed, Redaction, Withhold, actor_of_key};
 use crate::views::names::{self, PublicNames};
 use replica::apply::Replica;
 use replica::effects::Part;
@@ -94,12 +94,30 @@ pub(crate) fn start(
                     }
                     .to_value();
                     let place = copy.header().zone;
+                    let version = copy.version();
+                    let tree = copy.tree();
+                    // Made when the copy was just sealed (a hashes request), and kept for the records asked after it.
+                    if ask.contains_key(&wire::IDS) {
+                        let served = Served {
+                            tree,
+                            records: &kept,
+                        };
+                        let mut read = |h: &[u8]| {
+                            let mut s = Served {
+                                tree: served.tree,
+                                records: served.records,
+                            };
+                            s.records(&[h.to_vec()]).ok().and_then(|mut v| v.pop())
+                        };
+                        withhold.prepare(tree, version, asker, &mut read);
+                    }
                     let mut src = Withheld {
                         served: Served {
-                            tree: copy.tree(),
+                            tree,
                             records: &kept,
                         },
                         withhold: &withhold,
+                        redaction: withhold.redaction(asker),
                         asker,
                     };
                     let mut a = sync::answer(&mut src, &[place], &ask, now);
@@ -120,6 +138,7 @@ pub(crate) fn start(
 struct Withheld<'a> {
     served: Served<'a>,
     withhold: &'a Withhold,
+    redaction: Option<&'a Redaction>,
     asker: Option<Actor>,
 }
 
@@ -130,6 +149,8 @@ impl Source for Withheld<'_> {
         for (h, id) in hs.iter_mut().zip(ids) {
             if self.withhold.withheld(tree, self.asker, *id) {
                 *h = None;
+            } else if let Some(r) = self.redaction.and_then(|r| r.hash(*id)) {
+                *h = Some(r);
             }
         }
         Ok(hs)
@@ -137,17 +158,27 @@ impl Source for Withheld<'_> {
 
     fn records(&mut self, hashes: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, Refusal> {
         let tree: &Tree = self.served.tree;
-        Ok(self
-            .served
-            .records(hashes)?
-            .into_iter()
-            .map(|r| {
-                if self.withhold.withholds_record(tree, self.asker, &r) {
+        hashes
+            .iter()
+            .map(|h| {
+                // A record rewritten for an asker is served from those made; the real one it replaces never is.
+                if let Some(b) = self.withhold.made(h) {
+                    return Ok(b.clone());
+                }
+                if self.redaction.is_some_and(|r| r.replaced(h)) {
+                    return Ok(Vec::new());
+                }
+                let r = self
+                    .served
+                    .records(std::slice::from_ref(h))?
+                    .pop()
+                    .unwrap_or_default();
+                Ok(if self.withhold.withholds_record(tree, self.asker, &r) {
                     Vec::new()
                 } else {
                     r
-                }
+                })
             })
-            .collect())
+            .collect()
     }
 }

@@ -212,6 +212,12 @@ impl Copy {
         &self.roots
     }
 
+    /// Whether the record a hash names is held, and not withheld: a withheld one is asked for again at every sync,
+    /// since whether it may be seen is not in its hash (who may see into its container can change).
+    fn holds(&self, hash: &[u8]) -> bool {
+        self.records.get(hash).is_some_and(|b| !b.is_empty())
+    }
+
     /// The record a hash names, if held; none for one withheld.
     pub fn record(&self, hash: &[u8]) -> Option<&[u8]> {
         self.records
@@ -261,7 +267,7 @@ impl Copy {
             if self.roots.get(id) != Some(&h) {
                 s.changed += 1;
             }
-            if !self.records.contains_key(&h) {
+            if !self.holds(&h) {
                 want.push(h.clone());
             }
             roots.insert(*id, h);
@@ -281,7 +287,7 @@ impl Copy {
         if d.want.is_empty() {
             // A child named twice in one level, or also asked for in it, is fetched once.
             d.want = std::mem::take(&mut d.next);
-            d.want.retain(|c| !self.records.contains_key(c));
+            d.want.retain(|c| !self.holds(c));
             d.want.sort();
             d.want.dedup();
         }
@@ -299,7 +305,7 @@ impl Copy {
         d.s.sent += asked.iter().map(|h| h.len() as u64).sum::<u64>();
         for (h, bytes) in asked.iter().zip(got) {
             for c in check(h, &bytes)? {
-                if !self.records.contains_key(&c) {
+                if !self.holds(&c) {
                     d.next.push(c);
                 }
             }
