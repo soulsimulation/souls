@@ -1478,7 +1478,18 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     souls
         .set_read_timeout(Some(Duration::from_secs(60)))
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Since C3 a seeded Soul has a body only once it acts: each walks to where it stands, and its end is read.
+    let end = |s: &mut UnixStream| loop {
+        let got = socket_answer(s);
+        if got.kind != 3 {
+            return got;
+        }
+    };
+    for (k, &body) in w.souls.iter().enumerate() {
+        walk(&mut souls, &w, body, 1, (x0 + 2 * k as i64) * M, z0 * M);
+        let got = end(&mut souls);
+        assert_eq!(got.kind, 1, "Soul {k} stands: {got:?}");
+    }
     let at = |x: i64, z: i64, parent: Id| Spot {
         slot: None,
         position: Vec3::new(x, 0, z),
@@ -1540,8 +1551,8 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     .await;
     assert_eq!(got.kind, 1, "the hedge across the way commits: {got:?}");
     let version = got.version;
-    walk(&mut souls, &w, w.souls[1], 1, wx, goal);
-    let got = socket_answer(&mut souls);
+    walk(&mut souls, &w, w.souls[1], 2, wx, goal);
+    let got = end(&mut souls);
     println!("the second Soul's walk past the hedge: {got:?}");
     assert_eq!(got.kind, 1, "the walk ends at its goal: {got:?}");
 
