@@ -48,6 +48,9 @@
 //   souls-god.mjs event <room or ground id> '<words>' --when HH:MM|<world µs>us [--for <minutes>] [--at x,y,z]
 //                                                a calendar entry there (eden:calendar_entry), its words kept by the
 //                                                world for everyone; HH:MM is its next one on the world's calendar
+//   souls-god.mjs about <id> --title '<t>' [--alias '<a>' ...] | --set '{"title":..,"aliases":[..]}' | --clear
+//                                                a place's title and aliases (today's `about`), kept by the world as
+//                                                words for everyone; Souls' find matches either
 //   souls-god.mjs status | stop                  the daemon
 //   souls-god.mjs catalog [--category c] [--has slot:sit|form:<f>|point:<role>|state:<field>]   every kind, one each
 //   souls-god.mjs find <words> [--category c] [--has ...] [--all]    kinds that match, best first, with why
@@ -84,6 +87,7 @@ import { parseShoot, runShoot } from '../shoot/shoot.mjs';
 import { parseSpace, runSpace } from './space.mjs';
 
 export const VERBS = [
+  'about',
   'access',
   'batch',
   'build',
@@ -238,6 +242,7 @@ export function opsOf(verb, words, { related = false } = {}) {
     if (args.length !== 1 || (closed >= 0) === (open.length > 0)) throw usage('hours <id> --open HH:MM-HH:MM[@days] ... | --closed');
     return [{ op: 'set', node: node(args[0]), field: F_HOURS, value: hoursRows(open) }];
   }
+  if (verb === 'about') return aboutOps(args);
   if (verb === 'remove') {
     if (!args[0]) throw usage('remove <id>');
     return [{ op: 'remove', node: node(args[0]) }];
@@ -266,6 +271,41 @@ export function eventOf(words) {
   const us = /^(\d+)us$/.exec(when), hm = /^([01]\d|2[0-3]):[0-5]\d$/.test(when);
   if (!us && !hm) throw usage(how);
   return { into: args[0], words: args[1].trim(), ...(us ? { start: Number(us[1]) } : { when }), minutes, ...(at ? { at: xyz(at) } : {}) };
+}
+
+/** A place's title and aliases (`brief/copy.mjs` F_TITLE, F_ALIASES): the words, or false to clear. */
+export const ABOUT = { title: 4, aliases: 101 };
+const ALIASES_MOST = 64;
+
+/** `about`'s batch: today's `about <ref> --set JSON | --clear`, or its `--title` and `--alias` parts. */
+export function aboutOps(words) {
+  const args = [...words];
+  const how = 'about <id> --title \'<t>\' [--alias \'<a>\' ...] | --set \'{"title":"..","aliases":[".."]}\' | --clear';
+  const clear = args.indexOf('--clear');
+  if (clear >= 0) args.splice(clear, 1);
+  const set = takeOpt(args, '--set'), title = takeOpt(args, '--title'), alias = takeAll(args, '--alias');
+  if (args.length !== 1 || [clear >= 0, set !== undefined, title !== undefined || alias.length > 0].filter(Boolean).length !== 1) throw usage(how);
+  const id = node(args[0]);
+  const setTo = (field, value) => ({ op: 'set', node: id, field, value });
+  if (clear >= 0) return [setTo(ABOUT.title, false), setTo(ABOUT.aliases, false)];
+  let about = { title, aliases: alias.length ? alias : undefined };
+  if (set !== undefined) {
+    try { about = JSON.parse(set); } catch { throw usage('--set takes a JSON object'); }
+    if (!about || typeof about !== 'object' || Array.isArray(about) || Object.keys(about).some((k) => k !== 'title' && k !== 'aliases')) throw usage('--set takes {"title": "..", "aliases": [".."]}');
+  }
+  const line = (t) => (typeof t === 'string' && t.trim() && !/[\r\n]/.test(t) ? t.trim() : null);
+  const ops = [];
+  if (about.title !== undefined) {
+    if (!line(about.title)) throw usage('a title is one line of words');
+    ops.push(setTo(ABOUT.title, { words: line(about.title) }));
+  }
+  if (about.aliases !== undefined) {
+    const list = Array.isArray(about.aliases) ? about.aliases.map(line) : [null];
+    if (list.some((a) => a === null) || list.length > ALIASES_MOST) throw usage(`aliases are 1 to ${ALIASES_MOST} lines of words`);
+    ops.push(setTo(ABOUT.aliases, list.length ? { words: [...new Set(list)].join('\n') } : false));
+  }
+  if (!ops.length) throw usage(how);
+  return ops;
 }
 
 /** A world verb's words as the daemon reads them: `{ verb, ...flags }`, numbers as given. */
