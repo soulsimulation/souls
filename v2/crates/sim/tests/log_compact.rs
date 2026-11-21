@@ -55,7 +55,16 @@ fn i3837_a_compacted_log_reopens_from_its_cut_with_the_same_records_and_frees_th
     // The writer finishes it after its next sync, with the record appended meanwhile.
     log.append(payload(100)).unwrap();
     log.wait_durable(101).unwrap();
-    let done = durable.compacted().expect("finished").expect("compacted");
+    // The copy is finished just after that sync returns: wait for its outcome.
+    let done = (0..500)
+        .find_map(|_| {
+            durable.compacted().or_else(|| {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                None
+            })
+        })
+        .expect("finished")
+        .expect("compacted");
     assert_eq!(done.at, at);
     // Appends go to the compacted file from then on.
     for i in 101..110 {

@@ -2660,6 +2660,8 @@ mod tests {
             parts: 0,
             based: true,
             archive_base: 4,
+            mark: shipping::Mark::default(),
+            floor: None,
         };
         for (record, bytes, is_input) in [
             (0, &part, false),
@@ -2684,6 +2686,8 @@ mod tests {
             parts: 0,
             based: false,
             archive_base: 4,
+            mark: shipping::Mark::default(),
+            floor: None,
         };
         for (record, bytes, is_input) in
             [(10, &input, true), (11, &part, false), (12, &part, false)]

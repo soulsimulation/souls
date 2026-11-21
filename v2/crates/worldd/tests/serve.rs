@@ -556,19 +556,25 @@ fn i3837_a_compacted_world_restarts_with_the_state_of_a_full_replay() {
     std::fs::remove_dir_all(full.join("checkpoints")).unwrap();
     let _ = std::fs::remove_file(full.join("gateway.sock"));
     let w = serve(&full, &d.join("f"));
-    let replayed = w.line("worldd: started at tick");
+    let replayed = started_or_dump(&w);
     println!("A2 full replay: {replayed}");
     w.kill();
 
     let w = serve(&dir, &socket);
+    let started = started_or_dump(&w);
     let restart = w.line("restart: ");
-    let started = w.line("worldd: started at tick");
     println!("A1: last logged state {before}; {restart}; {started}");
     assert!(restart.starts_with("restart: checkpoint Some("), "{restart}");
     assert!(started.ends_with(&format!("state {before}")), "the last logged state");
     assert!(replayed.ends_with(&format!("state {before}")), "a full replay's state");
     w.kill();
     let _ = std::fs::remove_dir_all(&d);
+}
+
+/// The start line, or every line the process printed when it never came.
+fn started_or_dump(w: &Served) -> String {
+    first_line(&w.lines, &w.early, "worldd: started at tick", Duration::from_secs(60))
+        .unwrap_or_else(|| panic!("no start: {:#?}", w.all.lock().unwrap()))
 }
 
 fn copy_tree(from: &Path, to: &Path) {
