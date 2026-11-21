@@ -428,22 +428,7 @@ impl Sight<'_> {
         });
         let (floor, y) = match room {
             Some((floor, y)) => (floor, y),
-            // The only floor, when the area lies over it (a greenhouse's inside); an area off it (a bridge's end on
-            // the bank) is walked to on the ground, as any other point.
-            None if floors.len() == 1 => {
-                let f = floors[0].id();
-                let [w, x, yq, z] = place.orientation.parts();
-                let back = replica::pose::Quat::new(w, -x, -yq, -z).ok()?;
-                let local = back.rotate(at.minus(place.position).ok()?).ok()?;
-                let off = self.with_view(body, |v| {
-                    v.stand_near(f, local, skills::form_runner::REACH, None)
-                        .is_none()
-                });
-                if off == Some(true) {
-                    return None;
-                }
-                (f, None)
-            }
+            None if floors.len() == 1 => (floors[0].id(), None),
             None => return Some(None),
         };
         let [w, x, yq, z] = place.orientation.parts();
