@@ -41,6 +41,9 @@ export type NodeRec = {
   description?: string | null;
   /** The world node's day, night and weather fields (E6; V19, `sky/record.ts`). */
   sky?: SkyFields;
+  /** A moving node's course (field 80, `replica::schedule::F_COURSE`), its value's canonical bytes, for the replica's
+   *  `courseAt` (#3603). */
+  course?: Uint8Array;
 };
 
 /** Where the world is: its newest part's end, world time against wall time, and the world time up to which a still

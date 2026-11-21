@@ -117,7 +117,7 @@ pub fn run(args: &[String]) -> i32 {
     let usage = || {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
-             [--bodies <n>] [--items <n>] [--testworld] [--creator <32 hex>-<n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
+             [--bodies <n>] [--items <n>] [--testworld] [--punt] [--creator <32 hex>-<n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
              [--stall-after <s> --stall-for <s>] [--www <dir>] [--watchdog-ms <ms>] [--views <path>]"
         );
         2
@@ -207,7 +207,12 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     cfg.text = Some(Arc::clone(&text));
-    let built = toggles::World::build(rooms, bodies, items);
+    let mut built = toggles::World::build(rooms, bodies, items);
+    // #3603: a punt on a course with a body in it, for the page's proof of a moving node.
+    if args.iter().any(|a| a == "--punt") {
+        let p = built.punt();
+        println!("punt {}-{}", to_hex(&p.scope().0), p.counter());
+    }
     // The view tier: seeded with the bodies as built, and reading words for those who hear them (C6, #3390).
     let mut hub = worldd::views::subscription::Hub::with_words(Arc::clone(&text));
     hub.seed(built.replica.tree());

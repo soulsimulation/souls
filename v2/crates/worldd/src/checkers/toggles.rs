@@ -39,6 +39,8 @@ pub struct World {
     mint: Minter,
     /// Each body and the lamp beside it.
     pub pairs: Vec<(Id, Id)>,
+    root: Id,
+    rooms: Vec<Id>,
 }
 
 /// The rules for the world's lamps: the lamp's entry and a press that reaches 400 mm, so a body reaches its own
@@ -148,6 +150,8 @@ impl World {
             kinds,
             mint,
             pairs: Vec::new(),
+            root,
+            rooms: Vec::new(),
         };
         for _ in 0..rooms {
             w.room(root, bodies, items);
@@ -205,6 +209,7 @@ impl World {
 
     fn room(&mut self, root: Id, bodies: usize, items: usize) {
         let room = self.id();
+        self.rooms.push(room);
         let mut changes = vec![(root, self.create(room, "souls:room", root, 0, &[]))];
         for i in 0..bodies as i64 {
             let (b, l) = (self.id(), self.id());
@@ -222,6 +227,58 @@ impl World {
         self.replica
             .apply(&part)
             .unwrap_or_else(|e| panic!("a room applies: {e}"));
+    }
+
+    /// The page's proof of a moving node (#3603, `worldd gateway-link --punt`): a punt 3.5 m by 1.2 m rowing a loop
+    /// (its course, field 80) beside the first room, with the first body moved into it. It is a room's kind, so a body
+    /// may be in it. Returns the punt.
+    pub fn punt(&mut self) -> Id {
+        use replica::schedule::F_COURSE;
+        use replica::schedule::course::{Course, Shape, Station};
+        const M: i64 = 1_000_000;
+        let (punt, (body, _), room) = (self.id(), self.pairs[0], self.rooms[0]);
+        let station = |x: i64, z: i64, dwell: i64| Station {
+            at: Vec3::new(x * M, 0, z * M),
+            dwell,
+        };
+        let course = Course {
+            stations: vec![station(0, 3, 4 * M), station(12, 3, 0), station(12, -5, 0), station(0, -5, 0)],
+            shape: Shape::Loop,
+            speed: 1_200_000,
+            t0: 0,
+            within: 60 * M,
+        };
+        // One solid `[cx, cz, hx, hz, yaw, y0, y1, tag, abs]` mm: the hull.
+        let hull = [0, 0, 1750, 600, 0, 0, 400, 0, 0].map(Cbor::Uint).to_vec();
+        let create = Change::Create {
+            node: punt,
+            kind: self.kinds["souls:room"].clone(),
+            pose: Pose {
+                position: Vec3::new(0, 0, 3 * M),
+                ..pose(self.root, 0)
+            },
+            audience: Audience::Everyone,
+            fields: BTreeMap::from([
+                (12, Cbor::Array(vec![Cbor::Array(hull)])),
+                (F_COURSE, course.to_value()),
+            ]),
+        };
+        let seat = Change::Reparent {
+            node: body,
+            from: Frame {
+                node: room,
+                slot: None,
+            },
+            pose: Pose {
+                position: Vec3::new(0, 400_000, 0),
+                ..pose(punt, 0)
+            },
+        };
+        let part = self.part(vec![(self.root, create), (punt, seat)]);
+        self.replica
+            .apply(&part)
+            .unwrap_or_else(|e| panic!("the punt applies: {e}"));
+        punt
     }
 
     /// A change to a lamp's level, as another act would make it: the lamp's stamp moves on.
