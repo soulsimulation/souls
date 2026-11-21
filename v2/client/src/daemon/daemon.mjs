@@ -560,15 +560,17 @@ function connect() {
         if (k >= 0) { state.unanswered.splice(k, 1); counts.answered++; }
         trace.write({ k: 'answer', seq: s, cause: causeOf(Number(c), d, rankedOf.get(s)), achieved: achievedOf(Number(c), d) });
         if (Number(c) !== 3) rankedOf.delete(s); // an accepted move is resolved later
+        // Its own intent changed the world at a version its copy is not at: the copy follows. No entry may bring that
+        // change (a world whose view tier sends none, or a resume's follow that hashed before the tick was on the
+        // disk: the sync thread takes a tick only once it is durable, so the receipt can come after that follow).
+        let changed = k >= 0 && (Number(c) === 1 || Number(c) === 4) && b !== '-' && b !== copyVersion;
         if (joinsOf.has(s) && Number(c) !== 3) {
           joinsOf.delete(s);
-          if (Number(c) === 1) {
-            // An older sync may still hold the pre-birth tree. Keep one follow pending until it finishes, then
-            // read the authoritative body link and renew hearing through the usual sync completion path.
-            followWanted = true;
-            follow();
-          }
+          // An older sync may still hold the pre-birth tree. Keep one follow pending until it finishes, then
+          // read the authoritative body link and renew hearing through the usual sync completion path.
+          if (Number(c) === 1) changed = true;
         }
+        if (changed) { followWanted = true; follow(); }
         if (movesOf.has(s) && Number(c) !== 3) { state.seated = seatedAfter(movesOf.get(s), Number(c), state.seated ?? null); movesOf.delete(s); }
         if (serving.has(s) && Number(c) !== 3) {
           closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
@@ -928,7 +930,7 @@ async function worldBatch(req) {
   if (req.world.verb === 'land') {
     let land;
     try { land = await import('../creator/terrain/land.mjs'); } catch (e) {
-      return { ok: false, code: 'land.unavailable', detail: `the land verbs need packages/ground and zod beside this client: ${String(e.message ?? e).slice(0, 160)}` };
+      return { ok: false, code: 'land.unavailable', detail: `the land verbs need Node 22.18 or later, and packages/ground and zod beside this client: ${String(e.message ?? e).slice(0, 160)}` };
     }
     return land.landOps(copy, req.world);
   }

@@ -204,7 +204,9 @@ therefore **windowed**:
 bundle). It runs `repo`, `soul-tools` (the entry tests, the form-rules tests and the one launcher test that reads
 `content/kinds`) and, for `docs/site` reference pages, `docs-reference`. A change under `packages/form-rules/src/` also
 keeps `types-web` and `web`, because `apps/web` imports it. One file outside the list, or an empty or unreadable diff,
-and the usual path map decides; a changelog fragment beside any other file still selects every job. The list is
+and the usual path map decides; a changelog fragment beside other files selects nothing itself (since 21 Nov; before,
+it read as an unmapped path and every PR with a fragment ran every job). `content/kinds` and `content/moves` also run
+the v2 legs, which load them. The list is
 `LOW_RISK` in `.github/scripts/ci-scope.mjs`. The push to main after a merge group selects the same light set.
 
 Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
@@ -251,8 +253,12 @@ the served-world gate (`v2/client/served/e2e/world.test.mjs`): a served Eden sli
 the thin command, the page's worker on the public stream and the client's copy, across a restart. Its assertions that
 wait on an open fix run under a named `PENDING #<issue>` marker: printed while they fail, and failing the run once
 they pass, so the fix's PR removes the marker. Together they
-run exactly what `ci.sh` with no argument runs, and `ci-ok` needs each of them. They are picked by their own paths
-(`v2/`) and by every full-scope run. A change only under `v2/` runs those legs
+run exactly what `ci.sh` with no argument runs, and `ci-ok` needs each leg that ran. Each leg is picked by its own
+inputs (`V2_PATHS` in `.github/scripts/ci-scope.mjs`), in pull request and merge group runs alike, and every leg by a
+full-scope run. `v2/crates`, `v2/tools`, the files at `v2/`'s root and `content/kinds`, `moves` and `worlds` run all
+five. A change only under `v2/client` or `v2/web` runs `v2-rust` (its origin tests import both) and `v2-client`, plus
+`v2-sim` for `src/hatch` and `v2-wasm` for `v2/client/src/history`; `v2/docs` runs none but `docs/site` (the client's
+MCP page, `v2-client`). When in doubt a path runs the leg. A change only under `v2/` runs v2 legs
 alone, has release-gate scope `none` (no walk, bundle, conformance or remote gate) and is T1, its docs included. The
 strict tiers for the core (`v2/crates/sim`, `replica`, `skills` T3; `v2/web` T2) are written in
 `docs/process/PROOF-POLICY.yml` and switched on at the cut-over by X8 (#2839). The publication check and the secret

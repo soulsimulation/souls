@@ -20,7 +20,7 @@
 //! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
 //! how) and is answered: a receipt naming its entries when done, else a refusal naming how it ended
 //! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at walking
-//! speed, plus a margin and crossings, at most 180 s and never beyond the intent's expiry. Its deadline is written
+//! speed, plus a margin and crossings, with no total cap and never beyond the intent's expiry. Its deadline is written
 //! as C20's entry and it receives C20's one progress answer if still going at 10 s. C21's watch ends a stalled walk
 //! `walk.blocked`; waiting at a link and being carried do not count as stalled walking.
 //! No move outlives its act: a walk still going at its act's deadline stops in that tick and ends `act.timed-out`; a
@@ -313,6 +313,8 @@ pub enum Event {
     SetDown(Box<(Id, R<SetDownChecked>)>),
     /// The directory's Souls file as it now reads, and where the answers to the intents it causes go (W11b).
     Directory(Box<(Directory, Reply)>),
+    /// A gateway connection that is told each Soul's wind-down word (#3784): now, all of them, then each change.
+    States(Reply),
     /// Holds the clock thread for this long: the stuck-thread run (O4 A4).
     Stall(Duration),
     Stop,
@@ -575,6 +577,8 @@ pub struct Config {
     pub text: Option<Arc<Store>>,
     /// Immutable imported public name bytes, attached only to delivered public record references off the clock.
     pub public_names: Arc<crate::views::names::PublicNames>,
+    /// The closed kinds of the world's entries: what one holds stays out of other Souls' sync answers (#3915).
+    pub closed: crate::closed::Closed,
     /// Called once at start with the log's durable mark; what it gives is handed each part record as it is appended
     /// (its number and bytes): a view tier's `offer`, so a stream writer follows the world (V1b).
     pub follow: Option<Follow>,
@@ -691,6 +695,7 @@ impl Config {
             served: None,
             text: None,
             public_names: Arc::new(Default::default()),
+            closed: Default::default(),
             follow: None,
             rate: None,
             engine: None,
@@ -940,6 +945,10 @@ struct Clock {
     /// with it at the next tick.
     directory: Option<(Directory, Reply)>,
     told: BTreeSet<Id>,
+    /// #3784: the gateway connections told of the Souls' wind-down words, and the words they were last told (an
+    /// embodied Soul that is idle, a zombie or asleep; none is awake).
+    states_to: Vec<Reply>,
+    states: BTreeMap<Id, &'static str>,
     /// Loose things' ends (F10b, #3476), and the ends of owner's links the tick's acts ended.
     loose: Ends,
     unlinked: Vec<Id>,
@@ -2391,6 +2400,42 @@ impl Clock {
         }
     }
 
+    /// #3784: each embodied Soul's wind-down word, compared with what the gateways were last told; only a change is
+    /// sent, as one frame ([`states_frame`]), to every gateway connection still open. A Soul now awake, or gone, is
+    /// told `awake`.
+    fn tell_states(&mut self) {
+        let (Some(l), Some(b)) = (self.life.as_ref(), self.bodies.as_ref()) else {
+            return;
+        };
+        let mut now = BTreeMap::new();
+        for (soul, body) in l.life.embodied() {
+            let word = match b.wind.word(body) {
+                Some(skills::wind_down::Word::Idle) => "idle",
+                Some(skills::wind_down::Word::Zombie) => "zombie",
+                Some(skills::wind_down::Word::Asleep) => "asleep",
+                _ => continue,
+            };
+            now.insert(soul, word);
+        }
+        if now == self.states {
+            return;
+        }
+        let mut changed: Vec<(Id, &'static str)> = now
+            .iter()
+            .filter(|(s, w)| self.states.get(s) != Some(w))
+            .map(|(s, w)| (*s, *w))
+            .collect();
+        changed.extend(
+            self.states
+                .keys()
+                .filter(|s| !now.contains_key(s))
+                .map(|s| (*s, "awake")),
+        );
+        self.states = now;
+        let frame = states_frame(&changed);
+        self.states_to.retain(|r| r.send(frame.clone()).is_ok());
+    }
+
     /// The directory's word, at a tick's start after its births (W11b): each Soul told of since the last tick that has
     /// a body here is retired when the directory retired it, or given its saved words when its body's differ, by an
     /// intent of its own taken as any intent is, under [`notice_key`]. A Soul with no body here is left alone.
@@ -3252,27 +3297,39 @@ impl Clock {
     }
 
     /// Numbers and applies what the forms wrote (F2's log hook: each entry handed back as logged), then answers the
-    /// intents whose runs ended.
+    /// intents whose runs ended. One part for the tick; when the world refuses it, each intent's entries go in a part
+    /// of their own, and an act whose entries are refused is refused by that name, its run left and nothing of it
+    /// written.
     fn write_forms(&mut self, now: Micros) {
         let mut effects = self.forms.out();
         if let Some(e) = self.engine.as_mut() {
             effects.extend(e.out());
         }
-        if !effects.is_empty() {
-            for (k, e) in effects.iter_mut().enumerate() {
-                e.envelope.sequence = self.replica.version() + k as u64;
-            }
-            match sim::commit::write(&mut self.replica, &effects) {
-                Ok(part) => {
-                    self.unsealed = true;
-                    for e in &part.effects {
-                        self.forms.forms.logged(e);
-                    }
-                    self.receipts.index(&part.effects);
-                    self.effects.extend(part.effects.iter().cloned());
-                    self.parts.push(part);
+        if !effects.is_empty() && self.commit_forms(effects.clone()).is_err() {
+            let mut groups: Vec<(Option<Id>, Vec<Effect>)> = Vec::new();
+            for e in effects {
+                let of = match e.envelope.cause {
+                    Cause::Intent(id) => Some(id),
+                    _ => None,
+                };
+                match groups.iter_mut().find(|(g, _)| *g == of) {
+                    Some((_, g)) => g.push(e),
+                    None => groups.push((of, vec![e])),
                 }
-                Err(r) => eprintln!("worldd: a form's entries were not written: {r}"),
+            }
+            for (of, group) in groups {
+                let Err(r) = self.commit_forms(group.clone()) else {
+                    continue;
+                };
+                eprintln!("worldd: a form's entries were not written: {r}");
+                self.forms.unwritten(&group);
+                let Some(o) = of.and_then(|id| self.open.get(&id).map(|o| (id, o))) else {
+                    continue;
+                };
+                let (id, actor, sequence, body) = (o.0, o.1.actor, o.1.sequence, o.1.body);
+                self.forms
+                    .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+                self.end(id, |c| c.refusal(actor, sequence, r.name));
             }
         }
         for id in std::mem::take(&mut self.engine_done) {
@@ -3296,6 +3353,23 @@ impl Clock {
         for (id, how, why) in self.forms.ended() {
             self.form_ended(id, how, why, now);
         }
+    }
+
+    /// `effects` numbered from the replica's next sequence and applied as one part, each handed to the forms as
+    /// logged; or the world's refusal, nothing written.
+    fn commit_forms(&mut self, mut effects: Vec<Effect>) -> R<()> {
+        for (k, e) in effects.iter_mut().enumerate() {
+            e.envelope.sequence = self.replica.version() + k as u64;
+        }
+        let part = sim::commit::write(&mut self.replica, &effects)?;
+        self.unsealed = true;
+        for e in &part.effects {
+            self.forms.forms.logged(e);
+        }
+        self.receipts.index(&part.effects);
+        self.effects.extend(part.effects.iter().cloned());
+        self.parts.push(part);
+        Ok(())
     }
 
     /// A form's run started (C20, #3469): its act's deadline becomes the run's own, its start plus its steps' span
@@ -3470,6 +3544,7 @@ impl Clock {
         // what a script set for this one, is taken now.
         self.births(now);
         self.notices(now);
+        self.tell_states();
         for (bytes, reply, stamps) in std::mem::take(&mut self.pending) {
             self.arrival(&bytes, reply, stamps, now);
         }
@@ -4388,6 +4463,7 @@ pub fn start<S: Storage + 'static>(
         (cfg.lineage, zone, cfg.epoch),
         Arc::clone(&cfg.public_names),
         Arc::clone(&text),
+        std::mem::take(&mut cfg.closed),
     )
     .map_err(io)?;
     let fresh = if cfg.checkpoints.is_some() {
@@ -4487,6 +4563,8 @@ pub fn start<S: Storage + 'static>(
         worn: Vec::new(),
         directory: None,
         told: BTreeSet::new(),
+        states_to: Vec::new(),
+        states: BTreeMap::new(),
         loose,
         unlinked: Vec::new(),
     };
@@ -4605,6 +4683,13 @@ pub fn start<S: Storage + 'static>(
                         let (d, reply) = *d;
                         c.told.extend(d.souls());
                         c.directory = Some((d, reply));
+                    }
+                    Event::States(r) => {
+                        let all: Vec<(Id, &'static str)> =
+                            c.states.iter().map(|(s, w)| (*s, *w)).collect();
+                        if r.send(states_frame(&all)).is_ok() {
+                            c.states_to.push(r);
+                        }
                     }
                     Event::Stall(d) => thread::sleep(d),
                     Event::RunTo { done, .. } => return Some(done),
@@ -4956,6 +5041,39 @@ fn applied(replica: &mut Replica, mut effects: Vec<Effect>) -> R<Part> {
         .and_then(|p| replica.apply(&p).map(|()| p))
 }
 
+/// The key of a frame to the gateway that carries Souls' wind-down words (#3784; gatewayd's `world_link` reads it):
+/// `{30: [[grant bytes, word], ..]}`, sent only on a connection that asked with [`states_ask`]; the grant `soul-<scope hex>-<counter>` as the tokens file writes it, the word
+/// `idle`, `zombie`, `asleep` or `awake`.
+pub const STATES: u64 = 30;
+
+/// The frame a gateway sends to be told the Souls' words: `{30: []}`.
+pub fn states_ask() -> Vec<u8> {
+    encode(&Value::Map(BTreeMap::from([(
+        STATES,
+        Value::Array(Vec::new()),
+    )])))
+    .unwrap_or_default()
+}
+
+/// A frame of Souls' words ([`STATES`]).
+pub fn states_frame(words: &[(Id, &str)]) -> Vec<u8> {
+    let rows = words
+        .iter()
+        .filter_map(|(soul, word)| {
+            let grant = format!(
+                "soul-{}-{}",
+                replica::encode::to_hex(&soul.scope().0),
+                soul.counter()
+            );
+            Some(Value::Array(vec![
+                Value::Bytes(grant.into_bytes()),
+                Value::Text(Name::new(word)?),
+            ]))
+        })
+        .collect();
+    encode(&Value::Map(BTreeMap::from([(STATES, Value::Array(rows))]))).unwrap_or_default()
+}
+
 /// Serves one connection of the gateway's local socket (I1's framing: a 4-byte big-endian length, then that many
 /// bytes): each intent read goes through `world`'s door (stamped there, O4), each answer goes back on the same
 /// connection, in the order sent.
@@ -4965,6 +5083,7 @@ pub fn serve(world: Door, mut stream: UnixStream) {
         return;
     };
     let (reply, answers) = channel::<Vec<u8>>();
+    let ask = states_ask();
     std::thread::spawn(move || {
         for frame in answers {
             delivery_trace(trace, "native-write-start", &frame, "ready");
@@ -4991,6 +5110,13 @@ pub fn serve(world: Door, mut stream: UnixStream) {
         if stream.read_exact(&mut bytes).is_err() {
             return;
         }
+        // #3784: a gateway with a directory asks to be told the Souls' wind-down words, now and on each change.
+        if bytes == ask {
+            if world.events.send(Event::States(reply.clone())).is_err() {
+                return;
+            }
+            continue;
+        }
         if !world.arrive(bytes, reply.clone()) {
             return;
         }
@@ -5013,6 +5139,33 @@ mod tests {
     use replica::sync::{self, wire};
     use sim::log::{Mem, recover};
     use std::sync::{Condvar, Mutex};
+
+    /// #3784: the frame of Souls' words names each by its grant, as the tokens file does, with its word.
+    #[test]
+    fn a3784_a_states_frame_names_each_soul_by_its_grant() {
+        let soul = Id::new(Scope([0x4d; 16]), 3).unwrap();
+        let frame = states_frame(&[(soul, "asleep"), (soul, "awake")]);
+        let Value::Map(m) = decode(&frame).unwrap().value else {
+            panic!("a map")
+        };
+        let Some(Value::Array(rows)) = m.get(&STATES) else {
+            panic!("rows under STATES")
+        };
+        let grant = format!("soul-{}-3", "4d".repeat(16));
+        assert_eq!(
+            rows,
+            &vec![
+                Value::Array(vec![
+                    Value::Bytes(grant.clone().into_bytes()),
+                    Value::Text(Name::new("asleep").unwrap())
+                ]),
+                Value::Array(vec![
+                    Value::Bytes(grant.into_bytes()),
+                    Value::Text(Name::new("awake").unwrap())
+                ]),
+            ]
+        );
+    }
 
     const LINEAGE: Scope = Scope([9; 16]);
 

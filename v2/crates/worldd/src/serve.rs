@@ -468,11 +468,115 @@ fn with_made(facts: &str, entries: &[(String, Json)]) -> R<String> {
     Ok(f.to_json())
 }
 
+/// The facts with the courses of the rides `entries` declare (#3691): each thing on the ground whose kind's entry has a
+/// `ride` that flies a loop from its stop (`sim::courses::rides`, read from the ride's data, never its kind's name) gets
+/// its course, over the terrain beneath it. The `k`th such thing in the facts' order starts its lap `k` minutes in, so
+/// rides that stand together do not fly together. The same facts and entries give the same courses at every serve.
+fn with_rides(facts: &str, entries: &[(String, Json)]) -> R<String> {
+    let rides: BTreeMap<&str, sim::courses::rides::Ride> = entries
+        .iter()
+        .filter_map(|(k, e)| Some((k.as_str(), sim::courses::rides::Ride::of(e)?)))
+        .filter(|(_, r)| r.loops_aloft())
+        .collect();
+    if rides.is_empty() {
+        return Ok(facts.to_owned());
+    }
+    let im = import_eden::load(facts)?;
+    let Some(&ground) = im.nodes.get("ground") else {
+        return Ok(facts.to_owned());
+    };
+    let terrain = sim::ground::Terrain::of(&im.tree, ground)?;
+    let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
+    let Json::Obj(top) = &mut f else {
+        return Err("the facts are not an object".into());
+    };
+    // A kind's name as the entries name it, by its def's ref.
+    let names: BTreeMap<String, String> = top
+        .iter()
+        .find(|(k, _)| k == "kinds")
+        .and_then(|(_, v)| v.arr())
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|k| {
+            Some((
+                k.get("ref")?.str()?.to_owned(),
+                import_eden::kind_name(k.get("name")?.str()?),
+            ))
+        })
+        .collect();
+    let int = |n: i64| Json::Int(i128::from(n));
+    let num = |v: Option<&Json>| match v {
+        Some(Json::Int(n)) => i64::try_from(*n).ok(),
+        _ => None,
+    };
+    let Some((_, Json::Arr(things))) = top.iter_mut().find(|(k, _)| k == "things") else {
+        return Err("the facts have no 'things' list".into());
+    };
+    let mut k = 0;
+    for t in things.iter_mut() {
+        let on_ground = matches!(t.get("parent"), None | Some(Json::Null));
+        let Some(ride) = t
+            .get("def")
+            .and_then(Json::str)
+            .and_then(|d| names.get(d))
+            .and_then(|n| rides.get(n.as_str()))
+        else {
+            continue;
+        };
+        let Some([x, y, z]) = t
+            .get("world")
+            .and_then(Json::arr)
+            .and_then(|w| Some([num(w.first())?, num(w.get(1))?, num(w.get(2))?]))
+        else {
+            continue;
+        };
+        if !on_ground || t.get("course").is_some() {
+            continue;
+        }
+        let home = Vec3::new(x * 1000, y * 1000, z * 1000);
+        let t0 = k * 60_000_000;
+        let Some(c) = sim::courses::rides::course(
+            ride,
+            home,
+            |x, z| terrain.as_ref().and_then(|g| g.height_at(x, z)),
+            t0,
+        ) else {
+            continue;
+        };
+        k += 1;
+        println!(
+            "ride: {} at {:.3},{:.3} m, loop {} us from {} us",
+            t.get("name").and_then(Json::str).unwrap_or("?"),
+            home.x as f64 / 1e6,
+            home.z as f64 / 1e6,
+            c.load().map_or(0, |t| t.period),
+            c.t0
+        );
+        let stations = c
+            .stations
+            .iter()
+            .map(|s| Json::Arr(vec![int(s.at.x), int(s.at.y), int(s.at.z), int(s.dwell)]))
+            .collect();
+        let Json::Obj(kv) = t else { continue };
+        kv.push((
+            "course".to_owned(),
+            Json::Obj(vec![
+                ("stations".to_owned(), Json::Arr(stations)),
+                ("shape".to_owned(), int(1)),
+                ("speed".to_owned(), int(c.speed)),
+                ("t0".to_owned(), int(c.t0)),
+                ("within".to_owned(), int(c.within)),
+            ]),
+        ));
+    }
+    Ok(f.to_json())
+}
+
 /// The rowing punt's def (#3603): today's `rowing-punt`, a kind the world adds.
 const PUNT_REF: &str = "core-rowing-punt@1";
 
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
-    let facts = &with_made(&with_punts(facts)?, entries)?;
+    let facts = &with_made(&with_rides(&with_punts(facts)?, entries)?, entries)?;
     let mut im = import_eden::load(facts)?;
     stamp("facts");
     for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
@@ -2161,6 +2265,7 @@ fn serve(args: &[String]) -> R<()> {
     stamp("body classes");
     let (places, things, all, left, moved) = places(&mut town, &kinds);
     stamp("places to sit placed");
+    let closed_kinds = worldd::closed::Closed::of(&kinds);
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
          moved to clear ground",
@@ -2217,6 +2322,7 @@ fn serve(args: &[String]) -> R<()> {
     imported_births(&dir, initial.header(), &catalogue, &mut born)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
     cfg.public_names = Arc::clone(&built.public_names);
+    cfg.closed = closed_kinds.clone();
     let every = arg(args, "--checkpoint-every").map_or(Ok(EVERY), |n| {
         n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
     })?;
@@ -2238,6 +2344,7 @@ fn serve(args: &[String]) -> R<()> {
     // Gateway subscriptions have their own off-clock tier, apart from the filesystem stream below. Restore its
     // body, ownership and activity membership indexes before the answers thread can hand it any live part.
     let mut hub = worldd::views::subscription::Hub::with_words(text);
+    hub.closed(&closed_kinds);
     hub.seed(resumed.as_ref().map_or(initial.tree(), |(at, _)| at.tree()));
     let feed = worldd::views::served::start_with(hub).map_err(refusal)?;
     for bytes in found.after(base_record) {
