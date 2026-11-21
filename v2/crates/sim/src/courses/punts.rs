@@ -98,6 +98,26 @@ pub fn moorings(
         .collect()
 }
 
+/// The moorings of the open ground `ground` of `tree` (#3603): its terrain and the standing waters among its places.
+/// No thing is read: a plank among furniture is not refused yet (today's obstacle check).
+pub fn moorings_of(tree: &replica::tree::Tree, ground: Id) -> Result<Vec<Mooring>, String> {
+    let terrain = Terrain::of(tree, ground)?;
+    let gh = tree.handle(ground).ok_or("no ground")?;
+    let mut waters = Vec::new();
+    for &c in tree.children(gh).unwrap_or(&[]) {
+        let water = tree.node(c).is_some_and(|n| {
+            matches!(n.fields().get(&import_eden::F_PLACE_OF),
+                Some(replica::encode::Value::Text(t)) if t.as_str() == "eden:water")
+        });
+        if !water {
+            continue;
+        }
+        let s = crate::ground::Scene::of_child(tree, gh, c, terrain.as_ref())?;
+        waters.extend(s.waters);
+    }
+    Ok(moorings(&waters, terrain.as_ref(), |_| true))
+}
+
 fn mooring(w: &Water, terrain: Option<&Terrain>, clear: &impl Fn(Vec3) -> bool) -> Option<Mooring> {
     let ground = |x: i64, z: i64| terrain.and_then(|t| t.height_at(x, z)).unwrap_or(0);
     let wet = |x: i64, z: i64| inside(&w.ring, [x, z]) && w.level - ground(x, z) >= FLOAT_DEPTH;

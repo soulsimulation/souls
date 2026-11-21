@@ -581,6 +581,40 @@ pub fn load(text: &str) -> R<Import> {
         if let Some(w) = t.get("water") {
             fields.insert(F_WATER_LEVEL, i(int(w, "level")?));
         }
+        // A moving thing's track (N12; a punt's loop, #3603): `{stations: [[x, y, z, dwell] …] µm and µs, shape: 1 a
+        // loop, 2 there and back, 3 once, speed: µm a second, t0: µs, within: µs}`, kept as its course field.
+        if let Some(c) = t.get("course") {
+            use replica::schedule::course::{Course, Shape, Station};
+            let stations = need(c, "stations")?
+                .arr()
+                .iter()
+                .map(|r| match r.arr() {
+                    [x, y, z, d] => match (x.int(), y.int(), z.int(), d.int()) {
+                        (Some(x), Some(y), Some(z), Some(d)) => Ok(Station {
+                            at: Vec3::new(x, y, z),
+                            dwell: d,
+                        }),
+                        _ => Err("a course station is [x, y, z, dwell]".to_owned()),
+                    },
+                    _ => Err("a course station is [x, y, z, dwell]".to_owned()),
+                })
+                .collect::<R<Vec<_>>>()?;
+            let shape = match int(c, "shape")? {
+                1 => Shape::Loop,
+                2 => Shape::ThereAndBack,
+                3 => Shape::Once,
+                n => return Err(format!("a course's shape {n}")),
+            };
+            let course = Course {
+                stations,
+                shape,
+                speed: int(c, "speed")?,
+                t0: int(c, "t0")?,
+                within: int(c, "within")?,
+            };
+            course.load().map_err(|e| format!("a course: {e:?}"))?;
+            fields.insert(replica::schedule::F_COURSE, course.to_value());
+        }
         if let Some(sol) = t.get("solids") {
             fields.insert(F_SOLIDS, points(sol)?);
         }
