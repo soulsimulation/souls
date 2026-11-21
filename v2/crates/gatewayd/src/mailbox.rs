@@ -209,6 +209,48 @@ pub fn json_string(text: &str) -> String {
     out
 }
 
+/// The key of the world's frame of Souls' wind-down words (#3784; worldd's `answers::STATES`).
+pub const STATES: u64 = 30;
+
+/// The body the directory takes for a frame of Souls' wind-down words, `{"states": {grant: word}}`, or None when the
+/// frame is not one. Rows whose grant or word does not read are passed over.
+pub fn states_body(frame: &[u8]) -> Option<String> {
+    let Value::Map(m) = decode(frame).ok()?.value else {
+        return None;
+    };
+    let Some(Value::Array(rows)) = m.get(&STATES) else {
+        return None;
+    };
+    let words: Vec<String> = rows
+        .iter()
+        .filter_map(|row| {
+            let Value::Array(r) = row else { return None };
+            let (Some(Value::Bytes(g)), Some(Value::Text(w))) = (r.first(), r.get(1)) else {
+                return None;
+            };
+            let grant = std::str::from_utf8(g).ok().filter(|g| Grant::parse(g).is_some())?;
+            Some(format!("{}:{}", json_string(grant), json_string(w.as_str())))
+        })
+        .collect();
+    Some(format!("{{\"states\":{{{}}}}}", words.join(",")))
+}
+
+/// #3784: passes a frame of the world's Souls' wind-down words on to the directory (`POST /v1/mailbox/state`), when
+/// a mailbox is set; true when the frame was one. The world sends only changes, and all of them on each connection,
+/// so one lost while the directory is away comes again when the world next connects.
+pub fn on_states(gw: &Arc<Gateway>, frame: &[u8]) -> bool {
+    let Some(body) = states_body(frame) else {
+        return false;
+    };
+    if let Some(mb) = gw.mailbox.get() {
+        let mb = Mailbox { addr: mb.addr.clone(), key: mb.key.clone() };
+        tokio::spawn(async move {
+            let _ = http(&mb, "POST", "/v1/mailbox/state", "", &body).await;
+        });
+    }
+    true
+}
+
 /// A message id as the directory makes them (`m_<hex>`), safe to write into a frame as it is.
 pub fn id_like(id: &str) -> bool {
     (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
@@ -242,5 +284,26 @@ pub fn phase_of(frame: &[u8]) -> Option<(u64, &'static str, Option<String>)> {
         Value::Uint(3) => Some((sequence, "accepted", None)),
         Value::Uint(4) => Some((sequence, "resolved", named(a.remove(&4)))),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod states_tests {
+    use super::*;
+    use replica::encode::{Name, encode};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn a3784_the_worlds_words_become_the_directorys_body() {
+        let grant = format!("soul-{}-3", "4d".repeat(16));
+        let row = |g: &str, w: &str| Value::Array(vec![Value::Bytes(g.as_bytes().to_vec()), Value::Text(Name::new(w).unwrap())]);
+        let frame = encode(&Value::Map(BTreeMap::from([(
+            STATES,
+            Value::Array(vec![row(&grant, "asleep"), row("not-a-grant", "zombie")]),
+        )])))
+        .unwrap();
+        assert_eq!(states_body(&frame).unwrap(), format!("{{\"states\":{{\"{grant}\":\"asleep\"}}}}"));
+        let answer = encode(&Value::Map(BTreeMap::from([(1, Value::Uint(1))]))).unwrap();
+        assert_eq!(states_body(&answer), None, "an answer is not a states frame");
     }
 }

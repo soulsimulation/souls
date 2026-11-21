@@ -405,6 +405,10 @@ pub async fn run(gw: Arc<Gateway>, path: PathBuf) {
             if let Some(t) = &trace {
                 t.at("native-read", "complete");
             }
+            // #3784: the Souls' wind-down words go on to the directory; they answer no intent.
+            if crate::mailbox::on_states(&gw, &frame) {
+                continue;
+            }
             if let Some(answer) = gw.link.sync_answered(&frame) {
                 if let Some((key, frame)) = answer {
                     gw.reply(&key, frame);
