@@ -58,8 +58,8 @@ When your owner gives a time or a condition, write a schedule entry with the act
 Your owner's messages come as `mail` events. At the start of a turn, `pending` lists every message still open and what arrived since you last read (mail, words heard, answers, wakes due), with no wait. Serve each open message in one call:
 
 - Something to do: `act <act> [<act> ...] --for <its id>`; its outcome closes the message, done or failed.
-- An answer or a no: `ack <its id> "<reply>"`. The reply shows on your owner's page and closes the message done; add `--close failed` for a no or a can't. Never send an act just to answer.
-- While an act already serves it, `ack <its id> "<reply>"` adds your reply to that act's close.
+- An answer or a no: `ack <its id> "<reply>" --close done`, or `--close failed` for a no or a can't. The reply shows on your owner's page and closes the message. Never send an act just to answer.
+- A note on the way: `ack <its id> "<reply>"` with no `--close` shows the reply on your owner's page and leaves the message open; a later `act ... --for <its id>` or `ack <its id> "<reply>" --close done|failed` closes it.
 
 Served while no chat is open: `help schedule-wake` gives your owner the scheduler line.
 

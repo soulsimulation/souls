@@ -176,12 +176,18 @@ test('C15 (#3685): pending lists what is open and what arrived; ack answers with
   const second = await ask({ op: 'pending', list: true });
   assert.ok(second.open.some((m) => m.id === q.id), 'still open: listed again');
   assert.ok(!second.events.some((e) => e.kind === 'mail'), 'the arrival was read: not again');
-  // A1: a reply-only ack answers it with no act, and closes it done.
+  // #3781: with no --close, a reply is an interim note: the message stays open, in the directory and the listing.
+  const note = await ask({ op: 'ack', id: q.id, reply: 'one moment' });
+  assert.deepEqual([note.ok, note.open, note.closed], [true, true, undefined], JSON.stringify(note));
+  await sleep(1200); // past a mailbox read
+  assert.equal((await mailbox('read', { id: q.id })).state, 'open', 'a note leaves it open');
+  assert.ok((await ask({ op: 'pending', list: true })).open.some((m) => m.id === q.id), 'still listed');
+  // A1: a reply-only ack with --close done answers it with no act, and closes it done.
   assert.equal((await ask({ op: 'ack', id: 'm_0000000000000000', reply: 'hi' })).code, 'mail-not-found');
   assert.equal((await ask({ op: 'ack', id: q.id, reply: '   ' })).code, 'ack-reply');
   assert.equal((await ask({ op: 'ack', id: q.id, reply: 'hi', close: 'maybe' })).code, 'ack-close');
   const sentBefore = (await ask({ op: 'status' })).sent;
-  const a = await ask({ op: 'ack', id: q.id, reply: 'Noon,   by the tower clock' });
+  const a = await ask({ op: 'ack', id: q.id, reply: 'Noon,   by the tower clock', close: 'done' });
   assert.deepEqual([a.ok, a.acked, a.reply, a.closed], [true, q.id, 'Noon, by the tower clock', 'done']);
   const done = await read(q.id);
   assert.deepEqual([done.state, done.outcome], ['done', 'replied']);
@@ -193,13 +199,13 @@ test('C15 (#3685): pending lists what is open and what arrived; ack answers with
   assert.equal((await ask({ op: 'ack', id: no.id, reply: 'No: the lake is out of reach.', close: 'failed' })).closed, 'failed');
   const failed = await read(no.id);
   assert.deepEqual([failed.state, failed.outcome], ['failed', 'replied']);
-  // While an act serves a message, a reply with no --close rides on that act's close, which the act's outcome names.
+  // While an act serves a message, a reply with no --close is a note (#3781); the act's outcome closes it.
   const lamp = await mailbox('put', { soul: GRANT, text: 'the lamp off, please' });
   await listedWith(lamp.id);
   assert.equal((await ask({ op: 'act', verb: 'r2:switch_off', target: LAMP, for: lamp.id })).ok, true);
   const rides = await ask({ op: 'ack', id: lamp.id, reply: 'switching it off' });
   // The act's answer may already have closed it (a lamp answers within milliseconds): then there is nothing to answer.
-  assert.ok(rides.closes || rides.code === 'mail-not-found', JSON.stringify(rides));
+  assert.ok(rides.open || rides.code === 'mail-not-found', JSON.stringify(rides));
   const byAct = await read(lamp.id);
   assert.notEqual(byAct.outcome, 'replied', 'closed once, by its act');
 });
