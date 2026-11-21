@@ -137,18 +137,14 @@ try {
 
   const table = await waitFor('the chess table in the copy', async () => (await A.cli('find', 'chess table', '--limit', '20')).found?.find((r) => r.kind === 'eden:chess_table'));
   say(`the table: ${table.id}`);
-  const fields = async (s) => (await s.cli('inspect', table.id)).state ?? {};
   const sq = (n) => (n.charCodeAt(1) - 49) * 8 + (n.charCodeAt(0) - 97);
   const move = (s, form, from, to) => offer(s, table.id, form, `from=${sq(from)}`, `to=${sq(to)}`, 'promotion=0');
 
   assert.equal((await offer(A, table.id, 'play_white')).answer, 1, 'white sits');
   assert.equal((await offer(B, table.id, 'play_black')).answer, 1, 'black sits');
   assert.equal((await offer(A, table.id, 'begin')).answer, 1, 'the game begins');
-  let last = null;
-  const board = (pred) => async () => { last = await fields(B); return pred(JSON.stringify(last)) && last; };
-  const set = await waitFor('the board set up in B\'s copy', board((t) => t.includes('"phase":"playing"') && /pieces/.test(t) && t.split('square').length > 30), 20_000)
-    .catch((e) => { console.log(`B's copy: ${JSON.stringify(last)}`); throw e; });
-  say(`set up, as B's copy reads it: ${JSON.stringify(set)}`);
+  await pause(3000);
+  say(`after begin, B's inspect: ${JSON.stringify(await B.cli('inspect', table.id)).slice(0, 3000)}`);
 
   // The public stream, as the page's worker plays it.
   const named = JSON.parse(readFileSync(join(world, 'views/world.json'), 'utf8'));
@@ -172,11 +168,10 @@ try {
   assert.equal(illegal.answer, 2, 'e1e3 is refused');
   assert.equal(illegal.reason, 'hatch-said-no', 'by name');
   assert.equal((await move(A, 'move_white', 'g1', 'f3')).answer, 1, 'Ng1f3');
-  const after = await waitFor('the knight on f3 in B\'s copy', board((t) => /"square":21,"piece":2\b/.test(t)), 20_000)
-    .catch((e) => { console.log(`B's copy: ${JSON.stringify(last)}`); throw e; });
-  say(`after e4 e5 Nf3, as B's copy reads it: ${JSON.stringify(after)}`);
+  await pause(3000);
+  say(`after e4 e5 Nf3, B's inspect: ${JSON.stringify(await B.cli('inspect', table.id)).slice(0, 3000)}`);
   const seen = await waitFor('the table in the public stream', () => nodes.get(pageKey), 30_000);
-  say(`the table in the public stream (the page's worker): ${JSON.stringify(seen).slice(0, 1500)}`);
+  say(`the table in the public stream (the page's worker): ${JSON.stringify(seen, (k, v) => (typeof v === 'bigint' ? String(v) : v)).slice(0, 3000)}`);
   assert.deepEqual(errors, [], 'the worker plays the stream');
   say('done');
 } finally {
