@@ -11,7 +11,7 @@
 #                                               runs it on another machine through `$INSTALL_SSH <target> <command>`
 #
 # What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd,
-# directoryd, deploy, gateway-upgrade, import-accounts, import-world, templates, the origin and the page's files); data in
+# directoryd, deploy, gateway-upgrade, import-accounts, import-world, publish-template, the origin and the page's files); data in
 # /var/lib/souls; settings in /etc/souls, the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
 # souls-directory and souls-origin.
 # Carried over from today's installer: idempotent, and it starts, enables and restarts nothing. It never reads or
@@ -27,7 +27,10 @@ DATA=/var/lib/souls
 ETC=/etc/souls
 UNITS=/etc/systemd/system
 STATE=$ETC/install.state
-PROGRAMS=(supervisor worldd gatewayd directoryd deploy gateway-upgrade import-accounts import-world templates)
+PROGRAMS=(supervisor worldd gatewayd directoryd deploy gateway-upgrade import-accounts import-world publish-template)
+# A program's cargo binary: the `templates` crate's is installed as publish-template, since $LIB/templates is the
+# catalogue it writes (W3b's placement.json `templates`).
+built() { if [ "$1" = publish-template ]; then echo templates; else echo "$1"; fi; }
 UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service souls-place.path souls-place.service)
 DROPIN=$UNITS/worldd@.service.d
 # Everything it may make, and so everything it may remove: the user, three folders it owns whole, its units.
@@ -271,12 +274,12 @@ check() {
   tmp=$(mktemp -d) # global: the EXIT trap reads it
   trap 'rm -rf "$tmp"' EXIT
   mkdir -p "$tmp/root" "$tmp/bins" "$tmp/page"
-  for p in "${PROGRAMS[@]}"; do printf '%s\n' "$p" > "$tmp/bins/$p"; done
+  for p in "${PROGRAMS[@]}"; do printf '%s\n' "$p" > "$tmp/bins/$(built "$p")"; done
   echo '<!doctype html>' > "$tmp/page/index.html"
   bundle "$tmp/b" "$tmp/bins" "$tmp/page" > "$tmp/bundle"
   INSTALL_ROOT=$tmp/root bash "$0" plan --from "$tmp/b" > "$tmp/plan"
-  for p in import-accounts import-world templates; do
-    cmp -s "$tmp/bins/$p" "$tmp/b/bin/$p" || die "check: $p missing or changed in bundle"
+  for p in import-accounts import-world publish-template; do
+    cmp -s "$tmp/bins/$(built "$p")" "$tmp/b/bin/$p" || die "check: $p missing or changed in bundle"
     [ -n "$(find "$tmp/b/bin/$p" -prune -perm 755)" ] || die "check: $p bundle mode is not 755"
     grep -qxF "would file $LIB/$p 755 root:root" "$tmp/plan" || die "check: $p missing from plan"
   done
@@ -346,7 +349,7 @@ bundle() {
   local out=$1 bins=$2 page=$3 p
   [ -d "$page" ] || die "no page build at $page"
   mkdir -p "$out/bin" "$out/units"
-  for p in "${PROGRAMS[@]}"; do install -m 755 "$bins/$p" "$out/bin/$p"; done
+  for p in "${PROGRAMS[@]}"; do install -m 755 "$bins/$(built "$p")" "$out/bin/$p"; done
   rm -rf "$out/origin" "$out/web"
   mkdir -p "$out/origin"
   cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/owner-auth.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../../client/served/serve.mjs" "$out/origin/"
