@@ -290,6 +290,8 @@ struct Sight<'a> {
     /// and its leg's end, x and z µm.
     asked: RefCell<BTreeMap<Id, Way>>,
     context: BTreeMap<Id, (Id, usize, usize)>,
+    /// Each run's walk in progress to a named point: its step, the point's node and the point's name (C34, #3599).
+    walks: BTreeMap<Id, (usize, Id, Name)>,
     planning: &'a RefCell<Planning>,
     map: Arc<Versions>,
 }
@@ -325,6 +327,68 @@ impl Sight<'_> {
             }
         }
         None
+    }
+
+    /// A walk to a building's named area, resolved onto the building's own room and floor (C34, #3599). `body`'s run
+    /// walks, at step `step`, to point `at` of node `node`'s frame, a point its entry names as an `areas` entry of a
+    /// thing on `node` that has floors: the area is the thing's room of that name, on that room's floor (a lantern room
+    /// four floors up, whatever height the kind's area gives), else the thing's only floor; the point is carried into
+    /// the floor's frame (the thing's), at the room's height. `Some(None)` when the thing has floors and none is the
+    /// area's; `None` for any other walk, planned as before. No floor is chosen by nearness.
+    fn area_floor(&self, body: Id, step: usize, node: Id, at: Vec3) -> Option<Option<(Id, Vec3)>> {
+        use import_eden::{F_ORIGIN, FLOOR, ROOM};
+        let &(at_step, thing, ref point) = self.walks.get(&body)?;
+        if at_step != step {
+            return None;
+        }
+        let th = self.tree.handle(thing)?;
+        let n = self.tree.node(th)?;
+        if n.parent() != Some(node) {
+            return None;
+        }
+        self.kinds
+            .get(plain(n.kind()))?
+            .get("areas")?
+            .get(point.as_str())?;
+        let place = n.place()?;
+        let floors: Vec<_> = self
+            .tree
+            .children(th)?
+            .iter()
+            .filter_map(|&c| self.tree.node(c))
+            .filter(|f| plain(f.kind()) == FLOOR)
+            .collect();
+        if floors.is_empty() {
+            return None;
+        }
+        // The room the area names: its origin is `<thing>/<area>` (an area's `_` is a room id's `-`).
+        let names = [point.as_str().to_owned(), point.as_str().replace('_', "-")];
+        let room = floors.iter().find_map(|f| {
+            self.tree
+                .children(self.tree.handle(f.id())?)?
+                .iter()
+                .filter_map(|&c| self.tree.node(c))
+                .filter(|r| plain(r.kind()) == ROOM)
+                .find(|r| match r.fields().get(&F_ORIGIN) {
+                    Some(replica::encode::Value::Bytes(o)) => names
+                        .iter()
+                        .any(|nm| o.ends_with(format!("/{nm}").as_bytes())),
+                    _ => false,
+                })
+                .map(|r| (f.id(), r.place().map(|p| p.position.y)))
+        });
+        let (floor, y) = match room {
+            Some((floor, y)) => (floor, y),
+            None if floors.len() == 1 => (floors[0].id(), None),
+            None => return Some(None),
+        };
+        let [w, x, yq, z] = place.orientation.parts();
+        let back = replica::pose::Quat::new(w, -x, -yq, -z).ok()?;
+        let local = back.rotate(at.minus(place.position).ok()?).ok()?;
+        Some(Some((
+            floor,
+            Vec3::new(local.x, y.unwrap_or(local.y), local.z),
+        )))
     }
 }
 
@@ -392,6 +456,12 @@ impl Geometry for Sight<'_> {
         };
         let Some(me) = self.bodies.get(&body) else {
             return WalkPlan::Legs(Vec::new());
+        };
+        let (node, at) = match self.area_floor(body, step, node, at) {
+            Some(Some(on)) => on,
+            // A building's area with no room or floor of its own to stand on: no way there, the body where it is.
+            Some(None) => return WalkPlan::Legs(Vec::new()),
+            None => (node, at),
         };
         let mut planning = self.planning.borrow_mut();
         match planning.ask(key, *me, FormQuery::Walk { node, at, reach }, &self.map) {
@@ -699,6 +769,7 @@ impl Acts {
         f: impl FnOnce(&mut Forms, &mut World<'_, Sight<'_>, Sight<'_>>) -> T,
     ) -> T {
         let context = self.forms.planning_context();
+        let walks = self.forms.walks();
         self.planning.borrow_mut().keep(&context);
         let (controller, view, slots, map, questions) = match bodies {
             Some(b) => {
@@ -742,6 +813,7 @@ impl Acts {
             toward: &self.toward,
             asked: RefCell::new(BTreeMap::new()),
             context,
+            walks,
             planning: &self.planning,
             map,
         };

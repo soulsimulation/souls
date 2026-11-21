@@ -1849,3 +1849,31 @@ fn c21_the_sandpit_walk_arrives_or_ends_blocked() {
     }
     assert!(ticks <= 100, "ended within 5 s of its last progress");
 }
+
+/// C34 (#3599) A2: a building's named area resolves onto its own room and floor. Born outside, a Soul climbs a
+/// lighthouse to its lantern room (today's e_edbbc6a7, four floors up) and a tower to its top room (e_36bd67b1, whose
+/// top floor is 8.5 m up, not the 6.1 m the kind's area names), across the stairs, by their own entries; each ends
+/// `done`. Before #3599 each ended `souls:no-way`: the area's point was carried up to the open ground, cut out under
+/// the building.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c34_a2_a_lighthouse_and_a_tower_are_climbed_to_their_top_rooms() {
+    let lantern = act_at("96.0,194.0", "e_edbbc6a7", "eden:climb", "c34lh");
+    let top = act_at("69.0,26.0", "e_36bd67b1", "eden:climb", "c34tw");
+    lantern.expect("the lighthouse climbed, done");
+    top.expect("the tower climbed, done");
+}
+
+/// C34 (#3599) A2: the ground-floor areas of the sweep's other named forms resolve the same way. Born outside a chapel
+/// (today's e_9b7418a3), a Soul enters its nave (the room named `nave`); born beside a greenhouse's vent pole inside it
+/// (e_8b4c5e36: `open_vent` needs the pole within reach before it starts, so a Soul born outside is refused
+/// `out-of-reach` before any walk), a Soul opens the vent from the `inside` area (no room of that name, the
+/// greenhouse's only floor). Each ends `done`, where each ended `souls:no-way`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c34_a2_a_greenhouses_vent_and_a_chapels_nave() {
+    let open = act_at("70.2,35.3", "e_8b4c5e36", "eden:open_vent", "c34gh");
+    let enter = act_at("279.0,110.0", "e_9b7418a3", "eden:enter", "c34ch");
+    open.expect("the vent opened, done");
+    enter.expect("the nave entered, done");
+}
