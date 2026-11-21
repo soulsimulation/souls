@@ -14,7 +14,29 @@ const OFF = new THREE.Color(0.22, 0.22, 0.22), ON = new THREE.Color(1, 1, 1), WH
 
 /** Where one part of one thing is drawn. */
 type Slot = { batch: Batch; index: number; glow: boolean };
-type Thing = { id: string; model: string | null; matrix: THREE.Matrix4; boxes: THREE.Matrix4[]; slots: Slot[]; on: boolean };
+type Thing = { id: string; model: string | null; matrix: THREE.Matrix4; boxes: THREE.Matrix4[]; slots: Slot[]; on: boolean; inverse?: THREE.Matrix4[] };
+
+/** What a ray meets first among the things (N-V20 hover): the thing's id (a copy's `#n` dropped), how far along the
+ *  ray, where its box stands (the middle of the box's base) and the box's half width on the ground. */
+export type ThingHit = { id: string; distance: number; foot: THREE.Vector3; radius: number };
+
+/** Where a ray (`origin + k * dir`) enters the unit box (x and z from -0.5 to 0.5, y from 0 to 1), or null. */
+export function rayUnitBox(o: THREE.Vector3, d: THREE.Vector3): number | null {
+  let near = 0, far = Infinity;
+  const lo = [-0.5, 0, -0.5], hi = [0.5, 1, 0.5], oa = [o.x, o.y, o.z], da = [d.x, d.y, d.z];
+  for (let a = 0; a < 3; a++) {
+    if (Math.abs(da[a]) < 1e-12) {
+      if (oa[a] < lo[a] || oa[a] > hi[a]) return null;
+      continue;
+    }
+    let k0 = (lo[a] - oa[a]) / da[a], k1 = (hi[a] - oa[a]) / da[a];
+    if (k0 > k1) [k0, k1] = [k1, k0];
+    near = Math.max(near, k0);
+    far = Math.min(far, k1);
+    if (near > far) return null;
+  }
+  return near;
+}
 
 /** An instanced draw whose instances are packed: removing one moves the last into its place. */
 class Batch {
@@ -263,6 +285,28 @@ export class ThingLayer {
         .catch(() => (this.failed++, this.models.set(best, [])))
         .finally(() => this.loading--);
     }
+  }
+
+  /** The thing a ray meets first within `far` metres, from the boxes each thing stands in (its model's bounds, or its
+   *  solids): read-only, nothing drawn changes. Each box's inverse is kept with the thing until the thing moves. */
+  pick(origin: THREE.Vector3, dir: THREE.Vector3, far = Infinity): ThingHit | null {
+    let best: Thing | null = null, box = -1, near = far;
+    const o = new THREE.Vector3(), d = new THREE.Vector3();
+    for (const t of this.things.values()) {
+      const inv = (t.inverse ??= t.boxes.map((b) => b.clone().invert()));
+      for (let k = 0; k < inv.length; k++) {
+        // The ray in the box's own space: its distance along the ray stays the same (an affine map keeps ratios).
+        o.copy(origin).applyMatrix4(inv[k]);
+        d.copy(origin).add(dir).applyMatrix4(inv[k]).sub(o);
+        const hit = rayUnitBox(o, d);
+        if (hit !== null && hit < near) [best, box, near] = [t, k, hit];
+      }
+    }
+    if (!best) return null;
+    const m = best.boxes[box], e = m.elements;
+    const foot = new THREE.Vector3().applyMatrix4(m);
+    const radius = Math.hypot(Math.hypot(e[0], e[1], e[2]), Math.hypot(e[8], e[9], e[10])) / 2;
+    return { id: best.id.split('#')[0], distance: near, foot, radius };
   }
 
   /** The draws this layer makes, for the measure: instanced batches, material batches and the boxes. */
