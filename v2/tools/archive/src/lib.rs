@@ -813,7 +813,7 @@ struct BasedWindow {
     /// stood then. The whole-state reference keeps `observed` instead.
     seen: Seen,
 }
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct Seen {
     digest: Vec<u8>,
     next: u64,
@@ -1039,7 +1039,12 @@ impl Bundler {
                             cursor: (record, offset as u64),
                             rows: Vec::new(),
                             base_hash: mode.base_hash,
-                            seen: Seen::default(),
+                            seen: Seen {
+                                digest: Vec::new(),
+                                next: 0,
+                                time: Value::Array(Vec::new()),
+                                rows: BTreeMap::new(),
+                            },
                         });
                     }
                     let open = mode.open.as_mut().expect("observation window");
@@ -1139,7 +1144,7 @@ impl Bundler {
                         ),
                         view: probe.take().expect("candidate view"),
                         baseline: old,
-                        observed: Value::Null,
+                        observed: Value::Array(Vec::new()),
                         cursor: (record, offset as u64),
                         rows: Vec::new(),
                         base_hash: mode.base_hash,
