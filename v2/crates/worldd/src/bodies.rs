@@ -222,6 +222,8 @@ pub struct Bodies {
     pub wind_log: Vec<Effect>,
     /// The rule's own move going on each body, by its intent id.
     wind_moves: BTreeMap<Id, Id>,
+    /// A walk's pace other than [`WALK`], by its intent, for the one call of [`Bodies::start`] that starts it.
+    paces: BTreeMap<Id, i64>,
     /// Each body the rule put to sleep on the ground: the driver holding it lying.
     sleeping: BTreeMap<Id, Driver>,
 }
@@ -324,6 +326,7 @@ impl Bodies {
             ),
             wind_log: Vec::new(),
             wind_moves: BTreeMap::new(),
+            paces: BTreeMap::new(),
             sleeping: BTreeMap::new(),
         })
     }
@@ -660,7 +663,8 @@ impl Bodies {
                 Ask::Walk { node, point } => {
                     let goal = self.goal(a.body, node, point);
                     self.replace(a.body);
-                    let walk = Box::new(Route::sent(WALK, self.runner.tick));
+                    let pace = self.paces.get(&id).copied().unwrap_or(WALK);
+                    let walk = Box::new(Route::sent(pace, self.runner.tick));
                     let r = goal.and_then(|g| self.runner.send(a.body, walk, g, id));
                     if r.is_ok() {
                         self.live.insert(a.body, (id, Live::Walk));
@@ -1098,7 +1102,7 @@ impl Bodies {
                 Do::Stand => {
                     self.wake_ground(body);
                     if self.slots.held_by(body).is_some() {
-                        self.wind_move(body, Ask::Rise);
+                        self.wind_move(body, Ask::Rise, None);
                     }
                 }
                 Do::Walk([x, z]) => {
@@ -1109,6 +1113,7 @@ impl Bodies {
                             node,
                             point: Some(Vec3::new(x, 0, z)),
                         },
+                        Some(wind_down::shuffle(WALK)),
                     );
                 }
                 Do::Lie => self.lie_ground(body),
@@ -1120,9 +1125,13 @@ impl Bodies {
         }
     }
 
-    /// One move of the rule's, by the path every move intent takes ([`Bodies::start`]), under a fresh id.
-    fn wind_move(&mut self, body: Id, ask: Ask) {
+    /// One move of the rule's, by the path every move intent takes ([`Bodies::start`]), under a fresh id; a walk at
+    /// `pace` (µm a second) when given.
+    fn wind_move(&mut self, body: Id, ask: Ask, pace: Option<i64>) {
         let Ok(id) = self.mint.mint() else { return };
+        if let Some(p) = pace {
+            self.paces.insert(id, p);
+        }
         let started = self.start(vec![(
             id,
             Asked {
@@ -1132,6 +1141,7 @@ impl Bodies {
                 fallbacks: Vec::new(),
             },
         )]);
+        self.paces.remove(&id);
         if started.iter().all(|(_, r)| r.is_ok()) {
             self.wind_moves.insert(body, id);
         }

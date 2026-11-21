@@ -165,6 +165,44 @@ fn b16_a_silent_soul_walks_out_sleeps_and_wakes_on_its_agents_act() {
     assert!(apart(ground_xz(&b), [at[0] + 3_000_000, at[1]]) < 500_000.0);
 }
 
+/// #3791 A1: the walk out goes at today's shuffle, half the walking pace, by the same walk as any (no jump): its
+/// fastest tick while it walks is the shuffle's step, never the walk's.
+#[test]
+fn b16_the_walk_out_is_todays_shuffle() {
+    let mut b = testbodies::bodies().unwrap();
+    b.wind.set_knobs(SHORT, 0);
+    let shuffle = wind_down::shuffle(worldd::bodies::WALK);
+    assert_eq!(shuffle, worldd::bodies::WALK / 2);
+    let step = shuffle * TICK / S;
+    let mut now = 0;
+    let mut out = false;
+    let mut moved = Vec::new();
+    while now <= 120 * S && moved.len() < 60 {
+        let before = ground_xz(&b);
+        b.step(now);
+        out |= std::mem::take(&mut b.wind_log).iter().any(|e| {
+            e.events
+                .as_ref()
+                .is_some_and(|v| v.iter().any(|v| v.name.as_str() == "souls:zombie"))
+        });
+        if out {
+            let after = ground_xz(&b);
+            moved.push(((after[0] - before[0]) as f64).hypot((after[1] - before[1]) as f64));
+        }
+        now += TICK;
+    }
+    assert_eq!(moved.len(), 60, "it walked out");
+    let fastest = moved.iter().copied().fold(0.0, f64::max);
+    assert!(
+        fastest <= step as f64 * 1.05,
+        "never faster than the shuffle: {fastest} > {step}"
+    );
+    assert!(
+        fastest >= step as f64 * 0.8,
+        "it shuffles, not stands: {fastest} vs {step}"
+    );
+}
+
 // --- Served on Eden ------------------------------------------------------------------------------------------------
 
 // A served run waits on the real clock for the world it serves (as `tests/serve.rs`).

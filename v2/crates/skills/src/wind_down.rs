@@ -7,6 +7,7 @@
 //!   client's reflex (`Intent::agent_act`, #3764). Reads and looks are answered by the client's copy and send none.
 //! - **Wander** `wander` after the last act: the body stands (out of a seat); then every `leg_min` to `leg_max` one
 //!   slow walk of `leg_min_um` to `leg_max_um` whose end is farther from the town's centre than its start.
+//!   Each walk of the rule's, legs and the walk out alike, is today's shuffle: [`shuffle`] of the body's walking pace.
 //! - **Zombie** `zombie` after Wander starts: one walk to its sleeping spot, the nearest open ground outside the built
 //!   area at least `spot_gap_um` from another Soul's spot, searched within `spot_search_um`. A body that cannot move
 //!   now tries again every `leg_min`.
@@ -71,6 +72,12 @@ const LOOK: Micros = S;
 /// The ring step of the spot search, and the margin of outdoors around a spot.
 const RING: i64 = 1_500_000;
 const MARGIN: i64 = 3 * M;
+
+/// Today's shuffle (`pace: 'shuffle'`, LINK BODY): half the body's walking pace `walk` (µm a second). Every walk the
+/// rule starts goes at it, through the same move as any walk.
+pub fn shuffle(walk: i64) -> i64 {
+    walk / 2
+}
 
 /// The public word for a body (LINK BODY).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,7 +148,7 @@ pub enum Do {
     Stop,
     /// Rise from a seat (nothing when standing).
     Stand,
-    /// Walk to a point on the ground, x and z in µm.
+    /// Walk to a point on the ground, x and z in µm, at the [`shuffle`].
     Walk([i64; 2]),
     /// Lie down where it stands, with no end.
     Lie,
