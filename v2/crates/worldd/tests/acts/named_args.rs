@@ -21,8 +21,91 @@ fn entry() -> Json {
     ))
     .unwrap()
 }
+/// A module of one section each of `sections` (`(id, contents)`), with the WASM header.
+fn wasm(sections: &[(u8, &[u8])]) -> Vec<u8> {
+    let mut m = b"\0asm\x01\0\0\0".to_vec();
+    for (id, c) in sections {
+        m.push(*id);
+        m.push(c.len() as u8);
+        m.extend_from_slice(c);
+    }
+    m
+}
+/// A code hatch's module (#3713): memory, `input` at 0, `output` at 1024 and `run`, whose body is `body`.
+fn hatch_module(body: &[u8]) -> Vec<u8> {
+    let mut code = vec![1, body.len() as u8 + 1, 0];
+    code.extend_from_slice(body);
+    wasm(&[
+        (1, &[1, 0x60, 1, 0x7f, 1, 0x7e]),
+        (3, &[1, 0]),
+        (5, &[1, 0, 1]),
+        (
+            6,
+            &[2, 0x7f, 0, 0x41, 0, 0x0b, 0x7f, 0, 0x41, 0x80, 0x08, 0x0b],
+        ),
+        (
+            7,
+            &[
+                4, 6, b'm', b'e', b'm', b'o', b'r', b'y', 2, 0, 5, b'i', b'n', b'p', b'u', b't', 3,
+                0, 6, b'o', b'u', b't', b'p', b'u', b't', 3, 1, 3, b'r', b'u', b'n', 0, 0,
+            ],
+        ),
+        (10, &code),
+    ])
+}
+/// The echo: copies its input to its output and answers 1, so each read comes back as the answered field.
+fn echo() -> Vec<u8> {
+    hatch_module(&[
+        0x41, 0x80, 0x08, 0x41, 0, 0x20, 0, 0xfc, 0x0a, 0, 0, 0x42, 1, 0x0b,
+    ])
+}
+/// A hatch that always says no.
+fn nay() -> Vec<u8> {
+    hatch_module(&[0x42, 0, 0x0b])
+}
+fn prov(bytes: &[u8]) -> String {
+    let hex: String = replica::ids::sha256(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("prov-1220{hex}")
+}
+/// The note's hatch forms (#3713): `tally` writes its argument to `count` through the echo, in place of the form's
+/// own set; `refuse` is told no; `lost` names a module the world does not ship.
+fn hatch_forms() -> Vec<(String, Json)> {
+    let form = |module: &str| {
+        parse(&format!(
+            r#"{{"who":"anyone","takes":{{"n":{{"type":"count"}}}},"steps":[],"hatch":{{"module":"{module}","reads":[{{"arg":"n"}}],"steps_most":1000,"answers":{{"fields":["count"]}},"why":"why_tally"}},"effects":[{{"change":"set","field":"count","to":0,"event":"tallied"}}]}}"#
+        ))
+        .unwrap()
+    };
+    vec![
+        ("tally".into(), form(&prov(&echo()))),
+        ("refuse".into(), form(&prov(&nay()))),
+        ("lost".into(), form(&prov(b"not shipped"))),
+    ]
+}
 fn note_entry() -> Json {
-    parse(r#"{"format":"souls-entry/1","kind":"test:private_note","owner":"thing","state":{"words":{"n":1,"type":"text","default":null},"chosen":{"n":2,"type":"enum","values":["rest"],"default":"rest"}},"slots":{"rest":{"admits":"thing","at_mm":[0,0,0]}},"forms":{"choose_slot":{"who":"anyone","takes":{"seat":{"type":"slot"}},"steps":[],"effects":[{"change":"set","field":"chosen","to":{"arg":"seat"},"event":"chosen"}]},"ambiguous":{"who":"anyone","steps":[{"step":"move","move":"press","at":{"arg":"left"}},{"step":"move","move":"press","at":{"arg":"right"}}]},"write":{"who":"anyone","takes":{"words":{"type":"text"}},"steps":[],"effects":[{"change":"set","field":"words","to":{"arg":"words"},"event":"written"}]}}}"#).unwrap()
+    let mut e = note_entry_text();
+    if let Some(Json::Obj(forms)) = e
+        .obj()
+        .and_then(|o| o.iter().find(|(k, _)| k == "forms"))
+        .map(|(_, f)| f.clone())
+    {
+        let mut forms = forms;
+        forms.extend(hatch_forms());
+        if let Json::Obj(o) = &mut e {
+            for (k, v) in o.iter_mut() {
+                if k == "forms" {
+                    *v = Json::Obj(forms.clone());
+                }
+            }
+        }
+    }
+    e
+}
+fn note_entry_text() -> Json {
+    parse(r#"{"format":"souls-entry/1","kind":"test:private_note","owner":"thing","state":{"words":{"n":1,"type":"text","default":null},"chosen":{"n":2,"type":"enum","values":["rest"],"default":"rest"},"count":{"n":3,"type":"int","default":0,"min":0,"max":100}},"slots":{"rest":{"admits":"thing","at_mm":[0,0,0]}},"forms":{"choose_slot":{"who":"anyone","takes":{"seat":{"type":"slot"}},"steps":[],"effects":[{"change":"set","field":"chosen","to":{"arg":"seat"},"event":"chosen"}]},"ambiguous":{"who":"anyone","steps":[{"step":"move","move":"press","at":{"arg":"left"}},{"step":"move","move":"press","at":{"arg":"right"}}]},"write":{"who":"anyone","takes":{"words":{"type":"text"}},"steps":[],"effects":[{"change":"set","field":"words","to":{"arg":"words"},"event":"written"}]}}}"#).unwrap()
 }
 struct NamedRun {
     world: Option<answers::World>,
@@ -229,6 +312,7 @@ fn fixture() -> (NamedRun, Client) {
     cfg.bodies = Some(Box::new(move |_| named_bodies(&furniture)));
     cfg.engine = Some((rules, Vec::new()));
     cfg.text = Some(text.clone());
+    cfg.hatches = vec![echo(), nay()];
     let mut kinds = entries();
     let Json::Obj(loaded) = &mut kinds else {
         unreachable!()
@@ -417,4 +501,37 @@ fn named_args_dresser_part_and_private_text_through_gateway() {
             .any(|w| w == words),
         "raw words never enter the durable log"
     );
+}
+
+#[test]
+fn a_forms_code_hatch_checks_the_act_and_writes_its_fields_through_the_gateway() {
+    let (run, mut client) = fixture();
+    let n = |v: u64| args(vec![pair("n", Value::Uint(v))]);
+    assert!(
+        !client
+            .act("test:tally", Some(note()), n(42))
+            .expect("the echo says yes")
+            .is_empty()
+    );
+    assert_eq!(
+        run.field(note(), 3),
+        Value::Uint(42),
+        "the hatch's answer, not the form's own set"
+    );
+    for (form, v, reason) in [
+        ("test:refuse", 7, "hatch-said-no"),
+        ("test:lost", 7, "hatch-module-missing"),
+        ("test:tally", 500, "hatch-answer-malformed"),
+    ] {
+        assert_eq!(
+            client.act(form, Some(note()), n(v)),
+            Err(reason.into()),
+            "{form}"
+        );
+        assert_eq!(
+            run.field(note(), 3),
+            Value::Uint(42),
+            "{form} changes nothing"
+        );
+    }
 }

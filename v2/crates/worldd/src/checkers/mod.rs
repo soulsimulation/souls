@@ -189,8 +189,16 @@ fn thing(record: &Cbor, entry: &Value) -> Value {
 
 /// The changes a yes candidate's form makes: its effects as the form runner's binder binds them
 /// (`skills::form_runner`, F2 and F4), or the binder's refusal by name. A world with no bodies has no hands or runner
-/// to work out an amount, a take, a make or a remove against: those are the runner's, `effect-needs-the-runner`.
+/// to work out an amount, a take, a make or a remove against: those are the runner's, `effect-needs-the-runner`; a
+/// form with a code hatch is `hatch-needs-the-runner`.
 fn prepare(this: Id, entry: &Value, form: &str) -> Result<Vec<Change>, &'static str> {
+    // A code hatch runs in the form runner's path (#3713), which a world with no bodies does not have.
+    if form_runner::bind_hatch(entry, form)
+        .map_err(|r| r.name)?
+        .is_some()
+    {
+        return Err("hatch-needs-the-runner");
+    }
     let effects = form_runner::bind_effects(entry, form).map_err(|r| r.name)?;
     effects
         .into_iter()
