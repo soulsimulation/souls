@@ -5471,7 +5471,10 @@ mod tests {
         let until: i64 = 40 * 3_600_000_000;
         let weather = |rain: i64| {
             [
-                (sky::F_WEATHER, Value::Text(Name::new("souls:storm").unwrap())),
+                (
+                    sky::F_WEATHER,
+                    Value::Text(Name::new("souls:storm").unwrap()),
+                ),
                 (sky::F_CLOUD, int(100)),
                 (sky::F_RAIN, int(rain)),
                 (sky::F_WIND, int(80)),
@@ -5514,7 +5517,10 @@ mod tests {
         };
         let (kind, reason, _) = run(intent(1, &weather(101)), 2);
         assert_eq!(kind, 2, "a level of 101 is refused");
-        assert_eq!(reason, Value::Text(Name::new("edit.weather-level").unwrap()));
+        assert_eq!(
+            reason,
+            Value::Text(Name::new("edit.weather-level").unwrap())
+        );
         let (kind, _, _) = run(intent(2, &weather(90)), 4);
         assert_eq!(kind, 1, "the storm is set");
         world.stop();
@@ -5534,9 +5540,16 @@ mod tests {
         let tree = live.tree();
         let node = tree.node(tree.root()).unwrap();
         let f = node.fields();
-        assert_eq!(f.get(&sky::F_WEATHER), Some(&Value::Text(Name::new("souls:storm").unwrap())));
+        assert_eq!(
+            f.get(&sky::F_WEATHER),
+            Some(&Value::Text(Name::new("souls:storm").unwrap()))
+        );
         assert_eq!(f.get(&sky::F_RAIN), Some(&int(90)));
-        assert_eq!(f.get(&sky::F_WEATHER_NEXT), Some(&int(until)), "the next change is the creator's end");
+        assert_eq!(
+            f.get(&sky::F_WEATHER_NEXT),
+            Some(&int(until)),
+            "the next change is the creator's end"
+        );
         let due: Vec<_> = tree
             .timers()
             .iter()

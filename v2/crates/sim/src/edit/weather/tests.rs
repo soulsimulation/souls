@@ -336,18 +336,35 @@ fn a_batch_asks_for_weather_by_its_five_fields_on_the_world_node() {
             set(world, sky::F_WEATHER_UNTIL, sky::int(2 * HOUR)),
         ]
     };
-    let got = asked(&five("souls:storm"), world).expect("asked").expect("whole");
+    let got = asked(&five("souls:storm"), world)
+        .expect("asked")
+        .expect("whole");
     assert_eq!(got.kind.as_str(), "souls:storm");
     assert_eq!(got.levels, [100, 90, 80]);
     assert_eq!(got.until, 2 * HOUR);
     // Not the world node, or no weather field: no weather asked.
-    assert!(asked(&[set(other, sky::F_WEATHER, Value::Text(name("souls:rain")))], world).is_none());
+    assert!(
+        asked(
+            &[set(other, sky::F_WEATHER, Value::Text(name("souls:rain")))],
+            world
+        )
+        .is_none()
+    );
     assert!(asked(&[set(world, 3, sky::int(1))], world).is_none());
     // Some but not all, or a level that is not an integer: refused by name.
     let mut four = five("souls:rain");
     four.pop();
-    assert_eq!(asked(&four, world).expect("asked").expect_err("partial").name, PARTIAL);
+    assert_eq!(
+        asked(&four, world)
+            .expect("asked")
+            .expect_err("partial")
+            .name,
+        PARTIAL
+    );
     let mut bad = five("souls:rain");
     bad[1] = set(world, sky::F_CLOUD, Value::Text(name("lots")));
-    assert_eq!(asked(&bad, world).expect("asked").expect_err("typed").name, PARTIAL);
+    assert_eq!(
+        asked(&bad, world).expect("asked").expect_err("typed").name,
+        PARTIAL
+    );
 }
