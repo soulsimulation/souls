@@ -1411,14 +1411,15 @@ fn w3655_legacy_empty_initial_part_keeps_named_refusals_and_store_unchanged() {
 fn w3755_full_eden_bundles_row_by_row_equal_the_whole_state_reference() {
     use directoryd::directory::folder::Folder;
     use std::time::Instant;
-    let root = std::env::var("ARCHIVE_EDEN").expect("ARCHIVE_EDEN");
-    let store = Folder::new(root.into());
-    let head = store
+    let root = std::path::PathBuf::from(std::env::var("ARCHIVE_EDEN").expect("ARCHIVE_EDEN"));
+    let head = Folder::new(root.clone())
         .keys("h/")
         .into_iter()
         .find(|k| k.ends_with("/archive/head"))
         .expect("an archive in the store");
-    let prefix = head.trim_end_matches("archive/head").to_owned();
+    // The served world's archive keys are relative to its own folder (worldd's `Under`).
+    let store = Folder::new(root.join(head.trim_end_matches("archive/head")));
+    let prefix = String::new();
     let f = fetch(&store, &prefix).expect("fetched");
     let base = f.base.clone().expect("a based archive (a fork)");
     let records = f
