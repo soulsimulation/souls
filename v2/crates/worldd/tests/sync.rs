@@ -4,7 +4,8 @@
 //! - in the library (`answers::start`, the path `worldd gateway-link` and `worldd serve` share), no tick ends more
 //!   than 50 ms after it was due while a sync runs, in a release build (A2), read off K7's heartbeat; a debug build is
 //!   held to K7's default watchdog (500 ms with no tick), past which the process is ended;
-//! - through `worldd gateway-link`'s socket with the default watchdog, the process is still running after it. A debug
+//! - through `worldd gateway-link`'s socket with the default watchdog's soft limit made its hard one (a stall ends
+//!   the process), the process is still running after it. A debug
 //!   build widens the watchdog (`--watchdog-ms`): its start, which hashes the whole tree for C1's start state on the
 //!   clock thread, takes past 500 ms at this size before the first tick, with or without a sync.
 //!
@@ -264,6 +265,8 @@ fn c16_a2_gateway_link_answers_a_30000_record_sync_under_the_default_watchdog() 
         ])
         .arg("--no-measures")
         .args(["--watchdog-ms", &watchdog_ms().to_string()])
+        // A stall ends the process here, as K7 first did: a tick the sync held must show as the process ended.
+        .args(["--watchdog-hard-ms", &watchdog_ms().to_string()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
