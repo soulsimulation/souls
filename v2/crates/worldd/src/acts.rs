@@ -777,6 +777,118 @@ pub struct Acts {
 }
 
 /// The moves a form's step may name: every move content declares, and the body's own (C23, [`crate::moves`]).
+/// The refusal of a thing argument the caller left out whose selector finds nothing (#3914): `form-rules` names the
+/// same end `none_selected`.
+pub const NONE_SELECTED: &str = "thing.none-selected";
+
+/// A node's place in the tree, its parents' positions added (their turns are not), as [`View`]'s `place` reads it.
+fn tree_place(tree: &Tree, node: Id) -> Option<Vec3> {
+    let mut at = Vec3::ZERO;
+    let mut id = node;
+    for _ in 0..64 {
+        let n = tree.node(tree.handle(id)?)?;
+        if let Some(p) = n.place() {
+            at = Vec3::new(
+                at.x + p.position.x,
+                at.y + p.position.y,
+                at.z + p.position.z,
+            );
+        }
+        match n.parent() {
+            Some(p) => id = p,
+            None => return Some(at),
+        }
+    }
+    None
+}
+
+/// Binds a `thing` argument the caller left out by its `select` (E2's closed list, the entry format's `select`;
+/// `form-rules`' `chosenArgs` reads it the same way, #3914). `Ok(Some(thing))` binds it, `Ok(None)` finds nothing
+/// that qualifies, and `Err(())` is a selector this does not read (the argument stays missing).
+///
+/// - **The set** (`in`): `this` the children of the act's node, `here` those of the node the actor's body is in (the
+///   act's node's parent when the body is not in the tree), `parent` those of the act's node's parent. Never the
+///   act's node, the actor's body or any body (a node linked `souls:body-of`); with `kind`, only that kind.
+/// - **The order**: by squared distance in whole mm (x, y and z) from the `anchor` (`me` the body, `this` the act's
+///   node), `nearest` first or `furthest` first, ties by id; a thing with no place goes after every placed one, by id.
+/// - **The rank**: 1, 2, ... or `last`. Too few is nothing.
+pub(crate) fn select_thing(
+    tree: &Tree,
+    select: &Json,
+    node: Id,
+    body: Id,
+    body_at: Option<Vec3>,
+) -> Result<Option<Id>, ()> {
+    if select.get("of").and_then(Json::str) != Some("things") {
+        return Err(());
+    }
+    let parent = |id: Id| tree.node(tree.handle(id)?)?.parent();
+    let set = match select.get("in").and_then(Json::str) {
+        Some("this") => Some(node),
+        Some("here") => parent(body).or_else(|| parent(node)),
+        Some("parent") => parent(node),
+        _ => return Err(()),
+    };
+    let anchor = match select.get("anchor").and_then(Json::str) {
+        Some("me") => body_at.or_else(|| tree_place(tree, body)),
+        Some("this") => tree_place(tree, node),
+        _ => return Err(()),
+    };
+    let furthest = match select.get("order").and_then(Json::str) {
+        Some("nearest") => false,
+        Some("furthest") => true,
+        _ => return Err(()),
+    };
+    let rank = match select.get("rank") {
+        Some(Json::Int(n)) if *n >= 1 => Some(usize::try_from(*n).map_err(|_| ())?),
+        Some(Json::Str(l)) if l == "last" => None,
+        _ => return Err(()),
+    };
+    let kind = select.get("kind").and_then(Json::str);
+    let Some(children) = set
+        .and_then(|s| tree.handle(s))
+        .and_then(|h| tree.children(h))
+    else {
+        return Ok(None);
+    };
+    let is_body = |id: Id| {
+        tree.links_at(id)
+            .iter()
+            .any(|e| plain(tree.ty(e)) == "souls:body-of")
+    };
+    let mut ranked: Vec<(Option<i128>, Id)> = children
+        .iter()
+        .filter_map(|&h| tree.node(h))
+        .filter(|n| n.id() != node && n.id() != body)
+        .filter(|n| kind.is_none_or(|k| plain(n.kind()) == k))
+        .filter(|n| !is_body(n.id()))
+        .map(|n| {
+            let d = match (anchor, tree_place(tree, n.id())) {
+                (Some(a), Some(p)) => {
+                    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+                    Some(d(a.x, p.x) + d(a.y, p.y) + d(a.z, p.z))
+                }
+                _ => None,
+            };
+            (d, n.id())
+        })
+        .collect();
+    ranked.sort_by(|(da, a), (db, b)| {
+        let by = match (da, db) {
+            (Some(x), Some(y)) if furthest => y.cmp(x),
+            (Some(x), Some(y)) => x.cmp(y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        };
+        by.then(a.cmp(b))
+    });
+    Ok(match rank {
+        Some(r) => ranked.get(r - 1).map(|(_, id)| *id),
+        None => ranked.last().map(|(_, id)| *id),
+    })
+}
+
 pub fn library() -> R<Vec<Move>> {
     crate::moves::library()
 }
@@ -1055,6 +1167,40 @@ impl Acts {
             }
             if let Some(key) = none_free {
                 first.get_or_insert(refusal(sim::commit::bind::NONE_FREE, key));
+                continue;
+            }
+            // A thing the caller left out, which the form describes by a selector, is bound by it now (#3914); a
+            // selector that finds nothing is refused by name, before any walk.
+            let mut none_selected = None;
+            if let Some(f) = entry.get("forms").and_then(|f| f.get(form)) {
+                let body_at = bodies
+                    .as_deref()
+                    .and_then(|b| b.runner.controller.body(body))
+                    .map(|b| b.pose.position);
+                for (key, take) in f.get("takes").and_then(Json::obj).unwrap_or(&[]) {
+                    if all.contains_key(key)
+                        || take.get("type").and_then(Json::str) != Some("thing")
+                    {
+                        continue;
+                    }
+                    let Some(select) = take.get("select") else {
+                        continue;
+                    };
+                    match select_thing(tree, select, *node, body, body_at) {
+                        Ok(Some(t)) => {
+                            all.insert(key.clone(), skills::form_runner::Arg::Node(t));
+                            picked = true;
+                        }
+                        Ok(None) => {
+                            none_selected = Some(key.clone());
+                            break;
+                        }
+                        Err(()) => {}
+                    }
+                }
+            }
+            if let Some(key) = none_selected {
+                first.get_or_insert(refusal(NONE_SELECTED, key));
                 continue;
             }
             let incompatible = entry
