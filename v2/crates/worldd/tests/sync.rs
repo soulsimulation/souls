@@ -89,6 +89,7 @@ fn toggle(body: Id, thing: Id) -> Vec<u8> {
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     encode(&i.to_value()).unwrap()
 }

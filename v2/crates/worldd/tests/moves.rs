@@ -214,6 +214,7 @@ impl Client {
                 .collect(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         let bytes = encode(&i.to_value()).unwrap();
         self.0
@@ -1138,6 +1139,7 @@ fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     let bytes = encode(&i.to_value()).unwrap();
     c.0.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
@@ -1463,6 +1465,7 @@ fn a_mapped_world_steps_its_direct_ground_walk_in_world_time() {
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     let bytes = encode(&intent.to_value()).unwrap();
     let mut c = Client(client);
