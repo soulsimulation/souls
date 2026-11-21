@@ -1377,6 +1377,12 @@ impl Clock {
             let a = self.refusal(actor, sequence, "intent.ids-exhausted");
             return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
         };
+        // B16: an agent's act wakes a body the wind-down holds, on this tick; the act then runs.
+        if let (Actor::Soul(_), Ok(body)) = (actor, self.body_of(&intent))
+            && let Some(b) = self.bodies.as_mut()
+        {
+            b.agent_acted(body, now);
+        }
         // A leave retires the Soul's body (C3).
         if let (Actor::Soul(soul), true) =
             (actor, intent.verb.as_str() == LEAVE && self.life.is_some())
@@ -2443,6 +2449,7 @@ impl Clock {
         };
         let mut ended = b.step(now);
         let orders = std::mem::take(&mut b.orders.log);
+        let wind = std::mem::take(&mut b.wind_log);
         let mut deadlines = Vec::new();
         for (id, walk) in &mut self.walks {
             let (due, blocked) = walk.step(b, now);
@@ -2463,6 +2470,9 @@ impl Clock {
         let heard = std::mem::take(&mut b.heard);
         if !orders.is_empty() {
             self.write_own(orders, "standing orders");
+        }
+        if !wind.is_empty() {
+            self.write_own(wind, "the wind-down");
         }
         for (speaker, said, at) in heard {
             let e = speech::entry(Clock::own(speaker, at), speaker, &said);
@@ -3293,6 +3303,8 @@ pub fn start<S: Storage + 'static>(
     let mut restart = Restart::default();
     let mut blobs = Blobs::default();
     let mut order_records = Vec::new();
+    // B16: the wind-down's records and the Souls' acts replayed, to rebuild it.
+    let mut wind_records: Vec<Effect> = Vec::new();
     let records: &[Vec<u8>] = match restored {
         Some(r) => {
             let logged = found.first + found.records.len() as u64;
@@ -3342,6 +3354,7 @@ pub fn start<S: Storage + 'static>(
         restart.applied += 1;
         receipts.index(&part.effects);
         remember_orders(&mut order_records, &part.effects);
+        wind_records.extend(part.effects.iter().filter(|e| matches!(e.envelope.actor, Actor::Soul(_)) || skills::wind_down::read(e).is_some()).cloned());
         read_back(&part, &mut placed, &mut last);
         // Nodes an edit placed took their ids on the intents' counter (G1b): never give one out again.
         for e in &part.effects {
@@ -3713,6 +3726,7 @@ pub fn start<S: Storage + 'static>(
                         if let Err(r) = crate::orders::resume(&mut b, &order_parts, at) {
                             eprintln!("worldd: standing orders were not restored: {r}");
                         }
+                        b.wind_resume(&wind_records, |s| c.life.as_ref().and_then(|l| l.life.body_of(s)), at);
                         c.bodies = Some(b);
                         // The activities the log holds, so their members speak in them and leave them again (E26).
                         if let (Some(e), Some(b)) = (c.engine.as_mut(), c.bodies.as_mut())

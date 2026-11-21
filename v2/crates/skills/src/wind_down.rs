@@ -31,8 +31,8 @@ use replica::time::{MICROS_PER_SECOND, Micros};
 
 /// The rule's name, as today's.
 pub const RULE: &str = "wind-down/1";
-/// Its record's event name.
-pub const EVENT: &str = "souls:wind-down";
+/// Its records' event names: the body's public word after the move (`souls:awake` when its agent woke it).
+pub const EVENTS: [&str; 4] = ["souls:awake", "souls:idle", "souls:zombie", "souls:asleep"];
 
 /// The rule's clocks and distances. [`KNOBS`] are the maintainer's (13 Nov 2026); a test world shortens them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,6 +100,8 @@ pub enum Phase {
     Leg,
     Zombie,
     Asleep,
+    /// Its agent acted: the rule lets go of it.
+    Woken,
 }
 
 impl Phase {
@@ -109,10 +111,11 @@ impl Phase {
             Phase::Leg => "leg",
             Phase::Zombie => "zombie",
             Phase::Asleep => "asleep",
+            Phase::Woken => "woken",
         }
     }
     fn read(s: &str) -> Option<Phase> {
-        [Phase::Wander, Phase::Leg, Phase::Zombie, Phase::Asleep]
+        [Phase::Wander, Phase::Leg, Phase::Zombie, Phase::Asleep, Phase::Woken]
             .into_iter()
             .find(|p| p.as_str() == s)
     }
@@ -505,14 +508,16 @@ fn read_int(v: &Value) -> Option<i64> {
     }
 }
 
-/// The record of one move: cause and actor the world, node the body, and the event [`EVENT`] carrying the rule's
-/// state `{1: phase, 2: word, 3: last, 4: wander, 5: zombie, 6: [x, z] spot}` (5 and 6 left out when none).
+/// The record of one move: cause and actor the world, node the body, and one event named for the body's word after it
+/// ([`EVENTS`]), carrying the rule's state `{1: phase, 3: last, 4: wander, 5: zombie, 6: [x, z] spot}` (4, 5 and 6
+/// left out when none). A woken body's record is `souls:awake` with phase `woken`.
 pub fn record(o: &Order, s: &State, at: Micros, sequence: u64) -> Effect {
     let mut f = BTreeMap::new();
     f.insert(1, Value::Text(name(o.phase.as_str())));
-    f.insert(2, Value::Text(name(s.word().as_str())));
     f.insert(3, int(s.last));
-    f.insert(4, int(s.wander.unwrap_or(at)));
+    if let Some(w) = s.wander {
+        f.insert(4, int(w));
+    }
     if let Some(z) = s.zombie {
         f.insert(5, int(z));
     }
@@ -530,7 +535,7 @@ pub fn record(o: &Order, s: &State, at: Micros, sequence: u64) -> Effect {
         },
         body: Body::Changes(Vec::new()),
         events: Some(vec![Event {
-            name: name(EVENT),
+            name: name(&format!("souls:{}", s.word().as_str())),
             fields: f,
             changes: Vec::new(),
             rest: Rest::new(),
@@ -544,7 +549,7 @@ pub fn read(e: &Effect) -> Option<(Id, State)> {
     if e.envelope.actor != Actor::World {
         return None;
     }
-    let ev = e.events.as_ref()?.iter().find(|v| v.name.as_str() == EVENT)?;
+    let ev = e.events.as_ref()?.iter().find(|v| EVENTS.contains(&v.name.as_str()))?;
     let f = &ev.fields;
     let phase = match f.get(&1)? {
         Value::Text(t) => Phase::read(t.as_str())?,
@@ -558,7 +563,7 @@ pub fn read(e: &Effect) -> Option<(Id, State)> {
         e.envelope.node,
         State {
             last: read_int(f.get(&3)?)?,
-            wander: Some(read_int(f.get(&4)?)?),
+            wander: f.get(&4).and_then(read_int),
             zombie: f.get(&5).and_then(read_int),
             slept: phase == Phase::Asleep,
             spot,
