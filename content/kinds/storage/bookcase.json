@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "books": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "min": 0,
@@ -15,7 +15,7 @@
       }
     },
     "neat": {
-      "n": 2,
+      "n": 29,
       "type": "bool",
       "default": true,
       "audience": {

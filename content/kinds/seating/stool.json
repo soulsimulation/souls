@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:stool",
   "owner": "thing",
-  "state": { "spinning": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "state": { "spinning": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
   "points": { "front": { "role": "stand", "at_mm": [0, 0, 480], "yaw_mdeg": 180000 } },
   "slots": { "seat": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 670, 0], "stand": "front" } },
   "geometry": { "bounds_mm": [360, 675, 360] },

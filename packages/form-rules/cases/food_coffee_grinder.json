@@ -63,7 +63,7 @@
       "act": {"this": "cg1", "form": "dose", "args": {"mug": "m1"}},
       "state": {"actor": "b1", "nodes": {"cg1": {"kind": "eden:coffee_grinder", "fields": {"grounds": 1}}, "m1": {"kind": "eden:coffee_mug", "fields": {"dirt": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
       "asker": {"sees": ["public"]},
-      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"node": "m1", "field": "dirt", "found": 1, "wanted": {"at_most": 0}}, "fix": null, "says": "wash_first", "read": [["cg1/field/2", 1], ["m1/field/2", 1]]}
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"node": "m1", "field": "dirt", "found": 1, "wanted": {"at_most": 0}}, "fix": null, "says": "wash_first", "read": [["cg1/field/29", 1], ["m1/field/29", 1]]}
     },
     {
       "name": "coffee_grinder_dose_mug_not_empty",

@@ -21,8 +21,8 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "set", "node": "l1", "field": "charge", "n": 1, "to": 2 },
-              { "change": "set", "node": "l1", "field": "on", "n": 2, "to": 1 }
+              { "change": "set", "node": "l1", "field": "charge", "n": 28, "to": 2 },
+              { "change": "set", "node": "l1", "field": "on", "n": 29, "to": 1 }
             ],
             "events": [
               { "event": "eden:charge_spent", "node": "l1", "changes": [0] },
