@@ -1939,6 +1939,13 @@ impl Clock {
                         && tx.send(CheckJob::Edit(id, e, reserved)).is_ok()
                     {
                         self.outstanding += 1;
+                    } else {
+                        let r = Refused {
+                            op: None,
+                            name: EDIT_NO_CHECKER,
+                            detail: "the world's edit checker is not running".into(),
+                        };
+                        self.end(id, |c| c.edit_refusal(actor, sequence, &r));
                     }
                 }
                 Err(r) => self.end(id, |c| c.edit_refusal(actor, sequence, &r)),
@@ -1948,6 +1955,8 @@ impl Clock {
                     && tx.send(CheckJob::SetDown(a)).is_ok()
                 {
                     self.outstanding += 1;
+                } else {
+                    self.end(id, |c| c.refusal(actor, sequence, EDIT_NO_CHECKER));
                 }
             }
         }
@@ -4960,56 +4969,69 @@ fn edit_checker(
                     continue;
                 };
                 let who = creator.as_ref().map_or(Some(world.creator), |c| c.get());
-                let checked = match who {
-                    _ if copy.version() < needed => Err(Refused {
+                // #3958: a panic in the check or the plan answers the edit by name and keeps the thread (and every
+                // edit after it) going, on a town built again.
+                let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let checked = match who {
+                        _ if copy.version() < needed => Err(Refused {
+                            op: None,
+                            name: "edit.stale",
+                            detail: "the published copy has not reached the map basis".into(),
+                        }),
+                        Some(c) => {
+                            world.creator = c;
+                            edit::check(e, &copy, world)
+                        }
+                        None => Err(Refused {
+                            op: None,
+                            name: "edit.not-the-creator",
+                            detail: "the world's record names no creator".into(),
+                        }),
+                    };
+                    checked
+                        .and_then(|c| {
+                            let known = town.on(&copy, ground, false).map(|t| Known::of(t));
+                            // Planned with the ids the commit will mint, so its guard's ground is the map's (#3743).
+                            sim::edit::plan_classes(
+                                c,
+                                &copy,
+                                ground,
+                                known.as_ref(),
+                                snapshot.classes.values().copied(),
+                                reserved.clone(),
+                            )
+                        })
+                        .and_then(|mut p| {
+                            let kept = p.take_map();
+                            let places =
+                                crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
+                            let tree = buildsafe::souls(&copy, &world.kinds);
+                            let souls = buildsafe::judged(tree, &snapshot.bodies);
+                            let maps = source
+                                .map(|source| {
+                                    buildsafe::PreparedMaps::prepare_classes(
+                                        &copy,
+                                        &p,
+                                        kept,
+                                        reserved.clone(),
+                                        &souls,
+                                        source,
+                                        &snapshot.classes,
+                                        &snapshot.movers,
+                                    )
+                                })
+                                .transpose()?;
+                            Ok((p, souls, snapshot.classes.clone(), reserved, maps, places))
+                        })
+                }))
+                .unwrap_or_else(|p| {
+                    town = buildsafe::TownCopy::new(kinds.clone());
+                    Err(Refused {
                         op: None,
-                        name: "edit.stale",
-                        detail: "the published copy has not reached the map basis".into(),
-                    }),
-                    Some(c) => {
-                        world.creator = c;
-                        edit::check(e, &copy, world)
-                    }
-                    None => Err(Refused {
-                        op: None,
-                        name: "edit.not-the-creator",
-                        detail: "the world's record names no creator".into(),
-                    }),
-                };
-                let checked = checked
-                    .and_then(|c| {
-                        let known = town.on(&copy, ground, false).map(|t| Known::of(t));
-                        // Planned with the ids the commit will mint, so its guard's ground is the map's (#3743).
-                        sim::edit::plan_classes(
-                            c,
-                            &copy,
-                            ground,
-                            known.as_ref(),
-                            snapshot.classes.values().copied(),
-                            reserved.clone(),
-                        )
+                        name: EDIT_FAILED,
+                        detail: panic_text(p.as_ref()),
                     })
-                    .and_then(|mut p| {
-                        let kept = p.take_map();
-                        let places = crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
-                        let tree = buildsafe::souls(&copy, &world.kinds);
-                        let souls = buildsafe::judged(tree, &snapshot.bodies);
-                        let maps = source
-                            .map(|source| {
-                                buildsafe::PreparedMaps::prepare_classes(
-                                    &copy,
-                                    &p,
-                                    kept,
-                                    reserved.clone(),
-                                    &souls,
-                                    source,
-                                    &snapshot.classes,
-                                    &snapshot.movers,
-                                )
-                            })
-                            .transpose()?;
-                        Ok((p, souls, snapshot.classes.clone(), reserved, maps, places))
-                    });
+                });
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
                     break;
                 }
@@ -5017,6 +5039,19 @@ fn edit_checker(
         })
         .map_err(io)?;
     Ok(tx)
+}
+
+/// An edit whose check panicked (#3958): answered by this name, the checker kept.
+const EDIT_FAILED: &str = "edit.failed";
+/// An edit sent when the checker's thread is gone (#3958): answered by this name, never left open.
+const EDIT_NO_CHECKER: &str = "edit.no-checker";
+
+/// A panic's message, as far as it has one.
+fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| p.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic".into())
 }
 
 /// `effects` numbered from the replica's next sequence, made one part and applied to it: the part, or the refusal.
