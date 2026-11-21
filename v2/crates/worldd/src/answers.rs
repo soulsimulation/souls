@@ -1597,12 +1597,13 @@ impl Clock {
             // form writes into a field everyone reads are everyone's (#3712).
             let author = match (self.body_of(&intent), intent.actor) {
                 (Ok(b), _) => {
-                    let public = match (form, &intent.target) {
-                        (words::Form::Other, Some(Target::Node(node))) => self
-                            .forms
-                            .public_words(self.replica.tree(), *node, intent.verb.as_str()),
-                        _ => false,
-                    };
+                    let public =
+                        match (form, &intent.target) {
+                            (words::Form::Other, Some(Target::Node(node))) => self
+                                .forms
+                                .public_words(self.replica.tree(), *node, intent.verb.as_str()),
+                            _ => false,
+                        };
                     let audience = match public {
                         true => Audience::Everyone,
                         false => words::audience(form, b),
