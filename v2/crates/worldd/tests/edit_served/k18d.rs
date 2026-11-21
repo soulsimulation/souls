@@ -398,8 +398,9 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
     let Value::Array(mut buried) = before.clone() else {
         panic!("the building's walls: {before:?}")
     };
-    // The chair stands at (2 m, -0.509 m) of the building's frame: the inner room's middle, back 0.509 m.
-    buried.push(row(&[2000, -509, 400, 400, 0, 0, 2500, 1, 0]));
+    // A solid filling the inner room, the chair in it at (2 m, -0.509 m) of the building's frame: no ground is left
+    // for the seated Soul to stand up onto.
+    buried.push(row(&[2000, 0, 1900, 1900, 0, 0, 2500, 1, 0]));
     let (bury, _) = send(
         &mut maker,
         edit_intent(
