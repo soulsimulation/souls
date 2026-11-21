@@ -1,0 +1,77 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:bin with today's litter (core-bin@2, #1088; #3717): a held wrapper or litter goes into a named place of the three; a free hand takes one out.",
+  "cases": [
+    {
+      "name": "bin_put_in_held_wrapper",
+      "act": {
+        "this": "t1",
+        "form": "put_in",
+        "args": {
+          "thing": "w1",
+          "place": "in_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:bin"
+          },
+          "w1": {
+            "kind": "eden:wrapper"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bin_take_out_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "take_out",
+        "args": {
+          "thing": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:bin"
+          },
+          "w1": {
+            "kind": "eden:wrapper"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    }
+  ]
+}

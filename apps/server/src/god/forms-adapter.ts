@@ -80,7 +80,7 @@ const HERE = '@here';
 const WORLD = '@world';
 /** Who may start a form here: anyone, or its holder (the rules' held_by_actor need decides who holds it). */
 const WHO = new Set([undefined, 'anyone', 'holder']);
-type Takes = Record<string, { type?: string; select?: { of?: string; kind?: string; order?: string; rank?: number } }>;
+type Takes = Record<string, { type?: string; select?: { of?: string; kind?: string; order?: string; rank?: number | string; in?: string; anchor?: string } }>;
 /** A form offered on an entry thing: its own, or the body's with the thing as its argument `thing`. */
 type FormRef = { form: Form & { takes?: Takes }; body: Entry | null };
 const argName = (v: unknown) => (v && typeof v === 'object' && 'arg' in (v as object) ? String((v as { arg: unknown }).arg) : null);

@@ -33,7 +33,7 @@ pub const LAP: i64 = 150_000_000;
 pub const ROWING: i64 = 600_000;
 
 /// cos and sin of k/16 of a turn, parts per million.
-const TURN16: [(i64, i64); 16] = [
+pub(super) const TURN16: [(i64, i64); 16] = [
     (1_000_000, 0),
     (923_880, 382_683),
     (707_107, 707_107),
@@ -80,7 +80,7 @@ fn inside(r: &[Xz], p: Xz) -> bool {
 }
 
 /// `v` scaled by `ppm` parts per million, rounded.
-fn ppm(v: i64, ppm: i64) -> i64 {
+pub(super) fn ppm(v: i64, ppm: i64) -> i64 {
     let n = i128::from(v) * i128::from(ppm);
     i64::try_from(if n >= 0 {
         (n + 500_000) / 1_000_000
