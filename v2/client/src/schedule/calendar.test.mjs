@@ -117,3 +117,20 @@ test('A2: words beside a records answer reach the copy for public records only',
   const [item] = calendarItems(posted, kinds);
   assert.equal(item.words, 'Tea at four');
 });
+
+test("#3699: a creator's event (words and a start, no poster link) is posted and on whatson; a blank stays blank", () => {
+  const placed = copyOf([
+    { n: 1, kind: 'souls:world' },
+    { n: 3, kind: 'eden:room', parent: 1 },
+    // Placed by a creator's edit: its words kept for everyone, no poster link.
+    { n: 60, kind: 'eden:calendar_entry', parent: 3, fields: [[n('start'), world(15)], [n('end'), world(75)], [n('words'), words('Market on the green')]] },
+    // A blank notice: no poster and no words.
+    { n: 61, kind: 'eden:calendar_entry', parent: 3 },
+  ]);
+  const rows = rowsOf(placed), items = calendarItems(placed, kinds);
+  const out = whatsOn(items, { rows, me: text(100), clock, cal, nowMs: NOW, hours: 3 });
+  assert.deepEqual(out.on.map((r) => [r.id, r.title, r.phase, r.startsInMinutes, r.forMinutes]), [[text(60), 'Market on the green', 'soon', 15, 60]]);
+  assert.equal('by' in out.on[0], false, 'no Soul posted it');
+  assert.deepEqual(calendarList(items, { rows, me: text(100), clock, cal, nowMs: NOW }).blank.map((b) => b.id), [text(61)]);
+  assert.equal(blankAt(items, rows, text(3))?.id, text(61), 'calendar add never writes over the creator\'s event');
+});
