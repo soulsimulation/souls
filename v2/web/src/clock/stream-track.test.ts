@@ -24,7 +24,7 @@ test('the page Track draws a served Soul at changing positions from the real pub
   // world.json names the stream from the world's folder (`views/…`); V2_STREAM_DIR is the `views/` folder itself.
   const stream = (JSON.parse(readFileSync(join(dir, 'world.json'), 'utf8')).stream as string).replace(/^views\//, '');
   const base = `https://stream.example.invalid/${stream.replace(/^\/+|\/+$/g, '')}/`;
-  const parts: PartRec[] = [], errors: string[] = [], polls: (() => Promise<void>)[] = [];
+  const parts: PartRec[] = [], errors: string[] = [], polls: (() => Promise<void>)[] = [], stamps: number[] = [];
   const fetchBefore = globalThis.fetch, intervalBefore = globalThis.setInterval, selfBefore = (globalThis as { self?: unknown }).self;
   try {
     globalThis.fetch = (async (input: string | URL) => {
@@ -38,7 +38,7 @@ test('the page Track draws a served Soul at changing positions from the real pub
     (globalThis as { setInterval: unknown }).setInterval = (fn: () => Promise<void>) => { polls.push(fn); return 1; };
     (globalThis as { self?: unknown }).self = {
       onmessage: null as null | ((e: unknown) => void),
-      postMessage: (m: { t: string; p: PartRec; message: string }) => (m.t === 'part' ? parts.push(m.p) : m.t === 'error' ? errors.push(m.message) : undefined),
+      postMessage: (m: { t: string; p: PartRec; message: string }) => (m.t === 'part' ? (parts.push(m.p), stamps.push(performance.now())) : m.t === 'error' ? errors.push(m.message) : undefined),
     };
     await import(new URL('../source/worker.ts?stream-track', import.meta.url).href);
     (globalThis as unknown as { self: { onmessage: (e: unknown) => void } }).self.onmessage({ data: { stream: base } });
@@ -46,6 +46,9 @@ test('the page Track draws a served Soul at changing positions from the real pub
     const until = Date.now() + 10_000;
     while (!polls.length && !errors.length && Date.now() < until) await new Promise((r) => setImmediate(r));
     for (let seen = -1; seen !== parts.length && !errors.length; ) { seen = parts.length; await polls[0]?.(); }
+    // Each part's time in the worker, the later half of the stream (walking, after the joins).
+    const each = stamps.slice(1).map((t, i) => t - stamps[i]).slice(Math.floor(stamps.length / 2)).sort((a, b) => a - b);
+    if (each.length) console.log(`the worker's later half: median ${each[each.length >> 1].toFixed(1)} ms a part, 90th ${each[Math.floor(each.length * 0.9)].toFixed(1)} ms`);
     console.log(`the page's worker played ${parts.length} parts in ${((performance.now() - began) / 1000).toFixed(1)} s (${((performance.now() - began) / Math.max(1, parts.length)).toFixed(1)} ms a part)`);
   } finally {
     globalThis.fetch = fetchBefore;
