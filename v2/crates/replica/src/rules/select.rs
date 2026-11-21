@@ -1,5 +1,5 @@
 //! A thing argument the act leaves out, chosen by its selector as worldd chooses it (`select_thing`, #3914) and as
-//! `@souls/form-rules` does (`chosenSlots`, `selectThing`): the same set, order and rank, read from the input alone.
+//! today's form rules do (`chosenSlots`, `selectThing`): the same set, order and rank, read from the input alone.
 
 use super::json::Value;
 use super::{has, sees_audience, sorted};

@@ -570,7 +570,7 @@ pub fn decide_parts(
     else {
         return Rules::bad_verdict(-1, "malformed", vec![], vec![]);
     };
-    // A thing argument left out is chosen by its selector, as worldd and `@souls/form-rules` choose it (#3914).
+    // A thing argument left out is chosen by its selector, as worldd and today's form rules choose it (#3914).
     let owned;
     let mut none = None;
     let act = match select::chosen(kinds, act, state, asker.get("sees")) {
