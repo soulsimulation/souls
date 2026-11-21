@@ -182,7 +182,8 @@ sleeps on, and one wandering or walking out starts its hour again.
 10. **The hatch is one pure function named by the hash of its module** (SA-F9, #3000): `{1: module (its SHA-256
     multihash), 2: [read, ...], 3: steps most, 4: answers, 5: why}`. Reads are declared, whole values only: a field
     of the thing `{1: 1, 2: field}` or an argument of the form `{1: 2, 2: name}`; it reads nothing else. It answers a
-    verdict `{1: 1}` or one field's new value `{1: 2, 2: field}`. Its steps are 1 to 1,000,000, counted by F8's own
+    verdict `{1: 1}`, one field's new value `{1: 2, 2: field}`, or a verdict and, with a yes, the new values of up to
+    eight fields `{1: 3, 2: [field, ...]}` (a board's pieces, whose turn, the phase). Its steps are 1 to 1,000,000, counted by F8's own
     meter, never a runtime's. `why` is its text key. Refusals: `hatch-not-a-record` (unknown fields included),
     `hatch-module-not-hash`, `hatch-reads-nothing`, `hatch-steps-out-of-range`. One read is the engine's floor; SA-F9's
     gate asks for two, against hatches that bypass the closed lists. It sits on a form (`forms.<name>.hatch`), inside
@@ -193,9 +194,14 @@ sleeps on, and one wandering or walking out starts its hour again.
     in. A module is refused at load by name: `hatch-module-hash-differs`, `-invalid`, `-float` (any float
     instruction), `-imports`, `-memory` (over 1 MiB), `-shape`. It exports `memory`, an `i32` global `input` and
     `run: (i32) -> i64`; the host writes each read at `input` as a count of i64 words and the words (a list or a
-    record flattened in order). Over its budget a call ends `hatch-over-budget`; any other fault `hatch-trapped`, in
+    record flattened in order, an enum's value as its place in the field's `values`). A hatch that answers fields
+    also exports an `i32` global `output`: when `run` answers 1 it has written there, for each answered field in
+    order, a count of words (at most 1,024) and the words, the same shape as a read; the form runner turns them into
+    the fields' values by their definitions and refuses a misfit `hatch-answer-malformed` (past a bound, not one of
+    an enum's values, the wrong number of words, more records than the list's `most`), a bad count
+    `hatch-output-malformed`. Over its budget a call ends `hatch-over-budget`; any other fault `hatch-trapped`, in
     that call only. The form runner binds and calls it (`bind_hatch`, `run_hatch`); a no refuses the act
-    `hatch-said-no` with its `why`. Answering a field's value is not built yet (`hatch-answer-not-built`).
+    `hatch-said-no` with its `why`.
 
 **Step 0.** A throwaway skill crate depending on `replica` alone, naming `sim::walk::Walker`, does not compile:
 `error[E0433]: failed to resolve: use of unresolved module or unlinked crate 'sim'`. The same crate using only
