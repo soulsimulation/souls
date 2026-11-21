@@ -659,7 +659,9 @@ mod class_snapshot_tests {
 #[cfg(test)]
 mod checker_town_tests {
     use super::*;
-    use replica::effects::{Actor, Body as EffectBody, Cause, Change, ChangeRec, Effect, Envelope, Rest};
+    use replica::effects::{
+        Actor, Body as EffectBody, Cause, Change, ChangeRec, Effect, Envelope, Rest,
+    };
     use replica::encode::Value;
     use replica::world_model::Audience;
 
@@ -669,7 +671,9 @@ mod checker_town_tests {
         let change = Change::Set {
             node,
             field: import_eden::F_SOLIDS,
-            to: Value::Array(vec![Value::Array(row.iter().map(|&v| Value::Uint(v)).collect())]),
+            to: Value::Array(vec![Value::Array(
+                row.iter().map(|&v| Value::Uint(v)).collect(),
+            )]),
             by: None,
         };
         let id = |c| Id::new(replica::ids::Scope([0x37; 16]), c).unwrap();

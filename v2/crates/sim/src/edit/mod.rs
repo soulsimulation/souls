@@ -23,7 +23,9 @@ pub mod undo;
 pub mod weather;
 
 use crate::commit::{off_clock, write_guarded};
+use crate::ground::Versions;
 use crate::structure::Structure;
+use crate::walk::town::{Basis, Rebuilt};
 use replica::apply::Replica;
 use replica::edit::{Checked, Op, Ref, Refused, confirm};
 use replica::effects::{Body, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest};
@@ -34,8 +36,6 @@ use replica::pose::Frame;
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::Audience;
-use crate::ground::Versions;
-use crate::walk::town::{Basis, Rebuilt};
 use safety::{Guard, Known, Who, guard, guard_kept, guard_on};
 use std::collections::BTreeMap;
 use std::sync::Arc;
