@@ -505,6 +505,7 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
     if (catchingUp) { host.stop(); await catchingUp; }
     if (writesInFlight.size) {
       const n = writesInFlight.size, t = performance.now();
+      if (WRITE_DRAIN_TRACE) console.log(`[world] ${sig}: draining ${n} write request(s) in flight`);
       await Promise.race([Promise.all(writesInFlight), new Promise((r) => setTimeout(r, WRITE_DRAIN_MS))]);
       console.log(`[world] ${sig}: ${n - writesInFlight.size} of ${n} write request(s) in flight answered in ${Math.round(performance.now() - t)} ms`);
     }
