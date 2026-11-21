@@ -18,6 +18,9 @@
 //   souls-god.mjs strike <x,z | id>              lightning at a point (metres on the open ground) or on a place
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs status | stop                  the daemon
+//   souls-god.mjs where <x,z|name|id> | clear <x,z|name|id> --size WxD | free WxD --near <x,z|name|id>
+//                                                the room, areas and nearest things there; whether a footprint is free
+//                                                of things and buildings; the nearest free one (world metres, space.mjs)
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
 //   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
 //                                                these two ask the world's directory, with the creator's token
@@ -34,8 +37,9 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
+import { parseSpace, runSpace } from './space.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'check', 'status', 'stop', 'welcome', 'visitors'];
+export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'check', 'status', 'stop', 'welcome', 'visitors', 'where', 'clear', 'free'];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
 export const WORLD_VERBS = ['weather', 'sky', 'strike'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -69,6 +73,8 @@ export const FIX = {
   'strike.off-the-ground': 'strike somewhere on the world\'s ground',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'which-creator': 'name one with --creator',
+  'nothing-by-that-name': 'give x,z in metres, or a name or id describe lists',
+  'no-browser': 'install a headless browser: npm i -g playwright && npx playwright install chromium',
   'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
   'welcome-too-long': 'at most 500 characters',
   'welcome-not-text': 'plain words and line breaks only',
@@ -132,6 +138,7 @@ export function requestOf(argv) {
   const [verb = 'status', ...rest] = args;
   if (!VERBS.includes(verb)) throw Object.assign(new Error(`one of ${VERBS.join(', ')}`), { code: 'unknown-command' });
   if (verb === 'pair') return { pair: rest[0], creator };
+  if (verb === 'where' || verb === 'clear' || verb === 'free') { parseSpace(verb, rest); return { space: verb, args: rest, creator }; }
   if (verb === 'welcome') {
     if (rest.length > 1) throw usage("welcome '<words>': quote the words as one argument");
     return { directory: '/v1/worlds/welcome', body: { welcome: rest[0] ?? '' }, creator };
@@ -189,6 +196,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const asked = requestOf(process.argv.slice(2));
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
     if (asked.pair !== undefined) { out(await pairing(home, asked.pair, asked.creator)); process.exit(0); }
+    if (asked.space) { out(await runSpace(asked.space, asked.args, { home, env: process.env })); process.exit(0); }
     const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
     const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
     if (!creator) throw Object.assign(new Error(`creators here: ${creators.join(', ') || 'none; pair first'}`), { code: 'which-creator' });
