@@ -2080,7 +2080,7 @@ impl Clock {
                     kinds: BTreeMap::new(),
                 };
                 let (history, replica) = (&mut self.history, &mut self.replica);
-                let write = || {
+                let mut write = || {
                     let mut rule = |_: &Replica, list: &[Effect]| {
                         if !crate::undo::same(list, &effects) {
                             return Err(Refused {
