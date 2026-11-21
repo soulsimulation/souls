@@ -32,6 +32,10 @@
 //   souls-god.mjs build claim <part> --area x0,z0,x1,z1 | --district <id> [--plots a,b]   a build claim over an area
 //                                                (mm on the ground), or over a plan's plots (its next chapter if none)
 //   souls-god.mjs build claims | build release <claim>    the live claims (ids c:k<8 hex>); a claim released
+//   souls-god.mjs own <id> <soul id|god|group:<name>|none> [--private|--public]   who owns a thing or a place (#3700)
+//   souls-god.mjs access <id> private|public|none   a private thing is its owner's alone; what is inside takes its mark
+//   souls-god.mjs zone <name> <use> --rect cx,cz,w,d | --circle cx,cz,r | --area '[[x,z],...]'   a land-use zone (mm)
+//   souls-god.mjs zone-suggest <use> | layers | secret   what suits a use; zones and marks; secret places (off)
 //   place, move, set, remove, batch, check ... --claim <claim>   sent under a build claim: it builds only inside it,
 //                                                and others stay out of it until it is released
 //   souls-god.mjs build claim ... --helper [--ttl <minutes>]   the claim with a helper (#3727): a scoped token for a
@@ -66,6 +70,7 @@ import { answer as libraryAnswer, libraryOf } from './catalog.mjs';
 import { worldOf } from '../cli/souls.mjs';
 
 export const VERBS = [
+  'access',
   'batch',
   'build',
   'catalog',
@@ -73,12 +78,15 @@ export const VERBS = [
   'describe',
   'find',
   'land',
+  'layers',
   'move',
+  'own',
   'pair',
   'place',
   'recommend',
   'redo',
   'remove',
+  'secret',
   'set',
   'sky',
   'status',
@@ -89,6 +97,8 @@ export const VERBS = [
   'visitors',
   'weather',
   'welcome',
+  'zone',
+  'zone-suggest',
 ];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
 export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land'];
@@ -151,6 +161,10 @@ export const FIX = {
   'district.exists': 'a plan is recorded once: pick a new id, or claim its chapters (build district <id>)',
   'district.plot': 'build district <id> lists its plots',
   'claim.unknown': 'build claims lists the live claims',
+  'edit.owner-malformed': 'own <id> <soul id|god|group:<name>|none>; access <id> private|public|none',
+  'edit.zone-malformed': `zone <name> <${'residential|commercial|park|farm|civic|industrial|wild'}> with an outline of 3 to 64 points`,
+  'zone.unknown': 'layers lists the zones',
+  'secret.off': 'secret places are off, as on soul.game today: every place is on every Soul\'s map',
   'which-creator': 'name one with --creator',
   'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
   'welcome-too-long': 'at most 500 characters',
@@ -236,6 +250,7 @@ export function requestOf(argv) {
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe' || verb === 'redo') return { req: { op: verb }, creator };
   if (verb === 'build') return { build: buildOf(rest), creator };
+  if (LAYER_VERBS.includes(verb)) return { layer: layerOf(verb, rest), creator };
   if (verb === 'undo') { const build = takeOpt(rest, '--build'); return { req: { op: 'undo', ...(build !== undefined ? { build } : {}) }, creator }; }
   if (verb === 'check' && WORLD_VERBS.includes(rest[0])) return { req: { op: 'check', world: worldVerbOf(rest[0], rest.slice(1)), ...under }, creator };
   if (WORLD_VERBS.includes(verb)) return { req: { op: 'edit', world: worldVerbOf(verb, rest), ...under }, creator };
@@ -513,6 +528,99 @@ async function pairing(home, url, grant, { within = 15_000 } = {}) {
   throw Object.assign(new Error(`no answer from ${directory}`), { code: 'directory-not-answering' });
 }
 
+
+// ---------------------------------------------------------------- #3700: ownership, access and land-use zones
+// Today's `own`, `access`, `zone`, `zone-suggest`, `layers` and `secret` (tools/god-skill/lib/layers.mjs). Owner and
+// access are two fields of the thing (replica `who_may::F_OWNER`, `F_ACCESS`); zones are a root field (142). Each is an
+// ordinary edit, so undo takes it back. Secret places are off on soul.game today (#1262), so `secret` says so.
+export const F_OWNER = 143, F_ACCESS = 144, F_ZONES = 142;
+export const LAYER_VERBS = ['own', 'access', 'zone', 'zone-suggest', 'layers', 'secret'];
+export const USES = ['residential', 'commercial', 'park', 'farm', 'civic', 'industrial', 'wild'];
+/** Today's catalogue categories for each use (apps/server/src/god/layers.ts ZONE_SUGGEST). */
+export const ZONE_SUGGEST = {
+  residential: ['building.residential', 'furniture.seat', 'vegetation.shrub', 'vegetation.flower', 'utility.lighting', 'object.street'],
+  commercial: ['building.commercial', 'public.square', 'object.street', 'object.sign', 'furniture.seat', 'utility.lighting', 'object.food'],
+  park: ['public.park', 'vegetation.tree', 'vegetation.flower', 'water.feature', 'public.play', 'furniture.seat', 'utility.lighting'],
+  farm: ['building.agricultural', 'vegetation.crop', 'living.farm', 'object.tool', 'object.container'],
+  civic: ['building.civic', 'public.square', 'public.monument', 'public.venue', 'object.sign', 'water.feature'],
+  industrial: ['building.industrial', 'utility.power', 'utility.waste', 'vehicle.road', 'layer.construction', 'object.container'],
+  wild: ['vegetation.tree', 'terrain.landform', 'terrain.rock', 'water.body', 'living.wild', 'living.bird'],
+};
+const ID_TEXT = /^[0-9a-f]{32}-\d+$/;
+/** An owner as written: a Soul's id, god, group:<name> or none, as the field holds it. */
+export function ownerValue(t) {
+  const v = String(t ?? '');
+  if (v === 'none') return 0;
+  if (v === 'god') return 'owner:god';
+  if (/^group:[a-z][a-z0-9_-]*$/.test(v)) return v;
+  if (ID_TEXT.test(v.replace(/^soul:/, ''))) return v.replace(/^soul:/, '');
+  throw usage(`own <id> <soul id|god|group:<name>|none>, not ${v}`);
+}
+const ACCESS = { none: 0, public: 1, private: 2 };
+/** A zone's outline in whole mm, as today's --rect, --circle and --area give it (here in mm). */
+export function outlineOf({ rect, circle, area }) {
+  const nums = (t, n, what) => { const a = String(t).split(',').map(Number); if (a.length < n || a.slice(0, n).some((x) => !Number.isFinite(x))) throw usage(`${what}, in mm`); return a; };
+  let pts;
+  if (rect !== undefined) { const [cx, cz, w, d] = nums(rect, 4, '--rect cx,cz,w,d'); pts = [[cx - w / 2, cz - d / 2], [cx + w / 2, cz - d / 2], [cx + w / 2, cz + d / 2], [cx - w / 2, cz + d / 2]]; }
+  else if (circle !== undefined) { const [cx, cz, r] = nums(circle, 3, '--circle cx,cz,r'); pts = Array.from({ length: 12 }, (_, k) => [cx + Math.sin((k / 12) * 2 * Math.PI) * r, cz + Math.cos((k / 12) * 2 * Math.PI) * r]); }
+  else if (area !== undefined) { try { pts = JSON.parse(area); } catch { throw usage("--area '[[x,z],...]' in mm"); } }
+  else throw usage('zone <name> <use> --rect cx,cz,w,d | --circle cx,cz,r | --area \'[[x,z],...]\' (mm)');
+  if (!Array.isArray(pts) || pts.length < 3 || pts.some((p) => !Array.isArray(p) || p.length !== 2 || p.some((n) => !Number.isFinite(Number(n))))) throw usage('a zone outline is at least three [x, z] points');
+  return pts.flatMap(([x, z]) => [Math.round(Number(x)), Math.round(Number(z))]);
+}
+
+/** The request a layer verb's words make. */
+export function layerOf(verb, words) {
+  const args = [...words];
+  if (verb === 'own') {
+    const priv = args.indexOf('--private'), pub = args.indexOf('--public');
+    for (const k of [priv, pub].filter((k) => k >= 0).sort((a, b) => b - a)) args.splice(k, 1);
+    if (args.length !== 2) throw usage('own <id> <soul id|god|group:<name>|none> [--private|--public]');
+    return { act: 'own', node: args[0], owner: ownerValue(args[1]), ...(priv >= 0 ? { access: 2 } : pub >= 0 ? { access: 1 } : {}) };
+  }
+  if (verb === 'access') {
+    if (args.length !== 2 || !(args[1] in ACCESS)) throw usage('access <id> private|public|none');
+    return { act: 'access', node: args[0], access: ACCESS[args[1]] };
+  }
+  if (verb === 'zone') {
+    const rect = takeOpt(args, '--rect'), circle = takeOpt(args, '--circle'), area = takeOpt(args, '--area');
+    const [name, use] = args;
+    if (!name || !USES.includes(use)) throw usage(`zone <name> <${USES.join('|')}> --rect cx,cz,w,d | --circle cx,cz,r | --area '[[x,z],...]' (mm); zone <name> none removes it`);
+    return { act: 'zone', name: slug(name), use, outline: outlineOf({ rect, circle, area }) };
+  }
+  if (verb === 'zone-suggest') {
+    if (!USES.includes(args[0])) throw usage(`zone-suggest <${USES.join('|')}>`);
+    return { act: 'zone-suggest', use: args[0] };
+  }
+  return { act: verb };
+}
+
+/** The zones a root field holds, as a creator reads them. */
+export const zonesIn = (v) => (Array.isArray(v) ? v : []).map(([n, u, pts]) => ({ name: bare(n), use: bare(u), outline: (pts ?? []).reduce((o, x, i) => (i % 2 ? (o.at(-1).push(x), o) : [...o, [x]]), []) }));
+
+/** Runs a layer request through the daemon; the answer to print. */
+export async function runLayer(l, ask) {
+  if (l.act === 'secret') return { ok: false, code: 'secret.off', detail: 'secret places are off (#1262, decided 10 Nov 2026): every place is on every Soul\'s map', secrets: [] };
+  if (l.act === 'zone-suggest') return { ok: true, use: l.use, categories: ZONE_SUGGEST[l.use] };
+  const edit = (ops) => ask({ op: 'edit', ops });
+  if (l.act === 'own') return edit([{ op: 'set', node: l.node, field: F_OWNER, value: l.owner }, ...(l.access !== undefined ? [{ op: 'set', node: l.node, field: F_ACCESS, value: l.access }] : [])]);
+  if (l.act === 'access') return edit([{ op: 'set', node: l.node, field: F_ACCESS, value: l.access }]);
+  const root = await ask({ op: 'fields' });
+  if (root.ok === false) return root;
+  const zones = Array.isArray(root.fields[F_ZONES]) ? root.fields[F_ZONES] : [];
+  if (l.act === 'zone') {
+    const row = [`zone:${l.name}`, `use:${l.use}`, l.outline];
+    const out = await edit([{ op: 'set', node: root.id, field: F_ZONES, value: [...zones.filter((z) => z[0] !== row[0]), row] }]);
+    return out.ok === false ? out : { ...out, zone: { name: l.name, use: l.use }, suits: ZONE_SUGGEST[l.use] };
+  }
+  // layers: the zones, and every marked thing (describe carries each node's marks).
+  const d = await ask({ op: 'describe' });
+  if (d.ok === false) return d;
+  const words = { 0: 'none', 1: 'public', 2: 'private' };
+  const marked = d.nodes.filter((n) => n.marks).map((n) => ({ id: n.id, kind: n.kind, ...(n.marks.owner !== undefined ? { owner: n.marks.owner } : {}), ...(n.marks.access !== undefined ? { access: words[n.marks.access] ?? n.marks.access } : {}) }));
+  return { ok: true, zones: zonesIn(zones), marked, secrets: 'off, as today' };
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
   try {
@@ -541,7 +649,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // A helper's home sends every edit under its claim (#3727).
     const scoped = helperClaim(home);
     if (scoped && req && (req.op === 'edit' || req.op === 'check') && req.claim === undefined) req = { ...req, claim: scoped };
-    const answer = asked.build ? await runBuild(asked.build, ask, (minutes, claim) => mintHelper(home, creator, minutes, claim)) : await ask(req);
+    const answer = asked.build ? await runBuild(asked.build, ask, (minutes, claim) => mintHelper(home, creator, minutes, claim)) : asked.layer ? await runLayer(asked.layer, ask) : await ask(req);
     out(withFix(answer));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {

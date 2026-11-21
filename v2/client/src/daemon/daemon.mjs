@@ -804,6 +804,16 @@ function fullKind(kinds, k) {
   if (hit.length === 1) return hit[0];
   throw Object.assign(new Error(`${s}: ${hit.length ? 'ambiguous; copy a full pinned name from describe' : `not pinned; describe lists ${Object.keys(kinds).join(', ')}`}`), { code: 'edit.kind-unknown' });
 }
+/** #3700: a node's owner and access marks (replica `who_may::F_OWNER` 143, `F_ACCESS` 144), when it carries either. */
+function marksOf(row) {
+  const pairs = JSON.parse(row.own).find(([k]) => Number(k) === 6)?.[1] ?? [];
+  const get = (n) => pairs.find(([k]) => Number(k) === n)?.[1];
+  const owner = get(143), access = get(144);
+  if (owner === undefined && access === undefined) return {};
+  const who = Array.isArray(owner) ? `${owner[0]}-${owner[1]}` : owner === 0 ? 'none' : owner;
+  return { marks: { ...(owner !== undefined ? { owner: who } : {}), ...(access !== undefined ? { access: Number(access) } : {}) } };
+}
+
 /** The batch as replica's `ops_of` reads it: kinds by full name, positions in µm (a creator writes mm). */
 async function editOnce(req) {
   if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
@@ -1205,7 +1215,7 @@ async function answer(req) {
       // Where each stands in its parent, mm, for placing by relation (#3694).
       const poses = posesOf(copy);
       return {
-      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...poses.get(r.id), ...(r.text ? { text: r.text } : {}) })),
+      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...poses.get(r.id), ...(r.text ? { text: r.text } : {}), ...marksOf(r) })),
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
       };
     });

@@ -1919,6 +1919,18 @@ impl Clock {
             Taken::Engine(a) => a.body,
             Taken::SetDown(a) => a.body,
         };
+        // #3700: a private thing is its owner's alone, whatever reaches it: a bare sit or lie, a fixture's seat, an
+        // engine act (a lift's thing too) or a form. Checked once here, on the intent's target, before any dispatch.
+        // A walk up to it uses nothing, and an edit is the creator's.
+        let uses = match &taken {
+            Taken::Edit(_) => false,
+            Taken::Move(m) => !matches!(m.ask, replica::move_check::Ask::Walk { .. }),
+            _ => true,
+        };
+        if uses && self.private_to(&intent, actor, body) {
+            let a = self.refusal(actor, sequence, "object.private");
+            return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+        }
         self.next_intent += 1;
         // The recorder's input (K12): the intent by id and verb; its words, were there any, by reference only.
         self.inputs.push(Input::Intent {
@@ -2536,6 +2548,36 @@ impl Clock {
     }
 
     /// The body an intent drives: with joins (C3), a Soul's born body, else as [`body_of`] says.
+    /// Whether the intent's target, or a lift's thing, is private to someone other than its Soul (#3700): a Soul
+    /// actor is its own Soul; a body driven by the creator counts as the Soul it is linked to by `souls:body-of`.
+    fn private_to(&self, intent: &Intent, actor: Actor, body: Id) -> bool {
+        let tree = self.replica.tree();
+        let soul = match actor {
+            Actor::Soul(s) => s,
+            _ => tree
+                .links_at(body)
+                .iter()
+                .find(|e| replica::world_model::plain(tree.ty(e).as_str()) == "souls:body-of")
+                .map_or(body, |e| e.other),
+        };
+        let target = match &intent.target {
+            Some(Target::Node(n)) => Some(*n),
+            _ => None,
+        };
+        let thing = (intent.verb.as_str() == "carry:lift")
+            .then(|| {
+                intent
+                    .parameters
+                    .get(&1)
+                    .and_then(|v| replica::effects::read_id(v).ok())
+            })
+            .flatten();
+        [target, thing]
+            .into_iter()
+            .flatten()
+            .any(|n| replica::who_may::private_to(tree, n, soul).is_some())
+    }
+
     fn body_of(&self, intent: &Intent) -> Result<Id, &'static str> {
         match (intent.actor, &self.life) {
             (Actor::Soul(s), Some(l)) => l.life.body_of(s).ok_or("intent.no-body"),
@@ -3788,6 +3830,22 @@ impl Clock {
                 let changes = checks.candidates.iter().flat_map(|c| &c.changes);
                 let ends = Ends::unlinking(self.replica.tree(), changes);
                 self.unlinked.extend(ends);
+            }
+            // #3700: the checker read the private marks above the thing outside its read set; a mark committed since
+            // still binds, so the candidate this commit would take is asked again on the live tree.
+            let soul = match actor {
+                Actor::Soul(s) => s,
+                _ => act.body,
+            };
+            let taking = checks.candidates.iter().find(|c| {
+                sim::commit::unchanged(&self.replica, &c.reads)
+                    && matches!(c.verdict, sim::commit::Verdict::Yes)
+            });
+            if taking.is_some_and(|c| {
+                replica::who_may::private_to(self.replica.tree(), c.node, soul).is_some()
+            }) {
+                self.end(id, |c| c.refusal(actor, sequence, "object.private"));
+                continue;
             }
             match commit(&mut self.replica, &checks, now) {
                 Outcome::Applied { part, .. } => {

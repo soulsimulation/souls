@@ -18,7 +18,7 @@ import { createServer as createHttp } from 'node:http';
 import { DEFAULT_PKG } from '../daemon/client.mjs';
 import { readSeat } from '../home/home.mjs';
 import { pair } from '../pair/pair.mjs';
-import { areaOf, buildOf, opsOf, planRow, requestOf, resolve as resolveRelation } from './souls-god.mjs';
+import { areaOf, buildOf, layerOf, opsOf, outlineOf, planRow, requestOf, resolve as resolveRelation } from './souls-god.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -328,6 +328,50 @@ test('#3701: a creator records a district plan, claims its first chapter, builds
   assert.deepEqual((await god('build', 'claims')).claims, []);
   assert.equal((await god('remove', inside.names['1'])).ok, true);
   assert.equal((await god('build', 'release', c)).code, 'claim.unknown');
+});
+
+test('#3700: own, access and zone words make today\'s marks in the world\'s units', () => {
+  const soul = `${'ab'.repeat(16)}-4`;
+  assert.deepEqual(layerOf('own', ['aa-1', soul, '--private']), { act: 'own', node: 'aa-1', owner: soul, access: 2 });
+  assert.deepEqual(layerOf('own', ['aa-1', 'god']), { act: 'own', node: 'aa-1', owner: 'owner:god' });
+  assert.deepEqual(layerOf('own', ['aa-1', 'none', '--public']), { act: 'own', node: 'aa-1', owner: 0, access: 1 });
+  assert.deepEqual(layerOf('access', ['aa-1', 'none']), { act: 'access', node: 'aa-1', access: 0 });
+  assert.throws(() => layerOf('own', ['aa-1', 'Ana']), /soul id/);
+  assert.throws(() => layerOf('access', ['aa-1', 'secret']), /private\|public\|none/);
+  assert.deepEqual(outlineOf({ rect: '0,0,20,10' }), [-10, -5, 10, -5, 10, 5, -10, 5]);
+  assert.equal(outlineOf({ circle: '0,0,1000' }).length, 24);
+  assert.throws(() => layerOf('zone', ['market', 'casino', '--rect', '0,0,1,1']), /residential\|commercial/);
+  assert.deepEqual(requestOf(['secret']).layer, { act: 'secret' });
+});
+
+test('#3700: a creator marks a room private to a Soul, zones the land, and secret places stay off', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  const room = await god('place', 'room', '--in', place.id, '--at', '40000,0,40000');
+  assert.equal(room.ok, true, JSON.stringify(room));
+  const id = room.names['1'], soul = `${'ab'.repeat(16)}-4`;
+  const owned = await god('own', id, soul, '--private');
+  assert.equal(owned.ok, true, JSON.stringify(owned));
+  const marks = (await god('describe')).nodes.find((n) => n.id === id).marks;
+  assert.deepEqual(marks, { owner: soul, access: 2 });
+  assert.deepEqual((await god('layers')).marked.find((m) => m.id === id), { id, kind: 'souls:room', owner: soul, access: 'private' });
+  assert.equal((await god('access', id, 'public')).ok, true);
+  assert.equal((await god('describe')).nodes.find((n) => n.id === id).marks.access, 1);
+  // A mark that does not read is the world's refusal, with a fix.
+  const bad = await god('set', id, '144', '7');
+  assert.deepEqual([bad.ok, bad.code], [false, 'edit.owner-malformed'], JSON.stringify(bad));
+  assert.match(bad.fix, /access <id>/);
+
+  const zoned = await god('zone', 'Market Square', 'commercial', '--rect', '0,0,20000,10000');
+  assert.equal(zoned.ok, true, JSON.stringify(zoned));
+  assert.ok(zoned.suits.includes('building.commercial'));
+  assert.equal((await god('zone', 'park', 'park', '--circle', '50000,0,8000')).ok, true);
+  const L = await god('layers');
+  assert.deepEqual(L.zones.map((z) => [z.name, z.use, z.outline.length]), [['market-square', 'commercial', 4], ['park', 'park', 12]]);
+  assert.deepEqual((await god('zone-suggest', 'wild')).categories.slice(0, 2), ['vegetation.tree', 'terrain.landform']);
+  const secret = await god('secret');
+  assert.deepEqual([secret.ok, secret.code], [false, 'secret.off']);
+  assert.match(secret.fix, /every place is on every Soul/);
 });
 
 test('boot-body admission is shared by describe and local checks without revising kind pins', async () => {
