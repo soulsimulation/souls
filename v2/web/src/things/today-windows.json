@@ -1,0 +1,43 @@
+{
+ "note": "Today's outputs, pinned at the port (C10, #3681): sha256 of EDEN_ROOM_GLSL (mars/viewer/app/engine-view/content/assets/eden-window-interiors.ts) and of building-windows.ts's ROOM glass patch, and windowsLitAt (apps/web/src/WorldNightLights.ts) at these hours.",
+ "roomGlsl": "ee418c2536ffc6328cf965f9213b075cd51b1ebcebeb61fd6814b6ae9679d0c5",
+ "paneGlsl": "f8b2678b1b632d072d6db6bab54f4c35d1be3a9ef13211a24b9ab53ffa0f3257",
+ "litAt": [
+  [
+   0,
+   0.32
+  ],
+  [
+   3,
+   0.13574344023323615
+  ],
+  [
+   6,
+   0.34
+  ],
+  [
+   12,
+   0.3455933238347242
+  ],
+  [
+   17,
+   0.45
+  ],
+  [
+   18.5,
+   0.72
+  ],
+  [
+   20,
+   0.7121282798833819
+  ],
+  [
+   22,
+   0.7
+  ],
+  [
+   23.75,
+   0.37
+  ]
+ ]
+}

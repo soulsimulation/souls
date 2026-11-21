@@ -5,17 +5,21 @@
 // light writes its glow parts' colour slots and nothing else, so it uploads a few bytes and no geometry.
 import * as THREE from 'three';
 import { glowOf, partsOf, type ModelIndex, type Part } from './models.ts';
+import { NO_CUT, above, buildingView, cutHeight, decide, hidden, sameCut, type BuildingView, type Cut, type Storey } from './interior.ts';
 
 /** A model shared by at least this many things in the index is instanced; the rest are batched by material. */
 export const SHARED = 8;
 /** Models fetched at once. */
 const LOADING = 6;
-const HIDDEN = new THREE.Matrix4().makeScale(0, 0, 0);
 const OFF = new THREE.Color(0.22, 0.22, 0.22), ON = new THREE.Color(1, 1, 1), WHITE = new THREE.Color(1, 1, 1);
 
-/** Where one part of one thing is drawn. */
-type Slot = { batch: Batch; index: number; glow: boolean; flame?: THREE.Matrix4 };
-type Thing = { id: string; model: string | null; matrix: THREE.Matrix4; boxes: THREE.Matrix4[]; slots: Slot[]; on: boolean };
+/** Where one part of one thing is drawn, at `matrix` in the world; `storey`: a building's part (C10); `flame`: a static
+ *  flame part, hidden while the thing's animated fire draws. */
+type Slot = { batch: Batch; index: number; glow: boolean; matrix: THREE.Matrix4; storey?: Storey; flame?: boolean };
+/** `view` and `cut`: a generated building's interior view and its decision; `under`: hidden by a building's cut (the
+ *  furniture of the storeys it hides). */
+type Thing = { id: string; model: string | null; matrix: THREE.Matrix4; boxes: THREE.Matrix4[]; slots: Slot[]; on: boolean; view?: BuildingView; cut?: Cut; under?: string };
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 
 /** An instanced draw whose instances are packed: removing one moves the last into its place. */
 class Batch {
@@ -75,6 +79,11 @@ class Batch {
     this.mesh.instanceColor!.clearUpdateRanges();
     this.mesh.instanceColor!.needsUpdate = true;
   }
+  /** Shows or hides one instance (an instanced draw has no visibility of its own: a hidden one is scaled to nothing). */
+  show(i: number, matrix: THREE.Matrix4, on: boolean): void {
+    this.mesh.setMatrixAt(i, on ? matrix : ZERO);
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
   /** Writes one instance's colour and uploads only that slot. */
   color(i: number, c: THREE.Color): void {
     const a = this.mesh.instanceColor!;
@@ -121,6 +130,9 @@ class Shapes {
 
 export type ThingLayerOptions = {
   index: ModelIndex;
+  /** Today's `?hideRoofs=1` (every roof off) and `cut=<floor>` (with it, the storeys above that floor too). */
+  hideRoofs?: boolean;
+  cut?: number | null;
   /** Fetches a model's glTF bytes by hash. */
   fetch: (hash: string) => Promise<ArrayBuffer>;
   /** Each thing drawn this many times, each copy `spacing` metres further along x (V8's measure: Eden doubled). */
@@ -139,6 +151,8 @@ export class ThingLayer {
   private readonly pending = new Set<string>();
   private loading = 0;
   private readonly share = new Map<string, number>();
+  /** The generated buildings drawn from their models, for the interior view. */
+  private readonly buildings = new Set<Thing>();
   readonly copies: number;
   spacing: number;
   /** Models loaded, and those that failed (drawn as boxes for good). */
@@ -181,6 +195,8 @@ export class ThingLayer {
       this.clear(t);
       this.things.delete(cid);
       if (t.model) this.users.get(t.model)?.delete(t);
+      if (t.view) this.uncut(t);
+      this.buildings.delete(t);
     }
   }
 
@@ -201,10 +217,45 @@ export class ThingLayer {
   /** Hides or shows a thing's static flame parts while its animated fire draws (fx/layer.ts), as today's flames do. */
   standIns(id: string, shown: boolean): void {
     if (shown) this.flamesHidden.delete(id); else this.flamesHidden.add(id);
-    for (const s of this.things.get(id)?.slots ?? []) if (s.flame) {
-      if (s.batch instanceof Batch) (s.batch.mesh.setMatrixAt(s.index, shown ? s.flame : HIDDEN), (s.batch.mesh.instanceMatrix.needsUpdate = true));
-      else (s.batch as unknown as Shapes).mesh.setVisibleAt(s.index, shown);
+    const t = this.things.get(id);
+    if (t) this.show(t, !t.under);
+  }
+
+  /** Shows or hides every part of a thing that its own storey, or its burning fire (a flame stand-in), does not hide. */
+  private show(t: Thing, on: boolean): void {
+    for (const s of t.slots) {
+      const visible = on && !(t.view && s.storey && hidden(s.storey, t.cut ?? NO_CUT, t.view.floors)) && !(s.flame && this.flamesHidden.has(t.id));
+      if (s.batch instanceof Batch) s.batch.show(s.index, s.matrix, visible);
+      else (s.batch as unknown as Shapes).mesh.setVisibleAt(s.index, visible);
     }
+  }
+
+  /** C10, today's interior view: each building decides for the camera at `eye`; a changed decision shows or hides its
+   *  roof and storeys and the things standing on the storeys it hides. */
+  interior(eye: THREE.Vector3): number {
+    let changed = 0;
+    for (const b of this.buildings) {
+      const c = decide(b.view!, eye, this.opts.hideRoofs, this.opts.cut ?? null);
+      if (sameCut(c, b.cut ?? NO_CUT)) continue;
+      changed++;
+      b.cut = c;
+      this.show(b, true);
+      this.uncut(b);
+      const y = cutHeight(b.view!, c);
+      if (y === Infinity) continue;
+      const p = new THREE.Vector3();
+      for (const t of this.things.values()) {
+        if (t === b || t.view || t.under || !above(b.view!, p.setFromMatrixPosition(t.matrix), y)) continue;
+        t.under = b.id;
+        this.show(t, false);
+      }
+    }
+    return changed;
+  }
+
+  /** Shows again what a building's cut hid. */
+  private uncut(b: Thing): void {
+    for (const t of this.things.values()) if (t.under === b.id) (t.under = undefined, this.show(t, true));
   }
 
   private clear(t: Thing): void {
@@ -221,28 +272,32 @@ export class ThingLayer {
     if (!parts) {
       if (t.model && !this.pending.has(t.model) && !this.models.has(t.model)) this.pending.add(t.model);
       for (const b of t.boxes) {
-        const s: Slot = { batch: this.boxes, index: 0, glow: false };
+        const s: Slot = { batch: this.boxes, index: 0, glow: false, matrix: b };
         s.index = this.boxes.add(s, b, WHITE);
         t.slots.push(s);
       }
+      if (t.under) this.show(t, false);
       return;
     }
-    const shared = (this.share.get(t.model!) ?? 0) >= SHARED;
-    const m = new THREE.Matrix4();
+    // A building is batched whatever its share, so each one's storeys show and hide on their own (C10).
+    const view = buildingView(parts, t.matrix);
+    if (view) (t.view = view, this.buildings.add(t));
+    const shared = !view && (this.share.get(t.model!) ?? 0) >= SHARED;
     parts.forEach((p, k) => {
-      m.multiplyMatrices(t.matrix, p.matrix);
+      const m = new THREE.Matrix4().multiplyMatrices(t.matrix, p.matrix);
       const color = p.glow ? (t.on ? ON : OFF) : WHITE;
       if (shared) {
         const batches = this.instanced.get(t.model!) ?? this.instanced.set(t.model!, parts.map((q) => new Batch(this, q.geometry, q.material, (this.share.get(t.model!) ?? 1) * this.copies))).get(t.model!)!;
-        const s: Slot = { batch: batches[k], index: 0, glow: p.glow, ...(p.flame ? { flame: m.clone() } : {}) };
+        const s: Slot = { batch: batches[k], index: 0, glow: p.glow, matrix: m, ...(p.flame ? { flame: true } : {}) };
         s.index = batches[k].add(s, m, color);
         t.slots.push(s);
       } else {
         const shapes = this.batched.get(p.material) ?? this.batched.set(p.material, new Shapes(this, p.material)).get(p.material)!;
-        t.slots.push({ batch: shapes as unknown as Batch, index: shapes.add(p.geometry, m, color), glow: p.glow, ...(p.flame ? { flame: m.clone() } : {}) });
+        t.slots.push({ batch: shapes as unknown as Batch, index: shapes.add(p.geometry, m, color), glow: p.glow, matrix: m, ...(p.storey ? { storey: p.storey } : {}), ...(p.flame ? { flame: true } : {}) });
       }
     });
-    if (this.flamesHidden.has(t.id)) this.standIns(t.id, false); // a model arriving under a burning fire
+    // A model arriving under a cut, or under a burning fire.
+    if (t.under || t.cut || this.flamesHidden.has(t.id)) this.show(t, !t.under);
   }
 
   /** A model has arrived: its things leave their boxes for it. */
@@ -256,8 +311,9 @@ export class ThingLayer {
     }
   }
 
-  /** Starts loading the pending models nearest `eye`, a few at a time. Call once a frame. */
+  /** Starts loading the pending models nearest `eye`, a few at a time, and decides the interior view. Call once a frame. */
   update(eye: THREE.Vector3): void {
+    this.interior(eye);
     while (this.loading < LOADING && this.pending.size) {
       let best: string | null = null, near = Infinity;
       const p = new THREE.Vector3();
