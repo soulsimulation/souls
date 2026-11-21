@@ -17,7 +17,7 @@ import { Flight, PoseFlight, shotOffset } from './flight.ts';
 import { FOLLOW_MAX, FOLLOW_MIN, Follow, TARGET_UP, bodyAt } from './follow.ts';
 import type { WorldView } from '../draw/world.ts';
 import type { PageSouls } from '../souls/page.ts';
-import type { PartRec } from '../source/source.ts';
+import type { NodeRec, PartRec } from '../source/source.ts';
 import { Tour } from '../welcome/tour.ts';
 import { EDEN_STOPS } from '../welcome/stops.ts';
 import { mountWelcome, worldOf, type Welcome } from '../welcome/welcome.ts';
@@ -41,6 +41,23 @@ export function findSoul(souls: Iterable<{ id: string; name: string | null }>, t
   const all = [...souls].filter((s) => s.name);
   const by = (f: (n: string) => boolean) => all.find((s) => f(s.name!.toLowerCase()))?.id ?? null;
   return by((n) => n === q) ?? by((n) => n.startsWith(q)) ?? by((n) => n.includes(q));
+}
+
+/** The named place a typed name means, when no Soul does (#3574): the same rule over the places' public names, a
+ *  hyphen or underscore read as a space (Eden's names are written `land-west-lake`), an area with an outline before
+ *  a thing of the same name. */
+export function findPlace(nodes: Iterable<Pick<NodeRec, 'id' | 'placeName' | 'outline'>>, typed: string): string | null {
+  const words = (t: string) => t.replace(/[-_]+/g, ' ');
+  const named = [...nodes].filter((n) => n.placeName).sort((a, b) => Number(!a.outline?.length) - Number(!b.outline?.length));
+  return findSoul(named.map((n) => ({ id: n.id, name: words(n.placeName!) })), words(typed));
+}
+
+/** Where a named place is seen, world m: the middle of its outline (world mm) at its own height; null without one. */
+export function placeAt(n: Pick<NodeRec, 'outline'>, y: number, out = new THREE.Vector3()): THREE.Vector3 | null {
+  const o = n.outline;
+  if (!o?.length) return null;
+  const [x, z] = o.reduce(([a, b], [px, pz]) => [a + px, b + pz], [0, 0]);
+  return out.set((x / o.length) / 1000, y, (z / o.length) / 1000);
 }
 
 export class CameraDirector {
@@ -219,6 +236,8 @@ export class CameraDirector {
   private target(id: string): THREE.Vector3 | null {
     if (this.t === null) return null;
     const p = bodyAt(this.world, id, this.t);
+    const n = this.world.nodes.get(id);
+    if (p && n?.placeName) placeAt(n, p.y, p);
     return p && p.setY(p.y + TARGET_UP);
   }
 
@@ -308,20 +327,20 @@ export class CameraDirector {
     history.replaceState(history.state, '', u);
   }
 
-  /** The find box: a Soul's name, then Enter, flies there. */
+  /** The find box: a Soul's or a named place's name, then Enter, flies there. */
   private findBox(): HTMLInputElement {
     const el = document.createElement('input');
-    Object.assign(el, { id: 'find', type: 'search', placeholder: 'find a Soul', enterKeyHint: 'go', autocomplete: 'off', spellcheck: false });
-    el.setAttribute('aria-label', 'Find a Soul by name');
+    Object.assign(el, { id: 'find', type: 'search', placeholder: 'find a Soul or place', enterKeyHint: 'go', autocomplete: 'off', spellcheck: false });
+    el.setAttribute('aria-label', 'Find a Soul or place by name');
     el.style.cssText = 'position:fixed;left:12px;bottom:12px;width:min(240px,calc(100vw - 24px));box-sizing:border-box;padding:8px 10px;'
       + 'background:rgba(16,20,26,0.85);color:#e8e6e1;border:1px solid #3a4250;border-radius:4px;font:14px system-ui,sans-serif';
     // Typing is not steering: keys stay in the box.
     el.addEventListener('keydown', (e) => {
       e.stopPropagation();
       if (e.key !== 'Enter') return;
-      const id = findSoul(this.souls.copy.souls.values(), el.value);
-      if (id && this.fly(id)) return void ((el.value = ''), (el.placeholder = 'find a Soul'), el.blur());
-      el.placeholder = `no Soul here named “${el.value.trim()}”`;
+      const id = findSoul(this.souls.copy.souls.values(), el.value) ?? findPlace(this.world.nodes.values(), el.value);
+      if (id && this.fly(id)) return void ((el.value = ''), (el.placeholder = 'find a Soul or place'), el.blur());
+      el.placeholder = `no Soul or place here named “${el.value.trim()}”`;
       el.value = '';
     });
     document.body.append(el);

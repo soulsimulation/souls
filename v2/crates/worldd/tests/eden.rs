@@ -1849,3 +1849,78 @@ fn c21_the_sandpit_walk_arrives_or_ends_blocked() {
     }
     assert!(ticks <= 100, "ended within 5 s of its last progress");
 }
+
+/// C34 (#3599) A2: a building's named area resolves onto its own room and floor. Born outside, a Soul climbs a
+/// lighthouse to its lantern room (today's e_edbbc6a7, four floors up) and a tower to its top room (e_36bd67b1, whose
+/// top floor is 8.5 m up, not the 6.1 m the kind's area names), across the stairs, by their own entries; each ends
+/// `done`. Before #3599 each ended `souls:no-way`: the area's point was carried up to the open ground, cut out under
+/// the building.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c34_a2_a_lighthouse_and_a_tower_are_climbed_to_their_top_rooms() {
+    let lantern = act_at("96.0,194.0", "e_edbbc6a7", "eden:climb", "c34lh");
+    let top = act_at("69.0,26.0", "e_36bd67b1", "eden:climb", "c34tw");
+    lantern.expect("the lighthouse climbed, done");
+    top.expect("the tower climbed, done");
+}
+
+/// C34 (#3599) A2: the ground-floor areas of the sweep's other named forms resolve the same way. Born outside a chapel
+/// (today's e_9b7418a3), a Soul enters its nave (the room named `nave`). Born outside a greenhouse (e_8b4c5e36), a Soul
+/// opens its vent: the walk to the `inside` area (no room of that name, the greenhouse's only floor), then across it
+/// to within reach of the vent pole, then the press, as today's game approaches the pole; born beside the pole, the
+/// same form ends `done` too. Each ended `souls:no-way`, the greenhouse from outside `out-of-reach` once its area
+/// resolved.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c34_a2_a_greenhouses_vent_and_a_chapels_nave() {
+    let enter = act_at("279.0,110.0", "e_9b7418a3", "eden:enter", "c34ch");
+    let outside = act_at("69.0,39.0", "e_8b4c5e36", "eden:open_vent", "c34gh");
+    let beside = act_at("70.2,35.3", "e_8b4c5e36", "eden:open_vent", "c34gb");
+    enter.expect("the nave entered, done");
+    outside.expect("the vent opened from outside, done");
+    beside.expect("the vent opened from beside its pole, done");
+}
+
+/// A Soul walks to a bed and lies in it through the gateway, then gets up, as today's soul.game lets it (parity ledger,
+/// "lying in bed", #2835): the beds of the houses west of the library, from eden-house-2's living room. A bed's side
+/// stand point beside its room's door is one the spot tables never stop a walker on; it is moved out of the doorway at
+/// the start (`worldd serve`'s places), so the walk ends within the lie's reach. Each bed: the walk, the lie into
+/// one of its slots (the body's logged frame), the rise.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+// A real process on the real clock: its waits are real time.
+#[allow(clippy::disallowed_methods)]
+fn a_soul_walks_to_a_bed_lies_in_it_and_gets_up() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (served, mut soul, dir) = serve(&facts, "48.2,18.9", "bedlie", im.nodes["world"].scope());
+    let mut ends = Vec::new();
+    for b in ["e_9857eaa7", "e_09de188a", "e_6487ccc5", "e_c57cbb07"] {
+        let bed = im.nodes[b];
+        let walked = soul.act("eden:walk", Some(bed), BTreeMap::new());
+        let lay = soul.act("eden:lie", Some(bed), BTreeMap::new());
+        // The log is written behind the clock: wait (at most 10 s) for the lie's frame.
+        let at = std::time::Instant::now();
+        let mut frame = last_frames(&dir).into_values().next();
+        while lay.is_ok()
+            && frame.map(|f| f.0) != Some(bed)
+            && at.elapsed() < Duration::from_secs(10)
+        {
+            std::thread::sleep(Duration::from_millis(250));
+            frame = last_frames(&dir).into_values().next();
+        }
+        let up = soul.act("eden:rise", None, BTreeMap::new());
+        println!("bed {b}: walk {walked:?}, lie {lay:?} in {frame:?}, rise {up:?}");
+        ends.push((b, bed, walked, lay, frame, up));
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    for (b, bed, walked, lay, frame, up) in ends {
+        walked.unwrap_or_else(|e| panic!("walked to {b}: {e}"));
+        lay.unwrap_or_else(|e| panic!("lay in {b}: {e}"));
+        let (node, slot) = frame.expect("the body's logged frame");
+        assert_eq!(node, bed, "in {b}");
+        assert!(slot.is_some(), "in one of {b}'s slots");
+        up.unwrap_or_else(|e| panic!("rose from {b}: {e}"));
+    }
+}
