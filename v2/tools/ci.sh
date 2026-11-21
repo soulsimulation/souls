@@ -173,7 +173,7 @@ step client-daemon bash -c 'cargo build -p gatewayd -p worldd -p directoryd --lo
 step client-clock bash -c 'cargo build -p gatewayd -p worldd -p testworld --locked --quiet && node --test client/src/clock/*.test.mjs'
 # The thin command, the brief and find (R7, #2701): 100 scripted command sequences against the same gateway and world.
 step client-command bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet &&
-  node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs client/src/shoot/*.test.mjs client/src/home/*.test.mjs'
+  node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs client/src/shoot/*.test.mjs client/src/view/*.test.mjs client/src/home/*.test.mjs'
 # The creator's command (G7, #2796): a creator's daemon checks batches on its copy with no frame sent, and edits.
 step client-creator bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/creator/*.test.mjs'
 # The client's trace and stats (R10, #2702): per achieved intent, local only, with the network refused.
