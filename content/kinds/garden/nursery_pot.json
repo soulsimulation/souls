@@ -3,9 +3,9 @@
   "kind": "eden:nursery_pot",
   "owner": "thing",
   "state": {
-    "shoots": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } },
-    "planted": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
-    "supplies": { "n": 3, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+    "shoots": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } },
+    "planted": { "n": 29, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "supplies": { "n": 30, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [175, 200, 0] },

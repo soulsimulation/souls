@@ -42,14 +42,14 @@
                 "change": "set",
                 "node": "s1",
                 "field": "back_left",
-                "n": 1,
+                "n": 28,
                 "to": "red_disc"
               },
               {
                 "change": "set",
                 "node": "s1",
                 "field": "ink",
-                "n": 5,
+                "n": 32,
                 "to": 3
               }
             ],
@@ -89,14 +89,14 @@
                 "change": "set",
                 "node": "s1",
                 "field": "back_right",
-                "n": 2,
+                "n": 29,
                 "to": "blue_bar"
               },
               {
                 "change": "set",
                 "node": "s1",
                 "field": "ink",
-                "n": 5,
+                "n": 32,
                 "to": 2
               }
             ],
@@ -136,14 +136,14 @@
                 "change": "set",
                 "node": "s1",
                 "field": "front_left",
-                "n": 3,
+                "n": 30,
                 "to": "red_bar"
               },
               {
                 "change": "set",
                 "node": "s1",
                 "field": "ink",
-                "n": 5,
+                "n": 32,
                 "to": 1
               }
             ],
@@ -183,14 +183,14 @@
                 "change": "set",
                 "node": "s1",
                 "field": "back_left",
-                "n": 1,
+                "n": 28,
                 "to": "blue_disc"
               },
               {
                 "change": "set",
                 "node": "s1",
                 "field": "ink",
-                "n": 5,
+                "n": 32,
                 "to": 0
               }
             ],

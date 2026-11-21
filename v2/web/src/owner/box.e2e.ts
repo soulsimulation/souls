@@ -233,6 +233,33 @@ test('A1, A2 (the creator\'s box): the panel\'s message reaches the creator\'s a
   for (const t of ms) assert.ok(t < 2000, `${t} ms`);
 });
 
+test('#3781: an ack with no --close shows its note under the open message; the act --for it closes it once', async () => {
+  await ask({ op: 'wait', seconds: 0 });
+  const reader = ask({ op: 'wait', seconds: 30 }, 35_000);
+  await sleep(200);
+  const m = put(ada, GRANT, 'turn the lamp off when you can');
+  const got = await reader;
+  assert.ok(got.events?.some((e: { kind: string; id: string }) => e.kind === 'mail' && e.id === m.id), JSON.stringify(got));
+  await waitFor(() => m.state === 'thinking');
+  const a = await ask({ op: 'ack', id: m.id, reply: 'on it, in a moment' });
+  assert.deepEqual([a.ok, a.acked, a.open, a.closed], [true, m.id, true, undefined], JSON.stringify(a));
+  await waitFor(() => m.notes?.length === 1);
+  assert.deepEqual([m.state, m.notes, m.reply ?? null], ['thinking', ['on it, in a moment'], null], 'a note: still open');
+  const mailRead = (id: string) => fetch(`http://${directory}/v1/mailbox/read`, { method: 'POST', body: JSON.stringify({ id }) }).then((r) => r.json());
+  await sleep(1200); // past a mailbox read: the directory still has it open
+  assert.equal((await mailRead(m.id!)).state, 'open');
+  const listed = await ask({ op: 'pending', list: true });
+  assert.ok(listed.open.some((o: { id: string }) => o.id === m.id), 'the daemon still lists it open');
+  assert.equal((await ask({ op: 'act', verb: 'r2:switch_off', target: LAMP, for: m.id })).ok, true);
+  await waitFor(() => m.state === 'done' || m.state === 'failed');
+  const closed = await mailRead(m.id!);
+  assert.equal(closed.state, m.state, 'closed once, by the act');
+  assert.notEqual(closed.outcome, 'replied');
+  assert.equal(ada.texts.filter((t) => t.includes('"close"') && t.includes(m.id!)).length, 1, 'one close');
+  assert.equal((await ask({ op: 'ack', id: m.id, reply: 'done now' })).code, 'mail-not-found', 'closed: nothing more to note');
+  report.note = { state: m.state, notes: m.notes };
+});
+
 test('A3: another signed-in account can neither send to the Soul nor read its messages', async () => {
   const before = bo.texts.length;
   const m = put(bo, GRANT, 'come here');
@@ -245,7 +272,7 @@ test('A3: another signed-in account can neither send to the Soul nor read its me
   const ids = [...ada.box.messages, ...cy.box.messages].map((x) => x.id!);
   const seen = bo.texts.join('\n');
   for (const id of ids) assert.ok(!seen.includes(id), `Bo saw ${id}`);
-  assert.ok(!/"doing"|"close"|"picked"/.test(seen), seen);
+  assert.ok(!/"doing"|"close"|"picked"|"note"/.test(seen), seen);
   assert.equal(bo.texts.length - before, 2, 'only his own refusals');
   // Nor does Ada see the creator's, or the creator Ada's.
   assert.ok(!cy.box.messages.some((x) => ada.texts.join().includes(x.id!)) && !ada.box.messages.some((x) => cy.texts.join().includes(x.id!)));

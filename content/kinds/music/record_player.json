@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "playing": {
-      "n": 1,
+      "n": 28,
       "type": "enum",
       "values": [
         "off",

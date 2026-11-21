@@ -50,7 +50,7 @@
         "change": "set",
         "node": "h1",
         "field": "ash",
-        "n": 2,
+        "n": 29,
         "to": 0,
         "by": -4
        },
@@ -58,7 +58,7 @@
         "change": "set",
         "node": "a1",
         "field": "ash",
-        "n": 1,
+        "n": 28,
         "to": 4,
         "by": 4
        }
@@ -89,7 +89,7 @@
         "change": "set",
         "node": "h1",
         "field": "lit",
-        "n": 1,
+        "n": 28,
         "to": 1
        }
       ],
@@ -134,7 +134,7 @@
         "change": "set",
         "node": "h1",
         "field": "lit",
-        "n": 1,
+        "n": 28,
         "to": 0
        }
       ],
