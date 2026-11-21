@@ -3,7 +3,7 @@
   "kind": "eden:guestbook",
   "owner": "thing",
   "state": {
-    "title": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+    "title": { "n": 28, "type": "text", "default": null, "audience": { "rule": "everyone" } }
   },
   "points": {
     "front": { "role": "stand", "at_mm": [0, 0, 550], "yaw_mdeg": 180000 }

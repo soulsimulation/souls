@@ -1,4 +1,7 @@
-# The `proof-ok` check: does the PR (its body is the journal entry) carry the proof its tier needs?
+# The `proof-ok` check. It blocks on the required minimum only (process rule 6, docs/process/agent-workflow.md#pr-body):
+# the PR links its issue and has a one-line summary, no device details appear anywhere it reads (publication privacy),
+# and, at T3-T4, the maintainer has signed off. Everything below the minimum (the journal entry's sections, evidence,
+# clips, proof.json) is advisory: reported in the comment and as a workflow warning, never a failure.
 #   tier      `tools/proof/tier.mjs` over the PR's changed files; a tier:Tn label can raise it
 #   needs     docs/process/PROOF-POLICY.yml `pr_checks` for that tier (T0: only the problem statement)
 #   reads     the Problem, Acceptance, Proof and Self-audit sections, the linked issue's criteria (none may be
@@ -43,6 +46,7 @@ jobs:
       contents: read
       pull-requests: write
       issues: read
+      actions: read   # the CI run link in the comment (acceptance.mjs ciRunAt)
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
@@ -81,8 +85,10 @@ jobs:
       - name: proof-ok
         env:
           OK: ${{ steps.check.outputs.ok }}
+          JOURNAL: ${{ steps.check.outputs.journal }}
           TIER: ${{ steps.check.outputs.tier }}
         run: |
+          if [ "$JOURNAL" = false ]; then echo "::warning::The journal entry for ${TIER} is incomplete; the PR comment lists the advice. It does not fail proof-ok."; fi
           if [ "$OK" = true ]; then echo "proof-ok (${TIER:-n/a})"; exit 0; fi
-          echo "::error::Proof for ${TIER} is missing or invalid; the PR comment lists what to fix (.claude/skills/journal/SKILL.md)."
+          echo "::error::proof-ok (${TIER}) is blocked: an issue link, a one-line summary, a privacy finding or the T3-T4 maintainer sign-off. The PR comment says which."
           exit 1

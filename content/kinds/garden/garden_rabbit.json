@@ -3,7 +3,7 @@
   "kind": "eden:garden_rabbit",
   "owner": "thing",
   "state": {
-    "feed": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+    "feed": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
   },
   "points": {
     "mouth": { "role": "contact", "at_mm": [0, 160, 190] }

@@ -3,9 +3,9 @@
   "kind": "eden:water_filter",
   "owner": "thing",
   "state": {
-    "water": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
-    "cartridge": { "n": 2, "type": "int", "unit": "count", "default": 2, "min": 0, "max": 2, "audience": { "rule": "everyone" } },
-    "spares": { "n": 3, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+    "water": { "n": 28, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
+    "cartridge": { "n": 29, "type": "int", "unit": "count", "default": 2, "min": 0, "max": 2, "audience": { "rule": "everyone" } },
+    "spares": { "n": 30, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
   },
   "points": {
     "pump": { "role": "contact", "at_mm": [0, 1150, 120] },
