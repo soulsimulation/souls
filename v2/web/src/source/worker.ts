@@ -181,7 +181,7 @@ async function run(stream: URL) {
     for (const e of events) {
       if (e.get(1) === SAID_PRIVATELY) {
         const f = e.get(2) as Map<number, unknown>, conv = f.get(1) as IdValue | undefined;
-        if (conv) said.push({ speaker: key(e.get(3) as IdValue), at: num(e.get(4)), length: num(f.get(4)), reach: 0, ref: `private:${key(conv)}`, words: null,
+        if (conv) said.push({ speaker: key(e.get(3) as IdValue), at: num(e.get(4)), length: 0, reach: 0, ref: `private:${key(conv)}`, words: null,
           private: { conversation: key(conv), members: ((f.get(3) ?? []) as IdValue[]).map(key) } });
         continue;
       }

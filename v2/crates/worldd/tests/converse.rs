@@ -593,8 +593,8 @@ fn a1_a3_a4_two_souls_open_talk_privately_and_leave() {
         assert_eq!(r.events.as_ref().unwrap().len(), 1);
         assert_eq!(
             ev.fields.keys().copied().collect::<Vec<_>>(),
-            vec![1, 3, 4],
-            "#3775: the conversation, its members and the length, nothing else"
+            vec![1, 3],
+            "#3775: the conversation and its members, nothing else (no length)"
         );
         assert_eq!(ev.fields[&1], conv.to_value(), "#3775: the conversation");
         assert_eq!(
