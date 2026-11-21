@@ -47,6 +47,8 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `batch '<json list>'` | several operations at once: all happen, or none |
 | `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
 | `describe` | what is there, and what each kind admits |
+| `time <HH:MM \| live>` | the hour the page shows the sky at, for a staged scene (`time 18:30` for a sunset); `live` shows the world's own time. Display only: world time never stops or changes speed, and Souls' clocks and calendars are unchanged |
+| `trace [n]` | your last `n` commands here (20, at most 200), newest first: time, verb, result and refusal. If you see the same refusal again and again, stop and read its `fix` |
 | `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
 | `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
 

@@ -16,12 +16,16 @@
 //                         [--minutes 5..360]       the world's weather until then; E6's own weather resumes after
 //   souls-god.mjs sky --palette <name>           the sky's palette (today's names: clear-day, dusk, mars-desert, ...)
 //   souls-god.mjs strike <x,z | id>              lightning at a point (metres on the open ground) or on a place
+//   souls-god.mjs time <HH:MM | live>            the hour the page shows the sky at, for a staged scene; display only:
+//                                                world time, Souls' clocks and calendars never change
 //   souls-god.mjs land <raise|lower|flatten|knoll|hill|mountain|plateau|terrace|valley|ditch|cliff|pond|lake> [flags]
 //   souls-god.mjs land water <id> --level m | --by m      the land and its water, as today's `land` (terrain/land.mjs):
 //                                                one edit; what rests on changed ground moves with it, and a Soul
 //                                                standing there refuses it (edit.terrain-under-soul)
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs status | stop                  the daemon
+//   souls-god.mjs trace [n]                      the creator's last n commands here (20, at most 200), newest first:
+//                                                time, verb, result and refusal; kept by the daemon across restarts
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
 //   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
 //                                                these two ask the world's directory, with the creator's token
@@ -38,10 +42,11 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
+import { TRACE_MOST } from './trace.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'land', 'check', 'status', 'stop', 'welcome', 'visitors'];
+export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'land', 'time', 'check', 'status', 'stop', 'trace', 'welcome', 'visitors'];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
-export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land'];
+export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
@@ -69,6 +74,8 @@ export const FIX = {
   'weather.nothing': 'give --kind, --clouds, --rain or --wind',
   'sky.palette-unknown': 'run sky with no palette for the list',
   'sky.sun-follows-time': 'leave out --sun: the sun follows world time',
+  'time.form': 'time HH:MM (24-hour, e.g. 18:30) or time live',
+  'time.never-stops': 'world time never stops or changes speed; time <HH:MM> stages the hour shown',
   'strike.where': 'strike x,z in metres, or an id describe lists',
   'edit.terrain-under-soul': 'a Soul stands where the ground would change: shape the land elsewhere, or when it has moved',
   'edit.terrain-under-building': 'a building stands where the ground would change: shape the land clear of it',
@@ -132,11 +139,15 @@ export function opsOf(verb, words) {
 export function worldVerbOf(verb, words) {
   const args = [...words], out = { verb };
   const flags = {
-    weather: ['kind', 'clouds', 'rain', 'wind', 'minutes'], sky: ['palette', 'sun'], strike: ['at'],
+    weather: ['kind', 'clouds', 'rain', 'wind', 'minutes'], sky: ['palette', 'sun'], strike: ['at'], time: ['speed'],
     land: ['at', 'radius', 'amount', 'level', 'height', 'peak', 'path', 'area', 'rect', 'circle', 'edge', 'step', 'depth', 'width', 'side', 'face', 'steps', 'by'],
   }[verb];
   for (const f of flags) { const v = takeOpt(args, `--${f}`); if (v !== undefined) out[f] = v; }
   if (verb === 'strike' && out.at === undefined && args[0] !== undefined) out.at = args.shift();
+  if (verb === 'time') {
+    for (const f of ['--pause', '--resume']) { const k = args.indexOf(f); if (k >= 0) { args.splice(k, 1); out.pause = true; } }
+    if (args[0] !== undefined) out.hour = args.shift();
+  }
   if (verb === 'land') {
     if (!args[0]) throw usage('land <raise|lower|flatten|knoll|hill|mountain|plateau|terrace|valley|ditch|cliff|pond|lake|water> [flags]');
     out.land = args.shift();
@@ -160,6 +171,11 @@ export function requestOf(argv) {
   }
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe') return { req: { op: verb }, creator };
+  if (verb === 'trace') {
+    const n = rest[0] === undefined ? 20 : Number(rest[0]);
+    if (!Number.isInteger(n) || n < 1 || n > TRACE_MOST || rest.length > 1) throw usage(`trace [n]: 1 to ${TRACE_MOST}`);
+    return { req: { op: 'trace', n }, creator };
+  }
   if (verb === 'check' && WORLD_VERBS.includes(rest[0])) return { req: { op: 'check', world: worldVerbOf(rest[0], rest.slice(1)) }, creator };
   if (verb === 'check') return { req: { op: 'check', ops: opsOf(rest[0], rest.slice(1)) }, creator };
   if (WORLD_VERBS.includes(verb)) return { req: { op: 'edit', world: worldVerbOf(verb, rest) }, creator };
