@@ -46,7 +46,10 @@
 //!     the public audience reads it (`Store::read` with no ids), so a removed reference (the redaction list) and words
 //!     of any other audience are never in it. A whisper's entry is not in a public view at all, so its reference is
 //!     not either. The file is written whole and renamed (rule 4) before the part, so a reader that finds a part finds
-//!     its words.
+//!     its words. The public writer ([`PublicWriter`]) given the importer's name dictionary also writes the words of
+//!     the place names its public nodes reference (import-eden's field 4, a SHA-256 of the words; #3574) as
+//!     `[hash, words]` rows: the baseline's for its state, a part's for the nodes its records create, each checked
+//!     against its hash (#3571's rule).
 //! 11. **A still world says so** (V5b, #3460). [`follow`] is handed the world's clock and tells the writer the world's
 //!     time now ([`Writer::idle`]) after each frame, and at least every 20 ms without one. Once a stretch's time has
 //!     passed, with [`SETTLE_US`] more for its last records to be synced, the open stretch is written, so a burst after a
