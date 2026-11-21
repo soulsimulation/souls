@@ -978,6 +978,10 @@ pub struct PublicWriter<S> {
         BTreeMap<Id, std::collections::BTreeSet<Id>>,
         std::collections::BTreeSet<Id>,
     )>,
+    /// Where [`PublicWriter::idle`] last found the published state equal to the source's: the source's version and
+    /// the published version and part count then (#3603). While all three stand nothing new can be public, so the
+    /// whole tree is not projected again: on full Eden one projection is about 170 ms, and idle runs every 20 ms.
+    still_at: Option<(u64, u64, u64)>,
 }
 use std::collections::BTreeMap;
 /// What the public view reads of the source just before one entry (#3667): the parent chains of the nodes the entry
@@ -1357,6 +1361,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             touched: std::collections::BTreeSet::new(),
             timers: std::collections::BTreeSet::new(),
             refs: None,
+            still_at: None,
         };
         if let Some(head) = w.store.get(&format!("{}head", w.prefix))? {
             let h = object_map(&head.bytes)?;
@@ -2622,14 +2627,27 @@ impl<S: ObjectStore> PublicWriter<S> {
         {
             self.flush()?;
         }
-        let mut published = self.player.state().clone();
-        let current = project(&self.header, &self.canonical.tree().to_state())?;
-        if let (Value::Map(a), Value::Map(b)) = (&mut published, &current) {
-            a.insert(1, b[&1].clone());
+        if !self.records.is_empty() {
+            return Ok(());
         }
-        if self.records.is_empty() && published == current {
-            self.pointer(Some(world.saturating_sub(SETTLE_US)))?;
+        let at = (
+            self.canonical.version(),
+            self.player.version(),
+            self.player.next(),
+        );
+        if self.still_at != Some(at) {
+            #[cfg(test)]
+            tests::IDLE_PROJECTIONS.set(tests::IDLE_PROJECTIONS.get() + 1);
+            let mut published = self.player.state().clone();
+            let current = project(&self.header, &self.canonical.tree().to_state())?;
+            if let (Value::Map(a), Value::Map(b)) = (&mut published, &current) {
+                a.insert(1, b[&1].clone());
+            }
+            if published != current {
+                return Ok(());
+            }
+            self.still_at = Some(at);
         }
-        Ok(())
+        self.pointer(Some(world.saturating_sub(SETTLE_US)))
     }
 }

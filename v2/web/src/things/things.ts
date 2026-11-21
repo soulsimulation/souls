@@ -292,6 +292,28 @@ export class ThingLayer {
     }
   }
 
+  /** Moves a placed thing to `frame` in place (#3603, a punt on its course): its parts and boxes follow, nothing is
+   *  added again. A thing not placed yet is left to `set`. */
+  move(id: string, frame: THREE.Matrix4): void {
+    const d = new THREE.Matrix4();
+    for (let c = 0; c < this.copies; c++) {
+      const t = this.things.get(c ? `${id}#${c}` : id);
+      if (!t) continue;
+      const matrix = c ? new THREE.Matrix4().makeTranslation(c * this.spacing, 0, 0).multiply(frame) : frame;
+      if (t.matrix.equals(matrix)) continue;
+      d.copy(t.matrix).invert().premultiply(matrix);
+      t.matrix = matrix.clone();
+      const boxes = new Set(t.boxes);
+      for (const b of t.boxes) b.premultiply(d);
+      t.inverse = undefined;
+      for (const s of t.slots) {
+        if (!boxes.has(s.matrix)) s.matrix.premultiply(d);
+        if (s.batch instanceof Batch) s.batch.show(s.index, s.matrix, !t.under);
+        else (s.batch as unknown as Shapes).mesh.setMatrixAt(s.index, s.matrix);
+      }
+    }
+  }
+
   remove(id: string, oneCopy = false): void {
     for (let c = 0; c < (oneCopy ? 1 : this.copies); c++) {
       const cid = c && !oneCopy ? `${id}#${c}` : id;

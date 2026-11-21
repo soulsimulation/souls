@@ -19,6 +19,8 @@ use std::process::Command;
 thread_local! {
     /// Replays with the whole-state reference path instead of the tree-reading one (#3667's regression).
     pub(super) static WHOLE_STATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// How many whole-tree projections the public writer's idle has made (#3603).
+    pub(super) static IDLE_PROJECTIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 fn header() -> Header {
@@ -2923,6 +2925,120 @@ fn replay_output(whole_state: bool) -> Vec<u8> {
     all.extend(wire(out.public_player().state().clone()).unwrap());
     WHOLE_STATE.set(false);
     all
+}
+
+/// #3603: a still world costs no projection per idle, and a change the world makes by itself (a field set by the world,
+/// no Soul's act) is never passed by the pointer's quiet time: it is published once its stretch settles, and the world
+/// is said to be still again only after it. Before, idle projected the whole tree on every call (about 170 ms on full
+/// Eden, every 20 ms), so a loaded writer fell behind the log and claimed quiet past what it had not read.
+#[test]
+fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_quiet() {
+    let h = header();
+    let d = scratch("still-at");
+    let views = d.join("views");
+    let real = 1_000_000_000_000;
+    let mapping = Mapping::new(0, real, 1, 1).unwrap();
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &views,
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: None,
+            names: None,
+            clock_seed: Some(mapping),
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let thing = Id::new(Scope([58; 16]), 1).unwrap();
+    let first = w3e_packet(
+        &h,
+        vec![
+            w3e_effect(
+                0,
+                h.zone,
+                Audience::Everyone,
+                Body::Time(vec![TimeEffect::Mapping(mapping)]),
+            ),
+            w3e_create(&h, 1, thing, h.zone, Audience::Everyone),
+        ],
+    );
+    actual.apply_bytes(&first).unwrap();
+    out.push(0, &first).unwrap();
+    out.flush().unwrap();
+    let quiet = |out: &PublicWriter<_>| {
+        Pointer::read(&fs::read(out.dir.join(POINTER)).unwrap())
+            .unwrap()
+            .quiet_until
+    };
+    let projections = || tests::IDLE_PROJECTIONS.get();
+    // Still: the first idle projects once; the next ones only move the quiet time on.
+    let before = projections();
+    out.idle(real + 2_000_000).unwrap();
+    out.idle(real + 3_000_000).unwrap();
+    out.idle(real + 4_000_000).unwrap();
+    assert_eq!(
+        projections() - before,
+        1,
+        "one projection while nothing changes"
+    );
+    assert_eq!(quiet(&out), Some(4_000_000 - SETTLE_US));
+    // The world sets a field on the thing by itself at 5 s: no Soul, no intent.
+    let mut changed = w3e_effect(
+        2,
+        thing,
+        Audience::Everyone,
+        Body::Changes(vec![ChangeRec {
+            change: Change::Set {
+                node: thing,
+                field: 40,
+                to: Value::Uint(7),
+                by: None,
+            },
+            rest: Rest::new(),
+        }]),
+    );
+    changed.envelope.at = 5_000_000;
+    let world = w3e_packet(&h, vec![changed]);
+    actual.apply_bytes(&world).unwrap();
+    out.push(1, &world).unwrap();
+    // Before its stretch settles, quiet stays where it was: never past the change it has not published.
+    out.idle(real + 5_100_000).unwrap();
+    assert_eq!(quiet(&out), Some(4_000_000 - SETTLE_US));
+    assert_eq!(out.public_player().next(), 1, "not yet cut");
+    // Settled: the change is published, then the world is still again from there.
+    out.idle(real + 7_000_000).unwrap();
+    assert_eq!(
+        out.public_player().next(),
+        2,
+        "the world's change is a part"
+    );
+    assert_eq!(
+        out.public_player().state(),
+        &project(&h, &actual.tree().to_state()).unwrap()
+    );
+    let after = projections();
+    out.idle(real + 8_000_000).unwrap();
+    out.idle(real + 9_000_000).unwrap();
+    assert!(
+        projections() - after <= 1,
+        "still again: at most one projection"
+    );
+    assert_eq!(quiet(&out), Some(9_000_000 - SETTLE_US));
+    let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
+    for n in 0..2 {
+        reader
+            .play(&fs::read(out.generation_dir().join(n.to_string())).unwrap())
+            .unwrap();
+    }
+    assert_eq!(reader.state(), out.public_player().state());
 }
 
 /// #3822: parts played deferred (no digest worked out each) make the same state as parts played checked, and one
