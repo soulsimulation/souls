@@ -1039,6 +1039,24 @@ pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: 
     .unwrap_or_default()
 }
 
+/// The backstop refusal of an intent holding a text that is not a name (#3765).
+const TEXT_NOT_A_NAME: &str = "intent.text-not-a-name";
+
+/// An answered intent as its row logs it. The writer runs the reader's check (#3765): an intent holding a text that
+/// is not a name, which every intake refuses first, is logged as its encoded bytes, never as a text the log's reader
+/// refuses, and named.
+fn logged_intent(intent: Value) -> Value {
+    match replica::effects::not_a_name(&intent) {
+        None => intent,
+        Some(t) => {
+            eprintln!(
+                "worldd: an answered intent holds text-not-a-name {t:?}: logged as its bytes"
+            );
+            Value::Bytes(encode(&intent).unwrap_or_default())
+        }
+    }
+}
+
 fn name(s: &str) -> Name {
     Name::new(s).unwrap_or_else(|| Name::new("act.refused").expect("a name"))
 }
@@ -1219,7 +1237,7 @@ impl Clock {
             row.insert(3, id.to_value());
         }
         if let Some(i) = intent {
-            row.insert(5, i);
+            row.insert(5, logged_intent(i));
         }
         self.rows.push(Value::Map(row));
         self.replies.push((waiters, frame, stamps));
@@ -1340,6 +1358,11 @@ impl Clock {
         }
         let mut value = intent.to_value();
         keep_arg_names(&mut value);
+        // Every text the intent would be logged with must be a name the log's reader takes (#3765). A malformed word
+        // (an act's `sit_down:undefined`, a form argument, an edit's or a set-down's) is a backstop: the intent's own
+        // checks keep their names, and one that passes them all is refused `intent.text-not-a-name` where it would be
+        // taken, before anything is written, logged without its intent. Words are bytes (T8), so none is a text.
+        let unnamed = replica::effects::not_a_name(&value).is_some();
         let form = words::form(&intent);
         // A turn into an activity is its members' alone: refused before its words are kept when the speaker is not one.
         let mut members = BTreeSet::new();
@@ -1384,6 +1407,10 @@ impl Clock {
         if let (Actor::Soul(soul), true) =
             (actor, intent.verb.as_str() == LEAVE && self.life.is_some())
         {
+            if unnamed {
+                let a = self.refusal(actor, sequence, TEXT_NOT_A_NAME);
+                return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+            }
             return self.leave(
                 soul,
                 id,
@@ -1404,6 +1431,10 @@ impl Clock {
                 Err(e) => Some(Err(e)),
             };
             if let Some(entry) = entry {
+                if unnamed && entry.is_ok() {
+                    let a = self.refusal(actor, sequence, TEXT_NOT_A_NAME);
+                    return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+                }
                 let reason = match entry {
                     Ok(e) => self.write(e).err().map(|r| r.name),
                     Err(r) => Some(r),
@@ -1434,6 +1465,10 @@ impl Clock {
                     detail: String::new(),
                 })
                 .and_then(|body| match self.bodies.as_mut() {
+                    Some(_) if unnamed => Err(Refusal {
+                        name: TEXT_NOT_A_NAME,
+                        detail: String::new(),
+                    }),
                     Some(b) => crate::orders::accept(b, &intent, body, id, now),
                     None => Err(Refusal {
                         name: "orders-off",
@@ -1555,6 +1590,10 @@ impl Clock {
         } else {
             acts::Args::default()
         };
+        if unnamed {
+            let a = self.refusal(actor, sequence, TEXT_NOT_A_NAME);
+            return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+        }
         let body = match &taken {
             Taken::Form(a) => a.body,
             Taken::Move(m) => m.body,
@@ -3337,12 +3376,19 @@ pub fn start<S: Storage + 'static>(
         None => &found.records,
     };
     restart.read = records.len() as u64;
-    for record in records {
+    let first = found.first + (found.records.len() - records.len()) as u64;
+    for (n, record) in (first..).zip(records) {
         // The recorder's input records are what the world was handed, not what it did (K12): passed by.
         if recorder::is_input(record) {
             continue;
         }
-        let part = Part::read(record)?;
+        // A record its reader refuses stops the restart, named with its place; the log is kept as written (#3765).
+        let part = Part::read(record).map_err(|r| Refusal {
+            name: "log-record-unreadable",
+            detail: format!(
+                "record {n} of the log: {r}; the log is kept as written, nothing is dropped or repaired"
+            ),
+        })?;
         if !part.effects.is_empty() {
             world.apply(&part)?;
         }
@@ -5012,6 +5058,90 @@ mod standing_order_carry_tests {
             active.iter().map(|e| e.envelope.node).collect::<Vec<_>>(),
             vec![b],
             "cancelled order cannot restart"
+        );
+    }
+}
+
+#[cfg(test)]
+mod no_brick_tests {
+    //! #3765 A4: the writer of an answered row against the log's reader, over many intent words.
+    use super::*;
+
+    /// Text the encoding allows (rule 6), so each word could arrive in an intent.
+    const ALPHABET: &[u8] = b"abcdefgxyzABCZ0189_-.:/@";
+
+    /// A tick record holding one answered row whose intent carries `word` as its verb and as a form argument.
+    fn record(row_intent: Value) -> Vec<u8> {
+        let row = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(vec![1])),
+            (2, Value::Uint(1)),
+            (4, Value::Bytes(vec![2])),
+            (5, row_intent),
+        ]));
+        encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(Hash::of(Purpose::Header, b"h").to_bytes())),
+            (2, Value::Array(Vec::new())),
+            (ANSWERED, Value::Array(vec![row])),
+        ])))
+        .unwrap()
+    }
+
+    #[test]
+    fn every_logged_intent_word_reads_back() {
+        let mut seed: u64 = 0x3765;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let (mut names, mut not_names) = (0, 0);
+        for _ in 0..20_000 {
+            // Half the words are near-names: lowercase parts round one colon, as a client means them.
+            let near = next() % 2 == 0;
+            let alphabet: &[u8] = if near { b"abcxyz019_-" } else { ALPHABET };
+            let len = 1 + (next() % 24) as usize;
+            let mut word: String = (0..len)
+                .map(|_| alphabet[(next() % alphabet.len() as u64) as usize] as char)
+                .collect();
+            if near {
+                word.insert(0, 'a');
+                word.insert(1 + (next() % len as u64) as usize, ':');
+            }
+            let text = Value::Text(Name::new(&word).expect("the alphabet is names' bytes"));
+            let intent = Value::Map(BTreeMap::from([
+                (2, text.clone()),
+                (
+                    4,
+                    Value::Map(BTreeMap::from([(
+                        1,
+                        Value::Array(vec![Value::Array(vec![
+                            Value::Bytes(b"thing".to_vec()),
+                            text,
+                        ])]),
+                    )])),
+                ),
+            ]));
+            // Intake's check and the reader agree: what intake passes, the reader reads as written.
+            let raw = Part::read(&record(intent.clone()));
+            let refused = replica::effects::not_a_name(&intent).is_some();
+            assert_eq!(raw.is_err(), refused, "intake and reader agree on {word:?}");
+            if refused {
+                not_names += 1
+            } else {
+                names += 1
+            }
+            // The writer never logs what the reader refuses, and keeps a name as it is.
+            let logged = logged_intent(intent.clone());
+            Part::read(&record(logged.clone()))
+                .unwrap_or_else(|r| panic!("{word:?} logged unreadable: {r}"));
+            if !refused {
+                assert_eq!(logged, intent, "a name is logged as written");
+            }
+        }
+        assert!(
+            names > 100 && not_names > 100,
+            "both kinds tried: {names} names, {not_names} not"
         );
     }
 }
