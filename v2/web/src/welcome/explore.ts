@@ -27,7 +27,7 @@ const CSS = `
 #explore-open{position:fixed;left:calc(min(240px,100vw - 24px) + 76px);bottom:12px;padding:8px 12px;border:1px solid #3a4250;border-radius:4px;background:rgba(16,20,26,0.85);color:#e8e6e1;font:13px system-ui,sans-serif;cursor:pointer}
 #explore{position:fixed;z-index:22;left:50%;top:50%;transform:translate(-50%,-50%);width:min(720px,calc(100vw - 32px));max-height:min(640px,calc(100dvh - 32px));display:flex;flex-direction:column;box-sizing:border-box;
  padding:14px 16px 16px;background:rgba(16,20,26,0.96);color:#e8e6e1;border:1px solid #3a4250;border-radius:8px;font:14px/1.4 system-ui,sans-serif;box-shadow:0 8px 32px rgba(0,0,0,.45)}
-#explore[hidden]{display:none}
+#explore[hidden],#explore .views button[hidden]{display:none}
 #explore header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 #explore h2{margin:0;font-size:18px;font-weight:600}
 #explore header button{border:0;background:none;color:#e8e6e1;font-size:22px;line-height:1;padding:2px 8px;cursor:pointer}
