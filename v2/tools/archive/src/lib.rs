@@ -1086,8 +1086,8 @@ impl Bundler {
         })?;
         let mut done = Vec::new();
         for (offset, e) in part.effects.iter().enumerate() {
-            self.after.apply_entry(header, e)?;
-            let changes = public.changes(&self.before, e, &self.after, &self.redactions)?;
+            {let __t=std::time::Instant::now(); self.after.apply_entry(header, e)?; eprintln!("stage {} {:.1}ms", "after.apply", __t.elapsed().as_secs_f64()*1e3);}
+            let __t=std::time::Instant::now(); let changes = public.changes(&self.before, e, &self.after, &self.redactions)?; eprintln!("stage changes {:.1}ms n={}", __t.elapsed().as_secs_f64()*1e3, changes.len());
             let time = matches!(e.body, replica::effects::Body::Time(_))
                 .then(|| public_time(&self.after, &self.redactions))
                 .filter(|t| *t != public.time);
@@ -1122,7 +1122,7 @@ impl Bundler {
                 probe.as_mut().expect("candidate view")
             };
             let prior = view.output().records.len();
-            view.step(&self.before, e, &self.after, &self.redactions)?;
+            {let __t=std::time::Instant::now(); view.step(&self.before, e, &self.after, &self.redactions)?; eprintln!("stage {} {:.1}ms", "view.step", __t.elapsed().as_secs_f64()*1e3);}
             let kept = view.output().records.len() != prior;
             let thinned = matches!(&e.body,replica::effects::Body::Changes(cs) if !cs.is_empty() && cs.iter().all(|c|matches!(&c.change,replica::effects::Change::Motion(_))))
                 && !kept;
@@ -1133,9 +1133,9 @@ impl Bundler {
                 mode.anchor.get_or_insert(e.envelope.at);
                 if !same {
                     if let Some(open) = mode.open.take() {
-                        done.extend(self.close_based(header, open)?);
+                        {let __t=std::time::Instant::now(); done.extend(self.close_based(header, open)?); eprintln!("stage {} {:.1}ms", "close_based", __t.elapsed().as_secs_f64()*1e3);}
                     }
-                    let old = public.whole();
+                    let __t=std::time::Instant::now(); let old = public.whole(); eprintln!("stage whole {:.1}ms", __t.elapsed().as_secs_f64()*1e3); let __t=std::time::Instant::now(); let __lo = replica::history::seek::live_observation(header, &old)?; eprintln!("stage live_observation {:.1}ms", __t.elapsed().as_secs_f64()*1e3); let __t=std::time::Instant::now(); let __ps = public_snapshot(&__lo, &self.redactions); eprintln!("stage public_snapshot {:.1}ms", __t.elapsed().as_secs_f64()*1e3); let __t=std::time::Instant::now(); let __d = public.digest()?; eprintln!("stage digest {:.1}ms", __t.elapsed().as_secs_f64()*1e3); drop((__ps, __d));
                     mode.open = Some(BasedWindow {
                         start,
                         snapshot: public_snapshot(
@@ -1174,7 +1174,7 @@ impl Bundler {
             }
             if observe {
                 let open = mode.open.as_mut().expect("observation window");
-                let after = public.digest()?;
+                let __t=std::time::Instant::now(); let after = public.digest()?; eprintln!("stage digest-after {:.1}ms", __t.elapsed().as_secs_f64()*1e3);
                 let delta = public.delta(&open.seen);
                 open.rows.push(Value::Array(vec![
                     Value::Uint(record),
@@ -1192,7 +1192,7 @@ impl Bundler {
                     rows: BTreeMap::new(),
                 };
             }
-            self.before.apply_entry(header, e)?;
+            {let __t=std::time::Instant::now(); self.before.apply_entry(header, e)?; eprintln!("stage {} {:.1}ms", "before.apply", __t.elapsed().as_secs_f64()*1e3);}
         }
         self.based = Some(mode);
         self.public = Some(public);
