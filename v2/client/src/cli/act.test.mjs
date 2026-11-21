@@ -57,8 +57,8 @@ function souls(home, args) {
 }
 
 /** The answer event for `sequence`, read from the daemon. */
+const got = []; // every answer read, kept: one read may take the answers of several intents
 async function answerOf(rt, sequence) {
-  const got = [];
   return waitFor(async () => {
     got.push(...(await request(rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer'));
     return got.find((e) => e.sequence === sequence);
