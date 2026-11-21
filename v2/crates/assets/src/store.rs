@@ -184,12 +184,24 @@ impl Store {
 
     /// The creator hides an allowed upload (see the module's notes); answers its record.
     pub fn hide(&mut self, actor: Actor, reference: Id) -> Result<&Record, Refused> {
-        self.switch(actor, reference, State::Allowed, State::Hidden, "upload.not-allowed")
+        self.switch(
+            actor,
+            reference,
+            State::Allowed,
+            State::Hidden,
+            "upload.not-allowed",
+        )
     }
 
     /// The creator shows a hidden upload again; answers its record.
     pub fn show(&mut self, actor: Actor, reference: Id) -> Result<&Record, Refused> {
-        self.switch(actor, reference, State::Hidden, State::Allowed, "upload.not-hidden")
+        self.switch(
+            actor,
+            reference,
+            State::Hidden,
+            State::Allowed,
+            "upload.not-hidden",
+        )
     }
 
     fn switch(
@@ -209,10 +221,20 @@ impl Store {
             );
         }
         let Some(r) = self.records.get_mut(&reference) else {
-            return refuse("upload.missing", None, None, format!("no upload {reference:?}"));
+            return refuse(
+                "upload.missing",
+                None,
+                None,
+                format!("no upload {reference:?}"),
+            );
         };
         if r.state != from {
-            return refuse(code, None, None, format!("upload {reference:?} is {:?}", r.state));
+            return refuse(
+                code,
+                None,
+                None,
+                format!("upload {reference:?} is {:?}", r.state),
+            );
         }
         r.state = to;
         Ok(r)
