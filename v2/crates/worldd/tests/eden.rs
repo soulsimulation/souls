@@ -3059,9 +3059,18 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
             ("e_68df95e8", "switch_off", "done"),
         ],
     ));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// C25 (#3688) A1: a cottage's inner door, its bedroom's, on a served full Eden. From outside, each form walks in
+/// through the cottage's front door and then to the inner door, as today's game walks to the hand's point; from
+/// inside the bedroom, the knock, open and close are done where the body stands.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c25_a_cottages_inner_door_from_outside_and_inside() {
     // A cottage's inner door (its bedroom's), from outside: each form walks in through the front door, then to the
     // inner door, and knocks, opens and closes it.
-    wrong.extend(served_family(
+    let mut wrong = served_family(
         "-99.0,-93.0",
         "c25cottageout",
         &[
@@ -3069,7 +3078,7 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
             ("e_00385aae", "open", "done"),
             ("e_00385aae", "close", "done"),
         ],
-    ));
+    );
     // The same door from inside its bedroom: the Soul walks in to the bedroom's rug, then knocks, opens and closes it.
     wrong.extend(served_family(
         "-99.0,-93.0",
