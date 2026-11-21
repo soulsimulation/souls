@@ -49,6 +49,10 @@ export type NodeRec = {
   /** A moving node's course (field 80, `replica::schedule::F_COURSE`), its value's canonical bytes, for the replica's
    *  `courseAt` (#3603). */
   course?: Uint8Array;
+  /** A creator's kind (`souls:kind`, #3697): the full name it defines (field 1) and its canonical `souls-entry/1`
+   *  record (field 2), for the page's kind catalogue (`kinds/catalogue.ts`). */
+  defines?: string;
+  entry?: Uint8Array;
 };
 
 /** Where the world is: its newest part's end, world time against wall time, and the world time up to which a still

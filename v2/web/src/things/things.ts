@@ -274,9 +274,9 @@ export class ThingLayer {
   }
 
   /** Places (or moves) a thing: its frame in the world, its origin (today's id), and its boxes (one or a box a solid)
-   *  until its model, or for good when it has none. */
-  set(id: string, origin: string | null, frame: THREE.Matrix4, box: THREE.Matrix4 | THREE.Matrix4[] | null): void {
-    const model = origin ? this.opts.index.things[origin] ?? null : null;
+   *  until its model, or for good when it has none. `model` names its model when its origin does not: a creator's
+   *  kind's (#3697), a hash the index knows or the key its shapes `arrive` under. */
+  set(id: string, origin: string | null, frame: THREE.Matrix4, box: THREE.Matrix4 | THREE.Matrix4[] | null, model: string | null = origin ? this.opts.index.things[origin] ?? null : null): void {
     const boxes = box === null ? [] : Array.isArray(box) ? box : [box];
     if (!model && !boxes.length) return this.remove(id);
     for (let c = 0; c < this.copies; c++) {
@@ -498,6 +498,11 @@ export class ThingLayer {
     for (const p of parts) this.slot(t, p, new THREE.Matrix4().multiplyMatrices(t.matrix, p.matrix), p.glow, k);
     // A model arriving under a cut, or under a burning fire.
     if (t.under || t.cut || this.flamesHidden.has(t.id)) this.show(t, !t.under);
+  }
+
+  /** Whether a model has arrived (or failed) under this key. */
+  has(hash: string): boolean {
+    return this.models.has(hash);
   }
 
   /** A model has arrived: its things leave their boxes for it. */
