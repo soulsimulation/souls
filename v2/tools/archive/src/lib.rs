@@ -1261,6 +1261,8 @@ impl<S: Store + Clone> Archiver<S> {
         candidate: &Base,
         redactions: Redactions,
     ) -> R<Self> {
+        let t0 = std::time::Instant::now();
+        macro_rules! t { ($n:expr) => { eprintln!("PROF archive {} {} ms", $n, t0.elapsed().as_millis()) } }
         let checked = Base::read(&candidate.header, &candidate.checkpoint)?;
         if checked.record != candidate.record {
             return refuse("archive-base-mismatch", "checkpoint cursor differs");
@@ -1270,6 +1272,7 @@ impl<S: Store + Clone> Archiver<S> {
         } else {
             None
         };
+        t!("fetched");
         let base = match &fetched {
             Some(f) => f.base.clone().ok_or_else(|| Refusal {
                 name: "archive-unbased-head",
@@ -1285,6 +1288,7 @@ impl<S: Store + Clone> Archiver<S> {
             Some(f) => restore(f)?,
             None => base.tree()?,
         };
+        t!("canonical");
         let mut out = Self {
             packer: Packer::open_based(store.clone(), prefix, &base)?,
             shelf: Shelf::new_based(store, prefix),
@@ -1293,6 +1297,7 @@ impl<S: Store + Clone> Archiver<S> {
             header,
             based: Some((canonical, BTreeMap::new(), base)),
         };
+        t!("constructed");
         if let Some(f) = fetched {
             for segment in f.segments {
                 for (offset, raw) in segment.records.into_iter().enumerate() {
@@ -1304,7 +1309,9 @@ impl<S: Store + Clone> Archiver<S> {
                 }
             }
         }
+        t!("known");
         out.refresh_redactions_inner(redactions, true)?;
+        t!("refreshed");
         Ok(out)
     }
 }
@@ -1332,7 +1339,9 @@ impl<S: Store> Archiver<S> {
         if !force && self.bundler.redactions.hash() == redactions.hash() {
             return Ok(false);
         }
+        let t0 = std::time::Instant::now();
         let mut bundler = Bundler::from_base_with_redactions(base, redactions.clone())?;
+        eprintln!("PROF refresh bundler {} ms, {} known", t0.elapsed().as_millis(), known.len());
         let mut indexer = Indexer::new(redactions);
         let mut bundles = Vec::new();
         let mut views = BTreeMap::new();
@@ -1346,6 +1355,7 @@ impl<S: Store> Archiver<S> {
                 views.extend(indexer.feed(effect)?);
             }
         }
+        eprintln!("PROF refresh fed {} ms", t0.elapsed().as_millis());
         bundles.extend(bundler.finish()?);
         views.extend(indexer.clone().finish()?);
         // A removed event may leave an old mutable index with no surviving rows. Publish its canonical empty form.
@@ -1374,6 +1384,7 @@ impl<S: Store> Archiver<S> {
             };
             views.insert(relative.to_owned(), bytes);
         }
+        eprintln!("PROF refresh listed {} ms {} bundles {} views", t0.elapsed().as_millis(), bundles.len(), views.len());
         // Derive/validate everything before publishing any replacement index.
         for bundle in bundles {
             self.shelf.put(&bundle)?;
@@ -1382,6 +1393,7 @@ impl<S: Store> Archiver<S> {
             self.shelf.put_view(&key, &bytes)?;
         }
         self.shelf.flush()?;
+        eprintln!("PROF refresh published {} ms", t0.elapsed().as_millis());
         self.bundler = bundler;
         self.indexer = indexer;
         Ok(true)
