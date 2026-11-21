@@ -120,6 +120,29 @@ impl Replica {
         }
     }
 
+    /// As [`Replica::restored`], with each node's last change as it was (#3833): a copy carried across a restart
+    /// answers what changed, and a node's version, as the copy that applied every entry does.
+    pub fn restored_at(
+        header: Header,
+        tree: Tree,
+        version: u64,
+        changed_at: BTreeMap<Id, u64>,
+    ) -> Replica {
+        let by_version = changed_at.iter().map(|(id, v)| (*v, *id)).collect();
+        Replica {
+            tree,
+            header,
+            version,
+            changed_at,
+            by_version,
+        }
+    }
+
+    /// Each node's last change (#3833), for [`Replica::restored_at`].
+    pub fn changed_at(&self) -> &BTreeMap<Id, u64> {
+        &self.changed_at
+    }
+
     pub fn header(&self) -> &Header {
         &self.header
     }

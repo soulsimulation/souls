@@ -7,7 +7,7 @@
       "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "r1"]}, "r1": {"kind": "eden:bread_roll"}, "b1": {"hands": {"left": null, "right": null}}}},
       "do": [
         {"act": {"this": "r1", "form": "take"}, "receipt": "rp1", "expect": {"verdict": "yes", "changes": [{"change": "reparent", "node": "r1", "to": {"node": "b1", "hand": "left"}}], "events": [{"event": "eden:taken", "node": "r1", "changes": [0]}], "timers": []}},
-        {"act": {"this": "r1", "form": "bite"}, "receipt": "rp2", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "r1", "field": "bites", "n": 1, "to": 3}], "events": [{"event": "eden:bitten", "node": "r1", "changes": [0]}], "timers": []}}
+        {"act": {"this": "r1", "form": "bite"}, "receipt": "rp2", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "r1", "field": "bites", "n": 28, "to": 3}], "events": [{"event": "eden:bitten", "node": "r1", "changes": [0]}], "timers": []}}
       ],
       "after": {"r1": {"kind": "eden:bread_roll", "fields": {"bites": 3}}, "b1": {"hands": {"left": "r1", "right": null}}}
     },
@@ -16,7 +16,7 @@
       "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "lh1"]}, "lh1": {"kind": "eden:loaf_half"}, "b1": {"hands": {"left": null, "right": null}}}},
       "do": [
         {"act": {"this": "lh1", "form": "take"}, "receipt": "rp1", "expect": {"verdict": "yes", "changes": [{"change": "reparent", "node": "lh1", "to": {"node": "b1", "hand": "left"}}], "events": [{"event": "eden:taken", "node": "lh1", "changes": [0]}], "timers": []}},
-        {"act": {"this": "lh1", "form": "bite"}, "receipt": "rp2", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "lh1", "field": "bites", "n": 1, "to": 1}], "events": [{"event": "eden:bitten", "node": "lh1", "changes": [0]}], "timers": []}}
+        {"act": {"this": "lh1", "form": "bite"}, "receipt": "rp2", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "lh1", "field": "bites", "n": 28, "to": 1}], "events": [{"event": "eden:bitten", "node": "lh1", "changes": [0]}], "timers": []}}
       ],
       "after": {"lh1": {"kind": "eden:loaf_half", "fields": {"bites": 1}}, "b1": {"hands": {"left": "lh1", "right": null}}}
     },
@@ -25,7 +25,7 @@
       "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "lq1"]}, "lq1": {"kind": "eden:loaf_quarter"}, "b1": {"hands": {"left": null, "right": null}}}},
       "do": [
         {"act": {"this": "lq1", "form": "take"}, "receipt": "rp1", "expect": {"verdict": "yes", "changes": [{"change": "reparent", "node": "lq1", "to": {"node": "b1", "hand": "left"}}], "events": [{"event": "eden:taken", "node": "lq1", "changes": [0]}], "timers": []}},
-        {"act": {"this": "lq1", "form": "bite"}, "receipt": "rp2", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "lq1", "field": "bites", "n": 1, "to": 0}], "events": [{"event": "eden:bitten", "node": "lq1", "changes": [0]}], "timers": []}}
+        {"act": {"this": "lq1", "form": "bite"}, "receipt": "rp2", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "lq1", "field": "bites", "n": 28, "to": 0}], "events": [{"event": "eden:bitten", "node": "lq1", "changes": [0]}], "timers": []}}
       ],
       "after": {"lq1": {"kind": "eden:loaf_quarter", "fields": {"bites": 0}}, "b1": {"hands": {"left": "lq1", "right": null}}}
     }

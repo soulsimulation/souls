@@ -3,8 +3,8 @@
   "kind": "eden:ash_hearth",
   "owner": "thing",
   "state": {
-    "lit": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
-    "ash": { "n": 2, "type": "int", "unit": "count", "default": 4, "min": 0, "max": 4, "audience": { "rule": "everyone" } }
+    "lit": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "ash": { "n": 29, "type": "int", "unit": "count", "default": 4, "min": 0, "max": 4, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grate": { "role": "contact", "at_mm": [-150, 700, 0] },

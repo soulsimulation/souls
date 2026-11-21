@@ -49,7 +49,7 @@
         "change": "set",
         "node": "j1",
         "field": "juggles",
-        "n": 1,
+        "n": 28,
         "to": 1
        }
       ],
@@ -79,7 +79,7 @@
         "change": "set",
         "node": "j1",
         "field": "juggles",
-        "n": 1,
+        "n": 28,
         "to": 2
        }
       ]

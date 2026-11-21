@@ -53,7 +53,7 @@
         "change": "set",
         "node": "i1",
         "field": "lit",
-        "n": 1,
+        "n": 28,
         "to": 1
        }
       ],
@@ -83,7 +83,7 @@
         "change": "set",
         "node": "i1",
         "field": "lit",
-        "n": 1,
+        "n": 28,
         "to": 0
        }
       ],
@@ -113,7 +113,7 @@
         "change": "set",
         "node": "i1",
         "field": "lit",
-        "n": 1,
+        "n": 28,
         "to": 1
        }
       ]

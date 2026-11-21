@@ -100,6 +100,18 @@ enum Start {
 pub const SETTLE_US: Micros = 250_000;
 /// How often, in world time, a still world's pointer moves its "quiet until" on (rule 11).
 pub const QUIET_EVERY_US: Micros = stream::PERIOD_US;
+/// Parts in one public generation before the next baseline (#3825): 2 minutes of a busy world at 2 parts a second,
+/// so a new viewer fetches the baseline and at most 2 minutes of parts.
+pub const GENERATION_PARTS: u64 = 240;
+/// Recovery-store objects of old generations deleted after each published part (#3833): a generation's few hundred
+/// objects go in about a minute of a busy world, and no part waits on more than this many deletes.
+const DELETES_PER_PART: usize = 16;
+/// How long a public generation older than the previous one is kept after its last write (#3825).
+pub const PRUNE_GRACE: Duration = Duration::from_secs(600);
+
+fn env_u64(name: &str) -> Option<u64> {
+    std::env::var(name).ok()?.parse().ok()
+}
 
 fn fault(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
@@ -942,7 +954,26 @@ pub struct PublicWriter<S> {
     migration_cut: Option<u64>,
     migration_state: Option<Value>,
     legacy: Option<(u64, u64, Vec<u8>)>,
+    /// The generation this one took over from (#3825): `(old generation id, public version, its next part, digest)`.
+    handoff: Option<(Vec<u8>, u64, u64, Vec<u8>)>,
+    /// The recovery object holding the current generation's `baseline.text` (#3825).
+    baseline_text: Vec<u8>,
+    /// After how many parts a generation closes and the next starts from a fresh baseline (#3825; 0: never).
+    /// Read from `SOULS_STREAM_GENERATION_PARTS` at open; the boundary is a part count, so a restart cuts at the same
+    /// place. A rollover is recorded in the recovery chain, so a restart with another setting replays it exactly.
+    pub generation_parts: u64,
+    /// How long a generation older than the previous one is kept after its last file was written (#3825), so a live
+    /// viewer can drain it. `SOULS_STREAM_PRUNE_GRACE_S`, default [`PRUNE_GRACE`].
+    pub prune_grace: Duration,
     force_remainder: bool,
+    /// Every recovery object the current generation's chain names (#3833): never deleted.
+    live: std::collections::BTreeSet<Vec<u8>>,
+    /// The records of the generations before this one still in the recovery store, newest first (#3833):
+    /// `(record hash, when that generation closed, wall µs)`.
+    closed: Vec<(Vec<u8>, i64)>,
+    /// Recovery-store keys waiting to be deleted, a few after each part (#3833); none once the store refused one.
+    deletes: std::collections::VecDeque<String>,
+    deleting: bool,
     /// Off: every cut works out the public state whole (the reference the incremental cut is compared with, #3799).
     pub incremental: bool,
     /// Whether the open cut holds anything but motion and fields set on nodes; else the nodes it set (#3799).
@@ -1043,6 +1074,9 @@ fn stream_effect(header: &Header, value: Value) -> R<Effect> {
         .effects
         .pop()
         .ok_or_else(|| fault("stream-frame", "missing effect"))
+}
+fn int(n: i64) -> Value {
+    u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
 }
 fn wire(v: Value) -> R<Vec<u8>> {
     encode(&v).map_err(|e| fault("encoding", e.to_string()))
@@ -1328,7 +1362,17 @@ impl<S: ObjectStore> PublicWriter<S> {
             migration_cut: None,
             migration_state: None,
             legacy: None,
+            handoff: None,
+            baseline_text: Vec::new(),
+            generation_parts: env_u64("SOULS_STREAM_GENERATION_PARTS").unwrap_or(GENERATION_PARTS),
+            prune_grace: Duration::from_secs(
+                env_u64("SOULS_STREAM_PRUNE_GRACE_S").unwrap_or(PRUNE_GRACE.as_secs()),
+            ),
             force_remainder: false,
+            live: std::collections::BTreeSet::new(),
+            closed: Vec::new(),
+            deletes: std::collections::VecDeque::new(),
+            deleting: true,
             // SOULS_STREAM_WHOLE set: every cut worked out whole, the reference a recorded log is compared with.
             incremental: std::env::var_os("SOULS_STREAM_WHOLE").is_none(),
             structural: true,
@@ -1504,6 +1548,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                     Value::Bytes(w.put(&w.words(w.player.state(), w.player.state())?)?),
                 ),
             ])))?;
+            w.baseline_text = obj_bytes(&object_map(&seed)?, 9)?;
             w.seed = w.put(&seed)?;
             let manifest = wire(Value::Map(BTreeMap::from([
                 (1, Value::Bytes(w.seed.clone())),
@@ -1518,11 +1563,17 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         immutable(&w.root.join(stream::header_path(header)), header.stored())?;
         immutable(&w.generation_dir().join("baseline"), &w.baseline)?;
-        let seed = object_map(&w.get(&w.seed)?)?;
         immutable(
             &w.generation_dir().join("baseline.text"),
-            &w.get(&obj_bytes(&seed, 9)?)?,
+            &w.get(&w.baseline_text)?,
         )?;
+        w.closed_generations();
+        // A writer stopped between a generation's last part and its rollover rolls over now, at the same place.
+        if w.rollover_due() {
+            w.rollover()?;
+        }
+        w.prune();
+        w.prune_store();
         w.pointer(None)?;
         Ok(w)
     }
@@ -1637,6 +1688,376 @@ impl<S: ObjectStore> PublicWriter<S> {
     pub fn source_cursor(&self) -> u64 {
         self.cursor
     }
+    /// Whether the current generation is full and nothing is open (#3825).
+    fn rollover_due(&self) -> bool {
+        self.generation_parts > 0
+            && self.player.next() >= self.generation_parts
+            && self.chunks.is_empty()
+            && !self.force_remainder
+    }
+    /// The next generation's baseline: the public state now, at the source cursor (#3825).
+    fn generation_baseline(&self) -> R<Vec<u8>> {
+        replica::stream::public::baseline_from_projection(
+            &self.header,
+            self.player.state().clone(),
+            self.cursor,
+        )
+    }
+    /// Starts the next generation from `baseline` (#3825), keeping how a live viewer crosses over: the old
+    /// generation, the public version and part count it ends at, and its state's digest, which the new baseline's is.
+    fn next_generation(&mut self, baseline: Vec<u8>, text: Vec<u8>) -> R<()> {
+        let handoff = (
+            replica::ids::sha256(&self.baseline).to_vec(),
+            self.player.version(),
+            self.player.next(),
+            self.player.hash()?,
+        );
+        let player = PublicPlayer::start(self.header.stored(), &baseline)?;
+        if player.hash()? != handoff.3 {
+            return Err(fault("stream-rollover", "baseline digest differs"));
+        }
+        self.baseline = baseline;
+        self.player = player;
+        self.baseline_text = text;
+        self.handoff = Some(handoff);
+        self.legacy = None;
+        self.migration_cut = None;
+        Ok(())
+    }
+    /// Closes the current generation and starts the next one from the public state now (#3825). The rollover is
+    /// committed to the recovery store first, then the new generation's baseline files are written; the pointer that
+    /// names it is written after them by the caller. World time and the source cursor are untouched.
+    ///
+    /// The new generation's recovery chain starts afresh (#3833): its seed holds the canonical copy and what the
+    /// writer carries at this place, so a restart reads only the newest generation. A record of the closed chain's
+    /// objects is kept beside it, for [`PublicWriter::prune_store`].
+    fn rollover(&mut self) -> R<()> {
+        let number = self.player.next();
+        let baseline = self.generation_baseline()?;
+        // A new generation's baseline text holds every public name, as the first baseline's does (#3574).
+        let words = self.words(self.player.state(), self.player.state())?;
+        let text = self.put(&words)?;
+        let closed_at = crate::answers::now();
+        let record = self.put(&wire(Value::Map(BTreeMap::from([
+            (
+                1,
+                Value::Bytes(self.closed.first().map(|c| c.0.clone()).unwrap_or_default()),
+            ),
+            (2, int(closed_at)),
+            (
+                3,
+                Value::Array(self.live.iter().map(|h| Value::Bytes(h.clone())).collect()),
+            ),
+        ])))?)?;
+        let handoff = self.handoff_now()?;
+        let seed = self.generation_seed(&baseline, &text, &handoff, &record)?;
+        let seed_hash = self.put(&seed)?;
+        let manifest = wire(Value::Map(BTreeMap::from([
+            (1, Value::Bytes(seed_hash.clone())),
+            (2, Value::Bytes(Vec::new())),
+            (3, Value::Bytes(Vec::new())),
+            (4, Value::Uint(number)),
+            (5, Value::Bytes(Vec::new())),
+            (6, Value::Bytes(Vec::new())),
+            (7, Value::Uint(self.cursor)),
+        ])))?;
+        let live = std::mem::take(&mut self.live);
+        self.live = [seed_hash.clone(), text.clone()].into();
+        if let Err(e) = self.commit(&manifest) {
+            self.live = live;
+            return Err(e);
+        }
+        self.seed = seed_hash;
+        self.closed.insert(0, (record, closed_at));
+        self.next_generation(baseline, text)?;
+        immutable(&self.generation_dir().join("baseline"), &self.baseline)?;
+        immutable(&self.generation_dir().join("baseline.text"), &words)?;
+        self.prune();
+        self.prune_store();
+        Ok(())
+    }
+    /// How a live viewer crosses from the current generation (#3825): its id, the public version and part count it
+    /// ends at, and its state's digest.
+    fn handoff_now(&self) -> R<(Vec<u8>, u64, u64, Vec<u8>)> {
+        Ok((
+            replica::ids::sha256(&self.baseline).to_vec(),
+            self.player.version(),
+            self.player.next(),
+            self.player.hash()?,
+        ))
+    }
+    /// A generation's recovery seed (#3833): the fields of the first seed (`1` header, `3` source cursor, `4`
+    /// baseline, `9` its words; no checkpoint, bootstrap or legacy), and what the writer carries at the rollover: `10`
+    /// the canonical tree as a checkpoint's records `{1: [[audience, state hash], ...], 2: [[hash, record], ...]}`,
+    /// `11` its version, `12` each node's last change `[[id, version], ...]`, `13` the public view's carried state,
+    /// `14` the hand-off `[old generation, public version, its next part, digest]`, `15` the last part's end, `16`
+    /// the record of the chain it closed.
+    fn generation_seed(
+        &self,
+        baseline: &[u8],
+        text: &[u8],
+        handoff: &(Vec<u8>, u64, u64, Vec<u8>),
+        record: &[u8],
+    ) -> R<Vec<u8>> {
+        let sealed = self.canonical.tree().seal_whole()?;
+        let audience = |a: Audience| match a {
+            Audience::Everyone => Value::Map(BTreeMap::from([(1, Value::Uint(1))])),
+            Audience::Of(id) => {
+                Value::Map(BTreeMap::from([(1, Value::Uint(2)), (2, id.to_value())]))
+            }
+        };
+        let tree = Value::Map(BTreeMap::from([
+            (
+                1,
+                Value::Array(
+                    sealed
+                        .audiences
+                        .iter()
+                        .map(|(a, h, _)| {
+                            Value::Array(vec![audience(*a), Value::Bytes(h.to_bytes())])
+                        })
+                        .collect(),
+                ),
+            ),
+            (
+                2,
+                Value::Array(
+                    sealed
+                        .audiences
+                        .into_iter()
+                        .map(|(_, h, b)| (h, b))
+                        .chain(sealed.nodes)
+                        .map(|(h, b)| {
+                            Value::Array(vec![Value::Bytes(h.to_bytes()), Value::Bytes(b)])
+                        })
+                        .collect(),
+                ),
+            ),
+        ]));
+        let mut m = BTreeMap::from([
+            (1, Value::Bytes(self.header.stored().to_vec())),
+            (2, Value::Bytes(Vec::new())),
+            (3, Value::Uint(self.cursor)),
+            (4, Value::Bytes(baseline.to_vec())),
+            (5, Value::Array(Vec::new())),
+            (6, Value::Array(Vec::new())),
+            (7, Value::Array(Vec::new())),
+            (8, Value::Bytes(Vec::new())),
+            (9, Value::Bytes(text.to_vec())),
+            (10, tree),
+            (11, Value::Uint(self.canonical.version())),
+            (
+                12,
+                Value::Array(
+                    self.canonical
+                        .changed_at()
+                        .iter()
+                        .map(|(id, v)| Value::Array(vec![id.to_value(), Value::Uint(*v)]))
+                        .collect(),
+                ),
+            ),
+            (13, self.view.carried()),
+            (
+                14,
+                Value::Array(vec![
+                    Value::Bytes(handoff.0.clone()),
+                    Value::Uint(handoff.1),
+                    Value::Uint(handoff.2),
+                    Value::Bytes(handoff.3.clone()),
+                ]),
+            ),
+            (16, Value::Bytes(record.to_vec())),
+        ]);
+        if let Some(to) = self.last_to {
+            m.insert(15, int(to));
+        }
+        wire(Value::Map(m))
+    }
+    /// Takes back what a generation's seed carries (#3833; [`PublicWriter::generation_seed`]).
+    fn carry(&mut self, seed: &BTreeMap<u64, Value>) -> R<Replica> {
+        let bad = |what: &str| fault("stream-recovery", format!("generation seed: {what}"));
+        let Some(Value::Map(tree)) = seed.get(&10) else {
+            return Err(bad("tree"));
+        };
+        let (Some(Value::Array(tops)), Some(Value::Array(records))) = (tree.get(&1), tree.get(&2))
+        else {
+            return Err(bad("tree fields"));
+        };
+        let mut audiences = Vec::new();
+        for top in tops {
+            let Value::Array(p) = top else {
+                return Err(bad("audience"));
+            };
+            let [Value::Map(a), Value::Bytes(h)] = p.as_slice() else {
+                return Err(bad("audience"));
+            };
+            let a = match (a.get(&1), a.get(&2)) {
+                (Some(Value::Uint(1)), None) => Audience::Everyone,
+                (Some(Value::Uint(2)), Some(id)) => Audience::Of(replica::effects::read_id(id)?),
+                _ => return Err(bad("audience")),
+            };
+            audiences.push((a, h.clone()));
+        }
+        let mut stored = BTreeMap::new();
+        for r in records {
+            let Value::Array(p) = r else {
+                return Err(bad("record"));
+            };
+            let [Value::Bytes(h), Value::Bytes(b)] = p.as_slice() else {
+                return Err(bad("record"));
+            };
+            stored.insert(h.clone(), b.clone());
+        }
+        let tree = replica::tree::Tree::unseal(&audiences, &mut |h| {
+            stored
+                .get(h)
+                .cloned()
+                .ok_or_else(|| fault("stream-recovery", "generation seed: a record is missing"))
+        })?;
+        let Some(Value::Array(changed)) = seed.get(&12) else {
+            return Err(bad("versions"));
+        };
+        let mut changed_at = BTreeMap::new();
+        for c in changed {
+            let Value::Array(p) = c else {
+                return Err(bad("version"));
+            };
+            let [id, Value::Uint(v)] = p.as_slice() else {
+                return Err(bad("version"));
+            };
+            changed_at.insert(replica::effects::read_id(id)?, *v);
+        }
+        let canonical =
+            Replica::restored_at(self.header.clone(), tree, obj_uint(seed, 11)?, changed_at);
+        self.view.carry(seed.get(&13).ok_or_else(|| bad("view"))?)?;
+        let Some(Value::Array(h)) = seed.get(&14) else {
+            return Err(bad("hand-off"));
+        };
+        let [
+            Value::Bytes(from),
+            Value::Uint(version),
+            Value::Uint(next),
+            Value::Bytes(hash),
+        ] = h.as_slice()
+        else {
+            return Err(bad("hand-off"));
+        };
+        self.handoff = Some((from.clone(), *version, *next, hash.clone()));
+        self.last_to = match seed.get(&15) {
+            None => None,
+            Some(Value::Uint(u)) => Some(i64::try_from(*u).map_err(|_| bad("last end"))?),
+            Some(Value::Nint(n)) => Some(-1 - i64::try_from(*n).map_err(|_| bad("last end"))?),
+            Some(_) => return Err(bad("last end")),
+        };
+        Ok(canonical)
+    }
+    /// The records of the closed generations still in the recovery store, from the current seed back (#3833).
+    /// Best effort: a record that cannot be read ends the list, and its generation's objects are left where they are.
+    fn closed_generations(&mut self) {
+        self.closed.clear();
+        let Ok(seed) = self.get(&self.seed).and_then(|b| object_map(&b)) else {
+            return;
+        };
+        let mut at = match seed.get(&16) {
+            Some(Value::Bytes(h)) => h.clone(),
+            _ => return,
+        };
+        while !at.is_empty() && self.closed.iter().all(|c| c.0 != at) {
+            let Ok(r) = self.get(&at).and_then(|b| object_map(&b)) else {
+                break;
+            };
+            let closed = match r.get(&2) {
+                Some(Value::Uint(u)) => i64::try_from(*u).unwrap_or(i64::MAX),
+                _ => break,
+            };
+            self.closed.push((at, closed));
+            at = match r.get(&1) {
+                Some(Value::Bytes(h)) => h.clone(),
+                _ => break,
+            };
+        }
+    }
+    /// Queues for deletion the recovery chains of the generations before the previous one that closed longer than
+    /// the grace ago (#3833), as [`PublicWriter::prune`] removes their files: each chain's objects the current chain
+    /// does not name, then the record that lists them, oldest generation first. A restart reads only the current
+    /// chain; the grace leaves time to look into a recent one.
+    fn prune_store(&mut self) {
+        if !self.deleting || !self.deletes.is_empty() {
+            return;
+        }
+        let now = crate::answers::now();
+        let grace = i64::try_from(self.prune_grace.as_micros()).unwrap_or(i64::MAX);
+        let keep = self
+            .closed
+            .iter()
+            .enumerate()
+            .position(|(i, c)| i > 0 && now.saturating_sub(c.1) >= grace)
+            .unwrap_or(self.closed.len());
+        let gone = self.closed.split_off(keep);
+        for (record, _) in gone.iter().rev() {
+            let Ok(r) = self.get(record).and_then(|b| object_map(&b)) else {
+                continue;
+            };
+            if let Some(Value::Array(objects)) = r.get(&3) {
+                for o in objects {
+                    if let Value::Bytes(h) = o
+                        && !self.live.contains(h)
+                    {
+                        self.deletes.push_back(self.object_key(h));
+                    }
+                }
+            }
+            self.deletes.push_back(self.object_key(record));
+        }
+    }
+    fn object_key(&self, hash: &[u8]) -> String {
+        format!("{}objects/{}", self.prefix, replica::encode::to_hex(hash))
+    }
+    /// Deletes up to `n` queued recovery objects (#3833). A store that cannot delete is left as it is.
+    fn delete_some(&mut self, n: usize) {
+        for _ in 0..n {
+            let Some(key) = self.deletes.pop_front() else {
+                return;
+            };
+            if self.store.delete(&key).is_err() {
+                self.deletes.clear();
+                self.deleting = false;
+                return;
+            }
+        }
+    }
+    /// Removes the generations before the previous one whose last write is older than the grace (#3825). The
+    /// current and the previous generation are always kept, so a live viewer can drain the one it is on. Best effort:
+    /// a generation that cannot be read or removed now is tried again at the next rollover or start.
+    fn prune(&self) {
+        let keep: Vec<String> = std::iter::once(replica::ids::sha256(&self.baseline).to_vec())
+            .chain(self.handoff.as_ref().map(|h| h.0.clone()))
+            .map(|h| replica::encode::to_hex(&h))
+            .collect();
+        let Ok(entries) = fs::read_dir(self.dir.join("g")) else {
+            return;
+        };
+        let now = crate::answers::now();
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if keep.contains(&name) {
+                continue;
+            }
+            let old = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|t| i64::try_from(t.as_micros()).ok())
+                .is_some_and(|at| {
+                    now.saturating_sub(at)
+                        >= i64::try_from(self.prune_grace.as_micros()).unwrap_or(i64::MAX)
+                });
+            if old {
+                let _ = fs::remove_dir_all(entry.path());
+            }
+        }
+    }
     /// A newest-only O3 restore may begin after the observer's last publication. Recover the intervening actual
     /// immutable pieces through the existing takeover-aware reader; never jump to a newer checkpoint's state.
     pub fn bridge_to(&mut self, target: u64) -> R<()> {
@@ -1729,6 +2150,7 @@ impl<S: ObjectStore> PublicWriter<S> {
     }
     fn commit(&mut self, manifest: &[u8]) -> R<()> {
         let hash = self.put(manifest)?;
+        self.name_live(&hash, &object_map(manifest)?);
         let bytes = wire(Value::Map(BTreeMap::from([(
             1,
             Value::Bytes(hash.clone()),
@@ -1745,6 +2167,17 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.head = Some(hash);
         Ok(())
     }
+    /// Notes a manifest of the current chain and the objects it names (#3833).
+    fn name_live(&mut self, hash: &[u8], m: &BTreeMap<u64, Value>) {
+        self.live.insert(hash.to_vec());
+        for k in [1, 3, 5, 6, 9] {
+            if let Some(Value::Bytes(h)) = m.get(&k)
+                && !h.is_empty()
+            {
+                self.live.insert(h.clone());
+            }
+        }
+    }
     fn recover(&mut self, head: &[u8]) -> R<()> {
         let mut chain = Vec::new();
         let mut h = head.to_vec();
@@ -1754,6 +2187,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 return Err(fault("stream-recovery", "manifest cycle"));
             }
             let m = object_map(&self.get(&h)?)?;
+            self.name_live(&h, &m);
             h = obj_bytes(&m, 2)?;
             chain.push(m);
         }
@@ -1767,10 +2201,15 @@ impl<S: ObjectStore> PublicWriter<S> {
             return Err(fault("header-mismatch", "recovery seed"));
         }
         self.baseline = obj_bytes(&seed, 4)?;
+        self.baseline_text = obj_bytes(&seed, 9)?;
+        self.live.insert(self.baseline_text.clone());
         self.player = PublicPlayer::start(self.header.stored(), &self.baseline)?;
         let checkpoint = obj_bytes(&seed, 2)?;
         let record = obj_uint(&seed, 3)?;
-        self.canonical = if checkpoint.is_empty() {
+        self.canonical = if seed.contains_key(&10) {
+            // A generation's seed (#3833): the copy and what the writer carried at its rollover.
+            self.carry(&seed)?
+        } else if checkpoint.is_empty() {
             if record != 0 {
                 return Err(fault("stream-recovery", "empty nonzero checkpoint"));
             }
@@ -1812,6 +2251,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                     return Err(fault("stream-recovery", "invalid legacy file name"));
                 }
                 immutable(&self.dir.join(name.as_str()), &self.get(hash)?)?;
+                self.live.insert(hash.clone());
             }
         }
         if let Some(Value::Array(legacy)) = seed.get(&6)
@@ -1849,7 +2289,11 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.chunk_start = self.cursor;
         self.force_remainder = self.canonical.version() > self.player.version();
 
-        for m in chain {
+        // Only the current generation's files are written again; older ones are on the disk or pruned (#3825).
+        let current = chain.iter().rposition(|m| m.contains_key(&8)).unwrap_or(0);
+        let mut played = false;
+        let mut files = Vec::new();
+        for (i, m) in chain.into_iter().enumerate() {
             if obj_bytes(&m, 1)? != self.seed {
                 return Err(fault("stream-recovery", "generation source changed"));
             }
@@ -1858,8 +2302,21 @@ impl<S: ObjectStore> PublicWriter<S> {
                 if obj_uint(&m, 7)? != self.cursor {
                     return Err(fault("stream-recovery", "initial cursor"));
                 }
+                if let Some(id) = m.get(&8) {
+                    // A rollover (#3825): the same baseline worked out again from the same state.
+                    self.player.verify()?;
+                    if obj_uint(&m, 4)? != self.player.next() {
+                        return Err(fault("stream-recovery", "rollover part number"));
+                    }
+                    let baseline = self.generation_baseline()?;
+                    if *id != Value::Bytes(replica::ids::sha256(&baseline).to_vec()) {
+                        return Err(fault("stream-recovery", "rollover baseline differs"));
+                    }
+                    self.next_generation(baseline, obj_bytes(&m, 9)?)?;
+                }
                 continue;
             }
+            let write = i > current;
             let c = object_map(&self.get(&chunk)?)?;
             if obj_uint(&c, 1)? != self.cursor {
                 return Err(fault("stream-recovery", "source record gap"));
@@ -1881,20 +2338,29 @@ impl<S: ObjectStore> PublicWriter<S> {
                 return Err(fault("stream-recovery", "part number"));
             }
             let bytes = self.get(&obj_bytes(&m, 5)?)?;
-            self.player.play(&bytes)?;
-            if project(&self.header, &self.canonical.tree().to_state())? != *self.player.state() {
-                return Err(fault("stream-recovery", "canonical projection differs"));
-            }
-            immutable(&self.generation_dir().join(number.to_string()), &bytes)?;
+            self.player.play_deferred(&bytes)?;
+            played = true;
             let text = obj_bytes(&m, 6)?;
-            if !text.is_empty() {
-                immutable(
-                    &self.generation_dir().join(format!("{number}.text")),
-                    &self.get(&text)?,
-                )?;
+            if write {
+                files.push((number.to_string(), bytes.clone()));
+            }
+            if write && !text.is_empty() {
+                files.push((format!("{number}.text"), self.get(&text)?));
             }
             self.last_to = Some(StreamPart::read(&bytes)?.to);
             self.clear_pending();
+        }
+        // The parts' digests (#3822's deferred play) and the canonical copy's projection are checked once, for the
+        // state the parts make together, before any file is written again (#3833): a whole digest and a whole
+        // projection of a large world per part made a restart's time grow with the parts it reads.
+        self.player.verify()?;
+        if played
+            && project(&self.header, &self.canonical.tree().to_state())? != *self.player.state()
+        {
+            return Err(fault("stream-recovery", "canonical projection differs"));
+        }
+        for (name, bytes) in files {
+            immutable(&self.generation_dir().join(name), &bytes)?;
         }
         Ok(())
     }
@@ -2421,6 +2887,10 @@ impl<S: ObjectStore> PublicWriter<S> {
         immutable(&self.generation_dir().join(format!("{number}.text")), &text)?;
         self.last_to = Some(sp.to);
         self.clear_pending();
+        self.delete_some(DELETES_PER_PART);
+        if self.rollover_due() {
+            self.rollover()?;
+        }
         self.pointer(None)
     }
     fn pointer(&self, quiet: Option<i64>) -> R<()> {
@@ -2448,7 +2918,17 @@ impl<S: ObjectStore> PublicWriter<S> {
             8,
             Value::Bytes(replica::ids::sha256(&self.baseline).to_vec()),
         );
-        if let Some((version, number, hash)) = &self.legacy {
+        if let Some((from, version, number, hash)) = &self.handoff {
+            value.insert(
+                9,
+                Value::Array(vec![
+                    Value::Uint(*version),
+                    Value::Uint(*number),
+                    Value::Bytes(hash.clone()),
+                ]),
+            );
+            value.insert(10, Value::Bytes(from.clone()));
+        } else if let Some((version, number, hash)) = &self.legacy {
             value.insert(
                 9,
                 Value::Array(vec![

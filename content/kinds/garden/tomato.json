@@ -3,7 +3,7 @@
   "kind": "eden:tomato",
   "owner": "thing",
   "state": {
-    "bites_left": { "n": 1, "type": "int", "unit": "count", "default": 2, "min": 0, "max": 2, "audience": { "rule": "everyone" } }
+    "bites_left": { "n": 28, "type": "int", "unit": "count", "default": 2, "min": 0, "max": 2, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [45, 40, 0] },
