@@ -1,5 +1,6 @@
 import { creatorArchive } from '../worlds/archive.ts';
 import { creatorHandoff } from '../worlds/handoff.ts';
+import { creatorVisitors } from './visitors.ts';
 import { browserSession, localTestSignIn, sessionRequest } from '../source/signin.ts';
 import { worldAddress } from '../source/address.ts';
 // The creator's panel (Engine v2 W5, #2801): the world's one creator places and moves things by hand, through the same
@@ -377,3 +378,4 @@ requestAnimationFrame(draw);
 creatorHandoff($<HTMLElement>('handoff'), installed?.world ?? null, installed?.directory ?? location.origin, () => $<HTMLInputElement>('who').value);
 
 creatorArchive($<HTMLElement>('archive'), installed?.world ?? null, installed?.directory ?? location.origin, () => $<HTMLInputElement>('who').value);
+creatorVisitors($<HTMLElement>('visitors'), installed?.world ?? null, installed?.directory ?? location.origin, () => $<HTMLInputElement>('who').value);
