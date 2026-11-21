@@ -222,7 +222,7 @@ renderer.setAnimationLoop((now) => {
     }
   }
   renderer.render(scene, cam.camera);
-  shot.frame(framed && t !== null && sky.recordAt(t) !== null && (things.layer?.settled ?? true));
+  shot.frame(t !== null && world.nodes.size > 0 && sky.recordAt(t) !== null && (things.layer?.settled ?? true)); // a world with no Souls draws no bodies, and is still ready
   const c = cam.camera, fwd = c.getWorldDirection(new THREE.Vector3());
   sound.frame(t, { pos: c.position.toArray(), forward: fwd.toArray(), up: c.up.toArray() });
   if (t !== null) souls.draw(t, cam.camera);
