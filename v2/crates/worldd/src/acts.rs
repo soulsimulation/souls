@@ -961,6 +961,11 @@ impl Acts {
                 first.get_or_insert(e);
                 continue;
             }
+            // A thing on a course away from its stop (a punt out on the water, #3603) is refused before any walk to it.
+            if let Some(Err(e)) = bodies.as_deref().map(|b| b.slots.boardable(*node, now)) {
+                first.get_or_insert(e);
+                continue;
+            }
             // The same complete arguments reach target resolution, step binding and effects.
             let (entry, thing) = match targets(entry, form, &all) {
                 Ok(t) => t,
