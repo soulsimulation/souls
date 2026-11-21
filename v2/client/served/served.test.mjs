@@ -58,7 +58,7 @@ test('A2: each served file\'s version, length and hash equal the manifest\'s', (
 test('the served client carries the land verbs\' ground model and its zod (#3695): land loads from the unpacked client', async () => {
   const { build } = await import('./build.mjs');
   const out = join(dir, 'land-served'), home = join(dir, 'land-home');
-  build({ out, version: '2.5.1' });
+  build({ out, version: '2.5.1', strict: true });
   const r = spawnSync(process.execPath, [join(out, 'eden.mjs'), 'version'], { encoding: 'utf8', env: { ...process.env, SOULS_HOME: join(home, '.souls') } });
   assert.equal(r.status, 0, r.stderr + r.stdout);
   const [root] = readdirSync(join(home, '.souls/bin/client')).filter((d) => d.startsWith('2.5.1-'));

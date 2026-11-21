@@ -72,11 +72,13 @@ export function namedImports(files = payloadFiles()) {
 }
 
 /** A named package as served files, `node_modules/<name>/<path>` → text: its package.json and the files its ESM entry
- *  imports, closed over relative imports. Resolved as the importing file resolves it; a package not installed there
- *  stops the build, so a release never serves a client whose land verbs cannot load. */
-export function vendored(name, from) {
+ *  imports, closed over relative imports. Resolved as the importing file resolves it. A package not installed there
+ *  stops the build when `strict` (the command line, which a release runs, so it never serves a client whose land verbs
+ *  cannot load); otherwise it is left out (tests that build a client for other reasons). */
+export function vendored(name, from, { strict = false } = {}) {
   let pj;
   try { pj = createRequire(join(REPO, from)).resolve(`${name}/package.json`); } catch (e) {
+    if (!strict) return {};
     throw new Error(`${from} imports ${name}, which is not installed (pnpm install --frozen-lockfile --filter @souls/ground): ${e.message}`);
   }
   const dir = dirname(pj), pkg = JSON.parse(readFileSync(pj, 'utf8'));
@@ -106,13 +108,13 @@ export function stampSkill(text, version) {
 }
 
 /** Builds the served set into `out`; gives the `soulClient` it wrote. */
-export function build({ out, version, min = '0.0.0', pkg }) {
+export function build({ out, version, min = '0.0.0', pkg, strict = false }) {
   if (!VERSION.test(version) || !VERSION.test(min)) throw new Error('--version and --min are x.y.z');
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   const payload = payloadFiles();
   const files = Object.fromEntries(payload.map((f) => [f, readFileSync(join(REPO, f), 'utf8')]));
-  for (const [name, from] of namedImports(payload)) Object.assign(files, vendored(name, from));
+  for (const [name, from] of namedImports(payload)) Object.assign(files, vendored(name, from, { strict }));
   const loader = readFileSync(join(here, 'loader.mjs'), 'utf8');
   writeFileSync(join(out, 'eden.mjs'), `#!/usr/bin/env node\n// Souls client ${version} (Engine v2 R17): start with \`node eden.mjs pair <world>\`.\n` +
     `const VERSION = "${version}";\nconst ENTRY = ${JSON.stringify(ENTRY)};\nconst FILES = ${JSON.stringify(files)};\n${loader}`);
@@ -136,6 +138,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.stderr.write('usage: build.mjs --out <dir> --version <x.y.z> [--min <x.y.z>] [--pkg <dir>]\n');
     process.exit(2);
   }
-  const c = build({ out: resolve(opt('--out')), version: opt('--version'), min: opt('--min'), pkg: opt('--pkg') && resolve(opt('--pkg')) });
+  const c = build({ out: resolve(opt('--out')), version: opt('--version'), min: opt('--min'), pkg: opt('--pkg') && resolve(opt('--pkg')), strict: true });
   for (const f of c.files) console.log(`served: ${f.name.padEnd(16)} ${f.version}  ${f.bytes} bytes  ${f.sha256}`);
 }
