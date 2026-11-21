@@ -1,3 +1,4 @@
+import { creatorHandoff } from '../worlds/handoff.ts';
 import { browserSession, localTestSignIn, sessionRequest } from '../source/signin.ts';
 import { worldAddress } from '../source/address.ts';
 // The creator's panel (Engine v2 W5, #2801): the world's one creator places and moves things by hand, through the same
@@ -12,7 +13,7 @@ import { worldAddress } from '../source/address.ts';
 // Sign-in uses the existing provider session, as account and world creation do. Test people are HTTP-loopback only.
 import init, { wireHello, wireSignIn } from 'replica';
 import { StreamSource } from '../source/stream.ts';
-import type { NodeRec } from '../source/source.ts';
+import { reconcileSnapshot, type NodeRec, type SnapshotRec } from '../source/source.ts';
 import { idOf, type Frame, type Op } from './edit.ts';
 import { CreatorSession } from './session.ts';
 import { Drag, refusalText, soulName, type At, type Body } from './drag.ts';
@@ -342,28 +343,34 @@ $<HTMLFormElement>('signin').addEventListener('submit', (e) => {
 
 $<HTMLInputElement>('who').parentElement!.hidden = !localTestSignIn(location.href);
 
+/** Both the full public baseline and genuine changes update the same panel observation. */
+function applyNodes(p: SnapshotRec): void {
+  for (const id of p.removed) nodes.delete(id);
+  for (const n of p.nodes) nodes.set(n.id, n);
+  for (const id of [...sentTo.keys()]) {
+    const at = worldAt(id), want = sentTo.get(id)!;
+    if (Math.hypot(at.x - want.x, at.z - want.z) < 0.05) sentTo.delete(id);
+  }
+  const seen = new Set([...kinds.options].map((o) => o.value));
+  for (const n of things()) {
+    if (seen.has(n.kind)) continue;
+    seen.add(n.kind);
+    kinds.add(new Option(short(n.kind), n.kind));
+  }
+  const r = room();
+  if (r) ({ x: cx, z: cz } = worldAt(r));
+}
+
 const address = installed?.stream ?? (addressError ? null : params.get('stream'));
 if (address) {
   new StreamSource(address).start({
     pointer() {},
-    part(p) {
-      for (const id of p.removed) nodes.delete(id);
-      for (const n of p.nodes) nodes.set(n.id, n);
-      for (const id of [...sentTo.keys()]) {
-        const at = worldAt(id), want = sentTo.get(id)!;
-        if (Math.hypot(at.x - want.x, at.z - want.z) < 0.05) sentTo.delete(id);
-      }
-      const seen = new Set([...kinds.options].map((o) => o.value));
-      for (const n of things()) {
-        if (seen.has(n.kind)) continue;
-        seen.add(n.kind);
-        kinds.add(new Option(short(n.kind), n.kind));
-      }
-      const r = room();
-      if (r) ({ x: cx, z: cz } = worldAt(r));
-    },
+    snapshot(s) { applyNodes(reconcileSnapshot(nodes.keys(), s)); },
+    part: applyNodes,
     error: (m) => (status.textContent = m),
   });
 } else status.textContent = addressError || 'no stream: open this page with ?stream=<the stream directory>';
 Object.assign(globalThis, { panel: { nodes, get session() { return session; }, get prayers() { return prayers; }, drag } });
 requestAnimationFrame(draw);
+
+creatorHandoff($<HTMLElement>('handoff'), installed?.world ?? null, installed?.directory ?? location.origin, () => $<HTMLInputElement>('who').value);
