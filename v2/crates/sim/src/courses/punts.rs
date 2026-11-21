@@ -118,10 +118,91 @@ pub fn moorings_of(tree: &replica::tree::Tree, ground: Id) -> Result<Vec<Mooring
     Ok(moorings(&waters, terrain.as_ref(), |_| true))
 }
 
+/// cos and sin of k/32 of a turn, parts per million (today's 32 plank directions).
+fn turn32(k: usize) -> (i64, i64) {
+    const Q: [i64; 9] = [
+        1_000_000, 980_785, 923_880, 831_470, 707_107, 555_570, 382_683, 195_090, 0,
+    ];
+    let k = k % 32;
+    let (c, s) = match k / 8 {
+        0 => (Q[k % 8], Q[8 - k % 8]),
+        1 => (-Q[8 - k % 8], Q[k % 8]),
+        2 => (-Q[k % 8], -Q[8 - k % 8]),
+        _ => (Q[8 - k % 8], -Q[k % 8]),
+    };
+    (c, s)
+}
+
 fn mooring(w: &Water, terrain: Option<&Terrain>, clear: &impl Fn(Vec3) -> bool) -> Option<Mooring> {
     let ground = |x: i64, z: i64| terrain.and_then(|t| t.height_at(x, z)).unwrap_or(0);
     let wet = |x: i64, z: i64| inside(&w.ring, [x, z]) && w.level - ground(x, z) >= FLOAT_DEPTH;
-    let bank = |x: i64, z: i64| (!inside(&w.ring, [x, z])).then(|| Vec3::new(x, ground(x, z), z));
+    // Dry bank: off the water, or ground inside its outline that the water does not cover.
+    let bank = |x: i64, z: i64| {
+        (!inside(&w.ring, [x, z]) || ground(x, z) >= w.level).then(|| Vec3::new(x, ground(x, z), z))
+    };
+    let dry = |p: Xz| -> Option<Vec3> {
+        let v = bank(p[0], p[1])?;
+        let disc = TURN16
+            .iter()
+            .step_by(2)
+            .all(|&(c, s)| bank(p[0] + ppm(300_000, c), p[1] + ppm(300_000, s)).is_some());
+        (disc && clear(v)).then_some(v)
+    };
+    let floats = |p: Vec3| {
+        TURN16
+            .iter()
+            .all(|&(c, s)| wet(p.x + ppm(HULL, c), p.z + ppm(HULL, s)))
+    };
+    // Today's loop from `home`, `n` out over the water and `t` along the bank, at radius 5, 4, 3 or 2 m: the first
+    // whose hull floats at every second of it.
+    let looped = |home: Vec3, n: Xz, t: Xz| -> Option<Course> {
+        for radius in [5_000_000i64, 4_000_000, 3_000_000, 2_000_000] {
+            let key = |k: usize| {
+                let (c, s) = TURN16[k % 16];
+                let out = radius - ppm(radius, c);
+                let along = ppm(ppm(radius, 650_000), s);
+                Vec3::new(
+                    home.x + ppm(out, n[0]) + ppm(along, t[0]),
+                    w.level,
+                    home.z + ppm(out, n[1]) + ppm(along, t[1]),
+                )
+            };
+            let stations: Vec<Station> = (0..16)
+                .map(|k| Station {
+                    at: key(k),
+                    dwell: if k == 0 { BOARDING } else { 0 },
+                })
+                .collect();
+            let length: i64 = (0..16)
+                .map(|k| {
+                    let (p, q) = (key(k), key(k + 1));
+                    let d = [i128::from(q.x - p.x), i128::from(q.z - p.z)];
+                    (d[0] * d[0] + d[1] * d[1]).isqrt() as i64
+                })
+                .sum();
+            let course = Course {
+                stations,
+                shape: Shape::Loop,
+                speed: (length * 1_000_000 / LAP).clamp(1, ROWING),
+                t0: 0,
+                within: LAP * 4,
+            };
+            let Ok(table) = course.load() else { continue };
+            let mut at = 0;
+            let mut ok = true;
+            while at < table.period {
+                if !table.at(at).is_ok_and(|(p, _)| floats(p)) {
+                    ok = false;
+                    break;
+                }
+                at += 1_000_000;
+            }
+            if ok {
+                return Some(course);
+            }
+        }
+        None
+    };
     let r = &w.ring;
     let area: i128 = (0..r.len())
         .map(|i| {
@@ -156,14 +237,6 @@ fn mooring(w: &Water, terrain: Option<&Terrain>, clear: &impl Fn(Vec3) -> bool) 
                 mid[1] + ppm(inward, n[1]) + ppm(along, t[1]),
             ]
         };
-        let dry = |p: Xz| -> Option<Vec3> {
-            let v = bank(p[0], p[1])?;
-            let disc = TURN16
-                .iter()
-                .step_by(2)
-                .all(|&(c, s)| bank(p[0] + ppm(300_000, c), p[1] + ppm(300_000, s)).is_some());
-            (disc && clear(v)).then_some(v)
-        };
         let (Some(door), Some(ea), Some(eb)) = (
             dry(at(-900_000, 0)),
             dry(at(-1_450_000, -850_000)),
@@ -173,63 +246,96 @@ fn mooring(w: &Water, terrain: Option<&Terrain>, clear: &impl Fn(Vec3) -> bool) 
         };
         let h = at(2_200_000, 0);
         let home = Vec3::new(h[0], w.level, h[1]);
-        for radius in [5_000_000i64, 4_000_000, 3_000_000, 2_000_000] {
-            // Today's loop: k/16 of a turn, out `radius * (1 - cos)` and along `0.65 * radius * sin`.
-            let key = |k: usize| {
-                let (c, s) = TURN16[k % 16];
-                let out = radius - ppm(radius, c);
-                let along = ppm(ppm(radius, 650_000), s);
-                Vec3::new(
-                    home.x + ppm(out, n[0]) + ppm(along, t[0]),
-                    w.level,
-                    home.z + ppm(out, n[1]) + ppm(along, t[1]),
-                )
-            };
-            let stations: Vec<Station> = (0..16)
-                .map(|k| Station {
-                    at: key(k),
-                    dwell: if k == 0 { BOARDING } else { 0 },
-                })
-                .collect();
-            let length: i64 = (0..16)
-                .map(|k| {
-                    let (p, q) = (key(k), key(k + 1));
-                    let d = [i128::from(q.x - p.x), i128::from(q.z - p.z)];
-                    (d[0] * d[0] + d[1] * d[1]).isqrt() as i64
-                })
-                .sum();
-            let speed = (length * 1_000_000 / LAP).clamp(1, ROWING);
-            let course = Course {
-                stations,
-                shape: Shape::Loop,
-                speed,
-                t0: 0,
-                within: LAP * 4,
-            };
-            let Ok(table) = course.load() else { continue };
-            let floats = |p: Vec3| {
-                TURN16
-                    .iter()
-                    .all(|&(c, s)| wet(p.x + ppm(HULL, c), p.z + ppm(HULL, s)))
-            };
-            let mut t = 0;
-            let mut ok = true;
-            while t < table.period {
-                if !table.at(t).is_ok_and(|(p, _)| floats(p)) {
-                    ok = false;
-                    break;
-                }
-                t += 1_000_000;
+        if let Some(course) = looped(home, n, t) {
+            return Some(Mooring {
+                water: w.place,
+                home,
+                out: n,
+                door,
+                exits: [ea, eb],
+                course,
+            });
+        }
+    }
+    shelf(w, &floats, &dry, &looped)
+}
+
+/// Today's shelf search (L1): a water whose long sides all have shallows wider than a plank, at most 200 m by 200 m:
+/// every home on a 0.5 m lattice where the hull floats, nearest the water's middle first, its plank's dry end in any
+/// of 32 directions at 3.1, 2.8, 2.5 or 2.2 m; at most 400 loops tried.
+fn shelf(
+    w: &Water,
+    floats: &impl Fn(Vec3) -> bool,
+    dry: &impl Fn(Xz) -> Option<Vec3>,
+    looped: &impl Fn(Vec3, Xz, Xz) -> Option<Course>,
+) -> Option<Mooring> {
+    let r = &w.ring;
+    let (x0, x1) = (r.iter().map(|p| p[0]).min()?, r.iter().map(|p| p[0]).max()?);
+    let (z0, z1) = (r.iter().map(|p| p[1]).min()?, r.iter().map(|p| p[1]).max()?);
+    if i128::from(x1 - x0) * i128::from(z1 - z0) > 40_000 * 1_000_000_000_000 {
+        return None;
+    }
+    let k = r.len() as i64;
+    let (cx, cz) = (
+        r.iter().map(|p| p[0]).sum::<i64>() / k,
+        r.iter().map(|p| p[1]).sum::<i64>() / k,
+    );
+    const S: i64 = 500_000;
+    let mut homes = Vec::new();
+    let mut z = z0;
+    while z <= z1 + S {
+        let mut x = x0;
+        while x <= x1 + S {
+            let h = Vec3::new(x, w.level, z);
+            if inside(r, [x, z]) && floats(h) {
+                homes.push(h);
             }
-            if ok {
-                return Some(Mooring {
-                    water: w.place,
-                    home,
-                    out: n,
-                    door,
-                    exits: [ea, eb],
-                    course,
-                });
+            x += S;
+        }
+        z += S;
+    }
+    let d2 = |h: &Vec3| {
+        let (dx, dz) = (i128::from(h.x - cx), i128::from(h.z - cz));
+        dx * dx + dz * dz
+    };
+    homes.sort_by(|a, b| d2(a).cmp(&d2(b)).then(a.x.cmp(&b.x)).then(a.z.cmp(&b.z)));
+    let mut tried = 0;
+    for home in homes {
+        for k in 0..32 {
+            let (c, s) = turn32(k);
+            let (d, t) = ([c, s], [-s, c]);
+            let n = [-c, -s];
+            for out in [3_100_000i64, 2_800_000, 2_500_000, 2_200_000] {
+                let at = |o: i64, along: i64| {
+                    [
+                        home.x + ppm(o, d[0]) + ppm(along, t[0]),
+                        home.z + ppm(o, d[1]) + ppm(along, t[1]),
+                    ]
+                };
+                let Some(door) = dry(at(out, 0)) else {
+                    continue;
+                };
+                let (Some(ea), Some(eb)) = (
+                    dry(at(out + 550_000, -850_000)),
+                    dry(at(out + 550_000, 850_000)),
+                ) else {
+                    continue;
+                };
+                if let Some(course) = looped(home, n, t) {
+                    return Some(Mooring {
+                        water: w.place,
+                        home,
+                        out: n,
+                        door,
+                        exits: [ea, eb],
+                        course,
+                    });
+                }
+                tried += 1;
+                if tried > 400 {
+                    return None;
+                }
+                break;
             }
         }
     }
