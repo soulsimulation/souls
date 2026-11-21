@@ -749,17 +749,16 @@ const pinned = () => {
   return { ...boot, ...own };
 };
 /** #3697: a `define` operation as the world reads it: a `souls:kind` node at the root holding the record's bytes. */
-function definition(o, kinds) {
+function definition(o) {
   const text = typeof o.entry === 'string' ? o.entry : JSON.stringify(o.entry ?? null);
   const root = [...rowsOf(copy).values()].find((r) => r.parent === null)?.id;
   if (!root) throw Object.assign(new Error('no copy of the world yet'), { code: 'edit.no-copy' });
-  const kind = Object.keys(kinds).find((n) => n.split('@')[0] === 'souls:kind');
-  if (!kind) throw Object.assign(new Error('this client\'s checker has no souls:kind'), { code: 'edit.kind-unknown' });
-  return { op: 'place', name: o.name ?? 1, kind, in: root, at: [0, 0, 0], fields: { 2: { hex: Buffer.from(text, 'utf8').toString('hex') } } };
+  return { op: 'place', name: o.name ?? 1, kind: wire.definitionKind(), in: root, at: [0, 0, 0], fields: { 2: { hex: Buffer.from(text, 'utf8').toString('hex') } } };
 }
 /** A kind's full name from what a creator writes: the full name, `namespace:name`, or the bare name. */
 function fullKind(kinds, k) {
   const s = String(k ?? '');
+  if (s.includes('@')) return s; // a full name is the world's to judge
   const hit = Object.keys(kinds).filter((n) => n === s || n.split('@')[0] === s || n.split('@')[0].split(':')[1] === s);
   if (hit.length === 1) return hit[0];
   throw Object.assign(new Error(`${s}: ${hit.length ? 'ambiguous; copy a full pinned name from describe' : `not pinned; describe lists ${Object.keys(kinds).join(', ')}`}`), { code: 'edit.kind-unknown' });
@@ -770,7 +769,7 @@ function batchOf(ops) {
   const kinds = pinned();
   const um = (at) => (Array.isArray(at) ? at.map((n) => Math.round(Number(n) * 1000)) : undefined);
   // #3695: a move that must land to the micrometre (a thing lifted with the ground) gives its position as `atUm`.
-  return JSON.stringify(ops.map((o) => (o?.op === 'define' ? definition(o, kinds) : o)).map(({ atUm, ...o }) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}), ...(atUm ? { at: atUm.map(Number) } : {}) })));
+  return JSON.stringify(ops.map(({ atUm, ...o }) => (o?.op === 'define' ? definition(o) : { ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}), ...(atUm ? { at: atUm.map(Number) } : {}) })));
 }
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in

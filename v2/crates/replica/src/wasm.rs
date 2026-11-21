@@ -724,7 +724,12 @@ pub fn wire_edit(
         reflex: false,
     };
     let bytes = encode(&intent.to_value()).map_err(js)?;
-    crate::intent_decode::decode(&bytes).map_err(js)?;
+    // An edit over the agents' frame limit goes by the creator's bulk route (#3695), read by its own limit.
+    if bytes.len() > crate::intent_decode::LIMITS.frame_bytes as usize {
+        crate::intent_decode::decode_bulk(&bytes).map_err(js)?;
+    } else {
+        crate::intent_decode::decode(&bytes).map_err(js)?;
+    }
     Ok(bytes)
 }
 
@@ -938,12 +943,20 @@ fn copy_defined(nodes: &BTreeMap<Id, Held>) -> BTreeMap<String, Kind> {
     out
 }
 
-/// The kinds a creator defined in the world (#3697), from the copy, in [`edit_kinds`]'s JSON: what `describe` lists
+/// The kinds a creator defined in the world (#3697), from the copy (not `souls:kind` itself), in [`edit_kinds`]'s JSON: what `describe` lists
 /// beside the boot kinds, and what a place may name.
 #[wasm_bindgen(js_name = definedKinds)]
 pub fn defined_kinds(copy: &WasmCopy) -> Result<String, JsError> {
     let nodes = held(&copy.copy).map_err(|e| JsError::new(&e))?;
-    Ok(kinds_json(&copy_defined(&nodes)))
+    let mut own = copy_defined(&nodes);
+    own.remove(&defined::kind().0);
+    Ok(kinds_json(&own))
+}
+
+/// The engine's generic kind a definition is a node of (#3697): what a `define` places, never listed as a creator's.
+#[wasm_bindgen(js_name = definitionKind)]
+pub fn definition_kind() -> String {
+    defined::kind().0.clone()
 }
 
 /// A record's full name and canonical bytes as the world would keep them (#3697): `{"ok": true, "kind": "<full>",
