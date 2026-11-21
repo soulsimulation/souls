@@ -720,7 +720,10 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
             return refuse(
                 Some(*i),
                 "kind.in-use",
-                format!("{user:?} is still a {}; remove what uses it first", plain(full)),
+                format!(
+                    "{user:?} is still a {}; remove what uses it first",
+                    plain(full)
+                ),
             );
         }
     }
@@ -763,7 +766,10 @@ fn define(edit: &mut Edit, copy: &Replica) -> Result<BTreeMap<usize, (String, Ki
             detail,
         };
         if root.is_none_or(|r| *parent != Ref::Node(r)) {
-            return Err(no("kind.invalid", "a kind is defined at the world's root".into()));
+            return Err(no(
+                "kind.invalid",
+                "a kind is defined at the world's root".into(),
+            ));
         }
         let Some(Value::Bytes(sent)) = fields.get(&defined::ENTRY) else {
             return Err(no(
@@ -772,7 +778,9 @@ fn define(edit: &mut Edit, copy: &Replica) -> Result<BTreeMap<usize, (String, Ki
             ));
         };
         let d = defined::read(sent, &|ns| boot.contains(ns)).map_err(|(n, d)| no(n, d))?;
-        if fields.keys().any(|k| ![defined::NAME, defined::ENTRY].contains(k))
+        if fields
+            .keys()
+            .any(|k| ![defined::NAME, defined::ENTRY].contains(k))
             || fields
                 .get(&defined::NAME)
                 .is_some_and(|n| *n != Value::Text(Name::new(&d.full).expect("a full name")))

@@ -41,8 +41,8 @@ pub const ENTRY: u64 = 2;
 pub const ENTRY_MOST: usize = 64 << 10;
 /// The sections of a record: those the kind loader numbers, and those beside its meaning.
 const SECTIONS: [&str; 15] = [
-    "format", "kind", "owner", "state", "links", "points", "slots", "children", "geometry", "motion", "loose", "forms",
-    "looks", "text", "card",
+    "format", "kind", "owner", "state", "links", "points", "slots", "children", "geometry",
+    "motion", "loose", "forms", "looks", "text", "card",
 ];
 /// Namespaces never a creator's.
 const RESERVED: [&str; 2] = ["souls", "eden"];
@@ -150,12 +150,9 @@ pub fn read(sent: &[u8], boot: &dyn Fn(&str) -> bool) -> Result<Defined, Why> {
             .map(|(k, v)| {
                 // The parts a page draws sit beside the bounds the loader reads.
                 let v = match (k.as_str(), v) {
-                    ("geometry", Json::Obj(g)) => Json::Obj(
-                        g.iter()
-                            .filter(|(k, _)| k != "parts")
-                            .cloned()
-                            .collect(),
-                    ),
+                    ("geometry", Json::Obj(g)) => {
+                        Json::Obj(g.iter().filter(|(k, _)| k != "parts").cloned().collect())
+                    }
                     _ => v.clone(),
                 };
                 (k.clone(), v)
@@ -217,9 +214,9 @@ pub fn defines(tree: &Tree, full: &Name) -> bool {
     }
     let root = tree.root();
     tree.children(root).is_some_and(|cs| {
-        cs.iter().filter_map(|h| tree.node(*h)).any(|n| {
-            is_definition(n.kind().as_str()) && named(n.fields()) == Some(full.as_str())
-        })
+        cs.iter()
+            .filter_map(|h| tree.node(*h))
+            .any(|n| is_definition(n.kind().as_str()) && named(n.fields()) == Some(full.as_str()))
     })
 }
 
