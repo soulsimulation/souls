@@ -1848,3 +1848,17 @@ fn c21_the_sandpit_walk_arrives_or_ends_blocked() {
     }
     assert!(ticks <= 100, "ended within 5 s of its last progress");
 }
+
+/// C34 (#3599) A2: a building's named area resolves onto its own room and floor. Born outside, a Soul climbs a
+/// lighthouse to its lantern room (today's e_edbbc6a7, four floors up) and a tower to its top room (e_36bd67b1, whose
+/// top floor is 8.5 m up, not the 6.1 m the kind's area names), across the stairs, by their own entries; each ends
+/// `done`. Before #3599 each ended `souls:no-way`: the area's point was carried up to the open ground, cut out under
+/// the building.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c34_a2_a_lighthouse_and_a_tower_are_climbed_to_their_top_rooms() {
+    let lantern = act_at("96.0,194.0", "e_edbbc6a7", "eden:climb", "c34lh");
+    let top = act_at("69.0,26.0", "e_36bd67b1", "eden:climb", "c34tw");
+    lantern.expect("the lighthouse climbed, done");
+    top.expect("the tower climbed, done");
+}
