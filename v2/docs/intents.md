@@ -15,10 +15,13 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
    add to T6's schema (T6 rule 3: a new record is a new schema); that is how an order is in the log and survives a
    restart. Words in it are references (T8), never words.
 2. **An intent is `{1: actor, 2: verb, 3: target, 4: parameters, 5: sequence, 6: basis, 7: expiry, 8: resources, 9:
-   fallbacks, 10: replaces, 11: body}`.** 3, 4, 8, 9, 10 and 11 are left out when empty, never written empty
-   (`not-canonical`), and an intent re-encodes to exactly its own bytes. Any other field is refused
+   fallbacks, 10: replaces, 11: body, 12: reflex}`.** 3, 4, 8, 9, 10, 11 and 12 are left out when empty, never written
+   empty (`not-canonical`), and an intent re-encodes to exactly its own bytes. Any other field is refused
    (`intent-not-a-record`): there is no field for a start time or a condition, and a new field is a new protocol
-   version.
+   version. Field 12 (protocol 2, #3764) is `1` on an intent the Soul's client sent on its own standing consent (an
+   R9 reflex), and left out on its agent's act; any other value is refused (`intent-not-a-record`). A reflex is not
+   the agent acting: it neither keeps a body from going idle nor wakes it (`Intent::agent_act`, the wind-down rule,
+   B16). The world keeps the marker with the intent in the log, so a replay reads the same.
 3. **What each field holds.** The actor is a Soul or a creator's principal id (T6); a creator driving a body the
    world owns is the actor, with the creator's own sequence, and field 11 names that body; it is there exactly when
    the actor is a creator, an edit excepted (rule 15) (`creator-without-body`, `body-not-a-creators`). **Field 11 is proposed here for the
@@ -89,7 +92,7 @@ completed intent with the same form decoder as the gateway before sending it.
     version refusal uses that frame only, so a client of any version reads a refusal from any later world; the reader
     keeps field 3's name, and its versions when there. A frame over 256 bytes is refused before parsing. The goldens
     hold a client's frame and a version refusal, from both builds. The build hash is the world's pinned build, a
-    field of its directory record (T11). This protocol is version 1.
+    field of its directory record (T11). This protocol is version 2 (1 had no field 12).
 13. **The checker is `replica` as WASM, verified by hash, run with no imports.** The checker artifact is `replica`
     built for `wasm32-unknown-unknown` with the `checker` feature, which leaves out every wasm-bindgen export, so the
     module imports nothing; the build hash is the SHA-256 multihash of that `.wasm` file's bytes (what `sha256sum`
@@ -98,7 +101,7 @@ completed intent with the same form decoder as the gateway before sending it.
     (`checker-has-imports`). The `checker-artifact` step of `v2/tools/ci.sh` builds it and loads it by its hash. Its
     checking exports are I2's.
 14. **The fixtures** are one intent per kind (a checked act, a move, ranked fallbacks, a held stance, follow,
-    standing in a queue, a cancel, a replace, an edit), as diagnostic notation. `goldens.txt` holds each one's kind and bytes;
+    standing in a queue, a cancel, a replace, an edit, a reflex), as diagnostic notation. `goldens.txt` holds each one's kind and bytes;
     the native and the WASM builds must give it exactly.
 
 ## Edits

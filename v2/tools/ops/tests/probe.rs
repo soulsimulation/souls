@@ -165,6 +165,7 @@ fn a1_control_an_act_probe_is_seen() {
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     let r = watch(
         &d.join("gateway.sock"),
@@ -690,6 +691,7 @@ fn seed_user(d: &Path, soul: Id) {
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     watch(
         &d.join("gateway.sock"),
