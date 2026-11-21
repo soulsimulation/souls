@@ -137,7 +137,7 @@ test("A2 (#3724): today's halos at lamp heads and fires, and the lighthouse's be
   const bytes = glb(), at = (x: number) => new THREE.Matrix4().makeTranslation(x, 0, 0);
   const layer = new FxLayer({
     frame: (id) => at(Number(id) * 10),
-    index: () => ({ things: { a: 'h1', b: 'h2', c: 'h3' }, states: new Map([['h1', { on: ['light'] }], ['h2', { lit: ['flame'] }]]) }),
+    index: () => ({ things: { a: 'h1', b: 'h2', c: 'h3' }, states: new Map<string, Record<string, string[]>>([['h1', { on: ['light'] }], ['h2', { lit: ['flame'] }]]) }),
     fetch: async () => bytes, phone: false,
   });
   layer.apply([node('1', 'eden:street_lamp', 'a'), node('2', 'eden:campfire', 'b'), node('3', 'eden:lighthouse', 'c')], []);
