@@ -1138,10 +1138,7 @@ impl Bundler {
                     let old = public.whole();
                     mode.open = Some(BasedWindow {
                         start,
-                        snapshot: public_snapshot(
-                            &replica::history::seek::live_observation(header, &old)?,
-                            &self.redactions,
-                        ),
+                        snapshot: Projection::snapshot(header, &old)?,
                         view: probe.take().expect("candidate view"),
                         baseline: old,
                         observed: Value::Array(Vec::new()),
@@ -1401,6 +1398,21 @@ impl Projection {
             );
         }
         Value::Map(m)
+    }
+
+    /// The window's public snapshot (`public_snapshot(live_observation(whole))`): the live nodes and links, the
+    /// projection's rows 2 and 3 as they are (each row already scrubbed and in the state layout).
+    fn snapshot(header: &Header, whole: &Value) -> R<Value> {
+        let Value::Map(m) = whole else {
+            return refuse("archive-base", "projection is not a map");
+        };
+        let field = |k| m.get(&k).cloned().unwrap_or(Value::Array(Vec::new()));
+        let nodes = field(2);
+        let root = matches!(&nodes, Value::Array(rows) if rows.iter().any(|r| matches!(r, Value::Array(p) if read_id(&p[0]).ok() == Some(header.zone))));
+        if !root {
+            return refuse("history-root-missing", "public root missing");
+        }
+        Ok(Value::Map(BTreeMap::from([(1, nodes), (2, field(3))])))
     }
 
     /// `replica::stream::public::digest` of [`Projection::whole`], put together from the rows' encodings.
