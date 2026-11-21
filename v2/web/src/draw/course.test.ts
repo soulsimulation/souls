@@ -80,9 +80,9 @@ test('a course that throws leaves the punt and its rider where they were placed'
   w.apply([node('punt', 'root', { pos: [-3 * M, 0, 4 * M], course: new Uint8Array([0xff]) })], []);
   w.draw(107 * S); // a field that is not a course
   assert.deepEqual(new THREE.Vector3().setFromMatrixPosition(w.frame('punt')).toArray(), [-3, 0, 4]);
-  w.apply([node('punt', 'root', { pos: [-3 * M, 0, 4 * M], course: loop })], []);
   w.courseAt = null; // not loaded yet
-  w.draw(107 * S);
+  w.apply([node('punt', 'root', { pos: [-3 * M, 0, 4 * M], course: loop })], []);
+  w.draw(108 * S);
   assert.deepEqual(new THREE.Vector3().setFromMatrixPosition(w.frame('punt')).toArray(), [-3, 0, 4]);
 });
 
