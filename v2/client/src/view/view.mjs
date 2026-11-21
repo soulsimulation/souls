@@ -73,7 +73,7 @@ export function gather([grant, of, reach]) {
   const feet = me.p[1];
   for (const n of w.nodes.values()) {
     const s = byId.get(n.id), kind = plain(n.kind);
-    if (n.outline?.length >= 3 && kind !== 'eden:ground' && kind !== 'eden:world') {
+    if (n.outline?.length >= 3 && !['eden:ground', 'eden:world', 'eden:room', 'eden:floor'].includes(kind)) { // a room is no landmark (today's)
       const outline = n.outline.map(([x, z]) => [x / 1000, z / 1000]);
       if (outline.some(([x, z]) => Math.hypot(x - eye[0], z - eye[2]) <= reach * 2)) areas.push({ id: n.id, name: s?.name ?? kind, outline });
     }

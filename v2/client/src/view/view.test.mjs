@@ -83,6 +83,7 @@ function drawn() {
     ['s.3', { id: 's.3', kind: 'eden:bench@x', parent: 's.0', at: null, solids: [[0, 0, 500, 200, 0, 0, 500]] }],
     ['s.4', { id: 's.4', kind: 'eden:wall@x', parent: 's.0', at: null, solids: [[0, 0, 5000, 200, 0, 0, 3000]] }],
     ['s.5', { id: 's.5', kind: 'eden:place@x', parent: 's.0', at: null, outline: [[-40000, -40000], [40000, -40000], [40000, 40000], [-40000, 40000]] }],
+    ['s.6', { id: 's.6', kind: 'eden:room@x', parent: 's.0', at: null, outline: [[-5000, -30000], [5000, -30000], [5000, -20000], [-5000, -20000]] }],
   ]);
   const pos = { 's.0': [0, 0, 0], 's.1': [0, 0, 0], 's.2': [1, 0, -12], 's.3': [-1, 0, -3], 's.4': [0, 0, -8], 's.5': [0, 0, 0] };
   const names = { 's.1': 'Oriel', 's.2': 'Bea', 's.3': 'bench 3', 's.4': 'wall 4', 's.5': 'place 5' };
@@ -119,6 +120,7 @@ test('A1, A3: the page\'s drawn moment as words, the Soul found by its grant, na
   assert.ok(asked.every((op) => op === 'find'));
   const g = gather.call(null, ['soul-ab-7', null, 130]);
   assert.deepEqual(g.blocks.map((b) => b.owner), ['s.4'], 'a bench is low');
+  assert.deepEqual(g.areas.map((a) => a.id), ['s.5'], 'a room is no landmark');
 });
 
 test('A2: the picture from the eyes, and the map from overhead', async () => {
