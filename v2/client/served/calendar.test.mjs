@@ -143,6 +143,13 @@ test('#3703: a Soul announces from the notice board; another reads it in whatson
     console.log('A wait:', JSON.stringify(r.events?.filter((e) => e.kind !== 'synced')));
     return r.events?.find((e) => e.kind === 'calendar');
   }, 300_000);
+  if (posted.what !== 'posted') {
+    console.log('A receipt:', JSON.stringify(await A.cli('receipt', String(add.sequence))));
+    console.log('A calendar:', JSON.stringify(await A.cli('calendar')));
+    console.log('A find notice:', JSON.stringify(await A.cli('find', 'notice', '--limit', '20')));
+    console.log('A inspect board:', JSON.stringify(await A.cli('inspect', board.id)));
+    console.log('A look:', JSON.stringify(await A.cli('look')));
+  }
   assert.equal(posted.what, 'posted', `A's notice: ${JSON.stringify(posted)}`);
   stage(`posted ${posted.item}`);
 

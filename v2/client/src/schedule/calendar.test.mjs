@@ -6,10 +6,11 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { rowsOf } from '../brief/copy.mjs';
 import { encode } from '../history/day.mjs';
-import { blankAt, calendarItems, calendarList, whatsOn, worldTimeOf } from './world.mjs';
+import { blankAt, calendarItems, calendarList, heldBlank, noticeBoards, whatsOn, worldTimeOf } from './world.mjs';
 
 const entry = JSON.parse(readFileSync(new URL('../../../../content/kinds/calendar/entry.json', import.meta.url), 'utf8'));
-const kinds = { [entry.kind]: entry };
+const board = JSON.parse(readFileSync(new URL('../../../../content/kinds/calendar/notice_board.json', import.meta.url), 'utf8'));
+const kinds = { [entry.kind]: entry, [board.kind]: board };
 const S = new Uint8Array(16).fill(7), id = (n) => [S, n], text = (n) => `${'07'.repeat(16)}-${n}`;
 const MIN = 60_000_000, n = (f) => entry.state[f].n;
 
@@ -82,4 +83,22 @@ test('A2: calendar lists items not over and the blank notices; add finds the bla
   assert.deepEqual(out.blank, [{ id: text(24), place: 'room 3', placeId: text(3) }]);
   assert.equal(blankAt(items, rows, text(3))?.id, text(24));
   assert.equal(blankAt(items, rows, text(2)), null, 'no blank notice in room 2');
+});
+
+test('A2: the notice boards that make blank notices, and the blank one a body holds', () => {
+  const held = copyOf([
+    { n: 1, kind: 'souls:world' },
+    { n: 2, kind: 'eden:room', parent: 1 },
+    { n: 3, kind: 'eden:room', parent: 1 },
+    { n: 30, kind: 'eden:notice_board', parent: 2 },
+    { n: 31, kind: 'eden:notice_board', parent: 3 },
+    { n: 10, kind: 'souls:body', parent: 2 },
+    { n: 40, kind: 'eden:calendar_entry', parent: 10 },
+    { n: 41, kind: 'eden:calendar_entry', parent: 3 },
+  ]);
+  const rows = rowsOf(held), items = calendarItems(held, kinds);
+  assert.deepEqual(noticeBoards(rows, kinds).map((b) => [b.id, b.form]).sort(), [[text(30), 'take_notice'], [text(31), 'take_notice']]);
+  assert.equal(noticeBoards(rows, kinds, text(3))[0].id, text(31), 'the board at the place comes first');
+  assert.equal(heldBlank(items, rows, text(10))?.id, text(40));
+  assert.equal(heldBlank(items, rows, text(11)), null);
 });

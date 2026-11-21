@@ -1335,4 +1335,39 @@ mod gateway_walk_tests {
 }
 
 #[cfg(test)]
+mod number_tests {
+    use super::*;
+
+    /// #3703: a whole number a form takes as an int or a duration is a value; any other names a slot.
+    #[test]
+    fn whole_numbers_a_form_takes_as_counts_are_values_and_others_slots() {
+        let entry = replica::rules::json::parse(
+            r#"{"forms":{"post":{"takes":{"start":{"type":"duration"},"n":{"type":"int"},"seat":{"type":"slot"}}}}}"#,
+        )
+        .expect("an entry");
+        let given = BTreeMap::from([
+            ("start".to_owned(), 1_800_000_000_000_000u64),
+            ("n".to_owned(), 3),
+            ("seat".to_owned(), 2),
+            ("other".to_owned(), 1),
+        ]);
+        let (counts, slots) = numbers(&entry, "post", &given);
+        assert_eq!(
+            counts,
+            skills::form_runner::Args::from([
+                ("n".to_owned(), skills::form_runner::Arg::Int(3)),
+                ("start".to_owned(), skills::form_runner::Arg::Int(1_800_000_000_000_000)),
+            ])
+        );
+        assert_eq!(
+            slots,
+            BTreeMap::from([("other".to_owned(), 1), ("seat".to_owned(), 2)])
+        );
+        // A number past i64 stays a slot number, refused there by name.
+        let huge = BTreeMap::from([("n".to_owned(), u64::MAX)]);
+        assert_eq!(numbers(&entry, "post", &huge).1, huge);
+    }
+}
+
+#[cfg(test)]
 mod tests;
