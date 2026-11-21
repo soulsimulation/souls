@@ -98,3 +98,11 @@ test('the command: export and import take a file, made absolute', () => {
   assert.equal(requestOf(['import', '/w/a.json']).req.file, '/w/a.json');
   assert.throws(() => requestOf(['import']), { code: 'usage' });
 });
+
+test('#3728: a file whose ground is larger grows the world first: its tiles are set before anything is placed', () => {
+  const file = world(S, [node(`${S}-2`, 'eden:place@1', `${S}-1`, { 11: [[-64000, 0], [128000, 0], [128000, 64000], [-64000, 64000]], 20: 'eden:extent' }), node(`${S}-3`, 'eden:bench@1', `${S}-1`)]);
+  file.nodes[1].fields[25] = [[-1, 0, { hex: '00' }, { hex: '01' }], [0, 0, { hex: '00' }, { hex: '01' }], [1, 0, { hex: '00' }, { hex: '01' }]];
+  const edits = drain(importOf(file, world(T)));
+  assert.deepEqual(edits[0].map((o) => [o.op, o.node, o.field, o.value?.length]), [['set', `${T}-1`, 25, 3]]);
+  assert.deepEqual(edits[1].map((o) => [o.op, o.kind, o.fields?.[20]]), [['place', 'eden:place@1', 'eden:extent'], ['place', 'eden:bench@1', undefined]]);
+});

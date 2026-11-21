@@ -20,6 +20,9 @@
 //   souls-god.mjs land water <id> --level m | --by m      the land and its water, as today's `land` (terrain/land.mjs):
 //                                                one edit; what rests on changed ground moves with it, and a Soul
 //                                                standing there refuses it (edit.terrain-under-soul)
+//   souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres m | --bounds x0,z0,x1,z1
+//   souls-god.mjs expand <m>                     the world's ground grows (that way, or to a centred square m a side),
+//                                                flat from its edge; it only grows
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs export [file]                  every node of the world (not its Souls) to a file, world.souls.json
 //   souls-god.mjs import <file>                  such a file's nodes into this world, as edits, parents first
@@ -41,9 +44,9 @@ import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'land', 'check', 'status', 'stop', 'welcome', 'visitors', 'export', 'import'];
+export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'land', 'check', 'status', 'stop', 'welcome', 'visitors', 'export', 'import', 'expand'];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
-export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land'];
+export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'expand'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
@@ -81,6 +84,8 @@ export const FIX = {
   'land.nothing': 'shape the land on the world\'s ground',
   'land.smooth': 'use flatten',
   'land.unavailable': 'use Node 22.18 or later, and the client a world serves (it carries the ground model) or a checkout with packages/ground and zod installed',
+  'expand.nothing': 'the world already reaches that far: give a larger size',
+  'expand.too-large': 'grow it less: one edit carries the whole ground',
   'strike.off-the-ground': 'strike somewhere on the world\'s ground',
   'import.file': 'import <file>: a file export wrote, readable here',
   'import.format': 'import a souls-world/1 file, as export writes it',
@@ -139,10 +144,15 @@ export function worldVerbOf(verb, words) {
   const args = [...words], out = { verb };
   const flags = {
     weather: ['kind', 'clouds', 'rain', 'wind', 'minutes'], sky: ['palette', 'sun'], strike: ['at'],
-    land: ['at', 'radius', 'amount', 'level', 'height', 'peak', 'path', 'area', 'rect', 'circle', 'edge', 'step', 'depth', 'width', 'side', 'face', 'steps', 'by'],
+    land: ['at', 'radius', 'amount', 'level', 'height', 'peak', 'path', 'area', 'rect', 'circle', 'edge', 'step', 'depth', 'width', 'side', 'face', 'steps', 'by', 'toward', 'metres', 'bounds'],
+    expand: [],
   }[verb];
   for (const f of flags) { const v = takeOpt(args, `--${f}`); if (v !== undefined) out[f] = v; }
   if (verb === 'strike' && out.at === undefined && args[0] !== undefined) out.at = args.shift();
+  if (verb === 'expand') {
+    if (args[0] === undefined) throw usage('expand <metres>: the side of the centred square the world grows to');
+    out.extent = args.shift();
+  }
   if (verb === 'land') {
     if (!args[0]) throw usage('land <raise|lower|flatten|knoll|hill|mountain|plateau|terrace|valley|ditch|cliff|pond|lake|water> [flags]');
     out.land = args.shift();
@@ -230,7 +240,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       if (said.ok === false) process.exitCode = 1;
       process.exit();
     }
-    const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: asked.req.op === 'import' ? 3_600_000 : asked.req.op === 'export' ? 120_000 : asked.req.world?.verb === 'land' ? 130_000 : 15_000 });
+    const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: asked.req.op === 'import' ? 3_600_000 : asked.req.op === 'export' ? 120_000 : ['land', 'expand'].includes(asked.req.world?.verb) ? 130_000 : 15_000 });
     out(withFix(answer));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {
