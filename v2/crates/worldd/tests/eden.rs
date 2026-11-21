@@ -1899,9 +1899,20 @@ fn i3799_a4_the_public_stream_carries_a_soul_walking_sitting_and_rising() {
     let sat = soul.act("eden:sit", Some(armchair), BTreeMap::new());
     let rose = soul.act("eden:rise", None, BTreeMap::new());
     println!("walk {walked:?}, sit {sat:?}, rise {rose:?}");
-    // The view tier publishes each synced tick; a second and a half is several of its parts.
-    std::thread::sleep(Duration::from_millis(2500));
-    let samples = public_samples(&dir);
+    // The stream is cut every half second of world time; wait (at most 60 s) for the rise's hand-off to be published,
+    // and say how long it took after the rise's answer.
+    let rose_at = std::time::Instant::now();
+    let mut samples = public_samples(&dir);
+    while !samples.iter().any(|(_, h)| h.from == Owner::Slot)
+        && rose_at.elapsed() < Duration::from_secs(60)
+    {
+        std::thread::sleep(Duration::from_millis(250));
+        samples = public_samples(&dir);
+    }
+    println!(
+        "the rise's hand-off on the public stream {:.2} s after its answer",
+        rose_at.elapsed().as_secs_f64()
+    );
     drop(served);
     // The page's Track test plays this stream (`v2/web/src/clock/stream-track.test.ts`, V2_STREAM_DIR).
     if let Ok(keep) = std::env::var("V2_KEEP_STREAM") {
