@@ -473,38 +473,51 @@ impl Sight<'_> {
     }
 
     fn on_shape(&self, body: Id, step: usize, node: Id) -> Option<Vec3> {
-        use import_eden::{F_LINE, F_OUTLINE};
         let &(at_step, thing, ref point) = self.walks.get(&body)?;
         if at_step != step {
             return None;
         }
         let n = self.tree.node(self.tree.handle(thing)?)?;
-        if n.parent() != Some(node) || n.place().is_some_and(|p| p.position != Vec3::ZERO) {
+        if n.parent() != Some(node) {
             return None;
         }
-        let entry = self.kinds.get(plain(n.kind()))?;
-        let p = ["points", "areas"]
-            .iter()
-            .find_map(|k| um(entry.get(k)?.get(point.as_str())?.get("at_mm")))?;
-        let bounds = um(entry.get("geometry")?.get("bounds_mm"))?;
-        let xz = |v: &replica::encode::Value| -> Option<Vec<[i64; 2]>> {
-            let replica::encode::Value::Array(rows) = v else {
-                return None;
-            };
-            rows.iter()
-                .map(|r| match r {
-                    replica::encode::Value::Array(c) => {
-                        Some([int_of(c.first()?)? * 1000, int_of(c.get(1)?)? * 1000])
-                    }
-                    _ => None,
-                })
-                .collect()
+        on_drawn_shape(n, self.kinds.get(plain(n.kind()))?, point.as_str())
+    }
+}
+
+/// Point `point` of entry `entry` laid on thing `n`'s own shape, when `n` is drawn in its parent's frame (placed at its
+/// origin, with a line or an outline field), as Eden's land features are: on its line ([`on_line`]) when the entry
+/// is long along x (a hedge's, a bridge's: x at least twice z), else on the box of its line's or outline's points
+/// ([`on_outline`]: a pond, a garden, a winding channel). `None` for any other thing or point.
+pub fn on_drawn_shape(n: replica::tree::NodeRef<'_>, entry: &Json, point: &str) -> Option<Vec3> {
+    use import_eden::{F_LINE, F_OUTLINE};
+    if n.place().is_some_and(|p| p.position != Vec3::ZERO) {
+        return None;
+    }
+    let p = ["points", "areas"]
+        .iter()
+        .find_map(|k| um(entry.get(k)?.get(point)?.get("at_mm")))?;
+    let bounds = um(entry.get("geometry")?.get("bounds_mm"))?;
+    let xz = |v: &replica::encode::Value| -> Option<Vec<[i64; 2]>> {
+        let replica::encode::Value::Array(rows) = v else {
+            return None;
         };
-        if let Some(line) = n.fields().get(&F_LINE).and_then(xz) {
+        rows.iter()
+            .map(|r| match r {
+                replica::encode::Value::Array(c) => {
+                    Some([int_of(c.first()?)? * 1000, int_of(c.get(1)?)? * 1000])
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    if let Some(line) = n.fields().get(&F_LINE).and_then(xz) {
+        if bounds.x >= 2 * bounds.z {
             return on_line(p, bounds, &line);
         }
-        on_outline(p, bounds, &n.fields().get(&F_OUTLINE).and_then(xz)?)
+        return on_outline(p, bounds, &line);
     }
+    on_outline(p, bounds, &n.fields().get(&F_OUTLINE).and_then(xz)?)
 }
 
 /// `v` stretched from `from` to `to` (µm).
