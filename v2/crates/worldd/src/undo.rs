@@ -88,7 +88,12 @@ pub struct Ask<'a> {
 pub fn check(a: Ask<'_>, town: &mut TownCopy) -> Result<Checked, Refused> {
     match (a.creator, a.actor) {
         (Some(c), Actor::Creator(x)) if c == x => {}
-        _ => return Err(refused("edit.not-the-creator", "only the world's creator undoes")),
+        _ => {
+            return Err(refused(
+                "edit.not-the-creator",
+                "only the world's creator undoes",
+            ));
+        }
     }
     let part = part_on(a.copy, a.effects.clone())?;
     let souls = buildsafe::judged(buildsafe::souls(a.copy, a.kinds), a.moving);

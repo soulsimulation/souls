@@ -1488,7 +1488,9 @@ async fn g4_undo_and_redo_on_the_wire_and_buildsafe_refuses_an_undo_onto_a_soul(
     let (mut sequence, mut version) = (0, 0);
     let mut go = async |ws: &mut Ws, asked: Asked| {
         sequence += 1;
-        let got = send(ws, asked_intent(&w, creator, sequence, version, &asked)).await.0;
+        let got = send(ws, asked_intent(&w, creator, sequence, version, &asked))
+            .await
+            .0;
         version = got.version;
         got
     };
@@ -1537,5 +1539,8 @@ async fn g4_undo_and_redo_on_the_wire_and_buildsafe_refuses_an_undo_onto_a_soul(
     walk(&mut souls, &w, w.souls[0], 2, -36 * M, 30 * M);
     assert_eq!(socket_answer(&mut souls).kind, 1, "the walk ends");
     let got = go(&mut ws, Asked::Undo).await;
-    assert_eq!(got.kind, 1, "the undo commits once the Soul is gone: {got:?}");
+    assert_eq!(
+        got.kind, 1,
+        "the undo commits once the Soul is gone: {got:?}"
+    );
 }

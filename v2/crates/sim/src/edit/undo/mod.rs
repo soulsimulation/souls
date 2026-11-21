@@ -503,7 +503,10 @@ impl History {
 
     /// The step names of the batches that can be undone, oldest first (a build's steps, as `history` lists them).
     pub fn steps(&self) -> Vec<(u64, Option<Step>)> {
-        self.done.iter().map(|b| (b.first, b.step.clone())).collect()
+        self.done
+            .iter()
+            .map(|b| (b.first, b.step.clone()))
+            .collect()
     }
 
     /// Undoes the newest batch not undone (the module's notes), or refuses and changes nothing.
@@ -624,7 +627,12 @@ impl History {
     }
 
     /// G1's gate and the conflict check for writing `b`'s inverse on `live`: its writes, or why not.
-    fn admit(b: &Batch, live: &Replica, world: &World, actor: Actor) -> Result<Vec<Write>, Refused> {
+    fn admit(
+        b: &Batch,
+        live: &Replica,
+        world: &World,
+        actor: Actor,
+    ) -> Result<Vec<Write>, Refused> {
         if actor != Actor::Creator(world.creator) {
             return Err(Refused {
                 op: None,

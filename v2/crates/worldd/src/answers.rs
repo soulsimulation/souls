@@ -1782,13 +1782,7 @@ impl Clock {
                         match edit::wire::edit_of(&intent, id) {
                             Some(e) => {
                                 if let Some((build, name)) = step {
-                                    self.steps.insert(
-                                        id,
-                                        sim::edit::undo::Step {
-                                            build,
-                                            name,
-                                        },
-                                    );
+                                    self.steps.insert(id, sim::edit::undo::Step { build, name });
                                 }
                                 Ok(Taken::Edit(e))
                             }
@@ -1912,7 +1906,10 @@ impl Clock {
                     },
                     kinds: BTreeMap::new(),
                 };
-                match self.history.preview(redo, &self.replica, &world, actor, now) {
+                match self
+                    .history
+                    .preview(redo, &self.replica, &world, actor, now)
+                {
                     Ok(effects) => {
                         if let Some(tx) = &self.edits
                             && tx
@@ -2046,7 +2043,10 @@ impl Clock {
         for (id, checked) in std::mem::take(&mut self.undone) {
             let mut checked = checked;
             let mut keep = |c: &mut Result<crate::undo::Checked, Refused>| {
-                if let Ok(crate::undo::Checked { maps: Some(maps), .. }) = c {
+                if let Ok(crate::undo::Checked {
+                    maps: Some(maps), ..
+                }) = c
+                {
                     kept.push(std::mem::take(&mut maps.surfaces));
                 }
             };

@@ -360,7 +360,11 @@ pub fn asked(parameters: &BTreeMap<u64, Value>) -> R<Asked> {
         (None, None) => None,
         (Some(Value::Bytes(b)), Some(Value::Bytes(s))) => match (step_name(b), step_name(s)) {
             (Some(b), Some(s)) => Some((b, s)),
-            _ => return Err(format!("a build or step name is 1 to {STEP_NAME_MOST} bytes of UTF-8")),
+            _ => {
+                return Err(format!(
+                    "a build or step name is 1 to {STEP_NAME_MOST} bytes of UTF-8"
+                ));
+            }
         },
         _ => return Err("a build's step is {3: build, 4: step}, both bytes".into()),
     };
