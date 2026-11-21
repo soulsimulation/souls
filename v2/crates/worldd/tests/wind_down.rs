@@ -69,6 +69,13 @@ fn b16_a_silent_soul_walks_out_sleeps_and_wakes_on_its_agents_act() {
     assert!(matches!(pose.support, Support::Surface { .. }), "on the open ground");
     assert_eq!(stance, Some(Stance::Lie), "lying");
 
+    // A5: BUILDSAFE judges the sleeping body as it judges any body standing on the open ground (the edit checker's
+    // hand-off, `buildsafe::moving`): an edit that would cover its spot is refused `edit.would-bury`, never left over it.
+    let judged: Vec<_> = worldd::buildsafe::moving(&b).into_iter().filter(|w| w.body == soul).collect();
+    assert_eq!(judged.len(), 1, "judged once, not walking");
+    assert_eq!(judged[0].pose, pose);
+    assert!(matches!(judged[0].pose.support, Support::Surface { height: 0, .. }));
+
     // A4: asleep, it is on no due list, and a long while issues nothing.
     assert_eq!(b.wind.next(), None);
     assert!(run(&mut b, 120 * S + TICK, 400 * S).is_empty());
