@@ -2197,7 +2197,7 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
                     .parse()
                     .ok()
             };
-            if line.starts_with("start-up: before replay") {
+            if line.starts_with("start-up: replay at") {
                 before = ms(&line);
             }
             if line.starts_with("start-up: public stream") {
