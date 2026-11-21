@@ -32,21 +32,29 @@
     }
   },
   "slots": {
-    "inside": {
+    "in_1": {
       "admits": "thing",
       "kinds": ["eden:wrapper", "eden:litter"],
       "stand": "stand",
-      "most": 3,
-      "at_mm": [
-        0,
-        100,
-        0
-      ],
-      "fits_mm": [
-        400,
-        600,
-        400
-      ]
+      "most": 1,
+      "at_mm": [-70, 550, 60],
+      "fits_mm": [140, 120, 140]
+    },
+    "in_2": {
+      "admits": "thing",
+      "kinds": ["eden:wrapper", "eden:litter"],
+      "stand": "stand",
+      "most": 1,
+      "at_mm": [70, 550, 60],
+      "fits_mm": [140, 120, 140]
+    },
+    "in_3": {
+      "admits": "thing",
+      "kinds": ["eden:wrapper", "eden:litter"],
+      "stand": "stand",
+      "most": 1,
+      "at_mm": [0, 550, -80],
+      "fits_mm": [140, 120, 140]
     }
   },
   "geometry": {
@@ -121,10 +129,10 @@
     "put_in": {
       "who": "anyone",
       "starts": "act",
-      "takes": { "thing": { "type": "thing" } },
-      "needs": [{ "need": "held_by_actor", "thing": { "arg": "thing" } }],
-      "steps": [{ "step": "walk_to", "point": "stand" }, { "step": "put", "slot": "inside" }],
-      "effects": [{ "change": "reparent", "what": { "arg": "thing" }, "into": "inside", "event": "binned" }]
+      "takes": { "thing": { "type": "thing" }, "place": { "type": "slot" } },
+      "needs": [{ "need": "held_by_actor", "thing": { "arg": "thing" } }, { "need": "slot_free", "slot": { "arg": "place" } }],
+      "steps": [{ "step": "walk_to", "point": "stand" }, { "step": "put", "slot": { "arg": "place" } }],
+      "effects": [{ "change": "reparent", "what": { "arg": "thing" }, "into": { "arg": "place" }, "event": "binned" }]
     },
     "take_out": {
       "who": "anyone",
