@@ -2036,6 +2036,13 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(200);
+    // A warm-up first (the joins' parts, each written whole), then the measured walking.
+    let warmup = Duration::from_secs(
+        std::env::var("V2_WARMUP")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60),
+    );
     let secs: u64 = std::env::var("V2_SECONDS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -2066,7 +2073,15 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
             let (mut played, mut samples, mut lags, mut busy) =
                 (0u64, 0usize, Vec::new(), Duration::ZERO);
             let (start, mut first_newest, mut last_newest) = (Instant::now(), None, 0u64);
+            // Writer lag: world time now less the newest published part's end, µs, while measuring.
+            let mut behind: Vec<i64> = Vec::new();
+            let mut measuring: Option<Instant> = None;
             while !stop.load(Ordering::Relaxed) {
+                if measuring.is_none() && start.elapsed() >= warmup {
+                    measuring = Some(Instant::now());
+                    (played, samples, busy, first_newest) = (0, 0, Duration::ZERO, None);
+                    lags.clear();
+                }
                 let Ok(bytes) = std::fs::read(stream.join("pointer")) else {
                     continue;
                 };
@@ -2092,7 +2107,10 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
                     next = 0;
                 }
                 let newest = pointer.newest.unwrap_or(0);
-                first_newest.get_or_insert(newest);
+                if measuring.is_some() {
+                    first_newest.get_or_insert(newest);
+                    behind.push(answers::now() - pointer.newest_to.unwrap_or(0));
+                }
                 last_newest = newest;
                 let p = player.as_mut().unwrap();
                 while next <= newest {
@@ -2105,10 +2123,17 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
                     played += 1;
                     next += 1;
                 }
-                lags.push(newest + 1 - next);
+                if measuring.is_some() {
+                    lags.push(newest + 1 - next);
+                }
                 std::thread::sleep(Duration::from_millis(100));
             }
-            let wall = start.elapsed().as_secs_f64();
+            let wall = measuring.map_or(1.0, |m| m.elapsed().as_secs_f64());
+            println!(
+                "the writer behind world time while measuring: most {:.2} s, last {:.2} s",
+                behind.iter().max().copied().unwrap_or(0) as f64 / 1e6,
+                behind.last().copied().unwrap_or(0) as f64 / 1e6
+            );
             let written = last_newest - first_newest.unwrap_or(0);
             (
                 written as f64 / wall,
@@ -2147,7 +2172,7 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
             })
         })
         .collect();
-    std::thread::sleep(Duration::from_secs(secs));
+    std::thread::sleep(warmup + Duration::from_secs(secs));
     stop.store(true, Ordering::Relaxed);
     let (written, played_rate, played, samples, busy, lag) = reader.join().unwrap();
     for w in walkers {
@@ -2161,9 +2186,10 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
     }
     let _ = std::fs::remove_dir_all(&dir);
     println!(
-        "A5: {n} walkers, {secs} s: walks done {}, refused {}; public parts written {written:.2}/s, played \
+        "A5: {n} walkers, {secs} s measured after {} s: walks done {}, refused {}; public parts written {written:.2}/s, played \
          {played_rate:.2}/s ({played} parts, {samples} motion samples, {:.1} ms reading in all); the reader's most \
          parts behind the newest: {lag:?}",
+        warmup.as_secs(),
         walks.load(Ordering::Relaxed),
         refused.load(Ordering::Relaxed),
         busy.as_secs_f64() * 1e3
