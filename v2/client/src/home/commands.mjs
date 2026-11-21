@@ -8,11 +8,13 @@ import { CREDENTIALS, Refused, runtimeOf, soulsWithTokens } from './home.mjs';
 import { request } from '../daemon/client.mjs';
 import { localId, pair } from '../pair/pair.mjs';
 import { pairAddress } from '../pair/address.mjs';
-import { accountCommand, accountList, accountPair, hasAccount, soulProfile, soulRetire, soulRetireWait, soulRevoke } from '../account/account.mjs';
+import { accountCommand, accountList, accountPair, connectedAccounts, hasAccount, soulProfile, soulRetire, soulRetireWait, soulRevoke } from '../account/account.mjs';
+import { feedSites, newsCommand, unread } from './news.mjs';
 
 export const HOME_COMMANDS = [
   'accounts',
   'adopt',
+  'dashboard',
   'default',
   'doctor',
   'export',
@@ -20,6 +22,7 @@ export const HOME_COMMANDS = [
   'list',
   'login',
   'logout',
+  'news',
   'profile',
   'retire',
   'revoke',
@@ -296,10 +299,35 @@ export async function doctor(home) {
   return { ok: true, healthy: !noToken.length && !orphanCredentials.length && !unreachable.length, locksCleared, noToken, orphanCredentials, worlds, unreachable };
 }
 
+/**
+ * #3708: `dashboard`, the home at a glance, read on this machine only (today's dashboard asks no world): each Soul's
+ * world and state (paired, its daemon up and connected, retired), its memory, the account connections and unread news.
+ * A daemon that is down is not started.
+ */
+export async function dashboard(home) {
+  const config = configOf(home), creds = credsOf(home);
+  const souls = await Promise.all(listSouls(home).map(async (s) => {
+    const meta = config.souls?.[s.id] ?? {}, paired = Object.values(creds.souls[s.id] ?? {}).some((w) => typeof w?.token === 'string');
+    let daemon = { up: false };
+    try {
+      const st = await request(runtimeOf(home, s.id).socket, { op: 'status' }, 1500);
+      if (st?.ok && st.soul === s.id) daemon = { up: true, connected: !!st.connected, cursor: st.cursor ?? null, unanswered: st.unanswered?.length ?? 0, now: st.now ?? null, upMs: st.upMs ?? null };
+    } catch { /* not running */ }
+    const state = meta.retiredAt ? 'retired' : !paired ? 'unpaired' : daemon.up && daemon.connected ? 'connected' : 'paired';
+    return { ...s, state, ...(meta.retiredAt ? { retiredAt: meta.retiredAt } : {}), daemon, memory: existsSync(join(home, 'souls', s.id, 'memory')) };
+  }));
+  let accounts = []; try { accounts = connectedAccounts(home).accounts; } catch { /* none readable */ }
+  const worlds = Object.entries(config.worlds ?? {}).map(([key, w]) => ({ world: key, url: w?.url ?? null, souls: souls.filter((s) => s.world === key).length }));
+  return { ok: true, souls, worlds, accounts, news: { sites: feedSites(config).length, unread: unread(config), then: 'news' },
+    note: 'Read on this machine only: it asks no world, starts no daemon and runs no model.' };
+}
+
 export async function homeCommand(home, command, args = [], options = {}) {
   const asAt = args.indexOf('--as'), as = asAt < 0 ? undefined : args[asAt + 1];
   if (['login', 'accounts', 'logout'].includes(command)) return accountCommand(home, command, args);
   if (command === 'list') return args.includes('--account') ? accountList(home, as) : { ok: true, souls: listSouls(home) };
+  if (command === 'dashboard') return dashboard(home);
+  if (command === 'news') return newsCommand(home, args);
   // #3707: the agent's profile, retire and revoke (today's commands). profile names its Soul by --soul.
   if (command === 'profile') {
     const at = args.indexOf('--soul'), named = at < 0 ? undefined : args[at + 1];

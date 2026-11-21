@@ -4,7 +4,9 @@
 // measure's other arm) and `copies=2` draws each thing twice, the copy one world's width further east.
 import * as THREE from 'three';
 import type { NodeRec } from '../source/source.ts';
-import { STRUCTURE, type WorldView } from '../draw/world.ts';
+import { STRUCTURE, isBody, type WorldView } from '../draw/world.ts';
+import { Catalogue } from '../kinds/catalogue.ts';
+import { KindLayer } from '../kinds/layer.ts';
 import { fetchIndex } from './models.ts';
 import { ThingLayer } from './things.ts';
 import { BoardPieces } from './board.ts';
@@ -46,6 +48,9 @@ export type PageThings = {
   /** C10: the world time drawn and the sky's record then, for the lit windows' share by local hour (today's
    *  `setWindowLife`); until it is called, today's 0.6 of the rooms are lit at night. */
   night(t: number | null, record: SkyRecord | null): void;
+  /** #3871: the things drawn from their kinds' entries, in their state at world time `t` (µs); null with `things=0`. */
+  kinds: KindLayer | null;
+  drawKinds(t: number | null): void;
 };
 
 /** The windows' life at world time `t` (µs): the local hour on the world's clock, and seconds for the rooms' people. */
@@ -53,7 +58,9 @@ export function windowLife(t: number | null, record: SkyRecord | null): void {
   setWindowLife(t !== null && record ? civil(localAt(record, t)).hour : null, Math.max(0, t ?? 0) / 1e6);
 }
 
-/** The page's things, from its parameters; none (the world view's boxes stay) when no `models` root is given. */
+/** The page's things, from its parameters. A thing with a baked model is drawn from it (V8's thing layer, when a
+ *  `models` root is given); a thing with none, from its kind's entry (#3871) once its kind's file arrives; anything
+ *  else stays a box (the thing layer's, or the world view's with no `models`). `things=0` draws none. */
 export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams): PageThings {
   const root = params.get('models');
   // N-V12 (#3726): game boards show their pieces, with or without models.
@@ -63,25 +70,36 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
   const ride = () => {
     for (const id of world.moving()) if (boards.has(id)) boards.move(id, world.frame(id));
   };
-  const none: PageThings = { layer: null, apply: pieces, update() {}, follow: ride, night: windowLife };
-  if (!root) return none;
-  world.drawThings = false;
+  const none: PageThings = { layer: null, apply: pieces, update() {}, follow: ride, night: windowLife, kinds: null, drawKinds() {} };
+  if (root) world.drawThings = false;
   if (params.get('things') === '0') return none;
-  const base = new URL(root, location.href);
+  const base = root ? new URL(root, location.href) : null;
   let layer: ThingLayer | null = null;
+  const kinds = new KindLayer(new Catalogue(document.baseURI), (id) => (world.drawnElsewhere(id), layer?.remove(id)));
+  scene.add(kinds.group);
   const early: [NodeRec[], string[]][] = [];
+  const frameOf = (n: NodeRec) => world.frame(n.id).clone().scale(new THREE.Vector3().setScalar((n.scale ?? 1_000_000) / 1_000_000));
   const out: PageThings = {
     layer: null,
+    kinds,
     apply(nodes, removed) {
       pieces(nodes, removed);
+      for (const id of removed) kinds.remove(id);
+      for (const n of nodes) {
+        if (isBody(n) || STRUCTURE.has(n.kind.split('@')[0]) || world.isDrape(n)) continue;
+        if (n.origin && layer?.opts.index.things[n.origin]) continue; // its baked model draws it
+        if (base && !layer) continue; // until the models index arrives, a thing may yet have a model
+        kinds.set(n, frameOf(n));
+      }
+      if (!base) return;
       if (!layer) return void early.push([nodes, removed]);
       if (world.extent) layer.spacing = world.extent[2] - world.extent[0];
       for (const id of removed) layer.remove(id);
       for (const n of nodes) {
-        if (n.at !== null || STRUCTURE.has(n.kind.split('@')[0])) continue;
+        if (n.at !== null || STRUCTURE.has(n.kind.split('@')[0]) || kinds.has(n.id)) continue;
         const model = n.origin && layer.opts.index.things[n.origin];
         const box = model ? boxOf(n) : solidBoxes(n, n.parent === world.groundId && n.pos.every((v) => v === 0) ? (x, z) => world.heightAt(x, z) : null);
-        layer.set(n.id, n.origin ?? null, world.frame(n.id).clone().scale(new THREE.Vector3().setScalar((n.scale ?? 1_000_000) / 1_000_000)), box);
+        layer.set(n.id, n.origin ?? null, frameOf(n), box);
       }
     },
     update(eye) {
@@ -89,12 +107,19 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
     },
     follow() {
       ride();
-      if (!layer) return;
       const s = new THREE.Vector3();
-      for (const id of world.moving()) layer.move(id, world.frame(id).clone().scale(s.setScalar((world.nodes.get(id)?.scale ?? 1_000_000) / 1_000_000)));
+      for (const id of world.moving()) {
+        const f = world.frame(id).clone().scale(s.setScalar((world.nodes.get(id)?.scale ?? 1_000_000) / 1_000_000));
+        layer?.move(id, f);
+        kinds.move(id, f);
+      }
     },
     night: windowLife,
+    drawKinds(t) {
+      kinds.draw(t);
+    },
   };
+  if (!base) return out;
   fetchIndex(base.href).then((index) => {
     const copies = Number(params.get('copies') ?? 1);
     layer = new ThingLayer({
