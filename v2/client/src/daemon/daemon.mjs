@@ -806,6 +806,10 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex
   return { sequence, sent };
 }
 
+/** World time now: the copy's clock mapping (E7b), else the machine's clock, as a world without a mapping runs on it
+ *  (`worldd::answers::now`). For the creator's weather end and strike time (#3695). */
+const worldNowOrReal = () => worldNow(clockOf(copy)) ?? Date.now() * 1000;
+
 async function answer(req) {
   // R13: a command from the model's turn shows that what a reader was handed was taken.
   if (!['wait', 'status', 'pending'].includes(req.op)) wakes.confirm();
@@ -986,7 +990,7 @@ async function answer(req) {
     }));
     case 'check': {
       // On the copy as it is: no sync, no frame to the world (A4). A world verb (#3695) is made into its sets first.
-      const w = req.world ? worldOps(copy, req.world, worldNow(clockOf(copy))) : { ops: req.ops };
+      const w = req.world ? worldOps(copy, req.world, worldNowOrReal()) : { ops: req.ops };
       if (w.ok === false) return closing({ ...w, local: true }, null, { now: true });
       const v = JSON.parse(wire.editCheck(copy, batchOf(w.ops), kindsText()));
       return closing({ ...v, local: true, ...(w.says ? { would: w.says, ops: w.ops } : {}) }, null, { now: true });
@@ -995,7 +999,7 @@ async function answer(req) {
       if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
       const age = await ageAfter();
       // #3695: weather, sky and strike are sets on the world node, made from the copy as it is now, after the sync.
-      const w = req.world ? worldOps(copy, req.world, worldNow(clockOf(copy))) : { ops: req.ops };
+      const w = req.world ? worldOps(copy, req.world, worldNowOrReal()) : { ops: req.ops };
       if (w.ok === false) return closing({ ...w, sent: false, local: true }, null, { age });
       const batch = batchOf(w.ops);
       const v = JSON.parse(wire.editCheck(copy, batch, kindsText()));
