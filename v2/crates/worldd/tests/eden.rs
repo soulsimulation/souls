@@ -2928,10 +2928,11 @@ fn last_stances(
 }
 
 /// #3802 A2: Souls step up onto Eden's festival stage (e_569eb676, at (265, 34) m, its steps at z 37.3 m) and stand on
-/// it, each on its own standing point (the stage's 40 spots, 0.94 m up on its boards): the first two on two points, then
-/// the stage filled. A 41st Soul is refused by name and stays where it stood. The world is stopped and served again on
-/// the same folder: the 40 are still standing on the stage in their spots, the 41st is still refused, and once one
-/// steps down the 41st steps up.
+/// it, each on its own standing point (the stage's 40 spots, 0.94 m up on its boards). The first names no spot (the world
+/// picks the free one nearest it), the second names spot 40; the rest fill the stage naming none. A 41st Soul naming a
+/// taken spot is refused `place-taken`; naming none it is refused `place.none-free` up front and stays where it stood.
+/// The world is stopped and served again on the same folder: the 40 are still standing in their spots, the 41st is
+/// still refused, and once one steps down the 41st steps up into the freed spot.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
@@ -2955,7 +2956,8 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
     };
     let spot = |n: u64| args(&[("spot", Value::Uint(n))]);
     for (i, soul) in souls.iter_mut().enumerate().take(2) {
-        let up = soul.act("eden:step_up", Some(stage), spot(i as u64 + 1));
+        let named = if i == 0 { BTreeMap::new() } else { spot(40) };
+        let up = soul.act("eden:step_up", Some(stage), named);
         println!("Soul {}: step up {up:?}", i + 1);
         up.expect("stepped up onto a free spot");
     }
@@ -2970,7 +2972,7 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
     );
     let started = std::time::Instant::now();
     for (i, soul) in souls.iter_mut().enumerate().take(40).skip(2) {
-        let up = soul.act("eden:step_up", Some(stage), spot(i as u64 + 1));
+        let up = soul.act("eden:step_up", Some(stage), BTreeMap::new());
         println!("Soul {}: step up {up:?}", i + 1);
         up.expect("stepped up onto a free spot");
     }
@@ -2981,8 +2983,10 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
             .filter(|(_, f)| f.0 != stage)
             .collect()
     };
+    let taken = souls[40].act("eden:step_up", Some(stage), spot(1));
+    println!("Soul 41: step up onto a taken spot {taken:?}");
     let before = off(&dir);
-    let full = souls[40].act("eden:step_up", Some(stage), spot(1));
+    let full = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
     println!("Soul 41: step up onto the full stage {full:?}");
     let all = on_stage(&dir);
     let slots: Vec<Option<u64>> = all.iter().map(|f| f.1).collect();
@@ -2996,8 +3000,13 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
         "all standing"
     );
     assert_eq!(
-        full,
+        taken,
         Err("place-taken".to_owned()),
+        "a taken spot refuses by name"
+    );
+    assert_eq!(
+        full,
+        Err("place.none-free".to_owned()),
         "a full stage refuses by name"
     );
     assert_eq!(off(&dir), before, "the refused Soul stays where it stood");
@@ -3022,16 +3031,16 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
         .enumerate()
         .map(|(i, s)| reconnect(&dir, i as u64 + 1, s.2, lineage))
         .collect();
-    let again = souls[40].act("eden:step_up", Some(stage), spot(2));
+    let again = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
     println!("after the restart, Soul 41: step up {again:?}");
     let down = souls[0].act("eden:step_down", Some(stage), BTreeMap::new());
     println!("after the restart, Soul 1: step down {down:?}");
-    let up = souls[40].act("eden:step_up", Some(stage), spot(1));
+    let up = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
     println!("after the restart, Soul 41: step up {up:?}");
     let after = on_stage(&dir);
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(again, Err("place-taken".to_owned()), "still full");
+    assert_eq!(again, Err("place.none-free".to_owned()), "still full");
     down.expect("Soul 1 steps down");
     up.expect("Soul 41 steps up into the freed spot");
     assert_eq!(after.len(), 40, "the stage full again: {after:?}");
@@ -3052,4 +3061,50 @@ fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
         .collect();
     assert_eq!((left.len(), came.len()), (1, 1), "one stepped down, one up");
     assert_eq!(left[0].1, came[0].1, "the 41st took the freed spot");
+}
+
+/// #3802: a form that selects a body's slot from the thing's free ones, sent with no slot, is given the free one nearest
+/// the body: three Souls `flop` onto the roundhouse's three-seat sofa (e_3bfd13e0, see C19's test) naming no seat, each
+/// in its own slot, and a fourth is refused `place.none-free` up front, staying where it stood.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn i3802_a_form_with_no_slot_takes_the_nearest_free_one() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (sofa, lineage) = (im.nodes["e_3bfd13e0"], im.nodes["world"].scope());
+    let (served, first, dir) = serve(&facts, "66.5,-13.5", "i3802-sofa", lineage);
+    let mut souls = vec![first];
+    for n in 2..=4 {
+        souls.push(join(&dir, n, lineage));
+    }
+    for (i, soul) in souls.iter_mut().enumerate().take(3) {
+        let flop = soul.act("eden:flop", Some(sofa), BTreeMap::new());
+        println!("Soul {}: flop onto the sofa {flop:?}", i + 1);
+        flop.expect("flopped into a free slot");
+    }
+    let off = |dir: &Path| -> Vec<_> {
+        last_stances(dir)
+            .into_iter()
+            .filter(|(_, f)| f.0 != sofa)
+            .collect()
+    };
+    let before = off(&dir);
+    let fourth = souls[3].act("eden:flop", Some(sofa), BTreeMap::new());
+    println!("Soul 4: flop onto the full sofa {fourth:?}");
+    let after = off(&dir);
+    let mut slots: Vec<Option<u64>> = last_stances(&dir)
+        .values()
+        .filter(|f| f.0 == sofa)
+        .map(|f| f.1)
+        .collect();
+    slots.sort_unstable();
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(
+        slots,
+        vec![Some(1), Some(2), Some(3)],
+        "each in its own slot"
+    );
+    assert_eq!(fourth, Err("place.none-free".to_owned()));
+    assert_eq!(after, before, "the fourth stays where it stood");
 }
