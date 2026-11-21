@@ -172,20 +172,18 @@ impl Bundle {
         view: Value,
         observation: Value,
     ) -> R<Bundle> {
-        if !(WINDOW_LEAST..=WINDOW_MOST).contains(&length) {
-            return refuse("history-window", format!("{length} µs"));
-        }
-        let stored = enc(&Value::Map(BTreeMap::from([
+        let mut bundle = Self::new(header, start, length, snapshot, view)?;
+        bundle.observation = Some(observation.clone());
+        bundle.stored = enc(&Value::Map(BTreeMap::from([
             (1, Value::Uint(2)),
-            (2, Value::Bytes(header.clone())),
+            (2, Value::Bytes(bundle.header.clone())),
             (3, int(start)),
             (4, int(length)),
-            (5, snapshot.clone()),
-            (6, view.clone()),
-            (7, observation.clone()),
+            (5, bundle.snapshot.clone()),
+            (6, bundle.view.clone()),
+            (7, observation),
         ])))?;
-        let observation = Some(observation);
-        Ok(Bundle { header, start, length, snapshot, view, observation, stored })
+        Ok(bundle)
     }
 
     pub fn read(bytes: &[u8]) -> R<Bundle> {
