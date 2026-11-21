@@ -187,7 +187,9 @@ function corners([, x, z, w, d, yaw]) {
 /** The rectangle on the ground that holds the plots, whole mm. */
 export function areaOf(plots) {
   const pts = plots.flatMap(corners), xs = pts.map((p) => p[0]), zs = pts.map((p) => p[1]);
-  return [Math.floor(Math.min(...xs)), Math.floor(Math.min(...zs)), Math.ceil(Math.max(...xs)), Math.ceil(Math.max(...zs))];
+  // A turn's sine and cosine are not exact: a hair past a whole mm is that mm.
+  const lo = (v) => Math.floor(v + 1e-6), hi = (v) => Math.ceil(v - 1e-6);
+  return [lo(Math.min(...xs)), lo(Math.min(...zs)), hi(Math.max(...xs)), hi(Math.max(...zs))];
 }
 const inside = ([x0, z0, x1, z1], x, z) => x >= x0 && x < x1 && z >= z0 && z < z1;
 /** One plan as a creator reads it: plots with their status (claimed by a live claim over its centre, else planned) and
