@@ -94,6 +94,11 @@ fn seat_at() -> Vec3 {
 }
 
 fn bodies() -> Result<Bodies, replica::effects::Refusal> {
+    bodies_with(CHAIR, seat_at())
+}
+
+/// The body and one seat of `place` (its fixture text) at `point`.
+fn bodies_with(place: &str, point: Vec3) -> Result<Bodies, replica::effects::Refusal> {
     let (town, ground) = town();
     let at = town.surfaces[&ground].place(
         body_id(),
@@ -106,11 +111,11 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
     )?;
     let mut b = Bodies::new(town, 50_000)?;
     b.add_body(humanoid(), at)?;
-    let place = Place::from_value(&decode(&fixture_bytes(CHAIR)?).unwrap().value)?;
+    let place = Place::from_value(&decode(&fixture_bytes(place)?).unwrap().value)?;
     b.add_place(PlaceAt {
         thing: thing(),
         place,
-        point: seat_at(),
+        point,
         facing: Quat::IDENTITY,
         floor: ground,
     })?;
@@ -209,6 +214,7 @@ impl Client {
                 .collect(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         let bytes = encode(&i.to_value()).unwrap();
         self.0
@@ -1133,6 +1139,7 @@ fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     let bytes = encode(&i.to_value()).unwrap();
     c.0.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
@@ -1458,6 +1465,7 @@ fn a_mapped_world_steps_its_direct_ground_walk_in_world_time() {
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     let bytes = encode(&intent.to_value()).unwrap();
     let mut c = Client(client);
@@ -1488,4 +1496,79 @@ fn a_mapped_world_steps_its_direct_ground_walk_in_world_time() {
         "world ticks advance through the actual walk"
     );
     assert!(beat.1 > mapping.real_us, "heartbeat remains on real time");
+}
+
+/// #3600 A3: a stool whose seat is 1.0 m up (C22's ordinary stools and wagons, 0.65 to 1.60 m, were refused against the
+/// sit move's 0.6 m contact reach) is taken through the gateway by the standard body, within its 2.06 m standing reach:
+/// the walk to its stand point, the sit into its slot and the rise back onto the ground, each with its receipt.
+#[test]
+fn a_seat_one_metre_up_is_walked_to_sat_in_and_risen_from_through_the_gateway() {
+    const STOOL: &str = "{1: 1, 2: 1000, 3: [0, 300]}";
+    let seat = Vec3::new(seat_at().x, 1_000_000, seat_at().z);
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.bodies = Some(Box::new(move |_: &worldd::bodies::Placed| {
+        bodies_with(STOOL, seat)
+    }));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    let path = std::env::temp_dir().join(format!("reach-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    let (ready, accepted) = channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        ready.send(()).unwrap();
+        answers::serve(door, stream);
+    });
+    let stream = UnixStream::connect(&path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    accepted.recv().unwrap();
+    let mut c = Client(stream);
+    let stand = Vec3::new(seat.x, 0, seat.z + 300_000);
+    c.send(1, "eden:walk", Some(thing()));
+    let walk = c.answer().expect("the walk is done");
+    c.send(2, "eden:sit", Some(thing()));
+    let sit = c.answer().expect("the sit on the stool is done");
+    c.send(3, "eden:rise", None);
+    let rise = c.answer().expect("the rise is done");
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+
+    let log = logged(&store.0.lock().unwrap().bytes);
+    for (what, (id, entries)) in [("walk", &walk), ("sit", &sit), ("rise", &rise)] {
+        let l = &log[id];
+        println!("{what}: receipt entries {entries:?}");
+        for e in l {
+            println!(
+                "  #{} {} {:?} on {} at {:?} µm",
+                e.0,
+                e.1,
+                e.2,
+                replica::world_model::show(e.3),
+                e.4
+            );
+        }
+        assert_eq!(&l.iter().map(|e| e.0).collect::<Vec<_>>(), entries);
+        assert_eq!(
+            (l.last().unwrap().1.as_str(), l.last().unwrap().2.as_deref()),
+            (MOVE_ENDED, Some("done"))
+        );
+    }
+    let end = |id: &Id| log[id].last().cloned().unwrap();
+    let w = end(&walk.0);
+    assert!(near(w.4, stand, 60_000), "at the stand point: {:?}", w.4);
+    assert_eq!(end(&sit.0).3, thing(), "seated: in the stool's slot");
+    let r = end(&rise.0);
+    assert_eq!(r.3, w.3, "standing on the ground again");
+    assert!(near(r.4, stand, 1_000), "on the stand point: {:?}", r.4);
 }

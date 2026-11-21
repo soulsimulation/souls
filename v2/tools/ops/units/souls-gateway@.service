@@ -1,7 +1,9 @@
 # One world's gateway (Engine v2 I1, #2683; installed by v2/tools/ops/install.sh, O17 #2810): agents' sockets in,
 # the world's local socket out. The instance is the world's name. Its arguments are the world's own file,
 # /etc/souls/gateway-<world>.env (GATEWAYD_ARGS=--listen <loopback>:<port> --world <socket> --tokens <file>
-# --build <hex>), written when the world is placed (X5), never by the install. The install starts nothing.
+# --build <hex> --receipts <dir> --entries <the world's entries>), written when the world is placed (X5, place-world.sh),
+# never by the install. The install starts nothing. A world whose entries folder is missing or empty fails at start
+# (#3760): its paired clients would get none of its kinds.
 [Unit]
 ConditionPathExists=!/etc/souls/placement-data/archived/%i
 Description=Souls gateway for world %i

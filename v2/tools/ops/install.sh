@@ -6,12 +6,13 @@
 #   bash install.sh apply --from <bundle>       as root: makes it so; a second run changes nothing
 #   bash install.sh uninstall                   as root: removes what apply made, and only that
 #   bash install.sh check                       the test: nothing it writes is today's system's (a repo checkout)
-#   bash install.sh bundle <out> <cargo release dir> <page dist dir>   puts a bundle together (the workflow)
+#   bash install.sh bundle <out> <cargo release dir> <page dist dir> [<templates> [<served client>]]
+#                                               puts a bundle together (the workflow)
 #   INSTALL_TARGET=<ssh target> bash install.sh remote <plan|apply|uninstall> <bundle>
 #                                               runs it on another machine through `$INSTALL_SSH <target> <command>`
 #
 # What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd,
-# directoryd, deploy, gateway-upgrade, import-accounts, import-world, the origin and the page's files); data in
+# directoryd, deploy, gateway-upgrade, import-accounts, import-world, publish-template, the origin and the page's files); data in
 # /var/lib/souls; settings in /etc/souls, the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
 # souls-directory and souls-origin.
 # Carried over from today's installer: idempotent, and it starts, enables and restarts nothing. It never reads or
@@ -27,7 +28,10 @@ DATA=/var/lib/souls
 ETC=/etc/souls
 UNITS=/etc/systemd/system
 STATE=$ETC/install.state
-PROGRAMS=(supervisor worldd gatewayd directoryd deploy gateway-upgrade import-accounts import-world)
+PROGRAMS=(supervisor worldd gatewayd directoryd deploy gateway-upgrade import-accounts import-world publish-template)
+# A program's cargo binary: the `templates` crate's is installed as publish-template, since $LIB/templates is the
+# catalogue it writes (W3b's placement.json `templates`).
+built() { if [ "$1" = publish-template ]; then echo templates; else echo "$1"; fi; }
 UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service souls-place.path souls-place.service)
 DROPIN=$UNITS/worldd@.service.d
 # Everything it may make, and so everything it may remove: the user, three folders it owns whole, its units.
@@ -172,8 +176,21 @@ install_all() {
   ensure_tree "$from/ops" "$LIB/ops"
   ensure_dir "$LIB/templates" 755 root root
   if [ -d "$from/templates" ]; then ensure_tree "$from/templates" "$LIB/templates"; fi
-  ensure_dir "$DATA" 750 "$ACCOUNT" "$ACCOUNT" "tree $DATA"
+  # The served client (R17; the cut-over fence's clientDir), placed once and whole: release-v2's move replaces it
+  # later, so an install never puts back an older one.
+  if [ -f "$from/client/soul-client.json" ] && [ ! -e "$R$LIB/client" ]; then
+    act "client $LIB/client (once; a release's move replaces it)" bash -c 'set -e; rm -rf "$2.install"; cp -R "$1" "$2.install"
+      chown -R root:root "$2.install"; find "$2.install" -type d -exec chmod 755 {} +; find "$2.install" -type f -exec chmod 644 {} +
+      mv "$2.install" "$2"' _ "$from/client" "$LIB/client"
+  fi
+  # 751: today's launcher (simworlds, no Souls group) reaches the route file its cut-over fence reads
+  # (/etc/souls/cutover-binding.json `routesFile`, v2/docs/cutover.md); it can list nothing here, and every store
+  # below stays 750.
+  ensure_dir "$DATA" 751 "$ACCOUNT" "$ACCOUNT" "tree $DATA"
   for p in worlds directory views; do ensure_dir "$DATA/$p" 750 "$ACCOUNT" "$ACCOUNT"; done
+  # The world route file (placement, the cut-over and the origin write or read it): Souls-owned, so a root-run
+  # cut-over write never leaves a folder the placement child cannot lock.
+  ensure_dir "$DATA/routes" 755 "$ACCOUNT" "$ACCOUNT"
   ensure_dir "$DATA/worlds/directory" 750 "$ACCOUNT" "$ACCOUNT"
   ensure_dir "$DATA/worlds/worlds" 750 "$ACCOUNT" "$ACCOUNT"
   ensure_dir "$DATA/directory/placement-backup" 750 "$ACCOUNT" "$ACCOUNT"
@@ -273,12 +290,19 @@ check() {
   tmp=$(mktemp -d) # global: the EXIT trap reads it
   trap 'rm -rf "$tmp"' EXIT
   mkdir -p "$tmp/root" "$tmp/bins" "$tmp/page"
-  for p in "${PROGRAMS[@]}"; do printf '%s\n' "$p" > "$tmp/bins/$p"; done
+  for p in "${PROGRAMS[@]}"; do printf '%s\n' "$p" > "$tmp/bins/$(built "$p")"; done
   echo '<!doctype html>' > "$tmp/page/index.html"
-  bundle "$tmp/b" "$tmp/bins" "$tmp/page" > "$tmp/bundle"
+  mkdir -p "$tmp/client" && echo '{}' > "$tmp/client/soul-client.json"
+  bundle "$tmp/b" "$tmp/bins" "$tmp/page" "" "$tmp/client" > "$tmp/bundle"
   INSTALL_ROOT=$tmp/root bash "$0" plan --from "$tmp/b" > "$tmp/plan"
-  for p in import-accounts import-world; do
-    cmp -s "$tmp/bins/$p" "$tmp/b/bin/$p" || die "check: $p missing or changed in bundle"
+  grep -qxF "would client $LIB/client (once; a release's move replaces it)" "$tmp/plan" || die "check: the served client missing from plan"
+  cp -R "$tmp/root" "$tmp/placed"
+  mkdir -p "$tmp/placed$LIB/client" "$tmp/placed$ETC"
+  printf '%s\n' "${OWNED[@]}" > "$tmp/placed$STATE"
+  INSTALL_ROOT=$tmp/placed bash "$0" plan --from "$tmp/b" > "$tmp/plan2" || die "check: the plan over a placed client refused"
+  ! grep -q "^would client" "$tmp/plan2" || die "check: an install would replace a placed client"
+  for p in import-accounts import-world publish-template; do
+    cmp -s "$tmp/bins/$(built "$p")" "$tmp/b/bin/$p" || die "check: $p missing or changed in bundle"
     [ -n "$(find "$tmp/b/bin/$p" -prune -perm 755)" ] || die "check: $p bundle mode is not 755"
     grep -qxF "would file $LIB/$p 755 root:root" "$tmp/plan" || die "check: $p missing from plan"
   done
@@ -348,7 +372,7 @@ bundle() {
   local out=$1 bins=$2 page=$3 p
   [ -d "$page" ] || die "no page build at $page"
   mkdir -p "$out/bin" "$out/units"
-  for p in "${PROGRAMS[@]}"; do install -m 755 "$bins/$p" "$out/bin/$p"; done
+  for p in "${PROGRAMS[@]}"; do install -m 755 "$bins/$(built "$p")" "$out/bin/$p"; done
   rm -rf "$out/origin" "$out/web"
   mkdir -p "$out/origin"
   cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/owner-auth.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../../client/served/serve.mjs" "$out/origin/"
@@ -358,6 +382,11 @@ bundle() {
   cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$out/ops/"
   cp "$HERE/proxy/route-config.mjs" "$HERE/proxy/routes.mjs" "$out/ops/proxy/"
   if [ -n "${4:-}" ]; then cp -R "$4" "$out/templates"; fi
+  rm -rf "$out/client"
+  if [ -n "${5:-}" ]; then
+    [ -f "$5/soul-client.json" ] || die "no served client at $5 (v2/client/served/build.mjs)"
+    cp -R "$5" "$out/client"
+  fi
   cp "$HERE"/units/* "$out/units/"
   install -m 755 "$0" "$out/install.sh"
   echo "bundle: $(cd "$out" && find . -type f | wc -l | tr -d ' ') files in $out"

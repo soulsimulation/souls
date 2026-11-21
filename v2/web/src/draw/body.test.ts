@@ -10,7 +10,8 @@ test('a static Soul draws at its authoritative parent-frame pose until actual sa
   const w = new WorldView(), body = node({ id: 'b', kind: 'souls:body@pin', parent: 'p', pos: [2_000_000, 0, 3_000_000], body: 'admitted' });
   w.apply([node({ id: 'p', kind: 'souls:place', pos: [10_000_000, 0, 0] }), body, node({ id: 'thing', kind: 'eden:box' })], []);
   assert.equal(w.draw(100), 1);
-  assert.equal(w.tracks.get('b')!.samples.length, 0, 'no invented motion sample or time');
+  // #3814 (on main) records a still body's pose as its track's one sample at time 0, until a real sample moves it.
+  assert.deepEqual(w.tracks.get('b')!.samples.map((x) => x.at), [0], 'the still pose is the track\'s only sample, at time 0');
   assert.deepEqual(w.crowd(100)!.toArray(), [12, 0, 3]);
   const meshes = w.group.children.filter((n): n is THREE.InstancedMesh => n instanceof THREE.InstancedMesh);
   assert.equal(meshes.length, 2, 'one capsule batch and one generic thing batch');

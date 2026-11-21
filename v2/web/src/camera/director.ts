@@ -4,16 +4,31 @@
 // find box does the same; `follow=<id>` in the address opens on that Soul, and the address carries it while following.
 // Any gesture during broadcast hands the camera to the viewer. With `camera=free`, or on a link to a past moment, the
 // page starts on the free camera. Cameras observe: none of them moves anything in the world.
+// C2 (#3674): once the world is drawn, a first-time visitor gets the welcome card, and in Eden a guided camera tour
+// (`tour` mode) flies between today's Explore views; any gesture, Esc or "Leave tour" gives the free camera from there.
+// #3738: in Eden the Explore list flies the camera to one view (`view` mode), then gives the free camera from there.
+// On a phone (#3675): first-touch hints, a short vibration when a tap follows or a flight arrives, and a fast one-finger
+// sideways flick while following goes to the next (left) or previous (right) Soul; pinch and two-finger drags stay the
+// camera's.
 import * as THREE from 'three';
 import { farLimit, type FreeCamera } from './camera.ts';
 import { Broadcast, SHOT } from './broadcast.ts';
-import { Flight, shotOffset } from './flight.ts';
+import { Flight, PoseFlight, shotOffset } from './flight.ts';
 import { FOLLOW_MAX, FOLLOW_MIN, Follow, TARGET_UP, bodyAt } from './follow.ts';
 import type { WorldView } from '../draw/world.ts';
 import type { PageSouls } from '../souls/page.ts';
-import type { PartRec } from '../source/source.ts';
+import type { NodeRec, PartRec } from '../source/source.ts';
+import { Tour } from '../welcome/tour.ts';
+import { EDEN_STOPS } from '../welcome/stops.ts';
+import { mountWelcome, worldOf, type Welcome } from '../welcome/welcome.ts';
+import { mountExplore, type Explore } from '../welcome/explore.ts';
+import { EDEN_VIEWS } from '../welcome/views.ts';
+import type { Stop } from '../welcome/stops.ts';
+import type { ViewShots } from '../welcome/shots.ts';
+import { Flicks, SoulSwipe, hapticTick, soulRing } from '../phone/touch.ts';
+import { touchHints } from '../phone/hints.ts';
 
-export type Mode = 'broadcast' | 'free' | 'fly' | 'follow';
+export type Mode = 'broadcast' | 'free' | 'fly' | 'follow' | 'tour' | 'view';
 /** A tap moves less than this (px); a body this near the tap (px) is the one tapped; a pan this far (m) in one gesture
  *  leaves the follow. */
 const TAP_PX = 6, HIT_PX = 36, PAN_LEAVES = 1;
@@ -26,6 +41,23 @@ export function findSoul(souls: Iterable<{ id: string; name: string | null }>, t
   const all = [...souls].filter((s) => s.name);
   const by = (f: (n: string) => boolean) => all.find((s) => f(s.name!.toLowerCase()))?.id ?? null;
   return by((n) => n === q) ?? by((n) => n.startsWith(q)) ?? by((n) => n.includes(q));
+}
+
+/** The named place a typed name means, when no Soul does (#3574): the same rule over the places' public names, a
+ *  hyphen or underscore read as a space (Eden's names are written `land-west-lake`), an area with an outline before
+ *  a thing of the same name. */
+export function findPlace(nodes: Iterable<Pick<NodeRec, 'id' | 'placeName' | 'outline'>>, typed: string): string | null {
+  const words = (t: string) => t.replace(/[-_]+/g, ' ');
+  const named = [...nodes].filter((n) => n.placeName).sort((a, b) => Number(!a.outline?.length) - Number(!b.outline?.length));
+  return findSoul(named.map((n) => ({ id: n.id, name: words(n.placeName!) })), words(typed));
+}
+
+/** Where a named place is seen, world m: the middle of its outline (world mm) at its own height; null without one. */
+export function placeAt(n: Pick<NodeRec, 'outline'>, y: number, out = new THREE.Vector3()): THREE.Vector3 | null {
+  const o = n.outline;
+  if (!o?.length) return null;
+  const [x, z] = o.reduce(([a, b], [px, pz]) => [a + px, b + pz], [0, 0]);
+  return out.set((x / o.length) / 1000, y, (z / o.length) / 1000);
 }
 
 export class CameraDirector {
@@ -43,6 +75,18 @@ export class CameraDirector {
   private world: WorldView;
   private souls: PageSouls;
   readonly find: HTMLInputElement;
+  tour: Tour | null = null;
+  welcome: Welcome | null = null;
+  explore: Explore | null = null;
+  /** Explore's pictures, given by the page (it holds the renderer). */
+  shots: ViewShots | null = null;
+  private view: PoseFlight | null = null;
+  private flicks = new Flicks();
+  private swipe = new SoulSwipe();
+  /** When each body was last heard (it spoke, or a named event happened to it; µs), for the swipe's order. */
+  private heard = new Map<string, number>();
+  /** The Soul whose page a tap on its label opened (the Soul page opens it), so a swipe turns that page to the next. */
+  private card: string | null = null;
 
   constructor(cam: FreeCamera, canvas: HTMLCanvasElement, world: WorldView, souls: PageSouls, params: URLSearchParams, history: boolean) {
     this.cam = cam;
@@ -51,24 +95,58 @@ export class CameraDirector {
     this.pending = params.get('follow');
     this.mode = history || params.get('camera') === 'free' ? 'free' : 'broadcast';
     const take = () => {
-      if (this.mode === 'broadcast' || this.mode === 'fly') this.free();
+      if (this.mode === 'broadcast' || this.mode === 'fly' || this.mode === 'tour' || this.mode === 'view') this.free();
       this.follow?.touched();
     };
-    canvas.addEventListener('pointerdown', (e) => ((this.down = [e.clientX, e.clientY]), take()));
+    canvas.addEventListener('pointerdown', (e) => {
+      // Whether a flight to a Soul was under way: a flick then swipes on from it rather than taking the camera.
+      const flying = this.mode === 'fly';
+      this.down = [e.clientX, e.clientY];
+      this.flicks.pointerdown(e);
+      if (!(flying && e.pointerType === 'touch' && this.flicks.fingers === 1)) take();  // a pinch takes it at once
+    });
+    canvas.addEventListener('pointercancel', (e) => this.flicks.cancel(e));
     canvas.addEventListener('wheel', take, { passive: true });
     canvas.addEventListener('pointerup', (e) => {
+      const dir = this.flicks.pointerup(e);
+      const on = this.mode === 'follow' ? this.follow?.id : this.mode === 'fly' ? this.flight?.id : null;
+      if (dir && on) return void this.swipeFrom(on, dir);
+      if (this.mode === 'fly' && e.pointerType === 'touch') this.free();  // a touch that was not a flick takes the camera
       if (!this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > TAP_PX) return;
       const id = this.hit(e.clientX, e.clientY);
-      if (id) this.fly(id);
+      this.card = id && this.souls.placed.some((p) => p.id === id && e.clientX >= p.x && e.clientX <= p.x + p.w && e.clientY >= p.y && e.clientY <= p.y + p.h) ? id : this.card;
+      if (id && this.fly(id)) hapticTick();
     });
+    touchHints();
     cam.controls.addEventListener('start', () => ((this.panned = 0), this.follow?.touched()));
     addEventListener('keydown', (e) => /^(Key[WASD]|Arrow)/.test(e.code) && take());
     this.find = this.findBox();
+    // N-V21 (#3678): opening a conversation frames its members; the viewer's camera from there.
+    souls.framer = (eye, target) => (this.free(), this.show(eye, target));
   }
 
   /** A part's named events, for broadcast. */
   part(p: PartRec): void {
     this.broadcast.heard(p);
+    for (const s of p.said ?? []) this.heard.set(s.speaker, Math.max(this.heard.get(s.speaker) ?? 0, s.at));
+    for (const h of p.happened ?? []) if (h.name) this.heard.set(h.node, Math.max(this.heard.get(h.node) ?? 0, h.at));
+  }
+
+  /** A flick while following (or flying to) Soul `on`: flies to the next (+1) or previous (-1) Soul drawn. */
+  private swipeFrom(on: string, dir: 1 | -1): void {
+    if (this.t === null) return;
+    const t = this.t, v = new THREE.Vector3(), here: { id: string; p: [number, number, number]; walking: boolean }[] = [];
+    for (const id of this.souls.copy.souls.keys()) {
+      if (!bodyAt(this.world, id, t, v)) continue;
+      const k = this.world.tracks.get(id)?.samples;
+      here.push({ id, p: [v.x, v.y, v.z], walking: !!k && k.length > 1 && k[k.length - 1].at > t - 1_000_000 });
+    }
+    const next = this.swipe.step(on, here.map((s) => s.id), dir, performance.now(), () => soulRing(on, here, this.heard, t));
+    if (!next || !this.fly(next)) return;
+    hapticTick();
+    // The Soul's page that was open turns with the swipe, as today's follow chip names the Soul now shown.
+    const pageOpen = [...document.querySelectorAll('aside')].some((a) => a.style.display === 'block');
+    if (this.card === on && pageOpen) this.souls.open((this.card = next));
   }
 
   /** Each frame, `dt` ms on, the world drawn at `t` (µs). */
@@ -76,6 +154,15 @@ export class CameraDirector {
     const s = dt / 1000;
     this.t = t;
     if (t === null) return this.cam.update(dt);
+    if (!this.welcome && this.world.nodes.size > 0) {
+      const world = worldOf(location.pathname, new URLSearchParams(location.search), () => [...this.world.nodes.values()].map((n) => n.kind));
+      this.welcome = mountWelcome(document, this, { world, tour: world === 'eden', store: () => localStorage });
+      if (world === 'eden')
+        this.explore = mountExplore(document, { world: 'Eden', views: EDEN_VIEWS, go: (v) => this.toView(v), picture: (v) => this.shots?.shot(v) ?? Promise.resolve(null), closed: () => this.shots?.cancel() });
+    }
+    if (this.explore && !this.explore.panel.hidden) this.shots?.pump();
+    if (this.mode === 'view') return this.onView(s);
+    if (this.mode === 'tour') return this.onTour(s);
     if (this.pending && this.target(this.pending)) {
       const target = this.target(this.pending)!;
       this.watch(new Follow(this.pending, shotOffset(this.cam.camera.position, target)));
@@ -94,14 +181,53 @@ export class CameraDirector {
     this.flight = new Flight(id, this.cam.camera.position, this.cam.controls.target, target);
     this.flown = { id, asked: performance.now(), seconds: this.flight.seconds, done: null };
     this.mode = 'fly';
-    this.follow = null;
+    this.follow = this.tour = null;
+    this.welcome?.frame(null);
     return true;
+  }
+
+  /** Starts the guided Eden tour from where the camera is. */
+  startTour(): boolean {
+    this.free();
+    this.tour = new Tour(EDEN_STOPS, this.cam.camera.position, this.cam.controls.target);
+    this.mode = 'tour';
+    return true;
+  }
+
+  /** Flies the camera to an Explore view, then gives the free camera there. */
+  toView(v: Stop): boolean {
+    this.free();
+    this.view = new PoseFlight(this.cam.camera.position, this.cam.controls.target, new THREE.Vector3(...v.p), new THREE.Vector3(...v.target));
+    this.mode = 'view';
+    return true;
+  }
+
+  private onView(s: number): void {
+    const pose = this.view!.step(s);
+    this.show(pose.eye, pose.target);
+    if (pose.done) this.free();
+  }
+
+  leaveTour(): void {
+    if (this.mode === 'tour') this.free();
+  }
+
+  nextStop(): void {
+    if (this.tour && !this.tour.next()) this.free();
+  }
+
+  private onTour(s: number): void {
+    const pose = this.tour!.step(s);
+    this.show(pose.eye, pose.target);
+    this.welcome?.frame({ stop: pose.stop, index: pose.index, of: this.tour!.stops.length });
+    if (pose.done) this.free();
   }
 
   /** The free camera, from where the camera is now. */
   free(): void {
     this.mode = 'free';
-    this.follow = this.flight = null;
+    this.follow = this.flight = this.tour = this.view = null;
+    this.welcome?.frame(null);
     this.cam.controls.minDistance = 0;
     this.cam.controls.maxDistance = farLimit(this.world.extent);
     this.link(null);
@@ -110,6 +236,8 @@ export class CameraDirector {
   private target(id: string): THREE.Vector3 | null {
     if (this.t === null) return null;
     const p = bodyAt(this.world, id, this.t);
+    const n = this.world.nodes.get(id);
+    if (p && n?.placeName) placeAt(n, p.y, p);
     return p && p.setY(p.y + TARGET_UP);
   }
 
@@ -153,6 +281,7 @@ export class CameraDirector {
     if (!pose.done) return;
     if (this.flown?.id === f.id) this.flown.done = performance.now();
     this.watch(new Follow(f.id, f.offset));
+    hapticTick();  // the follow starts
   }
 
   private onFollow(dt: number, s: number): void {
@@ -198,20 +327,20 @@ export class CameraDirector {
     history.replaceState(history.state, '', u);
   }
 
-  /** The find box: a Soul's name, then Enter, flies there. */
+  /** The find box: a Soul's or a named place's name, then Enter, flies there. */
   private findBox(): HTMLInputElement {
     const el = document.createElement('input');
-    Object.assign(el, { id: 'find', type: 'search', placeholder: 'find a Soul', enterKeyHint: 'go', autocomplete: 'off', spellcheck: false });
-    el.setAttribute('aria-label', 'Find a Soul by name');
+    Object.assign(el, { id: 'find', type: 'search', placeholder: 'find a Soul or place', enterKeyHint: 'go', autocomplete: 'off', spellcheck: false });
+    el.setAttribute('aria-label', 'Find a Soul or place by name');
     el.style.cssText = 'position:fixed;left:12px;bottom:12px;width:min(240px,calc(100vw - 24px));box-sizing:border-box;padding:8px 10px;'
       + 'background:rgba(16,20,26,0.85);color:#e8e6e1;border:1px solid #3a4250;border-radius:4px;font:14px system-ui,sans-serif';
     // Typing is not steering: keys stay in the box.
     el.addEventListener('keydown', (e) => {
       e.stopPropagation();
       if (e.key !== 'Enter') return;
-      const id = findSoul(this.souls.copy.souls.values(), el.value);
-      if (id && this.fly(id)) return void ((el.value = ''), (el.placeholder = 'find a Soul'), el.blur());
-      el.placeholder = `no Soul here named “${el.value.trim()}”`;
+      const id = findSoul(this.souls.copy.souls.values(), el.value) ?? findPlace(this.world.nodes.values(), el.value);
+      if (id && this.fly(id)) return void ((el.value = ''), (el.placeholder = 'find a Soul or place'), el.blur());
+      el.placeholder = `no Soul or place here named “${el.value.trim()}”`;
       el.value = '';
     });
     document.body.append(el);

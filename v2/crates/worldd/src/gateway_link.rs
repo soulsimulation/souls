@@ -16,7 +16,7 @@
 //! [--items <n>] [--testworld] [--creator <32 hex>-<n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
 //! --stall-for <s>] [--www <dir>] [--views <path>]`. Subscriptions are served on `--views` (default: the socket's path with
 //! `.views`; `worldd::views::served`). With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it
-//! takes, in the order taken, so a bench can check each actor's order across restarts. With `--roots`, it appends `<version> <place hash
+//! takes (` reflex` after it for a reflex, #3764), in the order taken, so a bench can check each actor's order across restarts. With `--roots`, it appends `<version> <place hash
 //! hex>` after each tick that changed the world, so a test can check a client's copy against the place. Measures
 //! (O4, #2694) are on unless `--no-measures`; `health.json` goes to `--health` (default: the log's path with
 //! `.health.json`). `--stall-after` holds the clock thread `--stall-for` seconds, once, that many seconds after
@@ -118,7 +118,7 @@ pub fn run(args: &[String]) -> i32 {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
              [--bodies <n>] [--items <n>] [--testworld] [--creator <32 hex>-<n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
-             [--stall-after <s> --stall-for <s>] [--www <dir>] [--watchdog-ms <ms>] [--views <path>]"
+             [--stall-after <s> --stall-for <s>] [--www <dir>] [--watchdog-ms <ms>] [--watchdog-hard-ms <ms>] [--views <path>]"
         );
         2
     };
@@ -242,7 +242,16 @@ pub fn run(args: &[String]) -> i32 {
     let limit = arg("--watchdog-ms")
         .and_then(|m| m.parse().ok())
         .unwrap_or(crate::watchdog::LIMIT_MS);
-    crate::watchdog::watch(world.beat.clone(), crate::watchdog::Real::start(), limit);
+    // `--watchdog-hard-ms` ends the process sooner than K7's hard limit: a test that a tick is never held uses it.
+    let hard = arg("--watchdog-hard-ms")
+        .and_then(|m| m.parse().ok())
+        .unwrap_or(crate::watchdog::HARD_MS);
+    crate::watchdog::watch_to(
+        world.beat.clone(),
+        crate::watchdog::Real::start(),
+        limit,
+        hard,
+    );
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,

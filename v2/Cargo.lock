@@ -361,6 +361,7 @@ dependencies = [
  "axum",
  "futures-util",
  "getrandom 0.3.4",
+ "miniz_oxide",
  "replica",
  "rustix",
  "sim",

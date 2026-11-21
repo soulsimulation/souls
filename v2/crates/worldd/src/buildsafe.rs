@@ -166,6 +166,16 @@ impl PreparedMaps {
         let part =
             sim::edit::commit_classes(&mut preview, &mut reserved, planned, souls, 0, classes)?
                 .part;
+        Self::prepare_part(copy, part, source, movers)
+    }
+
+    /// The same preparation for a part already made off the clock (a set-down's, #3604), not an edit's plan.
+    pub fn prepare_part(
+        copy: &Replica,
+        part: Arc<Part>,
+        source: &MapBasis,
+        movers: &[sim::controller::BuildBasis],
+    ) -> Result<Self, replica::edit::Refused> {
         let rebuilt = Town::rebuild(
             copy.tree().frozen(),
             copy.header(),
@@ -374,7 +384,7 @@ impl TownCopy {
         copy: &Replica,
         ground: Option<Id>,
         committed: &[Arc<Part>],
-    ) -> Option<&Town> {
+    ) -> Option<&mut Town> {
         let mut whole = !matches!(&self.built, Some((_, g, _)) if *g == ground);
         if let Some((at, _, Some(town))) = &mut self.built {
             for p in committed {
@@ -414,7 +424,7 @@ impl TownCopy {
             });
             self.built = Some((copy.version(), ground, town));
         }
-        self.built.as_ref().and_then(|(_, _, t)| t.as_ref())
+        self.built.as_mut().and_then(|(_, _, t)| t.as_mut())
     }
 }
 /// Clock thread: each body the controller holds, as G2 judges it: where it stands, sits or lies, the link it is being
