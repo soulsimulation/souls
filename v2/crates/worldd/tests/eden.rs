@@ -1901,12 +1901,20 @@ fn i3799_a4_the_public_stream_carries_a_soul_walking_sitting_and_rising() {
     let sat = soul.act("eden:sit", Some(armchair), BTreeMap::new());
     let rose = soul.act("eden:rise", None, BTreeMap::new());
     println!("walk {walked:?}, sit {sat:?}, rise {rose:?}");
-    // A bed's slot (#3791's lying bodies): a bed in the house south-west of the library (today's e_9857eaa7).
-    let bed = im.nodes["e_9857eaa7"];
-    let to_bed = soul.act("eden:walk", Some(bed), BTreeMap::new());
-    let lay = soul.act("eden:lie", Some(bed), BTreeMap::new());
+    // A bed's slot (#3791's lying bodies): the beds of the houses west of the library, nearest first (today's ids),
+    // the first one the Soul can walk to and lie in.
+    let (mut bed, mut to_bed, mut lay) = (armchair, Err(String::new()), Err(String::new()));
+    for b in ["e_9857eaa7", "e_09de188a", "e_6487ccc5", "e_c57cbb07"] {
+        bed = im.nodes[b];
+        to_bed = soul.act("eden:walk", Some(bed), BTreeMap::new());
+        lay = soul.act("eden:lie", Some(bed), BTreeMap::new());
+        println!("bed {b}: walk {to_bed:?}, lie {lay:?}");
+        if lay.is_ok() {
+            break;
+        }
+    }
     let up = soul.act("eden:rise", None, BTreeMap::new());
-    println!("walk to the bed {to_bed:?}, lie {lay:?}, rise {up:?}");
+    println!("rise from the bed {up:?}");
     // The stream is cut every half second of world time; wait (at most 60 s) for the rise's hand-off to be published,
     // and say how long it took after the rise's answer.
     let rose_at = std::time::Instant::now();
@@ -2075,6 +2083,8 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
             let (start, mut first_newest, mut last_newest) = (Instant::now(), None, 0u64);
             // Writer lag: world time now less the newest published part's end, µs, while measuring.
             let mut behind: Vec<i64> = Vec::new();
+            // The same during the warm-up (the joins just made): (seconds since the walkers started, µs behind).
+            let mut warming: Vec<(f64, i64)> = Vec::new();
             let mut measuring: Option<Instant> = None;
             while !stop.load(Ordering::Relaxed) {
                 if measuring.is_none() && start.elapsed() >= warmup {
@@ -2107,9 +2117,12 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
                     next = 0;
                 }
                 let newest = pointer.newest.unwrap_or(0);
+                let lag = answers::now() - pointer.newest_to.unwrap_or(0);
                 if measuring.is_some() {
                     first_newest.get_or_insert(newest);
-                    behind.push(answers::now() - pointer.newest_to.unwrap_or(0));
+                    behind.push(lag);
+                } else {
+                    warming.push((start.elapsed().as_secs_f64(), lag));
                 }
                 last_newest = newest;
                 let p = player.as_mut().unwrap();
@@ -2129,6 +2142,18 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
                 std::thread::sleep(Duration::from_millis(100));
             }
             let wall = measuring.map_or(1.0, |m| m.elapsed().as_secs_f64());
+            let most = warming.iter().map(|w| w.1).max().unwrap_or(0);
+            let caught = warming
+                .iter()
+                .rposition(|w| w.1 > 1_000_000)
+                .and_then(|i| warming.get(i + 1))
+                .map(|w| w.0);
+            println!(
+                "after the joins: the writer at most {:.2} s behind world time, within 1 s again {:?} s after the \
+                 walkers started",
+                most as f64 / 1e6,
+                caught
+            );
             println!(
                 "the writer behind world time while measuring: most {:.2} s, last {:.2} s",
                 behind.iter().max().copied().unwrap_or(0) as f64 / 1e6,
