@@ -28,10 +28,14 @@
 //!    on, so opening takes the same time however long the log is. What follows is judged as in rule 4; the bytes
 //!    before are the checkpoint's, not read. A place whose record does not continue the chain from its checksum
 //!    means the two do not belong together, and the whole log is read instead.
+//! 9. **Compaction** (#3837, [`compact`]): the bytes before a place every reader has passed are given back to the
+//!    disk, the offsets after it unchanged. A compacted log is opened from its cut (or a later place), never from byte
+//!    0; a place before the cut is passed over for the cut, and a cut that does not check is `log-cut-bad`.
 //!
 //! The kill and power-cut runner and the sync table are `v2/tools/log-crash`. Not here: shipping off the machine
 //! (O3), views (R3), packing (V3), a full disk (O10), checkpoints (K5).
 
+pub mod compact;
 mod record;
 mod storage;
 
@@ -69,6 +73,9 @@ struct Marks {
     failed: Option<Refusal>,
     /// The last sync: the durable mark before it, and when it returned (R3's view tier times frames from it).
     synced: Option<(u64, Instant)>,
+    /// A compacted copy for the writer to finish (rule 9), and how the last one ended.
+    compact: Option<compact::Prepared>,
+    compacted: Option<Result<compact::Cut, Refusal>>,
 }
 
 #[derive(Debug, Default)]
@@ -113,6 +120,17 @@ impl Durable {
     pub fn at(&self) -> At {
         self.0.marks().at
     }
+
+    /// Hands a compacted copy ([`compact::prepare`]) to the writer, which finishes it after its next sync (rule 9).
+    /// A copy handed earlier and not yet finished is replaced.
+    pub fn compact(&self, p: compact::Prepared) {
+        self.0.marks().compact = Some(p);
+    }
+
+    /// How the last compaction the writer finished ended, taken: its cut, or why it did not happen.
+    pub fn compacted(&self) -> Option<Result<compact::Cut, Refusal>> {
+        self.0.marks().compacted.take()
+    }
 }
 
 /// An open log: recovered, its torn tail cut, and its writer thread running.
@@ -133,14 +151,31 @@ impl<S: Storage + 'static> Log<S> {
     /// As [`Log::open`], reading from `at` (a checkpoint's place) when it is given and belongs to this log (rule 8):
     /// what it returns are the records from `at.record` on (`Recovered::first`), and new ones follow them.
     pub fn open_at(mut storage: S, epoch: u64, at: Option<At>) -> R<(Log<S>, Recovered)> {
-        let from = match at {
-            Some(a) => {
-                let head = storage.read_from(0, HEADER_LEN)?;
-                let tail = storage.read_from(a.offset, usize::MAX)?;
-                recover_from(&head, &tail, a)?
+        // A compacted log (rule 9) is read from its cut, or from a later place; never from byte 0.
+        let cut = storage.cut()?;
+        let mut from = None;
+        for a in [at, cut].into_iter().flatten() {
+            if cut.is_some_and(|c| a.offset < c.offset) {
+                continue;
             }
-            None => None,
-        };
+            let head = storage.read_from(0, HEADER_LEN)?;
+            let tail = storage.read_from(a.offset, usize::MAX)?;
+            from = recover_from(&head, &tail, a)?;
+            if from.is_some() {
+                break;
+            }
+        }
+        if from.is_none()
+            && let Some(c) = cut
+        {
+            return refuse(
+                "log-cut-bad",
+                format!(
+                    "the log's cut at record {} does not continue its chain",
+                    c.record
+                ),
+            );
+        }
         let found = match from {
             Some(f) => f,
             None => recover(&storage.read()?)?,
@@ -337,9 +372,34 @@ fn write_loop<S: Storage>(
             }
             Err(e) => m.failed = Some(e),
         }
+        let p = if m.failed.is_none() {
+            m.compact.take()
+        } else {
+            None
+        };
         shared.moved.notify_all();
         if m.failed.is_some() {
             break;
+        }
+        drop(m);
+        // Rule 9: a compacted copy is finished here, between two syncs, so it holds every byte appended.
+        if let Some(p) = p {
+            let cut = p.cut;
+            let out = storage.compact(p);
+            let mut m = shared.marks();
+            m.compacted = Some(match out {
+                Ok(()) => Ok(cut),
+                Err((e, fatal)) => {
+                    if fatal {
+                        m.failed = Some(e.clone());
+                    }
+                    Err(e)
+                }
+            });
+            shared.moved.notify_all();
+            if m.failed.is_some() {
+                break;
+            }
         }
     }
     storage

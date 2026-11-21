@@ -15,6 +15,39 @@ export { readMoment } from './link.ts';
 
 const DAY_US = 86_400_000_000, SLOT_US = 600_000_000;
 
+/** Trusted installed bootstrap, already resolved by worldAddress; its slug is not the internal moment world. */
+export type HistoryAddress = { stream: string; history?: string };
+
+const PUBLIC_STREAM = /^\.\.\/views\/([0-9a-f]{32})\/([0-9a-f]{32}-(?:0|[1-9][0-9]*))\/(0|[1-9][0-9]*)\/([0-9a-f]{32}-(?:0|[1-9][0-9]*))\/1\/everyone\/$/;
+
+/** Installed moment identity is checked before any worker can seek the advertised history. */
+export function historyLocation(moment: Moment, href: string, installed?: HistoryAddress): URL {
+  if (!installed) return new URL(historyBase(moment), href);
+  if (!installed.history) throw Error('history-live-unmapped');
+  const page = new URL(href), base = new URL(installed.history);
+  const stream = new URL(installed.stream);
+  const identity = /^\/s\/w\/([A-Za-z0-9][A-Za-z0-9._-]*)\/history\/$/.exec(base.pathname);
+  const prefix = new URL('../views/', base).href;
+  const path = PUBLIC_STREAM.exec(`../views/${stream.href.startsWith(prefix) ? stream.href.slice(prefix.length) : ''}`);
+  if (!identity || identity[1] !== moment.world || !path || path[1] !== moment.lineage || path[2] !== path[4]
+    || base.origin !== page.origin || base.username || base.password || base.search || base.hash
+    || new URL(path[0], base).href !== stream.href) throw Error('history-live-foreign');
+  return base;
+}
+
+/** Resolve only navigation metadata from this exact public history export. */
+export async function historyLive(moment: Moment, base: URL, installed?: HistoryAddress, get: typeof fetch = fetch): Promise<string> {
+  if (installed && (!installed.history || new URL(installed.history).href !== base.href)) throw Error('history-live-unmapped');
+  const response = await get(new URL('live', base).href, { credentials: 'omit', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) throw Error('history-live-missing');
+  const value = await response.json() as { format?: unknown; world?: unknown; lineage?: unknown; stream?: unknown };
+  const path = typeof value?.stream === 'string' && PUBLIC_STREAM.exec(value.stream);
+  if (value?.format !== 'souls/history-live/1' || value.world !== moment.world || value.lineage !== moment.lineage || !path || path[1] !== moment.lineage || path[2] !== path[4]) throw Error('history-live-invalid');
+  const stream = new URL(value.stream as string, base);
+  if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash || stream.origin !== base.origin || (installed && stream.href !== installed.stream)) throw Error('history-live-foreign');
+  return stream.href;
+}
+
 export type HistoryHooks = {
   apply(nodes: NodeRec[], removed: string[], samples: SampleRec[], happened?: Happened[]): void;
   /** A node's world matrix, once drawn (the camera's frame). */
@@ -43,15 +76,17 @@ export class HistoryPage {
   private moment: Moment;
   private cam: FreeCamera;
   private hooks: HistoryHooks;
+  private installed?: HistoryAddress;
   live = false;
 
-  constructor(moment: Moment, cam: FreeCamera, hooks: HistoryHooks) {
+  constructor(moment: Moment, cam: FreeCamera, hooks: HistoryHooks, installed?: HistoryAddress) {
     this.moment = moment;
     this.cam = cam;
     this.hooks = hooks;
+    this.installed = installed;
     this.clock = new HistoryClock(moment.at);
     this.loadedTo = moment.at;
-    this.base = new URL(historyBase(moment), location.href);
+    this.base = historyLocation(moment, location.href, installed);
     this.worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = (e: MessageEvent<HistoryMsg>) => this.message(e.data);
     this.bar = this.controls();
@@ -112,12 +147,16 @@ export class HistoryPage {
     return writeMoment({ ...this.moment, at, camera });
   }
 
-  /** Back to live: the live stream named by the history's `live` file. */
+  /** Back to live: the validated same-world public export, bound to installed bootstrap when present. */
   async backToLive() {
-    const res = await fetch(new URL('live', this.base));
-    if (!res.ok) return void (this.error = 'no live stream for this world');
-    this.hooks.live(new URL(`../../../${(await res.text()).trim()}/`, this.base).href);
-    this.clock.returning = true;
+    try {
+      const address = await historyLive(this.moment, this.base, this.installed);
+      this.hooks.live(address);
+      this.clock.returning = true;
+      this.error = '';
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : 'history-live-refused';
+    }
   }
 
   status(): string {

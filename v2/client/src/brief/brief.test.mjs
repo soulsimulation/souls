@@ -5,7 +5,7 @@ import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { BRIEF_MOST, QUOTED_NOTE, brief, changedBlock } from './brief.mjs';
-import { changedBetween, decode } from './copy.mjs';
+import { changedBetween, decode, entryKind } from './copy.mjs';
 
 const eden = JSON.parse(readFileSync(new URL('./eden-busiest-room.json', import.meta.url), 'utf8'));
 const byId = (list) => new Map(list.map((r) => [r.id, r]));
@@ -87,4 +87,12 @@ test('the copy\'s records are read in T0\'s profile', () => {
   assert.equal(m.get(2), 'souls:cup');
   assert.equal(m.get(6).get(1), 'hi');
   assert.deepEqual(m.get(10), []);
+});
+
+test('a node names its entry by field 27 (a Mars chair borrows eden:chair); with none, its kind is its entry', () => {
+  const node = (fields) => new Map([[2, 'eden:mars_field_chair@ab'], [6, new Map(fields)]]);
+  assert.equal(entryKind(node([[27, 'eden:chair']])), 'eden:chair');
+  assert.equal(entryKind(node([[27n, 'eden:chair']])), 'eden:chair');
+  assert.equal(entryKind(node([])), 'eden:mars_field_chair');
+  assert.equal(entryKind(new Map([[2, 'eden:bench@cd']])), 'eden:bench');
 });
