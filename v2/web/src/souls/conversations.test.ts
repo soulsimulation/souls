@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as THREE from 'three';
 import type { NodeRec, SaidRec } from '../source/source.ts';
-import { Conversations, GAP_US, groupShot } from './layer.ts';
+import { Conversations, GAP_US, HIDDEN, groupShot } from './layer.ts';
 
 const said = (speaker: string, at: number, words: string | null, ref = `r${speaker}${at}`): SaidRec => ({ speaker, at, length: 2_000_000, reach: 12_000, ref, words });
 const spots: Record<string, [number, number, number]> = { a: [0, 0, 0], b: [2, 0, 0], c: [3, 0, 1], far: [100, 0, 0] };
@@ -121,7 +121,32 @@ test('the dock and the Soul page show a thread as text, live; opening it frames 
   souls.draw(9e6, camera);
   assert.equal(dock.style.display, 'flex');
   assert.equal(dock.children.find((c) => c.tag === 'ol')!.children.length, 3);
+  // #3775: a private conversation between Bo and Wren: the dock names them, says it is private, and shows '…' a turn.
+  const secret = (speaker: string, at: number): SaidRec => ({ speaker, at, length: 1_000_000, reach: 0, ref: 'private:c.9', words: null, private: { conversation: 'c.9', members: ['b.2', 'w.3'] } });
+  souls.apply(part(4, [secret('w.3', 9.2e6), secret('b.2', 9.4e6)]));
+  souls.converse('private:c.9');
+  souls.draw(9.5e6, camera);
+  assert.equal(dock.style.display, 'flex');
+  assert.equal(dock.children[1].textContent, 'Bo & Wren');
+  assert.ok(dock.children[2].textContent.startsWith('🔒 private — only they hear'), dock.children[2].textContent);
+  assert.deepEqual(dock.children.find((c) => c.tag === 'ol')!.children.map((li) => li.textContent), ['Wren: …', 'Bo: …']);
   souls.converse(null);
-  souls.draw(9.1e6, camera);
+  souls.draw(9.6e6, camera);
   assert.equal(dock.style.display, 'none');
+});
+
+// #3775: a private conversation's public record (who spoke, when, among whom; never words) folds into one private
+// thread; a public line nearby never joins it; the dock says it is private and names its members.
+test('a private conversation shows its members and a … per turn, never its words', async () => {
+  const priv = (speaker: string, at: number): SaidRec => ({ speaker, at, length: 1_000_000, reach: 0, ref: 'private:conv', words: null, private: { conversation: 'conv', members: ['a', 'b'] } });
+  const c = new Conversations();
+  const t = c.add(priv('a', 1e6), where, ids)!;
+  assert.equal(t.id, 'private:conv');
+  assert.equal(c.add(priv('b', 2e6), where, ids), t, 'one thread per conversation');
+  assert.equal(c.add(priv('b', 2e6), where, ids), null, 'a replayed record folds once');
+  assert.deepEqual(Conversations.members(t), ['a', 'b']);
+  assert.deepEqual(t.lines.map((l) => [l.speaker, l.at, l.words]), [['a', 1e6, HIDDEN], ['b', 2e6, HIDDEN]]);
+  const pub = c.add(said('a', 3e6, 'out loud now'), where, ids)!;
+  assert.notEqual(pub, t, 'a public line never joins the private thread');
+  assert.deepEqual(c.of('b').map((h) => h.id), [t.id], "a member's conversations include the private one");
 });

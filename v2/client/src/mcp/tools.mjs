@@ -54,7 +54,7 @@ export const TOOLS = Object.freeze([
   {
     op: 'stop', title: 'Stop',
     description: 'Ends this hosted session: the next call opens a new one. Your Soul stays in the world.',
-    input: {}, readOnly: false, argv: () => ['stop'],
+    input: {}, readOnly: false, argv: () => ['quit'], // the thin command's quit ends the daemon (#3705)
   },
 ].map((t) => Object.freeze({ ...t, name: `eden_${t.op}` })));
 
