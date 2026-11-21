@@ -102,6 +102,12 @@ async fn main() {
         let _ = gw.mailbox.set(mailbox::Mailbox { addr, key });
         tokio::spawn(mailbox::run(gw.clone()));
     }
+    if args.iter().any(|a| a == "--creator-authority-required")
+        && (arg("--creator").is_none() || arg("--directory").is_none())
+    {
+        eprintln!("gatewayd: required creator authority needs --creator and --directory");
+        std::process::exit(2);
+    }
     if let (Some(c), Some(directory)) = (arg("--creator"), arg("--directory")) {
         let Some(creator) = c.split_once('-').and_then(|(scope, n)| {
             Id::new(
@@ -112,7 +118,11 @@ async fn main() {
             eprintln!("gatewayd: --creator is <32 hex>-<counter>");
             std::process::exit(2);
         };
-        let _ = gw.exchange.set(creator::Exchange { creator, directory });
+        let _ = gw.exchange.set(creator::Exchange {
+            creator,
+            directory,
+            authority_required: args.iter().any(|a| a == "--creator-authority-required"),
+        });
     }
     let views = arg("--views").map_or_else(
         || PathBuf::from(&world).with_extension("views"),

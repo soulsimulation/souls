@@ -127,10 +127,19 @@ pub const REFUSED: &str = "token.refused";
 
 /// The stored tokens: per grant (by its text), the SHA-256 of each live token, and the account that owns the grant if
 /// the file names one (for the receipts file; never part of a check).
+/// The exact world's authority generation, including an explicit no-creator fence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CreatorMark {
+    pub generation: u64,
+    pub owner: Option<Id>,
+}
+
 #[derive(Default)]
 pub struct Tokens {
     by_grant: BTreeMap<String, (Grant, Vec<[u8; 32]>)>,
     accounts: BTreeMap<String, String>,
+    creator: Option<CreatorMark>,
+    browser: BTreeMap<[u8; 32], Grant>,
 }
 
 impl Tokens {
@@ -141,6 +150,22 @@ impl Tokens {
             .or_insert_with(|| (grant, Vec::new()))
             .1
             .push(hash);
+    }
+
+    /// A short browser token belongs to the authority generation that issued it.
+    pub fn add_browser(
+        &mut self,
+        grant: Grant,
+        hash: [u8; 32],
+        expected: CreatorMark,
+        fallback: Option<CreatorMark>,
+    ) -> bool {
+        if self.creator.or(fallback) != Some(expected) {
+            return false;
+        }
+        self.add(grant, hash);
+        self.browser.insert(hash, grant);
+        true
     }
 
     /// Names the account that owns `grant`.
@@ -155,7 +180,7 @@ impl Tokens {
 
     /// Revokes the token with this hash. True if it was stored.
     pub fn revoke(&mut self, hash: &[u8; 32]) -> bool {
-        let mut found = false;
+        let mut found = self.browser.remove(hash).is_some();
         for (_, hashes) in self.by_grant.values_mut() {
             hashes.retain(|h| {
                 let same = bool::from(h.ct_eq(hash));
@@ -190,6 +215,41 @@ impl Tokens {
         let mut t = Tokens::default();
         for (n, line) in text.lines().enumerate() {
             let line = line.trim();
+            if let Some(marker) = line.strip_prefix("# souls-creator/1 ") {
+                if t.creator.is_some() {
+                    return Err("creator-authority-invalid".into());
+                }
+                let mut words = marker.split_whitespace();
+                let generation = words
+                    .next()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .ok_or("creator-authority-invalid")?;
+                let owner = match words.next().ok_or("creator-authority-invalid")? {
+                    "none" => None,
+                    text => {
+                        let (scope, n) = text.split_once(':').ok_or("creator-authority-invalid")?;
+                        let bytes: [u8; 16] = from_hex(scope)
+                            .map_err(|_| "creator-authority-invalid")?
+                            .try_into()
+                            .map_err(|_| "creator-authority-invalid")?;
+                        Some(
+                            Id::new(
+                                Scope(bytes),
+                                n.parse().map_err(|_| "creator-authority-invalid")?,
+                            )
+                            .ok_or("creator-authority-invalid")?,
+                        )
+                    }
+                };
+                if words.next().is_some() {
+                    return Err("creator-authority-invalid".into());
+                }
+                t.creator = Some(CreatorMark { generation, owner });
+                continue;
+            }
+            if line.starts_with("# souls-creator/") {
+                return Err("creator-authority-invalid".into());
+            }
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
@@ -260,6 +320,35 @@ impl Source {
         Ok((source, tokens))
     }
 
+    /// Revalidate creator authority on a creator frame. Unrelated Soul-file churn keeps browser credentials.
+    pub fn creator(
+        &self,
+        tokens: &RwLock<Tokens>,
+        fallback: Id,
+        required: bool,
+    ) -> Result<CreatorMark, String> {
+        let now = stamp(&self.path);
+        let read = read_file(&self.path).map_err(|_| "creator-authority-unavailable")?;
+        if now.is_none() || now != stamp(&self.path) {
+            return Err("creator-authority-changing".into());
+        }
+        let marker = read.creator;
+        if marker.is_none() && required {
+            return Err("creator-authority-required".into());
+        }
+        let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        let mut current = tokens.write().unwrap_or_else(|e| e.into_inner());
+        if current.creator != marker {
+            // Generation changes revoke old in-memory browser tokens as well as persisted agents.
+            *current = read;
+            *seen = now;
+        }
+        Ok(marker.unwrap_or(CreatorMark {
+            generation: 0,
+            owner: Some(fallback),
+        }))
+    }
+
     /// Reads the file again into `tokens` if it changed since it was last read; true when it did.
     pub fn refresh(&self, tokens: &RwLock<Tokens>) -> bool {
         let now = stamp(&self.path);
@@ -267,10 +356,17 @@ impl Source {
         if now.is_none() || *seen == now {
             return false;
         }
-        let Ok(read) = read_file(&self.path) else {
+        let Ok(mut read) = read_file(&self.path) else {
             return false;
         };
-        *tokens.write().unwrap_or_else(|e| e.into_inner()) = read;
+        let mut current = tokens.write().unwrap_or_else(|e| e.into_inner());
+        if current.creator == read.creator {
+            for (hash, grant) in &current.browser {
+                read.add(*grant, *hash);
+            }
+            read.browser = std::mem::take(&mut current.browser);
+        }
+        *current = read;
         *seen = now;
         true
     }

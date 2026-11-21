@@ -149,7 +149,7 @@ https://soul.game {
 			header_up X-Forwarded-For {client_ip}
 		}
 	}
-	@directory path /v1/worlds /v1/account/* /v1/pair/* /v1/agent/account /v1/agent/account/*
+	@directory path /v1/worlds /v1/worlds/handoff/offer /v1/worlds/handoff/cancel /v1/worlds/handoff/accept /v1/account/* /v1/pair/* /v1/agent/account /v1/agent/account/*
 	handle @directory {
 		header X-Souls-System v2
 		reverse_proxy localhost:7310 {
