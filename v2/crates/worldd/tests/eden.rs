@@ -1924,3 +1924,214 @@ fn a_soul_walks_to_a_bed_lies_in_it_and_gets_up() {
         up.unwrap_or_else(|e| panic!("rose from {b}: {e}"));
     }
 }
+
+/// Every set of a course field on `punt` in the parts `records` hold: (world time µs, the course's shape and stations).
+fn course_sets(records: &[Vec<u8>], punt: Id) -> Vec<(i64, u64, usize)> {
+    use replica::effects::Change;
+    let mut out = Vec::new();
+    for r in records {
+        let Ok(part) = Part::read(r) else { continue };
+        for e in part.effects {
+            if let Body::Changes(cs) = &e.body {
+                for c in cs {
+                    if let Change::Set {
+                        node, field, to, ..
+                    } = &c.change
+                        && *node == punt
+                        && *field == replica::schedule::F_COURSE
+                    {
+                        let c = replica::schedule::course::Course::read(to).expect("a course");
+                        let shape = match c.shape {
+                            sim::courses::Shape::Loop => 1,
+                            sim::courses::Shape::ThereAndBack => 2,
+                            sim::courses::Shape::Once => 3,
+                        };
+                        out.push((e.envelope.at, shape, c.stations.len()));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The public stream's parts under `dir/views`, unpacked: each one's T6 part.
+fn public_parts(dir: &Path) -> Vec<Vec<u8>> {
+    use replica::stream::{Pointer, StreamPart};
+    let world = replica::rules::json::parse(
+        &std::fs::read_to_string(dir.join("views/world.json")).unwrap(),
+    )
+    .unwrap();
+    let stream = dir.join(world.get("stream").and_then(|v| v.str()).unwrap());
+    let pointer_bytes = std::fs::read(stream.join("pointer")).expect("the stream's pointer");
+    let pointer = Pointer::read(&pointer_bytes).unwrap();
+    let Value::Map(fields) = decode(&pointer_bytes).unwrap().value else {
+        panic!("a pointer")
+    };
+    let parts = match fields.get(&8) {
+        Some(Value::Bytes(g)) => stream.join("g").join(replica::encode::to_hex(g)),
+        _ => stream,
+    };
+    (0..=pointer.newest.expect("a published part"))
+        .map(|n| {
+            StreamPart::read(&std::fs::read(parts.join(n.to_string())).unwrap())
+                .unwrap()
+                .part
+        })
+        .collect()
+}
+
+/// #3603: a Soul boards the commons pond's rowing punt at its plank in its boarding stop, rides its loop, steers it
+/// over the pond, lands it, and gets off at the plank, through the gateway. Before boarding a steer is refused
+/// `not-aboard`; on the water a rise is refused `boarding-frame-away` and the body stays seated; a steer with no point,
+/// or 2 km away, is refused by name. The log and the public stream carry the punt's courses (its loop, the steer, the
+/// way back, its loop again) and the rider in its seat.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
+    use replica::sky::int;
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let lineage = im.nodes["world"].scope();
+    // The commons shore pond's punt, the punt nearest (-57.5, -6.0) m, as the server's search placed it: its home, its
+    // plank, its loop's period and start, from the lines `worldd serve` printed.
+    let seen = |l: &str| -> Option<(u64, [f64; 4], i64, i64)> {
+        let l = l
+            .trim()
+            .trim_start_matches("seed: ")
+            .strip_prefix("punt: rowing-punt-")?;
+        let (k, rest) = l.split_once(" on ")?;
+        let nums: Vec<f64> = rest
+            .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+            .filter_map(|w| w.parse().ok())
+            .collect();
+        let [.., hx, hz, px, pz, period, t0] = nums[..] else {
+            return None;
+        };
+        Some((k.parse().ok()?, [hx, hz, px, pz], period as i64, t0 as i64))
+    };
+    // Born by the commons punt's plank: found from the seed's own lines.
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let seeded = std::process::Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["seed", "--facts", &facts, "--dir"])
+        .arg(std::env::temp_dir().join(format!("eden-p1-probe-{}", std::process::id())))
+        .args([
+            "--entries",
+            &format!("{root}/content/kinds"),
+            "--souls",
+            "0",
+        ])
+        .output()
+        .unwrap();
+    let probe = String::from_utf8_lossy(&seeded.stdout).to_string();
+    let _ = std::fs::remove_dir_all(
+        std::env::temp_dir().join(format!("eden-p1-probe-{}", std::process::id())),
+    );
+    let (k1, [hx, hz, px, pz], period, t0) = probe
+        .lines()
+        .filter_map(seen)
+        .min_by_key(|(_, h, _, _)| (((h[0] + 57.5).abs() + (h[1] + 6.0).abs()) * 1000.0) as i64)
+        .expect("a punt on Eden");
+    let k = (k1 - 1) as usize;
+    println!(
+        "the commons punt: rowing-punt-{k1}, home ({hx:.1}, {hz:.1}) m, plank ({px:.2}, {pz:.2}) m, lap {:.1} s",
+        period as f64 / 1e6
+    );
+    // Born 1 m east of the plank's dry end.
+    let at = format!("{:.2},{:.2}", px - 1.0, pz);
+    let (served, mut soul, dir, lines) = serve_lines(&facts, &at, "p1", lineage);
+    let tag = format!("punt: rowing-punt-{} is ", k + 1);
+    let shown = lines
+        .iter()
+        .find_map(|l| l.trim().strip_prefix(tag.as_str()).map(str::to_owned))
+        .expect("the punt's id line");
+    let counter: u64 = shown.split(':').nth(1).unwrap().parse().unwrap();
+    let punt = Id::new(lineage, counter).unwrap();
+    let point = |x: f64, z: f64| {
+        BTreeMap::from([(
+            1,
+            Value::Array(vec![int((x * 1e6) as i64), int((z * 1e6) as i64)]),
+        )])
+    };
+    let ashore = soul.act("carrier:steer", Some(punt), point(-59.8, 0.0));
+    println!("steer from the bank: {ashore:?}");
+    // Board in the punt's boarding stop (its first 30 s each lap): wait for the next when less than 20 s are left.
+    let phase = |t: i64| (t - t0).rem_euclid(period);
+    let p = phase(answers::now());
+    if p > 10_000_000 {
+        let wait = period - p + 500_000;
+        println!(
+            "waiting {:.1} s for the punt's boarding stop",
+            wait as f64 / 1e6
+        );
+        std::thread::sleep(Duration::from_micros(wait as u64));
+    }
+    let boarded = soul.act("eden:row", Some(punt), args(&[("seat", Value::Uint(1))]));
+    println!("board it by its own form: {boarded:?}");
+    let seated_in = last_frames(&dir).into_values().find(|f| f.0 == punt);
+    println!("the rider's frame: {seated_in:?}");
+    // Ride the loop until the punt has left its stop.
+    let p = phase(answers::now());
+    if p < 32_000_000 {
+        std::thread::sleep(Duration::from_micros((32_000_000 - p) as u64));
+    }
+    let away = soul.act("eden:rise", None, BTreeMap::new());
+    println!("rise on the water: {away:?}");
+    let no_point = soul.act("carrier:steer", Some(punt), BTreeMap::new());
+    let far = soul.act("carrier:steer", Some(punt), point(1500.0, 1500.0));
+    println!("steer with no point: {no_point:?}; 2 km away: {far:?}");
+    let steered = soul.act("carrier:steer", Some(punt), point(-59.8, 0.0));
+    println!("steer toward the pond's middle: {steered:?}");
+    std::thread::sleep(Duration::from_secs(15));
+    let landed = soul.act("carrier:land", Some(punt), BTreeMap::new());
+    println!("land: {landed:?}");
+    // Rowed back along its wake and round the rest of its lap to its home: get off once it stands there.
+    let mut off = Err(String::new());
+    for _ in 0..80 {
+        std::thread::sleep(Duration::from_secs(3));
+        off = soul.act("eden:rise", None, BTreeMap::new());
+        if off.is_ok() {
+            break;
+        }
+    }
+    println!("rise at the plank: {off:?}");
+    std::thread::sleep(Duration::from_secs(2));
+    let stood = track(&dir).last().copied();
+    println!("the body's last logged place: {stood:?}");
+    let log = sim::log::recover(&std::fs::read(dir.join("log")).unwrap())
+        .unwrap()
+        .records;
+    let logged = course_sets(&log, punt);
+    println!("the punt's courses in the log (at, shape, stations): {logged:?}");
+    // The public stream publishes a tick's part after its sync: read it until it carries every course the log has.
+    let mut streamed = Vec::new();
+    for _ in 0..30 {
+        streamed = course_sets(&public_parts(&dir), punt);
+        if streamed == logged {
+            break;
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    println!("the public stream: the punt's courses {streamed:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(ashore, Err("not-aboard".to_owned()));
+    boarded.expect("boarded at the plank by the punt's own form");
+    assert!(
+        matches!(seated_in, Some((n, Some(_))) if n == punt),
+        "seated in the punt"
+    );
+    assert_eq!(away, Err("boarding-frame-away".to_owned()));
+    assert_eq!(no_point, Err("steer-needs-a-point".to_owned()));
+    assert_eq!(far, Err("out-of-bounds".to_owned()));
+    steered.expect("steered");
+    landed.expect("landed");
+    off.expect("rose at the plank");
+    let (_, node, x, z) = stood.expect("a place");
+    assert_eq!(node, im.nodes["ground"], "on the ground again");
+    let d = ((x - px).powi(2) + (z - pz).powi(2)).sqrt();
+    assert!(d < 1.5, "at the plank: {d:.2} m from it");
+    let shapes: Vec<u64> = logged.iter().map(|c| c.1).collect();
+    assert_eq!(shapes, vec![3, 3, 1], "steered, landed, its own loop again");
+    assert_eq!(streamed, logged, "the public stream carries every course");
+}

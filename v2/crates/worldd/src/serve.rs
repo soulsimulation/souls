@@ -284,9 +284,137 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
 }
 
 /// Loads a facts file (N1's or X6's) as the world as built, with the activity kinds of `entries` (C30).
+/// The facts with today's rowing punts added (#3603): one moored on each standing water that has room
+/// (`sim::courses::punts`), a thing of kind `core:rowing_punt` at its home, turned with its plank toward the bank, on its
+/// own loop (its course). The same facts give the same punts, so a seed and every serve of the world agree.
+fn with_punts(facts: &str) -> R<String> {
+    let im = import_eden::load(facts)?;
+    let Some(&ground) = im.nodes.get("ground") else {
+        return Ok(facts.to_owned());
+    };
+    // Planks and exits only where a body can stand on the ground as the walk cuts it (C15's `stand_near`).
+    let (waters, terrain) = sim::courses::punts::waters_of(&im.tree, ground)?;
+    let root = *im.nodes.get("world").ok_or("the facts have no world")?;
+    let header = import_eden::header(root, &im.rules)?;
+    let next = im.tree.to_state().next;
+    let mut town = Town::new(im.tree, ground, Doors::new(header, im.rules, next))
+        .map_err(|e| format!("the town: {e:?}"))?;
+    let view = town.view();
+    let moorings = sim::courses::punts::moorings(&waters, terrain.as_ref(), |p| {
+        view.stand_near(ground, p, 0, None).is_some()
+    });
+    if moorings.is_empty() {
+        return Ok(facts.to_owned());
+    }
+    let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
+    let Json::Obj(top) = &mut f else {
+        return Err("the facts are not an object".into());
+    };
+    let int = |n: i64| Json::Int(i128::from(n));
+    let obj =
+        |kv: Vec<(&str, Json)>| Json::Obj(kv.into_iter().map(|(k, v)| (k.to_owned(), v)).collect());
+    let kind = obj(vec![
+        ("ref", Json::s(PUNT_REF)),
+        ("hash", Json::s(&to_hex(&sha256(b"souls/rowing-punt/1")))),
+        ("name", Json::s("core:rowing_punt")),
+        ("form", Json::s("point")),
+        ("layer", Json::s("solid")),
+        ("door", Json::Bool(false)),
+        ("mesh", Json::Bool(false)),
+        ("slots", int(2)),
+    ]);
+    let things: Vec<Json> = moorings
+        .iter()
+        .enumerate()
+        .map(|(k, m)| {
+            // The plank (the kind's +x) toward the bank, `-out`: a yaw turns +x to (cos, -sin). Whole degrees, so no
+            // platform's last bit changes it.
+            let (ox, oz) = (m.out[0] as f64, m.out[1] as f64);
+            let yaw = (oz.atan2(-ox).to_degrees().round() as i64).rem_euclid(360) * 1000;
+            println!(
+                "punt: rowing-punt-{} on {} at {:.3},{:.3} m, plank at {:.3},{:.3} m, loop {} us from {} us",
+                k + 1,
+                replica::world_model::show(m.water),
+                m.home.x as f64 / 1e6,
+                m.home.z as f64 / 1e6,
+                m.door.x as f64 / 1e6,
+                m.door.z as f64 / 1e6,
+                m.course.load().map_or(0, |t| t.period),
+                m.course.t0
+            );
+            let mm = |v: i64| int(v / 1000);
+            let pose = Json::Arr(vec![mm(m.home.x), mm(m.home.y), mm(m.home.z), int(yaw)]);
+            let stations = m
+                .course
+                .stations
+                .iter()
+                .map(|s| Json::Arr(vec![int(s.at.x), int(s.at.y), int(s.at.z), int(s.dwell)]))
+                .collect();
+            let shape = match m.course.shape {
+                sim::courses::Shape::Loop => 1,
+                sim::courses::Shape::ThereAndBack => 2,
+                sim::courses::Shape::Once => 3,
+            };
+            // A rider's place: what the import reads of a slot (its number, point, yaw and capacity). What a body does
+            // there comes from the punt's entry, not from here.
+            let place = |n: i64, id: &str, x: i64| {
+                obj(vec![
+                    ("n", int(n)),
+                    ("id", Json::s(id)),
+                    ("at", Json::Arr(vec![int(x), int(360), int(0)])),
+                    ("yaw", int(180_000)),
+                    ("capacity", int(1)),
+                ])
+            };
+            obj(vec![
+                ("id", Json::Str(format!("e_punt{k}"))),
+                ("def", Json::s(PUNT_REF)),
+                ("ref", Json::s(PUNT_REF)),
+                ("parent", Json::Null),
+                ("pose", pose.clone()),
+                ("world", pose),
+                ("scale_ppm", int(1_000_000)),
+                ("name", Json::Str(format!("rowing-punt-{}", k + 1))),
+                (
+                    "slots",
+                    Json::Arr(vec![place(1, "rider_a", -650), place(2, "rider_b", 650)]),
+                ),
+                (
+                    "course",
+                    obj(vec![
+                        ("stations", Json::Arr(stations)),
+                        ("shape", int(shape)),
+                        ("speed", int(m.course.speed)),
+                        ("t0", int(m.course.t0)),
+                        ("within", int(m.course.within)),
+                    ]),
+                ),
+            ])
+        })
+        .collect();
+    for (key, add) in [("kinds", vec![kind]), ("things", things)] {
+        match top.iter_mut().find(|(k, _)| k == key) {
+            Some((_, Json::Arr(a))) => a.extend(add),
+            _ => return Err(format!("the facts have no '{key}' list")),
+        }
+    }
+    Ok(f.to_json())
+}
+
+/// The rowing punt's def (#3603): today's `rowing-punt`, a kind the world adds.
+const PUNT_REF: &str = "core-rowing-punt@1";
+
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
+    let facts = &with_punts(facts)?;
     let mut im = import_eden::load(facts)?;
     stamp("facts");
+    for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
+        println!(
+            "punt: rowing-punt-{} is {}",
+            k + 1,
+            replica::world_model::show(id)
+        );
+    }
     let mut activities = vec![conversation()?];
     activities.extend(activity_kinds(entries)?);
     stamp("activities");
@@ -959,7 +1087,7 @@ fn imported_births(
 fn bodies(
     town: Town,
     planner: Town,
-    _ground: Id,
+    ground: Id,
     placed: &Placed,
     places: Vec<PlaceAt>,
     builds: &std::collections::BTreeMap<Id, replica::kinds::sizes::Build>,
@@ -1011,9 +1139,27 @@ fn bodies(
         let moved = surface.place_built(*id, Frame { node, slot: None }, point, facing, build)?;
         at.push((moved, build));
     }
+    // The things on a course (today's punts, #3603): their seats are boarded and left only at their home stop.
+    let mut moving = Vec::new();
+    if let Some(gh) = town.tree.handle(ground) {
+        for &c in town.tree.children(gh).unwrap_or(&[]) {
+            if let Some(n) = town.tree.node(c)
+                && let Some(course) = n
+                    .fields()
+                    .get(&replica::schedule::F_COURSE)
+                    .and_then(replica::schedule::course::Course::read)
+            {
+                moving.push((n.id(), course));
+            }
+        }
+    }
     let mut b = Bodies::with_planner(town, planner, 50_000)?;
     for s in places {
         b.add_place(s)?;
+    }
+    for (thing, course) in moving {
+        let home = course.stations.first().map_or(Vec3::ZERO, |s| s.at);
+        b.slots.moving(thing, &course, home)?;
     }
 
     for (a, build) in at {
