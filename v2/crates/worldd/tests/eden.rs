@@ -2501,11 +2501,19 @@ fn i3833_a3_a_restart_after_an_hour_reads_only_the_newest_generation() {
         (Value::Bytes(g), _) => (replica::encode::to_hex(g), 0),
         _ => panic!("the pointer names its generation"),
     };
-    let objects = std::fs::read_dir(dir.join(".stream-recovery-store/stream-recovery"))
-        .unwrap()
-        .flatten()
-        .map(|w| std::fs::read_dir(w.path().join("objects")).map_or(0, |o| o.count()))
-        .sum::<usize>();
+    fn objects(d: &Path) -> usize {
+        std::fs::read_dir(d).map_or(0, |entries| {
+            entries
+                .flatten()
+                .map(|e| match e.path() {
+                    p if p.ends_with("objects") => std::fs::read_dir(&p).map_or(0, |o| o.count()),
+                    p if p.is_dir() => objects(&p),
+                    _ => 0,
+                })
+                .sum()
+        })
+    }
+    let objects = objects(&dir.join(".stream-recovery-store"));
     let writer = stages["public stream"].saturating_sub(stages["replay"]);
     println!(
         "A3: listening after {:.2} s ({} ms by the world's own clock); the public writer opened in {writer} ms; {} \
