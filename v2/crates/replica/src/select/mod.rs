@@ -499,6 +499,11 @@ fn um(v: &Value) -> R<i64> {
         .ok_or_else(|| pose_err("a whole number"))
 }
 
+/// A point in `id`'s frame (µm) in the root's, or `None` when its path cannot be read (the claim check, #3701).
+pub(crate) fn to_root_point(tree: &Tree, id: Id, p: Vec3) -> Option<Vec3> {
+    View { tree }.to_root(id).ok()?.point(p).ok()
+}
+
 /// The tree as this module reads it.
 struct View<'a> {
     tree: &'a Tree,

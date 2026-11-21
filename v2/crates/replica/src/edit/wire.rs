@@ -26,6 +26,8 @@ use std::collections::BTreeMap;
 pub const VERB: &str = "souls:edit";
 /// The parameter that holds the batch.
 pub const OPS: u64 = 1;
+/// The parameter that names the build claim the batch is sent under (#3701), left out when none.
+pub const CLAIM: u64 = 2;
 
 type R<T> = Result<T, String>;
 
@@ -293,11 +295,36 @@ pub fn parameters(ops: &[Op]) -> BTreeMap<u64, Value> {
     BTreeMap::from([(OPS, Value::Array(ops.iter().map(op).collect()))])
 }
 
+/// The batch and the claim it is sent under: `{1: [operation, ...], 2: claim id}`.
+pub fn parameters_under(ops: &[Op], claim: Option<&Name>) -> BTreeMap<u64, Value> {
+    let mut p = parameters(ops);
+    if let Some(c) = claim {
+        p.insert(CLAIM, Value::Text(c.clone()));
+    }
+    p
+}
+
+/// The claim an edit's parameters name, if any; `Err` when parameter 2 is not a name.
+pub fn claim(parameters: &BTreeMap<u64, Value>) -> R<Option<Name>> {
+    match parameters.get(&CLAIM) {
+        None => Ok(None),
+        Some(Value::Text(n))
+            if n.as_str().len() <= 64
+                && crate::effects::not_a_name(&Value::Text(n.clone())).is_none() =>
+        {
+            Ok(Some(n.clone()))
+        }
+        Some(_) => Err("an edit's claim is a name".into()),
+    }
+}
+
 /// Reads an edit intent's parameters: one to [`OPS_MOST`] operations, each in its one byte form. The detail of a
 /// refusal says what was wrong.
 pub fn read(parameters: &BTreeMap<u64, Value>) -> R<Vec<Op>> {
-    let (Some(Value::Array(a)), 1) = (parameters.get(&OPS), parameters.len()) else {
-        return Err("an edit's parameters are {1: [operation, ...]}".into());
+    let extra = usize::from(claim(parameters)?.is_some());
+    let (Some(Value::Array(a)), true) = (parameters.get(&OPS), parameters.len() == 1 + extra)
+    else {
+        return Err("an edit's parameters are {1: [operation, ...], 2: claim?}".into());
     };
     if a.is_empty() || a.len() > OPS_MOST {
         return Err(format!("1 to {OPS_MOST} operations, not {}", a.len()));
@@ -332,5 +359,6 @@ pub fn edit_of(intent: &Intent, id: Id) -> Option<Edit> {
         actor: intent.actor,
         planned: *planned,
         ops: read(&intent.parameters).ok()?,
+        claim: claim(&intent.parameters).ok()?,
     })
 }
