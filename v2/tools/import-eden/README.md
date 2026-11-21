@@ -31,7 +31,14 @@ win 1 and the named places of win 3. Two steps, both run by hand:
    (`tools/cdn/approved-derivatives.json`, `generated`), and the dry run
    `node tools/cdn/publish.mjs --dry-run --identity --root .local/import-eden/models --sources <csv> --out <plan>`
    then plans every model; a model with no record is listed as excluded, not published. Path and area shapes that drape
-   on the ground are one per thing and are listed, as are ground and water.
+   on the ground are one per thing and are listed, as are ground and water. A kind made from a stored glTF file (`make: {kind:'mesh'}`; 127 of the
+   Mars campus's 141 kinds, 6 of Eden's) is written as that file's bytes, unchanged: the viewer's rendition today's page
+   gets (`worlds/core-assets/renditions.json`) when there is one, else the core asset (`pnpm assets:pull` brings them).
+   Its kind carries `fit` (`[scale, x, y, z]`, today's `instantiate`: centred on x and z, standing on y = 0, its largest
+   extent matched to the def's box, from the core index's measured bounds) and `flat` for a model a few centimetres
+   thick, drawn a hair towards the camera as today. Its licence is its file's (`modelRecord`: served-public or a
+   reviewed CC0 derivative), so it is not added to `generated`. v2/web loads every model with the meshopt decoder and
+   keeps WebP and AVIF textures.
 
 The mapping, the field numbers and what each node holds are in the module doc of `src/lib.rs`. In short: world →
 open ground → things; a thing with rooms → a floor per level → rooms → the things in them and the windows; a doorway

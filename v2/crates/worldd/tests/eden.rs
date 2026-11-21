@@ -38,6 +38,17 @@ impl Client {
         target: Option<Id>,
         parameters: BTreeMap<u64, Value>,
     ) -> Result<Vec<u64>, String> {
+        self.act_within(verb, target, parameters, 120_000_000)
+    }
+
+    /// [`Client::act`], its intent expiring `within` µs from now.
+    fn act_within(
+        &mut self,
+        verb: &str,
+        target: Option<Id>,
+        parameters: BTreeMap<u64, Value>,
+        within: i64,
+    ) -> Result<Vec<u64>, String> {
         self.2 += 1;
         let i = Intent {
             actor: Actor::Soul(self.1),
@@ -52,7 +63,7 @@ impl Client {
                 sequence: 0,
             }
             .to_value(),
-            expiry: answers::now() + 120_000_000,
+            expiry: answers::now() + within,
             resources: Vec::new(),
             fallbacks: Vec::new(),
             replaces: None,
@@ -783,6 +794,75 @@ fn c20_a3_a_soul_walks_across_the_town_and_uses_a_thing_by_its_form() {
     assert!(all > 40_000_000);
 }
 
+/// A gateway walk of over 600 m across Eden, from the births to a point 650 to 900 m away by the map, ends done (#1960): its
+/// deadline follows its planned route, with no 180 s cap. Before, every walk over about 250 m ended `act.timed-out`
+/// while still moving. Takes about ten minutes of world time at 1/1.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_600_m_walk_across_eden_ends_done() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (ground, lineage) = (im.nodes["ground"], im.nodes["world"].scope());
+    // The far point: the first on a 50 m grid of the open ground whose route from the births is 650 to 900 m by the map.
+    let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
+    let next = im.tree.to_state().next;
+    let mut town = sim::walk::town::Town::new(
+        im.tree,
+        ground,
+        sim::links::Doors::new(header, im.rules, next),
+    )
+    .expect("the town");
+    let v = |x: i64, z: i64| replica::pose::Vec3::new(x * 1_000_000, 0, z * 1_000_000);
+    let from = town
+        .map
+        .spot(ground, v(74, -1))
+        .expect("the births on the map");
+    let (fx, fz, length) = (-10..=10)
+        .flat_map(|i| (-10..=10).map(move |j| (i * 50, j * 50)))
+        .find_map(|(x, z)| {
+            let to = town.map.spot(ground, v(x, z))?;
+            let r = town
+                .map
+                .route(&town.tree, from, to, sim::routes::ALL)
+                .ok()?;
+            (650_000..900_000)
+                .contains(&r.length)
+                .then_some((x, z, r.length))
+        })
+        .expect("a point 650 to 900 m away by the map");
+    println!("to ({fx}, {fz}) m, {:.0} m by the map", length as f64 / 1e3);
+    let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "long", lineage);
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(1_500)))
+        .unwrap();
+    let um = |m: f64| {
+        let v = (m * 1e6) as i64;
+        u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
+    };
+    let to = Value::Array(vec![um(fx as f64), um(0.0), um(fz as f64)]);
+    let t0 = answers::now();
+    let walked = soul.act_within(
+        "eden:walk",
+        Some(ground),
+        BTreeMap::from([(1, to)]),
+        1_500_000_000,
+    );
+    let secs = (answers::now() - t0) as f64 / 1e6;
+    let track = track(&dir);
+    let path: f64 = track
+        .windows(2)
+        .filter(|w| w[0].1 == w[1].1)
+        .map(|w| ((w[1].2 - w[0].2).powi(2) + (w[1].3 - w[0].3).powi(2)).sqrt())
+        .sum();
+    let last = track.last().map(|t| (t.2, t.3));
+    println!("walked {path:.0} m in {secs:.0} s, to {last:?}: {walked:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    walked.expect("the long walk ends done");
+    assert!(path > 600.0, "a walk of over 600 m: {path:.0} m");
+    assert!(secs > 180.0, "longer than the old cap: {secs:.0} s");
+}
+
 /// Copies folder `from` into `to`, file by file.
 fn copy_dir(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
@@ -1021,6 +1101,7 @@ fn measure(
                 point: Name::new(&point).unwrap(),
                 at,
                 on: None,
+                approach: false,
             }];
             if turned {
                 skills::form_runner::turn(&mut steps, place.orientation).unwrap();
@@ -3110,6 +3191,123 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     );
     let d = ((x - px).powi(2) + (z - pz).powi(2)).sqrt();
     assert!(d < 1.5, "out at the plank: {d:.2} m from it");
+}
+
+/// 0.131 parity C25 (#3688): one Soul, born at `at` (`x,z` m), does each `(today's id, form, ending)` in turn on a
+/// served full Eden, by the form's own entry, from wherever the one before left it. Each ending: `done`, or the
+/// refusal's or failure's name. Printed; each that differs from the one today's game gives is returned.
+fn served_family(at: &str, tag: &str, cases: &[(&str, &str, &str)]) -> Vec<String> {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (served, mut soul, dir) = serve(&facts, at, tag, im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .unwrap();
+    let mut got = Vec::new();
+    for (today, form, _) in cases {
+        let ended = match soul.act(
+            &format!("eden:{form}"),
+            Some(im.nodes[*today]),
+            BTreeMap::new(),
+        ) {
+            Ok(_) => "done".to_owned(),
+            Err(name) => name,
+        };
+        let body = track(&dir).last().map(|b| (b.2, b.3));
+        println!("{tag}: {form} at {today}: {ended} (the body at {body:?})");
+        got.push(ended);
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    cases
+        .iter()
+        .zip(&got)
+        .filter(|((_, _, want), ended)| ended != want)
+        .map(|((today, form, want), ended)| format!("{tag} {form} at {today}: {ended}, not {want}"))
+        .collect()
+}
+
+/// C25 (#3688) A1: lights, fire, doors and locks from outside, on a served full Eden. Born outside the library's
+/// door, a Soul knocks, opens and closes it; it is not the door's owner, so its lock and unlock are refused
+/// `not-permitted`, as today's game refuses them. Through the opened door it switches the library's floor lamp on,
+/// brighter, dimmer and off, a pendant by its pull cord and the desk lamp. Outside the café it opens the door and
+/// lights and puts out the candle on a table, and switches a pendant; at the dining green it lights the campfire and
+/// puts it out, and switches the string lights and a bollard light; by the pond, the twinkle lights. No form has a
+/// walk of its own: each walks to its point first, as today's game walks to the hand's point.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c25_lights_fire_doors_and_locks_from_outside() {
+    let mut wrong = served_family(
+        "74.0,-1.0",
+        "c25lib",
+        &[
+            ("e_89d82b59", "knock", "done"),
+            ("e_89d82b59", "open", "done"),
+            ("e_89d82b59", "close", "done"),
+            ("e_89d82b59", "lock", "not-permitted"),
+            ("e_89d82b59", "unlock", "not-permitted"),
+            ("e_89d82b59", "open", "done"),
+            ("e_19f5a481", "switch_on", "done"),
+            ("e_19f5a481", "switch_off", "done"),
+            ("e_f20d2d83", "switch_on", "done"),
+            ("e_f20d2d83", "switch_off", "done"),
+            ("e_e608452b", "switch_on", "done"),
+            ("e_e608452b", "switch_off", "done"),
+        ],
+    );
+    wrong.extend(served_family(
+        "96.5,25.0",
+        "c25cafe",
+        &[
+            ("e_61537992", "open", "done"),
+            ("e_63d14e62", "light", "done"),
+            ("e_63d14e62", "put_out", "done"),
+            ("e_daca0b8d", "switch_on", "done"),
+            ("e_daca0b8d", "switch_off", "done"),
+        ],
+    ));
+    wrong.extend(served_family(
+        "27.0,-3.0",
+        "c25green",
+        &[
+            ("e_14db400b", "light", "done"),
+            ("e_14db400b", "put_out", "done"),
+            ("e_718cb3ea", "switch_on", "done"),
+            ("e_718cb3ea", "switch_off", "done"),
+            ("e_c1f76c60", "switch_on", "done"),
+            ("e_c1f76c60", "switch_off", "done"),
+        ],
+    ));
+    wrong.extend(served_family(
+        "-38.0,-17.0",
+        "c25pond",
+        &[
+            ("e_68df95e8", "switch_on", "done"),
+            ("e_68df95e8", "switch_off", "done"),
+        ],
+    ));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// C25 (#3688) A1: a cottage's inner door, its bedroom's, on a served full Eden. Born outside the cottage, the Soul
+/// walks in to the bedroom's rug, then opens and closes the door from there: each form first walks to the door's
+/// point, as today's game walks to the hand's point. Left open (#3688): from outside, a form's approach walks in
+/// through the front door and approaches again from the cottage's floor, but its walk on the ground ends
+/// `walk.blocked` on the way there (the route lane's); a knock from the bedroom ends `out-of-reach`, as no place a
+/// body may stand on the bedroom's side is within an arm of the door's panel.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c25_a_cottages_inner_door_from_its_bedroom() {
+    let wrong = served_family(
+        "-99.0,-93.0",
+        "c25cottage",
+        &[
+            ("e_7ff72484", "walk", "done"),
+            ("e_00385aae", "open", "done"),
+            ("e_00385aae", "close", "done"),
+        ],
+    );
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// A body's logged frame, height and stance: `(node, slot, y µm, stance)`.
