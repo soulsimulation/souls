@@ -804,12 +804,7 @@ fn a_600_m_walk_across_eden_ends_done() {
     let facts = facts_path();
     let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
     let ground = im.nodes["ground"];
-    let (served, mut soul, dir) = serve(
-        &facts,
-        "-373.333,474.666",
-        "long",
-        im.nodes["world"].scope(),
-    );
+    let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "long", im.nodes["world"].scope());
     soul.0
         .set_read_timeout(Some(Duration::from_secs(1_500)))
         .unwrap();
