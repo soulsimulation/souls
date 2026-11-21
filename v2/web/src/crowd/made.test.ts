@@ -2,9 +2,11 @@
 // pose in its middle and starts and ends on the idle, so its weight only blends poses near each other.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import * as THREE from 'three';
 import { model } from '../pose/fixture.ts';
 import { jointAt } from '../pose/pose.ts';
-import { CLIPS } from './bodies.ts';
+import { CLIPS, CrowdBodies } from './bodies.ts';
+import { Crowd } from './crowd.ts';
 import { GESTURE_CLIPS } from './gestures.ts';
 import { MAX_CLIPS } from './shader.ts';
 
@@ -16,7 +18,7 @@ const at = (clip: string, u: number, bone: string) => {
   return jointAt(m, data.slice(f * row, (f + 1) * row), m.names.indexOf(bone));
 };
 const idle = (bone: string) => at('Idle', 0, bone);
-const near = (a: number[], b: number[], tol = 1e-3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < tol;
+const near = (a: readonly number[], b: readonly number[], tol = 1e-3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < tol;
 const ends = (clip: string) => {
   for (const b of ['Wrist.L', 'Wrist.R', 'UpperArm.L', 'Chest', 'Middle1.R']) {
     assert.ok(near(at(clip, 0, b), idle(b)), `${clip} starts on the idle (${b})`);
@@ -70,4 +72,24 @@ test('stretch: both hands go up over the head and the body leans to one side, th
   for (const w of ['Wrist.L', 'Wrist.R']) assert.ok(at('Stretch', 0.5, w)[1] > head, `${w} overhead: ${at('Stretch', 0.5, w)}`);
   const a = at('Stretch', 0.4, 'Chest')[0], b = at('Stretch', 0.62, 'Chest')[0];
   assert.ok(Math.sign(a) !== Math.sign(b) && Math.abs(a) > 0.01 && Math.abs(b) > 0.01, `leans both ways: ${a} ${b}`);
+});
+
+test('a body points at the body it points toward: it turns to face it while the move plays, then turns back', () => {
+  const crowd = new Crowd([m], 4), bodies = new CrowdBodies(crowd), S = 1e6;
+  bodies.gestures.apply({ moves: [{ body: 'a', name: 'souls:point', start: 1 * S, ends: [1.3 * S, 1.8 * S], target: 'b' }], removed: [] });
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+  camera.position.set(0, 10, 30);
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld();
+  const at = (t: number) => {
+    bodies.begin(t * S);
+    bodies.place('a', 0, 0, 0);
+    bodies.place('b', 3, 0, 0);
+    bodies.end(camera);
+    return crowd.yaw[0];
+  };
+  assert.equal(at(0), 0, 'facing ahead before');
+  assert.ok(Math.abs(at(1.5) - Math.PI / 2) < 1e-6, 'facing b (+x) while pointing');
+  assert.equal(crowd.clipB[0], crowd.clip(0, 'Point'));
+  assert.equal(at(3), 0, 'back to its own heading after');
 });

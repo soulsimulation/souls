@@ -41,8 +41,9 @@ const KEEP = 4;
 
 /** A move as drawn: its record and, once the run ended early, when. */
 export type Drawn = MoveRec & { cut?: number };
-/** What a body draws at a time: the clip's name, its phase in cycles (`seconds` is the clip's length) and weight. */
-export type Gesture = { clip: string; phase: number; weight: number };
+/** What a body draws at a time: the clip's name, its phase in cycles (`seconds` is the clip's length), weight, and the
+ *  move's target (a body turns to face one it can see, as today's Core turns a gesturer to its partner or target). */
+export type Gesture = { clip: string; phase: number; weight: number; target: string | null };
 
 const smooth = (u: number) => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
 
@@ -65,7 +66,7 @@ export function gestureAt(moves: readonly Drawn[], t: number, seated: boolean, s
     // A one-shot is fitted to the move (its planned span) and holds its last frame; a loop plays at its rate.
     const span = (m.ends[m.ends.length - 1] - m.start) / 1e6;
     const phase = g.mode === 'once' ? Math.min(0.999, since / Math.max(1e-3, span)) : (since * (g.rate ?? 1)) / len;
-    return { clip, phase, weight };
+    return { clip, phase, weight, target: m.target };
   }
   return null;
 }

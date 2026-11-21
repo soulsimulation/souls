@@ -57,6 +57,8 @@ export class CrowdBodies {
    *  a body gestures. */
   private idlePhase: number[] = [];
   private walkPhase: number[] = [];
+  /** Each body's heading from its own motion (rad); drawn yaw is this, turned toward a gesture's target by its weight. */
+  private heading: number[] = [];
   private t = 0;
   /** The move records the page has played (`./gestures.ts`). */
   readonly gestures: Gestures;
@@ -90,11 +92,13 @@ export class CrowdBodies {
       c.clipA[i] = this.idle;
       c.clipB[i] = this.walk;
       this.idlePhase[i] = this.walkPhase[i] = (hash(id) % 1000) / 1000;
+      this.heading[i] = c.yaw[i];
     }
     this.seen[i] = true;
     const dx = x - c.x[i], dz = z - c.z[i], d = Math.hypot(dx, dz);
     if (this.dt > 0) this.speed[i] += (d / this.dt - this.speed[i]) * Math.min(1, this.dt * 6);
-    if (d > 0.002) c.yaw[i] = Math.atan2(dx, dz);
+    if (d > 0.002) this.heading[i] = Math.atan2(dx, dz);
+    c.yaw[i] = this.heading[i];
     c.x[i] = x; c.y[i] = y; c.z[i] = z;
     const model = c.models[c.model[i]], walk = Math.min(1, this.speed[i] / FULL_WALK);
     const base = seated && this.sit >= 0 ? this.sit : this.idle;
@@ -113,6 +117,12 @@ export class CrowdBodies {
       c.clipB[i] = model.clips.findIndex((k) => k.name === g.clip);
       c.phaseB[i] = g.phase;
       c.blend[i] = seated || walk > 0 ? 2 + g.weight : g.weight;
+      // A move toward another body (point at it, bow to it) turns this one to face it while it plays.
+      const j = g.target === null ? undefined : this.index.get(g.target);
+      if (j !== undefined && j !== i && !walking) {
+        const to = Math.atan2(c.x[j] - x, c.z[j] - z), turn = Math.atan2(Math.sin(to - this.heading[i]), Math.cos(to - this.heading[i]));
+        c.yaw[i] = this.heading[i] + turn * g.weight;
+      }
     } else {
       c.clipA[i] = base;
       c.phaseA[i] = this.idlePhase[i];
@@ -134,11 +144,12 @@ export class CrowdBodies {
         this.speed[i] = this.speed[moved];
         this.idlePhase[i] = this.idlePhase[moved];
         this.walkPhase[i] = this.walkPhase[moved];
+        this.heading[i] = this.heading[moved];
         this.seen[i] = this.seen[moved];
         this.index.set(this.ids[i], i);
       }
     }
-    this.ids.length = this.speed.length = this.seen.length = this.idlePhase.length = this.walkPhase.length = c.count;
+    this.ids.length = this.speed.length = this.seen.length = this.idlePhase.length = this.walkPhase.length = this.heading.length = c.count;
     c.step(this.dt);
     c.draw(camera);
   }
