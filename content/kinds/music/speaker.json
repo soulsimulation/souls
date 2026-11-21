@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:speaker",
   "owner": "thing",
-  "state": {"playing":{"n":1,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
+  "state": {"playing":{"n":28,"type":"bool","default":false,"audience":{"rule":"everyone"}}},
   "links": {"feed":{"n":1,"from":"eden:microphone","most":4,"audience":{"rule":"everyone"}}},
   "points": {"switch":{"role":"contact","at_mm":[0,1250,150]}},
   "geometry": {"bounds_mm":[919,2179,796]},

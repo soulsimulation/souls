@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-21 #3802 the stage's standing points. A new revision of the Engine v2 entry eden:stage (content/kinds/floors/stage.json; its reference is the hash of its bytes, so the old revision keeps its bytes, e.g. in v2/crates/replica/cases/form-rules-snapshot). The one floor slot that admitted 40 bodies and named no stand point (so step_up was refused place-unknown) becomes 40 standing slots, spot_1 to spot_40, one body each: an 8 by 5 grid 0.9 m apart at the boards' top, 940 mm up, the height today's model gives (core-stage@1: boards box at 0.92 m, 0.04 m thick; its floor slot at 0.94 m, capacity 40). Each spot is taken from a stand point at the foot of its side's steps (steps, steps_right at z 3.3 m). step_up selects the free spot nearest the body. core-stage@1 and its other revisions are unchanged. No findings: no budgets, samples or gap checks were relaxed.",
+  "findings": []
+}

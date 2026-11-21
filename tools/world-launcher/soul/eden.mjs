@@ -3235,13 +3235,13 @@ const PUSHED                                   = Object.freeze({ pushed_by_one: 
               
   
 /** An argument's type. A `field` or `value` argument is a choice from the form's own closed list, `of`. */
-                                                                    
+                                                                                              
                     
                 
                   
                 
                  
-                                                                                 
+                                                                                             
                      
   
 /** An effect as an entry writes it. `transfer` moves an amount of one field from one node to another (SA-F2b). */
@@ -3278,7 +3278,7 @@ const PUSHED                                   = Object.freeze({ pushed_by_one: 
                                                                                                                  
                                                                                                            
                                                
-                                                                             
+                                                                                             
                                
                                                                                                                        
                                                      
@@ -3354,7 +3354,6 @@ function decide(input       )          {
   if (!input || typeof input !== 'object' || !input.act || !input.state || !input.kinds || !input.asker) return bad(-1, 'malformed');
   const { act, state, kinds, asker } = input;
   const nodes = state.nodes ?? {};
-  const args = act.args ?? {};
   const self = has(nodes, act.this) ? nodes[act.this] : undefined;
   if (!self) return bad(-1, 'no_such_node', { node: act.this });
   const entry = self.kind && has(kinds, self.kind) ? kinds[self.kind] : undefined;
@@ -3363,6 +3362,11 @@ function decide(input       )          {
   if (!form) return bad(-1, 'no_such_form', { form: act.form });
   const actor = has(nodes, state.actor) ? nodes[state.actor] : undefined;
   if (!actor) return bad(-1, 'no_such_node', { node: state.actor });
+  // A body's slot the caller left out, which the form selects from this thing's free slots, is chosen as the engine
+  // chooses it (worldd `Acts`, #3802); none free is refused by name before any need is read.
+  const chosen = chosenSlots(kinds, act, state);
+  if ('none' in chosen) return { verdict: 'no', reason: 'slot_taken', need: -1, detail: { node: act.this, arg: chosen.none, free: 0 }, fix: null, read };
+  const args = chosen.args;
   // A field or value argument is one of the form's own choices, so a form never writes a field it does not name.
   const takes        = form.takes && typeof form.takes === 'object' ? form.takes : {};
   for (const name of sorted(takes)) {
@@ -3902,6 +3906,48 @@ const WHO = Object.freeze(['anyone', 'holder', 'world', 'link']);
                                                                                    
 
 /** Whether the actor may do `input.act` at all, before its needs: yes, no naming who may, or unknown. Never throws. */
+/** Whether slot argument `key` of `form` is the body's own place: a `select` of free slots that a `sit` or `lie` step
+ *  takes, or that an effect reparents the actor into (worldd `selects_body_slot`, #3802). */
+function selectsBodySlot(form      , key        )          {
+  const t = form.takes?.[key], isArg = (r         ) => !!r && typeof r === 'object' && (r                     ).arg === key;
+  if (t?.type !== 'slot' || t.select?.of !== 'free_slots') return false;
+  return (form.steps ?? []).some((s) => (s.step === 'sit' || s.step === 'lie') && isArg(s.slot))
+    || (form.effects ?? []).some((e) => e.change === 'reparent' && e.what === 'actor' && isArg(e.into));
+}
+
+/**
+ * The act's arguments with each body slot the caller left out chosen as the engine chooses it (worldd `Acts`, #3802):
+ * the free body slot of this thing nearest the actor, measured from the slot's stand point (else the slot) when the
+ * input places both the actor and this thing (`at_mm`, one frame, the thing unturned), else the first free one in the
+ * entry's order. `none` names an argument with no slot free.
+ */
+function chosenSlots(kinds                       , act              , state                )                                                       {
+  const args = { ...(act.args ?? {}) }, nodes = state?.nodes ?? {};
+  const self = has(nodes, act.this) ? nodes[act.this] : undefined;
+  const entry = self?.kind && has(kinds, self.kind) ? kinds[self.kind] : undefined;
+  const form = entry && has(entry.forms, act.form) ? entry.forms [act.form] : undefined;
+  if (!self || !entry || !form || !form.takes || typeof form.takes !== 'object') return { args };
+  const actor = has(nodes, state.actor) ? nodes[state.actor] : undefined;
+  const sq = (a          , b          ) => [0, 1, 2].reduce((n, k) => { const d = BigInt(a[k] ?? 0) - BigInt(b[k] ?? 0); return n + d * d; }, 0n);
+  for (const key of sorted(form.takes)) {
+    if (has(args, key) || !selectsBodySlot(form, key)) continue;
+    const free = Object.keys(entry.slots ?? {}).filter((name) => {
+      const d = entry.slots [name], list = self.slots?.[name];
+      return d.admits === 'body' && (Array.isArray(list) ? list.length : 0) < d.most;
+    });
+    if (!free.length) return { none: key };
+    const origin = self.at_mm, me = actor?.at_mm;
+    const far = (name        )                => {
+      const d = entry.slots [name], p = d.stand && has(entry.points, d.stand) ? entry.points [d.stand].at_mm : d.at_mm;
+      return Array.isArray(origin) && Array.isArray(me) && Array.isArray(p) ? sq(me, [0, 1, 2].map((k) => (origin[k] ?? 0) + (p[k] ?? 0))) : null;
+    };
+    let best = free[0];
+    for (const name of free) { const a = far(name), b = far(best); if (a !== null && b !== null && a < b) best = name; }
+    args[key] = best;
+  }
+  return { args };
+}
+
 function whoMay(input       )             {
   const read         = [];
   const bad = (what        , extra                          = {})             => ({ verdict: 'no', reason: 'bad_input', who: null, detail: { what, ...extra }, read });
@@ -4042,7 +4088,7 @@ function measure(kinds                       , nodes                      , self
   if (!whole(want) || want < 0) return { bad: 'not_whole_number', detail: { amount: e.amount ?? null } };
   return { field, intoField, from, into, fromDef, intoDef, there, has: held, room, moved: Math.min(want, Math.max(0, there - floor)), asked: want };
 }
-return { NEEDS, REASONS, MAX_HANDS, MAX_SIBLINGS, CARRIED, PUSHED, seesAudience, decide, valueAt, crossing, WHO, whoMay, measure };
+return { NEEDS, REASONS, MAX_HANDS, MAX_SIBLINGS, CARRIED, PUSHED, seesAudience, decide, valueAt, crossing, WHO, chosenSlots, whoMay, measure };
 })();
 // </inline rules.ts>
 // <inline can-i.mjs> generated by inline.mjs: edit can-i.mjs, not this block

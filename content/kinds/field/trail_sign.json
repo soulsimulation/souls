@@ -3,7 +3,7 @@
   "kind": "eden:trail_sign",
   "owner": "thing",
   "state": {
-    "words": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+    "words": { "n": 28, "type": "text", "default": null, "audience": { "rule": "everyone" } }
   },
   "points": {
     "front": { "role": "stand", "at_mm": [0, 0, 700] },

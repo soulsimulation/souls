@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "tile1_cell": {
-      "n": 1,
+      "n": 28,
       "type": "enum",
       "values": ["tray", "tl", "tr", "bl", "br"],
       "default": "tray",
@@ -13,7 +13,7 @@
       }
     },
     "tile2_cell": {
-      "n": 2,
+      "n": 29,
       "type": "enum",
       "values": ["tray", "tl", "tr", "bl", "br"],
       "default": "tray",
@@ -22,7 +22,7 @@
       }
     },
     "tile3_cell": {
-      "n": 3,
+      "n": 30,
       "type": "enum",
       "values": ["tray", "tl", "tr", "bl", "br"],
       "default": "tray",
@@ -31,7 +31,7 @@
       }
     },
     "tile4_cell": {
-      "n": 4,
+      "n": 31,
       "type": "enum",
       "values": ["tray", "tl", "tr", "bl", "br"],
       "default": "tray",
@@ -40,7 +40,7 @@
       }
     },
     "tile1_turn": {
-      "n": 5,
+      "n": 32,
       "type": "enum",
       "values": ["r0", "r90", "r180", "r270"],
       "default": "r180",
@@ -49,7 +49,7 @@
       }
     },
     "tile2_turn": {
-      "n": 6,
+      "n": 33,
       "type": "enum",
       "values": ["r0", "r90", "r180", "r270"],
       "default": "r90",
@@ -58,7 +58,7 @@
       }
     },
     "tile3_turn": {
-      "n": 7,
+      "n": 34,
       "type": "enum",
       "values": ["r0", "r90", "r180", "r270"],
       "default": "r270",
@@ -67,7 +67,7 @@
       }
     },
     "tile4_turn": {
-      "n": 8,
+      "n": 35,
       "type": "enum",
       "values": ["r0", "r90", "r180", "r270"],
       "default": "r180",
@@ -76,7 +76,7 @@
       }
     },
     "moves": {
-      "n": 9,
+      "n": 36,
       "type": "int",
       "unit": "count",
       "default": 0,

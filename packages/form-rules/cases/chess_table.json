@@ -133,7 +133,7 @@
         }
       },
       "asker": {"sees": ["public"]},
-      "expect": {"verdict": "yes", "read": [["c1/field/2", "waiting"], ["c1/link/1", 1], ["c1/link/2", 1]]}
+      "expect": {"verdict": "yes", "read": [["c1/field/29", "waiting"], ["c1/link/1", 1], ["c1/link/2", 1]]}
     },
     {
       "name": "begin_again_after_a_resigned_game",
@@ -153,7 +153,7 @@
         }
       },
       "asker": {"sees": ["public"]},
-      "expect": {"verdict": "yes", "read": [["c1/field/2", "resigned"], ["c1/link/1", 1], ["c1/link/2", 1]]}
+      "expect": {"verdict": "yes", "read": [["c1/field/29", "resigned"], ["c1/link/1", 1], ["c1/link/2", 1]]}
     },
     {
       "name": "begin_while_a_game_is_in_progress",
@@ -179,7 +179,7 @@
         "need": 0,
         "detail": {"field": "phase", "found": "playing", "wanted": {"not": "playing"}},
         "fix": null,
-        "read": [["c1/field/2", "playing"]]
+        "read": [["c1/field/29", "playing"]]
       }
     },
     {
@@ -201,7 +201,7 @@
         "need": 1,
         "detail": {"link": "white", "count": 0},
         "fix": {"form": "play_white"},
-        "read": [["c1/field/2", "waiting"], ["c1/link/1", 0]]
+        "read": [["c1/field/29", "waiting"], ["c1/link/1", 0]]
       }
     },
     {
@@ -223,7 +223,7 @@
         "need": 2,
         "detail": {"link": "black", "count": 0},
         "fix": {"form": "play_black"},
-        "read": [["c1/field/2", "waiting"], ["c1/link/1", 1], ["c1/link/2", 0]]
+        "read": [["c1/field/29", "waiting"], ["c1/link/1", 1], ["c1/link/2", 0]]
       }
     },
     {
@@ -244,7 +244,7 @@
         }
       },
       "asker": {"sees": ["public"]},
-      "expect": {"verdict": "yes", "read": [["c1/field/2", "playing"], ["c1/field/1", "white"]]}
+      "expect": {"verdict": "yes", "read": [["c1/field/29", "playing"], ["c1/field/28", "white"]]}
     },
     {
       "name": "move_white_before_the_game_begins",
@@ -265,7 +265,7 @@
         "need": 0,
         "detail": {"field": "phase", "found": "waiting", "wanted": {"is": "playing"}},
         "fix": {"form": "begin"},
-        "read": [["c1/field/2", "waiting"]]
+        "read": [["c1/field/29", "waiting"]]
       }
     },
     {
@@ -292,7 +292,7 @@
         "need": 1,
         "detail": {"field": "turn", "found": "black", "wanted": {"is": "white"}},
         "fix": {"form": "begin"},
-        "read": [["c1/field/2", "playing"], ["c1/field/1", "black"]]
+        "read": [["c1/field/29", "playing"], ["c1/field/28", "black"]]
       }
     },
     {
@@ -313,7 +313,7 @@
         }
       },
       "asker": {"sees": ["public"]},
-      "expect": {"verdict": "yes", "read": [["c1/field/2", "playing"], ["c1/field/1", "black"]]}
+      "expect": {"verdict": "yes", "read": [["c1/field/29", "playing"], ["c1/field/28", "black"]]}
     },
     {
       "name": "move_black_after_the_game_is_over",
@@ -339,7 +339,7 @@
         "need": 0,
         "detail": {"field": "phase", "found": "checkmate", "wanted": {"is": "playing"}},
         "fix": {"form": "begin"},
-        "read": [["c1/field/2", "checkmate"]]
+        "read": [["c1/field/29", "checkmate"]]
       }
     },
     {
@@ -366,7 +366,7 @@
         "need": 1,
         "detail": {"field": "turn", "found": "white", "wanted": {"is": "black"}},
         "fix": null,
-        "read": [["c1/field/2", "playing"], ["c1/field/1", "white"]]
+        "read": [["c1/field/29", "playing"], ["c1/field/28", "white"]]
       }
     },
     {
@@ -387,7 +387,7 @@
         }
       },
       "asker": {"sees": ["public"]},
-      "expect": {"verdict": "yes", "read": [["c1/field/2", "playing"]]}
+      "expect": {"verdict": "yes", "read": [["c1/field/29", "playing"]]}
     },
     {
       "name": "resign_white_with_no_game_in_progress",
@@ -408,7 +408,7 @@
         "need": 0,
         "detail": {"field": "phase", "found": "waiting", "wanted": {"is": "playing"}},
         "fix": {"form": "begin"},
-        "read": [["c1/field/2", "waiting"]]
+        "read": [["c1/field/29", "waiting"]]
       }
     },
     {
@@ -429,7 +429,7 @@
         }
       },
       "asker": {"sees": ["public"]},
-      "expect": {"verdict": "yes", "read": [["c1/field/2", "playing"]]}
+      "expect": {"verdict": "yes", "read": [["c1/field/29", "playing"]]}
     },
     {
       "name": "resign_black_with_no_game_in_progress",
@@ -455,7 +455,7 @@
         "need": 0,
         "detail": {"field": "phase", "found": "stalemate", "wanted": {"is": "playing"}},
         "fix": {"form": "begin"},
-        "read": [["c1/field/2", "stalemate"]]
+        "read": [["c1/field/29", "stalemate"]]
       }
     },
     {
@@ -476,7 +476,7 @@
         }
       },
       "asker": {"sees": ["public"]},
-      "expect": {"verdict": "yes", "read": [["c1/field/2", "resigned"]]}
+      "expect": {"verdict": "yes", "read": [["c1/field/29", "resigned"]]}
     },
     {
       "name": "leave_white_during_a_game_is_refused",
@@ -502,7 +502,7 @@
         "need": 0,
         "detail": {"field": "phase", "found": "playing", "wanted": {"not": "playing"}},
         "fix": null,
-        "read": [["c1/field/2", "playing"]]
+        "read": [["c1/field/29", "playing"]]
       }
     },
     {
@@ -518,7 +518,7 @@
         }
       },
       "asker": {"sees": ["public"]},
-      "expect": {"verdict": "yes", "read": [["c1/field/2", "waiting"]]}
+      "expect": {"verdict": "yes", "read": [["c1/field/29", "waiting"]]}
     },
     {
       "name": "leave_black_during_a_game_is_refused",
@@ -544,7 +544,7 @@
         "need": 0,
         "detail": {"field": "phase", "found": "playing", "wanted": {"not": "playing"}},
         "fix": null,
-        "read": [["c1/field/2", "playing"]]
+        "read": [["c1/field/29", "playing"]]
       }
     }
   ]

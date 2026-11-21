@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "tens": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "default": 0,
@@ -15,7 +15,7 @@
       }
     },
     "ones": {
-      "n": 2,
+      "n": 29,
       "type": "int",
       "unit": "count",
       "default": 0,

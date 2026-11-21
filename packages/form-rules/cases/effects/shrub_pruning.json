@@ -41,14 +41,14 @@
                 "change": "set",
                 "node": "sh1",
                 "field": "left_low",
-                "n": 1,
+                "n": 28,
                 "to": 0
               },
               {
                 "change": "set",
                 "node": "sh1",
                 "field": "cuttings",
-                "n": 7,
+                "n": 34,
                 "to": 1
               }
             ],
@@ -102,14 +102,14 @@
                 "change": "set",
                 "node": "sh1",
                 "field": "right_low",
-                "n": 2,
+                "n": 29,
                 "to": 0
               },
               {
                 "change": "set",
                 "node": "sh1",
                 "field": "cuttings",
-                "n": 7,
+                "n": 34,
                 "to": 2
               }
             ],
@@ -148,14 +148,14 @@
                 "change": "set",
                 "node": "sh1",
                 "field": "left_mid",
-                "n": 3,
+                "n": 30,
                 "to": 0
               },
               {
                 "change": "set",
                 "node": "sh1",
                 "field": "cuttings",
-                "n": 7,
+                "n": 34,
                 "to": 3
               }
             ],
@@ -194,14 +194,14 @@
                 "change": "set",
                 "node": "sh1",
                 "field": "right_mid",
-                "n": 4,
+                "n": 31,
                 "to": 0
               },
               {
                 "change": "set",
                 "node": "sh1",
                 "field": "cuttings",
-                "n": 7,
+                "n": 34,
                 "to": 4
               }
             ],
@@ -240,14 +240,14 @@
                 "change": "set",
                 "node": "sh1",
                 "field": "left_high",
-                "n": 5,
+                "n": 32,
                 "to": 0
               },
               {
                 "change": "set",
                 "node": "sh1",
                 "field": "cuttings",
-                "n": 7,
+                "n": 34,
                 "to": 5
               }
             ],
@@ -286,14 +286,14 @@
                 "change": "set",
                 "node": "sh1",
                 "field": "right_high",
-                "n": 6,
+                "n": 33,
                 "to": 0
               },
               {
                 "change": "set",
                 "node": "sh1",
                 "field": "cuttings",
-                "n": 7,
+                "n": 34,
                 "to": 6
               }
             ],

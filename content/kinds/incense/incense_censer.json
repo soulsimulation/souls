@@ -3,7 +3,7 @@
   "kind": "eden:incense_censer",
   "owner": "thing",
   "state": {
-    "lit": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+    "lit": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
   },
   "points": {
     "stand": { "role": "stand", "at_mm": [0, 0, 550], "yaw_mdeg": 180000 },

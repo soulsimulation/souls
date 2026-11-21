@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "left_low": {
-      "n": 1,
+      "n": 28,
       "type": "bool",
       "default": true,
       "audience": {
@@ -12,7 +12,7 @@
       }
     },
     "right_low": {
-      "n": 2,
+      "n": 29,
       "type": "bool",
       "default": true,
       "audience": {
@@ -20,7 +20,7 @@
       }
     },
     "left_mid": {
-      "n": 3,
+      "n": 30,
       "type": "bool",
       "default": true,
       "audience": {
@@ -28,7 +28,7 @@
       }
     },
     "right_mid": {
-      "n": 4,
+      "n": 31,
       "type": "bool",
       "default": true,
       "audience": {
@@ -36,7 +36,7 @@
       }
     },
     "left_high": {
-      "n": 5,
+      "n": 32,
       "type": "bool",
       "default": true,
       "audience": {
@@ -44,7 +44,7 @@
       }
     },
     "right_high": {
-      "n": 6,
+      "n": 33,
       "type": "bool",
       "default": true,
       "audience": {
@@ -52,7 +52,7 @@
       }
     },
     "cuttings": {
-      "n": 7,
+      "n": 34,
       "type": "int",
       "unit": "count",
       "default": 0,

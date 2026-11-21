@@ -50,7 +50,7 @@
         "change": "set",
         "node": "p1",
         "field": "playing",
-        "n": 1,
+        "n": 28,
         "to": "paper_lanterns"
        }
       ],
@@ -80,7 +80,7 @@
         "change": "set",
         "node": "p1",
         "field": "playing",
-        "n": 1,
+        "n": 28,
         "to": "night_train"
        }
       ]
@@ -100,7 +100,7 @@
         "change": "set",
         "node": "p1",
         "field": "playing",
-        "n": 1,
+        "n": 28,
         "to": "off"
        }
       ],
@@ -130,7 +130,7 @@
         "change": "set",
         "node": "p1",
         "field": "playing",
-        "n": 1,
+        "n": 28,
         "to": "waltz"
        }
       ]
@@ -150,7 +150,7 @@
         "change": "set",
         "node": "p1",
         "field": "playing",
-        "n": 1,
+        "n": 28,
         "to": "harbour_lights"
        }
       ]
@@ -170,7 +170,7 @@
         "change": "set",
         "node": "p1",
         "field": "playing",
-        "n": 1,
+        "n": 28,
         "to": "low_tide"
        }
       ]
@@ -190,7 +190,7 @@
         "change": "set",
         "node": "p1",
         "field": "playing",
-        "n": 1,
+        "n": 28,
         "to": "open_window"
        }
       ]
@@ -210,7 +210,7 @@
         "change": "set",
         "node": "p1",
         "field": "playing",
-        "n": 1,
+        "n": 28,
         "to": "off"
        }
       ]

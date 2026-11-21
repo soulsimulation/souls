@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "fibre": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "default": 6,
@@ -13,7 +13,7 @@
       "audience": {"rule": "everyone"}
     },
     "yarn": {
-      "n": 2,
+      "n": 29,
       "type": "int",
       "unit": "count",
       "default": 0,
@@ -22,7 +22,7 @@
       "audience": {"rule": "everyone"}
     },
     "twist": {
-      "n": 3,
+      "n": 30,
       "type": "enum",
       "values": ["none", "soft", "firm", "hard"],
       "default": "none",

@@ -3,7 +3,7 @@
   "kind": "eden:card_table",
   "owner": "thing",
   "state": {
-    "cards": {"n": 1, "type": "int", "unit": "count", "default": 52, "min": 0, "max": 52, "audience": {"rule": "everyone"}}
+    "cards": {"n": 28, "type": "int", "unit": "count", "default": 52, "min": 0, "max": 52, "audience": {"rule": "everyone"}}
   },
   "links": {"player": {"n": 1, "from": "soul", "most": 4, "audience": {"rule": "everyone"}}},
   "points": {

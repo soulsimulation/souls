@@ -41,7 +41,7 @@
                 "change": "set",
                 "node": "hb1",
                 "field": "fruit",
-                "n": 1,
+                "n": 28,
                 "to": 1
               },
               {
@@ -115,7 +115,7 @@
                 "change": "set",
                 "node": "rh1.0",
                 "field": "bites_left",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -143,7 +143,7 @@
                 "change": "set",
                 "node": "rh1.0",
                 "field": "bites_left",
-                "n": 1,
+                "n": 28,
                 "to": 0
               }
             ]
@@ -174,7 +174,7 @@
                 "change": "set",
                 "node": "hb1",
                 "field": "fruit",
-                "n": 1,
+                "n": 28,
                 "to": 0
               },
               {
@@ -222,7 +222,7 @@
                 "change": "set",
                 "node": "rh6.0",
                 "field": "bites_left",
-                "n": 1,
+                "n": 28,
                 "to": 0
               }
             ],
@@ -366,7 +366,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "bites_left",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -395,7 +395,7 @@
                 "change": "set",
                 "node": "t1",
                 "field": "bites_left",
-                "n": 1,
+                "n": 28,
                 "to": 0
               }
             ],
