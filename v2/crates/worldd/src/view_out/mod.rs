@@ -97,8 +97,9 @@ enum Start {
 pub const SETTLE_US: Micros = 250_000;
 /// How often, in world time, a still world's pointer moves its "quiet until" on (rule 11).
 pub const QUIET_EVERY_US: Micros = stream::PERIOD_US;
-/// Parts in one public generation before the next baseline (#3825): about 5 minutes of a busy world.
-pub const GENERATION_PARTS: u64 = 600;
+/// Parts in one public generation before the next baseline (#3825): 2 minutes of a busy world at 2 parts a second,
+/// so a new viewer fetches the baseline and at most 2 minutes of parts.
+pub const GENERATION_PARTS: u64 = 240;
 /// How long a public generation older than the previous one is kept after its last write (#3825).
 pub const PRUNE_GRACE: Duration = Duration::from_secs(600);
 
