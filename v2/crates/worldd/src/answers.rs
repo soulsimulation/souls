@@ -20,7 +20,7 @@
 //! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
 //! how) and is answered: a receipt naming its entries when done, else a refusal naming how it ended
 //! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at walking
-//! speed, plus a margin and crossings, at most 180 s and never beyond the intent's expiry. Its deadline is written
+//! speed, plus a margin and crossings, with no total cap and never beyond the intent's expiry. Its deadline is written
 //! as C20's entry and it receives C20's one progress answer if still going at 10 s. C21's watch ends a stalled walk
 //! `walk.blocked`; waiting at a link and being carried do not count as stalled walking.
 //! No move outlives its act: a walk still going at its act's deadline stops in that tick and ends `act.timed-out`; a

@@ -38,6 +38,17 @@ impl Client {
         target: Option<Id>,
         parameters: BTreeMap<u64, Value>,
     ) -> Result<Vec<u64>, String> {
+        self.act_within(verb, target, parameters, 120_000_000)
+    }
+
+    /// [`Client::act`], its intent expiring `within` µs from now.
+    fn act_within(
+        &mut self,
+        verb: &str,
+        target: Option<Id>,
+        parameters: BTreeMap<u64, Value>,
+        within: i64,
+    ) -> Result<Vec<u64>, String> {
         self.2 += 1;
         let i = Intent {
             actor: Actor::Soul(self.1),
@@ -52,7 +63,7 @@ impl Client {
                 sequence: 0,
             }
             .to_value(),
-            expiry: answers::now() + 120_000_000,
+            expiry: answers::now() + within,
             resources: Vec::new(),
             fallbacks: Vec::new(),
             replaces: None,
@@ -781,6 +792,47 @@ fn c20_a3_a_soul_walks_across_the_town_and_uses_a_thing_by_its_form() {
         walk_across_and_build(&format!("{root}/content/kinds"), 20_000_000, "c20w");
     assert!(walk > 20_000_000, "a walk over 20 s");
     assert!(all > 40_000_000);
+}
+
+/// A gateway walk of over 600 m across Eden, from the births to the far corner of the town, ends done (#1960): its
+/// deadline follows its planned route, with no 180 s cap. Before, every walk over about 250 m ended `act.timed-out`
+/// while still moving. Takes about ten minutes of world time at 1/1.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_600_m_walk_across_eden_ends_done() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let ground = im.nodes["ground"];
+    let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "long", im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(1_500)))
+        .unwrap();
+    let um = |m: f64| {
+        let v = (m * 1e6) as i64;
+        u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
+    };
+    let to = Value::Array(vec![um(442.666), um(0.0), um(507.333)]);
+    let t0 = std::time::Instant::now();
+    let walked = soul.act_within(
+        "eden:walk",
+        Some(ground),
+        BTreeMap::from([(1, to)]),
+        1_500_000_000,
+    );
+    let secs = t0.elapsed().as_secs_f64();
+    let track = track(&dir);
+    let path: f64 = track
+        .windows(2)
+        .filter(|w| w[0].1 == w[1].1)
+        .map(|w| ((w[1].2 - w[0].2).powi(2) + (w[1].3 - w[0].3).powi(2)).sqrt())
+        .sum();
+    let last = track.last().map(|t| (t.2, t.3));
+    println!("walked {path:.0} m in {secs:.0} s, to {last:?}: {walked:?}");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    walked.expect("the long walk ends done");
+    assert!(path > 600.0, "a walk of over 600 m: {path:.0} m");
+    assert!(secs > 180.0, "longer than the old cap: {secs:.0} s");
 }
 
 /// Copies folder `from` into `to`, file by file.
