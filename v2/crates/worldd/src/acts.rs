@@ -317,6 +317,9 @@ struct Sight<'a> {
     context: BTreeMap<Id, (Id, usize, usize)>,
     /// Each run's walk in progress to a named point: its step, the point's node and the point's name (C34, #3599).
     walks: BTreeMap<Id, (usize, Id, Name)>,
+    /// Each run's walk in progress right before a sit into a slot the places hold: its step, the seat's floor and its
+    /// stand point on that floor (moved clear at registration when the entry's point is blocked).
+    sit_walks: BTreeMap<Id, (usize, Id, Vec3)>,
     planning: &'a RefCell<Planning>,
     map: Arc<Versions>,
 }
@@ -593,6 +596,11 @@ impl Geometry for Sight<'_> {
             return WalkPlan::Legs(Vec::new());
         };
         let at = self.on_shape(body, step, node).unwrap_or(at);
+        // A walk before a sit goes to the seat's own stand point, the one its sit is measured from.
+        let (node, at) = match self.sit_walks.get(&body) {
+            Some(&(at_step, floor, stand)) if at_step == step => (floor, stand),
+            _ => (node, at),
+        };
         let (node, at) = match self.area_floor(body, step, node, at) {
             Some(Some(on)) => on,
             // A building's area with no room or floor of its own to stand on: no way there, the body where it is.
@@ -924,8 +932,17 @@ impl Acts {
         let context = self.forms.planning_context();
         let walks = self.forms.walks();
         self.planning.borrow_mut().keep(&context);
+        let mut sit_walks = BTreeMap::new();
         let (controller, split, slots, map, questions) = match bodies {
             Some(b) => {
+                for (body, (step, node, slot)) in self.forms.seat_walks() {
+                    if let Some(p) = b.slots.place_in(node, slot)
+                        && let Ok(stand) = p.stand()
+                    {
+                        let y = p.point.y - p.place.height;
+                        sit_walks.insert(body, (step, p.floor, Vec3::new(stand.x, y, stand.z)));
+                    }
+                }
                 self.planning
                     .borrow_mut()
                     .receive(std::mem::take(&mut b.form_answers));
@@ -972,6 +989,7 @@ impl Acts {
             asked: RefCell::new(BTreeMap::new()),
             context,
             walks,
+            sit_walks,
             planning: &self.planning,
             map,
         };
