@@ -125,7 +125,9 @@ slot) with the stance the request named. Postures are the controller's stance in
 - **Reserved at commit.** One tick's requests are taken together and ordered by a stable key: the body's id, then the
   seat's. The first takes the seat. Each later request is refused `place-taken`, and the refusal names the holder. The
   hold is keyed by the seat's thing, so finding the holder is one lookup, never a scan.
-- **A seat above standing reach is refused** `place-out-of-reach`. Its height alone is compared with the move's reach.
+- **A seat above standing reach is refused** `place-out-of-reach`. Its height alone is compared with the body's
+  standing reach: 2.06 m for the standard 1.75 m body, scaled by the admitted build's height, unscaled for a hovering
+  body (`sim::slots::standing_reach`, today's SEATDEF). The move's own reach is horizontal, to the seat's stand point.
 - **A seated body has no timer and no mover.** A driver with no timer holds its legs and its stance, and the
   controller keeps it apart from the bodies it steps, so a tick never visits it.
 - **The engine releases the seat, never the skill.** It does so when the holder rises (at the rise's contact), and
