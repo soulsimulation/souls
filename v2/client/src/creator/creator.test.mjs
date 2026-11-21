@@ -123,6 +123,11 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(opsOf('hours', ['aa-3', '--open', '09:00-13:00@sat,sun']), [{ op: 'set', node: 'aa-3', field: 81, value: [[2, 96, 9 * 3_600_000_000, 13 * 3_600_000_000]] }]);
   assert.deepEqual(opsOf('hours', ['aa-3', '--closed']), [{ op: 'set', node: 'aa-3', field: 81, value: [] }]);
   assert.throws(() => opsOf('hours', ['aa-3']), /hours <id> --open/);
+  // A creator's look is G10's shot of a place, thing or Soul by name or id; its usage is checked before anything runs.
+  assert.deepEqual(requestOf(['look', 'market', '--out', 'm.jpg', '--size', '640x360']), { look: ['market', '--out', 'm.jpg', '--size', '640x360'], creator: undefined });
+  assert.throws(() => requestOf(['look']), (e) => e.code === 'usage');
+  assert.throws(() => requestOf(['look', 'market', '--out', 'm.gif']), /png or .jpg/);
+  assert.throws(() => requestOf(['look', 'picture', 'f.png']), /look <place/);
   // #3695: the world's verbs go to the daemon as words; it makes their sets on the world node from its copy.
   assert.deepEqual(requestOf(['weather', '--kind', 'storm', '--minutes', '30']).req, { op: 'edit', world: { verb: 'weather', kind: 'storm', minutes: '30' } });
   assert.deepEqual(requestOf(['check', 'strike', '12,-4']).req, { op: 'check', world: { verb: 'strike', at: '12,-4' } });

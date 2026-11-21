@@ -52,6 +52,9 @@
 //   souls-god.mjs taxonomy                       categories with counts, and what kinds offer (the --has names)
 //                                                these four read the world's kinds in the home; no daemon, no server;
 //                                                --lines prints them as lines instead of JSON
+//   souls-god.mjs look <place|thing|soul|id> [--eyes] [--out f.png|.jpg] [--size WxH] [--page <url>]
+//                                                a picture of it, drawn here from the public stream (souls.mjs shoot);
+//                                                with no browser here, the copy's words for it instead
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
 //   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
 //                                                these two ask the world's directory, with the creator's token
@@ -71,6 +74,7 @@ import { findHome, readSeat, soulsWithTokens, worldsOf } from '../home/home.mjs'
 import { answer as libraryAnswer, libraryOf } from './catalog.mjs';
 import { worldOf } from '../cli/souls.mjs';
 import { F_HOURS, hoursRows } from '../schedule/hours.mjs';
+import { parseShoot, runShoot } from '../shoot/shoot.mjs';
 
 export const VERBS = [
   'access',
@@ -83,6 +87,7 @@ export const VERBS = [
   'hours',
   'land',
   'layers',
+  'look',
   'move',
   'own',
   'pair',
@@ -255,6 +260,13 @@ export function requestOf(argv) {
   if (!VERBS.includes(verb)) throw Object.assign(new Error(`one of ${VERBS.join(', ')}`), { code: 'unknown-command' });
   if (verb === 'pair') return { pair: rest[0], creator };
   if (LIBRARY.has(verb)) return { library: verb, args: rest, creator };
+  // A creator's look (#3699 reads; today's `look --at <ref>`): G10's shot, checked here so a usage is answered at once.
+  if (verb === 'look') {
+    const how = 'look <place|thing|soul|id> [--eyes] [--out f.png|.jpg] [--size WxH] [--page <url>]';
+    if (rest[0] === 'picture') throw usage(how);
+    try { parseShoot(rest); } catch (e) { throw usage(e.message.startsWith('shoot <') || /needs a value|unknown/.test(e.message) ? how : e.message); }
+    return { look: rest, creator };
+  }
   if (verb === 'welcome') {
     if (rest.length > 1) throw usage("welcome '<words>': quote the words as one argument");
     return { directory: '/v1/worlds/welcome', body: { welcome: rest[0] ?? '' }, creator };
@@ -639,6 +651,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const asked = requestOf(process.argv.slice(2));
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
     if (asked.pair !== undefined) { out(await pairing(home, asked.pair, asked.creator)); process.exit(0); }
+    if (asked.look) {
+      // The picture needs no creator; the words without a browser come from the creator's daemon when there is one.
+      const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
+      const who = asked.creator ?? (creators.length === 1 ? creators[0] : null);
+      const ask = who ? (r) => call(home, who, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
+      out(await runShoot(asked.look, { home, env: process.env, ask }));
+      process.exit(0);
+    }
     const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
     const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
     if (asked.library) {
