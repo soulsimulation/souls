@@ -3352,8 +3352,9 @@ fn served_steps(at: &str, tag: &str, cases: &[Step]) -> Vec<String> {
 /// L46 (#3715) A1: tea, coffee and eating on a served full Eden. In a cottage's kitchen a Soul takes a bowl from the
 /// table and eats from it, turns the sink's tap on, washes the bowl and turns it off, and switches the stove on and
 /// off. At the café it takes the kettle; there is no sink in the café to fill it at, as today's game finds no tap near
-/// it, so the fill has nothing to fill from (refused `thing.none-selected`, #3914). Carried to the cottage's kitchen, the kettle fills at the sink, the fill
-/// choosing the nearest sink in the building itself, and switches on. Eden has no cup to pour it into (left open).
+/// it, so the fill has nothing to fill from (refused `thing.none-selected`, #3914). Carried to the cottage's kitchen,
+/// the kettle fills at the sink, the fill choosing the nearest sink in the building itself, and switches on. Eden has
+/// no cup to pour it into (left open; refused `thing.none-selected`).
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn l46_tea_coffee_and_eating() {
