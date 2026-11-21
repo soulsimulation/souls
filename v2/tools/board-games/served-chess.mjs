@@ -177,8 +177,17 @@ try {
   assert.equal(illegal.answer, 2, 'e1e3 is refused');
   assert.equal(illegal.reason, 'hatch-said-no', 'by name');
   assert.equal((await move(A, 'move_white', 'g1', 'f3')).answer, 1, 'Ng1f3');
-  await pause(3000);
-  say(`after e4 e5 Nf3, B's inspect: ${JSON.stringify(await B.cli('inspect', table.id)).slice(0, 3000)}`);
+  // Each copy reads the board the world wrote: the knight on f3 (21, a knight 2), e4 and e5 pawns, black to move.
+  for (const s of [A, B]) {
+    let last = null;
+    const got = await waitFor(`the knight on f3 in ${s.label}'s copy`, async () => {
+      const r = await s.cli('look', '--limit', '1');
+      last = (await s.cli('inspect', table.id)).state;
+      const t = JSON.stringify(last ?? {});
+      return /\{"square":21,"piece":2\}/.test(t) && /\{"square":36,"piece":9\}/.test(t) && r && last;
+    }, 60_000).catch((e) => { console.log(`${s.label}'s copy: ${JSON.stringify(last)}`); throw e; });
+    say(`after e4 e5 Nf3, ${s.label}'s copy: ${JSON.stringify(got)}`);
+  }
   const seen = await waitFor('the table in the public stream', () => nodes.get(pageKey), 30_000)
     .catch((e) => { console.log(`stream: ${nodes.size} nodes, errors ${JSON.stringify(errors)}, e.g. ${[...nodes.keys()].slice(0, 5)}, ${[...nodes.keys()].filter((k) => k.includes('5742'))}`); throw e; });
   say(`the table in the public stream (the page's worker): ${JSON.stringify(seen, (k, v) => (typeof v === 'bigint' ? String(v) : v)).slice(0, 3000)}`);
@@ -187,3 +196,5 @@ try {
 } finally {
   await cleanup();
 }
+// The worker's stream and timers keep the loop alive; the run is over.
+process.exit(0);
