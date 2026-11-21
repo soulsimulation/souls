@@ -3,8 +3,8 @@
   "kind": "eden:candle_mold_bench",
   "owner": "thing",
   "state": {
-    "wax": { "n": 1, "type": "int", "unit": "count", "default": 6, "min": 0, "max": 6, "audience": { "rule": "everyone" } },
-    "wicks": { "n": 2, "type": "int", "unit": "count", "default": 6, "min": 0, "max": 6, "audience": { "rule": "everyone" } }
+    "wax": { "n": 28, "type": "int", "unit": "count", "default": 6, "min": 0, "max": 6, "audience": { "rule": "everyone" } },
+    "wicks": { "n": 29, "type": "int", "unit": "count", "default": 6, "min": 0, "max": 6, "audience": { "rule": "everyone" } }
   },
   "points": {
     "stand": { "role": "stand", "at_mm": [0, 0, 700], "yaw_mdeg": 180000 },

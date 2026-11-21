@@ -13,7 +13,7 @@
 // with the WASM replica), from the world's `views/world.json` as the page resolves a placed world.
 //
 //   (a) the public stream carries both bodies, the said sentence and not the whisper's words (in no part and in no
-//       public file), a `souls:form-move` for the wave, and body motion: changing positions on the walk and a slot
+//       public file), a private conversation's turn as who spoke, when and among whom, never its words (#3775), a `souls:form-move` for the wave, and body motion: changing positions on the walk and a slot
 //       hand-off on the sit;
 //   (b) A's copy holds the world's kind entries after pairing, and `can wave:<A's body>` answers yes;
 //   (c) the malformed word is refused by name, and the world then restarts cleanly on the same folder;
@@ -23,7 +23,6 @@
 // fails, and the run prints `PENDING #<issue>: <what> (expected failure: <why>)` and goes on: never a silent skip. When
 // it passes, the test FAILS with `PENDING #<issue> now passes: remove its marker`, so the fix's PR removes the marker
 // in the same change and the assertion is required from then on.
-//   #3799 (viewers never see Souls move): the motion assertions in (a) and the body positions in (d).
 //   #3772 (a Soul's body runs its family's forms, E21 #2791): the wave's `souls:form-move` in (a) and `can wave` in (b).
 //
 // Fake minds, isolated folders under the OS temp dir, no fixed sleeps (each wait is on an event, bounded as a failure
@@ -61,7 +60,6 @@ registerHooks({ resolve: (s, c, next) => (s === 'replica' ? { url: replicaUrl, s
 
 // ---- Pending markers ---------------------------------------------------------------------------------------------
 const PENDING = {
-  3799: 'viewers never see Souls move: body motion is never published to the public stream',
   3772: "a Soul's body has no forms: its family's wave is refused and writes no souls:form-move",
 };
 const pendingReport = [];
@@ -249,6 +247,21 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
       return s.seen.find((e) => e.sequence === sequence);
     }, ms);
   }
+  /** The first event of `s`'s daemon that `pred` holds of; answers read on the way are kept for `answered`. */
+  async function event(s, what, pred, ms = 30_000) {
+    s.seen ??= [], s.other ??= [];
+    return waitFor(what, async () => {
+      for (const e of (await request(s.rt.socket, { op: 'read' })).events) (e.kind === 'answer' ? s.seen : s.other).push(e);
+      return s.other.find(pred);
+    }, ms);
+  }
+  /** Sends a CLI command and waits for the world's answer to each intent it sent. */
+  async function sent(s, ...words) {
+    const r = await s.cli(...words);
+    assert.equal(r.ok, true, `${s.label} ${words.join(' ')}: ${JSON.stringify(r)}`);
+    const seqs = Array.isArray(r.sent) ? r.sent.map((x) => x.sequence) : [r.sequence];
+    return Promise.all(seqs.map((q) => answered(s, q)));
+  }
   async function act(s, ...words) {
     const r = await s.cli('act', ...words);
     assert.equal(r.ok, true, `${s.label} act ${words.join(' ')}: ${JSON.stringify(r)}`);
@@ -287,6 +300,16 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const can = await A.cli('can', `wave:${meA}`);
   await pending(3772, '(b) `can wave:<me>` answers yes from the copy', () => assert.equal(can.can ?? can.answer ?? can.verdict, 'yes', JSON.stringify(can)));
 
+  // #3775: a private conversation. A offers B one where they stand (a seat admits no conversation), B accepts and
+  // takes a private turn.
+  const hidden = 'the boat leaves at the second bell';
+  const offer = await sent(A, 'converse', 'start', meB);
+  assert.ok(offer.every(accepted), `the offer lands: ${JSON.stringify(offer)}`);
+  const invite = await event(B, "B's invitation", (e) => e.kind === 'conversation' && e.what === 'invited');
+  assert.ok((await sent(B, 'converse', 'accept', invite.conversation)).every(accepted), 'the accept lands');
+  assert.ok((await sent(B, 'converse', 'say', invite.conversation, hidden, '--private')).every(accepted), 'the private turn lands');
+  stage('private turn answered');
+
   // The acts. A walks to the bench and sits on it.
   const bench = (await A.cli('find', 'bench')).found.find((r) => r.kind?.startsWith('eden:bench'));
   assert.ok(bench, 'the bench is found by its words');
@@ -321,9 +344,18 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   assert.ok(heard, '(a) the said sentence reached the page');
   assert.equal(heard.speaker, pageKey(meA), '(a) said by A\'s body');
   assert.ok(!v1.parts.some((p) => (p.said ?? []).some((s) => s.words?.includes('third stone'))), '(a) the whisper is in no part the page played');
+  // #3775: the private turn reaches the page as its record: B spoke, among A and B, with no words.
+  const record = await waitFor('the private turn\'s record in the public stream', () => v1.parts.flatMap((p) => p.said ?? []).find((s) => s.private) || v1.errors.length, 20_000);
+  assert.deepEqual(v1.errors, []);
+  assert.equal(record.speaker, pageKey(meB), '#3775: said by B');
+  assert.equal(record.private.conversation, pageKey(invite.conversation), '#3775: in the conversation');
+  assert.deepEqual([...record.private.members].sort(), [pageKey(meA), pageKey(meB)].sort(), '#3775: among A and B');
+  assert.equal(record.words, null, '#3775: no words');
+  assert.ok(!v1.parts.some((p) => (p.said ?? []).some((s) => s.words?.includes('second bell'))), '#3775: the private words are in no part the page played');
   const publicFiles = (root) => existsSync(root) ? readdirSync(root, { recursive: true }).map((f) => join(root, f)).filter((f) => statSync(f).isFile()) : [];
   for (const f of [...publicFiles(join(world, 'views')), ...publicFiles(join(world, 'history'))]) {
     assert.ok(!readFileSync(f).includes(Buffer.from('third stone')), `(a) the whisper's words are in no public file: ${f.slice(world.length)}`);
+    assert.ok(!readFileSync(f).includes(Buffer.from('second bell')), `#3775: the private words are in no public file: ${f.slice(world.length)}`);
   }
 
   // (a) The wave's move record, from the body's family.
@@ -334,13 +366,11 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
 
   // (a) Body motion: positions change on the walk, and the sit hands the body off to the bench's slot.
   const a = pageKey(meA), benchKey = pageKey(bench.id);
-  await pending(3799, '(a) the walk publishes changing positions and the sit a slot hand-off to the bench', async () => {
-    const seen = v1.parts.slice(fromPart).flatMap((p) => p.samples.filter((s) => s[0] === a).map((s) => s.slice(4).join(',')));
-    assert.ok(new Set(seen).size >= 3, `A's body moved through at least three positions on the walk: ${seen.length} samples, ${new Set(seen).size} distinct`);
-    const seat = v1.parts.slice(fromPart).flatMap((p) => p.samples.filter((s) => s[0] === a && s[1] === benchKey && s[2] !== null));
-    assert.ok(seat.length >= 1, 'a sample hands A\'s body to a bench slot');
-    await waitFor("A's body on the bench", () => v1.nodes.get(a)?.parent === benchKey && v1.nodes.get(a)?.slot !== null, 5_000);
-  });
+  const seen = v1.parts.slice(fromPart).flatMap((p) => p.samples.filter((s) => s[0] === a).map((s) => s.slice(4).join(',')));
+  assert.ok(new Set(seen).size >= 3, `(a) A's body moved through at least three positions on the walk: ${seen.length} samples, ${new Set(seen).size} distinct`);
+  const seat = v1.parts.slice(fromPart).flatMap((p) => p.samples.filter((s) => s[0] === a && s[1] === benchKey && s[2] !== null));
+  assert.ok(seat.length >= 1, '(a) a sample hands A\'s body to a bench slot');
+  await waitFor("A's body on the bench", () => v1.nodes.get(a)?.parent === benchKey && v1.nodes.get(a)?.slot !== null, 5_000);
 
   // (c) The world restarts cleanly on the same folder, after the malformed word.
   const before = new Map(v1.bodies().map((n) => [n.id, { parent: n.parent, slot: n.slot, pos: n.pos }]));
@@ -365,11 +395,9 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   assert.deepEqual([...afterRestart.keys()].sort(), [...before.keys()].sort(), '(d) the same bodies after the restart');
   const where = (m) => JSON.stringify([...m].sort().map(([id, b]) => [id, b.parent, b.slot, b.pos]));
   console.log(`e2e: bodies before the restart ${where(before)}; after ${where(afterRestart)}`);
-  // A seat is a motion frame (the bench's slot), so the sit itself shows only with #3799's samples.
-  await pending(3799, '(d) each body is where the stream had it before the restart, A seated on the bench', () => {
-    assert.equal(where(afterRestart), where(before));
-    assert.equal(afterRestart.get(a).parent, benchKey);
-  });
+  // A seat is a motion frame (the bench's slot): the sit shows through #3799's samples.
+  assert.equal(where(afterRestart), where(before), '(d) each body is where the stream had it before the restart');
+  assert.equal(afterRestart.get(a).parent, benchKey, '(d) A seated on the bench');
 
   // (d) The stream goes on: a client reconnects and a new say reaches the new viewer.
   await waitFor('A\'s daemon to reconnect', async () => (await request(A.rt.socket, { op: 'status' }).catch(() => null))?.connected, 30_000);

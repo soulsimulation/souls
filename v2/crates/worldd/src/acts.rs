@@ -174,6 +174,29 @@ impl Walk {
     }
 }
 
+/// Whether slot argument `key` of form `f` is the body's own place: a `select` of free slots that a `sit` or `lie` step
+/// takes, or that an effect reparents the actor into (#3802).
+fn selects_body_slot(f: &Json, key: &str) -> bool {
+    let arg = |v: Option<&Json>| v.and_then(|v| v.get("arg")).and_then(Json::str) == Some(key);
+    let take = f.get("takes").and_then(|t| t.get(key));
+    let selects = take.and_then(|t| t.get("type")).and_then(Json::str) == Some("slot")
+        && take
+            .and_then(|t| t.get("select"))
+            .and_then(|s| s.get("of"))
+            .and_then(Json::str)
+            == Some("free_slots");
+    let steps = f.get("steps").and_then(Json::arr).unwrap_or(&[]);
+    let effects = f.get("effects").and_then(Json::arr).unwrap_or(&[]);
+    selects
+        && (steps.iter().any(|s| {
+            matches!(s.get("step").and_then(Json::str), Some("sit" | "lie")) && arg(s.get("slot"))
+        }) || effects.iter().any(|e| {
+            e.get("change").and_then(Json::str) == Some("reparent")
+                && e.get("what").and_then(Json::str) == Some("actor")
+                && arg(e.get("into"))
+        }))
+}
+
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
         name,
@@ -292,6 +315,8 @@ struct Sight<'a> {
     /// and its leg's end, x and z µm.
     asked: RefCell<BTreeMap<Id, Way>>,
     context: BTreeMap<Id, (Id, usize, usize)>,
+    /// Each run's walk in progress to a named point: its step, the point's node and the point's name (C34, #3599).
+    walks: BTreeMap<Id, (usize, Id, Name)>,
     planning: &'a RefCell<Planning>,
     map: Arc<Versions>,
 }
@@ -346,6 +371,68 @@ impl Sight<'_> {
             }
         }
         None
+    }
+
+    /// A walk to a building's named area, resolved onto the building's own room and floor (C34, #3599). `body`'s run
+    /// walks, at step `step`, to point `at` of node `node`'s frame, a point its entry names as an `areas` entry of a
+    /// thing on `node` that has floors: the area is the thing's room of that name, on that room's floor (a lantern room
+    /// four floors up, whatever height the kind's area gives), else the thing's only floor; the point is carried into
+    /// the floor's frame (the thing's), at the room's height. `Some(None)` when the thing has floors and none is the
+    /// area's; `None` for any other walk, planned as before. No floor is chosen by nearness.
+    fn area_floor(&self, body: Id, step: usize, node: Id, at: Vec3) -> Option<Option<(Id, Vec3)>> {
+        use import_eden::{F_ORIGIN, FLOOR, ROOM};
+        let &(at_step, thing, ref point) = self.walks.get(&body)?;
+        if at_step != step {
+            return None;
+        }
+        let th = self.tree.handle(thing)?;
+        let n = self.tree.node(th)?;
+        if n.parent() != Some(node) {
+            return None;
+        }
+        self.kinds
+            .get(plain(n.kind()))?
+            .get("areas")?
+            .get(point.as_str())?;
+        let place = n.place()?;
+        let floors: Vec<_> = self
+            .tree
+            .children(th)?
+            .iter()
+            .filter_map(|&c| self.tree.node(c))
+            .filter(|f| plain(f.kind()) == FLOOR)
+            .collect();
+        if floors.is_empty() {
+            return None;
+        }
+        // The room the area names: its origin is `<thing>/<area>` (an area's `_` is a room id's `-`).
+        let names = [point.as_str().to_owned(), point.as_str().replace('_', "-")];
+        let room = floors.iter().find_map(|f| {
+            self.tree
+                .children(self.tree.handle(f.id())?)?
+                .iter()
+                .filter_map(|&c| self.tree.node(c))
+                .filter(|r| plain(r.kind()) == ROOM)
+                .find(|r| match r.fields().get(&F_ORIGIN) {
+                    Some(replica::encode::Value::Bytes(o)) => names
+                        .iter()
+                        .any(|nm| o.ends_with(format!("/{nm}").as_bytes())),
+                    _ => false,
+                })
+                .map(|r| (f.id(), r.place().map(|p| p.position.y)))
+        });
+        let (floor, y) = match room {
+            Some((floor, y)) => (floor, y),
+            None if floors.len() == 1 => (floors[0].id(), None),
+            None => return Some(None),
+        };
+        let [w, x, yq, z] = place.orientation.parts();
+        let back = replica::pose::Quat::new(w, -x, -yq, -z).ok()?;
+        let local = back.rotate(at.minus(place.position).ok()?).ok()?;
+        Some(Some((
+            floor,
+            Vec3::new(local.x, y.unwrap_or(local.y), local.z),
+        )))
     }
 }
 
@@ -413,6 +500,12 @@ impl Geometry for Sight<'_> {
         };
         let Some(me) = self.bodies.get(&body) else {
             return WalkPlan::Legs(Vec::new());
+        };
+        let (node, at) = match self.area_floor(body, step, node, at) {
+            Some(Some(on)) => on,
+            // A building's area with no room or floor of its own to stand on: no way there, the body where it is.
+            Some(None) => return WalkPlan::Legs(Vec::new()),
+            None => (node, at),
         };
         let mut planning = self.planning.borrow_mut();
         match planning.ask(key, *me, FormQuery::Walk { node, at, reach }, &self.map) {
@@ -497,7 +590,19 @@ impl Sight<'_> {
         self.with_view(body, |view| {
             let n = self.tree.node(self.tree.handle(target)?)?;
             let entry = self.kinds.get(plain(n.kind()))?;
+            // A body on one of the thing's own floors (inside a greenhouse, C34 #3599) is in the thing's frame: a floor
+            // is placed at its building's origin. Carried up the tree, the point would land on the ground cut out under it.
+            let own_floor = self
+                .tree
+                .handle(floor)
+                .and_then(|h| self.tree.node(h))
+                .is_some_and(|f| {
+                    f.parent() == Some(target) && f.place().is_none_or(|p| p.position == Vec3::ZERO)
+                });
             let on = |p: Vec3| {
+                if own_floor {
+                    return Some([p.x, p.z]);
+                }
                 view.on_floor(target, p)
                     .filter(|(f, ..)| *f == floor)
                     .map(|(_, p, _)| [p.x, p.z])
@@ -725,6 +830,7 @@ impl Acts {
         f: impl FnOnce(&mut Forms, &mut World<'_, Sight<'_>, Sight<'_>>) -> T,
     ) -> T {
         let context = self.forms.planning_context();
+        let walks = self.forms.walks();
         self.planning.borrow_mut().keep(&context);
         let (controller, split, slots, map, questions) = match bodies {
             Some(b) => {
@@ -773,6 +879,7 @@ impl Acts {
             toward: &self.toward,
             asked: RefCell::new(BTreeMap::new()),
             context,
+            walks,
             planning: &self.planning,
             map,
         };
@@ -850,6 +957,50 @@ impl Acts {
                 first.get_or_insert(refusal("arg-ambiguous", key));
                 continue;
             }
+            // A body's slot the caller left out, which the form selects from the thing's free slots, is the free one
+            // whose stand point is nearest the body (C19's pick); a thing with none free is refused by name (#3802).
+            // One the caller named that another body holds is refused `place-taken`, also before any walk.
+            let (mut picked, mut none_free, mut taken) = (false, None, None);
+            if let (Some(b), Some(f)) = (
+                bodies.as_deref().filter(|b| b.slots.place(*node).is_some()),
+                entry.get("forms").and_then(|f| f.get(form)),
+            ) {
+                let names = entry.get("slots").and_then(Json::obj).unwrap_or(&[]);
+                for (key, _) in f.get("takes").and_then(Json::obj).unwrap_or(&[]) {
+                    if !selects_body_slot(f, key) {
+                        continue;
+                    }
+                    if let Some(skills::form_runner::Arg::Name(n)) = all.get(key) {
+                        let slot = names.iter().position(|(m, _)| m == n).map(|i| i as u64 + 1);
+                        if slot
+                            .and_then(|s| b.slots.holder_in(*node, s))
+                            .is_some_and(|h| h != body)
+                        {
+                            taken = Some(n.clone());
+                        }
+                        continue;
+                    }
+                    if all.contains_key(key) {
+                        continue;
+                    }
+                    let free = b.slots.free(&b.runner.controller, body, *node);
+                    match free.and_then(|s| names.get(usize::try_from(s).ok()?.checked_sub(1)?)) {
+                        Some((n, _)) => {
+                            all.insert(key.clone(), skills::form_runner::Arg::Name(n.clone()));
+                            picked = true;
+                        }
+                        None => none_free = Some(key.clone()),
+                    }
+                }
+            }
+            if let Some(name) = taken {
+                first.get_or_insert(refusal("place-taken", name));
+                continue;
+            }
+            if let Some(key) = none_free {
+                first.get_or_insert(refusal(sim::commit::bind::NONE_FREE, key));
+                continue;
+            }
             let incompatible = entry
                 .get("forms")
                 .and_then(|f| f.get(form))
@@ -877,6 +1028,11 @@ impl Acts {
                 first.get_or_insert(e);
                 continue;
             }
+            // A thing on a course away from its stop (a punt out on the water, #3603) is refused before any walk to it.
+            if let Some(Err(e)) = bodies.as_deref().map(|b| b.slots.boardable(*node, now)) {
+                first.get_or_insert(e);
+                continue;
+            }
             // The same complete arguments reach target resolution, step binding and effects.
             let (entry, thing) = match targets(entry, form, &all) {
                 Ok(t) => t,
@@ -895,7 +1051,11 @@ impl Acts {
             }
             let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
             let r = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
-                if args.things.is_empty() && args.slots.is_empty() && args.values.is_empty() {
+                if !picked
+                    && args.things.is_empty()
+                    && args.slots.is_empty()
+                    && args.values.is_empty()
+                {
                     return forms.commit(
                         w,
                         &audiences,

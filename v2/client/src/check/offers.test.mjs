@@ -2,6 +2,7 @@
 //   node --test v2/client/src/check/offers.test.mjs
 
 import { strict as assert } from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from './offers.mjs';
 import { argsOf, requestOf } from '../cli/souls.mjs';
@@ -74,4 +75,22 @@ test('A2: the thin command\'s inspect and object words', () => {
     { op: 'object', for: 'm1', this: ID, action: 'brush', args: ['cell=back_left', 'pattern=along'] });
   assert.deepEqual(argsOf(['{"grams":50,"pattern":"along"}']), ['grams=50', 'pattern=along'], 'today\'s params JSON');
   assert.equal(requestOf(['object', ID, 'fill', '{nope']).refused, 'object-params');
+});
+
+test('#3603: a thing moving on a course with seats offers its rider steer, stop and land, the engine\'s own verbs', () => {
+  const punt = JSON.parse(readFileSync(new URL('../../../../content/kinds/vehicles/rowing_punt.json', import.meta.url), 'utf8'));
+  const moored = offersOf(ID, punt, { moving: true });
+  assert.deepEqual(moored.map((o) => o.name), ['walk', 'sit', 'row', 'steer', 'stop', 'land']);
+  const [steer, stop, land] = moored.slice(3);
+  assert.equal(steer.act, `carrier:steer:${ID}`);
+  assert.equal(steer.usage, `act carrier:steer:${ID} x=<m> z=<m>`);
+  assert.equal(stop.usage, `act carrier:stop:${ID}`);
+  assert.equal(land.usage, `act carrier:land:${ID} [x=<m> z=<m>]`);
+  assert.ok([steer, stop, land].every((o) => o.who === 'rider' && !o.form), 'for a seated rider; no form of the kind');
+  assert.deepEqual(actWords(steer, ['x=-59.8', 'z=0']), [`carrier:steer:${ID}`, 'x=-59.8', 'z=0']);
+  assert.equal(offerNamed(moored, 'carrier:land')?.name, 'land', 'named by its namespaced verb');
+  assert.equal(offerNamed(moored, `carrier:stop:${ID}`)?.name, 'stop', 'or by its act word');
+  assert.deepEqual(offersOf(ID, punt).map((o) => o.name), ['walk', 'sit', 'row'], 'not moving: no steering');
+  assert.deepEqual(offersOf(ID, { ...garden, slots: { shelf: { admits: 'thing' } } }, { moving: true }).map((o) => o.name),
+    ['walk', 'brush', 'fill', 'rake'], 'a moving thing with no seat has no rider');
 });

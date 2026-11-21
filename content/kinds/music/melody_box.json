@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "step_1": {
-      "n": 1,
+      "n": 28,
       "type": "enum",
       "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
       "default": "c4",
@@ -13,7 +13,7 @@
       }
     },
     "step_2": {
-      "n": 2,
+      "n": 29,
       "type": "enum",
       "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
       "default": "e4",
@@ -22,7 +22,7 @@
       }
     },
     "step_3": {
-      "n": 3,
+      "n": 30,
       "type": "enum",
       "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
       "default": "g4",
@@ -31,7 +31,7 @@
       }
     },
     "step_4": {
-      "n": 4,
+      "n": 31,
       "type": "enum",
       "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
       "default": "c5",
@@ -40,7 +40,7 @@
       }
     },
     "step_5": {
-      "n": 5,
+      "n": 32,
       "type": "enum",
       "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
       "default": "g4",
@@ -49,7 +49,7 @@
       }
     },
     "step_6": {
-      "n": 6,
+      "n": 33,
       "type": "enum",
       "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
       "default": "e4",
@@ -58,7 +58,7 @@
       }
     },
     "step_7": {
-      "n": 7,
+      "n": 34,
       "type": "enum",
       "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
       "default": "c4",
@@ -67,7 +67,7 @@
       }
     },
     "step_8": {
-      "n": 8,
+      "n": 35,
       "type": "enum",
       "values": ["rest", "c4", "d4", "e4", "f4", "g4", "a4", "b4", "c5"],
       "default": "rest",
@@ -76,7 +76,7 @@
       }
     },
     "tempo": {
-      "n": 9,
+      "n": 36,
       "type": "enum",
       "values": ["bpm_60", "bpm_90", "bpm_120"],
       "default": "bpm_90",
@@ -85,7 +85,7 @@
       }
     },
     "playing": {
-      "n": 10,
+      "n": 37,
       "type": "bool",
       "default": false,
       "audience": {
@@ -93,7 +93,7 @@
       }
     },
     "winds": {
-      "n": 11,
+      "n": 38,
       "type": "int",
       "unit": "count",
       "default": 0,

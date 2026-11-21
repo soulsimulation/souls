@@ -22,6 +22,7 @@ import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
 import { mountOwnerBox } from '../owner/box.ts';
 import { arrive } from '../worlds/arrive.ts';
+import { mountArrival } from '../arrival/card.ts';
 import { WorldSky } from '../sky/sky.ts';
 import { tickWater } from '../water/water.ts';
 import { installNightLighting, nightPools, paintNightSources, setNightStrength } from './night.ts';
@@ -85,6 +86,8 @@ const sky = new WorldSky(scene, hemi, sun); // V19: sky, daylight and rain from 
 const cam = new FreeCamera(canvas);
 const world = new WorldView();
 scene.add(world.group);
+// #3603: the replica's courseAt, loaded on this thread only when a node with a course (a rowing punt) arrives.
+world.onCourse = () => void import('replica').then(async (r) => { await r.default(); world.courseAt = r.courseAt; }, (e) => console.warn('courses stand still:', e));
 const clock = new PlaybackClock();
 const things = pageThings(scene, world, new URLSearchParams(location.search));
 const fx = pageFx(scene, world, things, q, quality.tier === 'phone'); // C8: flames, fountain water and steam
@@ -118,9 +121,13 @@ resize();
 cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 
 const firstFrame = arrive(worldName, status);
+// #3780: today's arrival card, the world's name on black and a light that grows with the stream, until the first frame.
+const card = mountArrival(document, worldName ?? installed?.world ?? 'Souls', q.has('shot') || moment !== null);
+let arrived = false, failedWith = '';
 const live = (address: string) => new StreamSource(address).start({
-  pointer: (p) => (pointer = p),
+  pointer: (p) => ((pointer = p), card.reach('pointer')),
   snapshot: (snapshot) => {
+    card.reach('snapshot');
     const s = reconcileSnapshot(world.nodes.keys(), snapshot);
     world.apply(s.nodes, s.removed, []);
     sky.apply(s.nodes);
@@ -137,6 +144,7 @@ const live = (address: string) => new StreamSource(address).start({
     sound.part(p.nodes, p.removed, p.samples, p.happened ?? []);
     souls.apply(p);
     director.part(p);
+    card.reach('part');
     newestTo = p.to;
     played++;
     if (p.hash !== null) (hashes++, p.hash && hashesEqual++);
@@ -178,7 +186,7 @@ else if (worldName && !addressError) resolveWorld(worldName, new URLSearchParams
   (w) => ((worldHistory = w.history), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, stream: w.stream, worldHistory } }), live(w.stream)),
   (e) => (error = String(e)),
 );
-else status.textContent = addressError || 'no stream: open this page with ?stream=<the stream directory> or ?world=<name>';
+else card.fail(status.textContent = addressError || 'no stream: open this page with ?stream=<the stream directory> or ?world=<name>');
 
 const secs = (us: number) => (us / 1e6).toFixed(2);
 const clockText = (us: number) => {
@@ -209,6 +217,7 @@ renderer.setAnimationLoop((now) => {
   let drawn = 0;
   if (t !== null) {
     drawn = world.draw(t, cam.camera);
+    things.follow(); // #3603: what rides a course, where it is now
     hover.update(now, t);
     if (!framed && drawn > 0) {
       framed = true;
@@ -219,6 +228,8 @@ renderer.setAnimationLoop((now) => {
     }
   }
   renderer.render(scene, cam.camera);
+  if (!arrived && t !== null && world.nodes.size > 0) (arrived = true), card.reach('drawn');
+  else if (!arrived && error && error !== failedWith) card.fail(failedWith = error);
   const c = cam.camera, fwd = c.getWorldDirection(new THREE.Vector3());
   sound.frame(t, { pos: c.position.toArray(), forward: fwd.toArray(), up: c.up.toArray() });
   if (t !== null) souls.draw(t, cam.camera);

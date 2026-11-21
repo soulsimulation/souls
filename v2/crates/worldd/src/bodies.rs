@@ -32,6 +32,11 @@
 //!   ([`Bodies::add_body_at`]) and hands each that sat back into its seat ([`Bodies::seat_placed`], K18c #3176), so
 //!   the seat is held in the slots table again and a rise or another sit sees it.
 //!
+//! - **Seen moving** (#3799). After each step the world writes each body's motion on its node, as T4's samples: at
+//!   each hand-off (a start, a stop, a turn, a seat taken or left, a new floor) and every [`KEYFRAME_US`] while it
+//!   moves; a change of frame is a leave and an arrive inside the zone first. So the tree, interest and the public
+//!   stream follow the bodies ([`Bodies::motion`]).
+//!
 //! - **Who hears** (#3369). After each step of the controller the bodies call `sim::speech::heard`, which brings every
 //!   body's interest set up to date and gives each utterance the step started its hearers as they are then; the world
 //!   writes each as `sim::speech::entry` says ([`Bodies::heard`]).
@@ -55,11 +60,12 @@ use replica::intents::Intent;
 use replica::kinds::sizes::{Build, Size};
 use replica::move_check::{self, Seen, Verdict};
 use replica::moves::{Effector, Move};
-use replica::pose::Frame;
-use replica::pose::{Pose, Support, Vec3};
+use replica::pose::{Frame, HandOff, Owner, Pose, Support, Vec3};
 use replica::select::{self, Spot};
 use replica::speech::Said;
 use replica::time::Micros;
+use replica::tree::Tree;
+use replica::world_model::Audience;
 use sim::commit::bind::{Bound, Slot, bind};
 use sim::commit::spot;
 use sim::controller::Stance;
@@ -193,6 +199,8 @@ pub struct Bodies {
     took: BTreeMap<Id, (usize, Option<Id>)>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
     logged: BTreeMap<Id, Pose>,
+    /// Each body's motion as the world last wrote it to its node ([`Bodies::motion`]); read from the tree when absent.
+    shown: BTreeMap<Id, Shown>,
     /// The planner thread: route searches and reach distances, off the clock (K18b, #3175).
     planner: Thread,
     /// How long a tick waits for each of the planner's batches: `None` as long as it takes (lockstep, the default),
@@ -230,6 +238,68 @@ pub struct Bodies {
 /// Where the log last had each body: its pose, and its stance when that pose is in a seat's slot (K18, #3160;
 /// K18c, #3176). What a restart builds its bodies at.
 pub type Placed = BTreeMap<Id, (Pose, Option<Stance>)>;
+
+/// About how often a moving body's motion is written while nothing else about it changes (#3799): 200 ms of world
+/// time, counted in whole ticks.
+pub const KEYFRAME_US: Micros = 200_000;
+
+/// A body's motion as the world last wrote it on its node (#3799): its pose, its velocity and when.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Shown {
+    pose: Pose,
+    linear: Vec3,
+    at: Micros,
+    audience: Audience,
+}
+
+impl Shown {
+    /// What the tree holds of `body`'s motion: its place in its parent's frame, and its last sample's velocity and time.
+    fn of(tree: &Tree, body: Id) -> Option<Shown> {
+        let n = tree.node(tree.handle(body)?)?;
+        let place = n.place()?;
+        let pose = Pose {
+            frame: Frame {
+                node: n.parent()?,
+                slot: n.slot(),
+            },
+            position: place.position,
+            orientation: place.orientation,
+            support: place.support,
+        };
+        let (linear, at) = n
+            .moved()
+            .map_or((Vec3::ZERO, Micros::MIN), |m| (m.linear, m.at));
+        Some(Shown {
+            pose,
+            linear,
+            at,
+            audience: n.audience(),
+        })
+    }
+}
+
+/// One body's motion to write this tick (#3799): T4's sample on its node, after a change of parent to `to` when its
+/// frame changed (into a seat's slot, out of one, onto another floor).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sample {
+    pub audience: Audience,
+    pub to: Option<Pose>,
+    pub handoff: HandOff,
+}
+
+/// Whether the walk turned or changed pace between two velocities: on the ground plane, more than about 7 degrees
+/// of heading, or a speed outside three quarters to four thirds of the last.
+fn turned(a: Vec3, b: Vec3) -> bool {
+    let (ax, az, bx, bz) = (
+        i128::from(a.x),
+        i128::from(a.z),
+        i128::from(b.x),
+        i128::from(b.z),
+    );
+    let (dot, cross) = (ax * bx + az * bz, ax * bz - az * bx);
+    let (a2, b2) = (ax * ax + az * az, bx * bx + bz * bz);
+    dot <= 0 || cross * cross * 64 > dot * dot || b2 * 16 < a2 * 9 || b2 * 9 > a2 * 16
+}
 
 /// A body's row in a tick's part (K18's `answers::BODIES`): `[body, pose]`, or `[body, pose, stance]` in a seat
 /// (1 sit, 2 lie, 3 stand in a standing slot, #3598).
@@ -316,6 +386,7 @@ impl Bodies {
             ended: Vec::new(),
             took: BTreeMap::new(),
             logged: BTreeMap::new(),
+            shown: BTreeMap::new(),
             hearing: Hearing::new(),
             heard: Vec::new(),
             // A test world shortens the wind-down's clocks (seconds: wander, zombie, leg min, leg max, bound).
@@ -632,6 +703,74 @@ impl Bodies {
                 self.logged.insert(id, pose);
                 out.push((id, pose, stance));
             }
+        }
+        out
+    }
+
+    /// The bodies' motion to write on their nodes at this tick's end (#3799), in id order: a sample at each hand-off
+    /// (a start, a stop, a turn or change of pace, a change of frame or support, a still body set somewhere new), and
+    /// one at least every [`KEYFRAME_US`] of world time, in whole ticks, while a body moves. A still or seated body
+    /// writes nothing. Each is compared with what its node last had from here, read from `tree` when not kept (a
+    /// first tick, a restart), so a restart decides as the run it continues. A sample the world could not write is
+    /// still kept as written, so it is not tried again each tick. Pose and velocity only: no intent, target
+    /// or route. A body with no node in `tree` is left out.
+    pub fn motion(&mut self, tree: &Tree) -> Vec<Sample> {
+        let (at, tick) = (self.runner.now, self.runner.tick.max(1));
+        let every = (KEYFRAME_US + tick - 1) / tick * tick;
+        let c = &self.runner.controller;
+        let mut ids: Vec<Id> = c.ids().collect();
+        ids.sort_unstable();
+        let mut out = Vec::new();
+        for id in ids {
+            let Some(b) = c.body(id) else { continue };
+            let in_slot = b.pose.support == Support::Slot;
+            if !in_slot && !matches!(b.pose.support, Support::Surface { .. }) {
+                continue;
+            }
+            let Some(was) = self.shown.get(&id).copied().or_else(|| Shown::of(tree, id)) else {
+                continue;
+            };
+            let linear = if in_slot { Vec3::ZERO } else { b.linear };
+            let (moving, moved) = (linear != Vec3::ZERO, was.linear != Vec3::ZERO);
+            let frame = b.pose.frame != was.pose.frame;
+            let handoff = frame
+                || b.pose.support != was.pose.support
+                || moving != moved
+                || (moving && turned(was.linear, linear))
+                || (!moving && b.pose != was.pose);
+            let keyframe = moving && at.saturating_sub(was.at) >= every;
+            if !(handoff || keyframe) {
+                continue;
+            }
+            let owner = |s: Support| {
+                if s == Support::Slot {
+                    Owner::Slot
+                } else {
+                    Owner::Mover
+                }
+            };
+            self.shown.insert(
+                id,
+                Shown {
+                    pose: b.pose,
+                    linear,
+                    at,
+                    audience: was.audience,
+                },
+            );
+            out.push(Sample {
+                audience: was.audience,
+                to: frame.then_some(b.pose),
+                handoff: HandOff {
+                    node: id,
+                    at,
+                    from: owner(was.pose.support),
+                    to: owner(b.pose.support),
+                    pose: b.pose,
+                    linear,
+                    angular: Vec3::ZERO,
+                },
+            });
         }
         out
     }
@@ -1186,6 +1325,7 @@ impl Bodies {
         )?;
         let open = self.live.remove(&r.body).map(|(intent, _)| intent);
         self.logged.remove(&r.body);
+        self.shown.remove(&r.body);
         self.wind.remove(r.body);
         self.wind_moves.remove(&r.body);
         self.sleeping.remove(&r.body);
@@ -1464,5 +1604,183 @@ fn refusal(name: &'static str, node: Id) -> Refusal {
     Refusal {
         name,
         detail: replica::world_model::show(node),
+    }
+}
+
+#[cfg(test)]
+mod map_tests {
+    use super::*;
+    use replica::apply::Replica;
+    use replica::edit::{Edit, Op, Ref};
+    use replica::effects::{
+        Actor, Body as EffectBody, Cause, Change, ChangeRec, Effect, Envelope, Part, Rest,
+    };
+    use replica::encode::encode;
+    use replica::world_model::Audience;
+
+    #[test]
+    fn k18d_actual_live_edit_and_town_install_refuse_atomically() {
+        let mut imported = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
+        imported.rules.kinds.extend(
+            replica::world_model::parse_kinds(&format!(
+                "{{1: \"souls:place\", 2: \"place\", 11: [\"{}\"]}}",
+                import_eden::GROUND,
+            ))
+            .unwrap(),
+        );
+        let root = imported.nodes["world"];
+        let ground = imported.nodes["ground"];
+        let floor = imported.nodes["building/floor-0"];
+        let door = imported.nodes["door-building-narrow"];
+        let rules = imported.rules;
+        let header = import_eden::header(root, &rules).unwrap();
+        let version = imported.tree.next();
+        let mut live = Replica::restored(header.clone(), imported.tree, version);
+        let town = Town::new(
+            live.tree().frozen(),
+            ground,
+            sim::links::Doors::new(header, rules.clone(), version),
+        )
+        .unwrap();
+        let mut bodies = Bodies::new(town, 50_000).unwrap();
+        let creator = Id::new(Scope([0x95; 16]), 1).unwrap();
+        let world = replica::edit::World {
+            creator,
+            kinds: rules.kinds,
+        };
+        let edit = Edit {
+            intent: Id::new(Scope([0x95; 16]), 2).unwrap(),
+            actor: Actor::Creator(creator),
+            planned: live.version(),
+            ops: vec![Op::Set {
+                node: Ref::Node(floor),
+                field: import_eden::F_STAIRS,
+                to: Value::Array(Vec::new()),
+            }],
+        };
+        let checked = replica::edit::check(edit, &live, &world).unwrap();
+        let planned =
+            sim::edit::plan_on(checked, &live, &sim::edit::safety::Known::of(&bodies.town))
+                .unwrap();
+        let minter = Minter::new(Scope([0x95; 16]));
+        let source = crate::buildsafe::MapBasis {
+            version: live.version(),
+            ground,
+            stamp: Arc::clone(&bodies.form_map),
+            basis: bodies.town.basis(),
+        };
+        let mut invalid =
+            crate::buildsafe::PreparedMaps::prepare(&live, &planned, minter.clone(), &[], &source)
+                .unwrap();
+        let refused =
+            crate::buildsafe::PreparedMaps::prepare(&live, &planned, minter.clone(), &[], &source)
+                .unwrap();
+        let stale =
+            crate::buildsafe::PreparedMaps::prepare(&live, &planned, minter.clone(), &[], &source)
+                .unwrap();
+        let mut bad = (*invalid.part).clone();
+        let EffectBody::Changes(changes) = &mut bad.effects[0].body else {
+            unreachable!()
+        };
+        changes[0].change = Change::Set {
+            node: Id::new(Scope([0x96; 16]), 999).unwrap(),
+            field: 99,
+            to: Value::Uint(1),
+            by: None,
+        };
+        invalid.part = Arc::new(Part::read(&encode(&bad.to_value()).unwrap()).unwrap());
+
+        // Independent runtime state changes after preparation, without changing the map's geometry identity.
+        let link = replica::effects::read_id(
+            &bodies
+                .town
+                .tree
+                .node(bodies.town.tree.handle(door).unwrap())
+                .unwrap()
+                .fields()[&sim::ground::scene::F_OPEN_DOOR_LINK],
+        )
+        .unwrap();
+        bodies
+            .town
+            .doors
+            .ask(door, link, Cause::World, Actor::Creator(creator));
+        bodies.town.doors.flush(&mut bodies.town.tree, 0).unwrap();
+        let live_before = live.tree().to_state();
+        let town_before = bodies.town.tree.to_state();
+        let stamp_before = Arc::clone(&bodies.form_map);
+        let called = std::cell::Cell::new(false);
+        let mut reserved = minter.clone();
+        assert!(
+            bodies
+                .commit_map(invalid, || {
+                    called.set(true);
+                    sim::edit::commit(&mut live, &mut reserved, &planned, &[], 0)
+                })
+                .is_err()
+        );
+        assert!(!called.get());
+        assert_eq!(live.tree().to_state(), live_before);
+        assert_eq!(bodies.town.tree.to_state(), town_before);
+        assert!(Arc::ptr_eq(&bodies.form_map, &stamp_before));
+        assert_eq!(bodies.planner.pending(), 0);
+
+        // A real concurrent live write changes the read stamp; the real edit's confirm refuses after staging.
+        let effect = Effect {
+            envelope: Envelope {
+                sequence: live.version(),
+                at: 0,
+                cause: Cause::World,
+                actor: Actor::Creator(creator),
+                audience: Audience::Everyone,
+                node: floor,
+            },
+            body: EffectBody::Changes(vec![ChangeRec {
+                change: Change::Set {
+                    node: floor,
+                    field: 99,
+                    to: Value::Uint(1),
+                    by: None,
+                },
+                rest: Rest::new(),
+            }]),
+            events: None,
+            rest: Rest::new(),
+        };
+        sim::commit::write(&mut live, &[effect]).unwrap();
+        let changed_live = live.tree().to_state();
+        let mut reserved = minter.clone();
+        let error = bodies
+            .commit_map(refused, || {
+                sim::edit::commit(&mut live, &mut reserved, &planned, &[], 0)
+            })
+            .unwrap_err();
+        assert_eq!(error.name, "edit.stale");
+        assert_eq!(live.tree().to_state(), changed_live);
+        assert_eq!(bodies.town.tree.to_state(), town_before);
+        assert!(Arc::ptr_eq(&bodies.form_map, &stamp_before));
+        assert_eq!(bodies.planner.pending(), 0);
+        assert_eq!(
+            bodies
+                .town
+                .tree
+                .node(bodies.town.tree.handle(door).unwrap())
+                .unwrap()
+                .fields()[&sim::links::F_OPEN],
+            Value::Uint(1)
+        );
+
+        bodies.form_map = Arc::new(bodies.town.versions.clone());
+        let mut reserved = minter;
+        let error = bodies
+            .commit_map(stale, || {
+                sim::edit::commit(&mut live, &mut reserved, &planned, &[], 0)
+            })
+            .unwrap_err();
+        assert_eq!(error.name, "edit.stale");
+        assert_eq!(live.tree().to_state(), changed_live);
+        assert_eq!(bodies.town.tree.to_state(), town_before);
+        println!(
+            "K18d: invalid staged part, real live edit.stale and obsolete map identity leave both trees/map/worker unchanged; independently opened door preserved"
+        );
     }
 }

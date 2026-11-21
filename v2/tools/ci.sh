@@ -105,8 +105,8 @@ step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test w
 step body-presets bash -c 'node tools/import-body/prepare.mjs --out .local/ci-body-assets --test'
 # The words path (V1b, #3361): a local world's said sentence, and a body's name and description, through the page's
 # worker within the stream's lag; a whisper in no public file (web/src/source/words.test.ts). A still world is drawn
-# at once and kept live (V5b, web/src/source/still.test.ts).
-step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts web/src/source/still.test.ts web/src/source/continuity.test.ts web/src/worlds/worlds.test.ts'
+# at once and kept live (V5b, web/src/source/still.test.ts). A node on a course moves at world time (#3603).
+step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts web/src/source/still.test.ts web/src/source/continuity.test.ts web/src/worlds/worlds.test.ts web/src/draw/course.test.ts'
 
 }
 wasm_goldens() {

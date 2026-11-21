@@ -40,6 +40,8 @@ export function solidBoxes(n: NodeRec, ground: ((x: number, z: number) => number
 
 export type PageThings = {
   layer: ThingLayer | null; apply(nodes: NodeRec[], removed: string[]): void; update(eye: THREE.Vector3): void;
+  /** #3603: moves what rides a course to where the world view has it at the drawn time; call after `world.draw`. */
+  follow(): void;
   /** C10: the world time drawn and the sky's record then, for the lit windows' share by local hour (today's
    *  `setWindowLife`); until it is called, today's 0.6 of the rooms are lit at night. */
   night(t: number | null, record: SkyRecord | null): void;
@@ -53,7 +55,7 @@ export function windowLife(t: number | null, record: SkyRecord | null): void {
 /** The page's things, from its parameters; none (the world view's boxes stay) when no `models` root is given. */
 export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams): PageThings {
   const root = params.get('models');
-  const none: PageThings = { layer: null, apply() {}, update() {}, night: windowLife };
+  const none: PageThings = { layer: null, apply() {}, update() {}, follow() {}, night: windowLife };
   if (!root) return none;
   world.drawThings = false;
   if (params.get('things') === '0') return none;
@@ -75,6 +77,11 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
     },
     update(eye) {
       layer?.update(eye);
+    },
+    follow() {
+      if (!layer) return;
+      const s = new THREE.Vector3();
+      for (const id of world.moving()) layer.move(id, world.frame(id).clone().scale(s.setScalar((world.nodes.get(id)?.scale ?? 1_000_000) / 1_000_000)));
     },
     night: windowLife,
   };
