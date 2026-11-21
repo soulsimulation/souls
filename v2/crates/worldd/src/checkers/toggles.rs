@@ -242,7 +242,12 @@ impl World {
             dwell,
         };
         let course = Course {
-            stations: vec![station(0, 3, 4 * M), station(12, 3, 0), station(12, -5, 0), station(0, -5, 0)],
+            stations: vec![
+                station(0, 3, 4 * M),
+                station(12, 3, 0),
+                station(12, -5, 0),
+                station(0, -5, 0),
+            ],
             shape: Shape::Loop,
             speed: 1_200_000,
             t0: 0,
