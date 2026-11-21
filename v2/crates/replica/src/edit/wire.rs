@@ -196,7 +196,11 @@ fn op(o: &Op) -> Value {
             m.extend(door.map(|d| (8, node(d))));
             map(m)
         }
-        Op::Rows { node: n, field, rows } => map(vec![
+        Op::Rows {
+            node: n,
+            field,
+            rows,
+        } => map(vec![
             (1, Value::Uint(7)),
             (2, node(*n)),
             (3, Value::Uint(*field)),

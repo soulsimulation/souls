@@ -135,7 +135,9 @@ pub enum Op {
 /// fewer than two values.
 pub fn merged_rows(now: Option<&Value>, rows: &[Value]) -> Option<Value> {
     let key = |r: &Value| match r {
-        Value::Array(r) if r.len() >= 2 => crate::encode::encode(&Value::Array(r[..2].to_vec())).ok(),
+        Value::Array(r) if r.len() >= 2 => {
+            crate::encode::encode(&Value::Array(r[..2].to_vec())).ok()
+        }
         _ => None,
     };
     let Some(Value::Array(now)) = now else {
