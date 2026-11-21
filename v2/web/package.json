@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p . && vite build",
-    "test": "node --test src/clock/*.test.ts src/source/*.test.ts src/things/*.test.ts src/crowd/*.test.ts src/draw/*.test.ts src/pose/*.test.ts src/worlds/*.test.ts src/home/*.test.ts src/visitor-counts.test.ts src/history/*.test.ts src/sound/*.test.ts src/souls/*.test.ts src/music/*.test.ts src/camera/*.test.ts src/sky/*.test.ts src/account/*.test.ts src/panel/*.test.ts src/water/*.test.ts src/capture/*.test.ts src/changelog/*.test.ts src/places/*.test.ts src/owner/*.test.ts src/phone/*.test.ts src/atmosphere/*.test.ts"
+    "test": "node --test src/clock/*.test.ts src/source/*.test.ts src/things/*.test.ts src/crowd/*.test.ts src/draw/*.test.ts src/pose/*.test.ts src/worlds/*.test.ts src/home/*.test.ts src/visitor-counts.test.ts src/history/*.test.ts src/sound/*.test.ts src/souls/*.test.ts src/music/*.test.ts src/camera/*.test.ts src/sky/*.test.ts src/account/*.test.ts src/panel/*.test.ts src/water/*.test.ts src/capture/*.test.ts src/changelog/*.test.ts src/places/*.test.ts src/owner/*.test.ts src/phone/*.test.ts src/arrival/*.test.ts src/atmosphere/*.test.ts"
   },
   "dependencies": {
     "cborg": "6.2.1",

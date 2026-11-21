@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:counter",
   "owner": "thing",
-  "state": { "clean": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
+  "state": { "clean": { "n": 28, "type": "bool", "default": true, "audience": { "rule": "everyone" } } },
   "points": {
     "side": { "role": "stand", "at_mm": [0, 0, 718], "yaw_mdeg": 180000 },
     "top": { "role": "contact", "at_mm": [0, 900, 0] }

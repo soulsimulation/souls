@@ -39,7 +39,7 @@
           "receipt": "rr1",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "rb1", "field": "condition", "n": 1, "to": "whole" }],
+            "changes": [{ "change": "set", "node": "rb1", "field": "condition", "n": 28, "to": "whole" }],
             "events": [{ "event": "eden:repaired", "node": "rb1", "changes": [0] }],
             "timers": []
           }
@@ -80,7 +80,7 @@
           "receipt": "rt1",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "t1", "field": "condition", "n": 1, "to": "whole" }],
+            "changes": [{ "change": "set", "node": "t1", "field": "condition", "n": 28, "to": "whole" }],
             "events": [{ "event": "eden:mended", "node": "t1", "changes": [0] }],
             "timers": []
           }
@@ -115,7 +115,7 @@
           "receipt": "rg2",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "g1", "field": "condition", "n": 1, "to": "restored" }],
+            "changes": [{ "change": "set", "node": "g1", "field": "condition", "n": 28, "to": "restored" }],
             "events": [{ "event": "eden:restored", "node": "g1", "changes": [0] }],
             "timers": []
           }

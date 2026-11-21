@@ -37,7 +37,7 @@
                 "change": "set",
                 "node": "x1",
                 "field": "bites",
-                "n": 1,
+                "n": 28,
                 "to": 1
               }
             ],
@@ -65,7 +65,7 @@
                 "change": "set",
                 "node": "x1",
                 "field": "bites",
-                "n": 1,
+                "n": 28,
                 "to": 2
               }
             ],
@@ -93,7 +93,7 @@
                 "change": "set",
                 "node": "x1",
                 "field": "bites",
-                "n": 1,
+                "n": 28,
                 "to": 3
               }
             ],
@@ -121,7 +121,7 @@
                 "change": "set",
                 "node": "x1",
                 "field": "bites",
-                "n": 1,
+                "n": 28,
                 "to": 4
               }
             ],

@@ -29,7 +29,7 @@
 // - An event's name is `namespace:name`, the declaring kind's namespace before the name its entry writes.
 // No float decides anything; nothing here imports more than the rules.
 
-import { decide, measure, valueAt, type Entry, type DrawRow, type Input, type Node, type Verdict } from './rules.ts';
+import { chosenSlots, decide, measure, valueAt, type Entry, type DrawRow, type Input, type Node, type Verdict } from './rules.ts';
 
 export type Place = { node: string; slot: string } | { node: string; hand: string } | { node: string };
 export type Change =
@@ -130,7 +130,7 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: 
   if (pre) return pre;
   const verdict = decide({ ...input, asker: { sees: 'all' } });
   if (verdict.verdict !== 'yes') return verdict;
-  const self = act.this, actor = state.actor, args = act.args ?? {};
+  const self = act.this, actor = state.actor, chosen = chosenSlots(kinds, act, state), args = 'args' in chosen ? chosen.args : {};
   const entry = kinds[state.nodes[self].kind!];
   const namespace = entry.kind.slice(0, entry.kind.indexOf(':') + 1);
   const work: Record<string, Node> = structuredClone(state.nodes);

@@ -22,6 +22,7 @@ import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
 import { mountOwnerBox } from '../owner/box.ts';
 import { arrive } from '../worlds/arrive.ts';
+import { mountArrival } from '../arrival/card.ts';
 import { WorldSky } from '../sky/sky.ts';
 import { tickWater } from '../water/water.ts';
 import { installNightLighting, nightPools, paintNightSources, setNightStrength } from './night.ts';
@@ -119,9 +120,13 @@ resize();
 cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 
 const firstFrame = arrive(worldName, status);
+// #3780: today's arrival card, the world's name on black and a light that grows with the stream, until the first frame.
+const card = mountArrival(document, worldName ?? installed?.world ?? 'Souls', q.has('shot') || moment !== null);
+let arrived = false, failedWith = '';
 const live = (address: string) => new StreamSource(address).start({
-  pointer: (p) => (pointer = p),
+  pointer: (p) => ((pointer = p), card.reach('pointer')),
   snapshot: (snapshot) => {
+    card.reach('snapshot');
     const s = reconcileSnapshot(world.nodes.keys(), snapshot);
     world.apply(s.nodes, s.removed, []);
     sky.apply(s.nodes);
@@ -138,6 +143,7 @@ const live = (address: string) => new StreamSource(address).start({
     sound.part(p.nodes, p.removed, p.samples, p.happened ?? []);
     souls.apply(p);
     director.part(p);
+    card.reach('part');
     newestTo = p.to;
     played++;
     if (p.hash !== null) (hashes++, p.hash && hashesEqual++);
@@ -179,7 +185,7 @@ else if (worldName) resolveWorld(worldName, new URLSearchParams(location.search)
   (w) => ((worldHistory = w.history), Object.assign(globalThis, { v2: { ...(globalThis as any).v2, stream: w.stream, worldHistory } }), live(w.stream)),
   (e) => (error = String(e)),
 );
-else status.textContent = addressError || 'no stream: open this page with ?stream=<the stream directory> or ?world=<name>';
+else card.fail(status.textContent = addressError || 'no stream: open this page with ?stream=<the stream directory> or ?world=<name>');
 
 const secs = (us: number) => (us / 1e6).toFixed(2);
 const clockText = (us: number) => {
@@ -222,6 +228,8 @@ renderer.setAnimationLoop((now) => {
     }
   }
   renderer.render(scene, cam.camera);
+  if (!arrived && t !== null && world.nodes.size > 0) (arrived = true), card.reach('drawn');
+  else if (!arrived && error && error !== failedWith) card.fail(failedWith = error);
   const c = cam.camera, fwd = c.getWorldDirection(new THREE.Vector3());
   sound.frame(t, { pos: c.position.toArray(), forward: fwd.toArray(), up: c.up.toArray() });
   if (t !== null) souls.draw(t, cam.camera);

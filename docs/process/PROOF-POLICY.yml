@@ -37,12 +37,14 @@ tiers:
     required: [Modal full gate against the cached baseline, live walks, cdn-walk, changelog]
     not_required: [re-running checks that already passed on the same tree]
 
-# What the `proof-ok` check (.github/workflows/proof-check.yml, tools/proof/acceptance.mjs) asks of a PR at each
-# tier. The PR body is the journal entry (.github/pull_request_template.md):
+# What the `proof-ok` check (.github/workflows/proof-check.yml, tools/proof/acceptance.mjs) reports on a PR at each
+# tier. These are advice: proof-ok fails only without an issue link and a one-line summary, on a privacy finding, or
+# at T3-T4 until the maintainer signs off (docs/process/agent-workflow.md#pr-body). The fuller journal entry
+# (.github/pull_request_template.md):
 #   problem     a Problem section with a real statement (who is affected, what is wrong or missing)
 #   issue       the Problem section links its issue (Closes #n)
 #   acceptance  an Acceptance checklist; every box ticked with "evidence:", or left unticked with "deferred: #n"
-#               (an "unmet:" box is honest, and keeps proof-ok red until it is met or deferred)
+#               (an "unmet:" box is honest, and is reported as advice until it is met or deferred)
 #   self_audit  a Self-audit section: checks run (commands in `code`, with results), failed attempts, the long-tail /
 #               externality check and known limits, each filled ("none" is an answer)
 #   clip        a video link in the PR (uncut, real speed; the proof skill records it, tools/proof/upload.mjs hosts it)

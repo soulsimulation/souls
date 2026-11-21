@@ -38,7 +38,7 @@
                 "change": "set",
                 "node": "s1",
                 "field": "part",
-                "n": 1,
+                "n": 28,
                 "to": "quarter"
               },
               {
@@ -201,7 +201,7 @@
                 "change": "set",
                 "node": "s1",
                 "field": "part",
-                "n": 1,
+                "n": 28,
                 "to": "half"
               },
               {
@@ -364,7 +364,7 @@
                 "change": "set",
                 "node": "s1",
                 "field": "part",
-                "n": 1,
+                "n": 28,
                 "to": "three_quarter"
               },
               {
