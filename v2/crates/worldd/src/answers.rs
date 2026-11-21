@@ -1591,8 +1591,21 @@ impl Clock {
             // The words go to the store and the intent is logged with their references (V1b); refused, it is logged
             // without its intent.
             let r = match self.body_of(&intent) {
-                Ok(b) => words::keep(value, &self.text, words::audience(form, b), b, &mut kept)
-                    .map_err(|r| r.name),
+                Ok(b) => {
+                    // Words a form writes into a field everyone reads are everyone's (#3712).
+                    let public =
+                        match (form, &intent.target) {
+                            (words::Form::Other, Some(Target::Node(node))) => self
+                                .forms
+                                .public_words(self.replica.tree(), *node, intent.verb.as_str()),
+                            _ => false,
+                        };
+                    let audience = match public {
+                        true => Audience::Everyone,
+                        false => words::audience(form, b),
+                    };
+                    words::keep(value, &self.text, audience, b, &mut kept).map_err(|r| r.name)
+                }
                 Err(e) => Err(e),
             };
             value = match r {
@@ -4318,6 +4331,7 @@ pub fn start<S: Storage + 'static>(
         kept,
         (cfg.lineage, zone, cfg.epoch),
         Arc::clone(&cfg.public_names),
+        Arc::clone(&text),
     )
     .map_err(io)?;
     let fresh = if cfg.checkpoints.is_some() {

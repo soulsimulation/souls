@@ -76,6 +76,10 @@
 //     {"op":"converse","do":"start","with":"<body id>","words":"..","private":bool}   the offer and the opening line
 //     {"op":"converse","do":"accept|decline|leave","conversation":"<id>"} | {"do":"say",...,"words":"..","private":bool}
 //     {"op":"converse","do":"list"}       the conversations in the copy
+//   and #3703's, today's calendar read from the calendar items the world publishes as things (`../schedule/world.mjs`):
+//     {"op":"whatson","hours":3}          what is on now or within that many real hours, and who is where
+//     {"op":"calendar","do":"list|interest|not-coming|add",...}   the items; interest/not-coming/add send the item's
+//                                         show_interest, drop_interest or post form through `act`
 //   and R16's (#2817), from the world's public history (`history` in its config) and the Soul's memory, the copy as
 //   it is (naming only), so it ends with `at` and not `changed`:
 //     {"op":"history","at":"<place>"} | {"thing":"<id>"} | {"soul":"<id or name>"}, "since"/"until": world µs
@@ -127,7 +131,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock } from '../brief/brief.mjs';
-import { changedBetween, decode, rememberPublicNames, rowsOf, sequenceOf } from '../brief/copy.mjs';
+import { changedBetween, decode, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
@@ -145,7 +149,7 @@ import { clockOf, worldNow } from '../clock/clock.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
-import { calendarOf, worldDue } from '../schedule/world.mjs';
+import { blankAt, CALENDAR_NOTE, calendarItems, heldBlank, noticeBoards, calendarList, calendarOf, whatsOn, worldDue, worldTimeOf } from '../schedule/world.mjs';
 import { refreshEntries } from '../pair/pair.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
@@ -443,7 +447,7 @@ function syncAnswer(sock, n, refused, bytes) {
   if (!syncing || n !== syncing.n) return; // an answer to a request since given up
   if (refused !== '-') throw new Error(`sync refused: ${refused}`);
   if (syncing.step === 'hashes') syncing.version = copy.onHashes(bytes);
-  else { copy.onRecords(bytes); rememberPublicNames(copy, bytes); }
+  else { copy.onRecords(bytes); rememberPublicNames(copy, bytes); rememberPublicWords(copy, bytes); }
   syncing.n = ++asked;
   const next = copy.next(BigInt(syncing.n));
   if (next.length > 0) { syncing.step = 'records'; awaitAnswer(sock); sock.send(next); return; }
@@ -703,7 +707,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object', 'whatson', 'calendar']);
 const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
@@ -798,8 +802,16 @@ function actsOf(words) {
       const c = out.at(-1), args = (c.args ??= {});
       // #3603: a carrier verb's point is in metres, a decimal allowed.
       if (arg && c.carrier) { c.args[arg[1]] = /^-?\d{1,7}(\.\d{1,6})?$/.test(arg[2]) ? Number(arg[2]) : arg[2]; continue; }
-      // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`).
-      if (arg) { args[arg[1]] = /^-?\d{1,15}$/.test(arg[2]) ? Number(arg[2]) : arg[2]; continue; }
+      // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`, or a world time in
+      // µs, 16 digits: #3703); #3712: a form's
+      // `text` argument is words, sent as T8's `{23: words}` for the world's text store, never logged as they are.
+      if (arg) {
+        kinds ??= kindsIn(join(home, 'kinds'));
+        rows ??= rowsOf(copy);
+        const take = kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
+        args[arg[1]] = take?.type === 'text' ? { 23: arg[2] } : /^-?\d{1,16}$/.test(arg[2]) && Number.isSafeInteger(Number(arg[2])) ? Number(arg[2]) : arg[2];
+        continue;
+      }
       kinds ??= kindsIn(join(home, 'kinds'));
       rows ??= rowsOf(copy);
       const takes = Object.entries(kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
@@ -970,8 +982,8 @@ async function answer(req) {
         if (req.for !== undefined) serving.set(sequence, req.for);
         return closing({ ok: true, sequence, sent, basis: sequenceOf(basis) }, null, { now: true });
       }
-      // A number goes as a number, so a form's arguments then go as parameter 1's pairs (#3686).
-      const pairs = Object.entries(keep[0].args ?? {}), counted = pairs.some(([, v]) => typeof v === 'number');
+      // A number or words go as they are, so a form's arguments then go as parameter 1's pairs (#3686, #3712).
+      const pairs = Object.entries(keep[0].args ?? {}), counted = pairs.some(([, v]) => typeof v !== 'string');
       const args = counted ? undefined : pairs.map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
       const params = counted ? { ...(req.params ?? {}), 1: pairs } : req.params;
       const { sequence, sent } = sendIntent(keep.map((c) => c.verb), { target, args, params, basis, expiry: req.expiry });
@@ -1001,6 +1013,7 @@ async function answer(req) {
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis), ...(toward ? { to: toward } : {}) }, null, { now: true });
     }
     case 'inspect': return inspect(req);
+    case 'whatson': case 'calendar': return calendar(req);
     case 'object': {
       // #3686: today's `object <id> [action]`: no action lists the offers (as inspect); an action is that offer sent
       // through `act` below, with its arguments, and nothing else.
@@ -1151,6 +1164,103 @@ function inspect(req) {
     ...(entry ? {} : { note: 'its kind\'s entry is not on this machine: walking to it is all that is known here' }),
   }, null, { now: true });
 }
+
+/**
+ * #3703: today's `whatson` and `calendar`, from the calendar items the world publishes as things in the copy
+ * (`../schedule/world.mjs`). Reading asks the world nothing but to bring the copy current; `interest`, `not-coming`
+ * and `add` are the items' own forms (`show_interest`, `drop_interest`, `post`), sent through `act`.
+ */
+async function calendar(req) {
+  const kinds = kindsIn(join(home, 'kinds')), clock = clockOf(copy), cal = calendarOf(copy), nowMs = Date.now();
+  const view = (rows) => ({ rows, me: ME, clock, cal, nowMs });
+  if (req.op === 'whatson') {
+    const hours = Number(req.hours ?? 3);
+    if (!(hours > 0 && hours <= 168)) return { ok: false, code: 'whatson-usage', detail: 'whatson [--hours n]   (real hours, up to 168; default 3)' };
+    return closing({ ok: true }, (rows) => {
+      const t = worldTimeOf(cal, worldNow(clock));
+      return { ...(t ? { worldTime: t } : {}), ...whatsOn(calendarItems(copy, kinds), { ...view(rows), hours }), calendarNote: CALENDAR_NOTE, next: 'calendar interest <id>   (say you will come)' };
+    });
+  }
+  const does = req.do ?? 'list';
+  if (does === 'list') return closing({ ok: true }, (rows) => ({ ...calendarList(calendarItems(copy, kinds), view(rows)), calendarNote: CALENDAR_NOTE }));
+  const items = calendarItems(copy, kinds), rows = rowsOf(copy);
+  if (does === 'interest' || does === 'not-coming') {
+    const item = items.find((i) => i.id === req.this);
+    if (!item) return closing({ ok: false, code: 'calendar.not-an-item', detail: `${req.this ?? '(none)'} is not a calendar item in this Soul's copy; calendar lists them` }, null, { now: true });
+    return answer({ op: 'act', acts: [`${does === 'interest' ? 'show_interest' : 'drop_interest'}:${item.id}`], ...(req.for !== undefined ? { for: req.for } : {}) });
+  }
+  if (does !== 'add') return { ok: false, code: 'calendar-usage', detail: CALENDAR_USAGE };
+  const title = String(req.title ?? '').trim(), inMin = Number(req.in), forMin = Number(req.for_minutes);
+  if (!title || !req.place || !Number.isFinite(inMin) || inMin < 0 || !(forMin > 0)) return { ok: false, code: 'calendar-usage', detail: CALENDAR_USAGE };
+  if (!rows.has(String(req.place))) return closing({ ok: false, code: 'calendar.unknown-place', detail: `${req.place} is not an id this Soul's copy holds; find gives place ids`, did_you_mean: nearestIds(rows.values(), req.place) }, null, { now: true });
+  if (!clock) return closing({ ok: false, code: 'calendar.no-clock', detail: 'the world has published no clock in this copy yet' }, null, { now: true });
+  const place = String(req.place), at = rows.get(place).name;
+  const words = `${title}${place && !noticeBoards(rows, kinds, place).some((b) => b.id === place) ? ` (at ${at})` : ''}${req.description ? ` — ${req.description}` : ''}`;
+  const start = worldNow(clock, (nowMs + inMin * 60_000) * 1000), end = worldNow(clock, (nowMs + (inMin + forMin) * 60_000) * 1000);
+  const served = req.for !== undefined ? { for: req.for } : {};
+  // A blank notice already at that place is posted where it is.
+  const blank = blankAt(items, rows, place);
+  if (blank) return { ...(await answer({ op: 'act', acts: [`post:${blank.id}`, `words=${words}`, `start=${start}`, `end=${end}`], ...served })), item: blank.id };
+  // Else one is taken from a notice board (at that place first), written, and put up there: three acts, sent one after
+  // another as each one's effect reaches the copy. The answer returns once the first is sent; how it ends arrives in
+  // `wait` as a `calendar` event.
+  const body = [...rows.values()].find((r) => r.soul === ME)?.id ?? null;
+  const held = body ? heldBlank(items, rows, body) : null;
+  const board = noticeBoards(rows, kinds, place)[0];
+  if (!held && !board) return closing({ ok: false, code: 'calendar.no-board', detail: 'no notice board in this Soul\'s copy: nowhere to take a blank notice from' }, null, { now: true });
+  const first = held ? null : await answer({ op: 'act', acts: [`${board.form}:${board.id}`], ...served });
+  if (first && first.ok !== true) return first;
+  putUp({ first: first?.sequence ?? null, body, words, start, end }).catch((e) => note({ kind: 'calendar', what: 'failed', step: 'put-up', detail: String(e?.message ?? e).slice(0, 200) }));
+  return { ok: true, sent: first ? `${board.form}:${board.id}` : null, ...(first ? { sequence: first.sequence } : {}), board: board?.id ?? null, then: 'the notice is written and put up as each step lands; wait reports a calendar event (posted, or failed and why)' };
+}
+
+/** An act's ending as its receipt shows it: refused (with the reason), ended (a receipt), or null while it goes on. */
+function endingOf(sequence) {
+  const a = receipts.get(sequence)?.answers ?? [];
+  const refused = a.find((x) => x.answer === 'refused');
+  if (refused) return { refused: true, reason: refused.reason ?? 'refused' };
+  const done = a.find((x) => x.answer === 'receipt');
+  return done ? { done: true, reason: done.reason ?? null } : null;
+}
+
+/**
+ * #3703: the rest of `calendar add` from a notice board: once the blank notice is in this Soul's hand, it is written
+ * (`post`) and set down where the Soul stands. Each step waits for its effect in the copy, or its act's refusal, at
+ * most CALENDAR_STEP_MS; the outcome is a `calendar` event.
+ */
+const CALENDAR_STEP_MS = 180_000;
+async function putUp({ first, body, words, start, end }) {
+  const kinds = kindsIn(join(home, 'kinds'));
+  const step = async (name, sequence, done) => {
+    let ended = null; // when its receipt came: its effect then has a few seconds to reach the copy
+    for (const until = Date.now() + CALENDAR_STEP_MS; Date.now() < until;) {
+      await Promise.race([refresh(), sleep(2000)]);
+      const items = calendarItems(copy, kinds), rows = rowsOf(copy), got = done(items, rows);
+      const e = sequence === null ? null : endingOf(sequence);
+      // Its effect is in the copy, and its act has ended (the body's next act would be refused `form-running`).
+      if (got && (sequence === null || e?.done)) return got;
+      if (e?.refused) throw Object.assign(new Error(`${name}: ${e.reason}`), { step: name });
+      if (e?.done) ended ??= Date.now();
+      if (ended !== null && Date.now() - ended > 8000) throw Object.assign(new Error(`${name}: ended ${e.reason ?? 'without its effect'}`), { step: name });
+      await sleep(250);
+    }
+    throw Object.assign(new Error(`${name}: not done within ${CALENDAR_STEP_MS / 1000} s`), { step: name });
+  };
+  try {
+    const me = body ?? [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id;
+    const blank = await step('take', first, (items, rows) => heldBlank(items, rows, me));
+    const posting = await answer({ op: 'act', acts: [`post:${blank.id}`, `words=${words}`, `start=${start}`, `end=${end}`] });
+    if (posting.ok !== true) throw Object.assign(new Error(`post: ${posting.code ?? 'refused'}`), { step: 'post' });
+    await step('post', posting.sequence, (items) => items.find((i) => i.id === blank.id && i.links.poster?.includes(ME)));
+    const down = await answer({ op: 'set-down', this: blank.id, word: 'here' });
+    if (down.ok !== true) throw Object.assign(new Error(`set-down: ${down.code ?? 'refused'}`), { step: 'set-down' });
+    await step('set-down', down.sequence, (items, rows) => !heldBlank(items, rows, me) && !(() => { for (let r = rows.get(rows.get(blank.id)?.parent); r; r = rows.get(r.parent)) if (r.id === me) return true; return false; })());
+    note({ kind: 'calendar', what: 'posted', item: blank.id });
+  } catch (e) {
+    note({ kind: 'calendar', what: 'failed', step: e.step ?? 'put-up', detail: String(e.message ?? e).slice(0, 200) });
+  }
+}
+const CALENDAR_USAGE = 'calendar | calendar add "<title>" --place <placeId> --in <minutes> --for <minutes> ["description"] | calendar interest|not-coming <id>';
 
 /**
  * E26 (#3329): a conversation's intents (`../converse/converse.mjs`), each sent once as `act`'s are, in order; their
