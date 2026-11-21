@@ -40,6 +40,7 @@ use replica::bodies::{Class, SkillShape, Want};
 use replica::effects::Refusal;
 use replica::encode::Name;
 use replica::ids::{Id, Minter};
+use replica::kinds::sizes::Build;
 use replica::moves::{Move, Place};
 use replica::pose::{Frame, HandOff, Quat, Vec3};
 use replica::time::Micros;
@@ -58,6 +59,59 @@ fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
         name,
         detail: detail.into(),
     })
+}
+
+/// The step, µm, of the search out from a seat's stand point along its exit ([`rise_point`]).
+pub const RISE_STEP: i64 = 10_000;
+
+/// Where a body of `build` rising from the seat `at` stands on `floor` (#1960): the seat's stand point when the body
+/// stands there, else the first point out from it along the seat's exit (from the slot to the stand point), every
+/// [`RISE_STEP`], whose support and clearance hold, no farther from the stand point than the body's own clearance
+/// radius for its class ([`rise_bound`]: a rise is a step off the seat, never a move). A chair whose stand point lies
+/// in its own collider's clearance (Eden's `e_3403bec8`, 19 mm in) is risen from just past it. Bounded (at most
+/// radius / step + 1 points), the same for the same inputs. `None`: nowhere within that bound.
+pub fn rise_point(floor: &Surface, at: &PlaceAt, body: Id, build: Build) -> R<Option<Vec3>> {
+    let frame = Frame {
+        node: at.floor,
+        slot: None,
+    };
+    let stand = at.stand()?;
+    let (dx, dz) = (stand.x - at.point.x, stand.z - at.point.z);
+    let len = (i128::from(dx) * i128::from(dx) + i128::from(dz) * i128::from(dz)).isqrt() as i64;
+    // The exit: away from the slot through the stand point; a stand point on the slot exits the way the seat faces.
+    let dir = if len > 0 {
+        [dx * 1_000_000 / len, dz * 1_000_000 / len]
+    } else {
+        let f = at
+            .facing
+            .rotate(Vec3::new(0, 0, 1_000_000))
+            .map_err(|e| Refusal {
+                name: e.name(),
+                detail: "a slot's facing".into(),
+            })?;
+        [f.x, f.z]
+    };
+    let bound = rise_bound(build);
+    let mut k = 0;
+    loop {
+        if k * RISE_STEP > bound {
+            return Ok(None);
+        }
+        let p = Vec3::new(
+            stand.x + dir[0] * k * RISE_STEP / 1_000_000,
+            0,
+            stand.z + dir[1] * k * RISE_STEP / 1_000_000,
+        );
+        if floor.place_built(body, frame, p, at.facing, build).is_ok() {
+            return Ok(Some(p));
+        }
+        k += 1;
+    }
+}
+
+/// How far from a seat's stand point a rising body may stand, µm: its own clearance radius for its admitted class.
+pub fn rise_bound(build: Build) -> i64 {
+    build.size.radius_mm() * 1000
 }
 
 /// A seat where it is: its thing, its kind's data, its slot's point and facing in the floor's frame (µm), and the
@@ -285,6 +339,7 @@ impl Slots {
         mint: &mut Minter,
         moves: &mut Moves,
         geo: &impl Reach,
+        floors: &dyn crate::mover::Floors,
         requests: &[Request],
         now: Micros,
     ) -> Vec<(Id, R<Instance>)> {
@@ -292,7 +347,7 @@ impl Slots {
         order.sort_by_key(|r| (r.body, r.thing, r.slot));
         order
             .into_iter()
-            .map(|r| (r.body, self.take(c, due, mint, moves, geo, r, now)))
+            .map(|r| (r.body, self.take(c, due, mint, moves, geo, floors, r, now)))
             .collect()
     }
 
@@ -304,6 +359,7 @@ impl Slots {
         mint: &mut Minter,
         moves: &mut Moves,
         geo: &impl Reach,
+        floors: &dyn crate::mover::Floors,
         r: &Request,
         now: Micros,
     ) -> R<Instance> {
@@ -347,6 +403,23 @@ impl Slots {
                     show(r.thing),
                     at.place.height,
                     r.mv.reach
+                ),
+            );
+        }
+        // A body never sits where it cannot rise (#1960): somewhere within its reach out of the seat must hold it.
+        let build = c.build(r.body).ok_or_else(|| Refusal {
+            name: "body-missing",
+            detail: show(r.body),
+        })?;
+        if let Some(floor) = floors.for_build(build).and_then(|f| f.get(&at.floor))
+            && rise_point(floor, at, r.body, build)?.is_none()
+        {
+            return refuse(
+                "place-no-stand-point",
+                format!(
+                    "{}: nowhere to stand on rising within {} µm of its stand point",
+                    show(r.thing),
+                    rise_bound(build)
                 ),
             );
         }
@@ -644,7 +717,13 @@ impl Slots {
             node: at.floor,
             slot: None,
         };
-        let placed = floor.place_built(body, frame, at.stand()?, at.facing, build)?;
+        let Some(p) = rise_point(floor, at, body, build)? else {
+            return refuse(
+                "off-surface",
+                format!("{}: no stand point within reach", show(at.thing)),
+            );
+        };
+        let placed = floor.place_built(body, frame, p, at.facing, build)?;
         c.stand(body, driver, placed, now)
     }
 }

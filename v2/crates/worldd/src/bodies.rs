@@ -969,6 +969,7 @@ impl Bodies {
                     &mut self.mint,
                     &mut self.moves,
                     &reach,
+                    &self.town,
                     &[request],
                     now,
                 )
@@ -983,6 +984,11 @@ impl Bodies {
         let n = r?;
         self.live.insert(body, (id, Live::Place(n)));
         Ok(())
+    }
+
+    /// Orders read the same current-map planner answers as the ordinary runner.
+    pub(crate) fn order_route_parts(&mut self) -> (&mut Town, &Planned) {
+        (&mut self.town, &self.planned)
     }
 
     /// Steps the bodies to world time `now`, a tick at a time, firing each move's phase timers as they fall due.
@@ -1029,9 +1035,10 @@ impl Bodies {
             }
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
-            crate::orders::step(self, at);
+            let order_lines = crate::orders::step(self, at);
             let planned = std::mem::take(&mut self.planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
+            wants.lines.extend(order_lines);
             // Every body in a seat move, with its seat: its reach for the next tick's phase timers.
             let mut seated: Vec<(Id, Id, Id)> = self
                 .live

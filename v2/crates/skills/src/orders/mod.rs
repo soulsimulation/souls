@@ -6,7 +6,7 @@
 //! - **Hold** (`souls:hold`): claims the legs (the stance is theirs, B1) and the hands named, and stands still. The
 //!   world sets the stance under its driver. Cancelled by a claim on the legs or on a hand.
 //! - **Follow** (`souls:follow`): N13's follow ([`crate::close::Follow`]) with the order's expiry; it claims the legs.
-//! - **Queue** (`souls:queue`): claims the legs and walks straight to the spot in the line the world gave it (field
+//! - **Queue** (`souls:queue`): claims the legs and follows the supported approach to the spot in the line the world gave it (field
 //!   [`F_LINE`] on its own body), then stands. When the line moves up, the world gives it the next spot. Taking the
 //!   slot at the head is the world's act, named by the order, once (`sim::orders`).
 //!
@@ -14,7 +14,7 @@
 
 use replica::bodies::{Class, SkillShape, Want};
 use replica::encode::{Name, Value};
-use replica::host::{Host, Progress, Skill};
+use replica::host::{Answer, Ask, Host, Progress, Skill};
 use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::time::Micros;
@@ -119,11 +119,19 @@ impl Skill for Queue {
             return Progress::Going;
         };
         let gap = apart(me.position, to);
+        let aim = if gap <= THERE {
+            to
+        } else if let Some(Answer::Point(point)) = host.ask(&Ask::Toward { from: body, to }) {
+            point
+        } else {
+            go(host, Vec3::ZERO);
+            return Progress::Failed(name("souls:no-way"));
+        };
         // Slowing as it comes in, so it stops on its spot: the gap closed in half a second, at most FAST.
         let speed = if gap <= THERE { 0 } else { (gap * 2).min(FAST) };
         go(
             host,
-            along(to.x - me.position.x, to.z - me.position.z, speed),
+            along(aim.x - me.position.x, aim.z - me.position.z, speed),
         );
         Progress::Going
     }

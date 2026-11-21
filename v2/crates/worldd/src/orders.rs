@@ -8,11 +8,21 @@ use replica::time::Micros;
 use sim::orders::{SlotAt, Where};
 use sim::slots::Slots;
 use sim::spots::Ground;
+use sim::walk::town::Plans;
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 
 type R<T> = Result<T, Refusal>;
+struct Approach {
+    at: Vec3,
+    goal: Option<Vec3>,
+    corner: Option<Vec3>,
+}
+
 struct World<'a> {
     ground: &'a mut dyn Ground,
     slots: &'a Slots,
+    approaches: &'a BTreeMap<Id, Approach>,
 }
 impl Ground for World<'_> {
     fn stand(&self, n: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
@@ -26,6 +36,15 @@ impl Ground for World<'_> {
     }
 }
 impl Where for World<'_> {
+    fn toward(&self, body: Id, to: Vec3) -> Option<Vec3> {
+        let approach = self.approaches.get(&body)?;
+        if approach.goal == Some(to) {
+            approach.corner
+        } else {
+            // A take or seat notification changed this line during the tick. Wait for its own planned goal.
+            Some(approach.at)
+        }
+    }
     fn slot(&self, thing: Id) -> Option<SlotAt> {
         let p = self.slots.place(thing)?;
         Some(SlotAt {
@@ -58,6 +77,7 @@ pub fn accept(b: &mut Bodies, source: &Intent, body: Id, id: Id, now: Micros) ->
         let w = World {
             ground,
             slots: &b.slots,
+            approaches: &BTreeMap::new(),
         };
         b.orders
             .accept(&mut b.runner.controller, &w, &intent, id, now)?;
@@ -72,12 +92,43 @@ pub fn accept(b: &mut Bodies, source: &Intent, body: Id, id: Id, now: Micros) ->
 }
 
 /// Seat events wake the queue; its skills run before this tick's one controller step.
-pub fn step(b: &mut Bodies, now: Micros) {
+pub fn step(b: &mut Bodies, now: Micros) -> Vec<(sim::mover::Body, Vec3)> {
+    let goals = b.orders.approaches(&b.runner.controller, now);
+    let asked = RefCell::new(Vec::new());
+    let mut approaches = BTreeMap::new();
+    {
+        let (town, planned) = b.order_route_parts();
+        for (body, size, goal) in goals {
+            let corner = goal.and_then(|to| {
+                let view = town.view_for_size(size).ok()?;
+                let [x, z] = view
+                    .corner_planned(
+                        &body,
+                        to,
+                        &Plans {
+                            found: &planned.lines,
+                            asked: &asked,
+                        },
+                    )
+                    .ok()?;
+                Some(Vec3::new(x, to.y, z))
+            });
+            approaches.insert(
+                body.id,
+                Approach {
+                    at: body.pose.position,
+                    goal,
+                    corner,
+                },
+            );
+        }
+    }
     let changed = b.slots.changes();
     let takes = b.town.with_ground(|_, ground| {
         let w = World {
             ground,
             slots: &b.slots,
+            approaches: &approaches,
         };
         for slot in changed {
             if available(&b.slots, slot) {
@@ -113,6 +164,7 @@ pub fn step(b: &mut Bodies, now: Micros) {
             },
         )]);
     }
+    asked.into_inner()
 }
 
 /// Restore the accepted order records in log order, after the bodies and seats have been restored.
@@ -121,6 +173,7 @@ pub fn resume(b: &mut Bodies, parts: &[Part], now: Micros) -> R<()> {
         let w = World {
             ground,
             slots: &b.slots,
+            approaches: &BTreeMap::new(),
         };
         b.orders.resume(&mut b.runner.controller, &w, parts, now)?;
         let slots: std::collections::BTreeSet<Id> = b
