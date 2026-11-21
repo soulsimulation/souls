@@ -609,7 +609,7 @@ export class ThingLayer {
       this.loading++;
       const glow = glowOf(this.opts.index.states.get(best));
       this.opts.fetch(best)
-        .then((bytes) => partsOf(bytes, glow.roles, glow.materials, this.opts.index.kinds?.get(best!)))
+        .then((bytes) => partsOf(bytes, glow.roles, glow.materials, this.opts.index.kinds?.get(best!), this.opts.index.fits?.get(best!)))
         .then((parts) => this.arrive(best, parts))
         .catch(() => (this.failed++, this.models.set(best, [])))
         .finally(() => this.loading--);

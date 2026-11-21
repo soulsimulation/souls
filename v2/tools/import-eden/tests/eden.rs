@@ -444,3 +444,63 @@ fn a_stair_from_a_floor_to_itself_is_noted_not_linked() {
     let stairs = rows.iter().find(|r| r.what == "stairs (links)").unwrap();
     assert_eq!(stairs.tree, 1);
 }
+
+/// A thing that names another kind's entry (field 27, from its world's map: a Mars sofa borrows `eden:sofa`) is found
+/// by that entry, and its seats are at its own slots (its def's geometry) with the entry's stand offsets; an entry seat
+/// it has no slot for is not offered. A thing naming no entry keeps its kind's name and the entry's own geometry.
+#[test]
+fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
+    let text = SMALL.replace(
+        r#""slot": {"room": "kitchen"},
+     "pose": [1000, 0, 500, 0], "world": [10500, 100, 21000, 90000], "scale_ppm": 1000000},"#,
+        r#""slot": {"room": "kitchen"},
+     "pose": [1000, 0, 500, 0], "world": [10500, 100, 21000, 90000], "scale_ppm": 1000000, "entry": "eden:sofa",
+     "slots": [{"n": 1, "id": "seat-1", "kind": "seat", "at": [-655, 300, 100], "yaw": 0},
+               {"n": 2, "id": "seat-2", "kind": "seat", "at": [0, 300, 100], "yaw": 0}]},"#,
+    );
+    assert_ne!(text, SMALL);
+    let im = load(&text).expect("loads");
+    let n = im
+        .tree
+        .node(im.tree.handle(im.nodes["e_chair"]).unwrap())
+        .unwrap();
+    assert_eq!(
+        import_eden::entry_name(n.kind().as_str(), n.fields()),
+        "eden:sofa"
+    );
+    let sofa = replica::rules::json::parse(
+        r#"{"kind": "eden:sofa", "slots": {
+            "seat_1": {"admits": "body", "posture": "sit", "at_mm": [-600, 520, 100], "stand": "f1"},
+            "seat_2": {"admits": "body", "posture": "sit", "at_mm": [0, 520, 100], "stand": "f2"},
+            "seat_3": {"admits": "body", "posture": "sit", "at_mm": [600, 520, 100], "stand": "f3"}},
+          "points": {"f1": {"role": "stand", "at_mm": [-600, 0, 740]}, "f2": {"role": "stand", "at_mm": [0, 0, 740]},
+                     "f3": {"role": "stand", "at_mm": [600, 0, 740]}}}"#,
+    )
+    .unwrap();
+    let (seats, all) = import_eden::body_slots(&im.tree, &[("eden:sofa".into(), sofa.clone())]);
+    assert_eq!(all, 3);
+    let got: Vec<_> = seats.iter().map(|s| (s.slot, s.at, s.stand)).collect();
+    let v = |x: i64, y: i64, z: i64| replica::pose::Vec3::new(x * 1000, y * 1000, z * 1000);
+    assert_eq!(
+        got,
+        vec![
+            (1, v(-655, 300, 100), v(-655, 0, 740)),
+            (2, v(0, 300, 100), v(0, 0, 740)),
+        ]
+    );
+    // The same thing without field 27 is a `core:chair`, found by its own name: the sofa entry is not its.
+    let im = load(SMALL).expect("loads");
+    let n = im
+        .tree
+        .node(im.tree.handle(im.nodes["e_chair"]).unwrap())
+        .unwrap();
+    assert_eq!(
+        import_eden::entry_name(n.kind().as_str(), n.fields()),
+        "eden:chair"
+    );
+    assert!(
+        import_eden::body_slots(&im.tree, &[("eden:sofa".into(), sofa)])
+            .0
+            .is_empty()
+    );
+}
