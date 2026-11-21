@@ -150,6 +150,7 @@ import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { clockOf, worldNow } from '../clock/clock.mjs';
+import { worldOps } from '../creator/world.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
@@ -818,7 +819,7 @@ function actsOf(words) {
       }
       kinds ??= kindsIn(join(home, 'kinds'));
       rows ??= rowsOf(copy);
-      const takes = Object.entries(kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
+      const takes = Object.entries(kinds[rows.get(c.this)?.entry ?? rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
       const name = takes.map(([n, t]) => t?.type === 'thing' && n).find((n) => n && !(n in args));
       if (!name) throw Object.assign(new Error(`name it: ${c.form ?? c.verb} <name>=${w}`), { code: 'act-arg-unnamed' });
       args[name] = w;
@@ -849,6 +850,10 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex
   if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
   return { sequence, sent };
 }
+
+/** World time now: the copy's clock mapping (E7b), else the machine's clock, as a world without a mapping runs on it
+ *  (`worldd::answers::now`). For the creator's weather end and strike time (#3695). */
+const worldNowOrReal = () => worldNow(clockOf(copy)) ?? Date.now() * 1000;
 
 async function answer(req) {
   // R13: a command from the model's turn shows that what a reader was handed was taken.
@@ -1052,14 +1057,19 @@ async function answer(req) {
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
     }));
     case 'check': {
-      // On the copy as it is: no sync, no frame to the world (A4).
-      const v = JSON.parse(wire.editCheck(copy, batchOf(req.ops), kindsText()));
-      return closing({ ...v, local: true }, null, { now: true });
+      // On the copy as it is: no sync, no frame to the world (A4). A world verb (#3695) is made into its sets first.
+      const w = req.world ? worldOps(copy, req.world, worldNowOrReal()) : { ops: req.ops };
+      if (w.ok === false) return closing({ ...w, local: true }, null, { now: true });
+      const v = JSON.parse(wire.editCheck(copy, batchOf(w.ops), kindsText()));
+      return closing({ ...v, local: true, ...(w.says ? { would: w.says, ops: w.ops } : {}) }, null, { now: true });
     }
     case 'edit': {
       if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
-      const batch = batchOf(req.ops);
       const age = await ageAfter();
+      // #3695: weather, sky and strike are sets on the world node, made from the copy as it is now, after the sync.
+      const w = req.world ? worldOps(copy, req.world, worldNowOrReal()) : { ops: req.ops };
+      if (w.ok === false) return closing({ ...w, sent: false, local: true }, null, { age });
+      const batch = batchOf(w.ops);
       const v = JSON.parse(wire.editCheck(copy, batch, kindsText()));
       if (!v.ok) return closing({ ...v, sent: false, local: true }, null, { age });
       if (!copyVersion) return closing({ ok: false, code: 'edit.no-copy', sent: false, detail: 'no copy of the world yet' }, null, { age });
@@ -1076,8 +1086,11 @@ async function answer(req) {
       const a = await got;
       if (!a) return closing({ ok: false, code: 'edit.unanswered', sequence, sent: true }, null, { now: true });
       const out = a.answer === 1
-        ? { ok: true, sequence, names: a.names ?? {} }
+        ? { ok: true, sequence, names: a.names ?? {}, ...(w.says ? { did: w.says } : {}) }
         : { ok: false, sequence, code: a.reason ?? 'edit.refused', ...(a.op !== undefined ? { op: a.op } : {}) };
+      // The world node is written by the world's own sky timers too: a world verb planned just before one is stale, and
+      // is made again from the copy brought current, once.
+      if (out.code === 'edit.stale' && req.world && !req.again) return answer({ ...req, again: true });
       return closing(out);
     }
     case 'pray': case 'answer': {
@@ -1161,7 +1174,7 @@ function thingOf(id) {
   if (!row) {
     return { ok: false, code: 'inspect.unknown-id', detail: `${id ?? '(none)'} is not an id this Soul's copy holds; ids come from look and find`, did_you_mean: nearestIds(rows.values(), id) };
   }
-  const kinds = kindsIn(join(home, 'kinds')), entry = kinds[row.kind];
+  const kinds = kindsIn(join(home, 'kinds')), entry = kinds[row.entry ?? row.kind];
   return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
 }
 

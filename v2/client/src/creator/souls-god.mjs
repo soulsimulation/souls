@@ -12,7 +12,11 @@
 //   souls-god.mjs remove <id>                    it and everything in it
 //   souls-god.mjs batch '<json list>'            several at once, all or none: [{"op":"place","name":1,...}, ...]; a
 //                                                later op names an earlier place by its "name" number
-//   souls-god.mjs check <any of the four, or batch> ...   the same, checked on the copy only; nothing is sent
+//   souls-god.mjs weather [--kind clear|cloudy|rain|wind|fog|storm] [--clouds 0..1] [--rain 0..1] [--wind 0..1]
+//                         [--minutes 5..360]       the world's weather until then; E6's own weather resumes after
+//   souls-god.mjs sky --palette <name>           the sky's palette (today's names: clear-day, dusk, mars-desert, ...)
+//   souls-god.mjs strike <x,z | id>              lightning at a point (metres on the open ground) or on a place
+//   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs status | stop                  the daemon
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
 //   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
@@ -31,7 +35,9 @@ import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'status', 'stop', 'welcome', 'visitors'];
+export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'check', 'status', 'stop', 'welcome', 'visitors'];
+/** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
+export const WORLD_VERBS = ['weather', 'sky', 'strike'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
@@ -49,6 +55,18 @@ export const FIX = {
   'edit.batch': 'see the usage: souls-god.mjs with no arguments',
   'edit.unanswered': 'the world did not answer within 10 s: describe to see whether it was done',
   'edit.no-copy': 'the daemon has no copy yet: run status until connected is true',
+  'edit.weather-level': 'levels are 0 to 1',
+  'edit.weather-ended': 'give --minutes from 5 to 360',
+  'edit.weather-partial': 'use the weather verb: it sets kind, clouds, rain, wind and end together',
+  'edit.weather-no-sky': 'this world has no sky to set',
+  'weather.kind-unknown': 'use clear, cloudy, rain, wind, fog or storm',
+  'weather.level': '--clouds, --rain and --wind are 0 to 1',
+  'weather.minutes': '--minutes is 5 to 360 world minutes',
+  'weather.nothing': 'give --kind, --clouds, --rain or --wind',
+  'sky.palette-unknown': 'run sky with no palette for the list',
+  'sky.sun-follows-time': 'leave out --sun: the sun follows world time',
+  'strike.where': 'strike x,z in metres, or an id describe lists',
+  'strike.off-the-ground': 'strike somewhere on the world\'s ground',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'which-creator': 'name one with --creator',
   'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
@@ -97,6 +115,16 @@ export function opsOf(verb, words) {
   throw usage(`one of ${VERBS.join(', ')}`);
 }
 
+/** A world verb's words as the daemon reads them: `{ verb, ...flags }`, numbers as given. */
+export function worldVerbOf(verb, words) {
+  const args = [...words], out = { verb };
+  const flags = { weather: ['kind', 'clouds', 'rain', 'wind', 'minutes'], sky: ['palette', 'sun'], strike: ['at'] }[verb];
+  for (const f of flags) { const v = takeOpt(args, `--${f}`); if (v !== undefined) out[f] = v; }
+  if (verb === 'strike' && out.at === undefined && args[0] !== undefined) out.at = args.shift();
+  if (args.length) throw usage(`${verb}: unknown words ${args.join(' ')}`);
+  return out;
+}
+
 /** The daemon request the arguments make, and the creator named. */
 export function requestOf(argv) {
   const args = [...argv];
@@ -110,7 +138,9 @@ export function requestOf(argv) {
   }
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe') return { req: { op: verb }, creator };
+  if (verb === 'check' && WORLD_VERBS.includes(rest[0])) return { req: { op: 'check', world: worldVerbOf(rest[0], rest.slice(1)) }, creator };
   if (verb === 'check') return { req: { op: 'check', ops: opsOf(rest[0], rest.slice(1)) }, creator };
+  if (WORLD_VERBS.includes(verb)) return { req: { op: 'edit', world: worldVerbOf(verb, rest) }, creator };
   return { req: { op: 'edit', ops: opsOf(verb, rest) }, creator };
 }
 
