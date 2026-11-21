@@ -3285,6 +3285,35 @@ fn l46_tea_coffee_and_eating() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// 0.131 parity L42 (#3710) A1: water and the garden on a served full Eden, from outside. At the street's firewood a
+/// Soul takes a log; it walks to a watering can on the street and takes it; at the park it turns the drinking fountain
+/// on, drinks, and turns it off. Left open (#3710): stacking the log back (`arg-missing`), watering the library's
+/// potted plant from the street and the greenhouse's vent (`walk.blocked`), and a cottage's bathroom upstairs (the
+/// bath, the basin: `out-of-reach`, the approach ends on the floor below).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn l42_water_and_the_garden_from_outside() {
+    let mut wrong = served_steps(
+        "84.0,44.0",
+        "l42street",
+        &[
+            ("e_7e4e5663", "take_log", &[], "done"),
+            ("e_5bf741bc", "walk", &[], "done"),
+            ("e_5bf741bc", "take", &[], "done"),
+        ],
+    );
+    wrong.extend(served_steps(
+        "19.0,96.0",
+        "l42park",
+        &[
+            ("e_b729d948", "turn_on", &[], "done"),
+            ("e_b729d948", "drink", &[], "done"),
+            ("e_b729d948", "turn_off", &[], "done"),
+        ],
+    ));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// A body's logged frame, height and stance: `(node, slot, y µm, stance)`.
 type Stood = (Id, Option<u64>, i64, Option<sim::controller::Stance>);
 
