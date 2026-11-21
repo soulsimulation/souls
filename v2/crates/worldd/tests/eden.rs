@@ -1848,3 +1848,120 @@ fn c21_the_sandpit_walk_arrives_or_ends_blocked() {
     }
     assert!(ticks <= 100, "ended within 5 s of its last progress");
 }
+
+/// Every motion sample the served world's public stream holds, part by part, read by the normal public reader from
+/// the files `worldd serve` wrote under `views/` (the stream `views/world.json` names): `(part, sample)`.
+fn public_samples(dir: &Path) -> Vec<(u64, replica::pose::HandOff)> {
+    use replica::stream::{Pointer, public::PublicPlayer};
+    let world = replica::rules::json::parse(
+        &std::fs::read_to_string(dir.join("views/world.json")).unwrap(),
+    )
+    .unwrap();
+    let stream = dir.join(world.get("stream").and_then(|v| v.str()).unwrap());
+    let pointer = Pointer::read(&std::fs::read(stream.join("pointer")).unwrap()).unwrap();
+    let headers = stream.ancestors().nth(3).unwrap().join("headers");
+    let header = std::fs::read(headers.join(replica::encode::to_hex(&pointer.header))).unwrap();
+    let Value::Map(fields) = decode(&std::fs::read(stream.join("pointer")).unwrap())
+        .unwrap()
+        .value
+    else {
+        panic!("the pointer is a map")
+    };
+    let Some(Value::Bytes(generation)) = fields.get(&8) else {
+        panic!("a public stream's pointer names its baseline")
+    };
+    let parts = stream.join("g").join(replica::encode::to_hex(generation));
+    let baseline = std::fs::read(parts.join("baseline")).unwrap();
+    let mut player = PublicPlayer::start(&header, &baseline).expect("the public reader");
+    let mut out = Vec::new();
+    for n in 0..=pointer.newest.expect("a published part") {
+        let bytes = std::fs::read(parts.join(n.to_string())).expect("a published part");
+        player
+            .play(&bytes)
+            .expect("the public reader plays the part");
+        out.extend(player.samples().iter().map(|h| (n, *h)));
+    }
+    out
+}
+
+/// #3799 A4: a Soul on a served Eden walks to the sage armchair, sits and rises through the gateway; the public
+/// stream `worldd serve` wrote carries its body's motion: samples that grow in number, positions that change over
+/// time while it walks, the hand-off into the seat's slot and the one out of it, read by the normal public reader.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn i3799_a4_the_public_stream_carries_a_soul_walking_sitting_and_rising() {
+    use replica::pose::Owner;
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let armchair = im.nodes["e_1f3666fe"];
+    let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "m3799", im.nodes["world"].scope());
+    let walked = soul.act("eden:walk", Some(armchair), BTreeMap::new());
+    let sat = soul.act("eden:sit", Some(armchair), BTreeMap::new());
+    let rose = soul.act("eden:rise", None, BTreeMap::new());
+    println!("walk {walked:?}, sit {sat:?}, rise {rose:?}");
+    // The view tier publishes each synced tick; a second and a half is several of its parts.
+    std::thread::sleep(Duration::from_millis(2500));
+    let samples = public_samples(&dir);
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    walked.expect("walked to the armchair");
+    sat.expect("sat in it");
+    rose.expect("rose from it");
+    let bodies: std::collections::BTreeSet<Id> = samples.iter().map(|(_, h)| h.node).collect();
+    println!(
+        "{} public samples in {} parts, of {} bodies",
+        samples.len(),
+        samples
+            .iter()
+            .map(|s| s.0)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        bodies.len()
+    );
+    assert_eq!(bodies.len(), 1, "the one Soul's body");
+    let walking: Vec<&replica::pose::HandOff> = samples
+        .iter()
+        .map(|(_, h)| h)
+        .filter(|h| h.to == Owner::Mover && h.from == Owner::Mover)
+        .collect();
+    let at: Vec<i64> = samples.iter().map(|(_, h)| h.at).collect();
+    assert!(at.windows(2).all(|w| w[0] <= w[1]), "in world time order");
+    let mut places: Vec<(i64, i64)> = walking
+        .iter()
+        .map(|h| (h.pose.position.x, h.pose.position.z))
+        .collect();
+    places.dedup();
+    println!(
+        "walking: {} samples at {} places, first {:?} last {:?} (µm)",
+        walking.len(),
+        places.len(),
+        places.first(),
+        places.last()
+    );
+    assert!(walking.len() >= 10, "a walk of metres is many samples");
+    assert!(places.len() >= 10, "the body is seen at changing positions");
+    let into = samples
+        .iter()
+        .position(|(_, h)| h.to == Owner::Slot && h.pose.frame.node == armchair);
+    let out = samples
+        .iter()
+        .position(|(_, h)| h.from == Owner::Slot && h.to == Owner::Mover);
+    println!(
+        "into the seat: {:?}; out of it: {:?}",
+        into.map(|i| samples[i].1),
+        out.map(|i| samples[i].1)
+    );
+    let (into, out) = (
+        into.expect("the hand-off into the seat's slot"),
+        out.expect("the hand-off out of it"),
+    );
+    assert!(
+        samples[into].1.pose.frame.slot.is_some(),
+        "in a slot of the armchair"
+    );
+    assert!(into < out, "seated, then risen");
+    assert_ne!(
+        samples[out].1.pose.frame.node, armchair,
+        "standing on a floor again"
+    );
+}
