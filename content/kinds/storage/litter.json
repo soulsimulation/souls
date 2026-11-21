@@ -1,0 +1,142 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:litter",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        60,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      800,
+      120,
+      800
+    ]
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:litter",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            200,
+            33,
+            100
+          ],
+          "r": 33,
+          "h": 120,
+          "segments": 6,
+          "tint": "can",
+          "roll": 90000,
+          "yaw": 34377
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            -200,
+            50,
+            0
+          ],
+          "r": 60,
+          "segments": 4,
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            4,
+            -150
+          ],
+          "size": [
+            140,
+            8,
+            100
+          ],
+          "round": 0,
+          "tint": "wrapper",
+          "yaw": 22918
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            50,
+            40,
+            300
+          ],
+          "r": 40,
+          "h": 220,
+          "segments": 6,
+          "tint": "bottle",
+          "roll": 90000,
+          "yaw": 68755
+        }
+      ],
+      "palette": {
+        "can": "#c23a2b",
+        "can2": "#3f7a8a",
+        "paper": "#e8e2d4",
+        "wrapper": "#e6c23a",
+        "bottle": "#6a9a6a"
+      },
+      "tags": [
+        "litter",
+        "item"
+      ]
+    }
+  },
+  "text": {
+    "card": "A little scatter of dropped rubbish: pick it up to tidy, put it in a bin.",
+    "rubbish": "rubbish",
+    "trash": "trash",
+    "scrap_paper": "scrap paper"
+  },
+  "card": {
+    "text": "card",
+    "category": "rubbish",
+    "synonyms": [
+      "trash",
+      "scrap_paper"
+    ]
+  }
+}

@@ -1321,3 +1321,48 @@ fn n_g8_visitors_are_the_souls_paired_for_the_world_newest_first() {
     let (token, _) = pair_in(&p, "acct_a", "mars");
     assert_eq!(p.creator_by_token(&token), None);
 }
+
+#[test]
+fn n3720_a_new_soul_past_the_accounts_cap_is_refused_too_many_and_a_retire_makes_room() {
+    let (mut p, _) = store();
+    assert_eq!(p.soul_cap, SOUL_CAP, "today's default");
+    p.soul_cap = 2;
+    let (_, first) = pair_in(&p, "acct_owner", "mars");
+    pair_in(&p, "acct_owner", "mars");
+    let (_, code) = ask(&p, "studio laptop", None, false, T0);
+    assert_eq!(p.approve("acct_owner", &code, T0), Err(("too-many", None)));
+    // Another account has its own cap; an existing Soul still pairs again.
+    pair_in(&p, "acct_other", "mars");
+    let (_, again) = ask(&p, "new laptop", Some(&first), true, T0);
+    assert_eq!(p.approve("acct_owner", &again, T0), Ok(first.clone()));
+    // A retired Soul no longer counts.
+    p.retire("acct_owner", &first, T0).expect("retired");
+    let (_, code) = ask(&p, "studio laptop", None, false, T0);
+    assert!(p.approve("acct_owner", &code, T0).is_ok());
+}
+
+#[test]
+fn n3720_a_name_another_soul_of_the_world_has_is_refused_name_taken() {
+    let (p, _) = store();
+    let named = |n: &str| souls::Profile {
+        name: Some(n.into()),
+        description: None,
+    };
+    let (_, oriel) = pair_in(&p, "acct_owner", "mars");
+    let (_, other) = pair_in(&p, "acct_other", "mars");
+    let (_, elsewhere) = pair_in(&p, "acct_other", "venus");
+    p.set_profile("acct_owner", &oriel, &named("Oriel"))
+        .expect("named");
+    assert_eq!(
+        p.set_profile("acct_other", &other, &named("oriel")),
+        Err("name-taken"),
+        "the same name in the same world, any case"
+    );
+    p.set_profile("acct_other", &elsewhere, &named("Oriel"))
+        .expect("another world");
+    p.set_profile("acct_owner", &oriel, &named("Oriel"))
+        .expect("its own name again");
+    p.retire("acct_owner", &oriel, T0).expect("retired");
+    p.set_profile("acct_other", &other, &named("Oriel"))
+        .expect("a retired Soul's name is free");
+}
