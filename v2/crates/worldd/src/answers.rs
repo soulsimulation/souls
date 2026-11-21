@@ -20,7 +20,7 @@
 //! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
 //! how) and is answered: a receipt naming its entries when done, else a refusal naming how it ended
 //! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at walking
-//! speed, plus a margin and crossings, at most 180 s and never beyond the intent's expiry. Its deadline is written
+//! speed, plus a margin and crossings, with no total cap and never beyond the intent's expiry. Its deadline is written
 //! as C20's entry and it receives C20's one progress answer if still going at 10 s. C21's watch ends a stalled walk
 //! `walk.blocked`; waiting at a link and being carried do not count as stalled walking.
 //! No move outlives its act: a walk still going at its act's deadline stops in that tick and ends `act.timed-out`; a
@@ -577,6 +577,8 @@ pub struct Config {
     pub text: Option<Arc<Store>>,
     /// Immutable imported public name bytes, attached only to delivered public record references off the clock.
     pub public_names: Arc<crate::views::names::PublicNames>,
+    /// The closed kinds of the world's entries: what one holds stays out of other Souls' sync answers (#3915).
+    pub closed: crate::closed::Closed,
     /// Called once at start with the log's durable mark; what it gives is handed each part record as it is appended
     /// (its number and bytes): a view tier's `offer`, so a stream writer follows the world (V1b).
     pub follow: Option<Follow>,
@@ -693,6 +695,7 @@ impl Config {
             served: None,
             text: None,
             public_names: Arc::new(Default::default()),
+            closed: Default::default(),
             follow: None,
             rate: None,
             engine: None,
@@ -1936,6 +1939,13 @@ impl Clock {
                         && tx.send(CheckJob::Edit(id, e, reserved)).is_ok()
                     {
                         self.outstanding += 1;
+                    } else {
+                        let r = Refused {
+                            op: None,
+                            name: EDIT_NO_CHECKER,
+                            detail: "the world's edit checker is not running".into(),
+                        };
+                        self.end(id, |c| c.edit_refusal(actor, sequence, &r));
                     }
                 }
                 Err(r) => self.end(id, |c| c.edit_refusal(actor, sequence, &r)),
@@ -1945,6 +1955,8 @@ impl Clock {
                     && tx.send(CheckJob::SetDown(a)).is_ok()
                 {
                     self.outstanding += 1;
+                } else {
+                    self.end(id, |c| c.refusal(actor, sequence, EDIT_NO_CHECKER));
                 }
             }
         }
@@ -3294,27 +3306,39 @@ impl Clock {
     }
 
     /// Numbers and applies what the forms wrote (F2's log hook: each entry handed back as logged), then answers the
-    /// intents whose runs ended.
+    /// intents whose runs ended. One part for the tick; when the world refuses it, each intent's entries go in a part
+    /// of their own, and an act whose entries are refused is refused by that name, its run left and nothing of it
+    /// written.
     fn write_forms(&mut self, now: Micros) {
         let mut effects = self.forms.out();
         if let Some(e) = self.engine.as_mut() {
             effects.extend(e.out());
         }
-        if !effects.is_empty() {
-            for (k, e) in effects.iter_mut().enumerate() {
-                e.envelope.sequence = self.replica.version() + k as u64;
-            }
-            match sim::commit::write(&mut self.replica, &effects) {
-                Ok(part) => {
-                    self.unsealed = true;
-                    for e in &part.effects {
-                        self.forms.forms.logged(e);
-                    }
-                    self.receipts.index(&part.effects);
-                    self.effects.extend(part.effects.iter().cloned());
-                    self.parts.push(part);
+        if !effects.is_empty() && self.commit_forms(effects.clone()).is_err() {
+            let mut groups: Vec<(Option<Id>, Vec<Effect>)> = Vec::new();
+            for e in effects {
+                let of = match e.envelope.cause {
+                    Cause::Intent(id) => Some(id),
+                    _ => None,
+                };
+                match groups.iter_mut().find(|(g, _)| *g == of) {
+                    Some((_, g)) => g.push(e),
+                    None => groups.push((of, vec![e])),
                 }
-                Err(r) => eprintln!("worldd: a form's entries were not written: {r}"),
+            }
+            for (of, group) in groups {
+                let Err(r) = self.commit_forms(group.clone()) else {
+                    continue;
+                };
+                eprintln!("worldd: a form's entries were not written: {r}");
+                self.forms.unwritten(&group);
+                let Some(o) = of.and_then(|id| self.open.get(&id).map(|o| (id, o))) else {
+                    continue;
+                };
+                let (id, actor, sequence, body) = (o.0, o.1.actor, o.1.sequence, o.1.body);
+                self.forms
+                    .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+                self.end(id, |c| c.refusal(actor, sequence, r.name));
             }
         }
         for id in std::mem::take(&mut self.engine_done) {
@@ -3338,6 +3362,23 @@ impl Clock {
         for (id, how, why) in self.forms.ended() {
             self.form_ended(id, how, why, now);
         }
+    }
+
+    /// `effects` numbered from the replica's next sequence and applied as one part, each handed to the forms as
+    /// logged; or the world's refusal, nothing written.
+    fn commit_forms(&mut self, mut effects: Vec<Effect>) -> R<()> {
+        for (k, e) in effects.iter_mut().enumerate() {
+            e.envelope.sequence = self.replica.version() + k as u64;
+        }
+        let part = sim::commit::write(&mut self.replica, &effects)?;
+        self.unsealed = true;
+        for e in &part.effects {
+            self.forms.forms.logged(e);
+        }
+        self.receipts.index(&part.effects);
+        self.effects.extend(part.effects.iter().cloned());
+        self.parts.push(part);
+        Ok(())
     }
 
     /// A form's run started (C20, #3469): its act's deadline becomes the run's own, its start plus its steps' span
@@ -4430,6 +4471,7 @@ pub fn start<S: Storage + 'static>(
         kept,
         (cfg.lineage, zone, cfg.epoch),
         Arc::clone(&cfg.public_names),
+        std::mem::take(&mut cfg.closed),
     )
     .map_err(io)?;
     let fresh = if cfg.checkpoints.is_some() {
@@ -4927,56 +4969,69 @@ fn edit_checker(
                     continue;
                 };
                 let who = creator.as_ref().map_or(Some(world.creator), |c| c.get());
-                let checked = match who {
-                    _ if copy.version() < needed => Err(Refused {
+                // #3958: a panic in the check or the plan answers the edit by name and keeps the thread (and every
+                // edit after it) going, on a town built again.
+                let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let checked = match who {
+                        _ if copy.version() < needed => Err(Refused {
+                            op: None,
+                            name: "edit.stale",
+                            detail: "the published copy has not reached the map basis".into(),
+                        }),
+                        Some(c) => {
+                            world.creator = c;
+                            edit::check(e, &copy, world)
+                        }
+                        None => Err(Refused {
+                            op: None,
+                            name: "edit.not-the-creator",
+                            detail: "the world's record names no creator".into(),
+                        }),
+                    };
+                    checked
+                        .and_then(|c| {
+                            let known = town.on(&copy, ground, false).map(|t| Known::of(t));
+                            // Planned with the ids the commit will mint, so its guard's ground is the map's (#3743).
+                            sim::edit::plan_classes(
+                                c,
+                                &copy,
+                                ground,
+                                known.as_ref(),
+                                snapshot.classes.values().copied(),
+                                reserved.clone(),
+                            )
+                        })
+                        .and_then(|mut p| {
+                            let kept = p.take_map();
+                            let places =
+                                crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
+                            let tree = buildsafe::souls(&copy, &world.kinds);
+                            let souls = buildsafe::judged(tree, &snapshot.bodies);
+                            let maps = source
+                                .map(|source| {
+                                    buildsafe::PreparedMaps::prepare_classes(
+                                        &copy,
+                                        &p,
+                                        kept,
+                                        reserved.clone(),
+                                        &souls,
+                                        source,
+                                        &snapshot.classes,
+                                        &snapshot.movers,
+                                    )
+                                })
+                                .transpose()?;
+                            Ok((p, souls, snapshot.classes.clone(), reserved, maps, places))
+                        })
+                }))
+                .unwrap_or_else(|p| {
+                    town = buildsafe::TownCopy::new(kinds.clone());
+                    Err(Refused {
                         op: None,
-                        name: "edit.stale",
-                        detail: "the published copy has not reached the map basis".into(),
-                    }),
-                    Some(c) => {
-                        world.creator = c;
-                        edit::check(e, &copy, world)
-                    }
-                    None => Err(Refused {
-                        op: None,
-                        name: "edit.not-the-creator",
-                        detail: "the world's record names no creator".into(),
-                    }),
-                };
-                let checked = checked
-                    .and_then(|c| {
-                        let known = town.on(&copy, ground, false).map(|t| Known::of(t));
-                        // Planned with the ids the commit will mint, so its guard's ground is the map's (#3743).
-                        sim::edit::plan_classes(
-                            c,
-                            &copy,
-                            ground,
-                            known.as_ref(),
-                            snapshot.classes.values().copied(),
-                            reserved.clone(),
-                        )
+                        name: EDIT_FAILED,
+                        detail: panic_text(p.as_ref()),
                     })
-                    .and_then(|mut p| {
-                        let kept = p.take_map();
-                        let places = crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
-                        let tree = buildsafe::souls(&copy, &world.kinds);
-                        let souls = buildsafe::judged(tree, &snapshot.bodies);
-                        let maps = source
-                            .map(|source| {
-                                buildsafe::PreparedMaps::prepare_classes(
-                                    &copy,
-                                    &p,
-                                    kept,
-                                    reserved.clone(),
-                                    &souls,
-                                    source,
-                                    &snapshot.classes,
-                                    &snapshot.movers,
-                                )
-                            })
-                            .transpose()?;
-                        Ok((p, souls, snapshot.classes.clone(), reserved, maps, places))
-                    });
+                });
                 if events.send(Event::Edited(Box::new((id, checked)))).is_err() {
                     break;
                 }
@@ -4984,6 +5039,19 @@ fn edit_checker(
         })
         .map_err(io)?;
     Ok(tx)
+}
+
+/// An edit whose check panicked (#3958): answered by this name, the checker kept.
+const EDIT_FAILED: &str = "edit.failed";
+/// An edit sent when the checker's thread is gone (#3958): answered by this name, never left open.
+const EDIT_NO_CHECKER: &str = "edit.no-checker";
+
+/// A panic's message, as far as it has one.
+fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| p.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic".into())
 }
 
 /// `effects` numbered from the replica's next sequence, made one part and applied to it: the part, or the refusal.

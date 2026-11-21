@@ -1,0 +1,130 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:wrapper",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        28,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      70,
+      55,
+      60
+    ]
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:wrapper",
+    "shape": {
+      "round": 4,
+      "shapes": [
+        {
+          "kind": "sphere",
+          "at": [
+            0,
+            26,
+            0
+          ],
+          "r": 30,
+          "segments": 5,
+          "tint": "paper",
+          "scale": [
+            1100,
+            850,
+            950
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            12,
+            42,
+            6
+          ],
+          "size": [
+            30,
+            4,
+            24
+          ],
+          "round": 0,
+          "tint": "print"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -16,
+            30,
+            -12
+          ],
+          "size": [
+            4,
+            22,
+            20
+          ],
+          "round": 0,
+          "tint": "paper"
+        }
+      ],
+      "palette": {
+        "paper": "#e8e1cf",
+        "print": "#b5422f"
+      },
+      "tags": [
+        "litter",
+        "item"
+      ]
+    }
+  },
+  "text": {
+    "card": "A crumpled paper wrapper someone dropped: pick it up and put it in a bin.",
+    "rubbish": "rubbish",
+    "wrapper": "wrapper",
+    "litter": "litter"
+  },
+  "card": {
+    "text": "card",
+    "category": "rubbish",
+    "synonyms": [
+      "wrapper",
+      "litter"
+    ]
+  }
+}
