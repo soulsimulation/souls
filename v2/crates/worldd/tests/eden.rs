@@ -173,6 +173,13 @@ fn serve_entries(
         lines.push(std::mem::take(&mut line));
     }
     print!("serve: {line}");
+    // The world's stdout stays read (#3825): with the pipe closed, its first line after start-up (a watchdog's stall
+    // report) panicked the thread that wrote it.
+    std::thread::spawn(move || {
+        for l in out.lines().map_while(Result::ok) {
+            println!("worldd: {l}");
+        }
+    });
     let s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(90))).unwrap();
     let mut soul = Client(s, Id::new(Scope([0xc1; 16]), 1).unwrap(), 0, lineage);
