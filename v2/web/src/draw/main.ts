@@ -22,8 +22,9 @@ import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
 import { mountOwnerBox } from '../owner/box.ts';
 import { arrive } from '../worlds/arrive.ts';
-import { mountArrival } from '../arrival/card.ts';
+import { mountArrival, welcomeOf } from '../arrival/card.ts';
 import { WorldSky } from '../sky/sky.ts';
+import { Lightning } from '../sky/lightning.ts';
 import { tickWater } from '../water/water.ts';
 import { installNightLighting, nightPools, paintNightSources, setNightStrength } from './night.ts';
 import { installCapture, shotSignal } from '../capture/capture.ts';
@@ -89,6 +90,9 @@ sky.hour = parseHour(location.search); // #3795: `?hour=HH:MM`, the sky and its 
 const cam = new FreeCamera(canvas);
 const world = new WorldView();
 scene.add(world.group);
+const lightning = new Lightning((x, z) => world.heightAt(x, z)); // #3695: a creator's strike, its bolt and thunder
+scene.add(lightning.group);
+(globalThis as { lightning?: Lightning }).lightning = lightning;
 // #3603: the replica's courseAt, loaded on this thread only when a node with a course (a rowing punt) arrives.
 world.onCourse = () => void import('replica').then(async (r) => { await r.default(); world.courseAt = r.courseAt; }, (e) => console.warn('courses stand still:', e));
 const clock = new PlaybackClock();
@@ -128,6 +132,8 @@ cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 const firstFrame = arrive(worldName, status);
 // #3780: today's arrival card, the world's name on black and a light that grows with the stream, until the first frame.
 const card = mountArrival(document, worldName ?? installed?.world ?? 'Souls', q.has('shot') || moment !== null);
+// #3702: the world's welcome, its creator's words in the directory's list, on the card while it loads.
+if (installed) fetch(new URL('/v1/worlds', installed.directory), { credentials: 'omit' }).then((r) => r.json()).then((l) => card.greet(welcomeOf(l, installed.world)), () => {});
 let arrived = false, failedWith = '';
 const live = (address: string) => new StreamSource(address).start({
   pointer: (p) => ((pointer = p), card.reach('pointer')),
@@ -212,6 +218,7 @@ renderer.setAnimationLoop((now) => {
   const t = history ? history.step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil)) : worldNow === null ? null : (near ?? clock).step(dt, worldNow, caughtUp(newestTo, pointer?.quietUntil));
   director.update(Math.min(100, dt), t);
   sun.position.copy(sun.target.position).addScaledVector(sky.update(t ?? 0, cam.camera), 400);
+  lightning.update(t === null ? null : sky.recordAt(t)?.strike ?? null, t, cam.camera, dt / 1000, sky.dome.uniforms.uFlash.value);
   tickWater((t ?? 0) / 1e6);
   fx?.update(t === null ? null : t / 1e6, cam.camera.position);
   setNightStrength(sky.state.daylight);

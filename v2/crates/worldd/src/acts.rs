@@ -395,7 +395,7 @@ impl Sight<'_> {
             return None;
         }
         self.kinds
-            .get(plain(n.kind()))?
+            .get(entry_of(&n))?
             .get("areas")?
             .get(point.as_str())?;
         let place = n.place()?;
@@ -603,7 +603,7 @@ impl Sight<'_> {
     fn to_thing(&self, body: Id, floor: Id, from: Vec3, target: Id, point: &Name) -> Option<i64> {
         self.with_view(body, |view| {
             let n = self.tree.node(self.tree.handle(target)?)?;
-            let entry = self.kinds.get(plain(n.kind()))?;
+            let entry = self.kinds.get(entry_of(&n))?;
             // A body on one of the thing's own floors (inside a greenhouse, C34 #3599) is in the thing's frame: a floor
             // is placed at its building's origin. Carried up the tree, the point would land on the ground cut out under it.
             let own_floor = self
@@ -782,11 +782,18 @@ pub struct Acts {
     /// What blocked each body whose walk ended [`BLOCKED`], until its run's ending is read.
     blocked: BTreeMap<Id, String>,
     planning: RefCell<Planning>,
+    /// The code hatches' modules this world ships (F8, #3713), loaded and checked once, by their SHA-256 multihash.
+    hatches: BTreeMap<Vec<u8>, replica::hatch::Loaded>,
 }
 
 /// The moves a form's step may name: every move content declares, and the body's own (C23, [`crate::moves`]).
 pub fn library() -> R<Vec<Move>> {
     crate::moves::library()
+}
+
+/// The name of a node's Soul Actions entry ([`import_eden::entry_name`]): the entry it names, else its kind's.
+fn entry_of<'a>(n: &'a replica::tree::NodeRef<'_>) -> &'a str {
+    import_eden::entry_name(n.kind().as_str(), n.fields())
 }
 
 /// The plain name (`namespace:name`) of a node's kind.
@@ -882,7 +889,60 @@ impl Acts {
             watch: Watch::new(),
             blocked: BTreeMap::new(),
             planning: RefCell::new(Planning::default()),
+            hatches: BTreeMap::new(),
         }
+    }
+
+    /// Loads the code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713), each named by the hash of
+    /// its bytes: a module refused at load is refused here by its name, before the world serves.
+    pub fn hatches(&mut self, modules: &[Vec<u8>]) -> Result<usize, Refusal> {
+        for bytes in modules {
+            let mut named = vec![replica::ids::SHA2_256, 32];
+            named.extend(replica::ids::sha256(bytes));
+            let loaded = replica::hatch::Loaded::load(bytes, &named)?;
+            self.hatches.insert(named, loaded);
+        }
+        Ok(self.hatches.len())
+    }
+
+    /// The sets form `form`'s code hatch answers for `node`, if the form has one (F8, #3713): its declared reads from
+    /// the node's fields and the act's arguments, run in the module the world ships under its hash. A no refuses the
+    /// act `hatch-said-no` with the hatch's `why`; a module the world does not ship is `hatch-module-missing`.
+    fn hatch_sets(
+        &self,
+        tree: &Tree,
+        node: Id,
+        entry: &Json,
+        form: &str,
+        args: &skills::form_runner::Args,
+    ) -> Result<Option<Vec<skills::form_runner::Effect>>, Refusal> {
+        let Some(hatch) = skills::form_runner::bind_hatch(entry, form)? else {
+            return Ok(None);
+        };
+        let Some(module) = self.hatches.get(&hatch.module) else {
+            return Err(refusal("hatch-module-missing", form));
+        };
+        let empty = BTreeMap::new();
+        let fields = tree
+            .handle(node)
+            .and_then(|h| tree.node(h))
+            .map(|n| n.fields().clone());
+        let reads = skills::form_runner::hatch_reads(
+            entry,
+            &hatch,
+            fields.as_ref().unwrap_or(&empty),
+            args,
+        )?;
+        let v = skills::form_runner::run_hatch(&hatch, module, entry, &reads)?;
+        if !v.yes {
+            return Err(skills::form_runner::hatch_no(&hatch));
+        }
+        Ok(Some(
+            v.sets
+                .into_iter()
+                .map(|(field, to)| skills::form_runner::Effect::Set { field, to })
+                .collect(),
+        ))
     }
 
     /// Runs `f` on the world the runner reaches.
@@ -979,6 +1039,53 @@ impl Acts {
         result
     }
 
+    /// Whether the words an act of form `verb` (`<namespace>:<form>`) on `node` carries are everyone's (#3712): the
+    /// node's entry has the form, and the form sets a field whose audience is everyone from one of its `text`
+    /// arguments (words written on a board for all to read). Words in any other act stay their sender's (T8).
+    pub fn public_words(&self, tree: &Tree, node: Id, verb: &str) -> bool {
+        let Some(form) = verb.split_once(':').map(|(_, f)| f) else {
+            return false;
+        };
+        let Some(entry) = tree
+            .handle(node)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| self.kinds.get(plain(n.kind())))
+        else {
+            return false;
+        };
+        let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
+            return false;
+        };
+        let text = |a: &str| {
+            f.get("takes")
+                .and_then(|t| t.get(a))
+                .and_then(|t| t.get("type"))
+                .and_then(Json::str)
+                == Some("text")
+        };
+        let everyone = |field: &str| {
+            entry
+                .get("state")
+                .and_then(|s| s.get(field))
+                .and_then(|d| d.get("audience"))
+                .and_then(|a| a.get("rule"))
+                .and_then(Json::str)
+                == Some("everyone")
+        };
+        f.get("effects")
+            .and_then(Json::arr)
+            .unwrap_or(&[])
+            .iter()
+            .any(|e| {
+                e.get("change").and_then(Json::str) == Some("set")
+                    && e.get("to")
+                        .and_then(|t| t.get("arg"))
+                        .and_then(Json::str)
+                        .is_some_and(text)
+                    && e.get("field").and_then(Json::str).is_some_and(everyone)
+            })
+    }
+
     /// Starts the act's first candidate that starts (`(node, form)` in rank order) for intent `intent` on `body`, or
     /// the first refusal. A resend of an intent whose run is going joins it; one whose effects are logged gets them.
     #[allow(clippy::too_many_arguments)]
@@ -999,7 +1106,7 @@ impl Acts {
             let kind = tree
                 .handle(*node)
                 .and_then(|h| tree.node(h))
-                .map(|n| plain(n.kind()).to_owned());
+                .map(|n| entry_of(&n).to_owned());
             // A thing already gone is refused by name here, never handed to the runner (F4's known gap).
             let Some(kind) = kind else {
                 first.get_or_insert(refusal("thing-missing", replica::world_model::show(*node)));
@@ -1013,13 +1120,39 @@ impl Acts {
                 first.get_or_insert(refusal("arg-ambiguous", key));
                 continue;
             }
-            let mut all = match skills::form_runner::args_in(entry, &args.things, &args.slots) {
+            // A number for an argument the form takes as a count or an int is that number, not a slot (#3713).
+            let takes = entry
+                .get("forms")
+                .and_then(|f| f.get(form))
+                .and_then(|f| f.get("takes"));
+            let counted = |k: &String| {
+                matches!(
+                    takes
+                        .and_then(|t| t.get(k))
+                        .and_then(|t| t.get("type"))
+                        .and_then(Json::str),
+                    Some("count" | "int")
+                )
+            };
+            let slots: BTreeMap<String, u64> = args
+                .slots
+                .iter()
+                .filter(|(k, _)| !counted(k))
+                .map(|(k, n)| (k.clone(), *n))
+                .collect();
+            let mut all = match skills::form_runner::args_in(entry, &args.things, &slots) {
                 Ok(all) => all,
                 Err(e) => {
                     first.get_or_insert(e);
                     continue;
                 }
             };
+            for (k, n) in args.slots.iter().filter(|(k, _)| counted(k)) {
+                all.insert(
+                    k.clone(),
+                    skills::form_runner::Arg::Int(i64::try_from(*n).unwrap_or(i64::MAX)),
+                );
+            }
             let mut ambiguous = None;
             for (key, value) in &args.values {
                 if all.insert(key.clone(), value.clone()).is_some() {
@@ -1115,6 +1248,15 @@ impl Acts {
                     continue;
                 }
             };
+            // A form's code hatch (F8, #3713) checks the act before any walk, and its answered fields are written
+            // with the form's effects, in place of the form's own sets of those fields.
+            let hatched = match self.hatch_sets(tree, *node, &entry, form, &all) {
+                Ok(h) => h,
+                Err(e) => {
+                    first.get_or_insert(e);
+                    continue;
+                }
+            };
             let was = match thing {
                 Some(t) => self.toward.insert(body, t),
                 None => self.toward.remove(&body),
@@ -1126,6 +1268,7 @@ impl Acts {
             let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
             let r = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
                 if !picked
+                    && hatched.is_none()
                     && args.things.is_empty()
                     && args.slots.is_empty()
                     && args.values.is_empty()
@@ -1145,7 +1288,14 @@ impl Acts {
                 }
                 // Thing, slot and value arguments (F4, C12, C24, C25): bound here, as `Forms::commit` binds none yet.
                 let steps = skills::form_runner::bind_with(&entry, form, &all)?;
-                let effects = skills::form_runner::bind_effects_args(&entry, form, &all)?;
+                let mut effects = skills::form_runner::bind_effects_args(&entry, form, &all)?;
+                if let Some(sets) = hatched {
+                    effects.retain(|e| {
+                        !matches!(e, skills::form_runner::Effect::Set { field, .. }
+                            if sets.iter().any(|s| matches!(s, skills::form_runner::Effect::Set { field: f, .. } if f == field)))
+                    });
+                    effects.extend(sets);
+                }
                 sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
                 forms.start(w, body, *node, intent, steps, effects, limits(), now)
             });
@@ -1239,7 +1389,7 @@ impl Acts {
         let entry = tree
             .handle(node)
             .and_then(|h| tree.node(h))
-            .and_then(|n| self.kinds.get(plain(n.kind())).cloned());
+            .and_then(|n| self.kinds.get(entry_of(&n)).cloned());
         let asked = match entry {
             None => Err(refusal("thing-missing", replica::world_model::show(node))),
             Some(entry) => {

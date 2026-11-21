@@ -1,4 +1,4 @@
-// A landform's expansion into one creator's edit (Engine v2 G5, #2762). G7's verbs call `expand` once merged.
+// A landform's expansion into one creator's edit (Engine v2 G5, #2762), called by souls-god's `land` verbs (#3695).
 //
 // The batch, in `replica::edit::Op`'s shapes: the landform's place node under the open ground (its outline, its
 // parameters as JSON bytes; for a lake or a pond, the water itself, as N1 imports Eden's waters), the open ground's
@@ -36,12 +36,45 @@ export function heightAt(tiles, tileMm, x, z) {
 }
 
 const ring = (pts) => pts.map(([x, z]) => [Math.round(x * 1000), Math.round(z * 1000)]);
+const hexOf = (bytes) => ({ hex: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('hex') });
+
+/** The cells (i, j) of side `side / n` whose heights differ between `before` and `after`, as "i,j" keys. */
+export function changedCells(before, after, tileMm) {
+  const out = new Set();
+  const byKey = new Map(before.map((t) => [`${t.tx},${t.tz}`, t]));
+  for (const t of after) {
+    const b = byKey.get(`${t.tx},${t.tz}`);
+    if (!b) continue;
+    const n = samplesOf(t), w = n + 1;
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        const k = [j * w + i, j * w + i + 1, (j + 1) * w + i, (j + 1) * w + i + 1];
+        if (k.some((x) => t.heights[x] !== b.heights[x])) out.add(`${t.tx * n + i},${t.tz * n + j}`);
+      }
+    }
+  }
+  return { cells: out, cellUm: (tileMm * 1000) / samplesOf(before[0] ?? { classes: [0] }) };
+}
+
+/** The bodies (`[{ id, position: [x, y, z] µm }]` standing on the open ground) within `radiusUm` of a changed cell:
+ *  what the world refuses as `edit.terrain-under-soul` (`sim::edit::terrain`), found on the copy first. */
+export function bodiesUnder({ cells, cellUm }, bodies, radiusUm) {
+  const c = (v) => Math.floor(Number(v) / cellUm);
+  return bodies.filter(({ position: [x, , z] }) => {
+    for (let i = c(Number(x) - radiusUm); i <= c(Number(x) + radiusUm); i++) {
+      for (let j = c(Number(z) - radiusUm); j <= c(Number(z) + radiusUm); j++) if (cells.has(`${i},${j}`)) return true;
+    }
+    return false;
+  });
+}
 
 /**
  * One edit's operations for `landform` (`packages/ground`'s record, metres) on the open ground `ground`
  * ({ id, tileMm, tiles: [{ tx, tz, heights: Int32Array mm, classes: Uint8Array }] }), with `things` resting on it
- * ([{ id, position: [x, y, z] µm (BigInt or number), orientation, support }]). `water` ({ level } m) makes the place
- * a water over the landform's area; `placeKind` is the world's pinned `eden:place@…`. Positions in the ops are µm.
+ * ([{ id, position: [x, y, z] µm (BigInt or number), orientation: [w, x, y, z], support }]). `water` ({ level } m)
+ * makes the place a water over the landform's area; `placeKind` is the world's place kind. The operations are the
+ * daemon's batch (`replica::wasm` `ops_of`): bytes as `{ hex }`, a move's position in µm as `atUm`, its facing and
+ * support kept. Also the tiles after, for the caller's own checks.
  */
 export function expand({ ground, landform, water, things = [], placeKind, outline }) {
   const patched = patch(ground.tiles, ground.tileMm, landform);
@@ -56,20 +89,17 @@ export function expand({ ground, landform, water, things = [], placeKind, outlin
   } else {
     fields[F.PLACE_OF] = 'eden:landform';
   }
-  fields[F.LANDFORM] = new TextEncoder().encode(JSON.stringify(landform));
+  fields[F.LANDFORM] = hexOf(new TextEncoder().encode(JSON.stringify(landform)));
   const ops = [
-    { op: 'place', name: 1, kind: placeKind, parent: ground.id, at: { position: [0n, 0n, 0n] }, fields },
-    {
-      op: 'set', node: ground.id, field: F.TILES,
-      to: tiles.map((t) => [t.tx, t.tz, new Uint8Array(t.heights.buffer, t.heights.byteOffset, t.heights.byteLength), t.classes]),
-    },
+    { op: 'place', name: 1, kind: placeKind, in: ground.id, at: [0, 0, 0], fields },
+    { op: 'set', node: ground.id, field: F.TILES, value: tiles.map((t) => [t.tx, t.tz, hexOf(t.heights), hexOf(t.classes)]) },
   ];
   for (const th of things) {
     const [x, y, z] = th.position.map(BigInt);
     const before = heightAt(ground.tiles, ground.tileMm, x, z) ?? 0n;
     const after = heightAt(tiles, ground.tileMm, x, z) ?? 0n;
     if (after === before) continue;
-    ops.push({ op: 'move', node: th.id, at: { position: [x, y + after - before, z], orientation: th.orientation, support: th.support } });
+    ops.push({ op: 'move', node: th.id, atUm: [Number(x), Number(y + after - before), Number(z)], orientation: th.orientation, support: th.support });
   }
-  return { ops, patched: patched.length };
+  return { ops, patched: patched.length, tiles };
 }
