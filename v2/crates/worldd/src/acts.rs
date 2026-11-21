@@ -752,6 +752,14 @@ impl Reach for Sight<'_> {
             AT_ARG => *self.toward.get(&body)?,
             _ => target,
         };
+        // A thing in the body's own hand is within its reach (#3715): a held kettle's switch.
+        let parent = self
+            .tree
+            .handle(target)
+            .and_then(|h| self.tree.node(h)?.parent());
+        if parent == Some(body) {
+            return Some(0);
+        }
         if let Some(d) = self.to_thing(body, sim::walk::node_of(me), a, target, point) {
             return Some(d);
         }

@@ -53,7 +53,7 @@ test('A2: the kettle fills from a sink (data: the nearest thing of kind eden:sin
   const fill = kettle.forms.fill;
   assert.deepEqual(fill.needs.find(n => n.need === 'state'), {need: 'state', field: 'water', at_most: 0});
   assert.ok(fill.needs.some(n => n.need === 'held_by_actor'));
-  assert.deepEqual(fill.steps, [{step: 'move', move: 'fill', toward: {arg: 'from'}}]);
+  assert.deepEqual(fill.steps, [{step: 'walk_to', point: {arg: 'from'}}, {step: 'move', move: 'fill', toward: {arg: 'from'}}]);
   assert.deepEqual(fill.effects.map(e => [e.change, e.field, e.from, e.into, e.amount]), [['transfer', 'water', {arg: 'from'}, 'this', 'room']]);
   assert.deepEqual(kettle.howtos.tea.steps.map(s => s.form), ['fill', 'switch_on', 'pour']);
   // Without the sink in its selector the fill would be a magic refill: the selector names the kind.

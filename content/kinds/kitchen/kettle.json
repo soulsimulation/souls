@@ -32,7 +32,7 @@
         { "need": "held_by_actor" },
         { "need": "state", "field": "water", "at_most": 0 }
       ],
-      "steps": [{ "step": "move", "move": "fill", "toward": { "arg": "from" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "from" } }, { "step": "move", "move": "fill", "toward": { "arg": "from" } }],
       "effects": [{ "change": "transfer", "field": "water", "from": { "arg": "from" }, "into": "this", "amount": "room", "event": "filled" }]
     },
     "switch_on": {

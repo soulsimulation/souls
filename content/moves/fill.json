@@ -6,5 +6,5 @@
   "cancels_on": ["claim_taken", "out_of_reach"],
   "effector": "held_point",
   "reach_mm": 600,
-  "phases": { "start_up_us": 700000, "fill_us": 3000000, "recovery_us": 500000 }
+  "phases": { "start_up_us": 700000, "pour_us": 3000000, "recovery_us": 500000 }
 }
