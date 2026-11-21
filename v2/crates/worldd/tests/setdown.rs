@@ -148,32 +148,29 @@ fn first_spot() -> Vec3 {
     Vec3::new(-39_000_000, 0, 30_000_000)
 }
 
-fn header(zone: Id) -> Header {
-    let v = Value::Map(BTreeMap::from([
-        (
-            1,
-            Value::Bytes(Hash::of(Purpose::Fixture, b"souls/e4-setdown/1").to_bytes()),
-        ),
-        (2, Value::Bytes(schema_hash().to_bytes())),
-        (3, Value::Bytes(zone.scope().0.to_vec())),
-        (4, zone.to_value()),
-        (5, Value::Uint(0)),
-        (
-            6,
-            Value::Array(
-                kinds()
-                    .into_iter()
-                    .map(|(_, f)| Value::Text(name(&f)))
-                    .collect(),
-            ),
-        ),
-        (7, Value::Array(Vec::new())),
-    ]));
-    Header::read(&encode(&v).unwrap()).unwrap()
-}
-
 /// The world's rules (T2): the ground takes bodies, things and activities; a body holds a thing in each hand.
 fn tree_rules() -> TreeRules {
+    let mut rules = import_eden::load(&testworld::generate(1, 0).unwrap().text)
+        .unwrap()
+        .rules;
+    let ground_kind = {
+        let (town, g) = town();
+        let t = &town.tree;
+        t.node(t.handle(g).unwrap())
+            .unwrap()
+            .kind()
+            .as_str()
+            .to_owned()
+    };
+    if let Some(k) = rules.kinds.get_mut(&ground_kind) {
+        k.children
+            .extend(["body", "thing", PAIR].map(str::to_owned));
+    }
+    rules.kinds.extend(ours());
+    rules
+}
+
+fn ours() -> BTreeMap<String, Kind> {
     let k = |owner: &str, children: &[&str], slots: &[u64], hands| Kind {
         owner: owner.into(),
         children: children.iter().map(|c| (*c).to_owned()).collect(),
@@ -183,8 +180,8 @@ fn tree_rules() -> TreeRules {
             .collect(),
         hands,
     };
-    TreeRules {
-        kinds: BTreeMap::from([
+    {
+        BTreeMap::from([
             (
                 fullname(PLACE),
                 k("place", &["body", "thing", PAIR], &[], None),
@@ -194,9 +191,7 @@ fn tree_rules() -> TreeRules {
             (fullname(RACK), k("thing", &[], &[1], None)),
             (fullname(PAIR), k("activity", &[], &[], None)),
             (fullname(CRATE), k("thing", &[], &[], Some(2))),
-        ]),
-        souls: BTreeSet::new(),
-        audiences: BTreeMap::new(),
+        ])
     }
 }
 
@@ -300,17 +295,28 @@ fn create(sequence: u64, node: Id, kind: &str, parent: Id, at: Vec3) -> Value {
 
 /// The world as built: a vessel 300 mm east of the first birth's spot, a rack 400 mm south of it. No body.
 fn world() -> Replica {
+    // N2's test world as imported (its open ground and buildings), so the edit checker's town has ground to plan on.
+    let im = import_eden::load(&testworld::generate(1, 0).expect("the test world").text)
+        .expect("the test world loads");
+    let mut r = Replica::start(&im.log.0).expect("a replica");
+    r.apply(&Part::read(&im.log.1).expect("the import's part"))
+        .expect("the import applies");
     let g = ground();
-    let h = header(g);
-    let mut r = Replica::start(h.stored()).expect("a replica");
     let s = first_spot();
+    let next = r.version();
     let effects = vec![
-        create(0, vessel(), VESSEL, g, Vec3::new(s.x + 300_000, 0, s.z)),
-        create(1, rack(), RACK, g, Vec3::new(s.x, 0, s.z + 400_000)),
-        create(2, crate_(), CRATE, g, Vec3::new(s.x - 300_000, 0, s.z)),
+        create(next, vessel(), VESSEL, g, Vec3::new(s.x + 300_000, 0, s.z)),
+        create(next + 1, rack(), RACK, g, Vec3::new(s.x, 0, s.z + 400_000)),
+        create(
+            next + 2,
+            crate_(),
+            CRATE,
+            g,
+            Vec3::new(s.x - 300_000, 0, s.z),
+        ),
     ];
     let part = encode(&Value::Map(BTreeMap::from([
-        (1, Value::Bytes(h.hash().to_bytes())),
+        (1, Value::Bytes(r.header().hash().to_bytes())),
         (2, Value::Array(effects)),
     ])))
     .unwrap();
