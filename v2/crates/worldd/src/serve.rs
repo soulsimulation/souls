@@ -1896,6 +1896,12 @@ fn serve(args: &[String]) -> R<()> {
             "public-stream: stopped before its first flush; the world is not servable".into(),
         );
     }
+    // ... and the clock runs: its first tick is done, after it reports the state this start resumes from (`worldd:
+    // started at tick`). The public stream no longer holds the start-up path, so without this a restart could say
+    // listening before the clock had started.
+    while world.beat.read().0 < 0 {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     if !pointer_path.is_file() {
         return Err(format!(
             "public-pointer-missing: {}",
