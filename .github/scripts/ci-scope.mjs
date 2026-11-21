@@ -36,6 +36,10 @@ import { SERVER_SHARDS } from './server-test-files.mjs';
 // `heavy: true` sends the job to the self-hosted pool CI_HEAVY_RUNNER when that variable is set (runnerFor, ci.yml's
 // qualify runs-on): the server shards and the legs whose hosted median is over about 8 minutes. The short legs stay on
 // ubuntu-latest, so one run uses both pools at once (docs/testing.md#self-hosted-runners). `native` never is heavy (#1162).
+/** v2/tools/ci.sh's legs: lints and every package's tests but sim's and worldd's; sim's tests; worldd's tests; the WASM
+ * build against the native answers; the client and page tests against the built binaries. */
+export const V2_LEGS = ['rust', 'sim', 'worldd', 'wasm', 'client'];
+
 export const JOBS = [
   // paths: a baseline or budget change is tools-only, so no step selects it, and this job is what compares it (#1117).
   { name: 'types-web', kind: 'types-web', light: true, assets: true, steps: ['V1-types', 'V2-build-root', 'V2-build-worlds', 'V3-bundle'], paths: /^tools\/test-harness\/bundle-budget\// },
@@ -58,8 +62,9 @@ export const JOBS = [
   // Also no gate step (#1111). soul-trace drives the thin CLI in tools/world-launcher/soul; soul-runtime's native client test uses the server's comms fixture. tools/entry's format, check and look gate tests ride here too, picked by tools/entry, content and packages/form-rules.
   { name: 'soul-tools', kind: 'soul-tools', light: true, assets: false, steps: [], paths: /^(tools\/soul-runtime|tools\/soul-trace|tools\/world-launcher\/soul|tools\/entry|content|packages\/form-rules|apps\/server)\// },
   // Engine v2 (#2635, K15 #2637): no gate step (v2/ is scope `none`), picked by its own paths. It builds and tests the
-  // Rust workspace with v2/tools/ci.sh, on the toolchain v2/rust-toolchain.toml pins, without the pnpm install.
-  { name: 'v2', kind: 'v2', assets: false, steps: [], paths: /^v2\// },
+  // Rust workspace with v2/tools/ci.sh, on the toolchain v2/rust-toolchain.toml pins, without the pnpm install, in
+  // V2_LEGS parallel legs (`ci.sh <leg>`): together the same checks as one `ci.sh` run, in about half the wall time.
+  ...V2_LEGS.map(leg => ({ name: `v2-${leg}`, kind: 'v2', leg, assets: false, steps: [], paths: /^v2\// })),
 ];
 
 /** The runner a qualify job gets, as ci.yml's runs-on computes it: a heavy job goes to CI_HEAVY_RUNNER (one label, or a
