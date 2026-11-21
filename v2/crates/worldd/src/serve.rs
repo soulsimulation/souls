@@ -2099,6 +2099,7 @@ fn serve(args: &[String]) -> R<()> {
     stamp("body classes");
     let (places, things, all, left, moved) = places(&mut town, &kinds);
     stamp("places to sit placed");
+    let closed_kinds = worldd::closed::Closed::of(&kinds);
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
          moved to clear ground",
@@ -2155,6 +2156,7 @@ fn serve(args: &[String]) -> R<()> {
     imported_births(&dir, initial.header(), &catalogue, &mut born)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
     cfg.public_names = Arc::clone(&built.public_names);
+    cfg.closed = closed_kinds.clone();
     let every = arg(args, "--checkpoint-every").map_or(Ok(EVERY), |n| {
         n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
     })?;
@@ -2176,6 +2178,7 @@ fn serve(args: &[String]) -> R<()> {
     // Gateway subscriptions have their own off-clock tier, apart from the filesystem stream below. Restore its
     // body, ownership and activity membership indexes before the answers thread can hand it any live part.
     let mut hub = worldd::views::subscription::Hub::with_words(text);
+    hub.closed(&closed_kinds);
     hub.seed(resumed.as_ref().map_or(initial.tree(), |(at, _)| at.tree()));
     let feed = worldd::views::served::start_with(hub).map_err(refusal)?;
     for bytes in found.after(base_record) {

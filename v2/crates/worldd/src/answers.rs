@@ -575,6 +575,8 @@ pub struct Config {
     pub text: Option<Arc<Store>>,
     /// Immutable imported public name bytes, attached only to delivered public record references off the clock.
     pub public_names: Arc<crate::views::names::PublicNames>,
+    /// The closed kinds of the world's entries: what one holds stays out of other Souls' sync answers (#3915).
+    pub closed: crate::closed::Closed,
     /// Called once at start with the log's durable mark; what it gives is handed each part record as it is appended
     /// (its number and bytes): a view tier's `offer`, so a stream writer follows the world (V1b).
     pub follow: Option<Follow>,
@@ -691,6 +693,7 @@ impl Config {
             served: None,
             text: None,
             public_names: Arc::new(Default::default()),
+            closed: Default::default(),
             follow: None,
             rate: None,
             engine: None,
@@ -4387,6 +4390,7 @@ pub fn start<S: Storage + 'static>(
         kept,
         (cfg.lineage, zone, cfg.epoch),
         Arc::clone(&cfg.public_names),
+        std::mem::take(&mut cfg.closed),
     )
     .map_err(io)?;
     let fresh = if cfg.checkpoints.is_some() {
