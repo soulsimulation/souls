@@ -135,7 +135,7 @@ use replica::effects::{
 };
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
-use replica::intents::{Answer, INTENT_MOST, Intent, Kind, Target};
+use replica::intents::{Answer, BULK_MOST, Intent, Kind, Target};
 use replica::pose::Pose;
 use replica::pose::{Frame, Quat, Support, Vec3};
 use replica::select::Answer as Answered;
@@ -4981,7 +4981,9 @@ pub fn serve(world: Door, mut stream: UnixStream) {
             return;
         }
         let len = u32::from_be_bytes(len) as usize;
-        if len > INTENT_MOST as usize {
+        // A creator's bulk edit (#3695) is the largest frame the gateway hands on; `Intent::read` keeps every other
+        // intent to the frame limit.
+        if len > BULK_MOST as usize {
             return;
         }
         let mut bytes = vec![0u8; len];

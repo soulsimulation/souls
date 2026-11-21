@@ -301,6 +301,31 @@ function send(bytes, sequence, ranked) {
   ws.send(bytes);
 }
 
+/** The agents' socket's frame limit (`replica` `intent_limits.txt`); a creator's larger edit goes by `sendBulk`. */
+const INTENT_MOST = 4096;
+
+/** A creator's bulk edit (#3695) by the gateway's `POST /v2/creator-edit`: null when it was taken (its answer comes on
+ *  the socket), else the refusal's name. Its bytes are never logged. */
+async function sendBulk(bytes, sequence) {
+  state.unanswered.push(sequence);
+  save();
+  counts.sent++;
+  trace.write({ k: 'send', seq: sequence, ranked: 1, bulk: bytes.length });
+  const u = new URL(seat.gateway);
+  u.protocol = u.protocol === 'wss:' ? 'https:' : u.protocol === 'ws:' ? 'http:' : u.protocol;
+  u.pathname = u.pathname.replace(/\/v2\/ws$/, '') + '/v2/creator-edit';
+  u.search = ''; u.hash = '';
+  try {
+    const r = await fetch(u, { method: 'POST', headers: { authorization: `Bearer ${seat.token}`, 'content-type': 'application/cbor' }, body: bytes, signal: AbortSignal.timeout(EDIT_WITHIN) });
+    if (r.status === 202) return null;
+    let code = `edit.bulk-${r.status}`;
+    try { code = (await r.json()).refused ?? code; } catch { /* not JSON */ }
+    return code;
+  } catch {
+    return 'edit.bulk-unreachable';
+  }
+}
+
 /** Signed in and current: intents go now, and (once a socket) the subscription to what this Soul hears (C6). */
 function current() {
   if (!signedIn) signedInAt = Date.now();
@@ -759,6 +784,7 @@ const nothingYet = () => !events.some((e) => e.kind !== 'synced');
 
 // --- G7 (#2796): a creator's edits -------------------------------------------------------------------------------
 const EDIT_WITHIN = 10_000; // an edit's answer is awaited this long; past it, it stays unanswered in `status`
+const EDIT_BULK_WITHIN = 120_000; // a bulk edit's (#3695)
 /** The world's kinds text, which the creator's pairing or setup keeps in the home; empty when there is none. */
 const kindsText = () => { try { return readFileSync(join(home, 'kinds', `${seat.world}.kinds`), 'utf8'); } catch { return ''; } };
 /** The pinned kinds by full name, with what each admits; {} without a kinds text. */
@@ -775,7 +801,8 @@ function batchOf(ops) {
   if (!Array.isArray(ops) || ops.length === 0) throw Object.assign(new Error('ops: a list of operations'), { code: 'edit.batch' });
   const kinds = pinned();
   const um = (at) => (Array.isArray(at) ? at.map((n) => Math.round(Number(n) * 1000)) : undefined);
-  return JSON.stringify(ops.map((o) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}) })));
+  // #3695: a move that must land to the micrometre (a thing lifted with the ground) gives its position as `atUm`.
+  return JSON.stringify(ops.map(({ atUm, ...o }) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}), ...(atUm ? { at: atUm.map(Number) } : {}) })));
 }
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
@@ -892,6 +919,20 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex
 /** World time now: the copy's clock mapping (E7b), else the machine's clock, as a world without a mapping runs on it
  *  (`worldd::answers::now`). For the creator's weather end and strike time (#3695). */
 const worldNowOrReal = () => worldNow(clockOf(copy)) ?? Date.now() * 1000;
+
+/** The batch an edit or a check carries: its own ops, or a world verb's (#3695) made from the copy now. The land
+ *  verbs load today's ground model (`packages/ground`, zod) only when used. */
+async function worldBatch(req) {
+  if (!req.world) return { ops: req.ops };
+  if (req.world.verb === 'land') {
+    let land;
+    try { land = await import('../creator/terrain/land.mjs'); } catch (e) {
+      return { ok: false, code: 'land.unavailable', detail: `the land verbs need packages/ground and zod beside this client: ${String(e.message ?? e).slice(0, 160)}` };
+    }
+    return land.landOps(copy, req.world);
+  }
+  return worldOps(copy, req.world, worldNowOrReal());
+}
 
 async function answer(req) {
   // R13: a command from the model's turn shows that what a reader was handed was taken.
@@ -1096,7 +1137,7 @@ async function answer(req) {
     }));
     case 'check': {
       // On the copy as it is: no sync, no frame to the world (A4). A world verb (#3695) is made into its sets first.
-      const w = req.world ? worldOps(copy, req.world, worldNowOrReal()) : { ops: req.ops };
+      const w = await worldBatch(req);
       if (w.ok === false) return closing({ ...w, local: true }, null, { now: true });
       const v = JSON.parse(wire.editCheck(copy, batchOf(w.ops), kindsText()));
       return closing({ ...v, local: true, ...(w.says ? { would: w.says, ops: w.ops } : {}) }, null, { now: true });
@@ -1105,7 +1146,7 @@ async function answer(req) {
       if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
       const age = await ageAfter();
       // #3695: weather, sky and strike are sets on the world node, made from the copy as it is now, after the sync.
-      const w = req.world ? worldOps(copy, req.world, worldNowOrReal()) : { ops: req.ops };
+      const w = await worldBatch(req);
       if (w.ok === false) return closing({ ...w, sent: false, local: true }, null, { age });
       const batch = batchOf(w.ops);
       const v = JSON.parse(wire.editCheck(copy, batch, kindsText()));
@@ -1116,11 +1157,19 @@ async function answer(req) {
       const bytes = wire.wireEdit(scope, seat.grant.counter, true, BigInt(state.sequence), unhex(copyVersion), batch);
       save();
       const sequence = state.sequence;
+      // A bulk edit (#3695, a landform: the open ground rebuilt off the clock for its walkers) is answered in under a
+      // minute on full Eden; its answer is awaited that long.
+      const within = bytes.length > INTENT_MOST ? EDIT_BULK_WITHIN : EDIT_WITHIN;
       const got = new Promise((ok) => {
-        const t = setTimeout(() => { editsWaiting.delete(sequence); ok(null); }, EDIT_WITHIN);
+        const t = setTimeout(() => { editsWaiting.delete(sequence); ok(null); }, within);
         editsWaiting.set(sequence, (a) => { clearTimeout(t); editsWaiting.delete(sequence); ok(a); });
       });
-      if (signedIn) send(bytes, sequence, 1); else queued.push({ bytes, sequence, ranked: 1 });
+      if (bytes.length > INTENT_MOST) {
+        // #3695: an edit over the agents' frame limit (a landform's tiles) goes by the gateway's creator route; its
+        // answer comes on this socket as any edit's does.
+        const r = await sendBulk(bytes, sequence);
+        if (r) { editsWaiting.get(sequence)?.(null); return closing({ ok: false, code: r, sequence, sent: false }, null, { now: true }); }
+      } else if (signedIn) send(bytes, sequence, 1); else queued.push({ bytes, sequence, ranked: 1 });
       const a = await got;
       if (!a) return closing({ ok: false, code: 'edit.unanswered', sequence, sent: true }, null, { now: true });
       const out = a.answer === 1
