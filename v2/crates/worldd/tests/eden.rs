@@ -1901,13 +1901,20 @@ fn i3799_a4_the_public_stream_carries_a_soul_walking_sitting_and_rising() {
     let sat = soul.act("eden:sit", Some(armchair), BTreeMap::new());
     let rose = soul.act("eden:rise", None, BTreeMap::new());
     println!("walk {walked:?}, sit {sat:?}, rise {rose:?}");
+    // A bed's slot (#3791's lying bodies): a bed in the house south-west of the library (today's e_9857eaa7).
+    let bed = im.nodes["e_9857eaa7"];
+    let to_bed = soul.act("eden:walk", Some(bed), BTreeMap::new());
+    let lay = soul.act("eden:lie", Some(bed), BTreeMap::new());
+    let up = soul.act("eden:rise", None, BTreeMap::new());
+    println!("walk to the bed {to_bed:?}, lie {lay:?}, rise {up:?}");
     // The stream is cut every half second of world time; wait (at most 60 s) for the rise's hand-off to be published,
     // and say how long it took after the rise's answer.
     let rose_at = std::time::Instant::now();
     let mut samples = public_samples(&dir);
-    while !samples.iter().any(|(_, h)| h.from == Owner::Slot)
-        && rose_at.elapsed() < Duration::from_secs(60)
-    {
+    let risen = |s: &[(u64, replica::pose::HandOff)]| {
+        s.iter().filter(|(_, h)| h.from == Owner::Slot).count() >= 2
+    };
+    while !risen(&samples) && rose_at.elapsed() < Duration::from_secs(60) {
         std::thread::sleep(Duration::from_millis(250));
         samples = public_samples(&dir);
     }
@@ -1924,6 +1931,9 @@ fn i3799_a4_the_public_stream_carries_a_soul_walking_sitting_and_rising() {
     walked.expect("walked to the armchair");
     sat.expect("sat in it");
     rose.expect("rose from it");
+    to_bed.expect("walked to the bed");
+    lay.expect("lay in it");
+    up.expect("rose from it");
     let bodies: std::collections::BTreeSet<Id> = samples.iter().map(|(_, h)| h.node).collect();
     println!(
         "{} public samples in {} parts, of {} bodies",
@@ -1980,6 +1990,32 @@ fn i3799_a4_the_public_stream_carries_a_soul_walking_sitting_and_rising() {
     assert_ne!(
         samples[out].1.pose.frame.node, armchair,
         "standing on a floor again"
+    );
+    // The bed: the body's node changes parent into the bed's slot (a sample's frame is its node's parent), at the
+    // slot's place, with the hand-off; then out of it onto a floor, where it stands somewhere new.
+    let lie = samples
+        .iter()
+        .position(|(_, h)| h.to == Owner::Slot && h.pose.frame.node == bed)
+        .expect("the hand-off into the bed's slot");
+    let got_up = samples
+        .iter()
+        .skip(lie)
+        .position(|(_, h)| h.from == Owner::Slot && h.to == Owner::Mover)
+        .map(|i| i + lie)
+        .expect("the hand-off out of the bed");
+    println!(
+        "into the bed: {:?}; out of it: {:?}",
+        samples[lie].1, samples[got_up].1
+    );
+    assert!(
+        samples[lie].1.pose.frame.slot.is_some(),
+        "in a slot of the bed"
+    );
+    assert!(out < lie, "the armchair, then the bed");
+    assert_ne!(samples[got_up].1.pose.frame.node, bed, "on a floor again");
+    assert_ne!(
+        samples[got_up].1.pose.position, samples[out].1.pose.position,
+        "standing somewhere new"
     );
 }
 
