@@ -13,6 +13,9 @@
 //                                sends it once (now, or at the next sign-in)
 //     {"op":"read"}              gives and clears what happened since the last read (it never wakes the model)
 //     {"op":"stop"}              ends the process (the thin command's `quit`)
+//     {"op":"query","questions":[..],"budget":n}   #3704: several reads of the copy, each answered in turn (reads.mjs)
+//     {"op":"catalog"} | {"op":"context","words":"..","cursor":n}   #3704: the kinds in the copy; its named targets
+//     {"op":"batch","reads":[{"op":..},..]}       #3704: several read ops in one call, each answered as alone
 //     {"op":"halt","sequence":n}  #3705, the thin command's `stop`: a `souls:cancel` ending this Soul's own act (the
 //                                 newest still going, or `sequence`) where it stands
 //     {"op":"receipt","sequence":n}   #3705: that intent's receipt, as its answers came (the newest sent by default)
@@ -93,11 +96,14 @@
 //   and G7's (#2796), for a world's creator (a `creator-` token), the world's kinds text from `<home>/kinds/<world>.kinds`:
 //     {"op":"describe"}                   the copy's nodes (id, kind, parent) and what each kind admits
 //     {"op":"check","ops":[...]}          G1's checks of a batch on the copy as it is: asks the world nothing
+//     {"op":"fields","node":"<id>"}       a node's fields as the copy holds them, the zone's root when no node
+//                                         (#3701: district plans and build claims are root fields 140 and 141)
 //     {"op":"edit","ops":[...]}           the copy brought current, checked, sent as T10's edit intent (G1b) planned at
 //                                         its version, and its answer awaited: the ids of the names placed, or the
 //                                         refusal and the operation that failed. An op is {op: place, name, kind,
 //                                         in, at: [x, y, z] mm, slot, fields}, {op: move, node, at}, {op: set, node,
-//                                         field, value} or {op: remove, node}; a kind by its plain name
+//                                         field, value} or {op: remove, node}; a kind by its plain name. With "claim":"<claim
+//                                         id>" (check too), the batch is sent under that build claim (#3701)
 //     {"op":"act","verbs":[{"verb":"..","this":"<id>","form":".."}, "..."]}   each candidate with a form is checked
 //       again at send time on a copy brought current; a current `no` drops it; none left is `stopped-locally`, with
 //       what changed, and nothing is sent. Unknown, a bare verb or a copy not current never stops a send. The
@@ -134,6 +140,7 @@ import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
 import { ageOf } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
+import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
 import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
@@ -703,7 +710,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'undo', 'redo', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
+const OPS = new Set(['query', 'catalog', 'context', 'batch', 'status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'undo', 'redo', 'fields', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
 const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
@@ -727,7 +734,7 @@ async function editOnce(req) {
   if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
   // An undo or a redo (G4, #3694) carries no batch; a build's step carries its build's and step's names.
   const undo = req.op !== 'edit';
-  const batch = undo ? null : batchOf(req.ops);
+  const batch = undo ? null : batchOf(req.ops, req.claim);
   const step = !undo && req.build !== undefined ? { build: String(req.build), step: String(req.step ?? '') } : null;
   const age = await ageAfter();
   if (!undo) {
@@ -770,11 +777,12 @@ async function editOnce(req) {
   return closing(out);
 }
 
-function batchOf(ops) {
+function batchOf(ops, claim) {
   if (!Array.isArray(ops) || ops.length === 0) throw Object.assign(new Error('ops: a list of operations'), { code: 'edit.batch' });
   const kinds = pinned();
   const um = (at) => (Array.isArray(at) ? at.map((n) => Math.round(Number(n) * 1000)) : undefined);
-  return JSON.stringify(ops.map((o) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}) })));
+  const list = ops.map((o) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}) }));
+  return JSON.stringify(claim === undefined ? list : { claim: String(claim), ops: list });
 }
 
 // C4 (#3368): say, whisper and lie are form verbs (T10 rule 4: any namespace but the engine's `souls:`), named in
@@ -1048,6 +1056,23 @@ async function answer(req) {
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis), ...(toward ? { to: toward } : {}) }, null, { now: true });
     }
     case 'inspect': return inspect(req);
+    // #3704 (today's `query`, `catalog`, `context` and `batch`): reads from the copy, asking the world nothing.
+    case 'query': { const q = query(rowsOf(copy), req.questions, { budget: req.budget }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
+    case 'catalog': return closing(catalog(rowsOf(copy), kindsIn(join(home, 'kinds'))), null, { now: true });
+    case 'context': return closing(context(rowsOf(copy), req.words ?? '', { cursor: req.cursor }), null, { now: true });
+    case 'batch': {
+      // Several reads in one call, each answered as it would be alone, in order; a write in it is refused, not sent.
+      const reads = Array.isArray(req.reads) ? req.reads : [];
+      if (reads.length < 1 || reads.length > BATCH_MOST) return { ok: false, code: 'batch-form', detail: `batch '<json list>': 1 to ${BATCH_MOST} reads`, ...ageNow() };
+      const results = [];
+      for (const r of reads) {
+        const read = r && BATCH_READS.has(r.op) && (r.op !== 'converse' || r.do === 'list');
+        if (!read) { results.push({ op: r?.op ?? null, ok: false, code: 'batch-reads-only', detail: `a batch runs reads only: ${[...BATCH_READS].join(', ')}` }); continue; }
+        const { at: _a, changed: _c, ...one } = await answer(r);
+        results.push({ op: r.op, ...one });
+      }
+      return closing({ ok: true, results }, null, { now: true });
+    }
     case 'object': {
       // #3686: today's `object <id> [action]`: no action lists the offers (as inspect); an action is that offer sent
       // through `act` below, with its arguments, and nothing else.
@@ -1070,8 +1095,18 @@ async function answer(req) {
     });
     case 'check': {
       // On the copy as it is: no sync, no frame to the world (A4).
-      const v = JSON.parse(wire.editCheck(copy, batchOf(req.ops), kindsText()));
+      const v = JSON.parse(wire.editCheck(copy, batchOf(req.ops, req.claim), kindsText()));
       return closing({ ...v, local: true }, null, { now: true });
+    }
+    case 'fields': {
+      // #3701: a node's fields from its record in the copy (`own` holds the record but its children).
+      return closing({ ok: true }, (rows) => {
+        const all = [...rows.values()], roots = all.filter((r) => r.parent === null);
+        const row = req.node !== undefined ? rows.get(String(req.node)) : roots.length === 1 ? roots[0] : undefined;
+        if (!row) return { ok: false, code: req.node !== undefined ? 'edit.node-missing' : 'which-root', detail: req.node !== undefined ? `${req.node} is not in the copy` : `${roots.length} roots: name one with node` };
+        const pairs = JSON.parse(row.own).find(([k]) => Number(k) === 6)?.[1] ?? [];
+        return { id: row.id, fields: Object.fromEntries(pairs.map(([k, v]) => [String(k), v])) };
+      }, { now: true });
     }
     case 'edit': case 'redo': return editOnce(req);
     case 'undo': {
