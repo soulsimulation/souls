@@ -1073,8 +1073,26 @@ fn malformed_words_are_refused_and_the_world_restarts() {
 fn a_cancel_naming_an_open_walk_stops_it_where_it_stands_and_replays() {
     let walker = pairs()[0].0;
     let cancel = |sequence: u64, replaces: u64| {
-        let mut i = Intent::read(&intent(walker, sequence, "souls:cancel", None, None)).unwrap();
-        i.replaces = Some(replaces);
+        let i = Intent {
+            actor: Actor::Soul(walker),
+            verb: name("souls:cancel"),
+            target: None,
+            parameters: BTreeMap::new(),
+            sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: 0,
+            }
+            .to_value(),
+            expiry: 1_000_000_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: Some(replaces),
+            body: None,
+            reflex: false,
+        };
         encode(&i.to_value()).unwrap()
     };
     let store = Mem::with(Vec::new());
