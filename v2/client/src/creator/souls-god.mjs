@@ -21,6 +21,8 @@
 //                                                one edit; what rests on changed ground moves with it, and a Soul
 //                                                standing there refuses it (edit.terrain-under-soul)
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
+//   souls-god.mjs export [file]                  every node of the world (not its Souls) to a file, world.souls.json
+//   souls-god.mjs import <file>                  such a file's nodes into this world, as edits, parents first
 //   souls-god.mjs status | stop                  the daemon
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
 //   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
@@ -33,13 +35,13 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'land', 'check', 'status', 'stop', 'welcome', 'visitors'];
+export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'land', 'check', 'status', 'stop', 'welcome', 'visitors', 'export', 'import'];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
 export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -80,6 +82,10 @@ export const FIX = {
   'land.smooth': 'use flatten',
   'land.unavailable': 'use Node 22.18 or later, and the client a world serves (it carries the ground model) or a checkout with packages/ground and zod installed',
   'strike.off-the-ground': 'strike somewhere on the world\'s ground',
+  'import.file': 'import <file>: a file export wrote, readable here',
+  'import.format': 'import a souls-world/1 file, as export writes it',
+  'import.unplaced': 'some nodes name a parent or support that was not placed: export the source again and import that',
+  'export.file': 'export [file]: a file path to write',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'which-creator': 'name one with --creator',
   'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
@@ -160,6 +166,10 @@ export function requestOf(argv) {
   }
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe') return { req: { op: verb }, creator };
+  if (verb === 'export' || verb === 'import') {
+    if (rest.length > 1 || (verb === 'import' && !rest[0])) throw usage(`${verb} ${verb === 'import' ? '<file>' : '[file]'}`);
+    return { req: { op: verb, file: resolve(rest[0] ?? 'world.souls.json') }, creator };
+  }
   if (verb === 'check' && WORLD_VERBS.includes(rest[0])) return { req: { op: 'check', world: worldVerbOf(rest[0], rest.slice(1)) }, creator };
   if (verb === 'check') return { req: { op: 'check', ops: opsOf(rest[0], rest.slice(1)) }, creator };
   if (WORLD_VERBS.includes(verb)) return { req: { op: 'edit', world: worldVerbOf(verb, rest) }, creator };
@@ -220,7 +230,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       if (said.ok === false) process.exitCode = 1;
       process.exit();
     }
-    const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: asked.req.world?.verb === 'land' ? 130_000 : 15_000 });
+    const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: asked.req.op === 'import' ? 3_600_000 : asked.req.op === 'export' ? 120_000 : asked.req.world?.verb === 'land' ? 130_000 : 15_000 });
     out(withFix(answer));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {

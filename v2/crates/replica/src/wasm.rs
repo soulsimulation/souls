@@ -679,7 +679,40 @@ fn ops_of(text: &str) -> Result<Vec<Op>, String> {
                         },
                     }
                 }
-                _ => return Err("op is place, move, set, remove or doorway".into()),
+                // #3728: a link between two nodes, its row appended to the owner's field, a door naming it.
+                Some("link") => {
+                    let ends = o
+                        .get("ends")
+                        .and_then(json::Value::arr)
+                        .ok_or("a link's ends are [node, node]")?;
+                    if ends.len() != 2 {
+                        return Err("a link's ends are [node, node]".into());
+                    }
+                    Op::Link {
+                        name: uint_of(o.get("name"), "a link's name")?,
+                        ty: o
+                            .get("type")
+                            .and_then(json::Value::str)
+                            .and_then(Name::new)
+                            .ok_or("a link's type is a name")?,
+                        ends: [ref_of(Some(&ends[0]))?, ref_of(Some(&ends[1]))?],
+                        owner: match uint_of(o.get("owner"), "a link's owner")? {
+                            0 => crate::world_model::End::First,
+                            1 => crate::world_model::End::Second,
+                            _ => return Err("a link's owner is 0 or 1".into()),
+                        },
+                        field: uint_of(o.get("field"), "a link's field")?,
+                        row: match field_value(o.get("row").ok_or("a link's row")?)? {
+                            Value::Array(row) => row,
+                            _ => return Err("a link's row is an array".into()),
+                        },
+                        door: match o.get("door") {
+                            None | Some(json::Value::Null) => None,
+                            d => Some(ref_of(d)?),
+                        },
+                    }
+                }
+                _ => return Err("op is place, move, set, remove, doorway or link".into()),
             })
         })
         .collect()
@@ -865,6 +898,9 @@ struct Held {
 /// The copy's nodes, read from its roots down by the records' hashes.
 fn held(copy: &Copy) -> Result<BTreeMap<Id, Held>, String> {
     let mut out = BTreeMap::new();
+    // A door is in a doorway while the link its field 7 names is there (`edit::check` asks the tree the same): a door
+    // whose room was removed keeps a field naming a link that is gone (#3728).
+    let (mut live, mut names_link) = (BTreeSet::new(), BTreeMap::new());
     let mut todo: Vec<Vec<u8>> = copy.roots().values().cloned().collect();
     while let Some(h) = todo.pop() {
         let Some(bytes) = copy.record(&h) else {
@@ -889,15 +925,30 @@ fn held(copy: &Copy) -> Result<BTreeMap<Id, Held>, String> {
                 _ => None,
             }));
         }
-        let doorway = matches!(m.get(&6), Some(Value::Map(fields)) if fields.get(&7).is_some_and(|v| read_id(v).is_ok()));
+        if let Some(Value::Array(owned)) = m.get(&9) {
+            live.extend(owned.iter().filter_map(|p| match p {
+                Value::Array(p) => p.first().and_then(|l| read_id(l).ok()),
+                _ => None,
+            }));
+        }
+        if let Some(Value::Map(fields)) = m.get(&6)
+            && let Some(link) = fields.get(&7).and_then(|v| read_id(v).ok())
+        {
+            names_link.insert(id, link);
+        }
         out.insert(
             id,
             Held {
                 kind,
                 parent,
-                doorway,
+                doorway: false,
             },
         );
+    }
+    for (id, link) in names_link {
+        if let Some(h) = out.get_mut(&id) {
+            h.doorway = live.contains(&link);
+        }
     }
     Ok(out)
 }
@@ -1115,6 +1166,37 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
                     (_, None) => Err(("edit.root", "the zone's root is not removed".to_owned())),
                     _ => Ok(()),
                 },
+                Op::Link {
+                    name,
+                    ty,
+                    ends,
+                    field,
+                    row,
+                    door,
+                    ..
+                } => {
+                    if new.contains_key(name) || links.contains(name) {
+                        return Err(("edit.name-twice", format!("{name} is placed twice")));
+                    }
+                    if ty.as_str().starts_with("souls:")
+                        || *field == crate::edit::DOOR_GEOMETRY
+                        || *field == 7
+                        || ends[0] == ends[1]
+                        || row.len() > crate::edit::LINK_ROW_MOST
+                    {
+                        return Err(("edit.link", "a link joins two distinct nodes, is not the engine's own, and appends a short row to a field other than 7".into()));
+                    }
+                    for end in ends {
+                        named(*end)?;
+                    }
+                    if let Some(door) = door {
+                        named(*door)?;
+                        if doorways.contains(door) {
+                            return Err(("edit.doorway", "the door already has a doorway".into()));
+                        }
+                    }
+                    Ok(())
+                }
             }
         };
         if let Err((code, detail)) = step() {
@@ -1124,6 +1206,12 @@ pub fn edit_check(copy: &WasmCopy, ops: &str, kinds: &str) -> String {
             Op::Doorway { name, door, .. } => {
                 links.insert(*name);
                 doorways.insert(*door);
+            }
+            Op::Link { name, door, .. } => {
+                links.insert(*name);
+                if let Some(door) = door {
+                    doorways.insert(*door);
+                }
             }
             Op::Place {
                 name,
