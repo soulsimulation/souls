@@ -892,6 +892,19 @@ pub struct PublicWriter<S> {
     migration_state: Option<Value>,
     legacy: Option<(u64, u64, Vec<u8>)>,
     force_remainder: bool,
+    /// Off: every cut works out the public state whole (the reference the incremental cut is compared with, #3799).
+    pub incremental: bool,
+    /// Whether the open cut holds anything but motion and fields set on nodes; else the nodes it set (#3799).
+    structural: bool,
+    touched: std::collections::BTreeSet<Id>,
+    /// The references each node row of the published state holds, and those of the rest of it (#3799).
+    /// Kept with the version of the state they are of.
+    #[allow(clippy::type_complexity)]
+    refs: Option<(
+        u64,
+        BTreeMap<Id, std::collections::BTreeSet<Id>>,
+        std::collections::BTreeSet<Id>,
+    )>,
 }
 use std::collections::BTreeMap;
 /// What the public view reads of the source just before one entry (#3667): the parent chains of the nodes the entry
@@ -1255,6 +1268,10 @@ impl<S: ObjectStore> PublicWriter<S> {
             migration_state: None,
             legacy: None,
             force_remainder: false,
+            incremental: true,
+            structural: true,
+            touched: std::collections::BTreeSet::new(),
+            refs: None,
         };
         if let Some(head) = w.store.get(&format!("{}head", w.prefix))? {
             let h = object_map(&head.bytes)?;
@@ -1442,10 +1459,81 @@ impl<S: ObjectStore> PublicWriter<S> {
         w.pointer(None)?;
         Ok(w)
     }
-    fn words(&self, value: &Value) -> R<Vec<u8>> {
+    /// The words file of a cut (#3799): the references of the state after it and of its records, as
+    /// [`PublicWriter::words`] finds them in the two whole, each node row's kept from the last cut that set it.
+    fn words_after(&mut self, after: Option<&Value>, delta: Option<&Value>) -> R<Vec<u8>> {
+        if self.text.is_none() {
+            return wire(Value::Array(Vec::new()));
+        }
+        let row_refs = |row: &Value| -> R<(Id, std::collections::BTreeSet<Id>)> {
+            let Value::Array(p) = row else {
+                return Err(fault("stream-words", "a row is a pair"));
+            };
+            let id = replica::effects::read_id(&p[0])?;
+            Ok((id, replica::audience::references(&p[1])))
+        };
+        // From a whole state: the one after a whole cut, or the one before the first cut by rows.
+        let version = |v: &Value| match v {
+            Value::Map(m) => match m.get(&1) {
+                Some(Value::Uint(n)) => *n,
+                _ => u64::MAX,
+            },
+            _ => u64::MAX,
+        };
+        let stale = self
+            .refs
+            .as_ref()
+            .is_none_or(|r| r.0 != self.player.version());
+        if after.is_some() || stale {
+            let whole = after.unwrap_or(self.player.state());
+            let at = version(whole);
+            let Value::Map(mut m) = whole.clone() else {
+                return Err(fault("stream-words", "a state is a map"));
+            };
+            let mut rows = BTreeMap::new();
+            if let Some(Value::Array(nodes)) = m.remove(&2) {
+                for row in &nodes {
+                    let (id, r) = row_refs(row)?;
+                    if !r.is_empty() {
+                        rows.insert(id, r);
+                    }
+                }
+            }
+            self.refs = Some((at, rows, replica::audience::references(&Value::Map(m))));
+        }
+        if after.is_none()
+            && let (Some((at, rows, _)), Some(d)) = (&mut self.refs, delta)
+        {
+            *at = version(d);
+            let Value::Map(d) = d else {
+                return Err(fault("stream-words", "a delta is a map"));
+            };
+            let changed: &[Value] = match d.get(&2) {
+                Some(Value::Array(c)) => c,
+                _ => &[],
+            };
+            for row in changed {
+                let (id, r) = row_refs(row)?;
+                if r.is_empty() {
+                    rows.remove(&id);
+                } else {
+                    rows.insert(id, r);
+                }
+            }
+        }
+        let Some((_, rows, rest)) = &self.refs else {
+            unreachable!("kept above")
+        };
+        let mut all = rest.clone();
+        all.extend(rows.values().flatten().copied());
+        all.extend(replica::audience::references(&Value::Array(
+            self.records.clone(),
+        )));
+        self.words_of(all)
+    }
+    fn words_of(&self, refs: std::collections::BTreeSet<Id>) -> R<Vec<u8>> {
         let words = if let Some(store) = &self.text {
-            replica::audience::references(value)
-                .into_iter()
+            refs.into_iter()
                 .filter_map(|r| {
                     store
                         .read(r, &[])
@@ -1806,6 +1894,25 @@ impl<S: ObjectStore> PublicWriter<S> {
             self.duplicates
                 .retain(|(seq, _)| self.migration_cut.is_none_or(|cut| *seq >= cut));
             self.canonical = checked;
+            // What the cut can be published from (#3799): only motion and fields set on nodes touch only their rows.
+            for e in &part.effects {
+                match &e.body {
+                    Body::Changes(cs) => {
+                        for c in cs {
+                            match &c.change {
+                                replica::effects::Change::Motion(h) => {
+                                    self.touched.insert(h.node);
+                                }
+                                replica::effects::Change::Set { node, .. } => {
+                                    self.touched.insert(*node);
+                                }
+                                _ => self.structural = true,
+                            }
+                        }
+                    }
+                    _ => self.structural = true,
+                }
+            }
             let at = part.effects.last().map(|e| e.envelope.at);
             if let Some(at) = at {
                 let win = at.div_euclid(stream::PERIOD_US);
@@ -1829,6 +1936,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 "physical record does not follow",
             ));
         }
+        self.structural = true;
         if !sim::recorder::is_input(raw) {
             let part = Part::read(raw)?;
             let mut checked = self.canonical.frozen();
@@ -1901,7 +2009,11 @@ impl<S: ObjectStore> PublicWriter<S> {
         let window = self.window;
         let t0 = std::time::Instant::now();
         self.apply_record(record, raw)?;
-        eprintln!("TIMING apply_record {} bytes {:.1} ms", raw.len(), t0.elapsed().as_secs_f64() * 1e3);
+        eprintln!(
+            "TIMING apply_record {} bytes {:.1} ms",
+            raw.len(),
+            t0.elapsed().as_secs_f64() * 1e3
+        );
         if let (Some(before), Some(last)) = (window, self.records.last())
             && stream_effect(&self.header, last.clone())?
                 .envelope
@@ -1921,22 +2033,58 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.changes.clear();
         self.window = None;
         self.force_remainder = false;
+        self.structural = false;
+        self.touched.clear();
     }
     pub fn flush(&mut self) -> R<()> {
         if self.chunks.is_empty() && !self.force_remainder {
             return Ok(());
         }
         let tf = std::time::Instant::now();
-        let after = project(&self.header, &self.canonical.tree().to_state())?;
-        eprintln!("TIMING project {:.1} ms", tf.elapsed().as_secs_f64() * 1e3);
-        if self.records.is_empty() {
+        // A cut of motion and fields set only (#3799): the published state with the touched nodes' rows replaced, its
+        // digest worked out in place; any other cut, the public state whole. The same bytes either way.
+        let delta = if self.incremental
+            && !self.structural
+            && !self.force_remainder
+            && !self.records.is_empty()
+            && self.migration_cut.is_none()
+        {
+            let tree = self.canonical.tree();
+            let rows = self
+                .touched
+                .iter()
+                .filter_map(|id| {
+                    let n = tree.node_state_of(*id)?;
+                    (n.audience == Audience::Everyone).then(|| (*id, n.to_value()))
+                })
+                .collect();
+            self.player.row_delta(tree.next(), rows)?
+        } else {
+            None
+        };
+        let (after, after_digest) = match &delta {
+            Some(d) => (None, self.player.digest_with(d)?),
+            None => {
+                let a = project(&self.header, &self.canonical.tree().to_state())?;
+                let h = digest(&a)?;
+                (Some(a), h)
+            }
+        };
+        eprintln!(
+            "TIMING project {:.1} ms fast {}",
+            tf.elapsed().as_secs_f64() * 1e3,
+            delta.is_some()
+        );
+        if self.records.is_empty()
+            && let Some(after) = &after
+        {
             let mut old = self.player.state().clone();
             if let Value::Map(m) = &mut old
-                && let Value::Map(a) = &after
+                && let Value::Map(a) = after
             {
                 m.insert(1, a[&1].clone());
             }
-            if old == after && !self.force_remainder {
+            if &old == after && !self.force_remainder {
                 return Ok(());
             }
         }
@@ -2000,7 +2148,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                 .unwrap_or(version),
             entries: self.records.len() as u64,
             part,
-            hash: Some(digest(&after)?),
+            hash: Some(after_digest.clone()),
             gaps,
             carried: Vec::new(),
         };
@@ -2012,56 +2160,78 @@ impl<S: ObjectStore> PublicWriter<S> {
         }
         // A returned public child can become live without being canonically touched by Return. Bind its
         // actual query version, including zero for an ordinary checkpoint's formerly flying child.
+        // A cut of rows only (#3799) adds and removes no node, so no flying child becomes live in it.
         let flying = replica::stream::public::flying_ids(self.player.state())?;
-        let before = object_map(&wire(self.player.state().clone())?)?;
-        let Value::Array(old_rows) = &before[&2] else {
-            unreachable!("validated projection")
-        };
-        let Value::Map(after_map) = &after else {
-            unreachable!("validated projection")
-        };
-        let Value::Array(new_rows) = &after_map[&2] else {
-            unreachable!("validated projection")
-        };
-        for row in new_rows {
-            let Value::Array(row) = row else {
-                unreachable!("validated pair")
+        if let Some(after) = after.as_ref().filter(|_| !flying.is_empty()) {
+            let before = object_map(&wire(self.player.state().clone())?)?;
+            let Value::Array(old_rows) = &before[&2] else {
+                unreachable!("validated projection")
             };
-            let id = replica::effects::read_id(&row[0])?;
-            // Only a flying id is looked up among the old rows: a scan per row is quadratic in the view (#3799).
-            if !flying.contains(&id) || self.changes.contains_key(&id) {
-                continue;
-            }
-            let existed = old_rows
-                .iter()
-                .any(|r| matches!(r,Value::Array(p) if p.first()==Some(&id.to_value())));
-            if !existed {
-                let query = wire(Value::Map(BTreeMap::from([
-                    (1, Value::Uint(1)),
-                    (2, id.to_value()),
-                ])))?;
-                let node = object_map(&self.canonical.query(&query)?)?;
-                let version = obj_uint(&node, 10)?;
-                self.changes.insert(id, version);
+            let Value::Map(after_map) = after else {
+                unreachable!("validated projection")
+            };
+            let Value::Array(new_rows) = &after_map[&2] else {
+                unreachable!("validated projection")
+            };
+            for row in new_rows {
+                let Value::Array(row) = row else {
+                    unreachable!("validated pair")
+                };
+                let id = replica::effects::read_id(&row[0])?;
+                // Only a flying id is looked up among the old rows: a scan per row is quadratic in the view (#3799).
+                if !flying.contains(&id) || self.changes.contains_key(&id) {
+                    continue;
+                }
+                let existed = old_rows
+                    .iter()
+                    .any(|r| matches!(r,Value::Array(p) if p.first()==Some(&id.to_value())));
+                if !existed {
+                    let query = wire(Value::Map(BTreeMap::from([
+                        (1, Value::Uint(1)),
+                        (2, id.to_value()),
+                    ])))?;
+                    let node = object_map(&self.canonical.query(&query)?)?;
+                    let version = obj_uint(&node, 10)?;
+                    self.changes.insert(id, version);
+                }
             }
         }
-        eprintln!("TIMING to-flying {:.1} ms", tf.elapsed().as_secs_f64() * 1e3);
-        let context = public_context(
-            &self.baseline,
-            self.player.state(),
-            &after,
-            self.cursor,
-            &self.duplicates,
-            &self
-                .changes
-                .iter()
-                .map(|(i, v)| (*i, *v))
-                .collect::<Vec<_>>(),
-        )?;
+        eprintln!(
+            "TIMING to-flying {:.1} ms",
+            tf.elapsed().as_secs_f64() * 1e3
+        );
+        let changed = self
+            .changes
+            .iter()
+            .map(|(i, v)| (*i, *v))
+            .collect::<Vec<_>>();
+        let context = match (&after, &delta) {
+            (Some(after), _) => public_context(
+                &self.baseline,
+                self.player.state(),
+                after,
+                self.cursor,
+                &self.duplicates,
+                &changed,
+            )?,
+            (None, Some(delta)) => replica::stream::public::context_with(
+                &self.baseline,
+                self.player.digest(),
+                &after_digest,
+                delta.clone(),
+                self.cursor,
+                &self.duplicates,
+                &changed,
+            )?,
+            (None, None) => unreachable!("a cut is worked out whole or by rows"),
+        };
         let mut value = object_map(&sp.to_bytes()?)?;
         value.insert(10, Value::Bytes(context));
         let bytes = wire(Value::Map(value))?;
-        eprintln!("TIMING to-context {:.1} ms", tf.elapsed().as_secs_f64() * 1e3);
+        eprintln!(
+            "TIMING to-context {:.1} ms",
+            tf.elapsed().as_secs_f64() * 1e3
+        );
         // Validate exactly as the native/WASM reader before storing or publishing bytes.
         let number = self.player.next();
         let chunk = wire(Value::Map(BTreeMap::from([
@@ -2078,10 +2248,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         ])))?;
         let chunk_hash = self.put(&chunk)?;
         let part_hash = self.put(&bytes)?;
-        let text = self.words(&Value::Array(vec![
-            after.clone(),
-            Value::Array(self.records.clone()),
-        ]))?;
+        let text = self.words_after(after.as_ref(), delta.as_ref())?;
         let text_hash = self.put(&text)?;
         eprintln!("TIMING to-words {:.1} ms", tf.elapsed().as_secs_f64() * 1e3);
         self.player.play(&bytes)?;
@@ -2101,7 +2268,10 @@ impl<S: ObjectStore> PublicWriter<S> {
         immutable(&self.generation_dir().join(number.to_string()), &bytes)?;
         immutable(&self.generation_dir().join(format!("{number}.text")), &text)?;
         self.last_to = Some(sp.to);
-        eprintln!("TIMING flush total {:.1} ms", tf.elapsed().as_secs_f64() * 1e3);
+        eprintln!(
+            "TIMING flush total {:.1} ms",
+            tf.elapsed().as_secs_f64() * 1e3
+        );
         self.clear_pending();
         self.pointer(None)
     }
