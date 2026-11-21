@@ -115,7 +115,7 @@ a named part of its surroundings: a tree's shade, a river's bank. A placed area 
 point, so a body can be sent to it. Names are one list with points and slots. Refused: an area that says nothing; a
 posture both allowed and forbidden; a forbidden posture the kind's own slot seats; and an area that only repeats what
 the kind's slots already say (the check gate reports it under `shape`). A bed (`content/kinds/rest/bed.json`) allows
-lying on it and sitting on its edge; a piano forbids sitting and lying; a tree declares its shade. A rug or a lawn needs
+lying on it and sitting on its edge; a piano forbids lying on it and seats its pianist at the bench; a tree declares its shade. A rug or a lawn needs
 no area (a body sits on the ground, SA-G3), and a thing that hangs uses a hang slot (SA-D3). Cases are data
 (`tools/entry/cases/areas.json`). Section 16 is meaning, so covered by the hash.
 
@@ -296,6 +296,10 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   be described with `select`: a candidate set (`of`: `things` or `free_slots`, optional `kind`, `in`: `this`,
   `here` or `parent`), an `anchor` (`me`, `this`), an `order` (`nearest`, `furthest`) and a `rank` (1, 2, ... or
   `last`), the same closed list as Engine v2 E2 ([#2709](https://github.com/soulsimulation/souls/issues/2709)).
+  A `thing` argument the act leaves out is bound by its selector when the act commits (#3914): `in: this` the
+  thing's own children, `here` those of the node the actor is in, `parent` those of the thing's parent, never the
+  thing, the actor or a body; by squared distance from the anchor, ties by id; then the rank. None qualifying is
+  refused by name: `none_selected` in the rules (`@souls/form-rules`), `thing.none-selected` from the world.
   Anywhere a point, slot or value is expected, `{"arg": <name>}` uses an argument. Two more types are a **choice from
   the form's own closed list**, `of`: `field` (two or more of this kind's state fields, of one type) and `value` (two
   or more values). A `set` or a `state` need may name a field argument as its `field`, and a value argument as its

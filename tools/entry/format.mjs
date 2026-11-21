@@ -399,7 +399,7 @@ export function refilled(entry, name, count, us) {
 
 /** Areas (SA-D6, #2861): what a kind says about resting on it, or about a part of its surroundings, where its shape cannot.
  *  Engine v2 E3 (#2777) reads a declared area first, then surfaces, then shape, so a kind writes an area only where shape
- *  gives the wrong answer or none: a bed is for lying and sitting on its edge, a piano is for neither, a tree has shade.
+ *  gives the wrong answer or none: a bed is for lying and sitting on its edge, a piano is never lain on (its bench slot seats the pianist), a tree has shade.
  *  An area may carry `allows` (posture -> `on` the thing or on its `edge`), `forbids` (postures, by name), `takes` (kinds of
  *  thing that may be set down on it, Engine v2 E4) and a place: `at_mm` and `radius_mm`, whole millimetres in the thing's
  *  own frame, a named part of its surroundings a body can be sent to (`walk_to`). The spot a body or thing gets is the

@@ -7,9 +7,11 @@
 // with windows, stairs, slots), the doors paired with their doorways, the ground (recipe, 1 m heights and classes),
 // each water, and the named places derived by the rules in apps/server/src/god/places.ts (read, not imported).
 //
-//   node v2/tools/import-eden/export/export.ts [--seed <s>] [--out <file>] [--template <file>]   (from the repository root)
+//   node v2/tools/import-eden/export/export.ts [--seed <s>] [--out <file>] [--template <file>] [--map <map.json>]
+//   (from the repository root)
 //
 // `--template` replays another committed world template (worlds/templates/*.json) the same way; Eden 2026 by default.
+// `--map` names each thing's Soul Actions entry from that world's map (content/worlds/<world>/map.json).
 //
 // The output is generated: it goes under the ignored .local/ and is never committed.
 import { createHash } from 'node:crypto';
@@ -45,6 +47,10 @@ const t0 = performance.now();
 const core = live ? {} : backup.coreAssets();
 const m = live?.m ?? new WorldModel({ constants: { ground: 'land', extent: 1000, ...g.constants }, seed: SEED, assets: (sha) => core[sha] });
 if (!live) m.library = coreLibrary();
+// A template's things name their Soul Actions entries from a world map (`--map`, `souls-world-map/1`: one row per kind
+// and revision, `def` and `entry`), as a backup's do (X6); a kind with no row names none and keeps its own name.
+const MAP = live ? '' : arg('--map', '');
+const entryOf = MAP ? backup.entryMap(MAP) : null;
 let tick = 1;
 const apply = (batch: unknown, what: string) => { const r = applyBatch(m, batch, 'genesis', tick++, { trusted: true }); if (!r.result.accepted) throw new Error(`${what} refused: ${JSON.stringify(r.result).slice(0, 600)}`); };
 if (g.state) apply({ ops: [{ op: 'world', state: g.state }], group: 'genesis' }, 'state');
@@ -119,6 +125,7 @@ for (const e of m.entities.values()) {
     // A path or area thing at the world root carries world-frame geometry, heights above the ground unless `abs`.
     ...(isWorldShape ? { worldShape: true } : {}),
     ...live?.thing(e, d),
+    ...(entryOf?.(ref) ? { entry: entryOf(ref) } : {}),
   };
   if (isDoorDef(d as never)) {
     const v = e.state?.open ?? (d.state as Record<string, { default?: unknown } | undefined>)?.open?.default;

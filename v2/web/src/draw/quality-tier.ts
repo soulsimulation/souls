@@ -45,3 +45,21 @@ export function pageDetail(): DistanceDetail | null {
   if (typeof window === 'undefined' || typeof screen === 'undefined') return null;
   return detailFor(browserQuality().tier, location.search);
 }
+
+/** #3785: today's mesh levels (apps/web WorldMeshLod.ts PHONE_MESH_LOD / DESKTOP_MESH_LOD): a level is drawn where its
+ *  error is under `maxErrorPx` CSS pixels, one on a phone, half on a desktop. Off with distance detail (`?detail=0`) or
+ *  alone with `?lod=0` (today's `?phoneOff=lod`). */
+export type MeshLod = { maxErrorPx: number };
+export const PHONE_MESH_LOD: MeshLod = Object.freeze({ maxErrorPx: 1 });
+export const DESKTOP_MESH_LOD: MeshLod = Object.freeze({ maxErrorPx: 0.5 });
+export function meshLodFor(tier: QualityTier, search = ''): MeshLod | null {
+  const q = new URLSearchParams(search);
+  if (q.get('detail') === '0' || q.get('lod') === '0') return null;
+  return tier === 'phone' ? PHONE_MESH_LOD : DESKTOP_MESH_LOD;
+}
+
+/** The page's mesh levels (browser only). */
+export function pageMeshLod(): MeshLod | null {
+  if (typeof window === 'undefined' || typeof screen === 'undefined') return null;
+  return meshLodFor(browserQuality().tier, location.search);
+}
