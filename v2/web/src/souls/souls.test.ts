@@ -121,13 +121,19 @@ test('A3: markup and an address in an utterance are drawn as plain text, with no
     }
   }
   const doc = { body: new El('body'), createElement: (t: string) => new El(t) };
-  Object.assign(globalThis, { document: doc, innerWidth: 1280, innerHeight: 720, devicePixelRatio: 1, addEventListener() {} });
+  // C14: the open Soul's status line comes from the directory by its grant, and is set as text like the rest.
+  const grant = `soul-${'cd'.repeat(16)}-4`, asked: string[] = [];
+  const fetch = async (url: string, init: { body: string }) => {
+    asked.push(`${url} ${init.body}`);
+    return new Response(url === '/v1/account/now' ? JSON.stringify({ now: { [grant]: { text: '<script>alert(2)</script> mending nets', at: Math.floor(Date.now() / 1000) } } }) : '{}');
+  };
+  Object.assign(globalThis, { document: doc, innerWidth: 1280, innerHeight: 720, devicePixelRatio: 1, addEventListener() {}, fetch });
   made.length = 0;
   const { pageSouls } = await import('./page.ts');
 
   const hostile = '<a href="https://example.com/x">click</a> <script>alert(1)</script> <b>bold</b> www.example.com';
   const at = 5_000_000;
-  const nodes = new Map([['s.1', body('s.1', { name: '<img src=x onerror=alert(1)>' })]]);
+  const nodes = new Map([['s.1', body('s.1', { name: '<img src=x onerror=alert(1)>', soul: grant })]]);
   const world = { nodes, tracks: new Map(), frame: () => new THREE.Matrix4() };
   const souls = pageSouls(new El('canvas') as never, world as never, new URLSearchParams('soul=s.1'));
   souls.apply({ number: 1, from: 0, to: at + 1, nodes: [...nodes.values()], removed: [], samples: [], hash: null, said: [said('s.1', at, hostile, 30_000_000)] });
@@ -141,6 +147,10 @@ test('A3: markup and an address in an utterance are drawn as plain text, with no
   assert.equal(drawn.join(' '), hostile, `drawn: ${JSON.stringify(drawn)}`);
   souls.open('s.1');
   souls.draw(at + 2_000_000, camera);
+  await new Promise((r) => setTimeout(r, 20));
+  souls.draw(at + 2_100_000, camera);
+  assert.ok(asked.includes(`/v1/account/now {"souls":["${grant}"]}`), asked.join('\n'));
+  assert.ok(texts.includes('“<script>alert(2)</script> mending nets” · just now'), JSON.stringify(texts));
   // The Soul's page: the name and the sentence as text, and the only elements are the page's own.
   assert.ok(texts.includes('<img src=x onerror=alert(1)>'));
   assert.ok(texts.some((t) => t.endsWith(`said “${hostile}”`)));
