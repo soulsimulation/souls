@@ -51,10 +51,11 @@ const RACK: &str = "test:rack";
 const PLANK: &str = "test:plank";
 const PAIR: &str = "test:pair";
 const CARRY: &str = "test:carry";
+const COURT: &str = "test:court";
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
-    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY]
+    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT]
         .iter()
         .enumerate()
         .map(|(i, k)| (*k, full(k, i as u8 + 1)))
@@ -132,6 +133,9 @@ fn rack() -> Id {
 fn plank() -> Id {
     id(5)
 }
+fn court() -> Id {
+    id(6)
+}
 
 /// Where the bodies stand on the test world's open ground, west of the square, µm.
 fn at1() -> Vec3 {
@@ -189,6 +193,7 @@ fn tree_rules() -> TreeRules {
             (fullname(PLANK), k("thing", &[], &[], Some(2))),
             (fullname(PAIR), k("activity", &[], &[], None)),
             (fullname(CARRY), k("activity", &[], &[1], None)),
+            (fullname(COURT), k("thing", &[], &[], None)),
         ]),
         souls: [w1(), w2()].into(),
         audiences: BTreeMap::new(),
@@ -240,11 +245,36 @@ fn entries() -> Json {
       "forms": { "put": { "who": "anyone",
         "steps": [{ "step": "put", "move": "press", "at": "edge", "what": { "arg": "item" }, "slot": "rest" }] },
         "stock": { "who": "anyone", "steps": [],
-          "effects": [{ "change": "create", "kind": "PLANK", "into": "rest", "event": "stocked" }] } } }"#
-            .replace("PLANK", &fullname(PLANK)),
+          "effects": [{ "change": "create", "kind": "PLANK", "into": "rest", "event": "stocked" }] },
+        "overstock": { "who": "anyone", "steps": [],
+          "effects": [{ "change": "create", "kind": "GHOST", "into": "rest", "event": "haunted" }] } } }"#
+            .replace("PLANK", &fullname(PLANK))
+            .replace("GHOST", &full("test:ghost", 0xff)),
     )
     .unwrap();
-    Json::Obj(vec![(VESSEL.into(), vessel), (RACK.into(), rack)])
+    // A game of two ends, as a frisbee is played (#3888): each player takes an end; whoever holds the disc throws
+    // it to the other end, which needs a player there (a `linked` need only the world can read).
+    let court = parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:court", "owner": "thing",
+      "state": { "disc": { "n": 28, "type": "enum", "values": ["end_a", "end_b"], "default": "end_a",
+        "audience": { "rule": "everyone" } } },
+      "links": { "end_a": { "n": 1, "from": "body", "most": 1, "audience": { "rule": "everyone" } },
+        "end_b": { "n": 2, "from": "body", "most": 1, "audience": { "rule": "everyone" } } },
+      "forms": {
+        "play_at_end_a": { "who": "anyone", "starts": "act", "needs": [{ "need": "unlinked", "link": "end_a" }],
+          "steps": [], "effects": [{ "change": "link", "link": "end_a", "from": "actor", "event": "joined" }] },
+        "play_at_end_b": { "who": "anyone", "starts": "act", "needs": [{ "need": "unlinked", "link": "end_b" }],
+          "steps": [], "effects": [{ "change": "link", "link": "end_b", "from": "actor", "event": "joined" }] },
+        "throw_from_end_a_to_end_b": { "who": { "link": "end_a" }, "starts": "act",
+          "needs": [{ "need": "state", "field": "disc", "is": "end_a" }, { "need": "linked", "link": "end_b" }],
+          "steps": [], "effects": [{ "change": "set", "field": "disc", "to": "end_b", "event": "threw" }] } } }"#,
+    )
+    .unwrap();
+    Json::Obj(vec![
+        (VESSEL.into(), vessel),
+        (RACK.into(), rack),
+        (COURT.into(), court),
+    ])
 }
 
 fn create(node: Id, kind: &str, parent: Id, at: Vec3) -> (Id, Change) {
@@ -284,6 +314,12 @@ fn world() -> Replica {
         create(vessel(), VESSEL, g, off(at1(), 300_000)),
         create(rack(), RACK, g, Vec3::new(at1().x, 0, at1().z + 400_000)),
         create(plank(), PLANK, g, off(at2(), 1_350_000)),
+        create(
+            court(),
+            COURT,
+            g,
+            Vec3::new(at1().x, 0, at1().z - 2_000_000),
+        ),
     ];
     let effects: Vec<Value> = changes
         .into_iter()
@@ -795,5 +831,53 @@ fn c24_a_forms_timer_fires_and_starts_its_form_with_the_world_as_actor() {
     assert!(r.tree().timers().is_empty());
 }
 
+#[path = "acts/effect_refused.rs"]
+mod effect_refused;
 #[path = "acts/named_args.rs"]
 mod named_args;
+
+/// #3888 A1, A2: the world decides a form's needs at commit, links included, by R2's one evaluator, whatever the
+/// client said. A throw to an end nobody plays is refused `not_linked` naming need 1, and nothing changes; with a
+/// Soul at that end it is done and the disc is there. An end already taken is refused `already_linked` (need 0),
+/// as chess's `play_white` is when white is taken.
+#[test]
+fn i3888_a_forms_needs_are_the_worlds_at_commit() {
+    let (run, mut a, mut b) = serve("i3888");
+    let disc = |run: &Run| {
+        let r = run.replay();
+        let t = r.tree();
+        t.node(t.handle(court()).unwrap())
+            .unwrap()
+            .fields()
+            .get(&28)
+            .cloned()
+    };
+    let none = BTreeMap::new;
+    a.act("test:play_at_end_a", Some(court()), none())
+        .expect("a takes end a");
+    let alone = a.act("test:throw_from_end_a_to_end_b", Some(court()), none());
+    println!("#3888 throw with nobody at end b: {alone:?}");
+    assert_eq!(
+        alone,
+        Err("not_linked".to_owned()),
+        "refused by the need's name"
+    );
+    assert_eq!(
+        disc(&run),
+        None,
+        "nothing changed: the disc is still at end a"
+    );
+    let taken = b.act("test:play_at_end_a", Some(court()), none());
+    println!("#3888 end a again: {taken:?}");
+    assert_eq!(taken, Err("already_linked".to_owned()));
+    b.act("test:play_at_end_b", Some(court()), none())
+        .expect("b takes end b");
+    let thrown = a.act("test:throw_from_end_a_to_end_b", Some(court()), none());
+    println!("#3888 throw with b at end b: {thrown:?}");
+    assert!(!thrown.expect("the throw lands").is_empty());
+    assert_eq!(disc(&run), Some(Value::Text(name("test:end_b"))));
+    // The disc is at end b now: a's throw from end a is refused by the state need (need 0).
+    let again = a.act("test:throw_from_end_a_to_end_b", Some(court()), none());
+    assert_eq!(again, Err("field_differs".to_owned()));
+    run.stop();
+}
