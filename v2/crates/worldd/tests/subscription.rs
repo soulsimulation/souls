@@ -482,7 +482,7 @@ fn c26_a_shout_is_heard_farther_than_a_say_by_the_same_rule() {
         e.events = Some(vec![said.event()]);
         e
     };
-    assert!(worldd::words::SHOUT_REACH_MM > worldd::words::SAY_REACH_MM);
+    const { assert!(worldd::words::SHOUT_REACH_MM > worldd::words::SAY_REACH_MM) };
     assert_eq!(
         worldd::words::SHOUT_REACH_MM as i64,
         replica::speech::Radii::default().loud / 1_000,
