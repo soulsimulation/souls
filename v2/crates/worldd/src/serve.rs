@@ -1931,7 +1931,8 @@ mod tests {
         let floor = imported.nodes["building/floor-1"];
         let built = build(&facts.text, &[]).unwrap();
         let initial = Replica::start(built.header.stored()).unwrap();
-        let (before, _) = recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+        let (before, _) =
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
         assert!(before.surfaces.contains_key(&floor));
         let mut live = initial.frozen();
         live.apply(&replica::effects::Part::read(&built.part).unwrap())
@@ -2597,11 +2598,15 @@ mod tests {
             recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
         let mut copy = town.copy().unwrap();
         for t in [&mut town, &mut planner, &mut copy] {
-            t.prepare_classes([replica::kinds::sizes::Size::Large]).unwrap();
+            t.prepare_classes([replica::kinds::sizes::Size::Large])
+                .unwrap();
         }
         assert_eq!(planner.tree.to_state(), copy.tree.to_state());
         let floors: Vec<Id> = copy.surfaces.keys().copied().collect();
-        assert!(floors.len() > 1, "the test world has floors besides the ground");
+        assert!(
+            floors.len() > 1,
+            "the test world has floors besides the ground"
+        );
         assert_eq!(planner.surfaces.keys().copied().collect::<Vec<_>>(), floors);
         let ask = |t: &mut Town| {
             let view = t.view();
