@@ -285,6 +285,10 @@ impl Stage {
             .map(|v| match v.fields.get(&3) {
                 // F4 (#2769) writes an ending in the `souls` namespace; the gate reads its plain name.
                 Some(Cbor::Text(n)) => n.as_str().trim_start_matches("souls:").to_owned(),
+                // The runner now writes the name as its bytes (#3646's durable text rule).
+                Some(Cbor::Bytes(b)) => String::from_utf8_lossy(b)
+                    .trim_start_matches("souls:")
+                    .to_owned(),
                 _ => "(unnamed)".into(),
             })
             .next()
