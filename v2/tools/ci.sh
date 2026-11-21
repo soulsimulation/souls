@@ -106,11 +106,13 @@ web_steps() {
 step web-deps npm ci --prefix web --no-audit --no-fund
 # B15: acquire only the released inputs and exercise the actual prepared artifact, after the locked page dependencies.
 step body-presets bash -c 'node tools/import-body/prepare.mjs --out .local/ci-body-assets --test'
-# Every page unit test, found by name (web/src/**/*.test.ts and *.test.mjs), so a new one runs here with no edit. Some
-# read the replica WASM package (wasm_pkg, above) or start target/debug/worldd: the words path (V1b, #3361), a still
-# world (V5b), a node on a course (#3603), the pose (V7, #2716). Named by file: Node 24 reads a bare folder as one file.
-step web-unit bash -c 'cargo build -p worldd --locked --quiet &&
-  node --test $(find web/src \( -name "*.test.ts" -o -name "*.test.mjs" \) -not -path "*/node_modules/*" | sort)'
+# Every page unit test, found by name (web/src/**/*.test.ts and *.test.mjs), so a new one runs here with no edit. A
+# file that starts target/debug/worldd (the words path V1b #3361, a still world V5b, the sky live) times a served world
+# on the wall clock, so those run one at a time after the rest; the rest run in parallel. Some read the replica WASM
+# package (wasm_pkg, above). Named by file: Node 24 reads a bare folder as one file, not as the tests inside it.
+web_tests() { find web/src \( -name "*.test.ts" -o -name "*.test.mjs" \) -not -path "*/node_modules/*" | sort; }
+step web-unit node --test $(grep -L target/debug/worldd $(web_tests))
+step web-served bash -c "cargo build -p worldd --locked --quiet && node --test --test-concurrency=1 $(grep -l target/debug/worldd $(web_tests) | tr '\n' ' ')"
 
 }
 wasm_goldens() {
