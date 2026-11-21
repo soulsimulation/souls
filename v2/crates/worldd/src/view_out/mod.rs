@@ -868,7 +868,10 @@ use replica::views::{Redactions, View};
 /// importer's dictionary with words of exactly that hash. Rows go after the K16 words in a text file as
 /// `[hash, words]`, in hash order, each once; a node of any other audience, or a hash the dictionary's words do not
 /// match, adds nothing.
-fn public_names(value: &Value, names: &crate::views::names::PublicNames) -> BTreeMap<[u8; 32], Vec<u8>> {
+fn public_names(
+    value: &Value,
+    names: &crate::views::names::PublicNames,
+) -> BTreeMap<[u8; 32], Vec<u8>> {
     fn walk(
         v: &Value,
         names: &crate::views::names::PublicNames,

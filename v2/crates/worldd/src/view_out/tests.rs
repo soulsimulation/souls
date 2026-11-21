@@ -1190,7 +1190,11 @@ fn w3e_compare_transfer_queries(public: &PublicPlayer, canonical: &Replica, auth
 fn public_place_names_beside_public_nodes_only_and_hash_verified() {
     use replica::ids::sha256;
     let h = header();
-    let mut actual = Replica::restored(h.clone(), replica::tree::Tree::start(h.zone, h.kinds[0].clone()), 0);
+    let mut actual = Replica::restored(
+        h.clone(),
+        replica::tree::Tree::start(h.zone, h.kinds[0].clone()),
+        0,
+    );
     let d = scratch("public-names");
     let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
     let store = directoryd::directory::store::Memory::default();
@@ -1244,7 +1248,10 @@ fn public_place_names_beside_public_nodes_only_and_hash_verified() {
     let Value::Array(text) = decode(&text).unwrap().value else {
         panic!("text")
     };
-    let mut want = vec![(sha256(b"Plaza"), "Plaza"), (sha256(b"West lake"), "West lake")];
+    let mut want = vec![
+        (sha256(b"Plaza"), "Plaza"),
+        (sha256(b"West lake"), "West lake"),
+    ];
     want.sort();
     assert_eq!(
         text,
@@ -1259,7 +1266,10 @@ fn public_place_names_beside_public_nodes_only_and_hash_verified() {
     // The baseline's text is the same words of the public state (`PublicWriter::words` of the player's state).
     let state = project(&h, &actual.tree().to_state()).unwrap();
     assert_eq!(
-        public_names(&state, &names).keys().copied().collect::<Vec<_>>(),
+        public_names(&state, &names)
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
         want.iter().map(|(k, _)| *k).collect::<Vec<_>>()
     );
     // The private node's name is in the source but never in the public projection's names.
