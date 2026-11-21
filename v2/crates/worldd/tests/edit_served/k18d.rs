@@ -44,6 +44,7 @@ fn soul_intent(
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         }
         .to_value(),
     )
