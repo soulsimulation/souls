@@ -538,7 +538,9 @@ impl Geometry for Sight<'_> {
                 if floor != sim::walk::node_of(me) {
                     return Some((node, at, skills::form_runner::REACH));
                 }
-                Some((floor, p, skills::form_runner::REACH))
+                let short = skills::form_runner::APPROACH_SHORT;
+                let aim = skills::form_runner::short_of(p, me.pose.position, short);
+                Some((floor, aim, reach + flat([aim.x, aim.z], [p.x, p.z])))
             })
             .flatten()
             .unwrap_or((node, at, reach))
@@ -548,9 +550,6 @@ impl Geometry for Sight<'_> {
         let mut planning = self.planning.borrow_mut();
         match planning.ask(key, *me, FormQuery::Walk { node, at, reach }, &self.map) {
             Some(FormResult::Walk(legs)) => {
-                if self.approaches.contains(&body) {
-                    eprintln!("DBG approach body on {} at {:?} -> {} {:?} reach {} legs {:?}", replica::world_model::show(sim::walk::node_of(me)), me.pose.position, replica::world_model::show(node), at, reach, legs.iter().map(|l| (l.to, l.link.is_some())).collect::<Vec<_>>());
-                }
                 // A later stage may start in this same call before Sight's context is refreshed: it must request its
                 // own answer, even when its step number and target repeat the preceding stage.
                 planning.current.remove(&key);
