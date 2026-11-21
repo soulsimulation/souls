@@ -1551,10 +1551,9 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
         .set_read_timeout(Some(Duration::from_secs(60)))
         .unwrap();
     // Since C3 a seeded Soul has a body only once it acts: each walks to where it stands, and its end is read.
-    let end = socket_end;
     for (k, &body) in w.souls.iter().enumerate() {
         walk(&mut souls, &w, body, 1, (x0 + 2 * k as i64) * M, z0 * M);
-        let got = end(&mut souls);
+        let got = socket_end(&mut souls);
         assert_eq!(got.kind, 1, "Soul {k} stands: {got:?}");
     }
     let at = |x: i64, z: i64, parent: Id| Spot {
@@ -1619,7 +1618,7 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     assert_eq!(got.kind, 1, "the hedge across the way commits: {got:?}");
     let version = got.version;
     walk(&mut souls, &w, w.souls[1], 2, wx, goal);
-    let got = end(&mut souls);
+    let got = socket_end(&mut souls);
     println!("the second Soul's walk past the hedge: {got:?}");
     assert_eq!(got.kind, 1, "the walk ends at its goal: {got:?}");
 
@@ -1730,7 +1729,7 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
         s.write_all(&bytes).unwrap();
     };
     act(&mut souls, 2, "eden:ring", bell_id);
-    let rang = end(&mut souls);
+    let rang = socket_end(&mut souls);
     println!("the first Soul rings the creator's bell: {rang:?}");
     assert_eq!(rang.kind, 1, "the form runs to its receipt: {rang:?}");
     let (copy, _) = served_copy(&w);
@@ -1763,11 +1762,11 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     }
     let boot = boot.expect("a boot thing with a content entry");
     act(&mut souls, 3, "eden:toll", bell_id);
-    let creator_no = end(&mut souls);
+    let creator_no = socket_end(&mut souls);
     act(&mut souls, 4, "eden:toll", boot);
-    let boot_no = end(&mut souls);
+    let boot_no = socket_end(&mut souls);
     act(&mut souls, 5, "eden:ring", bell_id);
-    let again = end(&mut souls);
+    let again = socket_end(&mut souls);
     println!(
         "refused: toll on the bell {creator_no:?}; toll on a boot thing {boot_no:?}; ring again {again:?}"
     );
