@@ -722,7 +722,10 @@ fn a_runs_move_record_is_written_for_viewers_and_a_restart_ignores_it() {
     let Some(Value::Map(m)) = ev.fields.get(&3) else {
         panic!("a move record: {ev:?}")
     };
-    assert!(matches!(m.get(&2), Some(Value::Text(_))), "the move's name");
+    assert!(
+        matches!(m.get(&2), Some(Value::Bytes(_))),
+        "the move's name"
+    );
     assert!(
         matches!(m.get(&8), Some(Value::Array(a)) if !a.is_empty()),
         "its phase ends"

@@ -68,9 +68,11 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   return rec;
 }
 
-/** B2's move record (`replica::moves::MoveRecord::to_value`): `{1: body, 2: move, 5: target, 7: start, 8: [phase end, ...]}`. */
+/** B2's move record (`replica::moves::MoveRecord::to_value`, its texts as bytes): `{1: body, 2: move, 5: target, 7: start,
+ * 8: [phase end, ...]}`. */
 function moveRec(m: Map<number, unknown>): MoveRec {
-  const ends = (m.get(8) as unknown[]).map(num), name = m.get(2), start = num(m.get(7));
+  const ends = (m.get(8) as unknown[]).map(num), raw = m.get(2), start = num(m.get(7));
+  const name = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : raw;
   if (typeof name !== 'string' || !ends.length || !Number.isFinite(start)) throw new Error('not a move record');
   return { body: key(m.get(1) as IdValue), name, start, ends, target: m.has(5) ? key(m.get(5) as IdValue) : null };
 }

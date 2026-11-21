@@ -1295,7 +1295,7 @@ impl Forms {
                             let fields = BTreeMap::from([
                                 (1, Value::Uint(run)),
                                 (2, body.to_value()),
-                                (3, r.to_value()),
+                                (3, as_bytes(r.to_value())),
                             ]);
                             self.out
                                 .push(entry(&o, now, Vec::new(), name(MOVED), fields));
@@ -1612,6 +1612,17 @@ pub fn may(
 }
 
 /// One entry of run `o` at `at`: `changes`, and one event, `event`, that names them all.
+/// `v` with every text as bytes: a move record's names (a contact point such as `grip`) need not be namespaced, and an
+/// entry's texts must be (rule 10), so the record goes out as `souls:act-ended`'s how does (#3741).
+fn as_bytes(v: Value) -> Value {
+    match v {
+        Value::Text(t) => Value::Bytes(t.as_str().as_bytes().to_vec()),
+        Value::Array(a) => Value::Array(a.into_iter().map(as_bytes).collect()),
+        Value::Map(m) => Value::Map(m.into_iter().map(|(k, v)| (k, as_bytes(v))).collect()),
+        v => v,
+    }
+}
+
 fn entry(
     o: &Open,
     at: Micros,
