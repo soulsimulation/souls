@@ -2950,11 +2950,7 @@ fn i3825_run(
     records: u64,
     restarts: &[u64],
     grace: Duration,
-) -> (
-    BTreeMap<String, Vec<(String, Vec<u8>)>>,
-    BTreeMap<u64, Value>,
-    Vec<String>,
-) {
+) -> I3825Run {
     let h = header();
     let d = scratch(&format!("i3825-{tag}"));
     let views = d.join("views");
@@ -3020,7 +3016,38 @@ fn i3825_run(
             .into_iter()
             .filter(|(k, _)| [1, 8, 9, 10].contains(k))
             .collect();
-    (gens, pointer, began)
+    // #3833: what a restart reads, and the state the writer ends at.
+    let mut chain = 0;
+    let mut at = obj_bytes(&object_map(&out.store.get(&format!("{}head", out.prefix)).unwrap().unwrap().bytes).unwrap(), 1)
+        .unwrap();
+    while !at.is_empty() {
+        chain += 1;
+        at = obj_bytes(&object_map(&out.get(&at).unwrap()).unwrap(), 2).unwrap();
+    }
+    let end = I3825End {
+        chain,
+        objects: out.store.list(&format!("{}objects/", out.prefix)).unwrap().len(),
+        state: out.canonical.tree().state_hashes_whole().unwrap(),
+        changed: out.canonical.changed_at().clone(),
+        public: out.player.hash().unwrap(),
+    };
+    I3825Run { gens, pointer, began, end }
+}
+/// #3833: how long the recovery chain a restart reads is, how many recovery objects are kept, and the canonical and
+/// public state the writer ends at.
+#[derive(Debug, PartialEq)]
+struct I3825End {
+    chain: usize,
+    objects: usize,
+    state: Vec<(Audience, replica::ids::Hash)>,
+    changed: BTreeMap<Id, u64>,
+    public: Vec<u8>,
+}
+struct I3825Run {
+    gens: BTreeMap<String, Vec<(String, Vec<u8>)>>,
+    pointer: BTreeMap<u64, Value>,
+    began: Vec<String>,
+    end: I3825End,
 }
 
 /// #3825 A1, A3, A4: the public writer closes a generation every 3 parts and starts the next from a baseline of the
@@ -3030,7 +3057,12 @@ fn i3825_run(
 /// record, across each rollover, writes the same bytes and pointer as one never stopped.
 #[test]
 fn i3825_generations_roll_over_prune_after_the_grace_and_restart_with_the_same_bytes() {
-    let (gens, pointer, began) = i3825_run("straight", 11, &[], Duration::from_secs(3600));
+    let I3825Run {
+        gens,
+        pointer,
+        began,
+        end,
+    } = i3825_run("straight", 11, &[], Duration::from_secs(3600));
     // 11 parts: generations of 3, 3, 3 and 2 parts.
     assert_eq!(began.len(), 4, "a new generation every 3 parts");
     assert_eq!(gens.len(), 4, "nothing pruned inside the grace");
@@ -3109,17 +3141,33 @@ fn i3825_generations_roll_over_prune_after_the_grace_and_restart_with_the_same_b
         )
     );
     // A writer reopened from the Store after every record, rollovers included, writes the same files and pointer.
-    let (again, pointer_again, began_again) = i3825_run(
+    // #3833 A1: each restart reads only the newest generation's chain (its seed and at most 3 parts), and ends at the
+    // same canonical state, node versions and public digest as the writer never stopped.
+    let again = i3825_run(
         "restarted",
         11,
         &(0..11).collect::<Vec<_>>(),
         Duration::from_secs(3600),
     );
-    assert_eq!(began_again, began);
-    assert_eq!(again, gens, "a restart publishes the same bytes");
-    assert_eq!(pointer_again, pointer);
-    // With no grace, only the current and the previous generation stay.
-    let (pruned, _, _) = i3825_run("pruned", 11, &[], Duration::ZERO);
+    assert_eq!(again.began, began);
+    assert_eq!(again.gens, gens, "a restart publishes the same bytes");
+    assert_eq!(again.pointer, pointer);
+    assert_eq!(again.end, end, "the same state and the same recovery store");
+    assert_eq!(end.chain, 3, "the chain is cut at the rollover: the seed's manifest and 2 parts");
+    // Restarts at a rollover only, each generation's first record.
+    let at_rollovers = i3825_run("at-rollovers", 11, &[2, 5, 8], Duration::from_secs(3600));
+    assert_eq!((at_rollovers.gens, at_rollovers.end), (gens.clone(), end));
+    // With no grace, only the current and the previous generation stay, on the disk and in the recovery store
+    // (#3833 A2); a writer reopened from what is left goes on with the same bytes.
+    let pruned_run = i3825_run("pruned", 11, &[10], Duration::ZERO);
+    let pruned = pruned_run.gens;
+    let kept = again_objects_bound();
+    assert!(
+        pruned_run.end.objects < end.objects && pruned_run.end.objects <= kept,
+        "old generations' recovery objects are deleted: {} kept of {}",
+        pruned_run.end.objects,
+        end.objects
+    );
     assert_eq!(
         pruned.keys().collect::<Vec<_>>(),
         {
@@ -3130,4 +3178,9 @@ fn i3825_generations_roll_over_prune_after_the_grace_and_restart_with_the_same_b
         "the previous generation is kept, older ones pruned"
     );
     assert_eq!(pruned[&began[3]], gens[&began[3]]);
+}
+/// The most recovery objects two generations of 3 parts keep (#3833): per generation, a record, a seed, its manifest
+/// and words, and per part a manifest, a chunk, the part and its words; and the head.
+fn again_objects_bound() -> usize {
+    2 * (4 + 3 * 4) + 1
 }
