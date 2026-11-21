@@ -5,7 +5,7 @@ use crate::effects::{
     Body, Change, Header, LinkState, NodeState, Part, Refusal, State, TransferRec, read_id,
 };
 use crate::encode::{Value, encode};
-use crate::ids::{Hash, Id, Purpose, sha256};
+use crate::ids::{Hash, Id, Purpose, Sha256, sha256};
 use crate::pose::{HandOff, Pose};
 use crate::time::{Tempo, TickRate, TimeEffect, Timeline};
 use crate::world_model::{Audience, DEPTH_LIMIT, End};
@@ -677,12 +677,53 @@ fn in_place(header: &Header, state: &Value, delta: &BTreeMap<u64, Value>) -> R<O
     }))
 }
 
+/// [`digest`] of `state` with `plan` in place of what it replaces (#3799), each node row (key 2) from its encoding in
+/// `enc`: the same bytes hashed in pieces, so a part that moves a few nodes encodes only their rows.
+fn streamed_digest(state: &Value, enc: &[Vec<u8>], plan: Option<&Plan>) -> R<Vec<u8>> {
+    use crate::encode::head;
+    let m = map(state)?;
+    let over: BTreeMap<usize, &Value> = plan
+        .map(|p| p.rows.iter().map(|(i, v)| (*i, v)).collect())
+        .unwrap_or_default();
+    let mut h = Sha256::new();
+    h.update(&head(5, m.len() as u64));
+    for (k, v) in m {
+        h.update(&head(0, *k));
+        match (*k, plan) {
+            (1, Some(p)) => h.update(&encoded(&p.v1)?),
+            (2, _) => {
+                let rows = arr(v)?;
+                if rows.len() != enc.len() {
+                    return bad("row encodings");
+                }
+                h.update(&head(4, rows.len() as u64));
+                for (i, e) in enc.iter().enumerate() {
+                    match over.get(&i) {
+                        Some(v) => h.update(&encoded(v)?),
+                        None => h.update(e),
+                    }
+                }
+            }
+            (
+                6,
+                Some(Plan {
+                    timers: Some(t), ..
+                }),
+            ) => h.update(&encoded(t)?),
+            _ => h.update(&encoded(v)?),
+        }
+    }
+    Ok(h.finish().to_vec())
+}
+
 pub struct PublicPlayer {
     header: Header,
     baseline: Vec<u8>,
     state: Value,
     /// `digest(&state)`, kept with it (#3799): a part's prior digest is checked against it, not worked out again.
     digest: Vec<u8>,
+    /// Each node row's encoding (key 2), once worked out, kept as rows change in place (#3799).
+    enc: Option<Vec<Vec<u8>>>,
     next: u64,
     changed: BTreeMap<Id, u64>,
     samples: Vec<HandOff>,
@@ -710,6 +751,7 @@ impl PublicPlayer {
             header,
             baseline: sha256(baseline).to_vec(),
             digest: digest(&state)?,
+            enc: None,
             state,
             next: 0,
             changed,
@@ -775,13 +817,23 @@ impl PublicPlayer {
     }
     /// The digest of the state `delta` (from [`PublicPlayer::row_delta`]) would make, the state left as it is.
     pub fn digest_with(&mut self, delta: &Value) -> R<Vec<u8>> {
-        let Some(mut plan) = in_place(&self.header, &self.state, map(delta)?)? else {
+        let Some(plan) = in_place(&self.header, &self.state, map(delta)?)? else {
             return bad("not an in-place delta");
         };
-        plan.swap(&mut self.state);
-        let d = digest(&self.state);
-        plan.swap(&mut self.state);
-        d
+        self.encodings()?;
+        streamed_digest(
+            &self.state,
+            self.enc.as_deref().unwrap_or_default(),
+            Some(&plan),
+        )
+    }
+    /// The node rows' encodings, worked out once for a state played whole.
+    fn encodings(&mut self) -> R<&[Vec<u8>]> {
+        if self.enc.is_none() {
+            let rows = arr(field(map(&self.state)?, 2)?)?;
+            self.enc = Some(rows.iter().map(encoded).collect::<R<_>>()?);
+        }
+        Ok(self.enc.as_deref().unwrap_or_default())
     }
     pub fn version(&self) -> u64 {
         uint(&map(&self.state).expect("validated state")[&1]).expect("validated version")
@@ -830,14 +882,48 @@ impl PublicPlayer {
             None => Some(self.whole_next(&c)?),
         };
         let mut plan = plan;
+        let in_place_digest = match &plan {
+            Some(p) => {
+                self.encodings()?;
+                let enc = self.enc.as_deref().unwrap_or_default();
+                Some(streamed_digest(&self.state, enc, Some(p))?)
+            }
+            None => None,
+        };
         if let Some(p) = plan.as_mut() {
             p.swap(&mut self.state);
         }
-        let r = self.check_next(&sp, &c, whole.as_ref(), plan.as_ref(), old_version, &flying);
+        let r = self.check_next(
+            &sp,
+            &c,
+            whole.as_ref(),
+            plan.as_ref(),
+            in_place_digest,
+            old_version,
+            &flying,
+        );
         match (r, whole) {
             (Ok((digest, changes, part, version)), whole) => {
-                if let Some(w) = whole {
-                    self.state = w;
+                match (whole, &plan) {
+                    (Some(w), _) => {
+                        self.state = w;
+                        self.enc = None;
+                    }
+                    (None, Some(p)) => {
+                        // The swapped rows' new encodings.
+                        let rows = arr(field(map(&self.state)?, 2)?)?;
+                        let new: Vec<(usize, Vec<u8>)> = p
+                            .rows
+                            .iter()
+                            .map(|(i, _)| Ok((*i, encoded(&rows[*i])?)))
+                            .collect::<R<_>>()?;
+                        if let Some(enc) = self.enc.as_mut() {
+                            for (i, e) in new {
+                                enc[i] = e;
+                            }
+                        }
+                    }
+                    (None, None) => {}
                 }
                 self.digest = digest;
                 self.finish(sp, part, changes, record, version)
@@ -894,11 +980,15 @@ impl PublicPlayer {
         c: &BTreeMap<u64, Value>,
         whole: Option<&Value>,
         old: Option<&Plan>,
+        in_place_digest: Option<Vec<u8>>,
         old_version: u64,
         flying: &BTreeSet<Id>,
     ) -> R<(Vec<u8>, BTreeMap<Id, u64>, Part, u64)> {
         let next = whole.unwrap_or(&self.state);
-        let next_digest = digest(next)?;
+        let next_digest = match in_place_digest {
+            Some(d) => d,
+            None => digest(next)?,
+        };
         if bytes(field(c, 4)?)? != next_digest || sp.hash.as_deref() != Some(bytes(field(c, 4)?)?) {
             return bad("context result digest");
         }
