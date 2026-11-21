@@ -754,6 +754,8 @@ async function answer(req) {
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),
         hearing: ws?.hearing ?? null, viewGrants, viewKinds: [...viewKinds],
+        // The Soul's own body in the copy, once born (a joined body is minted, not the Soul's id): `act wave:<body>`.
+        body: [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id ?? null,
         rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since,
       };
     }
