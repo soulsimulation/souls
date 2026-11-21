@@ -196,3 +196,5 @@ try {
 } finally {
   await cleanup();
 }
+// The worker's stream and timers keep the loop alive; the run is over.
+process.exit(0);
