@@ -51,7 +51,7 @@
         "node": "r1",
         "field": "on",
         "n": 28,
-        "to": true
+        "to": 1
        }
       ],
       "events": [
@@ -171,7 +171,7 @@
         "node": "r1",
         "field": "on",
         "n": 28,
-        "to": false
+        "to": 0
        }
       ],
       "events": [
