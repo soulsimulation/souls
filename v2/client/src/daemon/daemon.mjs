@@ -149,7 +149,7 @@ import { clockOf, worldNow } from '../clock/clock.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
-import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, whatsOn, worldDue, worldTimeOf } from '../schedule/world.mjs';
+import { blankAt, CALENDAR_NOTE, calendarItems, heldBlank, noticeBoards, calendarList, calendarOf, whatsOn, worldDue, worldTimeOf } from '../schedule/world.mjs';
 import { refreshEntries } from '../pair/pair.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
@@ -1193,12 +1193,70 @@ async function calendar(req) {
   if (!title || !req.place || !Number.isFinite(inMin) || inMin < 0 || !(forMin > 0)) return { ok: false, code: 'calendar-usage', detail: CALENDAR_USAGE };
   if (!rows.has(String(req.place))) return closing({ ok: false, code: 'calendar.unknown-place', detail: `${req.place} is not an id this Soul's copy holds; find gives place ids`, did_you_mean: nearestIds(rows.values(), req.place) }, null, { now: true });
   if (!clock) return closing({ ok: false, code: 'calendar.no-clock', detail: 'the world has published no clock in this copy yet' }, null, { now: true });
-  const blank = blankAt(items, rows, String(req.place));
-  if (!blank) return closing({ ok: false, code: 'calendar.no-blank', detail: `nothing at ${rows.get(String(req.place)).name} takes a calendar notice; calendar lists the blank ones and where they are` }, null, { now: true });
-  const words = req.description ? `${title} — ${req.description}` : title;
+  const place = String(req.place), at = rows.get(place).name;
+  const words = `${title}${place && !noticeBoards(rows, kinds, place).some((b) => b.id === place) ? ` (at ${at})` : ''}${req.description ? ` — ${req.description}` : ''}`;
   const start = worldNow(clock, (nowMs + inMin * 60_000) * 1000), end = worldNow(clock, (nowMs + (inMin + forMin) * 60_000) * 1000);
-  const out = await answer({ op: 'act', acts: [`post:${blank.id}`, `words=${words}`, `start=${start}`, `end=${end}`], ...(req.for !== undefined ? { for: req.for } : {}) });
-  return { ...out, item: blank.id };
+  const served = req.for !== undefined ? { for: req.for } : {};
+  // A blank notice already at that place is posted where it is.
+  const blank = blankAt(items, rows, place);
+  if (blank) return { ...(await answer({ op: 'act', acts: [`post:${blank.id}`, `words=${words}`, `start=${start}`, `end=${end}`], ...served })), item: blank.id };
+  // Else one is taken from a notice board (at that place first), written, and put up there: three acts, sent one after
+  // another as each one's effect reaches the copy. The answer returns once the first is sent; how it ends arrives in
+  // `wait` as a `calendar` event.
+  const body = [...rows.values()].find((r) => r.soul === ME)?.id ?? null;
+  const held = body ? heldBlank(items, rows, body) : null;
+  const board = noticeBoards(rows, kinds, place)[0];
+  if (!held && !board) return closing({ ok: false, code: 'calendar.no-board', detail: 'no notice board in this Soul\'s copy: nowhere to take a blank notice from' }, null, { now: true });
+  const first = held ? null : await answer({ op: 'act', acts: [`${board.form}:${board.id}`], ...served });
+  if (first && first.ok !== true) return first;
+  putUp({ first: first?.sequence ?? null, body, words, start, end }).catch((e) => note({ kind: 'calendar', what: 'failed', step: 'put-up', detail: String(e?.message ?? e).slice(0, 200) }));
+  return { ok: true, sent: first ? `${board.form}:${board.id}` : null, ...(first ? { sequence: first.sequence } : {}), board: board?.id ?? null, then: 'the notice is written and put up as each step lands; wait reports a calendar event (posted, or failed and why)' };
+}
+
+/** An act's ending as its receipt shows it: refused (with the reason), ended (a receipt), or null while it goes on. */
+function endingOf(sequence) {
+  const a = receipts.get(sequence)?.answers ?? [];
+  const refused = a.find((x) => x.answer === 'refused');
+  if (refused) return { refused: true, reason: refused.reason ?? 'refused' };
+  const done = a.find((x) => x.answer === 'receipt');
+  return done ? { done: true, reason: done.reason ?? null } : null;
+}
+
+/**
+ * #3703: the rest of `calendar add` from a notice board: once the blank notice is in this Soul's hand, it is written
+ * (`post`) and set down where the Soul stands. Each step waits for its effect in the copy, or its act's refusal, at
+ * most CALENDAR_STEP_MS; the outcome is a `calendar` event.
+ */
+const CALENDAR_STEP_MS = 180_000;
+async function putUp({ first, body, words, start, end }) {
+  const kinds = kindsIn(join(home, 'kinds'));
+  const step = async (name, sequence, done) => {
+    let ended = null; // when its receipt came: its effect then has a few seconds to reach the copy
+    for (const until = Date.now() + CALENDAR_STEP_MS; Date.now() < until;) {
+      await Promise.race([refresh(), sleep(2000)]);
+      const items = calendarItems(copy, kinds), rows = rowsOf(copy), got = done(items, rows);
+      if (got) return got;
+      const e = sequence === null ? null : endingOf(sequence);
+      if (e?.refused) throw Object.assign(new Error(`${name}: ${e.reason}`), { step: name });
+      if (e?.done) ended ??= Date.now();
+      if (ended !== null && Date.now() - ended > 8000) throw Object.assign(new Error(`${name}: ended ${e.reason ?? 'without its effect'}`), { step: name });
+      await sleep(250);
+    }
+    throw Object.assign(new Error(`${name}: not done within ${CALENDAR_STEP_MS / 1000} s`), { step: name });
+  };
+  try {
+    const me = body ?? [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id;
+    const blank = await step('take', first, (items, rows) => heldBlank(items, rows, me));
+    const posting = await answer({ op: 'act', acts: [`post:${blank.id}`, `words=${words}`, `start=${start}`, `end=${end}`] });
+    if (posting.ok !== true) throw Object.assign(new Error(`post: ${posting.code ?? 'refused'}`), { step: 'post' });
+    await step('post', posting.sequence, (items) => items.find((i) => i.id === blank.id && i.links.poster?.includes(ME)));
+    const down = await answer({ op: 'set-down', this: blank.id, word: 'here' });
+    if (down.ok !== true) throw Object.assign(new Error(`set-down: ${down.code ?? 'refused'}`), { step: 'set-down' });
+    await step('set-down', down.sequence, (items, rows) => !heldBlank(items, rows, me) && !(() => { for (let r = rows.get(rows.get(blank.id)?.parent); r; r = rows.get(r.parent)) if (r.id === me) return true; return false; })());
+    note({ kind: 'calendar', what: 'posted', item: blank.id });
+  } catch (e) {
+    note({ kind: 'calendar', what: 'failed', step: e.step ?? 'put-up', detail: String(e.message ?? e).slice(0, 200) });
+  }
 }
 const CALENDAR_USAGE = 'calendar | calendar add "<title>" --place <placeId> --in <minutes> --for <minutes> ["description"] | calendar interest|not-coming <id>';
 

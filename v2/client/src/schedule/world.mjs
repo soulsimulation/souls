@@ -215,3 +215,24 @@ export function blankAt(items, rows, place) {
   const inside = (id) => { for (let r = rows.get(id); r; r = rows.get(r.parent)) if (r.id === place) return true; return false; };
   return items.find((i) => !i.links.poster?.length && (i.links.place?.[0] === place || inside(i.id))) ?? null;
 }
+
+/**
+ * The things in the copy a blank notice can be taken from: each whose kind's entry has a form that makes a calendar
+ * item (`create` of a calendar kind), with that form's name. Those at or inside `place` come first.
+ */
+export function noticeBoards(rows, kinds, place = null) {
+  const out = [];
+  for (const r of rows.values()) {
+    const form = Object.entries(kinds[r.kind]?.forms ?? {})
+      .find(([, f]) => (f?.effects ?? []).some((e) => e?.change === 'create' && isCalendarEntry(kinds[e.kind])))?.[0];
+    if (form) out.push({ id: r.id, name: r.name, form });
+  }
+  const inside = (id) => { for (let r = rows.get(id); r; r = rows.get(r.parent)) if (r.id === place) return true; return false; };
+  return place ? [...out.filter((b) => inside(b.id)), ...out.filter((b) => !inside(b.id))] : out;
+}
+
+/** A blank notice `body` holds (an item never posted, with that body above it), or null. */
+export function heldBlank(items, rows, body) {
+  const under = (id) => { for (let r = rows.get(rows.get(id)?.parent); r; r = rows.get(r.parent)) if (r.id === body) return true; return false; };
+  return items.find((i) => !i.links.poster?.length && under(i.id)) ?? null;
+}
