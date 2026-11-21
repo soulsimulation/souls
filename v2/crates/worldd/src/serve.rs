@@ -1936,7 +1936,8 @@ fn serve(args: &[String]) -> R<()> {
         let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
             .map_err(|e| format!("the fork's town: {e}"))?;
         stamp("town and planner");
-        (initial, Some((initial.frozen(), record)), observer, Some(checkpoint), towns)
+        let resumed = initial.frozen();
+        (initial, Some((resumed, record)), observer, Some(checkpoint), towns)
     } else {
         let initial = Replica::start(built.header.stored()).map_err(refusal)?;
         // The newest checkpoint that verifies (K5) is where the engine resumes (`answers::start`), so the towns and
