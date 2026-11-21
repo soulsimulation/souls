@@ -81,6 +81,9 @@ use skills::form_runner::Limits;
 use crate::bodies::Bodies;
 
 type R<T> = Result<T, Refusal>;
+pub static MEASURE_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static MEASURE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static MEASURE_MAX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// The longest a form's walk may take, µs (C20, #3469): about 250 m at a body's free speed (1.4 m/s), most of the way
 /// across Eden's town round its buildings, through doors and up stairs. A walk that cannot go on ends by its own name,
@@ -1063,6 +1066,10 @@ impl Acts {
                                 now,
                             )
                         });
+                let us = t0.elapsed().as_nanos() as u64;
+                MEASURE_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                MEASURE_NS.fetch_add(us, std::sync::atomic::Ordering::Relaxed);
+                MEASURE_MAX.fetch_max(us, std::sync::atomic::Ordering::Relaxed);
                 if let Err(e) = checked {
                     first.get_or_insert(e);
                     continue;

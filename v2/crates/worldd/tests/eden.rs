@@ -1551,6 +1551,13 @@ fn c22_a3_every_form_of_every_eden_entry_runs_once_from_its_stand_point() {
             println!("    {f}");
         }
     }
+    use std::sync::atomic::Ordering::Relaxed;
+    println!(
+        "needs at commit: {} checks, {} ns total, {} ns max",
+        worldd::acts::MEASURE_N.load(Relaxed),
+        worldd::acts::MEASURE_NS.load(Relaxed),
+        worldd::acts::MEASURE_MAX.load(Relaxed)
+    );
     assert!(out.contains_key("done"));
 }
 
