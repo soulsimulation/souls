@@ -69,6 +69,7 @@ const RESERVED: &[Reserved] = &[
     r(crate::sky::F_SKY_DATE, "sky::F_SKY_DATE", On::World),
     r(crate::sky::F_PALETTE, "sky::F_PALETTE", On::World),
     r(crate::sky::F_MIST, "sky::F_MIST", On::World),
+    r(crate::sky::F_STRIKE, "sky::F_STRIKE", On::World),
     r(crate::time::F_CLOCK_WORLD, "time::F_CLOCK_WORLD", On::World),
     r(crate::time::F_CLOCK_REAL, "time::F_CLOCK_REAL", On::World),
     r(crate::time::F_CLOCK_RATE, "time::F_CLOCK_RATE", On::World),
@@ -97,6 +98,7 @@ const RESERVED: &[Reserved] = &[
     r(crate::edit::DOOR_GEOMETRY, "edit::DOOR_GEOMETRY", On::Thing),
     // Kept for fields in review (21 Nov): a place's aliases (#3904), district plans, build claims and land-use zones
     // on the zone's root (#3879, #3913), and the owner and access marks any node may carry (#3913).
+    r(91, "sky::F_SKY_HOUR (#3957)", On::World),
     r(101, "F_ALIASES (#3904)", On::Place),
     r(140, "edit::claims F_DISTRICTS (#3879)", On::Place),
     r(141, "edit::claims F_CLAIMS (#3879)", On::Place),
@@ -119,18 +121,12 @@ pub fn on_things(n: u64) -> Option<&'static Reserved> {
 mod tests {
     use super::*;
 
-    /// The sky's date, palette and mist share the clock's 66 to 68 on the world node until #3872 moves them to 88
-    /// to 90; remove this when it lands.
-    const KNOWN: [u64; 3] = [66, 67, 68];
-
     #[test]
     fn no_number_is_kept_twice_on_the_same_nodes() {
         for (i, a) in RESERVED.iter().enumerate() {
             for b in &RESERVED[..i] {
                 assert!(
-                    a.n != b.n
-                        || (a.on != b.on && a.on != On::Thing && b.on != On::Thing)
-                        || (a.on == On::World && b.on == On::World && KNOWN.contains(&a.n)),
+                    a.n != b.n || (a.on != b.on && a.on != On::Thing && b.on != On::Thing),
                     "{} and {} both take {}",
                     a.name,
                     b.name,
@@ -150,6 +146,6 @@ mod tests {
                 f.n
             );
         }
-        assert!(crate::edit::DOOR_GEOMETRY >= ENGINE_THING_FIELDS);
+        const { assert!(crate::edit::DOOR_GEOMETRY >= ENGINE_THING_FIELDS) };
     }
 }
