@@ -40,7 +40,7 @@ const out = resolve(args[outAt + 1]), start = performance.now(), total = 600_000
 const cache = join(process.env.RUNNER_TEMP ?? join(repo, '.local/2750'), 'body-input-cache');
 function run(stage, argv, env = process.env, executable = process.execPath, cwd = repo, cap = 120_000) {
   const remaining = total - (performance.now() - start); if (remaining <= 0) throw Error('body.prepare-deadline');
-  const result = spawnSync(executable, argv, { cwd, env, timeout: Math.min(cap, remaining), encoding: 'utf8', maxBuffer: 8 << 20 });
+  const result = spawnSync(executable, argv, { cwd, env, timeout: Math.floor(Math.min(cap, remaining)), encoding: 'utf8', maxBuffer: 8 << 20 });
   if (result.stdout) process.stdout.write(result.stdout); if (result.stderr) process.stderr.write(result.stderr);
   if (result.error || result.signal || result.status !== 0) throw Error('body.prepare-' + stage);
   return result.stdout;
