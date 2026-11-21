@@ -892,8 +892,14 @@ fn k18b_a_free_running_world_with_its_planner_replays_in_lockstep() {
 }
 
 /// #3765: an intent with `params` (its field 4) set.
-fn intent_params(body: Id, sequence: u64, verb: &str, params: Vec<(u64, Value)>) -> Vec<u8> {
-    let Value::Map(mut m) = decode(&intent(body, sequence, verb, None, None))
+fn intent_params(
+    body: Id,
+    sequence: u64,
+    verb: &str,
+    target: Option<Id>,
+    params: Vec<(u64, Value)>,
+) -> Vec<u8> {
+    let Value::Map(mut m) = decode(&intent(body, sequence, verb, target, None))
         .unwrap()
         .value
     else {
@@ -912,58 +918,94 @@ fn malformed_words_are_refused_and_the_world_restarts() {
     let text = |s: &str| Value::Text(name(s));
     let arg = |k: &str, v: Value| Value::Array(vec![Value::Bytes(k.as_bytes().to_vec()), v]);
     let words = Value::Map(BTreeMap::from([(23, Value::Bytes(b"hello".to_vec()))]));
+    // Each with the name it is refused by. An intent's own checks keep their names (#3765 ruling): the Saturn act
+    // `sit_down:undefined` is no form here, and its row logs the intent as bytes; a text that passes every check
+    // is refused `intent.text-not-a-name` before anything is written.
     let malformed = [
-        // The world bricked on Saturn: a thin client's act word with an `undefined` in it.
-        intent(body, 1, "sit_down:undefined", Some(chair()), None),
-        intent_params(
-            body,
-            2,
-            "speech:say",
-            vec![(1, words), (2, text("Loud:Voice"))],
+        (
+            intent(body, 1, "sit_down:undefined", Some(chair()), None),
+            "intent.not-a-form-on-a-node",
         ),
-        intent_params(
-            body,
-            3,
-            "r2:switch_on",
-            vec![(1, Value::Array(vec![arg("thing", text("lamp:Main_1"))]))],
+        (
+            intent_params(
+                body,
+                2,
+                "speech:say",
+                None,
+                vec![(1, words), (2, text("Loud:Voice"))],
+            ),
+            "intent.text-not-a-name",
         ),
-        intent_params(body, 4, "souls:edit", vec![(1, text("eden:Chair"))]),
-        intent_params(
-            body,
-            5,
-            "hands:set-down",
-            vec![(1, text("place:on_floor:x"))],
+        (
+            intent_params(
+                body,
+                3,
+                "r2:switch_on",
+                Some(lamp),
+                vec![(1, Value::Array(vec![arg("thing", text("lamp:Main_1"))]))],
+            ),
+            "intent.text-not-a-name",
+        ),
+        (
+            intent_params(body, 4, "souls:edit", None, vec![(1, text("eden:Chair"))]),
+            "edit-not-a-batch",
+        ),
+        (
+            intent_params(
+                body,
+                5,
+                "hands:set-down",
+                None,
+                vec![(1, text("place:on_floor:x"))],
+            ),
+            "SETDOWN?",
+        ),
+        // A part that is not UTF-8 stays `arg-malformed`, though its value `top` is no name either.
+        (
+            intent_params(
+                body,
+                6,
+                "r2:switch_on",
+                Some(lamp),
+                vec![(
+                    1,
+                    Value::Array(vec![Value::Array(vec![
+                        Value::Bytes(vec![0xff]),
+                        text("top"),
+                    ])]),
+                )],
+            ),
+            "arg-malformed",
         ),
     ];
     let store = Mem::with(Vec::new());
     let w = start(store.clone(), false);
-    let asked: Vec<_> = malformed
+    let (asked, expected): (Vec<_>, Vec<_>) = malformed
         .into_iter()
         .enumerate()
-        .map(|(k, b)| at(&w, 2 + k as i64, b))
-        .collect();
-    let switch = at(&w, 9, intent(body, 6, "r2:switch_on", Some(lamp), None));
+        .map(|(k, (b, why))| (at(&w, 2 + k as i64, b), why.to_owned()))
+        .unzip();
+    let switch = at(&w, 9, intent(body, 7, "r2:switch_on", Some(lamp), None));
     let ran = run_to(&w, 60);
-    for (k, rx) in asked.iter().enumerate() {
-        // Refused (2) at intake, or unread (5) as the edit is when its batch is no batch: by name either way.
-        let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
-        let Value::Map(m) = decode(&frame).unwrap().value else {
-            panic!("a frame")
-        };
-        let Some(Value::Map(a)) = m.get(&2) else {
-            panic!("an answer")
-        };
-        let reason = match (a.get(&3), a.get(&4)) {
-            (Some(Value::Uint(2 | 5)), Some(Value::Text(t))) => t.as_str().to_owned(),
-            other => panic!("malformed word {k} answered {other:?}"),
-        };
-        let expected = if k == 3 {
-            "edit-not-a-batch"
-        } else {
-            "intent.text-not-a-name"
-        };
-        assert_eq!(reason, expected, "malformed word {k} is refused by name");
-    }
+    let reasons: Vec<String> = asked
+        .iter()
+        .enumerate()
+        .map(|(k, rx)| {
+            // Refused (2), or unread (5) as the edit is when its batch is no batch: by name either way.
+            let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+            let Value::Map(m) = decode(&frame).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Map(a)) = m.get(&2) else {
+                panic!("an answer")
+            };
+            match (a.get(&3), a.get(&4)) {
+                (Some(Value::Uint(2 | 5)), Some(Value::Text(t))) => t.as_str().to_owned(),
+                other => panic!("malformed word {k} answered {other:?}"),
+            }
+        })
+        .collect();
+    assert_eq!(reasons, expected, "each malformed word is refused by name");
     assert!(
         answer(&switch).is_ok(),
         "the world goes on: a later act lands"
