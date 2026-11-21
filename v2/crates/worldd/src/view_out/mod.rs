@@ -1841,66 +1841,112 @@ impl<S: ObjectStore> PublicWriter<S> {
             // takes the part entry by entry, as a viewer applies it (all of it or none); the view, the duplicates and
             // the cut's state are kept only when every entry applied. The view reads the copy's tree around each
             // entry: no whole state is built per entry (#3667).
-            let mut checked = self.canonical.frozen();
-            if part.effects.is_empty() || part.header != self.header.hash().to_bytes() {
-                checked.apply(&part)?;
-            }
-            let before_version = self.canonical.version();
-            let mut view = self.view.clone();
-            let mut duplicates = Vec::new();
-            let mut migration_state = None;
-            for effect in &part.effects {
-                let before = Before::of(checked.tree(), effect);
-                if effect.envelope.audience == Audience::Everyone
-                    && let Body::Transfer(replica::effects::TransferRec::Arrive {
-                        transfer, ..
-                    }) = &effect.body
-                    && checked.tree().arrived().contains(transfer)
-                {
-                    duplicates.push((effect.envelope.sequence, *transfer));
+            // A part of motion, fields and timers only (#3799) changes no node's parent and brings no node, so each
+            // entry's view reads the same parent chains before and after it: the view steps over the tree as it stands,
+            // and the part is applied to the one tree, all of it or none, with no copy. Any other part is taken entry by
+            // entry on a copy, as above.
+            let simple = self.incremental
+                && self.migration_cut.is_none()
+                && !part.effects.is_empty()
+                && part.header == self.header.hash().to_bytes()
+                && part.effects.iter().all(|e| match &e.body {
+                    Body::Changes(cs) => cs.iter().all(|c| {
+                        matches!(
+                            c.change,
+                            replica::effects::Change::Motion(_)
+                                | replica::effects::Change::Set { .. }
+                        )
+                    }),
+                    Body::Timers(_) => true,
+                    _ => false,
+                });
+            if simple {
+                let before_version = self.canonical.version();
+                let mut view = self.view.clone();
+                for effect in &part.effects {
+                    let before = Before::of(self.canonical.tree(), effect);
+                    view.step(&before, effect, &before, &Redactions::default())?;
                 }
-                let one = wire(Value::Map(BTreeMap::from([
-                    (1, Value::Bytes(self.header.hash().to_bytes())),
-                    (2, Value::Array(vec![effect.to_value()])),
-                ])))?;
-                checked.apply(&Part::read(&one)?)?;
-                if self.migration_cut == Some(checked.version()) {
-                    migration_state = Some(project(&self.header, &checked.tree().to_state())?);
-                }
-                view.step(&before, effect, checked.tree(), &Redactions::default())?;
-            }
-            self.view = view;
-            self.duplicates.extend(duplicates);
-            if migration_state.is_some() {
-                self.migration_state = migration_state;
-            }
-            for (_, record) in self.view.take() {
-                if Carried::read(&record)?.is_none() {
-                    let seq = stream_effect(&self.header, record.clone())?
-                        .envelope
-                        .sequence;
-                    if self.migration_cut.is_none_or(|v| seq >= v) {
+                self.canonical.apply(&part)?;
+                self.view = view;
+                for (_, record) in self.view.take() {
+                    if Carried::read(&record)?.is_none() {
                         self.records.push(record)
                     }
                 }
-            }
-            // A node is a row of the public projection when it is live here and public: read from the two trees,
-            // never by projecting either whole (#3667).
-            let visible = |t: &replica::tree::Tree, id: Id| {
-                t.handle(id)
-                    .and_then(|h| t.node(h))
-                    .is_some_and(|n| n.audience() == Audience::Everyone)
-            };
-            for (id, v) in checked.changed_since(before_version) {
-                if (visible(self.canonical.tree(), id) || visible(checked.tree(), id))
-                    && self.migration_cut.is_none_or(|cut| v > cut)
-                {
-                    self.changes.insert(id, v);
+                let tree = self.canonical.tree();
+                for (id, v) in self.canonical.changed_since(before_version) {
+                    if tree
+                        .handle(id)
+                        .and_then(|h| tree.node(h))
+                        .is_some_and(|n| n.audience() == Audience::Everyone)
+                    {
+                        self.changes.insert(id, v);
+                    }
                 }
+            } else {
+                let mut checked = self.canonical.frozen();
+                if part.effects.is_empty() || part.header != self.header.hash().to_bytes() {
+                    checked.apply(&part)?;
+                }
+                let before_version = self.canonical.version();
+                let mut view = self.view.clone();
+                let mut duplicates = Vec::new();
+                let mut migration_state = None;
+                for effect in &part.effects {
+                    let before = Before::of(checked.tree(), effect);
+                    if effect.envelope.audience == Audience::Everyone
+                        && let Body::Transfer(replica::effects::TransferRec::Arrive {
+                            transfer,
+                            ..
+                        }) = &effect.body
+                        && checked.tree().arrived().contains(transfer)
+                    {
+                        duplicates.push((effect.envelope.sequence, *transfer));
+                    }
+                    let one = wire(Value::Map(BTreeMap::from([
+                        (1, Value::Bytes(self.header.hash().to_bytes())),
+                        (2, Value::Array(vec![effect.to_value()])),
+                    ])))?;
+                    checked.apply(&Part::read(&one)?)?;
+                    if self.migration_cut == Some(checked.version()) {
+                        migration_state = Some(project(&self.header, &checked.tree().to_state())?);
+                    }
+                    view.step(&before, effect, checked.tree(), &Redactions::default())?;
+                }
+                self.view = view;
+                self.duplicates.extend(duplicates);
+                if migration_state.is_some() {
+                    self.migration_state = migration_state;
+                }
+                for (_, record) in self.view.take() {
+                    if Carried::read(&record)?.is_none() {
+                        let seq = stream_effect(&self.header, record.clone())?
+                            .envelope
+                            .sequence;
+                        if self.migration_cut.is_none_or(|v| seq >= v) {
+                            self.records.push(record)
+                        }
+                    }
+                }
+                // A node is a row of the public projection when it is live here and public: read from the two trees,
+                // never by projecting either whole (#3667).
+                let visible = |t: &replica::tree::Tree, id: Id| {
+                    t.handle(id)
+                        .and_then(|h| t.node(h))
+                        .is_some_and(|n| n.audience() == Audience::Everyone)
+                };
+                for (id, v) in checked.changed_since(before_version) {
+                    if (visible(self.canonical.tree(), id) || visible(checked.tree(), id))
+                        && self.migration_cut.is_none_or(|cut| v > cut)
+                    {
+                        self.changes.insert(id, v);
+                    }
+                }
+                self.duplicates
+                    .retain(|(seq, _)| self.migration_cut.is_none_or(|cut| *seq >= cut));
+                self.canonical = checked;
             }
-            self.duplicates
-                .retain(|(seq, _)| self.migration_cut.is_none_or(|cut| *seq >= cut));
-            self.canonical = checked;
             // What the cut can be published from (#3799): only motion and fields set on nodes touch only their rows.
             for e in &part.effects {
                 match &e.body {
@@ -2049,7 +2095,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         let tp = std::time::Instant::now();
         let window = self.window;
         self.apply_record(record, raw)?;
-        eprintln!("TIMING apply {:.1}", tp.elapsed().as_secs_f64()*1e3);
+        eprintln!("TIMING apply {:.1}", tp.elapsed().as_secs_f64() * 1e3);
         if let (Some(before), Some(last)) = (window, self.records.last())
             && stream_effect(&self.header, last.clone())?
                 .envelope
@@ -2127,7 +2173,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         } else {
             None
         };
-        eprintln!("TIMING flush delta {:.1}", tf.elapsed().as_secs_f64()*1e3);
+        eprintln!("TIMING flush delta {:.1}", tf.elapsed().as_secs_f64() * 1e3);
         let (after, after_digest) = match &delta {
             Some(d) => (None, self.player.digest_with(d)?),
             None => {
@@ -2257,7 +2303,10 @@ impl<S: ObjectStore> PublicWriter<S> {
                 }
             }
         }
-        eprintln!("TIMING flush context-start {:.1}", tf.elapsed().as_secs_f64()*1e3);
+        eprintln!(
+            "TIMING flush context-start {:.1}",
+            tf.elapsed().as_secs_f64() * 1e3
+        );
         let changed = self
             .changes
             .iter()
@@ -2303,10 +2352,10 @@ impl<S: ObjectStore> PublicWriter<S> {
         let chunk_hash = self.put(&chunk)?;
         let part_hash = self.put(&bytes)?;
         let text = self.words_after(after.as_ref(), delta.as_ref())?;
-        eprintln!("TIMING flush words {:.1}", tf.elapsed().as_secs_f64()*1e3);
+        eprintln!("TIMING flush words {:.1}", tf.elapsed().as_secs_f64() * 1e3);
         let text_hash = self.put(&text)?;
         self.player.play(&bytes)?;
-        eprintln!("TIMING flush play {:.1}", tf.elapsed().as_secs_f64()*1e3);
+        eprintln!("TIMING flush play {:.1}", tf.elapsed().as_secs_f64() * 1e3);
         let manifest = wire(Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.seed.clone())),
             (2, Value::Bytes(self.head.clone().unwrap_or_default())),
@@ -2323,7 +2372,11 @@ impl<S: ObjectStore> PublicWriter<S> {
         immutable(&self.generation_dir().join(format!("{number}.text")), &text)?;
         self.last_to = Some(sp.to);
         self.clear_pending();
-        eprintln!("TIMING flush end {:.1} fast {}", tf.elapsed().as_secs_f64()*1e3, delta.is_some());
+        eprintln!(
+            "TIMING flush end {:.1} fast {}",
+            tf.elapsed().as_secs_f64() * 1e3,
+            delta.is_some()
+        );
         self.pointer(None)
     }
     fn pointer(&self, quiet: Option<i64>) -> R<()> {
