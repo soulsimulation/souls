@@ -101,3 +101,29 @@ async fn a_signed_in_client_fetches_the_entries_once_per_change() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn a_token_paired_a_moment_ago_fetches_at_once() {
+    let dir = std::env::temp_dir().join(format!("gatewayd-entries-paired-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("entries")).unwrap();
+    std::fs::write(
+        dir.join("entries/eden.bench.json"),
+        r#"{"format":"souls-entry/1","kind":"eden:bench","owner":"thing"}"#,
+    )
+    .unwrap();
+    let file = dir.join("tokens");
+    std::fs::write(&file, "").unwrap();
+    let (source, tokens) = gatewayd::token::Source::open(&file).unwrap();
+    let log: Log = Arc::new(|_| {});
+    let gw = Gateway::with_receipts(tokens, vec![0x12, 0x20], log, Receipts::off());
+    let _ = gw.tokens_file.set(source);
+    let _ = gw.entries.set(Entries::open(&dir.join("entries")).unwrap());
+    let base = serve(gw).await;
+    // The directory writes the new pairing's hash; the client asks at once, before any periodic re-read.
+    let soul = Grant::Actor(Actor::Soul(Id::new(Scope([0xc4; 16]), 1).unwrap()));
+    let token = Token::issue(soul).unwrap();
+    std::fs::write(&file, Tokens::line(soul, &token.hash())).unwrap();
+    assert_eq!(get(&base, Some(token.reveal()), None).await.0, 200);
+    let _ = std::fs::remove_dir_all(&dir);
+}

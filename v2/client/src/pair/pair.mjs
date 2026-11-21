@@ -72,7 +72,7 @@ export function entriesOf(gateway) {
  * written as `<home>/kinds/<kind, : as .>.json`, where the checks read them (`check/state.mjs` `kindsIn`), and an
  * entry this world sent before and no longer does is removed. Resolves to `{entries, changed}`; rejects on a refusal.
  */
-export async function refreshEntries({ home, world, gateway, token, within = 30000 }) {
+export async function refreshEntries({ home, world, gateway, token, within = 10000 }) {
   const dir = join(home, 'kinds'), mark = join(dir, `.entries-${encodeURIComponent(world)}.json`);
   let held = {};
   try { held = JSON.parse(readFileSync(mark, 'utf8')); } catch { /* none kept yet */ }

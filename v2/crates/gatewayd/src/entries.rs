@@ -3,8 +3,8 @@
 //! folder, as one JSON array in path order, gzip-encoded, with its SHA-256 as a strong `ETag`. A client sends its
 //! stored tag as `If-None-Match` and gets 304 while the entries are unchanged, so it fetches them once per change.
 //!
-//! It is signed in like the stream: `Authorization: Bearer <token>` with a token of the tokens file; a page's view
-//! token is refused. Entries hold the world's rules (forms, slots, geometry, cards), not anything private.
+//! It is signed in like the stream: `Authorization: Bearer <token>` with a token of the tokens file (read again if it
+//! changed, so a client fetching straight after its pairing is known); a page's view token is refused. Entries hold the world's rules (forms, slots, geometry, cards), not anything private.
 //!
 //! The folder is read at start (an unreadable folder, or one without an entry, stops the gateway) and again at a
 //! request whenever its files' names, sizes or times changed, so a world given new entries serves them without a
@@ -150,6 +150,10 @@ pub async fn serve(State(gw): State<Arc<Gateway>>, headers: HeaderMap) -> Respon
     let Some(entries) = gw.entries.get() else {
         return refuse(StatusCode::NOT_FOUND, "entries-not-served");
     };
+    // As a sign-in does (C3): a token paired a moment ago is in the file before the 2 s re-read.
+    if let Some(f) = gw.tokens_file.get() {
+        f.refresh(&gw.tokens);
+    }
     let signed_in = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
