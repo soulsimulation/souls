@@ -14,6 +14,7 @@ import { SoulsCopy, TestMark, label, spoken, TALK_MM, wrap, type Status } from '
 import { Conversations, SPEECH_W, groupShot, measurer, paint, place, placeOf, type Candidate, type Ctx, type Placed, type Thread } from './layer.ts';
 import { placeWords } from '../places/places.ts';
 import { mountCard, nowText, readNow, type NowLine } from './mine.ts';
+import { enters, inside, solidsNear } from '../camera/follow.ts';
 
 const UM = 1e-6, HEAD = 2.1, FAR = 150;
 /** How often an open Soul page reads its status line again. */
@@ -130,8 +131,20 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
   const frame = (id: string): boolean => {
     const t = talk.threads.get(id), camera = lastCamera as THREE.PerspectiveCamera | null;
     if (!t || !camera || lastT === null || !out.framer) return false;
-    const heads = Conversations.members(t).flatMap((m) => { const p = where(m, lastT!); return p ? [p.setY(p.y + HEAD)] : []; });
-    const shot = groupShot(heads, camera.fov ?? 50, camera.aspect ?? innerWidth / innerHeight, camera.getWorldPosition(new THREE.Vector3()));
+    const members = Conversations.members(t).filter((m) => where(m, lastT!));
+    const heads = members.map((m) => { const p = where(m, lastT!)!; return p.setY(p.y + HEAD); });
+    if (!heads.length) return false;
+    // The scene (#3774): where each member faces (a body's model faces +z), and the things' solids near them, so the
+    // shot is never from inside or behind a wall. A solid a member is in (a chair) does not hide them.
+    const faces = members.map((m) => { const f = new THREE.Vector3(0, 0, 1).transformDirection(world.frame(m)); return { x: f.x, z: f.z }; });
+    const mid = heads.reduce((a, h) => a.add(h), new THREE.Vector3()).multiplyScalar(1 / heads.length);
+    const boxes = solidsNear(world, mid, 80), e = new THREE.Vector3(), h = new THREE.Vector3();
+    const clear = (eye: { x: number; y: number; z: number }, at: { x: number; y: number; z: number }[]) => {
+      e.set(eye.x, eye.y, eye.z);
+      return !inside(boxes, e) && at.every((p) => (h.set(p.x, p.y, p.z), boxes.every((b) => inside([b], h) || enters(b, e, h) === null)));
+    };
+    const ground = (x: number, z: number) => world.heightAt?.(x, z) ?? -Infinity;
+    const shot = groupShot(heads, camera.fov ?? 50, camera.aspect ?? innerWidth / innerHeight, camera.getWorldPosition(new THREE.Vector3()), { faces, clear, ground });
     if (!shot) return false;
     out.framer(new THREE.Vector3(shot.eye.x, shot.eye.y, shot.eye.z), new THREE.Vector3(shot.target.x, shot.target.y, shot.target.z));
     return true;
