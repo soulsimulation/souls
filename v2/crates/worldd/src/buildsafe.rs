@@ -195,6 +195,27 @@ impl PreparedMaps {
             sim::edit::commit_classes(&mut preview, &mut reserved, planned, souls, 0, classes)?
                 .part;
         let kept = kept.and_then(|k| k.reuse(&part, source.ground, &source.stamp, &source.basis));
+        Self::prepare_rebuilt(copy, part, source, movers, kept)
+    }
+
+    /// The same preparation for a part already made off the clock (a set-down's, #3604), not an edit's plan.
+    pub fn prepare_part(
+        copy: &Replica,
+        part: Arc<Part>,
+        source: &MapBasis,
+        movers: &[sim::controller::BuildBasis],
+    ) -> Result<Self, replica::edit::Refused> {
+        Self::prepare_rebuilt(copy, part, source, movers, None)
+    }
+
+    /// The ground for `part`: `kept` when the plan's guard already built it (#3743), else built here; then the rebinds.
+    fn prepare_rebuilt(
+        copy: &Replica,
+        part: Arc<Part>,
+        source: &MapBasis,
+        movers: &[sim::controller::BuildBasis],
+        kept: Option<Rebuilt>,
+    ) -> Result<Self, replica::edit::Refused> {
         let rebuilt = match kept {
             Some(r) => r,
             None => Town::rebuild(
