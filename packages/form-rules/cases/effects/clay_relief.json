@@ -50,7 +50,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "left",
-                "n": 1,
+                "n": 28,
                 "to": "level1"
               }
             ],
@@ -78,7 +78,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "left",
-                "n": 1,
+                "n": 28,
                 "to": "level2"
               }
             ],
@@ -106,7 +106,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "left",
-                "n": 1,
+                "n": 28,
                 "to": "level3"
               }
             ],
@@ -134,7 +134,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "left",
-                "n": 1,
+                "n": 28,
                 "to": "level4"
               }
             ],
@@ -162,7 +162,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "left",
-                "n": 1,
+                "n": 28,
                 "to": "level0"
               }
             ],
@@ -235,7 +235,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "middle",
-                "n": 2,
+                "n": 29,
                 "to": "level1"
               }
             ],
@@ -263,7 +263,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "middle",
-                "n": 2,
+                "n": 29,
                 "to": "level2"
               }
             ],
@@ -291,7 +291,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "middle",
-                "n": 2,
+                "n": 29,
                 "to": "level3"
               }
             ],
@@ -319,7 +319,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "middle",
-                "n": 2,
+                "n": 29,
                 "to": "level4"
               }
             ],
@@ -347,7 +347,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "middle",
-                "n": 2,
+                "n": 29,
                 "to": "level0"
               }
             ],
@@ -420,7 +420,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "right",
-                "n": 3,
+                "n": 30,
                 "to": "level1"
               }
             ],
@@ -448,7 +448,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "right",
-                "n": 3,
+                "n": 30,
                 "to": "level2"
               }
             ],
@@ -476,7 +476,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "right",
-                "n": 3,
+                "n": 30,
                 "to": "level3"
               }
             ],
@@ -504,7 +504,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "right",
-                "n": 3,
+                "n": 30,
                 "to": "level4"
               }
             ],
@@ -532,7 +532,7 @@
                 "change": "set",
                 "node": "c1",
                 "field": "right",
-                "n": 3,
+                "n": 30,
                 "to": "level0"
               }
             ],

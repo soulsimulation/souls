@@ -195,7 +195,7 @@ test('A2: over 50 scripted calls, each tool\'s answer equals the thin command\'s
   await waitFor(() => readdirSync(root).length === 0, 30_000);
   await tool('eden_status');
   const closing = session();
-  const thinStopped = thin(['stop']);
+  const thinStopped = thin(['quit']);
   assert.deepEqual(steady(thinStopped), steady(stopped));
   await waitFor(() => request(closing.rt.socket, { op: 'status' }).then(() => false, () => true));
   // The durable Soul folder alone cannot authorize a replacement after its tokenless daemon stops.

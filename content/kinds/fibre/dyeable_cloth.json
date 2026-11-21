@@ -4,20 +4,20 @@
   "owner": "thing",
   "state": {
     "dye": {
-      "n": 1,
+      "n": 28,
       "type": "enum",
       "values": ["undyed", "indigo", "rust"],
       "default": "undyed",
       "audience": {"rule": "everyone"}
     },
     "banded": {
-      "n": 2,
+      "n": 29,
       "type": "bool",
       "default": false,
       "audience": {"rule": "everyone"}
     },
     "indigo": {
-      "n": 3,
+      "n": 30,
       "type": "int",
       "unit": "count",
       "default": 0,
@@ -26,7 +26,7 @@
       "audience": {"rule": "everyone"}
     },
     "rust": {
-      "n": 4,
+      "n": 31,
       "type": "int",
       "unit": "count",
       "default": 0,
@@ -35,7 +35,7 @@
       "audience": {"rule": "everyone"}
     },
     "water": {
-      "n": 5,
+      "n": 32,
       "type": "int",
       "unit": "count",
       "default": 0,

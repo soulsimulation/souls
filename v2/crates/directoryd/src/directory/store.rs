@@ -49,6 +49,14 @@ pub trait Store {
             format!("{prefix}: this store does not list"),
         )
     }
+    /// Removes the object at `key`; none there is no refusal (#3833). A store that cannot delete refuses,
+    /// `store-cannot-delete`.
+    fn delete(&self, key: &str) -> R<()> {
+        refuse(
+            "store-cannot-delete",
+            format!("{key}: this store does not delete"),
+        )
+    }
 }
 
 /// Several machines' directories over one store.
@@ -63,6 +71,10 @@ impl<T: Store + ?Sized> Store for &T {
 
     fn list(&self, prefix: &str) -> R<Vec<String>> {
         (**self).list(prefix)
+    }
+
+    fn delete(&self, key: &str) -> R<()> {
+        (**self).delete(key)
     }
 }
 
@@ -146,5 +158,11 @@ impl Store for Memory {
             .filter(|k| k.starts_with(prefix))
             .cloned()
             .collect())
+    }
+
+    fn delete(&self, key: &str) -> R<()> {
+        self.reach()?;
+        self.lock().remove(key);
+        Ok(())
     }
 }

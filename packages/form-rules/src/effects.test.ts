@@ -129,7 +129,7 @@ function results(): Done[] {
 
 test('T0 values: every change, event and timer of every result is inside Engine v2\'s encoding profile', () => {
   const all = results();
-  assert.ok(all.some((r) => r.changes.some((c) => c.change === 'set' && typeof c.to === 'number' && c.n === 2 && c.field === 'heating')), 'a flag is set');
+  assert.ok(all.some((r) => r.changes.some((c) => c.change === 'set' && typeof c.to === 'number' && c.n === 29 && c.field === 'heating')), 'a flag is set');
   for (const r of all) {
     for (const [what, list] of [['change', r.changes], ['event', r.events], ['timer', r.timers]] as const) {
       list.forEach((item, k) => assert.equal(outsideProfile(item), null, `${r.receipt} ${what} ${k}: ${JSON.stringify(item)}`));
@@ -143,7 +143,7 @@ test('T0 values: a value outside the profile is refused by name, and apply refus
   }
   assert.equal(outsideProfile({ to: { text: 't_ethics' }, by: -5, n: 9007199254740991, big: 2n ** 63n }), null);
   const state: State = { actor: 'b1', nodes: { k1: { kind: 'eden:kettle', fields: { heating: 0 } } } };
-  const result: Done = { verdict: 'yes', receipt: 'x', actor: 'b1', changes: [{ change: 'set', node: 'k1', field: 'heating', n: 2, to: true }], events: [], timers: [] };
+  const result: Done = { verdict: 'yes', receipt: 'x', actor: 'b1', changes: [{ change: 'set', node: 'k1', field: 'heating', n: 29, to: true }], events: [], timers: [] };
   assert.deepEqual(apply(state, result), { ok: false, reason: 'simple', change: 0, at: '/to' });
   assert.deepEqual(apply(state, { ...result, changes: [], events: [{ event: 'eden:on', node: 'k1', changes: [], extra: null } as never] }), { ok: false, reason: 'null', event: 0, at: '/extra' });
 });
@@ -153,7 +153,7 @@ test('T0 values: a missing text argument is left out, and a set without a value 
   const result = effects({ kinds, act: { this: 'l1', form: 'begin', args: {} }, state, receipt: 'r1' });
   assert.equal(result.verdict, 'yes');
   const set = (result as Done).changes[1];
-  assert.deepEqual(set, { change: 'set', node: 'l1', field: 'topic', n: 2 });
+  assert.deepEqual(set, { change: 'set', node: 'l1', field: 'topic', n: 29 });
   const after = apply(state, result);
   assert.ok(after.ok);
   assert.deepEqual(after.ok && after.state.nodes.l1.fields, { running: 1 });

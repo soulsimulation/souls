@@ -3,7 +3,7 @@
   "kind": "eden:floor_lamp",
   "owner": "thing",
   "state": {
-    "level": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+    "level": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
   },
   "points": {
     "switch": { "role": "contact", "at_mm": [30, 1200, 0] },
