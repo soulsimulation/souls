@@ -54,11 +54,11 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change": "set", "node": "c1", "field": "phase", "n": 2, "to": "playing"},
-              {"change": "set", "node": "c1", "field": "turn", "n": 1, "to": "white"},
-              {"change": "set", "node": "c1", "field": "winner", "n": 3, "to": "none"},
-              {"change": "set", "node": "c1", "field": "castling", "n": 5, "to": 15},
-              {"change": "set", "node": "c1", "field": "en_passant", "n": 6, "to": 64}
+              {"change": "set", "node": "c1", "field": "phase", "n": 29, "to": "playing"},
+              {"change": "set", "node": "c1", "field": "turn", "n": 28, "to": "white"},
+              {"change": "set", "node": "c1", "field": "winner", "n": 30, "to": "none"},
+              {"change": "set", "node": "c1", "field": "castling", "n": 32, "to": 15},
+              {"change": "set", "node": "c1", "field": "en_passant", "n": 33, "to": 64}
             ],
             "events": [
               {"event": "eden:game_began", "node": "c1", "changes": [0]},
@@ -75,7 +75,7 @@
           "receipt": "rc4",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change": "set", "node": "c1", "field": "turn", "n": 1, "to": "black"}],
+            "changes": [{"change": "set", "node": "c1", "field": "turn", "n": 28, "to": "black"}],
             "events": [{"event": "eden:moved", "node": "c1", "changes": [0]}],
             "timers": []
           }
@@ -86,7 +86,7 @@
           "receipt": "rc5",
           "expect": {
             "verdict": "yes",
-            "changes": [{"change": "set", "node": "c1", "field": "turn", "n": 1, "to": "white"}],
+            "changes": [{"change": "set", "node": "c1", "field": "turn", "n": 28, "to": "white"}],
             "events": [{"event": "eden:moved", "node": "c1", "changes": [0]}],
             "timers": []
           }
@@ -98,8 +98,8 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change": "set", "node": "c1", "field": "phase", "n": 2, "to": "resigned"},
-              {"change": "set", "node": "c1", "field": "winner", "n": 3, "to": "white"}
+              {"change": "set", "node": "c1", "field": "phase", "n": 29, "to": "resigned"},
+              {"change": "set", "node": "c1", "field": "winner", "n": 30, "to": "white"}
             ],
             "events": [
               {"event": "eden:resigned", "node": "c1", "changes": [0]},
@@ -114,11 +114,11 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change": "set", "node": "c1", "field": "phase", "n": 2, "to": "playing"},
-              {"change": "set", "node": "c1", "field": "turn", "n": 1, "to": "white"},
-              {"change": "set", "node": "c1", "field": "winner", "n": 3, "to": "none"},
-              {"change": "set", "node": "c1", "field": "castling", "n": 5, "to": 15},
-              {"change": "set", "node": "c1", "field": "en_passant", "n": 6, "to": 64}
+              {"change": "set", "node": "c1", "field": "phase", "n": 29, "to": "playing"},
+              {"change": "set", "node": "c1", "field": "turn", "n": 28, "to": "white"},
+              {"change": "set", "node": "c1", "field": "winner", "n": 30, "to": "none"},
+              {"change": "set", "node": "c1", "field": "castling", "n": 32, "to": 15},
+              {"change": "set", "node": "c1", "field": "en_passant", "n": 33, "to": 64}
             ],
             "events": [
               {"event": "eden:game_began", "node": "c1", "changes": [0]},
@@ -136,8 +136,8 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change": "set", "node": "c1", "field": "phase", "n": 2, "to": "resigned"},
-              {"change": "set", "node": "c1", "field": "winner", "n": 3, "to": "black"}
+              {"change": "set", "node": "c1", "field": "phase", "n": 29, "to": "resigned"},
+              {"change": "set", "node": "c1", "field": "winner", "n": 30, "to": "black"}
             ],
             "events": [
               {"event": "eden:resigned", "node": "c1", "changes": [0]},
@@ -235,8 +235,8 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change": "set", "node": "t1", "field": "cards", "n": 1, "to": 51, "by": -1},
-              {"change": "set", "node": "h1", "field": "cards", "n": 1, "to": 1, "by": 1}
+              {"change": "set", "node": "t1", "field": "cards", "n": 28, "to": 51, "by": -1},
+              {"change": "set", "node": "h1", "field": "cards", "n": 28, "to": 1, "by": 1}
             ],
             "events": [{"event": "eden:drew_a_card", "node": "h1", "changes": [0, 1]}],
             "timers": []
@@ -248,8 +248,8 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change": "set", "node": "t1", "field": "cards", "n": 1, "to": 50, "by": -1},
-              {"change": "set", "node": "h1", "field": "cards", "n": 1, "to": 2, "by": 1}
+              {"change": "set", "node": "t1", "field": "cards", "n": 28, "to": 50, "by": -1},
+              {"change": "set", "node": "h1", "field": "cards", "n": 28, "to": 2, "by": 1}
             ],
             "events": [{"event": "eden:drew_a_card", "node": "h1", "changes": [0, 1]}],
             "timers": []
@@ -261,8 +261,8 @@
           "expect": {
             "verdict": "yes",
             "changes": [
-              {"change": "set", "node": "h1", "field": "cards", "n": 1, "to": 1, "by": -1},
-              {"change": "set", "node": "t1", "field": "cards", "n": 1, "to": 51, "by": 1}
+              {"change": "set", "node": "h1", "field": "cards", "n": 28, "to": 1, "by": -1},
+              {"change": "set", "node": "t1", "field": "cards", "n": 28, "to": 51, "by": 1}
             ],
             "events": [{"event": "eden:played_a_card", "node": "h1", "changes": [0, 1]}],
             "timers": []

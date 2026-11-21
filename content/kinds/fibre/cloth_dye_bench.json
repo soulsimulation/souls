@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "indigo": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "default": 1,
@@ -13,7 +13,7 @@
       "audience": {"rule": "everyone"}
     },
     "rust": {
-      "n": 2,
+      "n": 29,
       "type": "int",
       "unit": "count",
       "default": 1,
@@ -22,7 +22,7 @@
       "audience": {"rule": "everyone"}
     },
     "water": {
-      "n": 3,
+      "n": 30,
       "type": "int",
       "unit": "count",
       "default": 2,

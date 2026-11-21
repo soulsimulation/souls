@@ -23,6 +23,10 @@
 //!   near each receiver of its link that is on, and by talk's hearers. A turn by a Soul that is not a member is
 //!   refused `not-a-member` ([`refused`]) and writes nothing. The format of the record is B11's.
 //!
+//! - **A private turn's public record** (#3775, today's sealed conversation): a turn into an activity is read by its
+//!   members alone, and the world also writes [`private_record`], a public entry that says who spoke, when and among
+//!   whom, and never the words: no reference to them, so no public view, part or text file can carry them.
+//!
 //! Not here: sound through walls, recorded sounds (Soul Actions), charging a speaker by its hearers (I8), who may
 //! speak through a thing (F6), the device link read from the tree, conversations (E26), playing sound (lane V).
 
@@ -30,7 +34,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::controller::Line;
 use crate::index::Index;
-use replica::effects::{Body, Effect, Envelope, Refusal, Rest};
+use replica::effects::{Body, Effect, Envelope, Event, Refusal, Rest};
+use replica::encode::{Name, Value};
 use replica::ids::Id;
 use replica::speech::{Device, Radii, Reach, Said};
 use replica::time::Micros;
@@ -289,6 +294,39 @@ pub fn entry(envelope: Envelope, speaker: Id, said: &Said) -> Effect {
         },
         body: Body::Changes(Vec::new()),
         events: Some(vec![said.event()]),
+        rest: Rest::new(),
+    }
+}
+
+/// The event of a private turn's public record: `souls:said-privately {1: activity, 3: [member, ...]}`. No length: it
+/// would tell how much was said (today's `conversation.talking` names who, and nothing of the words).
+pub const SAID_PRIVATELY: &str = "souls:said-privately";
+
+/// The public record of `said`, a turn by `speaker` into `activity` that its members alone read (#3775): an entry of
+/// the public audience, written by the speaker's body at the turn's time, whose one event names the activity and its
+/// members (the turn's hearers). It holds nothing of the words: not their reference, not their length. Sequence, time, cause and
+/// actor are the writer's.
+pub fn private_record(envelope: Envelope, speaker: Id, activity: Id, said: &Said) -> Effect {
+    let mut fields = BTreeMap::from([(1, activity.to_value())]);
+    if !said.hearers.is_empty() {
+        fields.insert(
+            3,
+            Value::Array(said.hearers.iter().map(|h| h.to_value()).collect()),
+        );
+    }
+    Effect {
+        envelope: Envelope {
+            node: speaker,
+            audience: Audience::Everyone,
+            ..envelope
+        },
+        body: Body::Changes(Vec::new()),
+        events: Some(vec![Event {
+            name: Name::new(SAID_PRIVATELY).unwrap_or_else(|| unreachable!("a literal name")),
+            fields,
+            changes: Vec::new(),
+            rest: BTreeMap::new(),
+        }]),
         rest: Rest::new(),
     }
 }
