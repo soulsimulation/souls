@@ -16,7 +16,9 @@ import { BEHIND_US, CUT_US } from '../clock/clock.ts';
 const AHEAD = 16;
 
 type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string };
-const post = (m: Msg, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
+// This worker's own scope, taken once: a test harness that loads several workers in one process gives each its own.
+const scope = self as unknown as Worker;
+const post = (m: Msg, transfer: Transferable[] = []) => scope.postMessage(m, transfer);
 
 const num = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : (v as number));
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
@@ -278,13 +280,13 @@ async function run(stream: URL) {
         if (!(await playOne(ptr))) break;
         if (Number(player.next()) > (ptr.newest ?? -1)) tell();
       }
-    } catch (e) { post({ t: 'error', message: String((e as Error)?.message ?? e) }); }
+    } catch (e) { post({ t: 'error', message: String((e as Error)?.stack ?? e) }); }
     finally { busy = false; }
   };
   await poll();
   setInterval(poll, 250);
 }
 
-self.onmessage = (e: MessageEvent<{ stream: string }>) => {
+scope.onmessage = (e: MessageEvent<{ stream: string }>) => {
   run(new URL(e.data.stream)).catch((err) => post({ t: 'error', message: String(err?.stack ?? err) }));
 };

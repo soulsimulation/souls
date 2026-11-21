@@ -42,6 +42,7 @@
 //! capped at [`MAX_HANDS`]; every other loop runs over lists the kind declares.
 
 pub mod json;
+mod select;
 
 use json::Value;
 
@@ -569,6 +570,28 @@ pub fn decide_parts(
     else {
         return Rules::bad_verdict(-1, "malformed", vec![], vec![]);
     };
+    // A thing argument left out is chosen by its selector, as worldd and `@souls/form-rules` choose it (#3914).
+    let owned;
+    let mut none = None;
+    let act = match select::chosen(kinds, act, state, asker.get("sees")) {
+        select::Choice::Same => act,
+        select::Choice::Args(a) => {
+            owned = a;
+            &owned
+        }
+        select::Choice::None(arg) => {
+            none = Some(arg);
+            act
+        }
+        select::Choice::Unknown(node) => {
+            return Value::object([
+                ("verdict", Value::s("unknown")),
+                ("need", Value::Int(-1)),
+                ("node", Value::s(&node)),
+                ("read", Value::Arr(Vec::new())),
+            ]);
+        }
+    };
     let mut r = Rules {
         kinds,
         act,
@@ -576,7 +599,28 @@ pub fn decide_parts(
         asker,
         read: Vec::new(),
     };
-    r.run()
+    let v = r.run();
+    // Told only once every need holds, so a far act is never a way to learn what a hiding place holds.
+    match none {
+        Some(arg) if v.get("verdict").and_then(Value::str) == Some("yes") => Value::object([
+            ("verdict", Value::s("no")),
+            ("reason", Value::s("none_selected")),
+            ("need", Value::Int(-1)),
+            (
+                "detail",
+                Value::object([
+                    ("node", act.get("this").cloned().unwrap_or(Value::Null)),
+                    ("arg", Value::s(&arg)),
+                ]),
+            ),
+            ("fix", Value::Null),
+            (
+                "read",
+                v.get("read").cloned().unwrap_or(Value::Arr(Vec::new())),
+            ),
+        ]),
+        _ => v,
+    }
 }
 
 struct Rules<'a> {

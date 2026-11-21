@@ -776,62 +776,97 @@ pub struct Acts {
     planning: RefCell<Planning>,
 }
 
-/// The moves a form's step may name: every move content declares, and the body's own (C23, [`crate::moves`]).
 /// The refusal of a thing argument the caller left out whose selector finds nothing (#3914): `form-rules` names the
 /// same end `none_selected`.
 pub const NONE_SELECTED: &str = "thing.none-selected";
 
-/// A node's place in the tree, its parents' positions added (their turns are not), as [`View`]'s `place` reads it.
-fn tree_place(tree: &Tree, node: Id) -> Option<Vec3> {
-    let mut at = Vec3::ZERO;
-    let mut id = node;
+/// How far from the anchor a thing `here` may be, mm: today's reach for a thing a form uses nearby (a tap for a
+/// kettle, `TAP_REACH` in today's tea).
+pub const HERE_REACH_MM: i64 = 20_000;
+
+/// How near a body stands to a thing to be within a form's reach of it, mm, beyond the thing's own half size.
+const NEAR_MM: i64 = 1_500;
+
+/// A node's place in the zone's frame, µm: its position carried up the tree through each parent's place, turns
+/// included.
+fn world_at(tree: &Tree, node: Id) -> Option<Vec3> {
+    let n = tree.node(tree.handle(node)?)?;
+    let mut at = n.place().map_or(Vec3::ZERO, |p| p.position);
+    let mut up = n.parent();
     for _ in 0..64 {
-        let n = tree.node(tree.handle(id)?)?;
-        if let Some(p) = n.place() {
-            at = Vec3::new(
-                at.x + p.position.x,
-                at.y + p.position.y,
-                at.z + p.position.z,
-            );
+        let Some(p) = up else { return Some(at) };
+        let pn = tree.node(tree.handle(p)?)?;
+        if let Some(pp) = pn.place() {
+            at = pp.orientation.rotate(at).ok()?.plus(pp.position).ok()?;
         }
-        match n.parent() {
-            Some(p) => id = p,
-            None => return Some(at),
-        }
+        up = pn.parent();
     }
     None
 }
 
+/// Whether `body` stands within a form's reach of `node`: within its half size (its entry's bounds) and
+/// [`NEAR_MM`], across x and z, in the zone's frame.
+fn within_reach(tree: &Tree, entry: &Json, body: Id, node: Id) -> bool {
+    let (Some(b), Some(n)) = (world_at(tree, body), world_at(tree, node)) else {
+        return false;
+    };
+    let half = entry
+        .get("geometry")
+        .and_then(|g| g.get("bounds_mm"))
+        .and_then(Json::arr)
+        .map_or(0, |b| {
+            [b.first(), b.get(2)]
+                .into_iter()
+                .flatten()
+                .filter_map(|v| match v {
+                    Json::Int(n) => i64::try_from(*n).ok(),
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(0)
+                / 2
+        });
+    let reach = i128::from((half + NEAR_MM) * 1_000);
+    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+    d(b.x, n.x) + d(b.z, n.z) <= reach * reach
+}
+
 /// Binds a `thing` argument the caller left out by its `select` (E2's closed list, the entry format's `select`;
-/// `form-rules`' `chosenArgs` reads it the same way, #3914). `Ok(Some(thing))` binds it, `Ok(None)` finds nothing
+/// `form-rules`' `selectThing` reads it the same way, #3914). `Ok(Some(thing))` binds it, `Ok(None)` finds nothing
 /// that qualifies, and `Err(())` is a selector this does not read (the argument stays missing).
 ///
-/// - **The set** (`in`): `this` the children of the act's node, `here` those of the node the actor's body is in (the
-///   act's node's parent when the body is not in the tree), `parent` those of the act's node's parent. Never the
-///   act's node, the actor's body or any body (a node linked `souls:body-of`); with `kind`, only that kind.
-/// - **The order**: by squared distance in whole mm (x, y and z) from the `anchor` (`me` the body, `this` the act's
-///   node), `nearest` first or `furthest` first, ties by id; a thing with no place goes after every placed one, by id.
+/// - **The set** (`in`): `this` the children of the act's node; `here` those of the node the actor's body is in
+///   (the act's node's parent when the body is not in the tree) and what the body holds, within [`HERE_REACH_MM`]
+///   of the anchor; `parent` those of the act's node's parent. Never the act's node, the actor's body, a body (a
+///   node linked `souls:body-of`) or a node of a private audience; with `kind`, only that kind.
+/// - **The order**: by squared distance in the zone's frame (x, y and z) from the `anchor` (`me` the body, `this`
+///   the act's node), `nearest` first or `furthest` first, ties by id; a thing with no place goes after every placed
+///   one, by id.
 /// - **The rank**: 1, 2, ... or `last`. Too few is nothing.
 pub(crate) fn select_thing(
     tree: &Tree,
     select: &Json,
     node: Id,
     body: Id,
-    body_at: Option<Vec3>,
 ) -> Result<Option<Id>, ()> {
     if select.get("of").and_then(Json::str) != Some("things") {
         return Err(());
     }
     let parent = |id: Id| tree.node(tree.handle(id)?)?.parent();
-    let set = match select.get("in").and_then(Json::str) {
-        Some("this") => Some(node),
-        Some("here") => parent(body).or_else(|| parent(node)),
-        Some("parent") => parent(node),
+    let here = select.get("in").and_then(Json::str) == Some("here");
+    let sets: Vec<Id> = match select.get("in").and_then(Json::str) {
+        Some("this") => vec![node],
+        Some("here") => parent(body)
+            .or_else(|| parent(node))
+            .into_iter()
+            .chain([body])
+            .collect(),
+        Some("parent") => parent(node).into_iter().collect(),
         _ => return Err(()),
     };
     let anchor = match select.get("anchor").and_then(Json::str) {
-        Some("me") => body_at.or_else(|| tree_place(tree, body)),
-        Some("this") => tree_place(tree, node),
+        Some("me") => world_at(tree, body),
+        Some("this") => world_at(tree, node),
         _ => return Err(()),
     };
     let furthest = match select.get("order").and_then(Json::str) {
@@ -845,33 +880,30 @@ pub(crate) fn select_thing(
         _ => return Err(()),
     };
     let kind = select.get("kind").and_then(Json::str);
-    let Some(children) = set
-        .and_then(|s| tree.handle(s))
-        .and_then(|h| tree.children(h))
-    else {
-        return Ok(None);
-    };
     let is_body = |id: Id| {
         tree.links_at(id)
             .iter()
             .any(|e| plain(tree.ty(e)) == "souls:body-of")
     };
-    let mut ranked: Vec<(Option<i128>, Id)> = children
+    let d2 = |a: Vec3, p: Vec3| {
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        d(a.x, p.x) + d(a.y, p.y) + d(a.z, p.z)
+    };
+    let reach = i128::from(HERE_REACH_MM * 1_000) * i128::from(HERE_REACH_MM * 1_000);
+    let mut ranked: Vec<(Option<i128>, Id)> = sets
         .iter()
+        .filter_map(|s| tree.children(tree.handle(*s)?))
+        .flatten()
         .filter_map(|&h| tree.node(h))
         .filter(|n| n.id() != node && n.id() != body)
+        .filter(|n| n.audience() == replica::world_model::Audience::Everyone)
         .filter(|n| kind.is_none_or(|k| plain(n.kind()) == k))
         .filter(|n| !is_body(n.id()))
         .map(|n| {
-            let d = match (anchor, tree_place(tree, n.id())) {
-                (Some(a), Some(p)) => {
-                    let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
-                    Some(d(a.x, p.x) + d(a.y, p.y) + d(a.z, p.z))
-                }
-                _ => None,
-            };
+            let d = anchor.zip(world_at(tree, n.id())).map(|(a, p)| d2(a, p));
             (d, n.id())
         })
+        .filter(|(d, _)| !here || d.is_some_and(|d| d <= reach))
         .collect();
     ranked.sort_by(|(da, a), (db, b)| {
         let by = match (da, db) {
@@ -889,6 +921,7 @@ pub(crate) fn select_thing(
     })
 }
 
+/// The moves a form's step may name: every move content declares, and the body's own (C23, [`crate::moves`]).
 pub fn library() -> R<Vec<Move>> {
     crate::moves::library()
 }
@@ -1173,10 +1206,6 @@ impl Acts {
             // selector that finds nothing is refused by name, before any walk.
             let mut none_selected = None;
             if let Some(f) = entry.get("forms").and_then(|f| f.get(form)) {
-                let body_at = bodies
-                    .as_deref()
-                    .and_then(|b| b.runner.controller.body(body))
-                    .map(|b| b.pose.position);
                 for (key, take) in f.get("takes").and_then(Json::obj).unwrap_or(&[]) {
                     if all.contains_key(key)
                         || take.get("type").and_then(Json::str) != Some("thing")
@@ -1186,7 +1215,7 @@ impl Acts {
                     let Some(select) = take.get("select") else {
                         continue;
                     };
-                    match select_thing(tree, select, *node, body, body_at) {
+                    match select_thing(tree, select, *node, body) {
                         Ok(Some(t)) => {
                             all.insert(key.clone(), skills::form_runner::Arg::Node(t));
                             picked = true;
@@ -1199,8 +1228,21 @@ impl Acts {
                     }
                 }
             }
+            // Nothing selected is told only to one who may do the form and stands within its reach, so a far act
+            // is never a way to learn what a hiding place holds.
             if let Some(key) = none_selected {
-                first.get_or_insert(refusal(NONE_SELECTED, key));
+                let none = BTreeMap::<Id, BTreeSet<Id>>::new();
+                let named = sim::forms::may(tree, &none, &|_| None, body, *node, entry, form)
+                    .and_then(|()| {
+                        if within_reach(tree, entry, body, *node) {
+                            Err(refusal(NONE_SELECTED, key.clone()))
+                        } else {
+                            Err(refusal("out-of-reach", key.clone()))
+                        }
+                    });
+                if let Err(e) = named {
+                    first.get_or_insert(e);
+                }
                 continue;
             }
             let incompatible = entry

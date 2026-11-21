@@ -429,7 +429,7 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
         }
         Json::Obj(o)
     };
-    let at = |id: Id| tree_place(tree, id).unwrap();
+    let at = |id: Id| world_at(tree, id).unwrap();
     let d2 = |id: Id| {
         let (a, p) = (at(this), at(id));
         let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
@@ -441,17 +441,11 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
         .iter()
         .filter_map(|&h| tree.node(h))
         .map(|n| n.id())
-        .filter(|&id| id != this && tree_place(tree, id).is_some())
+        .filter(|&id| id != this && world_at(tree, id).is_some())
         .map(d2)
         .collect();
     by.sort();
-    let nearest = select_thing(
-        tree,
-        &sel("nearest", Json::Int(1), None),
-        this,
-        nobody,
-        None,
-    );
+    let nearest = select_thing(tree, &sel("nearest", Json::Int(1), None), this, nobody);
     assert_eq!(nearest, Ok(Some(by[0].1)), "the nearest other thing");
     assert_ne!(nearest, Ok(Some(this)), "never the act's own node");
     let last = select_thing(
@@ -459,30 +453,22 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
         &sel("nearest", Json::Str("last".into()), None),
         this,
         nobody,
-        None,
     );
-    let furthest = select_thing(
-        tree,
-        &sel("furthest", Json::Int(1), None),
-        this,
-        nobody,
-        None,
-    );
+    let furthest = select_thing(tree, &sel("furthest", Json::Int(1), None), this, nobody);
     assert_eq!(last, furthest, "the last nearest is the first furthest");
     assert_eq!(
         select_thing(
             tree,
             &sel("nearest", Json::Int(1), Some("test:no_such_kind")),
             this,
-            nobody,
-            None
+            nobody
         ),
         Ok(None),
         "nothing of the kind: nothing selected"
     );
     let off = Json::Obj(vec![("of".into(), Json::Str("free_slots".into()))]);
     assert_eq!(
-        select_thing(tree, &off, this, nobody, None),
+        select_thing(tree, &off, this, nobody),
         Err(()),
         "not a thing selector"
     );
