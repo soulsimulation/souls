@@ -407,7 +407,17 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
         ),
     )
     .await;
-    assert_eq!((bury.kind, bury.reason.as_str()), (2, "edit.would-bury"));
+    // A seated Soul is judged for the ground it would stand up onto (#3280): none left there is a cut-off.
+    assert_eq!((bury.kind, bury.reason.as_str()), (2, "edit.would-cut-off"));
+    let (copy, _) = served_copy(&w);
+    assert_eq!(
+        copy.tree()
+            .node(copy.tree().handle(host).unwrap())
+            .unwrap()
+            .fields()[&import_eden::F_SOLIDS],
+        Value::Array(host_solids()),
+        "the refused burial left the building's walls as they were"
+    );
     assert!(poses(&w).iter().any(|(b, pose)| *b == body
         && pose.frame.node == chair
         && pose.frame.slot == Some(1)
