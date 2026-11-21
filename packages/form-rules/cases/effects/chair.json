@@ -20,7 +20,7 @@
           "receipt": "rc1",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "c1", "field": "tucked", "n": 1, "to": 1 }],
+            "changes": [{ "change": "set", "node": "c1", "field": "tucked", "n": 28, "to": 1 }],
             "events": [{ "event": "eden:pushed_in", "node": "c1", "changes": [0] }],
             "timers": []
           }
@@ -30,7 +30,7 @@
           "receipt": "rc2",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "c1", "field": "tucked", "n": 1, "to": 0 }],
+            "changes": [{ "change": "set", "node": "c1", "field": "tucked", "n": 28, "to": 0 }],
             "events": [{ "event": "eden:pulled_out", "node": "c1", "changes": [0] }],
             "timers": []
           }

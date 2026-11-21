@@ -64,8 +64,8 @@ test('a two-field transfer balances: the turn moves one side\'s gold to the othe
   const state = {actor: 'b1', nodes: {sk1: {kind: 'eden:marshmallow_skewer', fields: {heat: 1}}, b1: {hands: {left: 'sk1', right: null}}}};
   const done = effects({kinds, act: {this: 'sk1', form: 'turn'}, state, receipt: 'r1'});
   assert.deepEqual(done.changes, [
-    {change: 'set', node: 'sk1', field: 'heat', n: 1, to: 0, by: -1},
-    {change: 'set', node: 'sk1', field: 'back', n: 3, to: 1, by: 1},
+    {change: 'set', node: 'sk1', field: 'heat', n: 28, to: 0, by: -1},
+    {change: 'set', node: 'sk1', field: 'back', n: 30, to: 1, by: 1},
   ]);
   const ok = apply(state, done);
   assert.equal(ok.ok, true);

@@ -3,7 +3,7 @@
   "kind": "eden:poll_option",
   "owner": "thing",
   "state": {
-    "label": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+    "label": { "n": 28, "type": "text", "default": null, "audience": { "rule": "everyone" } }
   },
   "links": {
     "vote": { "n": 1, "from": "soul", "most": 500, "most_per": 1, "per": "parent", "audience": { "rule": "everyone" } }

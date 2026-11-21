@@ -91,7 +91,7 @@
           "receipt": "rc1",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "t1", "field": "rolled", "n": 1, "to": 1 }],
+            "changes": [{ "change": "set", "node": "t1", "field": "rolled", "n": 28, "to": 1 }],
             "events": [{ "event": "eden:rolled_up", "node": "t1", "changes": [0] }],
             "timers": []
           }
@@ -106,7 +106,7 @@
           "receipt": "rc3",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "t1", "field": "rolled", "n": 1, "to": 0 }],
+            "changes": [{ "change": "set", "node": "t1", "field": "rolled", "n": 28, "to": 0 }],
             "events": [{ "event": "eden:unrolled", "node": "t1", "changes": [0] }],
             "timers": []
           }

@@ -3,7 +3,7 @@
   "kind": "eden:cutting_donor",
   "owner": "thing",
   "state": {
-    "shoots": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+    "shoots": { "n": 28, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
   },
   "points": {
     "stand": { "role": "stand", "at_mm": [0, 0, 800] },

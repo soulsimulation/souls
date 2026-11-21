@@ -84,7 +84,7 @@
           "receipt": "rc1",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "t1", "field": "swaying", "n": 1, "to": 1 }],
+            "changes": [{ "change": "set", "node": "t1", "field": "swaying", "n": 28, "to": 1 }],
             "events": [
               { "event": "eden:swung", "node": "t1", "changes": [0] },
               { "event": "eden:swing_slowing", "node": "t1", "changes": [] }
@@ -97,7 +97,7 @@
           "receipt": "rc2",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "t1", "field": "swaying", "n": 1, "to": 0 }],
+            "changes": [{ "change": "set", "node": "t1", "field": "swaying", "n": 28, "to": 0 }],
             "events": [{ "event": "eden:came_to_rest", "node": "t1", "changes": [0] }],
             "timers": []
           }

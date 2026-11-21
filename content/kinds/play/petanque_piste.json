@@ -2,7 +2,7 @@
   "format": "souls-entry/1",
   "kind": "eden:petanque_piste",
   "owner": "thing",
-  "state": { "jack_out": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "state": { "jack_out": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
   "links": { "player": { "n": 1, "from": "body", "most": 6, "audience": { "rule": "everyone" } } },
   "points": {
     "by_circle": { "role": "stand", "at_mm": [0, 0, -5000] },
