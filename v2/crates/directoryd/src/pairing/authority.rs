@@ -14,6 +14,7 @@ pub(super) struct Authority {
     pub world: String,
     pub tokens: PathBuf,
     pub creator: String,
+    pub generation: u64,
 }
 
 macro_rules! io_error {
@@ -204,12 +205,35 @@ impl Pairing {
             if crate::accounts::principal_from_text(creator).is_none() {
                 return Err("world-authority-invalid");
             }
+            let (creator, generation) = if let Some(read) = self.owner_reader.get() {
+                let current = read(world).map_err(|_| "world-authority-unavailable")?;
+                let expected = format!(
+                    "{}-{}",
+                    replica::encode::to_hex(&current.lineage),
+                    crate::accounts::principal_text(current.zone).replace(':', "-")
+                );
+                if expected != instance
+                    || crate::accounts::principal_text(current.founder) != creator
+                {
+                    return Err("world-authority-mismatch");
+                }
+                (
+                    current
+                        .creator
+                        .map(crate::accounts::principal_text)
+                        .unwrap_or_default(),
+                    current.generation,
+                )
+            } else {
+                (creator.to_owned(), 0)
+            };
             let tokens = root.join("worlds").join(instance).join("tokens");
             regular(&tokens)?;
             let authority = Authority {
                 world: world.clone(),
                 tokens,
-                creator: creator.to_owned(),
+                creator,
+                generation,
             };
             if out.insert(world.clone(), authority.clone()).is_some()
                 || out.insert(instance.to_owned(), authority).is_some()
@@ -314,13 +338,29 @@ impl Pairing {
     }
 
     pub(super) fn write_world_tokens(&self, db: &Connection) -> std::io::Result<bool> {
+        self.write_handoff_tokens(db, None)
+    }
+
+    fn write_handoff_tokens(
+        &self,
+        db: &Connection,
+        target: Option<&crate::worlds::list::handoff::Pending>,
+    ) -> std::io::Result<bool> {
         let Some(rows) = self.authorities().map_err(std::io::Error::other)? else {
             return Ok(false);
         };
         Self::backfill_world_tokens(db, &rows).map_err(std::io::Error::other)?;
-        for (key, authority) in rows {
+        for (key, mut authority) in rows {
             if key != authority.world {
                 continue;
+            }
+            if let Some(target) = target
+                && target.world == authority.world
+            {
+                if !authority.creator.is_empty() || authority.generation != target.generation {
+                    return Err(std::io::Error::other("handoff-stale"));
+                }
+                authority.creator = crate::accounts::principal_text(target.creator);
             }
             let mut query = db.prepare("SELECT grant_text, token_hash FROM paired_world_tokens_v1 WHERE world=?1 ORDER BY 1").map_err(std::io::Error::other)?;
             let values = query
@@ -328,10 +368,20 @@ impl Pairing {
                     Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
                 })
                 .map_err(std::io::Error::other)?;
-            let mut text = String::from("# World-bound pairing authority\n");
+            let mut text = format!(
+                "# World-bound pairing authority\n# souls-creator/1 {} {}\n",
+                authority.generation,
+                if authority.creator.is_empty() {
+                    "none"
+                } else {
+                    &authority.creator
+                }
+            );
             for value in values {
                 let (grant, hash) = value.map_err(std::io::Error::other)?;
-                text.push_str(&format!("{grant} {hash}\n"));
+                if !is_creator_grant(&grant) || grant == authority.creator_grant() {
+                    text.push_str(&format!("{grant} {hash}\n"));
+                }
             }
             let temporary = authority.tokens.with_extension("tmp");
             std::fs::write(&temporary, text)?;
@@ -420,6 +470,103 @@ impl Pairing {
             );
         }
         changed.map_err(str::to_owned)
+    }
+}
+
+impl Pairing {
+    /// Install the trusted existing Worlds reader before the listener accepts requests.
+    pub fn current_owner_reader(&self, read: super::OwnerReader) -> Result<(), String> {
+        self.owner_reader
+            .set(read)
+            .map_err(|_| "world-authority-already-configured".to_owned())
+    }
+
+    pub fn requires_world_authority(&self) -> bool {
+        self.authority_file.is_some()
+    }
+
+    pub fn reconcile_current_authority(&self) -> Result<(), String> {
+        let db = self.db.lock().map_err(|_| "store")?;
+        self.write_tokens(&db)
+            .and_then(|()| self.write_souls(&db))
+            .map_err(|_| "world-authority-publication".to_owned())
+    }
+
+    /// Materialize only this already-fenced world's creator; ordinary Souls and other worlds are untouched.
+    pub fn materialize_handoff(
+        &self,
+        pending: &crate::worlds::list::handoff::Pending,
+    ) -> Result<(), String> {
+        let authority = self
+            .authority(Some(&pending.world))
+            .map_err(str::to_owned)?
+            .ok_or("world-authority-required")?;
+        if !authority.creator.is_empty() || authority.generation != pending.generation {
+            return Err("handoff-stale".into());
+        }
+        let mut db = self.db.lock().map_err(|_| "store")?;
+        let tx = db.transaction().map_err(|_| "store")?;
+        let grant = format!(
+            "creator-{}",
+            crate::accounts::principal_text(pending.creator).replace(':', "-")
+        );
+        let prior: Option<String> = tx
+            .query_row(
+                "SELECT account FROM paired_souls_v1 WHERE grant_text=?1",
+                params![grant],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|_| "store")?;
+        if prior.is_some_and(|a| a != pending.account) {
+            return Err("handoff-account-mismatch".into());
+        }
+        let mut q = tx.prepare("SELECT grant_text FROM paired_world_tokens_v1 WHERE world=?1 AND grant_text LIKE 'creator-%'").map_err(|_| "store")?;
+        let old = q
+            .query_map(params![authority.world], |r| r.get::<_, String>(0))
+            .map_err(|_| "store")?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "store")?;
+        drop(q);
+        tx.execute(
+            "DELETE FROM paired_world_tokens_v1 WHERE world=?1 AND grant_text LIKE 'creator-%'",
+            params![authority.world],
+        )
+        .map_err(|_| "store")?;
+        for grant in old {
+            tx.execute("UPDATE paired_souls_v1 SET device=NULL,token_hash=NULL WHERE grant_text=?1 AND NOT EXISTS(SELECT 1 FROM paired_world_tokens_v1 WHERE grant_text=?1)",params![grant]).map_err(|_| "store")?;
+        }
+        let grant = format!(
+            "creator-{}",
+            crate::accounts::principal_text(pending.creator).replace(':', "-")
+        );
+        tx.execute(
+            "INSERT OR IGNORE INTO paired_souls_v1(grant_text,account) VALUES(?1,?2)",
+            params![grant, pending.account],
+        )
+        .map_err(|_| "store")?;
+        // An approved old request cannot mint a replacement credential after the handoff.
+        let mut q=tx.prepare("SELECT r.code,w.world FROM pair_requests_v1 r JOIN pair_request_worlds_v1 w ON w.code=r.code WHERE r.scope='creator' AND r.state IN ('pending','approved')").map_err(|_|"store")?;
+        let requests = q
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|_| "store")?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "store")?;
+        drop(q);
+        for (code, world) in requests {
+            if self
+                .authority(Some(&world))
+                .map_err(str::to_owned)?
+                .is_some_and(|a| a.world == authority.world)
+            {
+                tx.execute("UPDATE pair_requests_v1 SET state='refused',refusal='not-the-creator' WHERE code=?1",params![code]).map_err(|_|"store")?;
+            }
+        }
+        tx.commit().map_err(|_| "store")?;
+        // The next marker is installed before final CAS. World admission still sees pending until that CAS.
+        self.write_handoff_tokens(&db, Some(pending))
+            .map_err(|_| "world-authority-publication".to_owned())?;
+        Ok(())
     }
 }
 

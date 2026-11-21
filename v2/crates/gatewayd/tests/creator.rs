@@ -138,6 +138,7 @@ async fn w5_a4_only_the_worlds_creator_gets_a_token_and_its_socket_signs_in() {
     let log: Log = std::sync::Arc::new(|_: &str| {});
     let gw = Gateway::with_receipts(Tokens::default(), BUILD.to_vec(), log, Receipts::off());
     let _ = gw.exchange.set(Exchange {
+        authority_required: false,
         creator: maker,
         directory: directory(maker, visitor),
     });
@@ -179,4 +180,179 @@ async fn w5_a4_only_the_worlds_creator_gets_a_token_and_its_socket_signs_in() {
         );
     }
     assert_eq!(gw.tokens.read().unwrap().stored().count(), 1);
+}
+
+#[tokio::test]
+async fn w16_idle_creator_socket_cannot_revive_after_round_trip_and_soul_churn_keeps_browser_token()
+{
+    use gatewayd::token::Source;
+    let a = Id::new(Scope([0xa1; 16]), 1).unwrap();
+    let b = Id::new(Scope([0xb2; 16]), 1).unwrap();
+    let root = std::env::temp_dir().join(format!("gateway-w16-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let file = root.join("tokens");
+    let write = |generation: u64, owner: Id, tail: &str| {
+        let temp = file.with_extension("tmp");
+        std::fs::write(
+            &temp,
+            format!(
+                "# souls-creator/1 {generation} {}\n{tail}",
+                creator::principal_text(owner)
+            ),
+        )
+        .unwrap();
+        std::fs::rename(temp, &file).unwrap();
+    };
+    write(0, a, "");
+    let (source, tokens) = Source::open(&file).unwrap();
+    let gw = Gateway::with_receipts(
+        tokens,
+        BUILD.to_vec(),
+        std::sync::Arc::new(|_| {}),
+        Receipts::off(),
+    );
+    assert!(gw.tokens_file.set(source).is_ok());
+    assert!(
+        gw.exchange
+            .set(Exchange {
+                creator: a,
+                directory: directory(a, b),
+                authority_required: true
+            })
+            .is_ok()
+    );
+    let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = tcp.local_addr().unwrap().to_string();
+    let task = tokio::spawn(axum::serve(tcp, socket::router(gw.clone())).into_future());
+    let url = format!("ws://{base}{}", socket::PATH);
+    let (status, body) = exchange(&base, Some("test:maker")).await;
+    assert_eq!(status, 200);
+    let token = body
+        .split_once("\"token\":\"")
+        .unwrap()
+        .1
+        .split('"')
+        .next()
+        .unwrap()
+        .to_owned();
+    let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    ws.send(Message::Binary(
+        Hello {
+            protocol: PROTOCOL,
+            build: Vec::new(),
+            refused: None,
+            other: None,
+        }
+        .to_bytes()
+        .unwrap()
+        .into(),
+    ))
+    .await
+    .unwrap();
+    next(&mut ws).await;
+    ws.send(Message::Binary(
+        encode(&Value::Map(
+            [(1, Value::Text(Name::new(&token).unwrap()))].into(),
+        ))
+        .unwrap()
+        .into(),
+    ))
+    .await
+    .unwrap();
+    assert_eq!(
+        next(&mut ws).await,
+        Value::Map([(4, Value::Text(Name::new(resume::STARTED).unwrap()))].into())
+    );
+    let view_key = gatewayd::token::ViewKey::new([9; 32]);
+    assert!(
+        gw.view_key
+            .set(gatewayd::token::ViewKey::new([9; 32]))
+            .is_ok()
+    );
+    let make_view = |grant: Grant| {
+        let text = format!("view.{}.{}", gatewayd::unix_now() + 120, grant.to_text());
+        format!(
+            "{text}.{}",
+            replica::encode::to_hex(&view_key.mac(text.as_bytes()))
+        )
+    };
+    async fn open_view(url: &str, token: &str) -> Ws {
+        let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        ws.send(Message::Binary(
+            Hello {
+                protocol: PROTOCOL,
+                build: Vec::new(),
+                refused: None,
+                other: None,
+            }
+            .to_bytes()
+            .unwrap()
+            .into(),
+        ))
+        .await
+        .unwrap();
+        next(&mut ws).await;
+        ws.send(Message::Binary(
+            encode(&Value::Map(
+                [(1, Value::Text(Name::new(token).unwrap()))].into(),
+            ))
+            .unwrap()
+            .into(),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            next(&mut ws).await,
+            Value::Map([(4, Value::Text(Name::new(socket::VIEW_STARTED).unwrap()))].into())
+        );
+        ws
+    }
+    let maker = Grant::Actor(Actor::Creator(a));
+    let mut creator_view = open_view(&url, &make_view(maker)).await;
+    // Another ordinary pairing changes the file. Its new hash is loaded, while this short browser token survives.
+    let soul = Grant::Actor(Actor::Soul(Id::new(Scope([0xc3; 16]), 1).unwrap()));
+    let secret = gatewayd::token::Token::issue(soul).unwrap();
+    let mut soul_view = open_view(&url, &make_view(soul)).await;
+    write(0, a, &Tokens::line(soul, &secret.hash()));
+    gw.tokens_file.get().unwrap().refresh(&gw.tokens);
+    assert!(
+        gw.tokens
+            .read()
+            .unwrap()
+            .check(&gatewayd::token::Token::parse(&token).unwrap())
+            .is_some()
+    );
+    assert_eq!(gw.tokens.read().unwrap().check(&secret), Some(soul));
+    // This A socket sends NOTHING while B owns it, then A owns it again under a new generation.
+    write(1, b, &Tokens::line(soul, &secret.hash()));
+    assert_eq!(exchange(&base, Some("test:visitor")).await.0, 200);
+    write(2, a, &Tokens::line(soul, &secret.hash()));
+    // Private outgoing data alone must revoke the idle old creator-view socket, without any incoming frame.
+    gw.tell_watchers(&maker.key(), "private creator reply".into());
+    assert_eq!(
+        next(&mut creator_view).await,
+        Value::Map([(4, Value::Text(Name::new("token.refused").unwrap()))].into())
+    );
+    gw.tell_watchers(&soul.key(), "ordinary Soul reply".into());
+    let ordinary = tokio::time::timeout(Duration::from_secs(5), soul_view.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(ordinary, Message::Text("ordinary Soul reply".into()));
+    ws.send(Message::Text("{}".into())).await.unwrap();
+    assert_eq!(
+        next(&mut ws).await,
+        Value::Map([(4, Value::Text(Name::new("token.refused").unwrap()))].into())
+    );
+    assert_eq!(sign_in(&url, &token).await, "token.refused");
+    assert_eq!(exchange(&base, Some("test:maker")).await.0, 200);
+    // Required placed mode never falls back to the static founder when the marker is absent or damaged.
+    std::fs::write(&file, "").unwrap();
+    assert_eq!(exchange(&base, Some("test:maker")).await.0, 503);
+    std::fs::write(&file, "# souls-creator/1 broken none\n").unwrap();
+    assert_eq!(exchange(&base, Some("test:maker")).await.0, 503);
+    task.abort();
+    let _ = task.await;
+    std::fs::remove_dir_all(root).unwrap();
 }
