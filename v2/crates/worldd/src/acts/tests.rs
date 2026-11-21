@@ -453,6 +453,7 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
         &sel("nearest", Json::Str("last".into()), None),
         this,
         nobody,
+        None,
     );
     let furthest = select_thing(tree, &sel("furthest", Json::Int(1), None), this, nobody);
     assert_eq!(last, furthest, "the last nearest is the first furthest");
@@ -461,14 +462,15 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
             tree,
             &sel("nearest", Json::Int(1), Some("test:no_such_kind")),
             this,
-            nobody
+            nobody,
+            None
         ),
         Ok(None),
         "nothing of the kind: nothing selected"
     );
     let off = Json::Obj(vec![("of".into(), Json::Str("free_slots".into()))]);
     assert_eq!(
-        select_thing(tree, &off, this, nobody),
+        select_thing(tree, &off, this, nobody, None),
         Err(()),
         "not a thing selector"
     );

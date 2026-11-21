@@ -805,9 +805,9 @@ fn world_at(tree: &Tree, node: Id) -> Option<Vec3> {
 }
 
 /// Whether `body` stands within a form's reach of `node`: within its half size (its entry's bounds) and
-/// [`NEAR_MM`], across x and z, in the zone's frame.
-fn within_reach(tree: &Tree, entry: &Json, body: Id, node: Id) -> bool {
-    let (Some(b), Some(n)) = (world_at(tree, body), world_at(tree, node)) else {
+/// [`NEAR_MM`], across x and z, in the zone's frame (`body_at` when the body is not a node of the tree).
+fn within_reach(tree: &Tree, entry: &Json, body: Id, body_at: Option<Vec3>, node: Id) -> bool {
+    let (Some(b), Some(n)) = (world_at(tree, body).or(body_at), world_at(tree, node)) else {
         return false;
     };
     let half = entry
@@ -848,6 +848,7 @@ pub(crate) fn select_thing(
     select: &Json,
     node: Id,
     body: Id,
+    body_at: Option<Vec3>,
 ) -> Result<Option<Id>, ()> {
     if select.get("of").and_then(Json::str) != Some("things") {
         return Err(());
@@ -865,7 +866,7 @@ pub(crate) fn select_thing(
         _ => return Err(()),
     };
     let anchor = match select.get("anchor").and_then(Json::str) {
-        Some("me") => world_at(tree, body),
+        Some("me") => world_at(tree, body).or(body_at),
         Some("this") => world_at(tree, node),
         _ => return Err(()),
     };
@@ -1205,6 +1206,11 @@ impl Acts {
             // A thing the caller left out, which the form describes by a selector, is bound by it now (#3914); a
             // selector that finds nothing is refused by name, before any walk.
             let mut none_selected = None;
+            // The body's place in the zone's frame when it is not a node of the tree: its controller's, unseated.
+            let body_at = bodies
+                .as_deref()
+                .and_then(|b| b.runner.controller.body(body))
+                .map(|b| b.pose.position);
             if let Some(f) = entry.get("forms").and_then(|f| f.get(form)) {
                 for (key, take) in f.get("takes").and_then(Json::obj).unwrap_or(&[]) {
                     if all.contains_key(key)
@@ -1215,7 +1221,7 @@ impl Acts {
                     let Some(select) = take.get("select") else {
                         continue;
                     };
-                    match select_thing(tree, select, *node, body) {
+                    match select_thing(tree, select, *node, body, body_at) {
                         Ok(Some(t)) => {
                             all.insert(key.clone(), skills::form_runner::Arg::Node(t));
                             picked = true;
@@ -1235,7 +1241,7 @@ impl Acts {
                 let named: Result<(), Refusal> =
                     sim::forms::may(tree, &none, &|_| None, body, *node, entry, form).and_then(
                         |()| {
-                            if within_reach(tree, entry, body, *node) {
+                            if within_reach(tree, entry, body, body_at, *node) {
                                 Err(refusal(NONE_SELECTED, key.clone()))
                             } else {
                                 Err(refusal("out-of-reach", key.clone()))
