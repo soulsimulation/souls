@@ -268,6 +268,46 @@ mod served {
         }
     }
 
+    /// #3784: a connection that asks for the Souls' words, as a gateway with a directory does; each word it is told, in
+    /// order, as `(grant, word)`.
+    fn listen_states(dir: &Path) -> std::sync::mpsc::Receiver<(String, String)> {
+        let mut s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
+        let ask = answers::states_ask();
+        s.write_all(&u32::try_from(ask.len()).unwrap().to_be_bytes())
+            .unwrap();
+        s.write_all(&ask).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            loop {
+                let mut len = [0u8; 4];
+                if s.read_exact(&mut len).is_err() {
+                    return;
+                }
+                let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+                if s.read_exact(&mut frame).is_err() {
+                    return;
+                }
+                let Ok(Value::Map(m)) = decode(&frame).map(|d| d.value) else {
+                    continue;
+                };
+                let Some(Value::Array(rows)) = m.get(&answers::STATES) else {
+                    continue;
+                };
+                for r in rows {
+                    if let Value::Array(r) = r
+                        && let (Some(Value::Bytes(g)), Some(Value::Text(w))) = (r.first(), r.get(1))
+                    {
+                        let _ = tx.send((
+                            String::from_utf8_lossy(g).into_owned(),
+                            w.as_str().to_owned(),
+                        ));
+                    }
+                }
+            }
+        });
+        rx
+    }
+
     fn connect(dir: &Path, seq: u64, lineage: Scope) -> Client {
         let s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(90))).unwrap();
@@ -383,6 +423,8 @@ mod served {
         let t0 = Instant::now();
         let say = |what: &str| eprintln!("[{:6.1} s] {what}", t0.elapsed().as_secs_f64());
 
+        // #3784: a gateway's connection, told each Soul's word as it changes.
+        let states = listen_states(&dir);
         // The agent: joins, walks 3 m east, then goes.
         say("serving");
         let mut soul = connect(&dir, 0, lineage);
@@ -457,6 +499,14 @@ mod served {
         let mut seq_words = words.clone();
         seq_words.dedup();
         assert_eq!(seq_words, ["souls:idle", "souls:zombie", "souls:asleep"]);
+        // #3784: the gateway's connection was told the same words, once each, for the Soul's grant.
+        let told: Vec<(String, String)> = states.try_iter().collect();
+        let grant = format!("soul-{}-1", replica::encode::to_hex(&[0xc1; 16]));
+        say(&format!("told the gateway: {told:?}"));
+        assert_eq!(
+            told,
+            ["idle", "zombie", "asleep"].map(|w| (grant.clone(), w.to_owned()))
+        );
         let first = rows.first().unwrap();
         let last = *rows.last().unwrap();
         say(&format!(
@@ -537,6 +587,10 @@ mod served {
         walked.expect("the agent's walk runs");
         let log = read_log(&dir);
         assert!(awake(&log), "written awake");
+        let woke = states
+            .recv_timeout(Duration::from_secs(5))
+            .expect("told awake");
+        assert_eq!(woke.1, "awake", "#3784: the gateway is told it woke");
         let after = log
             .iter()
             .rev()

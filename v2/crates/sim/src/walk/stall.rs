@@ -58,9 +58,15 @@ pub struct Watch {
     walkers: BTreeMap<Id, Track>,
 }
 
+/// The distance from `a` to `b`, µm; [`i64::MAX`] when it is past that (any two points' differences and squares are
+/// taken unsigned, so no input overflows: a walker's place must never panic the clock thread).
 fn len(a: [i64; 2], b: [i64; 2]) -> i64 {
-    let (x, z) = (i128::from(a[0] - b[0]), i128::from(a[1] - b[1]));
-    i64::try_from((x * x + z * z).isqrt()).unwrap_or(i64::MAX)
+    let d = |u: i64, v: i64| u128::from((i128::from(u) - i128::from(v)).unsigned_abs() as u64);
+    let (x, z) = (d(a[0], b[0]), d(a[1], b[1]));
+    (x * x)
+        .checked_add(z * z)
+        .and_then(|s| i64::try_from(s.isqrt()).ok())
+        .unwrap_or(i64::MAX)
 }
 
 impl Watch {
@@ -288,6 +294,25 @@ mod tests {
             p[1] += speed(t);
         }
         None
+    }
+
+    /// A corner or leg's end anywhere in µm, the far ends of i64 included (a forgotten line's sentinel, #1960), is
+    /// measured without overflow: it panicked the clock thread before.
+    #[test]
+    fn extreme_points_never_overflow() {
+        let mut w = Watch::new();
+        let far = [i64::MIN, i64::MIN];
+        for t in 0..100 {
+            let _ = w.seen(
+                fixture(9),
+                [57_000_000, t * 70_000],
+                [57_170_000, 0],
+                far,
+                t * TICK,
+            );
+        }
+        assert_eq!(len([i64::MAX, i64::MAX], far), i64::MAX);
+        assert_eq!(len([0, 0], [3, 4]), 5);
     }
 
     #[test]

@@ -84,6 +84,10 @@
 //                                             unread news; read here, asks no world (#3708)
 //   souls.mjs news [--all]                    platform news from the sites of this home's worlds, unread (or the last 50),
 //                                             then read; any other command mentions new news once (#3708)
+//   souls.mjs profile [name "<Name>" | description "<text>" | photo <file.png|file.jpg|auto>]   the Soul's name,
+//                                             description and picture on its owner's page, set by its agent (#3707)
+//   souls.mjs retire <name|id> | retire wait  asks to retire a Soul; the owner's click on the page decides (#3707)
+//   souls.mjs revoke <name|id>                disconnects a Soul's agent wherever it runs; its memory stays (#3707)
 //   souls.mjs upgrade [--rollback]            brings today's client's Souls across, one owner approval each (R18); with
 //                                             --rollback, today's client again
 //   souls.mjs query '<json list>' [--budget <bytes>]   several reads of the copy in one call, each answered in turn
@@ -356,7 +360,7 @@ export async function runViews(args, shootOne) {
 }
 
 function help(home, named, topic) {
-  if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
+  if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]', 'profile [name "Name" | description "Text" | photo <file.png|auto>] [--soul <id>]', 'retire <name|id> [--as alias] | retire wait', 'revoke <name|id> [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
   if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake'), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;

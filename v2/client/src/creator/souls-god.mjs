@@ -95,7 +95,7 @@ export const FIX = {
   'land.no-water': 'name a pond, lake or river\'s id from describe',
   'land.nothing': 'shape the land on the world\'s ground',
   'land.smooth': 'use flatten',
-  'land.unavailable': 'run souls-god from a checkout with packages/ground and zod installed',
+  'land.unavailable': 'use Node 22.18 or later, and the client a world serves (it carries the ground model) or a checkout with packages/ground and zod installed',
   'strike.off-the-ground': 'strike somewhere on the world\'s ground',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'which-creator': 'name one with --creator',
