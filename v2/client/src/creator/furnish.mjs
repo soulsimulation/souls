@@ -144,7 +144,7 @@ export function furnishOps(nodes, ref, { style, kinds = {}, entries = {} } = {})
     const outline = (Array.isArray(r.fields?.[11]) ? r.fields[11] : []).map((p) => fr.toB(p.map(Number)));
     if (!items.length || outline.length < 3) continue;
     // What stands there: an obstacle, and its name (today's) to keep a second furnish from doubling it.
-    const taken = [], names = new Set();
+    const taken = [], fronts = [], names = new Set();
     for (const c of under(r.id)) {
       names.add(text(c.fields?.[1]));
       const k = plain(c.kind), size = sizeOf(c.kind);
@@ -190,12 +190,13 @@ export function furnishOps(nodes, ref, { style, kinds = {}, entries = {} } = {})
         if (solid(size) && zones.slice(0, doors.filter((d) => d.level === level).length).some((z) => meets(box, z))) { why = 'in a doorway'; continue; }
         if (zones.slice(doors.filter((d) => d.level === level).length).some((z) => meets(box, z))) { why = 'at the stairs'; continue; }
         if (solid(size) && taken.some((t) => meets(box, t))) { why = 'overlaps another piece'; continue; }
-        if (solid(size)) { const w = ways.ok(taken, box); if (!w.ok) { why = w.why; continue; } }
-        got = { p, box, yaw: fyaw + th };
+        const yaw = fyaw + th, depth = (side ? size[0] : size[2]) / 2 + 300, front = [p[0] + Math.sin(yaw) * depth, p[1] + Math.cos(yaw) * depth];
+        if (solid(size)) { const w = ways.ok(taken, box, fronts, front); if (!w.ok) { why = w.why; continue; } }
+        got = { p, box, yaw: fyaw + th, front };
         break;
       }
       if (!got) { dropped.push({ name, why }); continue; }
-      if (solid(size)) taken.push(got.box);
+      if (solid(size)) { taken.push(got.box); fronts[taken.length - 1] = got.front; }
       // Into the room's frame: from the building's, less the floor's and the room's place and turn.
       const f0 = floorAt.get(f.id), q = rot([got.p[0] - f0.at[0], got.p[1] - f0.at[2]], f0.yaw), local = rot([q[0] - fr.at[0], q[1] - fr.at[2]], fr.yaw);
       const at = [Math.round(local[0]), 0, Math.round(local[1])];

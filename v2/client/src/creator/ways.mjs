@@ -25,7 +25,8 @@ const toBox = ([x, z], b) => Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.ma
 /**
  * The ways of a room: its `outline` (building frame, mm), its `doors` ([{ c: [x, z], width }] on its level, those on
  * its walls kept) and stair `ends` ([x, z] inside it). `ok(pieces, box)` says whether `box` keeps every way `pieces`
- * (boxes standing there) leave, with its own approach reached from a doorway: { ok } or { ok: false, why }.
+ * (boxes standing there, each reached at its `fronts` point when known) leave, with its own approach (`front`) reached
+ * from a doorway: { ok } or { ok: false, why }.
  */
 export function waysOf(outline, doors, ends) {
   const xs = outline.map((p) => p[0]), zs = outline.map((p) => p[1]);
@@ -80,11 +81,10 @@ export function waysOf(outline, doors, ends) {
     }
     return best;
   };
-  const keysOf = (g, pieces) => [
-    ...mine.map((d) => near(g, (c) => Math.hypot(c[0] - d.c[0], c[1] - d.c[1]))),
-    ...ends.map((p) => near(g, (c) => Math.hypot(c[0] - p[0], c[1] - p[1]))),
-    ...pieces.map((b) => near(g, (c) => toBox(c, b))),
-  ];
+  // A piece is reached at its approach: the free spot nearest its front (today's `approachKeys`), else nearest it.
+  const at = (p) => (c) => Math.hypot(c[0] - p[0], c[1] - p[1]);
+  const approach = (g, b, front) => near(g, front ? at(front) : (c) => toBox(c, b));
+  const keysOf = (g, pieces, fronts) => [...mine.map((d) => near(g, at(d.c))), ...ends.map((p) => near(g, at(p))), ...pieces.map((b, i) => approach(g, b, fronts[i]))];
   const pairs = (l, keys) => {
     let n = 0;
     for (let a = 0; a < keys.length; a++) for (let b = a + 1; b < keys.length; b++) if (keys[a] >= 0 && keys[b] >= 0 && l[keys[a]] === l[keys[b]]) n++;
@@ -92,13 +92,13 @@ export function waysOf(outline, doors, ends) {
   };
   return {
     doors: mine.length,
-    ok(pieces, box) {
+    ok(pieces, box, fronts = [], front = null) {
       if (!mine.length) return { ok: true };
       const was = grid(pieces), now = grid([...pieces, box]);
-      const before = pairs(labels(was), keysOf(was, pieces));
-      const ln = labels(now), keys = keysOf(now, pieces);
+      const before = pairs(labels(was), keysOf(was, pieces, fronts));
+      const ln = labels(now), keys = keysOf(now, pieces, fronts);
       if (pairs(ln, keys) < before) return { ok: false, why: 'would cut the way to its doors or another piece' };
-      const own = near(now, (c) => toBox(c, box)), doorKeys = keys.slice(0, mine.length).filter((k) => k >= 0);
+      const own = approach(now, box, front), doorKeys = keys.slice(0, mine.length).filter((k) => k >= 0);
       if (own < 0 || !doorKeys.some((k) => ln[k] === ln[own])) return { ok: false, why: 'no way to it from the doors' };
       return { ok: true };
     },
