@@ -528,39 +528,28 @@ impl Geometry for Sight<'_> {
             None => (node, at),
         };
         // An approach to a move's point (#3688): a point of a thing on a building with floors (an inner door) is on
-        // the building's floor nearest its height, so the walk goes in to it; on the floor the body stands on, it is
-        // aimed short of the point, on the body's side, and stops within what is left of the reach of the point.
+        // the building's floor nearest its height. From another floor, the walk goes in to anywhere within a form's
+        // reach of it (no place may stand in the doorway), and the runner then approaches again from there; on the
+        // floor the body stands on, it is aimed short of the point, on the body's side, within the reach plus that.
         let (node, at, reach) = if self.approaches.contains(&body) {
             let (node, at) = self.floor_of(node, at).unwrap_or((node, at));
             self.with_view(body, |v| {
                 let (floor, p, _) = v.on_floor(node, at)?;
-                (floor == sim::walk::node_of(me)).then(|| {
-                    let short = skills::form_runner::APPROACH_SHORT;
-                    let aim = skills::form_runner::short_of(p, me.pose.position, short);
-                    let moved = flat([aim.x, aim.z], [p.x, p.z]);
-                    (floor, aim, reach.saturating_sub(moved).max(0))
-                })
+                if floor != sim::walk::node_of(me) {
+                    return Some((node, at, skills::form_runner::REACH));
+                }
+                let short = skills::form_runner::APPROACH_SHORT;
+                let aim = skills::form_runner::short_of(p, me.pose.position, short);
+                Some((floor, aim, reach + flat([aim.x, aim.z], [p.x, p.z])))
             })
             .flatten()
             .unwrap_or((node, at, reach))
         } else {
             (node, at, reach)
         };
-        if self.approaches.contains(&body) {
-            self.with_view(body, |v| {
-                for r in [600_000, 900_000, 1_200_000] {
-                    let a = v.stand_near(node, at, r, Some(me));
-                    let b = v.stand_near(node, at, r, None);
-                    eprintln!("DBG near r {r}: with-from {a:?} no-from {b:?}");
-                }
-            });
-        }
         let mut planning = self.planning.borrow_mut();
         match planning.ask(key, *me, FormQuery::Walk { node, at, reach }, &self.map) {
             Some(FormResult::Walk(legs)) => {
-                if self.approaches.contains(&body) {
-                    eprintln!("DBG approach body on {} at {:?} -> {} {:?} reach {} legs {:?}", replica::world_model::show(sim::walk::node_of(me)), me.pose.position, replica::world_model::show(node), at, reach, legs.iter().map(|l| (l.to, l.link.is_some())).collect::<Vec<_>>());
-                }
                 // A later stage may start in this same call before Sight's context is refreshed: it must request its
                 // own answer, even when its step number and target repeat the preceding stage.
                 planning.current.remove(&key);

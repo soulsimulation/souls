@@ -1446,6 +1446,9 @@ pub struct Runner {
     effected: bool,
     /// The Soul left during a move: the run ends `left` at the move's next phase boundary.
     leaving: bool,
+    /// The approach walk in progress crossed a link (into a building, #3688): when it ends, the body approaches the
+    /// point again from the floor it came onto.
+    again: bool,
 }
 
 impl Runner {
@@ -1468,6 +1471,7 @@ impl Runner {
             effect: false,
             effected: false,
             leaving: false,
+            again: false,
         }
     }
 
@@ -1560,6 +1564,7 @@ impl Runner {
                         return self.end(host, name("souls:no-way"));
                     }
                     replica::host::WalkPlan::Legs(l) => {
+                        self.again = approach && !self.again && l.iter().any(|(_, k)| k.is_some());
                         l.into_iter().map(|(to, link)| Leg { to, link }).collect()
                     }
                     replica::host::WalkPlan::Unplanned => vec![Leg {
@@ -1627,6 +1632,7 @@ impl Runner {
 
     fn advance(&mut self, host: &mut dyn Host) -> Next {
         self.at += 1;
+        self.again = false;
         self.begin(host)
     }
 
@@ -1669,6 +1675,8 @@ impl Runner {
                 }
             }
             (Woke::Walked(p), Some(Step::WalkTo { .. })) => match p {
+                // In through a link: the approach again, from the floor the body came onto (#3688).
+                Progress::Done if self.again => self.begin(host),
                 Progress::Done => self.advance(host),
                 Progress::Failed(n) => self.end(host, n),
                 Progress::Going => Next::Sleep,
