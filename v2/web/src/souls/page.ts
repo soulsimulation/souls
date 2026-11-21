@@ -57,9 +57,13 @@ function dock(onClose: () => void, onFollow: () => void) {
   list.setAttribute('aria-label', 'Lines, newest last');
   list.tabIndex = 0;
   list.style.cssText = 'margin:0;padding:0;list-style:none;overflow:auto;flex:1 1 auto;min-height:0';
-  el.append(close, who, hear, list);
+  // Lines that arrived while the reader was scrolled up, and a jump to the newest (#3777, today's `dlg-new`).
+  const more = document.createElement('button');
+  more.hidden = true;
+  more.style.cssText = 'align-self:center;margin:6px 0 0;padding:3px 10px;border:0;border-radius:12px;background:#2f6f9f;color:#fff;font:12px system-ui,sans-serif;cursor:pointer';
+  el.append(close, who, hear, list, more);
   document.body.append(el);
-  return { el, who, hear, list };
+  return { el, who, hear, list, more };
 }
 
 /** The Soul page's panel: one element, its fields set as text. */
@@ -155,6 +159,19 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
   };
   /** A thread's line as text: the speaker's name, then the words. */
   const lineText = (l: { speaker: string; words: string }) => `${nameOf(l.speaker)}: ${l.words}`;
+  type Scrolled = HTMLOListElement & { scrollTop: number; scrollHeight: number; clientHeight: number };
+  const dockList = d.list as Scrolled;
+  const atBottom = () => !(dockList.scrollHeight > 0) || dockList.scrollTop + dockList.clientHeight >= dockList.scrollHeight - 12;
+  /** Lines shown in the dock's thread, and how many arrived while the reader was scrolled up. */
+  let shownLines = 0, shownLast = '', unread = 0;
+  const setUnread = (n: number) => {
+    unread = n;
+    d.more.hidden = n === 0;
+    d.more.textContent = `${n} new line${n === 1 ? '' : 's'} ↓`;
+  };
+  const jump = () => ((dockList.scrollTop = dockList.scrollHeight ?? 0), setUnread(0));
+  d.more.onclick = jump;
+  dockList.addEventListener('scroll', () => unread && atBottom() && setUnread(0));
   const showDock = (t: number) => {
     const th = focus ? talk.threads.get(focus) : undefined;
     const said = th ? Conversations.by(th, t) : [];
@@ -176,9 +193,13 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     d.who.textContent = joinNames(members);
     d.who.setAttribute('aria-label', `Frame the conversation with ${joinNames(members)}`);
     d.hear.textContent = hear;
-    const l = d.list as HTMLOListElement & { scrollTop: number; scrollHeight: number; clientHeight: number };
-    // Follows the newest line unless the reader scrolled up.
-    const stick = fresh || !(l.scrollHeight > 0) || l.scrollTop + l.clientHeight >= l.scrollHeight - 12;
+    const l = dockList;
+    // Follows the newest line unless the reader scrolled up; then counts what arrived (#3777).
+    const stick = fresh || atBottom();
+    const last = said.at(-1)?.key ?? '';
+    // A thread keeps its newest lines only, so a new last line counts at least one, as today's dock does.
+    setUnread(stick ? 0 : last === shownLast ? unread : unread + Math.max(1, said.length - shownLines));
+    (shownLines = said.length), (shownLast = last);
     l.replaceChildren(...said.map((line) => {
       const li = document.createElement('li');
       li.style.cssText = 'margin:0 0 4px';
