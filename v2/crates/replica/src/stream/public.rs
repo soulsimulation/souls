@@ -769,17 +769,6 @@ impl PublicPlayer {
             return refuse("node-missing", "not a public live node");
         };
         let n = NodeState::read(v)?;
-        let mut m = BTreeMap::from([
-            (1, id.to_value()),
-            (2, Value::Text(n.kind)),
-            (5, crate::hash::audience(n.audience)),
-            (6, Value::Map(n.fields)),
-            (10, Value::Uint(self.changed.get(&id).copied().unwrap_or(0))),
-        ]);
-        m.extend(n.parent.map(|p| (3, p.to_value())));
-        m.extend(n.slot.map(|s| (4, Value::Uint(s))));
-        m.extend(n.place.map(|p| (7, p)));
-        m.extend(n.motion.map(|p| (8, p)));
         let links = pairs(field(map(&self.state)?, 3)?)?;
         let rows = links
             .into_iter()
@@ -800,14 +789,53 @@ impl PublicPlayer {
                 ]))
             })
             .collect();
+        self.node_value_with_rows(id, n, rows)
+    }
+    fn node_value_with_rows(&self, id: Id, n: NodeState, rows: Vec<Value>) -> R<Value> {
+        let mut m = BTreeMap::from([
+            (1, id.to_value()),
+            (2, Value::Text(n.kind)),
+            (5, crate::hash::audience(n.audience)),
+            (6, Value::Map(n.fields)),
+            (10, Value::Uint(self.changed.get(&id).copied().unwrap_or(0))),
+        ]);
+        m.extend(n.parent.map(|p| (3, p.to_value())));
+        m.extend(n.slot.map(|s| (4, Value::Uint(s))));
+        m.extend(n.place.map(|p| (7, p)));
+        m.extend(n.motion.map(|p| (8, p)));
         m.insert(9, Value::Array(rows));
         Ok(Value::Map(m))
     }
     pub fn snapshot(&self) -> R<Vec<u8>> {
+        let nodes = pairs(field(map(&self.state)?, 2)?)?;
+        let links = pairs(field(map(&self.state)?, 3)?)?;
+        let mut incident: BTreeMap<Id, Vec<Value>> = BTreeMap::new();
+        for (lid, value) in links {
+            let Ok(link) = LinkState::read(&value) else {
+                continue;
+            };
+            for (index, id) in link.ends.iter().enumerate() {
+                if index == 1 && link.ends[0] == link.ends[1] {
+                    continue;
+                }
+                incident.entry(*id).or_default().push(Value::Array(vec![
+                    lid.to_value(),
+                    Value::Text(link.ty.clone()),
+                    link.ends[1 - index].to_value(),
+                    crate::hash::audience(link.audience),
+                ]));
+            }
+        }
         encoded(&Value::Array(
-            pairs(field(map(&self.state)?, 2)?)?
-                .keys()
-                .map(|i| self.node_value(*i))
+            nodes
+                .iter()
+                .map(|(id, value)| {
+                    self.node_value_with_rows(
+                        *id,
+                        NodeState::read(value)?,
+                        incident.remove(id).unwrap_or_default(),
+                    )
+                })
                 .collect::<R<Vec<_>>>()?,
         ))
     }
@@ -905,5 +933,135 @@ impl PublicPlayer {
             _ => return bad("query is 1 through 6"),
         };
         encoded(&out)
+    }
+}
+
+#[cfg(test)]
+mod w16_snapshot_tests {
+    use super::*;
+    use crate::effects::{FIXTURE_HEADER, fixture_bytes};
+    use crate::ids::Scope;
+    use crate::pose::{Frame, Quat, Support, Vec3};
+
+    #[test]
+    fn w16_snapshot_matches_exact_node_queries_with_opaque_frames_and_ordered_self_links() {
+        let header = Header::read(&fixture_bytes(FIXTURE_HEADER).unwrap()).unwrap();
+        let mut state = State::start(header.zone, header.kinds[0].clone());
+        state.next = 17;
+        let id = |n| Id::new(Scope([94; 16]), n).unwrap();
+        for (n, parent, audience) in [
+            (0, header.zone, Audience::Of(id(0))),
+            (1, id(0), Audience::Everyone),
+            (2, header.zone, Audience::Everyone),
+        ] {
+            state.nodes.insert(
+                id(n),
+                NodeState {
+                    kind: header.kinds[0].clone(),
+                    parent: Some(parent),
+                    slot: None,
+                    audience,
+                    fields: BTreeMap::from([(30, Value::Uint(n))]),
+                    place: Some({
+                        let Value::Map(mut local) = (Pose {
+                            frame: Frame {
+                                node: parent,
+                                slot: None,
+                            },
+                            position: Vec3::new(0, 0, 0),
+                            orientation: Quat::IDENTITY,
+                            support: Support::Surface {
+                                surface: parent,
+                                height: 0,
+                            },
+                        })
+                        .to_value() else {
+                            unreachable!()
+                        };
+                        local.remove(&1);
+                        Value::Map(local)
+                    }),
+                    motion: None,
+                },
+            );
+        }
+        for (n, ends, audience) in [
+            (6, [id(1), id(2)], Audience::Everyone),
+            (4, [id(1), id(1)], Audience::Everyone),
+            (5, [id(0), id(0)], Audience::Of(id(0))),
+        ] {
+            state.links.insert(
+                id(n),
+                LinkState {
+                    ty: header.kinds[0].clone(),
+                    ends,
+                    owner: End::First,
+                    audience,
+                },
+            );
+        }
+        let player =
+            PublicPlayer::start(header.stored(), &baseline(&header, &state, 0).unwrap()).unwrap();
+        let values = pairs(field(map(player.state()).unwrap(), 2).unwrap()).unwrap();
+        assert!(!values.contains_key(&id(0)), "private node stays excluded");
+        let expected = Value::Array(
+            values
+                .keys()
+                .map(|node| {
+                    let query = encoded(&Value::Map(BTreeMap::from([
+                        (1, Value::Uint(1)),
+                        (2, node.to_value()),
+                    ])))
+                    .unwrap();
+                    crate::encode::decode(&player.query(&query).unwrap())
+                        .unwrap()
+                        .value
+                })
+                .collect(),
+        );
+        assert_eq!(player.snapshot().unwrap(), encoded(&expected).unwrap());
+        let Value::Array(rows) = expected else {
+            panic!("snapshot")
+        };
+        let child = rows
+            .iter()
+            .find(|row| map(row).unwrap()[&1] == id(1).to_value())
+            .unwrap();
+        assert_eq!(
+            map(child).unwrap()[&3],
+            id(0).to_value(),
+            "opaque parent remains exact"
+        );
+        let Value::Array(links) = &map(child).unwrap()[&9] else {
+            panic!("links")
+        };
+        assert_eq!(links.len(), 2, "self link appears once");
+        assert_eq!(arr(&links[0]).unwrap()[0], id(4).to_value());
+        assert_eq!(arr(&links[1]).unwrap()[0], id(6).to_value());
+        assert_eq!(
+            player
+                .query(
+                    &encoded(&Value::Map(BTreeMap::from([
+                        (1, Value::Uint(1)),
+                        (2, id(0).to_value())
+                    ])))
+                    .unwrap()
+                )
+                .unwrap_err()
+                .name,
+            "node-missing"
+        );
+        let mut corrupt = player;
+        let Value::Map(raw) = &mut corrupt.state else {
+            unreachable!()
+        };
+        let Value::Array(nodes) = raw.get_mut(&2).unwrap() else {
+            unreachable!()
+        };
+        nodes.push(nodes[0].clone());
+        assert!(
+            corrupt.snapshot().is_err(),
+            "duplicate source nodes stay refused"
+        );
     }
 }
