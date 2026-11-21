@@ -522,9 +522,14 @@ fn spot_of(o: &json::Value) -> Result<Spot, String> {
     // A turn about +y in whole millidegrees (#3694: placing facing something), or, for a move that keeps a thing's
     // facing and support (#3695: a landform lifting what rests on it), both as the pose writes them: `orientation`
     // [w, x, y, z] and `support` {"which": 0 to 4, "node": id, "height": µm}.
-    let orientation = match (o.get("yaw"), o.get("orientation").and_then(json::Value::arr)) {
-        (Some(v), _) if !matches!(v, json::Value::Null) => Quat::from_yaw_mdeg(int_of(Some(v), "yaw, in millidegrees")?)
-            .map_err(|e| format!("yaw: {e:?}"))?,
+    let orientation = match (
+        o.get("yaw"),
+        o.get("orientation").and_then(json::Value::arr),
+    ) {
+        (Some(v), _) if !matches!(v, json::Value::Null) => {
+            Quat::from_yaw_mdeg(int_of(Some(v), "yaw, in millidegrees")?)
+                .map_err(|e| format!("yaw: {e:?}"))?
+        }
         (_, None) => Quat::IDENTITY,
         (_, Some(q)) if q.len() == 4 => Quat::new(
             int_of(q.first(), "orientation's numbers")?,
