@@ -16,7 +16,7 @@
 //! - **Claims** ([`F_CLAIMS`]): `[[id, part, x0, z0, x1, z1], ...]` (`c:house`, `part:roof`), at most [`CLAIMS_MOST`], none overlapping,
 //!   else `edit.claim-malformed`. Releasing a claim is setting the field without it.
 //!
-//! The claim check, in [`super::check`] before the safety rule: an edit sent under a claim (its parameter 2) touches
+//! The claim check, in [`super::check`] before the safety rule: an edit sent under a claim (its parameter 6) touches
 //! only things inside that claim's area, before and after each operation, and never the root's fields
 //! (`edit.outside-claim`); an edit sent under no claim does not touch anything inside a live claim (`edit.claimed`);
 //! an edit naming a claim that is not live is refused `edit.claim-unknown`. Where a thing is: its origin in the root's
@@ -484,6 +484,7 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
 mod tests {
     use super::super::wire::{claim, parameters_under, read};
     use super::*;
+    use std::collections::BTreeMap;
 
     #[test]
     fn a_claim_rides_the_edit_as_parameter_two() {
@@ -497,9 +498,15 @@ mod tests {
         let plain = parameters_under(&ops, None);
         assert_eq!(claim(&plain).expect("none"), None);
         let mut bad = plain.clone();
-        bad.insert(2, Value::Uint(7));
+        bad.insert(6, Value::Uint(7));
         assert!(read(&bad).is_err());
         bad.insert(3, Value::Uint(7));
         assert!(read(&bad).is_err());
+        // A claim never stands for a batch, and an old parameter 2 is not a claim.
+        let alone = BTreeMap::from([(6, Value::Text(Name::new("c:house").expect("a name")))]);
+        assert!(read(&alone).is_err());
+        let mut two = plain.clone();
+        two.insert(2, Value::Text(Name::new("c:house").expect("a name")));
+        assert!(read(&two).is_err());
     }
 }
