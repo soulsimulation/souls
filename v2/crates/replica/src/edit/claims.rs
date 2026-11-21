@@ -280,7 +280,7 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
     };
     for (i, op) in edit.ops.iter().enumerate() {
         let mut t = Touch::default();
-        let mut add = |t: &mut Touch, p: Option<Vec3>| match p {
+        let add = |t: &mut Touch, p: Option<Vec3>| match p {
             Some(p) => t.points.push(p),
             None => t.lost = true,
         };
@@ -373,4 +373,28 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::wire::{claim, parameters_under, read};
+    use super::*;
+
+    #[test]
+    fn a_claim_rides_the_edit_as_parameter_two() {
+        let ops = vec![Op::Remove {
+            node: Ref::Node(Id::new(crate::ids::Scope([1; 16]), 2).expect("an id")),
+        }];
+        let c = Name::new("c_house").expect("a name");
+        let p = parameters_under(&ops, Some(&c));
+        assert_eq!(read(&p).expect("a batch"), ops);
+        assert_eq!(claim(&p).expect("a claim"), Some(c));
+        let plain = parameters_under(&ops, None);
+        assert_eq!(claim(&plain).expect("none"), None);
+        let mut bad = plain.clone();
+        bad.insert(2, Value::Uint(7));
+        assert!(read(&bad).is_err());
+        bad.insert(3, Value::Uint(7));
+        assert!(read(&bad).is_err());
+    }
 }

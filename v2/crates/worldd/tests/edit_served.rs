@@ -698,7 +698,7 @@ async fn g1f_a2_doorway_commits_owned_metadata_and_removal_guards_the_last_way_o
         legs.iter().any(|leg| leg.link == Some(link)),
         "the route crosses this exact new passage"
     );
-    let edit = Edit {
+    let edit = Edit { claim: None,
         intent: Id::new(Scope([0xde; 16]), 1).unwrap(),
         actor,
         planned: open.version(),

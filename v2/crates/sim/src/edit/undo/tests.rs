@@ -115,7 +115,7 @@ impl W {
     }
 
     fn edit(&mut self, ops: Vec<Op>, step: Option<&str>) -> Committed {
-        let edit = Edit {
+        let edit = Edit { claim: None,
             intent: self.intents.mint().expect("an id"),
             actor: self.creator(),
             planned: self.live.version(),

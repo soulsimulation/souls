@@ -239,7 +239,7 @@ impl Edits {
         bodies: &[Who],
         at: Micros,
     ) -> Result<crate::edit::Committed, Refused> {
-        let edit = Edit {
+        let edit = Edit { claim: None,
             intent: self.intents.mint().unwrap(),
             actor: Actor::Creator(self.world.creator),
             planned: self.live.version(),
@@ -646,7 +646,7 @@ fn a1_a_hill_across_a_route_re_routes_its_walkers_within_2_s() {
     let cells = {
         let copy = e.live.frozen();
         let checked = check(
-            Edit {
+            Edit { claim: None,
                 intent: id(9),
                 actor: Actor::Creator(e.world.creator),
                 planned: copy.version(),

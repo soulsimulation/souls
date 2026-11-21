@@ -694,7 +694,7 @@ fn a2b_a_creators_edit_that_removes_the_frame_under_four_beams_is_refused_naming
         kinds: rules(&rack, &[]).kinds,
     };
     let planned = live.version();
-    let edit = |ops| Edit {
+    let edit = |ops| Edit { claim: None,
         intent: Id::new(Scope([0x11; 16]), 1).expect("an id"),
         actor: Actor::Creator(creator),
         planned,
