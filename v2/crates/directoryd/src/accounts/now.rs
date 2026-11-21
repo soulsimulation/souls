@@ -25,7 +25,8 @@ pub const SETS_WINDOW_S: u64 = 60;
 pub const READ_MOST: usize = 64;
 
 /// The table this module keeps in the account store.
-pub(super) const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS soul_now_v1(soul TEXT PRIMARY KEY, text TEXT, at INTEGER,
+pub(super) const SCHEMA: &str =
+    "CREATE TABLE IF NOT EXISTS soul_now_v1(soul TEXT PRIMARY KEY, text TEXT, at INTEGER,
     window_at INTEGER NOT NULL, window_n INTEGER NOT NULL);";
 
 /// A Soul's line and when it was set (seconds since 1970).
@@ -150,14 +151,24 @@ mod tests {
                 at: T0
             })
         );
-        assert_eq!(s.now_of(&[soul.as_str()]).unwrap(), [(soul.clone(), set.clone().unwrap())]);
+        assert_eq!(
+            s.now_of(&[soul.as_str()]).unwrap(),
+            [(soul.clone(), set.clone().unwrap())]
+        );
         // 140 characters (not bytes) is a line; 141 is refused and the line kept.
-        assert!(s.now_set(&soul, &"é".repeat(NOW_MOST), T0 + 1).unwrap().is_ok());
+        assert!(
+            s.now_set(&soul, &"é".repeat(NOW_MOST), T0 + 1)
+                .unwrap()
+                .is_ok()
+        );
         assert_eq!(
             s.now_set(&soul, &"x".repeat(NOW_MOST + 1), T0 + 2).unwrap(),
             Err("now.too-long")
         );
-        assert_eq!(s.now_of(&[soul.as_str()]).unwrap()[0].1.text, "é".repeat(NOW_MOST));
+        assert_eq!(
+            s.now_of(&[soul.as_str()]).unwrap()[0].1.text,
+            "é".repeat(NOW_MOST)
+        );
         // Empty or blank clears it.
         assert_eq!(s.now_set(&soul, " \n ", T0 + 3).unwrap(), Ok(None));
         assert!(s.now_of(&[soul.as_str()]).unwrap().is_empty());
@@ -179,14 +190,19 @@ mod tests {
         s.now_set(&b, "Asleep", T0).unwrap().unwrap();
         let got = s.now_of(&[b.as_str(), "not-a-grant", a.as_str()]).unwrap();
         assert_eq!(
-            got.iter().map(|(g, n)| (g.as_str(), n.text.as_str())).collect::<Vec<_>>(),
+            got.iter()
+                .map(|(g, n)| (g.as_str(), n.text.as_str()))
+                .collect::<Vec<_>>(),
             [(b.as_str(), "Asleep"), (a.as_str(), "Fishing")]
         );
         // 30 sets a minute; the window opens again after it.
         for i in 1..SETS_MOST {
             assert!(s.now_set(&a, &format!("step {i}"), T0 + 1).unwrap().is_ok());
         }
-        assert_eq!(s.now_set(&a, "one more", T0 + 2).unwrap(), Err("now.too-often"));
+        assert_eq!(
+            s.now_set(&a, "one more", T0 + 2).unwrap(),
+            Err("now.too-often")
+        );
         assert!(s.now_set(&a, "later", T0 + SETS_WINDOW_S).unwrap().is_ok());
         drop(s);
         let _ = std::fs::remove_dir_all(dir);

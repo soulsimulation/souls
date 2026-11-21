@@ -511,8 +511,15 @@ fn now_set(req: &Request, app: &App) -> (u16, Value, String) {
     let (mut reply, note) = match text.map(|t| app.store.now_set(&grant, t, now())) {
         None => (json!({"refused": "now.form"}), "now.form".to_string()),
         Some(Ok(Ok(line))) => {
-            let note = if line.is_some() { "now set" } else { "now cleared" };
-            (json!({"now": line.as_ref().map(now_json)}), note.to_string())
+            let note = if line.is_some() {
+                "now set"
+            } else {
+                "now cleared"
+            };
+            (
+                json!({"now": line.as_ref().map(now_json)}),
+                note.to_string(),
+            )
         }
         Some(Ok(Err(name))) => (json!({"refused": name}), name.to_string()),
         Some(Err(_)) => (json!({"refused": "store"}), "store".to_string()),
@@ -530,13 +537,19 @@ fn now_read(req: &Request, app: &App) -> (u16, Value, String) {
         return (400, json!({"refused": "request"}), "request".into());
     };
     if souls.len() > super::now::READ_MOST {
-        return (400, json!({"refused": "now.too-many"}), "now.too-many".into());
+        return (
+            400,
+            json!({"refused": "now.too-many"}),
+            "now.too-many".into(),
+        );
     }
     let asked: Vec<&str> = souls.iter().filter_map(Value::as_str).collect();
     match app.store.now_of(&asked) {
         Ok(lines) => {
-            let map: serde_json::Map<String, Value> =
-                lines.iter().map(|(g, n)| (g.clone(), now_json(n))).collect();
+            let map: serde_json::Map<String, Value> = lines
+                .iter()
+                .map(|(g, n)| (g.clone(), now_json(n)))
+                .collect();
             let note = format!("now {} of {}", map.len(), asked.len());
             (200, json!({"now": map}), note)
         }

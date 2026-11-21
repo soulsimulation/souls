@@ -769,31 +769,58 @@ fn c14_a1_a_soul_sets_its_status_line_through_the_gateway_and_anyone_reads_it() 
         let mut out = String::new();
         s.read_to_string(&mut out).unwrap();
         let (head, body) = out.split_once("\r\n\r\n").unwrap();
-        (head[9..12].parse::<u16>().unwrap(), serde_json::from_str::<Value>(body).unwrap())
+        (
+            head[9..12].parse::<u16>().unwrap(),
+            serde_json::from_str::<Value>(body).unwrap(),
+        )
     };
-    let read = |souls: Value| request(&addr, "POST", "/v1/account/now", None, &json!({"souls": souls}).to_string());
+    let read = |souls: Value| {
+        request(
+            &addr,
+            "POST",
+            "/v1/account/now",
+            None,
+            &json!({"souls": souls}).to_string(),
+        )
+    };
     let (a, b) = (soul_grant(1), soul_grant(2));
 
     let (s1, r1) = set("gateway-key", &a, json!("  Mending the\nnets "));
     assert_eq!(s1, 200);
-    assert_eq!((r1["reply"]["n"].as_u64(), r1["reply"]["ok"].as_bool()), (Some(7), Some(true)));
+    assert_eq!(
+        (r1["reply"]["n"].as_u64(), r1["reply"]["ok"].as_bool()),
+        (Some(7), Some(true))
+    );
     assert_eq!(r1["reply"]["now"]["text"], "Mending the nets");
     let (s2, _, got) = read(json!([a, b]));
     assert_eq!(s2, 200);
     assert_eq!(got["now"][&a]["text"], "Mending the nets");
-    assert!(got["now"].get(&b).is_none(), "a Soul with no line is not in the answer");
-    assert_eq!(got["now"][&a].as_object().unwrap().len(), 2, "text and at only");
+    assert!(
+        got["now"].get(&b).is_none(),
+        "a Soul with no line is not in the answer"
+    );
+    assert_eq!(
+        got["now"][&a].as_object().unwrap().len(),
+        2,
+        "text and at only"
+    );
 
     let (_, r3) = set("gateway-key", &a, json!("x".repeat(141)));
     assert_eq!(r3["reply"]["refused"], "now.too-long");
     assert_eq!(read(json!([a])).2["now"][&a]["text"], "Mending the nets");
     let (_, r4) = set("gateway-key", &a, json!(""));
-    assert_eq!((r4["reply"]["ok"].as_bool(), &r4["reply"]["now"]), (Some(true), &Value::Null));
+    assert_eq!(
+        (r4["reply"]["ok"].as_bool(), &r4["reply"]["now"]),
+        (Some(true), &Value::Null)
+    );
     assert!(read(json!([a])).2["now"].as_object().unwrap().is_empty());
 
     let (s5, r5) = set("not-the-key", &a, json!("Hi"));
     assert_eq!((s5, r5["refused"].as_str()), (401, Some("mailbox-key")));
     let (s6, _, r6) = read(json!((0..65).map(soul_grant).collect::<Vec<_>>()));
     assert_eq!((s6, r6["refused"].as_str()), (400, Some("now.too-many")));
-    println!("c14 a1: set {s1}; too long {}; cleared; no key {s5}; 65 asked {s6}", r3["reply"]["refused"]);
+    println!(
+        "c14 a1: set {s1}; too long {}; cleared; no key {s5}; 65 asked {s6}",
+        r3["reply"]["refused"]
+    );
 }
