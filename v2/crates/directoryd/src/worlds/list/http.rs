@@ -7,6 +7,11 @@
 //! - `POST /v1/worlds/settings` with `{"world", "unlisted"?, "closed"?}`, signed in the same way as the world's creator
 //!   (W9, #2827): answers `{"world": {...}}`, the row as set; with neither switch, the row as it is. With
 //!   `"picture": <base64url>` it also sets the list's picture (G10, #2800), refused by G6's code when the file fails.
+//! - `POST /v1/worlds/welcome` with `{"world", "welcome"}` (#3702): the creator sets the words visitors are shown on
+//!   arrival (empty clears them); answers `{"world": {...}}`. Signed in as the creator, or with the creator's paired
+//!   token (`Bearer creator-…`, what `souls-god` holds).
+//! - `POST /v1/worlds/visitors` with `{"world"}` (#3702), signed in the same way: the world's welcome and its most
+//!   recent visitors, newest first, each `{"soul", "name", "arrived", "connected"}`; nothing of an owner's account.
 
 use serde_json::{Value, json};
 
@@ -297,4 +302,89 @@ pub fn archive(req: &Request, app: &App) -> Answer {
             e.name,
         ),
     }
+}
+
+/// The most visitors the list gives (today's `/v1/world/visitors` gives 20 recent arrivals).
+pub const VISITORS_MOST: usize = 20;
+
+/// The creator asking (#3702): a paired creator's token (`Bearer creator-…`), else a signed-in account.
+fn creator_asking(req: &Request, app: &App) -> Result<replica::ids::Id, Answer> {
+    if let Some(token) = req.bearer.as_deref().filter(|b| b.starts_with("creator-")) {
+        let grant = app
+            .pairing
+            .as_ref()
+            .and_then(|p| p.creator_by_token(token))
+            .ok_or_else(|| refuse(401, "token-refused"))?;
+        let text = grant.trim_start_matches("creator-");
+        let principal = text
+            .rsplit_once('-')
+            .and_then(|(scope, n)| crate::accounts::principal_from_text(&format!("{scope}:{n}")));
+        return principal.ok_or_else(|| refuse(401, "token-refused"));
+    }
+    signed_in(req, app).map(|a| a.principal)
+}
+
+fn world_refusal(e: replica::effects::Refusal) -> Answer {
+    let status = match e.name {
+        "world-missing" => 404,
+        "not-the-creator" => 403,
+        "store-unreachable" | "contended" => 503,
+        _ => 400,
+    };
+    refuse(status, e.name)
+}
+
+/// `POST /v1/worlds/welcome`: the creator sets the world's welcome.
+pub fn welcome(req: &Request, app: &App) -> Answer {
+    let Some(worlds) = &app.worlds else {
+        return refuse(404, "no-worlds");
+    };
+    let who = match creator_asking(req, app) {
+        Ok(w) => w,
+        Err(e) => return e,
+    };
+    let body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+    let (Some(world), Some(words)) = (
+        body.get("world").and_then(Value::as_str),
+        body.get("welcome").and_then(Value::as_str),
+    ) else {
+        return refuse(400, "request");
+    };
+    match worlds.set_welcome(world, who, words) {
+        Ok(row) => (200, json!({"world": row}), "welcome".into()),
+        Err(e) => world_refusal(e),
+    }
+}
+
+/// `POST /v1/worlds/visitors`: the creator reads the world's welcome and recent visitors.
+pub fn visitors(req: &Request, app: &App) -> Answer {
+    let (Some(worlds), Some(pairing)) = (&app.worlds, &app.pairing) else {
+        return refuse(404, "no-worlds");
+    };
+    let who = match creator_asking(req, app) {
+        Ok(w) => w,
+        Err(e) => return e,
+    };
+    let body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+    let Some(world) = body.get("world").and_then(Value::as_str) else {
+        return refuse(400, "request");
+    };
+    match worlds.is_creator(world, who) {
+        Ok(true) => {}
+        Ok(false) => return refuse(403, "not-the-creator"),
+        Err(e) => return world_refusal(e),
+    }
+    let Ok(list) = pairing.visitors(world, VISITORS_MOST) else {
+        return refuse(500, "store");
+    };
+    let welcome = worlds.welcome_of(world).ok().flatten();
+    let rows: Vec<Value> = list
+        .iter()
+        .map(|v| json!({"soul": v.soul, "name": v.name, "arrived": v.arrived, "connected": v.connected}))
+        .collect();
+    (
+        200,
+        json!({"world": world, "welcome": welcome, "visitors": rows}),
+        "visitors".into(),
+    )
 }
