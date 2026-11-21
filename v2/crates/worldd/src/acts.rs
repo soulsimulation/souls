@@ -436,6 +436,97 @@ impl Sight<'_> {
     }
 }
 
+impl Sight<'_> {
+    /// Where a body walks, at step `step`, to its run's named point of a thing on `node` that is drawn in the world's
+    /// own frame (C22 sweep): a thing placed at its parent's origin with a line (a path's, a bridge's) or an outline (a
+    /// pond's) in that frame, as Eden's land features are. The entry's point is laid on that shape: a line's way along
+    /// the entry's x axis from its first point to its last, stretched from the entry's bounds to the line's length,
+    /// across it unstretched; an outline's around its box's middle, each axis stretched from the bounds to the box.
+    /// `None` for any other walk, planned at the entry's point as before.
+    fn on_shape(&self, body: Id, step: usize, node: Id) -> Option<Vec3> {
+        use import_eden::{F_LINE, F_OUTLINE};
+        let &(at_step, thing, ref point) = self.walks.get(&body)?;
+        if at_step != step {
+            return None;
+        }
+        let n = self.tree.node(self.tree.handle(thing)?)?;
+        if n.parent() != Some(node) || n.place().is_some_and(|p| p.position != Vec3::ZERO) {
+            return None;
+        }
+        let entry = self.kinds.get(plain(n.kind()))?;
+        let p = ["points", "areas"]
+            .iter()
+            .find_map(|k| um(entry.get(k)?.get(point.as_str())?.get("at_mm")))?;
+        let bounds = um(entry.get("geometry")?.get("bounds_mm"))?;
+        let xz = |v: &replica::encode::Value| -> Option<Vec<[i64; 2]>> {
+            let replica::encode::Value::Array(rows) = v else {
+                return None;
+            };
+            rows.iter()
+                .map(|r| match r {
+                    replica::encode::Value::Array(c) => {
+                        Some([int_of(c.first()?)? * 1000, int_of(c.get(1)?)? * 1000])
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        if let Some(line) = n.fields().get(&F_LINE).and_then(xz) {
+            return on_line(p, bounds, &line);
+        }
+        on_outline(p, bounds, &n.fields().get(&F_OUTLINE).and_then(xz)?)
+    }
+}
+
+/// `v` stretched from `from` to `to` (µm).
+fn stretch(v: i64, from: i64, to: i64) -> Option<i64> {
+    i64::try_from(i128::from(v) * i128::from(to) / i128::from(from.max(1))).ok()
+}
+
+/// Point `p` of an entry whose bounds are `bounds` laid on `line` (`[x, z]` µm): its x along the line from the first
+/// point to the last, stretched from the bounds' x to the line's length, from the line's middle; its z across it, as
+/// it is; its y as it is.
+fn on_line(p: Vec3, bounds: Vec3, line: &[[i64; 2]]) -> Option<Vec3> {
+    let (a, b) = (line.first()?, line.last()?);
+    let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
+    let len = flat(*a, *b);
+    if len == 0 {
+        return None;
+    }
+    let along = stretch(p.x, bounds.x, len)?;
+    let on = |u: i64, w: i64| i64::try_from(i128::from(u) * i128::from(w) / i128::from(len)).ok();
+    // The line's way is (dx, dz), and across it (-dz, dx), each over its length.
+    Some(Vec3::new(
+        (a[0] + b[0]) / 2 + on(along, dx)? - on(p.z, dz)?,
+        p.y,
+        (a[1] + b[1]) / 2 + on(along, dz)? + on(p.z, dx)?,
+    ))
+}
+
+/// Point `p` of an entry whose bounds are `bounds` laid on `outline` (`[x, z]` µm): from the middle of the outline's
+/// box, each of x and z stretched from the bounds to the box; its y as it is.
+fn on_outline(p: Vec3, bounds: Vec3, outline: &[[i64; 2]]) -> Option<Vec3> {
+    let lo = [0, 1].map(|k| outline.iter().map(|q| q[k]).min());
+    let hi = [0, 1].map(|k| outline.iter().map(|q| q[k]).max());
+    let ([Some(x0), Some(z0)], [Some(x1), Some(z1)]) = (lo, hi) else {
+        return None;
+    };
+    Some(Vec3::new(
+        (x0 + x1) / 2 + stretch(p.x, bounds.x, x1 - x0)?,
+        p.y,
+        (z0 + z1) / 2 + stretch(p.z, bounds.z, z1 - z0)?,
+    ))
+}
+
+/// A whole number of the encoding as an `i64`.
+fn int_of(v: &replica::encode::Value) -> Option<i64> {
+    match v {
+        replica::encode::Value::Uint(u) => i64::try_from(*u).ok(),
+        replica::encode::Value::Nint(n) => i64::try_from(*n).ok().map(|n| -n - 1),
+        _ => None,
+    }
+}
+
 impl Geometry for Sight<'_> {
     fn ask(&self, body: Id, q: &Ask) -> Option<Answer> {
         match q {
@@ -501,6 +592,7 @@ impl Geometry for Sight<'_> {
         let Some(me) = self.bodies.get(&body) else {
             return WalkPlan::Legs(Vec::new());
         };
+        let at = self.on_shape(body, step, node).unwrap_or(at);
         let (node, at) = match self.area_floor(body, step, node, at) {
             Some(Some(on)) => on,
             // A building's area with no room or floor of its own to stand on: no way there, the body where it is.
