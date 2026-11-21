@@ -1594,6 +1594,9 @@ impl<S: ObjectStore> PublicWriter<S> {
         // A part's names are those its own records create; the baseline's text holds the rest (#3574).
         self.words_of(all, &Value::Array(self.records.clone()))
     }
+    fn words(&self, value: &Value, named: &Value) -> R<Vec<u8>> {
+        self.words_of(replica::audience::references(value), named)
+    }
     fn words_of(&self, refs: std::collections::BTreeSet<Id>, named: &Value) -> R<Vec<u8>> {
         let words = if let Some(store) = &self.text {
             refs.into_iter()
