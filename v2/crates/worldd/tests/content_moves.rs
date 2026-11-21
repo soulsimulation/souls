@@ -142,3 +142,37 @@ fn a1_a_move_content_gets_wrong_is_refused_by_name() {
         Some("move-phases-too-few")
     );
 }
+
+/// 0.131 parity (#3736): today's nod and shake-head are 1.5 s head gestures, seated or standing, alone or toward
+/// someone. Each is a gaze move of 1.5 s, and the humanoid has both forms, the one toward taking `toward`, as wave's.
+#[test]
+fn parity_nod_and_shake_head_are_head_gestures_of_today_s_length() {
+    let lib = worldd::acts::library().unwrap();
+    let humanoid = parse(
+        &std::fs::read_to_string(format!("{}/content/kinds/body/humanoid.json", root())).unwrap(),
+    )
+    .unwrap();
+    let forms = humanoid.get("forms").unwrap();
+    for mv in ["nod", "shake_head"] {
+        let m = lib
+            .iter()
+            .find(|m| m.name.as_str() == format!("souls:{mv}"))
+            .unwrap_or_else(|| panic!("{mv} in the library"));
+        assert_eq!(m.claims, vec![Want::One(Class::Gaze)], "{mv}: the head");
+        assert_eq!(m.cancelled_by, vec![Class::Gaze], "{mv}");
+        let total: i64 = m.phases.iter().map(|p| p.length).sum();
+        assert_eq!(total, 1_500_000, "{mv}: today's 1.5 s");
+        for (form, toward) in [(mv.to_owned(), false), (format!("{mv}_at"), true)] {
+            let f = forms.get(&form).unwrap_or_else(|| panic!("form {form}"));
+            let steps = f.get("steps").and_then(J::arr).unwrap();
+            assert_eq!(steps.len(), 1, "{form}: one move");
+            assert_eq!(steps[0].get("move").and_then(J::str), Some(mv), "{form}");
+            assert_eq!(steps[0].get("toward").is_some(), toward, "{form}");
+            assert_eq!(f.get("takes").is_some(), toward, "{form}: takes toward");
+            assert!(
+                f.get("needs").and_then(J::arr).is_some_and(<[J]>::is_empty),
+                "{form}: seated or standing, as today"
+            );
+        }
+    }
+}
