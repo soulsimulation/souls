@@ -34,7 +34,14 @@ fn signed_in(req: &Request, app: &App) -> Result<Account, Answer> {
     let (issuer, subject) = match (bearer.strip_prefix("test:"), &app.verifier) {
         (Some(n), _) if app.test_sign_in => (TEST_ISSUER.to_string(), n.to_string()),
         (_, Some(v)) => match v.verify(bearer, now()) {
-            Ok(s) => (s.issuer, s.subject),
+            Ok(s) => {
+                match app.store.revoked(&s.issuer, &s.session) {
+                    Ok(false) => {}
+                    Ok(true) => return Err(refuse(401, "session-revoked")),
+                    Err(_) => return Err(refuse(500, "store")),
+                }
+                (s.issuer, s.subject)
+            }
             Err(r) => return Err(refuse(401, r.name())),
         },
         _ => return Err(refuse(401, "no-provider")),
@@ -153,6 +160,87 @@ pub fn route(req: &Request, app: &App) -> Answer {
                 json!({"refused": e.name, "detail": detail}),
                 format!("{note} {}", e.name),
             )
+        }
+    }
+}
+
+/// The signed-in creator offers/cancels, and a signed-in recipient explicitly accepts.
+pub fn handoff(req: &Request, app: &App) -> Answer {
+    let Some(worlds) = &app.worlds else {
+        return refuse(404, "no-worlds");
+    };
+    let account = match signed_in(req, app) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+    let world = body
+        .get("world")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if let Err(error) = crate::worlds::create::check_name(world)
+        && error.name != "name-reserved"
+    {
+        return refuse(400, "world-name-invalid");
+    }
+    let note = format!("account#{}", correlate(&account.account));
+    let _transaction = worlds.handoffs.lock().unwrap_or_else(|e| e.into_inner());
+    let result: Result<Value, replica::effects::Refusal> = (|| match req.path.as_str() {
+        "/v1/worlds/handoff/offer" => {
+            let to = body
+                .get("to")
+                .and_then(Value::as_str)
+                .filter(|v| !v.is_empty());
+            if to == Some(&account.account) {
+                return crate::directory::store::refuse(
+                    "handoff-already-owner",
+                    "recipient already owns world",
+                );
+            }
+            worlds.offer_handoff(world, account.principal, to, now())
+        }
+        "/v1/worlds/handoff/cancel" => {
+            worlds.cancel_handoff(world, account.principal)?;
+            Ok(json!({"cancelled":true}))
+        }
+        "/v1/worlds/handoff/accept" => {
+            let code = body.get("code").and_then(Value::as_str).unwrap_or_default();
+            let pending =
+                worlds.begin_handoff(world, code, &account.account, account.principal, now())?;
+            let publication = || -> Result<(), String> {
+                let p = app.pairing.as_ref().ok_or("world-authority-required")?;
+                let grant = format!(
+                    "creator-{}",
+                    crate::accounts::principal_text(pending.creator).replace(':', "-")
+                );
+                app.store
+                    .own(&account.account, &grant, None)
+                    .map_err(|_| "store")?;
+                p.materialize_handoff(&pending)?;
+                Ok(())
+            };
+            if publication().is_err() {
+                return crate::directory::store::refuse(
+                    "handoff-pending",
+                    "accepted handoff awaits authority publication; retry the same acceptance",
+                );
+            }
+            worlds.finish_handoff(&pending)?;
+            Ok(json!({"accepted":true,"world":world}))
+        }
+        _ => crate::directory::store::refuse("handoff-route", "unknown handoff operation"),
+    })();
+    match result {
+        Ok(body) => (200, body, note),
+        Err(e) => {
+            let status = if e.name == "handoff-pending" || e.name.starts_with("world-authority-") {
+                503
+            } else if e.name == "not-the-creator" || e.name == "handoff-not-for-you" {
+                403
+            } else {
+                409
+            };
+            refuse(status, e.name)
         }
     }
 }
