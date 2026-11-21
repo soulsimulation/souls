@@ -145,6 +145,42 @@ impl Terrain {
         Terrain::read(tree, id, Some(bb))
     }
 
+    /// The box its tiles cover, `[x0, z0, x1, z1]` µm, read from the tiles' keys alone (#3958): `None` when node `id`
+    /// holds no terrain.
+    pub fn extent(tree: &Tree, id: Id) -> Result<Option<[i64; 4]>, String> {
+        let n = tree
+            .node(tree.handle(id).ok_or("no such node")?)
+            .ok_or("no such node")?;
+        let (Some(side), Some(rows)) = (
+            n.fields().get(&F_TILE_SIZE).and_then(int),
+            n.fields().get(&F_TILES),
+        ) else {
+            return Ok(None);
+        };
+        let side = side
+            .checked_mul(1000)
+            .filter(|s| *s > 0)
+            .ok_or("a terrain tile of no size")?;
+        let mut bb: Option<[i64; 4]> = None;
+        for r in row(rows) {
+            let (Some(tx), Some(tz)) = (row(r).first().and_then(int), row(r).get(1).and_then(int))
+            else {
+                return Err("a terrain tile is [tx, tz, heights, classes]".into());
+            };
+            let (x0, z0) = (tx.saturating_mul(side), tz.saturating_mul(side));
+            let t = [x0, z0, x0.saturating_add(side), z0.saturating_add(side)];
+            bb = Some(bb.map_or(t, |b| {
+                [
+                    b[0].min(t[0]),
+                    b[1].min(t[1]),
+                    b[2].max(t[2]),
+                    b[3].max(t[3]),
+                ]
+            }));
+        }
+        Ok(bb)
+    }
+
     fn read(tree: &Tree, id: Id, bb: Option<[i64; 4]>) -> Result<Option<Terrain>, String> {
         let n = tree
             .node(tree.handle(id).ok_or("no such node")?)

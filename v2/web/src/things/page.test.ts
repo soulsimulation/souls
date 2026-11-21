@@ -7,6 +7,7 @@ import type { WorldView } from '../draw/world.ts';
 import { modelsRoot, pageThings } from './page.ts';
 
 const PAGE = 'https://soul.game/w/eden/';
+(globalThis as { document?: unknown }).document ??= { baseURI: PAGE };
 
 test('the models root is models/ beside the world page unless the page names one', () => {
   assert.equal(modelsRoot(new URLSearchParams(), PAGE).href, 'https://soul.game/w/eden/models/');
