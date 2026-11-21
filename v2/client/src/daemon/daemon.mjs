@@ -793,7 +793,9 @@ async function answer(req) {
     case 'set-down': {
       // #3604: put the held thing down by E4's legal placement; checked off the world's clock, one receipt.
       if (!ID.test(String(req.this ?? ''))) return { ok: false, code: 'set-down-names-a-thing', detail: 'set-down <id of the held thing> [word] [anchor id]' };
-      const params = { 1: String(req.word ?? 'here'), ...(req.anchor ? { 2: String(req.anchor) } : {}), ...(req.facing ? { 3: String(req.facing) } : {}) };
+      // A word or a facing is a namespaced name in the log (`place:here`); an id stays an id.
+      const word = (w) => (ID.test(w) || w.includes(':') ? w : `place:${w}`);
+      const params = { 1: word(String(req.word ?? 'here')), ...(req.anchor ? { 2: String(req.anchor) } : {}), ...(req.facing ? { 3: word(String(req.facing)) } : {}) };
       const basis = shownVersion ?? state.cursor;
       const { sequence, sent } = sendIntent(['hands:set-down'], { target: req.this, params, basis, expiry: req.expiry });
       return closing({ ok: true, sequence, sent, verb: 'hands:set-down', basis: sequenceOf(basis) }, null, { now: true });

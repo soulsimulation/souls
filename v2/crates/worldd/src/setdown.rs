@@ -2,8 +2,8 @@
 //! clock thread by the edit checker's thread ([`crate::answers`]) and committed at a tick with lookups only.
 //!
 //! - **The intent.** Verb [`VERB`], its target the thing held. Parameter 1 the word (`replica::kinds::place::Word`,
-//!   by its placements name; `here` when absent), 2 the anchor (an id, for the words that need one), 3 the facing:
-//!   a node's id (toward it) or `to_wall`; absent, as it was.
+//!   by its placements name under [`NS`], `place:next_to`; `here` when absent), 2 the anchor (an id, for the words
+//!   that need one), 3 the facing: a node's id (toward it) or `place:to_wall`; absent, as it was.
 //! - **Off the clock** ([`check`]): on the newest frozen copy at or after the intent's arrival, with the acting body
 //!   stood where the controller has it (Souls' bodies are not written to the tree as they walk), E4's
 //!   `sim::setdown::plan` chooses the place on the checker's own town's ground, `sim::setdown::part` makes its one
@@ -35,6 +35,9 @@ type R<T> = Result<T, Refusal>;
 
 /// The verb of a set-down.
 pub const VERB: &str = "hands:set-down";
+/// The namespace of a placement word or a facing in the intent: a text in a part is a namespaced name
+/// (`v2/docs/effects.md`), so `here` is sent as `place:here`.
+pub const NS: &str = "place:";
 
 fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     Refusal {
@@ -86,7 +89,11 @@ pub fn read(
     let p = &intent.parameters;
     let word = match p.get(&1) {
         None => Word::Here,
-        Some(Value::Text(t)) => Word::from_name(t.as_str()).ok_or("setdown.unknown-word")?,
+        Some(Value::Text(t)) => t
+            .as_str()
+            .strip_prefix(NS)
+            .and_then(Word::from_name)
+            .ok_or("setdown.unknown-word")?,
         Some(_) => return Err("setdown.unknown-word"),
     };
     let id_at = |k| match p.get(&k) {
@@ -98,8 +105,8 @@ pub fn read(
     let anchor = id_at(2)?;
     let facing = match p.get(&3) {
         None => Facing::AsItWas,
-        Some(Value::Text(t)) if t.as_str() == "to_wall" => Facing::ToWall,
-        Some(Value::Text(t)) if t.as_str() == "as_it_was" => Facing::AsItWas,
+        Some(Value::Text(t)) if t.as_str().strip_prefix(NS) == Some("to_wall") => Facing::ToWall,
+        Some(Value::Text(t)) if t.as_str().strip_prefix(NS) == Some("as_it_was") => Facing::AsItWas,
         Some(_) => Facing::Toward(id_at(3)?.ok_or("arg-malformed")?),
     };
     Ok(Ask {
@@ -217,11 +224,13 @@ pub fn check(
         };
         e4::plan(&mut w, &ask, a.at)
     })?;
+    // Judged as the body's: G2's bodies name their Soul by its body (`crate::buildsafe`), so the holder's own thing is
+    // not counted in use by it.
     let part = e4::part(
         header,
         tree.next(),
         a.at,
-        a.soul,
+        a.body,
         Cause::Intent(a.id),
         planned.entries.clone(),
     )?;

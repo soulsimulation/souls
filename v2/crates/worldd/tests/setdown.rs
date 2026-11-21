@@ -528,7 +528,7 @@ fn p(pairs: &[(u64, Value)]) -> BTreeMap<u64, Value> {
 const SET_DOWN: &str = "hands:set-down";
 
 fn word(w: &str) -> BTreeMap<u64, Value> {
-    p(&[(1, Value::Text(name(w)))])
+    p(&[(1, Value::Text(name(&format!("place:{w}"))))])
 }
 
 /// Where `node` stands on the open ground (µm), its parent and slot.
