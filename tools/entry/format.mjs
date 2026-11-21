@@ -1004,7 +1004,8 @@ function form(f, path, ctx, err) {
 
 /** A hatch: one pure function, named by the hash of its module, with the fields and arguments it reads and a step limit.
  *  `answers` is "verdict" (the form can be done only if the function says yes) or {"field": <a field of this kind>} (the
- *  function's whole-number answer is that field's new value). `why` names a text entry saying what no declared form could do. */
+ *  function's whole-number answer is that field's new value) or {"fields": [<fields>]} (a verdict and, with a yes, those
+ *  fields' new values, #3713). `why` names a text entry saying what no declared form could do. */
 function hatch(f, path, ctx, err) {
   const p = `${path}.hatch`, h = f.hatch;
   if (!isObj(h)) { err(p, 'an object: {"module", "reads", "steps_most", "answers", "why"}'); return; }
@@ -1036,7 +1037,15 @@ function hatch(f, path, ctx, err) {
   else if (isObj(h.answers) && Object.keys(h.answers).length === 1 && 'field' in h.answers) {
     const t = ctx.state[h.answers.field]?.type;
     if (!t || !['bool', 'enum', 'int', 'duration'].includes(t)) err(`${p}.answers.field`, 'names a bool, enum, int or duration state field of this kind that takes the answer');
-  } else err(`${p}.answers`, '"verdict", or {"field": <a state field of this kind>}');
+  } else if (isObj(h.answers) && Object.keys(h.answers).length === 1 && Array.isArray(h.answers.fields)) {
+    const fs = h.answers.fields;
+    if (fs.length < 1 || fs.length > 8) err(`${p}.answers.fields`, 'one to eight state fields of this kind');
+    fs.forEach((f, i) => {
+      const t = ctx.state[f]?.type;
+      if (!t || !['bool', 'enum', 'int', 'duration', 'list'].includes(t)) err(`${p}.answers.fields.${i}`, 'names a bool, enum, int, duration or list state field of this kind');
+      else if (fs.indexOf(f) !== i) err(`${p}.answers.fields.${i}`, 'already answered');
+    });
+  } else err(`${p}.answers`, '"verdict", {"field": <a state field of this kind>} or {"fields": [<state fields of this kind>]}');
   if (!(typeof h.why === 'string' && h.why in ctx.text)) err(`${p}.why`, 'names an entry of the text table saying what no declared form could do');
 }
 

@@ -28,7 +28,8 @@
       "audience": {"rule": "everyone"}
     },
     "castling": {"n": 32, "type": "int", "unit": "count", "default": 15, "min": 0, "max": 15, "audience": {"rule": "everyone"}},
-    "en_passant": {"n": 33, "type": "int", "unit": "count", "default": 64, "min": 0, "max": 64, "audience": {"rule": "everyone"}}
+    "en_passant": {"n": 33, "type": "int", "unit": "count", "default": 64, "min": 0, "max": 64, "audience": {"rule": "everyone"}},
+    "check": {"n": 34, "type": "bool", "default": false, "audience": {"rule": "everyone"}}
   },
   "links": {
     "white": {"n": 1, "from": "soul", "most": 1, "audience": {"rule": "everyone"}},
@@ -74,8 +75,10 @@
         {"need": "linked", "link": "black"}
       ],
       "steps": [],
+      "hatch": {"module": "prov-1220ba123219c43ce8691e3ed37a0342f8a0af104a94c43a21e621a8d980772ceb15", "reads": [{"field": "phase"}, {"field": "pieces"}], "steps_most": 1000000, "answers": {"fields": ["pieces"]}, "why": "why_chess"},
       "effects": [
         {"change": "set", "field": "phase", "to": "playing", "event": "game_began"},
+        {"change": "set", "field": "check", "to": false, "event": "no_check"},
         {"change": "set", "field": "turn", "to": "white", "event": "white_to_move"},
         {"change": "set", "field": "winner", "to": "none", "event": "no_winner_yet"},
         {"change": "set", "field": "castling", "to": 15, "event": "castling_restored"},
@@ -89,7 +92,7 @@
       "needs": [{"need": "state", "field": "phase", "is": "playing"}, {"need": "state", "field": "turn", "is": "white"}],
       "steps": [{"step": "move", "move": "slide", "at": "board"}],
       "hatch": {
-        "module": "prov-12200000000000000000000000000000000000000000000000000000000000000000",
+        "module": "prov-1220ba123219c43ce8691e3ed37a0342f8a0af104a94c43a21e621a8d980772ceb15",
         "reads": [
           {"field": "pieces"},
           {"field": "turn"},
@@ -99,8 +102,8 @@
           {"arg": "to"},
           {"arg": "promotion"}
         ],
-        "steps_most": 20000,
-        "answers": "verdict",
+        "steps_most": 1000000,
+        "answers": {"fields": ["pieces", "turn", "en_passant", "castling", "phase", "winner", "check"]},
         "why": "why_chess"
       },
       "effects": [{"change": "set", "field": "turn", "to": "black", "event": "moved"}]
@@ -112,7 +115,7 @@
       "needs": [{"need": "state", "field": "phase", "is": "playing"}, {"need": "state", "field": "turn", "is": "black"}],
       "steps": [{"step": "move", "move": "slide", "at": "board"}],
       "hatch": {
-        "module": "prov-12200000000000000000000000000000000000000000000000000000000000000000",
+        "module": "prov-1220ba123219c43ce8691e3ed37a0342f8a0af104a94c43a21e621a8d980772ceb15",
         "reads": [
           {"field": "pieces"},
           {"field": "turn"},
@@ -122,8 +125,8 @@
           {"arg": "to"},
           {"arg": "promotion"}
         ],
-        "steps_most": 20000,
-        "answers": "verdict",
+        "steps_most": 1000000,
+        "answers": {"fields": ["pieces", "turn", "en_passant", "castling", "phase", "winner", "check"]},
         "why": "why_chess"
       },
       "effects": [{"change": "set", "field": "turn", "to": "white", "event": "moved"}]

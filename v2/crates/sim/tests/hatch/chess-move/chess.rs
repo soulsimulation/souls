@@ -3,8 +3,8 @@
 //! then the words, and calls `run(bytes)`; it answers 1 (a legal move) or 0. With a yes it has written at `output`,
 //! each as a count of words and the words, the table's fields after the move: `pieces`, `turn`, `en_passant`,
 //! `castling`, `phase` (1 playing, 2 checkmate, 3 stalemate), `winner` (0 none, 1 white, 2 black) and `check` (1 when
-//! the side to move is in check). With one read (the table's `phase`), it is the setup: it answers 1 and writes the
-//! starting `pieces`.
+//! the side to move is in check). With two reads (the table's `phase` and `pieces`), it is the setup: it answers 1 and
+//! writes the starting `pieces`.
 //!
 //! The reads, in the chess table's order: `pieces` (square, piece pairs), `turn` (0 white, 1 black), `en_passant` (the
 //! square a pawn may take on, 64 for none), `castling` (bits: 1 white king side, 2 white queen side, 4 and 8 black's),
@@ -98,7 +98,7 @@ pub extern "C" fn run(bytes: i32) -> i64 {
     let mut out = Out { w: out, at: 0 };
     let w = &w[..n.min(WORDS)];
     let mut r = Reads { w, at: 0 };
-    if r.next().is_some() && r.next().is_none() {
+    if r.next().is_some() && r.next().is_some() && r.next().is_none() {
         out.pieces(&START);
         return 1;
     }
