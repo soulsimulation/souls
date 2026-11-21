@@ -1485,7 +1485,7 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
             // A land feature drawn in the world's frame: the point laid on its own shape, as the world walks to it.
             let drawn = named.as_deref().and_then(|p| {
                 let n = tree.node(tree.handle(thing)?)?;
-                worldd::acts::on_drawn_shape(n, entry, p)
+                worldd::acts::on_drawn_shape(&n, entry, p)
             });
             let at = drawn
                 .or_else(|| named.as_deref().and_then(point))

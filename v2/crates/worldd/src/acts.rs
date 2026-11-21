@@ -481,7 +481,7 @@ impl Sight<'_> {
         if n.parent() != Some(node) {
             return None;
         }
-        on_drawn_shape(n, self.kinds.get(plain(n.kind()))?, point.as_str())
+        on_drawn_shape(&n, self.kinds.get(plain(n.kind()))?, point.as_str())
     }
 }
 
@@ -489,7 +489,7 @@ impl Sight<'_> {
 /// origin, with a line or an outline field), as Eden's land features are: on its line ([`on_line`]) when the entry
 /// is long along x (a hedge's, a bridge's: x at least twice z), else on the box of its line's or outline's points
 /// ([`on_outline`]: a pond, a garden, a winding channel). `None` for any other thing or point.
-pub fn on_drawn_shape(n: replica::tree::NodeRef<'_>, entry: &Json, point: &str) -> Option<Vec3> {
+pub fn on_drawn_shape(n: &replica::tree::NodeRef<'_>, entry: &Json, point: &str) -> Option<Vec3> {
     use import_eden::{F_LINE, F_OUTLINE};
     if n.place().is_some_and(|p| p.position != Vec3::ZERO) {
         return None;
