@@ -996,6 +996,7 @@ impl Bodies {
                     &mut self.mint,
                     &mut self.moves,
                     &reach,
+                    &self.town,
                     &[request],
                     now,
                 )
