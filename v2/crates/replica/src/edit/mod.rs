@@ -752,10 +752,10 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
 /// The definitions a batch makes (#3697), each a place of `souls:kind` at the zone's root holding its record as bytes
 /// in field [`defined::ENTRY`]: checked ([`defined::read`]), and its fields made the canonical record and the full name
 /// it defines, which every replica reads. By the operation that makes each: the full name and its rules.
-fn define(
-    edit: &mut Edit,
-    copy: &Replica,
-) -> Result<BTreeMap<usize, (String, Kind, Option<Value>)>, Refused> {
+/// By the operation that makes each definition: its full name, its rules and the solids a thing of it stands as.
+type Made = BTreeMap<usize, (String, Kind, Option<Value>)>;
+
+fn define(edit: &mut Edit, copy: &Replica) -> Result<Made, Refused> {
     let tree = copy.tree();
     let root = tree.node(tree.root()).map(|n| n.id());
     let boot = defined::namespaces(copy.header().kinds.iter().map(Name::as_str));
