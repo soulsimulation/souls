@@ -612,7 +612,8 @@ mod doorway_lowering_tests {
         };
         // Codec regression only: the served test separately proves authored geometry, admission and BUILDSAFE.
         let checked = Checked {
-            edit: Edit { claim: None,
+            edit: Edit {
+                claim: None,
                 intent: Id::new(Scope([0xec; 16]), 1).unwrap(),
                 actor: Actor::Creator(Id::new(Scope([0xed; 16]), 1).unwrap()),
                 planned: 0,

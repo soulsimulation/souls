@@ -449,7 +449,8 @@ fn g1c_worldd_reads_the_souls_and_the_open_ground_and_g2_names_the_soul() {
         kinds: b.kinds.clone(),
     };
     for (name, soul, op) in unsafe_edits(&b) {
-        let e = Edit { claim: None,
+        let e = Edit {
+            claim: None,
             intent: Id::new(LINEAGE, 9_000).unwrap(),
             actor: Actor::Creator(creator),
             planned: copy.version(),

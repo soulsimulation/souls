@@ -157,8 +157,14 @@ pub fn read_districts(v: &Value) -> Result<(), String> {
             for v in [x, z, yaw] {
                 near(v)?;
             }
-            if [w, dep].iter().any(|v| near(v).is_ok_and(|n| n <= 0) || near(v).is_err()) {
-                return Err(format!("plot {}: width and depth are positive mm", pid.as_str()));
+            if [w, dep]
+                .iter()
+                .any(|v| near(v).is_ok_and(|n| n <= 0) || near(v).is_err())
+            {
+                return Err(format!(
+                    "plot {}: width and depth are positive mm",
+                    pid.as_str()
+                ));
             }
             match rest {
                 [] => {}
@@ -168,7 +174,11 @@ pub fn read_districts(v: &Value) -> Result<(), String> {
                 _ => return Err("a plot is [id, x, z, width, depth, yaw, use?]".into()),
             }
             if !plot_ids.insert(pid.clone()) {
-                return Err(format!("plot {} is in plan {} twice", pid.as_str(), id.as_str()));
+                return Err(format!(
+                    "plot {} is in plan {} twice",
+                    pid.as_str(),
+                    id.as_str()
+                ));
             }
         }
         for r in list(roads, "roads", ROADS_MOST)? {
@@ -195,7 +205,10 @@ pub fn read_districts(v: &Value) -> Result<(), String> {
             for p in list(c, "a chapter's plots", 8)? {
                 let p = name(p, "a chapter's plot")?;
                 if !plot_ids.contains(&p) || !chaptered.insert(p.clone()) {
-                    return Err(format!("chapter plot {} is unknown or in two chapters", p.as_str()));
+                    return Err(format!(
+                        "chapter plot {} is unknown or in two chapters",
+                        p.as_str()
+                    ));
                 }
             }
         }
@@ -226,7 +239,11 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
     let root = tree.node(tree.root()).map(|n| n.id());
     // The root's own fields first: a plan or claim list that would not read is refused whatever else.
     for (i, op) in edit.ops.iter().enumerate() {
-        if let Op::Set { node: Ref::Node(id), field, to } = op
+        if let Op::Set {
+            node: Ref::Node(id),
+            field,
+            to,
+        } = op
             && Some(*id) == root
         {
             let (bad, why) = match *field {
@@ -259,7 +276,8 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
     let at = |id: Id, p: Vec3| crate::select::to_root_point(tree, id, p);
     // Placed nodes by their batch name: where each is, and its parent.
     let mut placed: BTreeMap<u64, (Option<Vec3>, Ref)> = BTreeMap::new();
-    let point_in = |placed: &BTreeMap<u64, (Option<Vec3>, Ref)>, parent: Ref, p: Vec3| match parent {
+    let point_in = |placed: &BTreeMap<u64, (Option<Vec3>, Ref)>, parent: Ref, p: Vec3| match parent
+    {
         Ref::Node(id) => at(id, p),
         Ref::New(n) => placed
             .get(&n)
@@ -316,9 +334,18 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                     if let Ref::Node(id) = r
                         && let Some(cs) = tree.handle(id).and_then(|h| tree.children(h))
                     {
-                        stack.extend(cs.iter().filter_map(|c| tree.node(*c)).map(|n| Ref::Node(n.id())));
+                        stack.extend(
+                            cs.iter()
+                                .filter_map(|c| tree.node(*c))
+                                .map(|n| Ref::Node(n.id())),
+                        );
                     }
-                    stack.extend(placed.iter().filter(|(_, (_, p))| *p == r).map(|(n, _)| Ref::New(*n)));
+                    stack.extend(
+                        placed
+                            .iter()
+                            .filter(|(_, (_, p))| *p == r)
+                            .map(|(n, _)| Ref::New(*n)),
+                    );
                 }
             }
             Op::Doorway { door, .. } => add(&mut t, origin(&placed, *door)),
@@ -336,7 +363,10 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                     return refuse(
                         Some(i),
                         "edit.outside-claim",
-                        format!("where this is cannot be read, so it is not inside {}", c.show()),
+                        format!(
+                            "where this is cannot be read, so it is not inside {}",
+                            c.show()
+                        ),
                     );
                 }
                 if let Some(p) = t.points.iter().find(|p| !c.holds(**p)) {
