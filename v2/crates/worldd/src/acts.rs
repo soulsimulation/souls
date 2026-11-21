@@ -683,6 +683,32 @@ fn obj_mut<'a>(v: &'a mut Json, key: &str) -> Option<&'a mut Json> {
 /// argument is at [`AT_ARG`], that thing (returned). A point of this thing named by `at` stays as it is. An argument
 /// not given as a thing is refused `arg-missing`. The two points are added to the copy's points, at its origin, so the
 /// binder knows them; [`Sight`] measures them.
+/// An intent's whole-number arguments split for `form` of `entry`: those it `takes` as an `int` or a `duration` (a
+/// count, a start time) as values, the rest as slot numbers (#3703).
+fn numbers(
+    entry: &Json,
+    form: &str,
+    given: &BTreeMap<String, u64>,
+) -> (skills::form_runner::Args, BTreeMap<String, u64>) {
+    let takes = |k: &str| {
+        entry
+            .get("forms")
+            .and_then(|f| f.get(form))
+            .and_then(|f| f.get("takes"))
+            .and_then(|t| t.get(k))
+            .and_then(|t| t.get("type"))
+            .and_then(Json::str)
+    };
+    let (mut counts, mut slots) = (skills::form_runner::Args::new(), BTreeMap::new());
+    for (k, &n) in given {
+        match (takes(k), i64::try_from(n)) {
+            (Some("int" | "duration"), Ok(v)) => drop(counts.insert(k.clone(), skills::form_runner::Arg::Int(v))),
+            _ => drop(slots.insert(k.clone(), n)),
+        }
+    }
+    (counts, slots)
+}
+
 fn targets(entry: &Json, form: &str, args: &skills::form_runner::Args) -> R<(Json, Option<Id>)> {
     let mut e = entry.clone();
     let mut thing = None;
@@ -986,7 +1012,10 @@ impl Acts {
                 first.get_or_insert(refusal("arg-ambiguous", key));
                 continue;
             }
-            let mut all = match skills::form_runner::args_in(entry, &args.things, &args.slots) {
+            // A whole number the form takes as an `int` or a `duration` is that value (#3703); any other is a slot
+            // of the node by number (C12).
+            let (counts, slots) = numbers(entry, form, &args.slots);
+            let mut all = match skills::form_runner::args_in(entry, &args.things, &slots) {
                 Ok(all) => all,
                 Err(e) => {
                     first.get_or_insert(e);
@@ -994,7 +1023,7 @@ impl Acts {
                 }
             };
             let mut ambiguous = None;
-            for (key, value) in &args.values {
+            for (key, value) in counts.iter().chain(&args.values) {
                 if all.insert(key.clone(), value.clone()).is_some() {
                     ambiguous = Some(key.clone());
                     break;
