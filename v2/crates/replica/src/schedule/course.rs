@@ -10,8 +10,13 @@
 //!   per number (T4 rule 3). Orientation is constant (T4 rule 8); no platform `sin` or `cos` is used.
 //! - **Stops.** A loaded track states the time within which a stop is always reached (`within`); a table with a gap
 //!   between stops longer than that, or with no stop, is refused at load as `track-no-stop-within`.
+//! - **Once** (#3603): a track run through its stations one time, after which the frame stands at its last station
+//!   for good: a punt rowed to where a rider steered it, or back to its bank. Its last station is a stop that never
+//!   ends.
 //! - **Stored** as the node's field [`super::F_COURSE`]: `{1: [[[x, y, z], dwell], ...], 2: shape (1 a loop, 2 there
-//!   and back), 3: speed µm/s, 4: start µs, 5: within µs}` ([`Course::to_value`], [`Course::read`]).
+//!   and back, 3 once), 3: speed µm/s, 4: start µs, 5: within µs}` ([`Course::to_value`], [`Course::read`]).
+//! - **A node's place at a time** ([`place_at`], #3603): where its course has it at world time `t`, else where it
+//!   was placed. The world and the page (the replica's WASM `courseAt`) read it with the same code.
 
 use crate::effects::Refusal;
 use crate::encode::Value;
@@ -49,13 +54,17 @@ pub struct Station {
     pub dwell: Micros,
 }
 
-/// How the stations are run: in a loop (the last back to the first), or along a line and back again (the end
-/// stations dwell once a turn, the others once each way).
+/// How the stations are run: in a loop (the last back to the first), along a line and back again (the end
+/// stations dwell once a turn, the others once each way), or once through, standing at the last for good.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
     Loop,
     ThereAndBack,
+    Once,
 }
+
+/// How long a [`Shape::Once`] track's last stop lasts, µs: for good, as far as any world time reaches.
+const FOR_GOOD: Micros = Micros::MAX / 4;
 
 /// A track as the moving node stores it: data, read by its formula, never stepped.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -113,11 +122,24 @@ impl Course {
         let order: Vec<usize> = match self.shape {
             Shape::Loop => (0..n).collect(),
             Shape::ThereAndBack => (0..n).chain((1..n - 1).rev()).collect(),
+            Shape::Once => (0..n).collect(),
         };
         let mut legs = Vec::new();
         let mut at: Micros = 0;
         for (k, &i) in order.iter().enumerate() {
             let s = self.stations[i];
+            if self.shape == Shape::Once && k + 1 == order.len() {
+                // The last station of a track run once: a stop that never ends.
+                legs.push(Leg {
+                    from: s.at,
+                    to: s.at,
+                    start: at,
+                    dur: FOR_GOOD,
+                    stop: Some(i),
+                });
+                at += FOR_GOOD;
+                break;
+            }
             if s.dwell > 0 {
                 legs.push(Leg {
                     from: s.at,
@@ -323,6 +345,7 @@ impl Course {
         let shape = match self.shape {
             Shape::Loop => 1,
             Shape::ThereAndBack => 2,
+            Shape::Once => 3,
         };
         Value::Map(BTreeMap::from([
             (1, Value::Array(stations)),
@@ -356,6 +379,7 @@ impl Course {
             shape: match n(2)? {
                 1 => Shape::Loop,
                 2 => Shape::ThereAndBack,
+                3 => Shape::Once,
                 _ => return None,
             },
             speed: n(3)?,
@@ -363,4 +387,17 @@ impl Course {
             within: n(5)?,
         })
     }
+}
+
+/// Where a node is at world time `t` (#3603), µm in its parent's frame, and its velocity, µm a second: where its
+/// course ([`super::F_COURSE`] in `fields`) has it, else `placed` (where the tree placed it) and still. A course that
+/// does not load, or a time before it starts, leaves the node where it was placed. The world's reads and the page's
+/// (`courseAt`) are this function.
+pub fn place_at(fields: &BTreeMap<u64, Value>, placed: Vec3, t: Micros) -> (Vec3, Vec3) {
+    fields
+        .get(&super::F_COURSE)
+        .and_then(Course::read)
+        .and_then(|c| c.load().ok())
+        .and_then(|table| table.at(t).ok())
+        .unwrap_or((placed, Vec3::ZERO))
 }

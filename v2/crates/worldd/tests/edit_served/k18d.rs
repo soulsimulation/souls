@@ -74,6 +74,16 @@ fn place(
     }
 }
 
+/// The new building's walls: the closed partition at x 0 and three outer walls (µm rows of the building's frame).
+fn host_solids() -> Vec<Value> {
+    vec![
+        row(&[0, 0, 100, 2000, 0, 0, 2500, 1, 0]),
+        row(&[4000, 0, 100, 2000, 0, 0, 2500, 1, 0]),
+        row(&[2000, -2000, 2000, 100, 0, 0, 2500, 1, 0]),
+        row(&[2000, 2000, 2000, 100, 0, 0, 2500, 1, 0]),
+    ]
+}
+
 fn room_batch(w: &Seeded, im: &import_eden::Import, building: &Name, x: i64, z: i64) -> Vec<Op> {
     let pinned = |plain: &str| {
         Name::new(
@@ -85,13 +95,7 @@ fn room_batch(w: &Seeded, im: &import_eden::Import, building: &Name, x: i64, z: 
         )
         .unwrap()
     };
-    let closed = row(&[0, 0, 100, 2000, 0, 0, 2500, 1, 0]);
-    let solids = vec![
-        closed.clone(),
-        row(&[4000, 0, 100, 2000, 0, 0, 2500, 1, 0]),
-        row(&[2000, -2000, 2000, 100, 0, 0, 2500, 1, 0]),
-        row(&[2000, 2000, 2000, 100, 0, 0, 2500, 1, 0]),
-    ];
+    let solids = host_solids();
     vec![
         place(
             1,
@@ -374,13 +378,71 @@ async fn k18d_creator_builds_room_door_chair_and_live_planner_approaches_its_exa
     )
     .await;
     assert_eq!((in_use.kind, in_use.reason.as_str()), (2, "edit.in-use"));
+    // #3826: a second Soul is refused the occupied slot, and a wall over the seated Soul is refused by BUILDSAFE.
+    put(
+        &mut other,
+        soul_intent(&w, w.souls[1], 2, "eden:sit", Some(chair), BTreeMap::new()),
+    )
+    .await;
+    let taken = terminal(&mut other).await;
+    assert_eq!(
+        taken.kind, 2,
+        "the occupied slot refuses a second Soul: {taken:?}"
+    );
+    let walls = |w: &Seeded| {
+        let (copy, _) = served_copy(w);
+        let t = copy.tree();
+        t.node(t.handle(host).unwrap()).unwrap().fields()[&import_eden::F_SOLIDS].clone()
+    };
+    let before = walls(&w);
+    let Value::Array(mut buried) = before.clone() else {
+        panic!("the building's walls: {before:?}")
+    };
+    // A solid filling the inner room, the chair in it at (2 m, -0.509 m) of the building's frame: no ground is left
+    // for the seated Soul to stand up onto.
+    buried.push(row(&[2000, 0, 1900, 1900, 0, 0, 2500, 1, 0]));
+    let (bury, _) = send(
+        &mut maker,
+        edit_intent(
+            &w,
+            actor,
+            5,
+            in_use.version,
+            Op::Set {
+                node: Ref::Node(host),
+                field: import_eden::F_SOLIDS,
+                to: Value::Array(buried),
+            },
+        ),
+    )
+    .await;
+    // A seated Soul is judged for the ground it would stand up onto (#3280): none left there is a cut-off.
+    assert_eq!((bury.kind, bury.reason.as_str()), (2, "edit.would-cut-off"));
+    assert_eq!(
+        walls(&w),
+        before,
+        "the refused burial left the building's walls as they were"
+    );
     assert!(poses(&w).iter().any(|(b, pose)| *b == body
         && pose.frame.node == chair
         && pose.frame.slot == Some(1)
         && pose.support == Support::Slot));
+    let stalls: Vec<String> = served
+        .lines
+        .try_iter()
+        .filter(|l| l.contains("tick-stalled"))
+        .collect();
+    assert!(stalls.is_empty(), "the clock never stalled: {stalls:?}");
     println!(
-        "K18d creator batches {:?}/{:?}; new door/room/chair exact slot sit {:?}; unrelated walk {:?}; occupied cutoff {} and seat {}",
-        made.entries, opened.entries, seated.entries, walked.entries, blocked.reason, in_use.reason
+        "K18d creator batches {:?}/{:?}; new door/room/chair exact slot sit {:?}; unrelated walk {:?}; occupied cutoff {}, seat {}, second Soul {}, bury {}",
+        made.entries,
+        opened.entries,
+        seated.entries,
+        walked.entries,
+        blocked.reason,
+        in_use.reason,
+        taken.reason,
+        bury.reason
     );
 }
 

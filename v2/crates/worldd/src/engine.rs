@@ -8,7 +8,8 @@
 //! - **Parameters.** The target is the place (propose, offer), the activity (join, start, leave, lift, set down) or the
 //!   offer (accept, decline). Propose: 1 the activity's kind. Offer: 1 the kind, 2 the asker's role, 3 the bodies
 //!   asked (ids). Join: 1 the role, 2 the revision (default 1). Lift: 1 the thing carried. Its two carriers are the
-//!   activity's first two members, the first in front.
+//!   activity's first two members, the first in front. `carrier:steer` and `carrier:land` steer the boat the Soul sits
+//!   in ([`crate::carrier`], #3603): the target the boat, steer's 1 a point `[x, z]` µm.
 //! - **Written once, as the Soul's.** Each system writes through its own writer onto a copy of the tree; its entries,
 //!   caused by the intent and acted by its Soul, are applied to the world with the tick's other entries
 //!   ([`Engine::out`]), so the intent's receipt names them. An act is answered at once: a receipt, or its refusal by
@@ -35,6 +36,7 @@ use sim::activity::carry::Carry;
 use sim::activity::{Activities, Ask};
 use sim::controller::Controller;
 use sim::moves::Moves;
+use sim::slots::Slots;
 use sim::timers::DueList;
 
 type R<T> = Result<T, Refusal>;
@@ -58,6 +60,9 @@ pub enum Verb {
     Leave,
     Lift,
     SetDown,
+    /// A rider steers or lands the boat it sits in (#3603, [`crate::carrier`]).
+    Steer,
+    Land,
 }
 
 impl Verb {
@@ -73,6 +78,8 @@ impl Verb {
             "activity:leave" => Verb::Leave,
             "carry:lift" => Verb::Lift,
             "carry:set-down" => Verb::SetDown,
+            "carrier:steer" => Verb::Steer,
+            "carrier:land" => Verb::Land,
             _ => return None,
         })
     }
@@ -101,6 +108,8 @@ pub struct Engine {
     mint: Minter,
     /// Entries written and not yet applied.
     out: Vec<Effect>,
+    /// The boats steered off their own loops (#3603).
+    steered: BTreeSet<Id>,
 }
 
 fn param_id(p: &BTreeMap<u64, Value>, k: u64, what: &'static str) -> R<Id> {
@@ -161,20 +170,43 @@ impl Engine {
             moves: Moves::new(),
             mint: Minter::new(scope),
             out: Vec::new(),
+            steered: BTreeSet::new(),
         }
     }
 
     /// The activities `live` holds after a restart (their nodes and membership links are in the log), so a member can
     /// still speak in one and leave it: each started one takes its members' role claims again through `c`.
-    pub fn restore(&mut self, live: &Tree, c: &mut Controller) -> R<()> {
+    /// The things on a course are handed to `slots` with the courses the log left them (#3603).
+    pub fn restore(&mut self, live: &Tree, c: &mut Controller, slots: &mut Slots) -> R<()> {
         let kinds = self.kinds.clone();
         self.activities =
             Activities::restore(self.header.clone(), self.rules.clone(), kinds, live, c)?;
+        self.steered = crate::carrier::restore(live, slots)?;
         Ok(())
     }
 
     /// Runs act `a` at `now` on a copy of `live`, the bodies' controller `c`. Its entries wait in [`Engine::out`].
-    pub fn act(&mut self, live: &Tree, c: &mut Controller, a: &Act, now: Micros) -> R<()> {
+    pub fn act(
+        &mut self,
+        live: &Tree,
+        c: &mut Controller,
+        slots: &mut Slots,
+        a: &Act,
+        now: Micros,
+    ) -> R<()> {
+        if let Some(ask) = match a.verb {
+            Verb::Steer => Some(crate::carrier::Ask::Steer),
+            Verb::Land => Some(crate::carrier::Ask::Land),
+            _ => None,
+        } {
+            let by = (Cause::Intent(a.id), Actor::Soul(a.soul));
+            let e = crate::carrier::act(live, slots, ask, a.body, a.target, &a.params, now, by)?;
+            if let Some(t) = a.target {
+                self.steered.insert(t);
+            }
+            self.out.push(e);
+            return Ok(());
+        }
         let mut tree = live.frozen();
         let target = |what| a.target.ok_or_else(|| refusal(what, "a target node"));
         let ask = Ask {
@@ -266,6 +298,7 @@ impl Engine {
                     self.carries.remove(&activity);
                 }
             }
+            Verb::Steer | Verb::Land => {}
             Verb::Lift | Verb::SetDown => {
                 let activity = target("carry-needs-an-activity")?;
                 let members = self
@@ -351,7 +384,11 @@ impl Engine {
 
     /// The engine's part of a tick at `now`: its due timers (a leave let go, an offer or a pair lapsed), then one
     /// sample of each carry between its carriers.
-    pub fn tick(&mut self, live: &Tree, c: &mut Controller, now: Micros) {
+    pub fn tick(&mut self, live: &Tree, c: &mut Controller, slots: &mut Slots, now: Micros) {
+        if !self.steered.is_empty() {
+            let home = crate::carrier::settle(live, slots, &mut self.steered, now);
+            self.out.extend(home);
+        }
         let mut tree = None;
         while let Some(t) = self.due.fire(now) {
             let tr = tree.get_or_insert_with(|| live.frozen());

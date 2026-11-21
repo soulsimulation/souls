@@ -346,6 +346,35 @@ fn slot_point(tree: &Tree, h: Handle, n: u64) -> Option<Vec3> {
     })
 }
 
+/// Each slot of node `h` and its point in the frame of its ancestor `frame`, µm (none when it has no slots).
+pub fn slot_points(tree: &Tree, h: Handle, frame: Handle) -> Result<Vec<(u64, Vec3)>, String> {
+    let Some(v) = tree.node(h).and_then(|n| n.fields().get(&F_SLOTS).cloned()) else {
+        return Ok(Vec::new());
+    };
+    let x = xform_to(tree, h, frame)?;
+    let mut out = Vec::new();
+    for r in row(&v).iter().map(row) {
+        let Some(n) = r.first().and_then(int).and_then(|n| u64::try_from(n).ok()) else {
+            continue;
+        };
+        if let Some(p) = slot_point(tree, h, n) {
+            out.push((n, x.point(p)?));
+        }
+    }
+    Ok(out)
+}
+
+/// The boxes of every node of the subtree at `h`, in the frame of its ancestor `frame`.
+pub fn solids_under(tree: &Tree, h: Handle, frame: Handle) -> Result<Vec<Solid>, String> {
+    let mut out = Vec::new();
+    let mut stack = vec![h];
+    while let Some(at) = stack.pop() {
+        solids_of(tree, at, &xform_to(tree, at, frame)?, &mut out)?;
+        stack.extend(tree.children(at).unwrap_or(&[]).iter().copied());
+    }
+    Ok(out)
+}
+
 fn int(v: &Value) -> Option<i64> {
     match v {
         Value::Uint(u) => i64::try_from(*u).ok(),

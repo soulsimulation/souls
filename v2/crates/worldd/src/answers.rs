@@ -2952,7 +2952,12 @@ impl Clock {
         self.forms
             .tick(self.replica.tree(), self.bodies.as_mut(), tick, now);
         if let (Some(e), Some(b)) = (self.engine.as_mut(), self.bodies.as_mut()) {
-            e.tick(self.replica.tree(), &mut b.runner.controller, now);
+            e.tick(
+                self.replica.tree(),
+                &mut b.runner.controller,
+                &mut b.slots,
+                now,
+            );
         }
     }
 
@@ -2997,7 +3002,13 @@ impl Clock {
             };
             let (actor, sequence) = (o.actor, o.sequence);
             let r = match (self.engine.as_mut(), self.bodies.as_mut()) {
-                (Some(e), Some(b)) => e.act(self.replica.tree(), &mut b.runner.controller, &a, now),
+                (Some(e), Some(b)) => e.act(
+                    self.replica.tree(),
+                    &mut b.runner.controller,
+                    &mut b.slots,
+                    &a,
+                    now,
+                ),
                 _ => Err(Refusal {
                     name: "engine-acts-off",
                     detail: "the world has no rules or no bodies for them".into(),
@@ -4285,7 +4296,8 @@ pub fn start<S: Storage + 'static>(
                         c.bodies = Some(b);
                         // The activities the log holds, so their members speak in them and leave them again (E26).
                         if let (Some(e), Some(b)) = (c.engine.as_mut(), c.bodies.as_mut())
-                            && let Err(r) = e.restore(c.replica.tree(), &mut b.runner.controller)
+                            && let Err(r) =
+                                e.restore(c.replica.tree(), &mut b.runner.controller, &mut b.slots)
                         {
                             eprintln!("worldd: the activities were not restored: {r}");
                         }
