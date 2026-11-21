@@ -96,15 +96,16 @@ export function rendererPictures(renderer: THREE.WebGLRenderer, cell = 96, cols 
       const previous = renderer.getRenderTarget(), clear = renderer.getClearColor(new THREE.Color()), alpha = renderer.getClearAlpha();
       const autoClear = renderer.autoClear, shadows = renderer.shadowMap.enabled, scissorTest = renderer.getScissorTest();
       try {
-        renderer.setRenderTarget(target);
         renderer.setClearColor(0x000000, 0);
-        if (!cleared) (renderer.setScissorTest(false), renderer.clear(), (cleared = true));
         renderer.autoClear = false;
         renderer.shadowMap.enabled = false;
-        // Inside a margin, so the atlas's smaller mip levels do not bleed a neighbour into a card.
+        if (!cleared) (renderer.setRenderTarget(target), renderer.clear(), (cleared = true));
+        // Inside a margin, so the atlas's smaller mip levels do not bleed a neighbour into a card. A target's viewport
+        // and scissor are read when it is bound, so they are set first.
         target.viewport.set(x + pad, y + pad, cell - 2 * pad, cell - 2 * pad);
         target.scissor.copy(target.viewport);
         target.scissorTest = true;
+        renderer.setRenderTarget(target);
         renderer.clear();
         renderer.render(scene, camera);
       } finally {
