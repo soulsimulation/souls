@@ -546,6 +546,7 @@ function connect() {
       const edit = { ...(names !== '-' ? { names: Object.fromEntries(names.split(',').map((p) => p.split('='))) } : {}), ...(op !== '-' ? { op: Number(op) } : {}) };
       const answered = { kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b, answer: Number(c), ...(d !== '-' ? { reason: d } : {}), ...edit };
       note(answered);
+      keyAnswered(answered);
       if (a !== '-') editsWaiting.get(Number(a))?.(answered);
     } catch (e) {
       log(`frame refused: ${String(e.message ?? e).slice(0, 200)}`);
@@ -834,7 +835,50 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex
   return { sequence, sent };
 }
 
+// --- #3706 (today's `--key`): a command sent again with the same key is one write --------------------------------
+// A write's key is kept with its first answer and the world's answer to its intent, on disk with the sequence, so a
+// retry (a harness that timed out, the same command run twice, a daemon restarted between) sends nothing and gets the
+// first answer back, `repeat: true`, with the receipt as it stands. Two at once with one key wait for the same write.
+const KEYED = new Set(['act', 'object', 'say', 'whisper', 'lie', 'set-down', 'converse', 'wear']);
+const KEYS_KEPT = 500, keying = new Map();
+/** Today's limits for a key (eden.mjs `keyArg`): 1 to 100 printable characters, no spaces. */
+const keyOk = (k) => typeof k === 'string' && /^[\x21-\x7e]{1,100}$/.test(k);
+async function keyed(req) {
+  const k = `${req.op} ${req.key}`;
+  state.keys ??= {};
+  const kept = state.keys[k];
+  if (kept) return { ...kept.first, sent: false, repeat: true, ...(kept.answer ? { receipt: kept.answer } : {}), ...ageNow() };
+  if (keying.has(k)) { const first = await keying.get(k); return { ...first, sent: false, repeat: true }; }
+  const { key: _key, ...rest } = req;
+  const going = answer(rest);
+  keying.set(k, going);
+  try {
+    const first = await going;
+    // Kept only once it wrote: a refusal before anything was sent can be fixed and sent again with the same key.
+    if (first.ok && first.sequence !== undefined) {
+      const { at: _a, changed: _c, age: _g, gap: _p, stale: _s, asleep: _z, ...answerOnly } = first;
+      state.keys[k] = { sequence: first.sequence, first: answerOnly, answer: null };
+      const names = Object.keys(state.keys);
+      if (names.length > KEYS_KEPT) delete state.keys[names[0]];
+      save();
+    }
+    return first;
+  } finally { keying.delete(k); }
+}
+/** The world's answer to a keyed write's intent, kept with its key (a later answer, the resolution, replaces it). */
+function keyAnswered(a) {
+  if (a.sequence === null || !state.keys) return;
+  for (const kept of Object.values(state.keys)) {
+    if (kept.sequence === a.sequence) { kept.answer = { answer: a.answer, ...(a.reason ? { reason: a.reason } : {}), ...(a.version ? { version: a.version } : {}) }; save(); }
+  }
+}
+
 async function answer(req) {
+  if (req.key !== undefined) {
+    if (!KEYED.has(req.op)) return { ok: false, code: 'key-not-a-write', detail: `--key goes on a write: ${[...KEYED].join(', ')}` };
+    if (!keyOk(req.key)) return { ok: false, code: 'key-form', detail: '--key takes 1 to 100 printable characters, no spaces' };
+    return keyed(req);
+  }
   // R13: a command from the model's turn shows that what a reader was handed was taken.
   if (!['wait', 'status', 'pending'].includes(req.op)) wakes.confirm();
   switch (req.op) {

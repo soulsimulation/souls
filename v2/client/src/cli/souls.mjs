@@ -76,6 +76,9 @@
 //   souls.mjs schedule [list] | schedule remove <id>   the entries and what became of each
 //   souls.mjs upgrade [--rollback]            brings today's client's Souls across, one owner approval each (R18); with
 //                                             --rollback, today's client again
+//   a write [--key <k>]                       act, say, whisper, lie, converse, wear: sent again with the same key, it
+//                                             is one write, and the repeat answers with the first answer (#3706)
+//   souls.mjs help safety                     the safety page for agents, the text a world serves at /safety.md
 //   any of them [--soul <id>]                 which Soul, when the home has more than one
 //
 // The home is SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG.
@@ -148,7 +151,7 @@ export function requestOf(argv) {
   }
   // history's --soul is its question; --as is the Soul asking.
   const asking = args.includes('history');
-  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for', '--close', '--to', '--gesture']) {
+  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for', '--close', '--to', '--gesture', '--key']) {
     const k = args.indexOf(name);
     if (k >= 0) { opts[name.slice(2)] = args[k + 1]; args.splice(k, 2); }
     if (name === '--missed' && opts.missed === 'late') { opts.missed = `late ${args[k]}`; args.splice(k, 1); }
@@ -212,6 +215,8 @@ export function requestOf(argv) {
   if (op === 'history') {
     for (const [k, v] of [['at', opts.at], ['thing', opts.thing], ['soul', opts.of], ['since', opts.since], ['until', opts.until]]) if (v !== undefined) req[k] = v;
   }
+  // #3706: a write sent again with the same --key is one write; the daemon answers the repeat with the first answer.
+  if (opts.key !== undefined) req.key = opts.key;
   return { req, soul: opts.soul, ...(opts.now !== undefined && !LOCAL.includes(op) && op !== 'pending' ? { now: opts.now } : {}) };
 }
 
@@ -236,9 +241,12 @@ const shq = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
  * served: `pending --check` gates a headless turn, which starts only when a message or a wake waits. The turn uses
  * the harness's own login.
  */
+/** The safety page for agents (#3706): today's text, kept in this client and served as a world's /safety.md. */
+export const safetyText = () => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../help/safety.md'), 'utf8');
+
 function help(home, named, topic) {
   if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
-  if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake'), { code: 'help-topics' });
+  if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake | safety | account'), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;
   const prompt = `Work in the folder ${folder}. Run: ${cli} pending. For each message under open, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, or for an answer or a no, ${cli} ack <its id> "<reply>" --close done|failed, as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
@@ -279,6 +287,8 @@ async function schedule(home, named, { sub, args, until, missed }) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
   const asked = requestOf(process.argv.slice(2)), { req, soul: named, refused, detail } = asked;
+  // #3706: today's `help safety`, as text: the page a world serves at /safety.md, from the same file.
+  if (process.argv[2] === 'help' && process.argv[3] === 'safety') { process.stdout.write(safetyText()); process.exit(0); }
   try {
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
     if (process.argv[2] === 'shoot') { // G10: drawn here, in a browser, from the public stream; no daemon unless it must use words
