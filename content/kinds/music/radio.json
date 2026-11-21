@@ -1,0 +1,483 @@
+{
+ "format": "souls-entry/1",
+ "kind": "eden:radio",
+ "owner": "thing",
+ "state": {
+  "on": {
+   "n": 28,
+   "type": "bool",
+   "default": false,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "station": {
+   "n": 29,
+   "type": "enum",
+   "values": [
+    "quiet_piano",
+    "dance_band",
+    "spoken_word"
+   ],
+   "default": "quiet_piano",
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "front": {
+   "role": "stand",
+   "at_mm": [
+    0,
+    0,
+    650
+   ]
+  },
+  "power": {
+   "role": "contact",
+   "at_mm": [
+    50,
+    1125,
+    120
+   ]
+  },
+  "tuner": {
+   "role": "contact",
+   "at_mm": [
+    170,
+    1125,
+    120
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   620,
+   1460,
+   360
+  ]
+ },
+ "forms": {
+  "switch_on": {
+   "who": "anyone",
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "on",
+     "is": false
+    }
+   ],
+   "steps": [
+    {
+     "step": "walk_to",
+     "point": "front"
+    },
+    {
+     "step": "move",
+     "move": "press",
+     "at": "power"
+    }
+   ],
+   "effects": [
+    {
+     "change": "set",
+     "field": "on",
+     "to": true,
+     "event": "switched_on"
+    }
+   ]
+  },
+  "switch_off": {
+   "who": "anyone",
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "on",
+     "is": true
+    }
+   ],
+   "steps": [
+    {
+     "step": "walk_to",
+     "point": "front"
+    },
+    {
+     "step": "move",
+     "move": "press",
+     "at": "power"
+    }
+   ],
+   "effects": [
+    {
+     "change": "set",
+     "field": "on",
+     "to": false,
+     "event": "switched_off"
+    }
+   ]
+  },
+  "tune_quiet_piano": {
+   "who": "anyone",
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "on",
+     "is": true
+    }
+   ],
+   "steps": [
+    {
+     "step": "walk_to",
+     "point": "front"
+    },
+    {
+     "step": "move",
+     "move": "press",
+     "at": "tuner"
+    }
+   ],
+   "effects": [
+    {
+     "change": "set",
+     "field": "station",
+     "to": "quiet_piano",
+     "event": "station_changed"
+    }
+   ]
+  },
+  "tune_dance_band": {
+   "who": "anyone",
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "on",
+     "is": true
+    }
+   ],
+   "steps": [
+    {
+     "step": "walk_to",
+     "point": "front"
+    },
+    {
+     "step": "move",
+     "move": "press",
+     "at": "tuner"
+    }
+   ],
+   "effects": [
+    {
+     "change": "set",
+     "field": "station",
+     "to": "dance_band",
+     "event": "station_changed"
+    }
+   ]
+  },
+  "tune_spoken_word": {
+   "who": "anyone",
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "on",
+     "is": true
+    }
+   ],
+   "steps": [
+    {
+     "step": "walk_to",
+     "point": "front"
+    },
+    {
+     "step": "move",
+     "move": "press",
+     "at": "tuner"
+    }
+   ],
+   "effects": [
+    {
+     "change": "set",
+     "field": "station",
+     "to": "spoken_word",
+     "event": "station_changed"
+    }
+   ]
+  }
+ },
+ "motion": {
+  "how": "two_hands"
+ },
+ "loose": {
+  "ever": true
+ },
+ "looks": {
+  "model": "look:radio",
+  "table": [
+   {
+    "do": "sound",
+    "sound": "music",
+    "mode": "loop",
+    "field": "on",
+    "at": {
+     "true": 500,
+     "false": 0
+    },
+    "reach_mm": 16000
+   }
+  ],
+  "shape": {
+   "round": 0,
+   "shapes": [
+    {
+     "kind": "box",
+     "at": [
+      0,
+      1005,
+      0
+     ],
+     "size": [
+      620,
+      30,
+      360
+     ],
+     "tint": "shelf"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      960,
+      165
+     ],
+     "size": [
+      560,
+      60,
+      20
+     ],
+     "tint": "shelf"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -270,
+      495,
+      -150
+     ],
+     "size": [
+      36,
+      990,
+      36
+     ],
+     "tint": "shelf"
+    },
+    {
+     "kind": "box",
+     "at": [
+      270,
+      495,
+      -150
+     ],
+     "size": [
+      36,
+      990,
+      36
+     ],
+     "tint": "shelf"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -270,
+      495,
+      150
+     ],
+     "size": [
+      36,
+      990,
+      36
+     ],
+     "tint": "shelf"
+    },
+    {
+     "kind": "box",
+     "at": [
+      270,
+      495,
+      150
+     ],
+     "size": [
+      36,
+      990,
+      36
+     ],
+     "tint": "shelf"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      320,
+      0
+     ],
+     "size": [
+      560,
+      22,
+      310
+     ],
+     "tint": "shelf"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      1195,
+      -20
+     ],
+     "size": [
+      500,
+      280,
+      240
+     ],
+     "tint": "wood"
+    },
+    {
+     "kind": "box",
+     "at": [
+      0,
+      1190,
+      102
+     ],
+     "size": [
+      460,
+      250,
+      8
+     ],
+     "tint": "face"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -110,
+      1195,
+      108
+     ],
+     "size": [
+      190,
+      200,
+      6
+     ],
+     "tint": "cloth"
+    },
+    {
+     "kind": "box",
+     "at": [
+      110,
+      1255,
+      108
+     ],
+     "size": [
+      200,
+      70,
+      6
+     ],
+     "tint": "dark",
+     "when": "!@on"
+    },
+    {
+     "kind": "box",
+     "at": [
+      110,
+      1255,
+      108
+     ],
+     "size": [
+      200,
+      70,
+      6
+     ],
+     "tint": "dial",
+     "glow": 1000,
+     "when": "@on"
+    },
+    {
+     "kind": "cyl",
+     "at": [
+      50,
+      1125,
+      120
+     ],
+     "r": 28,
+     "h": 32,
+     "segments": 8,
+     "tint": "knob",
+     "pitch": 90000
+    },
+    {
+     "kind": "cyl",
+     "at": [
+      170,
+      1125,
+      120
+     ],
+     "r": 28,
+     "h": 32,
+     "segments": 8,
+     "tint": "knob",
+     "pitch": 90000,
+     "role": "knob"
+    }
+   ],
+   "palette": {
+    "wood": "#8a5a33",
+    "shelf": "#5b3b24",
+    "face": "#3b2a1f",
+    "cloth": "#cdb48a",
+    "dial": "#ffe2a0",
+    "dark": "#2a2420",
+    "knob": "#d9c08a"
+   },
+   "tags": [
+    "music",
+    "radio",
+    "hand-operated"
+   ]
+  }
+ },
+ "text": {
+  "card": "A valve radio on a console shelf: switch it on, then tune a station.",
+  "radio": "radio",
+  "music": "music",
+  "howto_listen": "Switch it on, tune a station, then switch it off.",
+  "instrument": "instrument"
+ },
+ "card": {
+  "text": "card",
+  "category": "instrument",
+  "synonyms": [
+   "radio",
+   "music"
+  ]
+ },
+ "howtos": {
+  "listen": {
+   "text": "howto_listen",
+   "steps": [
+    {
+     "form": "switch_on"
+    },
+    {
+     "form": "tune_dance_band"
+    },
+    {
+     "form": "switch_off"
+    }
+   ]
+  }
+ }
+}

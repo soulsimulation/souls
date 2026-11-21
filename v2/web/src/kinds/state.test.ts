@@ -10,7 +10,7 @@ const entry = (path: string) => JSON.parse(readFileSync(join(import.meta.dirname
 test('the worker keeps the plain fields: numbers, texts and timed values; bytes, references and rows are left out', () => {
   const f = new Map<number, unknown>([
     [1, new Uint8Array([1, 2])], [12, [[0, 0, 1, 1, 0, 0, 10]]], [30, new Map([[21, [new Uint8Array(16), 1]]])],
-    [28, 1], [29, 'sprout'], [31, 3n], [33, [400000, -5, 7000000n]], [34, 2n ** 60n],
+    [28, true], [29, 'sprout'], [31, 3n], [33, [400000, -5, 7000000n]], [34, 2n ** 60n],
   ]);
   assert.deepEqual(fieldsOf(f), { 28: 1, 29: 'sprout', 31: 3, 33: { value: 400000, per_s: -5, set_us: 7000000 }, 34: 2n ** 60n });
   assert.equal(fieldsOf(new Map([[1, new Uint8Array(0)]])), undefined);
