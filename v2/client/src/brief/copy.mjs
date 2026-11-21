@@ -127,7 +127,7 @@ export const F_COURSE = 80;
 /** A place's title (#3699): field 4, a public name's hash (named at import) or a creator's words (`{21: id}`). */
 export const F_TITLE = 4;
 /** A place's aliases (#3699): a creator's words (`{21: id}`), one alias a line; `find` scores them. */
-export const F_ALIASES = 90;
+export const F_ALIASES = 101;
 export const plainKind = (k) => String(k).replace(/@.*$/, '');
 /** A version `[lineage, zone, epoch, sequence]`'s bytes in hex, as its sequence. */
 export const sequenceOf = (versionHex) => (versionHex ? Number(decode(Buffer.from(versionHex, 'hex'))[3]) : 0);

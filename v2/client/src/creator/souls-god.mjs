@@ -95,7 +95,7 @@ export function opsOf(verb, words) {
 }
 
 /** A place's title and aliases (`brief/copy.mjs` F_TITLE, F_ALIASES): the words, or false to clear. */
-export const ABOUT = { title: 4, aliases: 90 };
+export const ABOUT = { title: 4, aliases: 101 };
 const ALIASES_MOST = 64;
 
 /** `about`'s batch: today's `about <ref> --set JSON | --clear`, or its `--title` and `--alias` parts. */
