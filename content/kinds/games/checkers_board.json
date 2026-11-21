@@ -1,0 +1,1082 @@
+{
+ "format": "souls-entry/1",
+ "kind": "eden:checkers_board",
+ "owner": "thing",
+ "state": {
+  "turn": {
+   "n": 28,
+   "type": "enum",
+   "values": [
+    "x",
+    "o"
+   ],
+   "default": "x",
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "phase": {
+   "n": 29,
+   "type": "enum",
+   "values": [
+    "waiting",
+    "playing",
+    "won"
+   ],
+   "default": "waiting",
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "winner": {
+   "n": 30,
+   "type": "enum",
+   "values": [
+    "none",
+    "x",
+    "o"
+   ],
+   "default": "none",
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "pieces": {
+   "n": 31,
+   "type": "list",
+   "most": 24,
+   "of": {
+    "square": {
+     "type": "int",
+     "unit": "count"
+    },
+    "piece": {
+     "type": "int",
+     "unit": "count"
+    }
+   },
+   "key": "square",
+   "default": [],
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "chain": {
+   "n": 32,
+   "type": "int",
+   "unit": "count",
+   "default": 64,
+   "min": 0,
+   "max": 64,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "links": {
+  "x": {
+   "n": 1,
+   "from": "soul",
+   "most": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "o": {
+   "n": 2,
+   "from": "soul",
+   "most": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "x_stand": {
+   "role": "stand",
+   "at_mm": [
+    0,
+    0,
+    -600
+   ]
+  },
+  "o_stand": {
+   "role": "stand",
+   "at_mm": [
+    0,
+    0,
+    600
+   ],
+   "yaw_mdeg": 180000
+  },
+  "board": {
+   "role": "contact",
+   "at_mm": [
+    0,
+    724,
+    0
+   ]
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   640,
+   740,
+   640
+  ]
+ },
+ "forms": {
+  "play_x": {
+   "who": "anyone",
+   "starts": "act",
+   "needs": [
+    {
+     "need": "unlinked",
+     "link": "x"
+    }
+   ],
+   "steps": [
+    {
+     "step": "walk_to",
+     "point": "x_stand"
+    }
+   ],
+   "effects": [
+    {
+     "change": "link",
+     "link": "x",
+     "from": "actor",
+     "event": "took_x"
+    }
+   ]
+  },
+  "play_o": {
+   "who": "anyone",
+   "starts": "act",
+   "needs": [
+    {
+     "need": "unlinked",
+     "link": "o"
+    }
+   ],
+   "steps": [
+    {
+     "step": "walk_to",
+     "point": "o_stand"
+    }
+   ],
+   "effects": [
+    {
+     "change": "link",
+     "link": "o",
+     "from": "actor",
+     "event": "took_o"
+    }
+   ]
+  },
+  "begin": {
+   "who": "anyone",
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "phase",
+     "not": "playing"
+    },
+    {
+     "need": "linked",
+     "link": "x"
+    },
+    {
+     "need": "linked",
+     "link": "o"
+    }
+   ],
+   "steps": [],
+   "hatch": {
+    "module": "prov-12200000000000000000000000000000000000000000000000000000000000000000",
+    "reads": [
+     {
+      "field": "phase"
+     },
+     {
+      "field": "pieces"
+     }
+    ],
+    "steps_most": 1000000,
+    "answers": {
+     "fields": [
+      "pieces"
+     ]
+    },
+    "why": "why_checkers"
+   },
+   "effects": [
+    {
+     "change": "set",
+     "field": "phase",
+     "to": "playing",
+     "event": "game_began"
+    },
+    {
+     "change": "set",
+     "field": "turn",
+     "to": "x",
+     "event": "x_to_move"
+    },
+    {
+     "change": "set",
+     "field": "winner",
+     "to": "none",
+     "event": "no_winner_yet"
+    },
+    {
+     "change": "set",
+     "field": "chain",
+     "to": 64,
+     "event": "no_jump_under_way"
+    }
+   ]
+  },
+  "move_x": {
+   "who": {
+    "link": "x"
+   },
+   "starts": "act",
+   "takes": {
+    "from": {
+     "type": "count"
+    },
+    "to": {
+     "type": "count"
+    }
+   },
+   "needs": [
+    {
+     "need": "state",
+     "field": "phase",
+     "is": "playing"
+    },
+    {
+     "need": "state",
+     "field": "turn",
+     "is": "x"
+    }
+   ],
+   "steps": [
+    {
+     "step": "move",
+     "move": "slide",
+     "at": "board"
+    }
+   ],
+   "hatch": {
+    "module": "prov-12200000000000000000000000000000000000000000000000000000000000000000",
+    "reads": [
+     {
+      "field": "pieces"
+     },
+     {
+      "field": "turn"
+     },
+     {
+      "field": "chain"
+     },
+     {
+      "arg": "from"
+     },
+     {
+      "arg": "to"
+     }
+    ],
+    "steps_most": 1000000,
+    "answers": {
+     "fields": [
+      "pieces",
+      "turn",
+      "chain",
+      "phase",
+      "winner"
+     ]
+    },
+    "why": "why_checkers"
+   },
+   "effects": [
+    {
+     "change": "set",
+     "field": "turn",
+     "to": "o",
+     "event": "moved"
+    }
+   ]
+  },
+  "move_o": {
+   "who": {
+    "link": "o"
+   },
+   "starts": "act",
+   "takes": {
+    "from": {
+     "type": "count"
+    },
+    "to": {
+     "type": "count"
+    }
+   },
+   "needs": [
+    {
+     "need": "state",
+     "field": "phase",
+     "is": "playing"
+    },
+    {
+     "need": "state",
+     "field": "turn",
+     "is": "o"
+    }
+   ],
+   "steps": [
+    {
+     "step": "move",
+     "move": "slide",
+     "at": "board"
+    }
+   ],
+   "hatch": {
+    "module": "prov-12200000000000000000000000000000000000000000000000000000000000000000",
+    "reads": [
+     {
+      "field": "pieces"
+     },
+     {
+      "field": "turn"
+     },
+     {
+      "field": "chain"
+     },
+     {
+      "arg": "from"
+     },
+     {
+      "arg": "to"
+     }
+    ],
+    "steps_most": 1000000,
+    "answers": {
+     "fields": [
+      "pieces",
+      "turn",
+      "chain",
+      "phase",
+      "winner"
+     ]
+    },
+    "why": "why_checkers"
+   },
+   "effects": [
+    {
+     "change": "set",
+     "field": "turn",
+     "to": "x",
+     "event": "moved"
+    }
+   ]
+  },
+  "resign_x": {
+   "who": {
+    "link": "x"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "phase",
+     "is": "playing"
+    }
+   ],
+   "steps": [],
+   "effects": [
+    {
+     "change": "set",
+     "field": "phase",
+     "to": "won",
+     "event": "resigned"
+    },
+    {
+     "change": "set",
+     "field": "winner",
+     "to": "o",
+     "event": "o_won"
+    }
+   ]
+  },
+  "resign_o": {
+   "who": {
+    "link": "o"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "phase",
+     "is": "playing"
+    }
+   ],
+   "steps": [],
+   "effects": [
+    {
+     "change": "set",
+     "field": "phase",
+     "to": "won",
+     "event": "resigned"
+    },
+    {
+     "change": "set",
+     "field": "winner",
+     "to": "x",
+     "event": "x_won"
+    }
+   ]
+  },
+  "leave_x": {
+   "who": {
+    "link": "x"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "phase",
+     "not": "playing"
+    }
+   ],
+   "steps": [],
+   "effects": [
+    {
+     "change": "unlink",
+     "link": "x",
+     "from": "actor",
+     "event": "left_x"
+    }
+   ]
+  },
+  "leave_o": {
+   "who": {
+    "link": "o"
+   },
+   "starts": "act",
+   "needs": [
+    {
+     "need": "state",
+     "field": "phase",
+     "not": "playing"
+    }
+   ],
+   "steps": [],
+   "effects": [
+    {
+     "change": "unlink",
+     "link": "o",
+     "from": "actor",
+     "event": "left_o"
+    }
+   ]
+  }
+ },
+ "roles": {
+  "x": {
+   "need": "required",
+   "places": {
+    "in": "this",
+    "points": [
+     "x_stand"
+    ],
+    "posture": "stand"
+   }
+  },
+  "o": {
+   "need": "required",
+   "places": {
+    "in": "this",
+    "points": [
+     "o_stand"
+    ],
+    "posture": "stand"
+   }
+  }
+ },
+ "motion": {
+  "how": "pushed_by_one"
+ },
+ "loose": {
+  "ever": true
+ },
+ "looks": {
+  "model": "look:checkers_board",
+  "shape": {
+   "round": 4,
+   "shapes": [
+    {
+     "kind": "box",
+     "at": [
+      0,
+      700,
+      0
+     ],
+     "size": [
+      640,
+      40,
+      640
+     ],
+     "tint": "wood"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -270,
+      340,
+      -270
+     ],
+     "size": [
+      50,
+      680,
+      50
+     ],
+     "tint": "leg"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -270,
+      340,
+      270
+     ],
+     "size": [
+      50,
+      680,
+      50
+     ],
+     "tint": "leg"
+    },
+    {
+     "kind": "box",
+     "at": [
+      270,
+      340,
+      -270
+     ],
+     "size": [
+      50,
+      680,
+      50
+     ],
+     "tint": "leg"
+    },
+    {
+     "kind": "box",
+     "at": [
+      270,
+      340,
+      270
+     ],
+     "size": [
+      50,
+      680,
+      50
+     ],
+     "tint": "leg"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -245,
+      722,
+      -245
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -105,
+      722,
+      -245
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      35,
+      722,
+      -245
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      175,
+      722,
+      -245
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -175,
+      722,
+      -175
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -35,
+      722,
+      -175
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      105,
+      722,
+      -175
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      245,
+      722,
+      -175
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -245,
+      722,
+      -105
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -105,
+      722,
+      -105
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      35,
+      722,
+      -105
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      175,
+      722,
+      -105
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -175,
+      722,
+      -35
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -35,
+      722,
+      -35
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      105,
+      722,
+      -35
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      245,
+      722,
+      -35
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -245,
+      722,
+      35
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -105,
+      722,
+      35
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      35,
+      722,
+      35
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      175,
+      722,
+      35
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -175,
+      722,
+      105
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -35,
+      722,
+      105
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      105,
+      722,
+      105
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      245,
+      722,
+      105
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -245,
+      722,
+      175
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -105,
+      722,
+      175
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      35,
+      722,
+      175
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      175,
+      722,
+      175
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -175,
+      722,
+      245
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      -35,
+      722,
+      245
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      105,
+      722,
+      245
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    },
+    {
+     "kind": "box",
+     "at": [
+      245,
+      722,
+      245
+     ],
+     "size": [
+      70,
+      4,
+      70
+     ],
+     "tint": "dark"
+    }
+   ],
+   "palette": {
+    "wood": "#c9a46a",
+    "leg": "#7d5a3a",
+    "dark": "#2b322e"
+   },
+   "tags": [
+    "checkers",
+    "game",
+    "table"
+   ]
+  }
+ },
+ "text": {
+  "card": "A checkers board on a small table for two: take x or o, begin, then move in turn; a jump must be taken and a man reaching the far row is crowned.",
+  "game": "game",
+  "checkers": "checkers",
+  "draughts": "draughts",
+  "why_checkers": "Whether a checkers move is legal depends on every piece, whether a jump is open and a jump under way; no declared need can say it.",
+  "howto_play": "Take a side, begin once both sides are taken, then move in turn until one side has no move left or resigns."
+ },
+ "card": {
+  "text": "card",
+  "category": "game",
+  "synonyms": [
+   "checkers",
+   "draughts"
+  ]
+ },
+ "howtos": {
+  "play": {
+   "text": "howto_play",
+   "steps": [
+    {
+     "form": "play_x"
+    },
+    {
+     "form": "begin"
+    },
+    {
+     "form": "move_x"
+    }
+   ]
+  }
+ }
+}
