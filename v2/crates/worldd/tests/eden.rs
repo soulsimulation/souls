@@ -794,7 +794,8 @@ fn c20_a3_a_soul_walks_across_the_town_and_uses_a_thing_by_its_form() {
     assert!(all > 40_000_000);
 }
 
-/// A gateway walk of over 600 m across Eden, from the births to the far corner of the town, ends done (#1960): its
+/// A gateway walk of over 600 m across Eden, from its north-west corner to its north-east (one of N5's seeded route
+/// pairs, 829 m by the map), ends done (#1960): its
 /// deadline follows its planned route, with no 180 s cap. Before, every walk over about 250 m ended `act.timed-out`
 /// while still moving. Takes about ten minutes of world time at 1/1.
 #[test]
@@ -803,7 +804,12 @@ fn a_600_m_walk_across_eden_ends_done() {
     let facts = facts_path();
     let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
     let ground = im.nodes["ground"];
-    let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "long", im.nodes["world"].scope());
+    let (served, mut soul, dir) = serve(
+        &facts,
+        "-373.333,474.666",
+        "long",
+        im.nodes["world"].scope(),
+    );
     soul.0
         .set_read_timeout(Some(Duration::from_secs(1_500)))
         .unwrap();
@@ -812,14 +818,14 @@ fn a_600_m_walk_across_eden_ends_done() {
         u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
     };
     let to = Value::Array(vec![um(442.666), um(0.0), um(507.333)]);
-    let t0 = std::time::Instant::now();
+    let t0 = answers::now();
     let walked = soul.act_within(
         "eden:walk",
         Some(ground),
         BTreeMap::from([(1, to)]),
         1_500_000_000,
     );
-    let secs = t0.elapsed().as_secs_f64();
+    let secs = (answers::now() - t0) as f64 / 1e6;
     let track = track(&dir);
     let path: f64 = track
         .windows(2)
