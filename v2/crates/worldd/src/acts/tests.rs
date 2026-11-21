@@ -437,7 +437,7 @@ fn a_gateway_walk_is_watched_against_its_legs_end_not_its_granted_place() {
     };
     let place = |town: &Town, at: Vec3| {
         town.surfaces[&ground]
-            .place(id, frame.clone(), at, Quat::IDENTITY)
+            .place(id, frame, at, Quat::IDENTITY)
             .unwrap()
     };
     let start = place(&town, Vec3::new(-20_000_000, 0, 50_000_000));
