@@ -619,3 +619,43 @@ fn c33_a_standing_slot_binds_to_the_hand_off_and_a_seat_stays_refused() {
     let end = r.wake(&mut h, Woke::Moved(Name::new("done").unwrap()));
     assert_eq!(ended(&end), Some("done"));
 }
+
+/// C34 (#3599): a move at a point right after a walk to an area first walks, within that area, to the point (the
+/// planner stops within the move's reach), as today's game approaches the hand's point before it acts: a greenhouse's
+/// `open_vent` from across the room or outside reaches its vent pole. A move after a walk to a point is bound as before.
+#[test]
+fn c34_a_move_after_a_walk_to_an_area_approaches_its_point_first() {
+    let entry = parse(
+        r#"{"format":"souls-entry/1","kind":"t:x",
+        "points":{"door":{"role":"stand","at_mm":[0,0,2400]},"pole":{"role":"grip","at_mm":[1500,1500,500]}},
+        "areas":{"inside":{"at_mm":[0,100,0],"radius_mm":1800}},
+        "forms":{
+          "vent":{"steps":[{"step":"walk_to","point":"inside"},{"step":"move","move":"press","at":"pole"}],"effects":[]},
+          "knock":{"steps":[{"step":"walk_to","point":"door"},{"step":"move","move":"press","at":"pole"}],"effects":[]}}}"#,
+    )
+    .expect("JSON");
+    let steps = bind(&entry, "vent").expect("binds");
+    assert_eq!(steps.len(), 3, "{steps:?}");
+    assert!(matches!(&steps[0], Step::WalkTo { point, .. } if point.as_str() == "inside"));
+    match &steps[1] {
+        Step::WalkTo {
+            point,
+            at,
+            on: None,
+        } => {
+            assert_eq!(point.as_str(), "inside", "planned on the area's floor");
+            assert_eq!(
+                *at,
+                replica::pose::Vec3::new(1_500_000, 100_000, 500_000),
+                "the pole across the floor"
+            );
+        }
+        s => panic!("an approach walk, not {s:?}"),
+    }
+    assert!(matches!(&steps[2], Step::Move { .. }));
+    assert_eq!(
+        bind(&entry, "knock").expect("binds").len(),
+        2,
+        "after a walk to a point: as before"
+    );
+}

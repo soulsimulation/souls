@@ -1864,15 +1864,18 @@ fn c34_a2_a_lighthouse_and_a_tower_are_climbed_to_their_top_rooms() {
 }
 
 /// C34 (#3599) A2: the ground-floor areas of the sweep's other named forms resolve the same way. Born outside a chapel
-/// (today's e_9b7418a3), a Soul enters its nave (the room named `nave`); born beside a greenhouse's vent pole inside it
-/// (e_8b4c5e36: `open_vent` needs the pole within reach before it starts, so a Soul born outside is refused
-/// `out-of-reach` before any walk), a Soul opens the vent from the `inside` area (no room of that name, the
-/// greenhouse's only floor). Each ends `done`, where each ended `souls:no-way`.
+/// (today's e_9b7418a3), a Soul enters its nave (the room named `nave`). Born outside a greenhouse (e_8b4c5e36), a Soul
+/// opens its vent: the walk to the `inside` area (no room of that name, the greenhouse's only floor), then across it
+/// to within reach of the vent pole, then the press, as today's game approaches the pole; born beside the pole, the
+/// same form ends `done` too. Each ended `souls:no-way`, the greenhouse from outside `out-of-reach` once its area
+/// resolved.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c34_a2_a_greenhouses_vent_and_a_chapels_nave() {
-    let open = act_at("70.2,35.3", "e_8b4c5e36", "eden:open_vent", "c34gh");
     let enter = act_at("279.0,110.0", "e_9b7418a3", "eden:enter", "c34ch");
-    open.expect("the vent opened, done");
+    let outside = act_at("69.0,39.0", "e_8b4c5e36", "eden:open_vent", "c34gh");
+    let beside = act_at("70.2,35.3", "e_8b4c5e36", "eden:open_vent", "c34gb");
     enter.expect("the nave entered, done");
+    outside.expect("the vent opened from outside, done");
+    beside.expect("the vent opened from beside its pole, done");
 }
