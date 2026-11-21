@@ -1308,6 +1308,17 @@ fn a_walk_before_a_sit_goes_to_the_seats_own_stand_point() {
     act_at("132.5,-21.7", "e_13a2e4cf", "eden:ride", "c22seat").expect("walked and seated, done");
 }
 
+/// C22 sweep follow-up: a seat whose stand point is on water (a boat's side afloat) is boarded from the bank within
+/// today's boarding distance (`skills::form_runner::BOARD`, 3.2 m). Born on the bank by the canoe (today's e_21e423f2), a Soul
+/// rides it (`ride`: a walk to its `back` seat's stand point, then a sit in it). Before, no place within 1.3 m of the
+/// stand point could be stood on, and the walk ended `souls:no-way`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_boat_afloat_is_boarded_from_the_bank() {
+    act_at("133.0,42.0", "e_21e423f2", "eden:ride", "c22canoe")
+        .expect("boarded from the bank, done");
+}
+
 /// How one form of a sweep ended ([`sweep`]): `done`, `refused <name>` at its start, `failed <name>` by its run's
 /// ending, or `never-ended` past its deadline.
 fn ending(r: Result<String, String>) -> String {
@@ -1378,7 +1389,13 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
         let back = Quat::new(w, -x, -y, -z);
         if let (Ok(stand), Ok(back)) = (stand, back)
             && view.stand_near(floor, stand, 1, None).is_none()
-            && let Some(clear) = view.stand_near(floor, stand, skills::form_runner::REACH, None)
+            && let Some(clear) = view
+                .stand_near(floor, stand, skills::form_runner::REACH, None)
+                .or_else(|| {
+                    view.on_water(floor, stand)
+                        .then(|| view.stand_near(floor, stand, skills::form_runner::BOARD, None))
+                        .flatten()
+                })
             && let Ok(d) = back.rotate(Vec3::new(clear.x - point.x, 0, clear.z - point.z))
         {
             place.place.stand = [d.x, d.z];

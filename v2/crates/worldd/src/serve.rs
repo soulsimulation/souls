@@ -897,6 +897,14 @@ fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, us
         let clear = stand.ok().and_then(|stand| {
             if view.stand_near(floor, stand, 1, None).is_none() {
                 view.stand_near(floor, stand, skills::form_runner::REACH, None)
+                    // A stand point on water (a boat's side afloat): the bank, within today's boarding distance.
+                    .or_else(|| {
+                        view.on_water(floor, stand)
+                            .then(|| {
+                                view.stand_near(floor, stand, skills::form_runner::BOARD, None)
+                            })
+                            .flatten()
+                    })
             } else if passage(stand) {
                 out_of_passage(&view, floor, stand, point, &passage)
             } else {
