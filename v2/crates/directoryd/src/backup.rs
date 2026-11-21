@@ -561,6 +561,13 @@ impl Store for Bucket {
             Bucket::Folder(f) => f.list(prefix),
         }
     }
+
+    fn delete(&self, key: &str) -> R<()> {
+        match self {
+            Bucket::S3(s) => s.delete(key),
+            Bucket::Folder(f) => f.delete(key),
+        }
+    }
 }
 
 impl Bucket {

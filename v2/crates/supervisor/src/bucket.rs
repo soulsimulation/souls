@@ -37,6 +37,9 @@ impl<S: Store> Store for Under<S> {
             .filter_map(|k| k.strip_prefix(&self.prefix).map(str::to_owned))
             .collect())
     }
+    fn delete(&self, key: &str) -> R<()> {
+        self.store.delete(&format!("{}{key}", self.prefix))
+    }
 }
 
 #[cfg(test)]
