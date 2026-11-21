@@ -196,13 +196,11 @@ fn io(path: &Path) -> impl Fn(std::io::Error) -> String + '_ {
     move |e| format!("{}: {e}", path.display())
 }
 
-/// What a loader's facts file gives a world: its header, its import part, its walkers' town and ground.
+/// What a loader's facts file gives a world: its header, its import part and its ground. Its walkers' town is built
+/// by `serve` from the world as its log leaves it, once (#3672).
 struct Built {
     header: replica::effects::Header,
     part: Vec<u8>,
-    town: Town,
-    /// The planner's copy of the town (K18b), built with it before the clock and its watchdog start.
-    planner: Town,
     ground: Id,
     root: Id,
     /// The world's rules (T2), for the engine's own acts (C2).
@@ -358,20 +356,10 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
         .into(),
     ))
     .map_err(|e| e.to_string())?;
-    let next = im.tree.to_state().next;
-    let rules = im.rules.clone();
-    let doors = Doors::new(header.clone(), im.rules, next);
-    let town = Town::new(im.tree, ground, doors).map_err(|e| format!("the town: {e:?}"))?;
-    stamp("facts town");
-    let planner = town
-        .copy()
-        .map_err(|e| format!("the planner's town: {e:?}"))?;
-    stamp("facts planner copy");
+    let rules = im.rules;
     Ok(Built {
         header,
         part,
-        town,
-        planner,
         ground,
         root,
         rules,
@@ -397,14 +385,10 @@ fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(
         live.tree().next(),
     );
     stamp("log applied");
-    let town = Town::new(live.tree().frozen(), built.ground, doors)
+    let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
         .map_err(|e| format!("the recovered town: {e}"))?;
-    stamp("town");
-    let planner = town
-        .copy()
-        .map_err(|e| format!("the recovered planner: {e}"))?;
-    stamp("planner copy");
-    Ok((town, planner))
+    stamp("town and planner");
+    Ok(towns)
 }
 
 /// Public, data-only serving support. Only the seed's facts, flattened public entries and optional moves are
@@ -1532,7 +1516,7 @@ fn serve(args: &[String]) -> R<()> {
     let store = log.close();
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
-    let (initial, base_record, stream_mapping, checkpoint) = if let Some(header) = stored_header {
+    let started = if let Some(header) = stored_header {
         let restored = sim::checkpoint::restore(&dir.join("checkpoints"))
             .map_err(refusal)?
             .ok_or("served-fork-checkpoint-missing")?;
@@ -1579,32 +1563,23 @@ fn serve(args: &[String]) -> R<()> {
         stamp("log applied");
         built.header = header.clone();
         let doors = Doors::new(header, built.rules.clone(), live.tree().next());
-        built.town = Town::new(live.tree().frozen(), built.ground, doors)
+        let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
             .map_err(|e| format!("the fork's town: {e}"))?;
-        stamp("town");
-        built.planner = built
-            .town
-            .copy()
-            .map_err(|e| format!("the fork's planner: {e}"))?;
-        stamp("planner copy");
-        (initial, record, observer, Some(checkpoint))
+        stamp("town and planner");
+        (initial, record, observer, Some(checkpoint), towns)
     } else {
         let initial = Replica::start(built.header.stored()).map_err(refusal)?;
-        let (town, planner) = recovered_towns(&built, &initial, &found.records)?;
-        built.town = town;
-        built.planner = planner;
-        (initial, 0, None, None)
+        let towns = recovered_towns(&built, &initial, &found.records)?;
+        (initial, 0, None, None, towns)
     };
-    built
-        .town
-        .prepare_classes(catalogue.classes())
+    let (initial, base_record, stream_mapping, checkpoint, (mut town, mut planner)) = started;
+    town.prepare_classes(catalogue.classes())
         .map_err(|e| format!("body-classes: {e}"))?;
-    built
-        .planner
+    planner
         .prepare_classes(catalogue.classes())
         .map_err(|e| format!("body-classes: {e}"))?;
     stamp("body classes");
-    let (places, things, all, left, moved) = places(&mut built.town, &kinds);
+    let (places, things, all, left, moved) = places(&mut town, &kinds);
     stamp("seats placed");
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
@@ -1713,7 +1688,7 @@ fn serve(args: &[String]) -> R<()> {
     let kinds_path = dir.join("world.kinds");
     std::fs::write(&kinds_path, &built.kinds_text).map_err(io(&kinds_path))?;
 
-    let (town, planner, ground) = (built.town, built.planner, built.ground);
+    let ground = built.ground;
 
     // Births by the world's entry (C3): `world.json`'s `entry`, else the first place it lists for a Soul.
     let int = |v: &Json| match v {
@@ -1955,8 +1930,9 @@ mod tests {
         let building = imported.nodes["building"];
         let floor = imported.nodes["building/floor-1"];
         let built = build(&facts.text, &[]).unwrap();
-        assert!(built.town.surfaces.contains_key(&floor));
         let initial = Replica::start(built.header.stored()).unwrap();
+        let (before, _) = recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+        assert!(before.surfaces.contains_key(&floor));
         let mut live = initial.frozen();
         live.apply(&replica::effects::Part::read(&built.part).unwrap())
             .unwrap();
@@ -2609,6 +2585,46 @@ mod tests {
         assert_eq!(ordinary.replica().tree().to_state(), parent.to_state());
         drop(log.close());
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// #3672: the planner `Town::with_planner` clones answers every query as `Town::copy`'s second assembly does.
+    #[test]
+    fn planner_clone_answers_as_the_assembled_copy() {
+        let facts = testworld::generate(1, 0).unwrap();
+        let built = build(&facts.text, &[]).unwrap();
+        let initial = Replica::start(built.header.stored()).unwrap();
+        let (mut town, mut planner) =
+            recovered_towns(&built, &initial, std::slice::from_ref(&built.part)).unwrap();
+        let mut copy = town.copy().unwrap();
+        for t in [&mut town, &mut planner, &mut copy] {
+            t.prepare_classes([replica::kinds::sizes::Size::Large]).unwrap();
+        }
+        assert_eq!(planner.tree.to_state(), copy.tree.to_state());
+        let floors: Vec<Id> = copy.surfaces.keys().copied().collect();
+        assert!(floors.len() > 1, "the test world has floors besides the ground");
+        assert_eq!(planner.surfaces.keys().copied().collect::<Vec<_>>(), floors);
+        let ask = |t: &mut Town| {
+            let view = t.view();
+            let mut out = Vec::new();
+            for &node in &floors {
+                for x in (-30_000..=30_000).step_by(2_500) {
+                    for z in (-30_000..=30_000).step_by(2_500) {
+                        let at = Vec3::new(x, 0, z);
+                        out.push(format!(
+                            "{:?} {:?} {:?}",
+                            view.on_floor(node, at),
+                            view.stand_near(node, at, 1, None),
+                            view.stand_near(node, at, skills::form_runner::REACH, None)
+                        ));
+                    }
+                }
+            }
+            out
+        };
+        let (cloned, assembled) = (ask(&mut planner), ask(&mut copy));
+        assert!(cloned.iter().any(|a| !a.contains("None None")));
+        assert_eq!(cloned, assembled);
+        assert_eq!(ask(&mut town), assembled);
     }
 
     #[test]

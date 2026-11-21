@@ -1391,6 +1391,48 @@ impl Town {
         Ok(copy)
     }
 
+    /// A town on `tree` and its planner's copy (K18b, #3175), with the ground assembled once (#3672): the planner
+    /// gets a clone of the assembled ground instead of a second assembly. Equal to [`Town::new`] then
+    /// [`Town::copy`]: assembly reads only the tree, the ground and fresh versions, all the same for both.
+    pub fn with_planner(tree: Tree, ground: Id, doors: Doors) -> Result<(Town, Town), String> {
+        let frozen = tree.frozen();
+        let planner_doors = Doors::new(doors.header.clone(), doors.rules.clone(), doors.next);
+        let town = Town::new(tree, ground, doors)?;
+        let (map, surfaces, buildings, basis, square_pieces) = (
+            town.map.clone(),
+            town.surfaces.clone(),
+            town.buildings.clone(),
+            town.basis.clone(),
+            town.square_pieces.clone(),
+        );
+        let link_at = town.link_at.clone();
+        let planner = Town {
+            tree: frozen,
+            classes: BTreeMap::new(),
+            body_classes: BTreeMap::new(),
+            ground,
+            map,
+            surfaces,
+            buildings,
+            link_at,
+            doors: planner_doors,
+            turns: Some(Turns::new()),
+            spots: Spots::new(),
+            meter: None,
+            spent: Cell::new(Spent::default()),
+            lines: Vec::new(),
+            scratches: vec![ClassScratch::default()],
+            crossings: BTreeMap::new(),
+            versions: Versions::default(),
+            basis,
+            square_pieces,
+            planned: BTreeMap::new(),
+            planned_squares: BTreeMap::new(),
+            stale: BTreeMap::new(),
+        };
+        Ok((town, planner))
+    }
+
     /// The line from where `body` stands toward `to` on its node ([`View::search`], the planning call): the planner's
     /// (K18b, #3175), not the clock's.
     pub fn line(&mut self, body: &Body, to: Vec3) -> Result<Line, Refusal> {
