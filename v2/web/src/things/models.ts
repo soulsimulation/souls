@@ -4,9 +4,13 @@
 // matrix in the model's frame each. The page admits no file of its own: what it draws is what the bake wrote.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { patchWind, windModeOf, windWeights } from '../sky/wind.ts';
+import { storeyOf, type Storey } from './interior.ts';
+import { isNightGlass, nightWindows } from './windows.ts';
 
-/** One drawn part of a model. `glow`: the parts a light's `on` (or `lit`) state brightens. */
-export type Part = { geometry: THREE.BufferGeometry; material: THREE.Material; matrix: THREE.Matrix4; key: string; glow: boolean };
+/** One drawn part of a model. `glow`: the parts a light's `on` (or `lit`) state brightens. `storey`: where a generated
+ *  building's part is (C10, `interior.ts`), so the interior view can hide its roof and upper storeys. */
+export type Part = { geometry: THREE.BufferGeometry; material: THREE.Material; matrix: THREE.Matrix4; key: string; glow: boolean; storey?: Storey };
 
 /** What the page needs of V17's `models.json`. */
 export type ModelIndex = {
@@ -14,9 +18,11 @@ export type ModelIndex = {
   things: Record<string, string>;
   /** A model's hash -> the state table of its kind (field -> the parts it changes, or a note in parentheses). */
   states: Map<string, Record<string, string[]>>;
+  /** A model's hash -> its kind's name (`core-flagpole`), which says whether its cloth sways (C9). */
+  kinds?: Map<string, string>;
 };
 
-type ModelsJson = { kinds: { models: Record<string, string>; states?: Record<string, string[]> }[]; things?: Record<string, string> };
+type ModelsJson = { kinds: { kind?: string; models: Record<string, string>; states?: Record<string, string[]> }[]; things?: Record<string, string> };
 
 export async function fetchIndex(root: string): Promise<ModelIndex> {
   const res = await fetch(new URL('models.json', root));
@@ -25,9 +31,12 @@ export async function fetchIndex(root: string): Promise<ModelIndex> {
 }
 
 export function indexOf(j: ModelsJson): ModelIndex {
-  const states = new Map<string, Record<string, string[]>>();
-  for (const k of j.kinds) for (const h of Object.values(k.models)) if (h && k.states) states.set(h, k.states);
-  return { things: j.things ?? {}, states };
+  const states = new Map<string, Record<string, string[]>>(), kinds = new Map<string, string>();
+  for (const k of j.kinds) for (const h of Object.values(k.models)) {
+    if (h && k.states) states.set(h, k.states);
+    if (h && k.kind) kinds.set(h, k.kind);
+  }
+  return { things: j.things ?? {}, states, kinds };
 }
 
 /** Materials are shared by what they look like, so one-off shapes with the same material go in one batch. */
@@ -35,11 +44,12 @@ const shared = new Map<string, THREE.Material>();
 function materialKey(m: THREE.Material): string {
   const s = m as THREE.MeshStandardMaterial;
   return [m.type, s.color?.getHexString(), s.roughness, s.metalness, s.emissive?.getHexString(), s.emissiveIntensity,
-    m.transparent, m.opacity, m.side, m.alphaTest, s.vertexColors].join('|');
+    m.transparent, m.opacity, m.side, m.alphaTest, s.vertexColors, isNightGlass(m)].join('|');
 }
 
-/** Every geometry in a batch has the same attributes and an index: position, normal and colour (three floats). */
-function plainGeometry(g: THREE.BufferGeometry): THREE.BufferGeometry {
+/** Every geometry in a batch has the same attributes and an index: position, normal and colour (three floats), and on
+ *  the building kit's window glass its pane (four floats, the bake's `_edenpane`; C10). */
+function plainGeometry(g: THREE.BufferGeometry, pane = false): THREE.BufferGeometry {
   const out = new THREE.BufferGeometry();
   const pos = g.getAttribute('position'), n = pos.count;
   out.setAttribute('position', new THREE.Float32BufferAttribute(Array.from({ length: n * 3 }, (_, i) => pos.getComponent(Math.floor(i / 3), i % 3)), 3));
@@ -47,13 +57,19 @@ function plainGeometry(g: THREE.BufferGeometry): THREE.BufferGeometry {
   out.setAttribute('normal', nor ? new THREE.Float32BufferAttribute(Array.from({ length: n * 3 }, (_, i) => nor.getComponent(Math.floor(i / 3), i % 3)), 3) : new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
   const col = g.getAttribute('color');
   out.setAttribute('color', new THREE.Float32BufferAttribute(col ? Array.from({ length: n * 3 }, (_, i) => col.getComponent(Math.floor(i / 3), i % 3)) : new Float32Array(n * 3).fill(1), 3));
+  if (pane) {
+    const p = g.getAttribute('_edenpane');
+    out.setAttribute('edenPane', new THREE.Float32BufferAttribute(p ? Array.from({ length: n * 4 }, (_, i) => p.getComponent(Math.floor(i / 4), i % 4)) : new Float32Array(n * 4), 4));
+  }
   out.setIndex(g.index ? Array.from(g.index.array) : Array.from({ length: n }, (_, i) => i));
   if (!nor) out.computeVertexNormals();
   return out;
 }
 
-/** A model's parts, from its glTF bytes. `glowRoles`: the named parts its kind's `on`/`lit` state changes. */
-export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMaterials: boolean): Promise<Part[]> {
+/** A model's parts, from its glTF bytes. `glowRoles`: the named parts its kind's `on`/`lit` state changes; `kind`: its
+ *  kind's name, for the wind (C9): a part that sways gets its own copy of its material, patched to sway, and its
+ *  geometry carries each vertex's share of the sway. */
+export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMaterials: boolean, kind = ''): Promise<Part[]> {
   const gltf = await new GLTFLoader().parseAsync(bytes, '');
   const root = gltf.scene;
   root.updateMatrixWorld(true);
@@ -63,11 +79,16 @@ export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMater
     if (!mesh.isMesh) return;
     let role = false;
     for (let p: THREE.Object3D | null = mesh; p; p = p.parent) if (glowRoles.includes(p.userData?.role)) role = true;
-    for (const m of [mesh.material].flat()) {
-      const k = materialKey(m);
+    const storey = storeyOf(mesh) ?? undefined;
+    for (const original of [mesh.material].flat()) {
+      const mode = windModeOf(original.name, kind);
+      const weights = mode && windWeights(mesh.geometry, mesh.matrixWorld, mode);
+      const m = weights ? original.clone() : original;
+      const k = materialKey(m) + (weights ? `|wind:${mode}` : '');
       if (!shared.has(k)) {
         const s = m as THREE.MeshStandardMaterial;
         s.vertexColors = true;
+        if (isNightGlass(m)) nightWindows(m); // C10: rooms behind lit windows at night
         // A glowing material's light follows its instance's colour, so a light switched off stops glowing.
         if (s.emissive && s.emissive.getHex() !== 0) s.onBeforeCompile = (sh) => {
           sh.vertexShader = 'varying float vGlow;\n' + sh.vertexShader.replace('#include <color_vertex>',
@@ -75,12 +96,15 @@ export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMater
           sh.fragmentShader = 'varying float vGlow;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>',
             '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= vGlow;');
         };
+        if (weights) patchWind(m, mode!); // after the glow hook, which it keeps
         shared.set(k, m);
       }
       const mat = shared.get(k)!;
       const s = mat as THREE.MeshStandardMaterial;
       const glow = role || (glowMaterials && ((s.emissive && s.emissive.getHex() !== 0) || mat.type === 'MeshBasicMaterial'));
-      parts.push({ geometry: plainGeometry(mesh.geometry), material: mat, matrix: mesh.matrixWorld.clone(), key: k, glow });
+      const geometry = plainGeometry(mesh.geometry, isNightGlass(mat));
+      if (weights) geometry.setAttribute('edenWind', new THREE.Float32BufferAttribute(weights, 1));
+      parts.push({ geometry, material: mat, matrix: mesh.matrixWorld.clone(), key: k, glow, ...(storey ? { storey } : {}) });
     }
   });
   return parts;
