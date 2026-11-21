@@ -352,6 +352,24 @@ impl Sight<'_> {
         None
     }
 
+    /// Point `at` of node `node`'s frame carried onto the floor of `node` nearest its height (#3688), when `node` has
+    /// floors: `None` when it has none.
+    fn floor_of(&self, node: Id, at: Vec3) -> Option<(Id, Vec3)> {
+        use import_eden::FLOOR;
+        let floor = self
+            .tree
+            .children(self.tree.handle(node)?)?
+            .iter()
+            .filter_map(|&c| self.tree.node(c))
+            .filter(|f| plain(f.kind()) == FLOOR)
+            .filter_map(|f| Some((f.id(), f.place()?)))
+            .min_by_key(|(_, p)| (p.position.y - at.y).abs())?;
+        let [w, x, y, z] = floor.1.orientation.parts();
+        let back = replica::pose::Quat::new(w, -x, -y, -z).ok()?;
+        let local = back.rotate(at.minus(floor.1.position).ok()?).ok()?;
+        Some((floor.0, local))
+    }
+
     /// A walk to a building's named area, resolved onto the building's own room and floor (C34, #3599). `body`'s run
     /// walks, at step `step`, to point `at` of node `node`'s frame, a point its entry names as an `areas` entry of a
     /// thing on `node` that has floors: the area is the thing's room of that name, on that room's floor (a lantern room
@@ -486,8 +504,11 @@ impl Geometry for Sight<'_> {
             Some(None) => return WalkPlan::Legs(Vec::new()),
             None => (node, at),
         };
-        // An approach to a move's point on the floor the body stands on (#3688): aimed short of it, on the body's side.
+        // An approach to a move's point (#3688): a point of a thing on a building with floors (an inner door) is on
+        // the building's floor nearest its height, so the walk goes in to it; on the floor the body stands on, it is
+        // aimed short of the point, on the body's side.
         let (node, at) = if self.approaches.contains(&body) {
+            let (node, at) = self.floor_of(node, at).unwrap_or((node, at));
             self.with_view(body, |v| {
                 let (floor, p, _) = v.on_floor(node, at)?;
                 (floor == sim::walk::node_of(me)).then(|| {
