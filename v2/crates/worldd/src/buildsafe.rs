@@ -166,6 +166,16 @@ impl PreparedMaps {
         let part =
             sim::edit::commit_classes(&mut preview, &mut reserved, planned, souls, 0, classes)?
                 .part;
+        Self::prepare_part(copy, part, source, movers)
+    }
+
+    /// The same preparation for a part already made off the clock (a set-down's, #3604), not an edit's plan.
+    pub fn prepare_part(
+        copy: &Replica,
+        part: Arc<Part>,
+        source: &MapBasis,
+        movers: &[sim::controller::BuildBasis],
+    ) -> Result<Self, replica::edit::Refused> {
         let rebuilt = Town::rebuild(
             copy.tree().frozen(),
             copy.header(),
