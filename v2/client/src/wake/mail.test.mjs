@@ -161,3 +161,45 @@ test('A4, A5: a mailbox message reaches the agent, its act closes it with the ou
   }
   assert.ok(readFileSync(join(dir, 'world', 'arrivals.txt'), 'utf8').trim().split('\n').length >= 2, 'the acts reached the world');
 });
+
+test('C15 (#3685): pending lists what is open and what arrived; ack answers with no act, done or failed', async () => {
+  await ask({ op: 'wait', seconds: 0 }); // what came before, taken
+  const read = (id) => waitFor(async () => { const r = await mailbox('read', { id }); return r.state !== 'open' && r; });
+  const listedWith = (id) => waitFor(async () => { const p = await ask({ op: 'pending', list: true }); return p.open.some((m) => m.id === id) && p; });
+  // A3: the listing holds the message still open, and what arrived since the last read, once.
+  const q = await mailbox('put', { soul: GRANT, text: 'what time is it?' });
+  const first = await listedWith(q.id);
+  assert.equal(first.ok, true);
+  assert.deepEqual(first.open.find((m) => m.id === q.id).text, 'what time is it?');
+  assert.ok(first.events.some((e) => e.kind === 'mail' && e.id === q.id), 'the arrival is listed');
+  assert.match(first.next, /ack <its id>/);
+  const second = await ask({ op: 'pending', list: true });
+  assert.ok(second.open.some((m) => m.id === q.id), 'still open: listed again');
+  assert.ok(!second.events.some((e) => e.kind === 'mail'), 'the arrival was read: not again');
+  // A1: a reply-only ack answers it with no act, and closes it done.
+  assert.equal((await ask({ op: 'ack', id: 'm_0000000000000000', reply: 'hi' })).code, 'mail-not-found');
+  assert.equal((await ask({ op: 'ack', id: q.id, reply: '   ' })).code, 'ack-reply');
+  assert.equal((await ask({ op: 'ack', id: q.id, reply: 'hi', close: 'maybe' })).code, 'ack-close');
+  const sentBefore = (await ask({ op: 'status' })).sent;
+  const a = await ask({ op: 'ack', id: q.id, reply: 'Noon,   by the tower clock' });
+  assert.deepEqual([a.ok, a.acked, a.reply, a.closed], [true, q.id, 'Noon, by the tower clock', 'done']);
+  const done = await read(q.id);
+  assert.deepEqual([done.state, done.outcome], ['done', 'replied']);
+  assert.equal((await ask({ op: 'status' })).sent, sentBefore, 'no act was sent');
+  assert.ok(!(await ask({ op: 'pending', list: true })).open.some((m) => m.id === q.id), 'closed: no longer listed');
+  // A2: --close failed closes it failed: a no.
+  const no = await mailbox('put', { soul: GRANT, text: 'jump in the lake' });
+  await listedWith(no.id);
+  assert.equal((await ask({ op: 'ack', id: no.id, reply: 'No: the lake is out of reach.', close: 'failed' })).closed, 'failed');
+  const failed = await read(no.id);
+  assert.deepEqual([failed.state, failed.outcome], ['failed', 'replied']);
+  // While an act serves a message, a reply with no --close rides on that act's close, which the act's outcome names.
+  const lamp = await mailbox('put', { soul: GRANT, text: 'the lamp off, please' });
+  await listedWith(lamp.id);
+  assert.equal((await ask({ op: 'act', verb: 'r2:switch_off', target: LAMP, for: lamp.id })).ok, true);
+  const rides = await ask({ op: 'ack', id: lamp.id, reply: 'switching it off' });
+  // The act's answer may already have closed it (a lamp answers within milliseconds): then there is nothing to answer.
+  assert.ok(rides.closes || rides.code === 'mail-not-found', JSON.stringify(rides));
+  const byAct = await read(lamp.id);
+  assert.notEqual(byAct.outcome, 'replied', 'closed once, by its act');
+});
