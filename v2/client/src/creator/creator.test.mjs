@@ -18,7 +18,7 @@ import { createServer as createHttp } from 'node:http';
 import { DEFAULT_PKG } from '../daemon/client.mjs';
 import { readSeat } from '../home/home.mjs';
 import { pair } from '../pair/pair.mjs';
-import { opsOf, requestOf } from './souls-god.mjs';
+import { opsOf, requestOf, resolve } from './souls-god.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -184,6 +184,60 @@ test('a creator describes, checks on its copy alone, and builds a room with a th
   const all = await god('status');
   assert.deepEqual(all.unanswered, []);
   console.log(`edits: ${all.sent} sent, ${all.answered} answered`);
+});
+
+test('a relation resolves on describe: beside, on a free slot, facing (#3694)', () => {
+  const world = {
+    nodes: [
+      { id: 'a-1', kind: 'souls:room', parent: 'a-0', at: [0, 0, 0] },
+      { id: 'a-2', kind: 'souls:item', parent: 'a-1', at: [1000, 0, 2000] },
+      { id: 'a-3', kind: 'r2:shelf', parent: 'a-1', at: [0, 0, 0] },
+      { id: 'a-4', kind: 'souls:item', parent: 'a-3', slot: 0 },
+    ],
+    kinds: { 'r2:shelf@00': { admits: ['thing'], slots: { 0: { admits: 'thing' }, 1: { admits: 'thing' } } } },
+  };
+  const of = (...a) => { const r = requestOf(a); return resolve(r.req, r.relation, world).ops[0]; };
+  assert.deepEqual(of('place', 'lamp', '--beside', 'a-2', '--dir', 'n', '--dist', '500'), { op: 'place', name: 1, kind: 'lamp', in: 'a-1', at: [1000, 0, 1500] });
+  assert.deepEqual(of('place', 'lamp', '--on', 'a-3'), { op: 'place', name: 1, kind: 'lamp', in: 'a-3', slot: 1, at: [0, 0, 0] });
+  assert.deepEqual(of('move', 'a-2', '--facing', 'e'), { op: 'move', node: 'a-2', yaw: 90000, at: [1000, 0, 2000] });
+  assert.equal(of('place', 'lamp', '--in', 'a-1', '--at', '1000,0,0', '--facing', 'a-2').yaw, 0, 'facing +z toward the other');
+  assert.throws(() => of('place', 'lamp', '--beside', 'a-9'), /no a-9/);
+  assert.deepEqual(requestOf(['place', 'room', '--in', 'a-0', '--build', 'hut', '--step', 'shell']).req, { op: 'edit', ops: [{ op: 'place', name: 1, kind: 'room', in: 'a-0' }], build: 'hut', step: 'shell' });
+  assert.throws(() => requestOf(['remove', 'a-2', '--build', 'hut']), /both/);
+});
+
+test('undo and redo step the world\'s history, a build is undone whole, and a relation places beside (#3694)', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  assert.equal((await god('undo', '--build', 'hut')).code, 'undo.not-the-build');
+  // A build of two steps, then a thing beside the lamp that is no step.
+  const room = await god('place', 'room', '--in', place.id, '--build', 'hut', '--step', 'shell');
+  assert.equal(room.ok, true, JSON.stringify(room));
+  assert.deepEqual([room.build, room.step], ['hut', 'shell']);
+  const roomId = room.names['1'];
+  const lamp = await god('place', 'lamp', '--in', roomId, '--at', '1000,0,1000', '--build', 'hut', '--step', 'lamp');
+  assert.equal(lamp.ok, true, JSON.stringify(lamp));
+  const beside = await god('place', 'item', '--beside', lamp.names['1'], '--dir', 's', '--dist', '500');
+  assert.equal(beside.ok, true, JSON.stringify(beside));
+  const at = (d, id) => d.nodes.find((n) => n.id === id);
+  assert.deepEqual(at(await god('describe'), beside.names['1'])?.at, [1000, 0, 1500], 'beside the lamp, 500 mm south');
+  // Undo takes the newest away and says what changed; redo gives it back with the same id.
+  const undone = await god('undo');
+  assert.equal(undone.ok, true, JSON.stringify(undone));
+  assert.equal(undone.undone, true);
+  assert.ok(undone.changed, 'the answer says what changed');
+  assert.equal(at(await god('describe'), beside.names['1']), undefined);
+  assert.equal((await god('redo')).ok, true);
+  assert.ok(at(await god('describe'), beside.names['1']), 'redone with its id');
+  assert.equal((await god('undo')).ok, true);
+  // The build, both steps, at once.
+  const build = await god('undo', '--build', 'hut');
+  assert.equal(build.ok, true, JSON.stringify(build));
+  assert.equal(build.steps, 2);
+  const d = await god('describe');
+  assert.equal(at(d, roomId), undefined, 'the build is gone whole');
+  assert.equal((await god('undo')).code, 'undo.nothing');
+  console.log(`undo: a build of 2 steps undone in one command; redo gave back ${beside.names['1']}`);
 });
 
 test('boot-body admission is shared by describe and local checks without revising kind pins', async () => {

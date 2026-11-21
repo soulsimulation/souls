@@ -141,6 +141,27 @@ export function rowsOf(copy) {
   return rows;
 }
 
+/**
+ * Where each node stands in its parent, for the creator (#3694: placing by relation): `{ at: [x, y, z] mm, slot }`
+ * by id, from each record's pose (field 7, its position in µm) and slot (field 4). Rows never carry this; only the
+ * creator's describe does.
+ */
+export function posesOf(copy) {
+  const out = new Map();
+  const todo = Object.values(JSON.parse(copy.roots()));
+  while (todo.length) {
+    const d = read(copy, todo.pop());
+    if (!d) continue;
+    const { m } = d, pose = m.get(7), p = pose instanceof Map ? pose.get(2) : null;
+    out.set(idText(m.get(1)), {
+      ...(Array.isArray(p) ? { at: p.map((n) => Math.round(Number(n) / 1000)) } : {}),
+      ...(m.has(4) ? { slot: Number(m.get(4)) } : {}),
+    });
+    todo.push(...(m.get(10) ?? []).map(hex));
+  }
+  return out;
+}
+
 /** What changed between two sets of rows: the names added, removed or changed in their own record, in name order. */
 export function changedBetween(before, after) {
   const out = [];

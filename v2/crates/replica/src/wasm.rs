@@ -516,10 +516,16 @@ fn spot_of(o: &json::Value) -> Result<Spot, String> {
         None | Some(json::Value::Null) => None,
         v => Some(uint_of(v, "slot")?),
     };
+    // A turn about +y in whole millidegrees (#3694: placing facing something), else none.
+    let orientation = match o.get("yaw") {
+        None | Some(json::Value::Null) => Quat::IDENTITY,
+        v => Quat::from_yaw_mdeg(int_of(v, "yaw, in millidegrees")?)
+            .map_err(|e| format!("yaw: {e:?}"))?,
+    };
     Ok(Spot {
         slot,
         position: Vec3::new(axis(0)?, axis(1)?, axis(2)?),
-        orientation: Quat::IDENTITY,
+        orientation,
         support: if slot.is_some() {
             Support::Slot
         } else {
@@ -553,7 +559,8 @@ fn field_value(v: &json::Value) -> Result<Value, String> {
 
 /// The batch the daemon passes as JSON: `[{"op": "place", "name": 1, "kind": "<namespace:name@hash>", "in": <node>,
 /// "at": [x, y, z], "slot": n, "fields": {"<n>": value}}, {"op": "move", "node": <node>, "at": [..]}, {"op": "set",
-/// "node": <node>, "field": n, "value": v}, {"op": "remove", "node": <node>}]`, positions in micrometres.
+/// "node": <node>, "field": n, "value": v}, {"op": "remove", "node": <node>}]`, positions in micrometres; a place or
+/// a move may add `"yaw"`, a turn about +y in millidegrees.
 /// A `doorway` names its leaf, owning `from` and other `to` places, with `at: [x,z]`, `yaw`, `width` and `height`
 /// in the existing doorway row's millimetres/millidegrees, in the owning room's building frame.
 fn ops_of(text: &str) -> Result<Vec<Op>, String> {
