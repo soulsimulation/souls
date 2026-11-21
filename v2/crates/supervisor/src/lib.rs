@@ -144,6 +144,30 @@ fn machine() -> Name {
     Name::new("souls:supervisor").unwrap_or_else(|| unreachable!("a name"))
 }
 
+/// A known local archive fence wins even during a Store outage. An unavailable Store otherwise leaves the
+/// established pin-cache path intact; the caller still requires its ordinary valid cached pin/build.
+pub fn archive_guard<S: Store>(store: S, fences: &Path, world: &World) -> Result<(), String> {
+    let fence = fences.join(world.name());
+    match std::fs::symlink_metadata(&fence) {
+        Ok(meta) => {
+            if !meta.is_file() || meta.file_type().is_symlink() {
+                return Err("archive-fence-invalid".into());
+            }
+            let bytes = std::fs::read(&fence).map_err(|_| "archive-fence-unreadable")?;
+            return directoryd::worlds::list::archive::check_fence(&bytes, &world.name())
+                .map_err(|e| e.name.to_owned());
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err("archive-fence-unreadable".into()),
+    }
+    match directoryd::worlds::list::archive::instance_blocked(&store, &world.lineage, world.zone) {
+        Ok(false) => Ok(()),
+        Ok(true) => Err("world-archived".into()),
+        Err(e) if e.name == "store-unreachable" || e.name == "store-error" => Ok(()),
+        Err(e) => Err(e.name.to_owned()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

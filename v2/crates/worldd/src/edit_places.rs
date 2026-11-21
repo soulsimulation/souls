@@ -10,7 +10,7 @@ use replica::rules::json::Value as Json;
 use replica::tree::Tree;
 use replica::world_model::plain;
 use sim::edit::Planned;
-use sim::ground::scene::{FLOOR, ROOM};
+use sim::ground::scene::FLOOR;
 use sim::slots::{PlaceAt, Slots};
 
 pub struct Projection(Vec<(Ref, Vec<(PlaceAt, Ref)>)>);
@@ -34,7 +34,7 @@ fn on_floor(
     let mut turn = Quat::IDENTITY;
     for _ in 0..64 {
         let n = tree.node(tree.handle(node)?)?;
-        if Some(node) == ground || matches!(plain(n.kind().as_str()), FLOOR | ROOM) {
+        if Some(node) == ground || plain(n.kind().as_str()) == FLOOR {
             return Some((node, at, turn));
         }
         let p = n.place()?;
@@ -161,5 +161,35 @@ impl Projection {
             slots.replace(thing, places)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #3826: a seat in a room is placed on the room's floor. Rooms are not map patches: a seat placed on the room
+    /// had no standing place round it, and an ordinary walk to it was refused `spot-none-near`.
+    #[test]
+    fn a_seat_in_a_room_stands_on_the_rooms_floor() {
+        let im = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
+        let (room, floor) = (im.nodes["building/r0a"], im.nodes["building/floor-0"]);
+        let kind = |id| {
+            plain(
+                im.tree
+                    .node(im.tree.handle(id).unwrap())
+                    .unwrap()
+                    .kind()
+                    .as_str(),
+            )
+            .to_owned()
+        };
+        assert_eq!(
+            (kind(room).as_str(), kind(floor).as_str()),
+            (sim::ground::scene::ROOM, FLOOR)
+        );
+        let (on, ..) = on_floor(&im.tree, Some(im.nodes["ground"]), room, Vec3::ZERO)
+            .expect("a floor under the room");
+        assert_eq!(on, floor);
     }
 }

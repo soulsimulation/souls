@@ -5,8 +5,8 @@ import { dirname } from 'node:path';
 import { readWorldRoutes } from '../../origin/world-routes.mjs';
 
 /** Patch one world without losing other worlds or a concurrent writer's fields. A stale lock refuses, never steals. */
-export async function updateWorldRoute(file, world, patch) {
-  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(world) || !patch || Object.keys(patch).some(k => !['gateway', 'stream', 'history', 'canonical'].includes(k))) throw Error('world-route-update-invalid');
+export async function updateWorldRoute(file, world, patch, { expected } = {}) {
+  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(world) || !patch || Object.keys(patch).some(k => !['gateway', 'stream', 'history', 'canonical', 'archived'].includes(k))) throw Error('world-route-update-invalid');
   await mkdir(dirname(file), { recursive: true });
   const lock = `${file}.lock`, until = Date.now() + 5000;
   for (;;) {
@@ -24,6 +24,10 @@ export async function updateWorldRoute(file, world, patch) {
       value = { schema: 'souls/world-routes/1', worlds: {} };
     }
     if (value.schema !== 'souls/world-routes/1' || !value.worlds || Array.isArray(value.worlds)) throw Error('world-routing-unconfigured');
+    if (expected) {
+      const current = readWorldRoutes(file)[world];
+      if (!current || ['gateway','stream','history','canonical','archived'].some(key => current[key] !== expected[key])) throw Error('world-route-occupied');
+    }
     value.worlds[world] = { ...value.worlds[world], ...patch };
     const handle = await open(temporary, 'wx', 0o644);
     try { await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`); await handle.sync(); } finally { await handle.close(); }
