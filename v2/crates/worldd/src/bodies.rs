@@ -32,6 +32,11 @@
 //!   ([`Bodies::add_body_at`]) and hands each that sat back into its seat ([`Bodies::seat_placed`], K18c #3176), so
 //!   the seat is held in the slots table again and a rise or another sit sees it.
 //!
+//! - **Seen moving** (#3799). After each step the world writes each body's motion on its node, as T4's samples: at
+//!   each hand-off (a start, a stop, a turn, a seat taken or left, a new floor) and every [`KEYFRAME_US`] while it
+//!   moves; a change of frame is a leave and an arrive inside the zone first. So the tree, interest and the public
+//!   stream follow the bodies ([`Bodies::motion`]).
+//!
 //! - **Who hears** (#3369). After each step of the controller the bodies call `sim::speech::heard`, which brings every
 //!   body's interest set up to date and gives each utterance the step started its hearers as they are then; the world
 //!   writes each as `sim::speech::entry` says ([`Bodies::heard`]).

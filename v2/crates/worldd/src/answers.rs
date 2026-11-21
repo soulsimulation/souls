@@ -77,7 +77,8 @@
 //!    [`crate::loose`]); a move's phase timers fire;
 //! 2. skills step through the host, each one unit in K11's wrapper (K13a, T9b/T9c; a panic ends that skill only);
 //! 3. the controller steps the bodies (B1), moves and seats included (B2, B3); each utterance a step started is
-//!    written with its hearers (`sim::speech::heard`, B11, #3369);
+//!    written with its hearers (`sim::speech::heard`, B11, #3369); each body's motion is written on its node, world-caused,
+//!    at each hand-off and every 200 ms while it moves ([`crate::bodies::Bodies::motion`], #3799);
 //! 4. committed acts: the checks that came back are committed (I3, I4), then the checked edits (G1b, `sim::edit`;
 //!    each counts as outstanding, so lockstep waits for it as for an act), and new moves start (I4b); what they made
 //!    loose gets its end, and what they made kept loses it (F10b, [`crate::loose`]);
