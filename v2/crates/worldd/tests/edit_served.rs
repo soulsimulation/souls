@@ -312,6 +312,7 @@ fn edit_batch_intent(
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     encode(&i.to_value()).unwrap()
 }
@@ -901,6 +902,7 @@ fn walk(s: &mut UnixStream, w: &Seeded, body: Id, sequence: u64, x: i64, z: i64)
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     let bytes = encode(&i.to_value()).unwrap();
     s.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
@@ -1366,6 +1368,7 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
                 fallbacks: Vec::new(),
                 replaces: None,
                 body: None,
+                reflex: false,
             }
             .to_value(),
         )

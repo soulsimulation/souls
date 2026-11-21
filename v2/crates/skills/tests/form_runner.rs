@@ -286,24 +286,37 @@ fn c17_a_sit_step_binds_its_slot_and_posture_and_runs_through_the_seat() {
     let slots = |n: u64| BTreeMap::from([("seat".to_owned(), n)]);
     let bound =
         skills::form_runner::bind_in(&entry, "s", &BTreeMap::new(), &slots(2)).expect("binds");
-    assert_eq!(bound[1], Step::Sit { slot: 2, lie: true });
+    assert_eq!(
+        bound[1],
+        Step::Sit {
+            slot: 2,
+            lie: true,
+            stand: false
+        }
+    );
     assert_eq!(
         skills::form_runner::bind_in(&entry, "s", &BTreeMap::new(), &slots(1)).unwrap()[1],
         Step::Sit {
             slot: 1,
-            lie: false
+            lie: false,
+            stand: false
         }
     );
     assert_eq!(
         bind(&entry, "n").unwrap(),
         vec![Step::Sit {
             slot: 1,
-            lie: false
+            lie: false,
+            stand: false
         }]
     );
     assert_eq!(
         bind(&entry, "l").unwrap(),
-        vec![Step::Sit { slot: 1, lie: true }]
+        vec![Step::Sit {
+            slot: 1,
+            lie: true,
+            stand: false
+        }]
     );
     let effects = skills::form_runner::bind_effects_in(&entry, "s", &BTreeMap::new(), &slots(1))
         .expect("binds");
@@ -450,7 +463,7 @@ fn c24_link_timer_timed_set_and_reparent_bind_or_are_refused_by_name() {
           "count":{"n":2,"type":"int","default":0,"min":0,"max":9}},
         "links":{"user":{"n":1,"from":"soul","most":2,"audience":{"rule":"everyone"}},
           "owner":{"n":2,"from":"soul","most":1,"audience":{"rule":"everyone"}}},
-        "slots":{"rest":{"admits":"thing"},"seat":{"admits":"body"}},
+        "slots":{"rest":{"admits":"thing"},"seat":{"admits":"body","posture":"sit"}},
         "forms":{
           "a":{"steps":[{"step":"wait","us":1}],"effects":[
             {"change":"link","link":"user","from":"actor"},{"change":"unlink","link":"owner","from":"all"},
@@ -528,4 +541,81 @@ fn c24_link_timer_timed_set_and_reparent_bind_or_are_refused_by_name() {
     assert_eq!(refused("too_many"), "out-of-range");
     assert_eq!(refused("down"), "no-slot-here");
     assert_eq!(refused("board"), "body-moves-by-step");
+}
+
+/// C33 (#3598) A1: a form's `reparent` of the actor into a standing slot (one that admits a body and names no posture),
+/// by name or by a slot argument, binds to the seat hand-off on the body's feet after the form's own steps, and is not
+/// written as an effect; a `reparent` of the actor `here` with no `rise` binds a rise first. Into a seat (a slot with
+/// a posture) the effect is still refused `body-moves-by-step`, and a slot argument not given `arg-missing`.
+#[test]
+fn c33_a_standing_slot_binds_to_the_hand_off_and_a_seat_stays_refused() {
+    use skills::form_runner::{bind_effects, bind_effects_in, bind_in};
+    let entry = parse(
+        r#"{"format":"souls-entry/1","kind":"t:x","points":{"door":{"role":"stand","at_mm":[0,0,900]}},
+        "slots":{"inside":{"admits":"body","most":1,"at_mm":[0,120,0],"stand":"door"},
+                 "side":{"admits":"body","most":1,"at_mm":[900,0,0],"stand":"door"},
+                 "chair":{"admits":"body","posture":"sit","at_mm":[0,450,0],"stand":"door"}},
+        "forms":{
+          "step_in":{"steps":[{"step":"walk_to","point":"door"}],
+                     "effects":[{"change":"reparent","what":"actor","into":"inside"}]},
+          "play":{"takes":{"place":{"type":"slot"}},"steps":[{"step":"walk_to","point":{"arg":"place"}}],
+                  "effects":[{"change":"set","field":"n","to":1},
+                             {"change":"reparent","what":"actor","into":{"arg":"place"}}]},
+          "step_out":{"steps":[{"step":"walk_to","point":"door"}],
+                      "effects":[{"change":"reparent","what":"actor","into":"here"}]},
+          "leave":{"steps":[],"effects":[{"change":"reparent","what":"actor","into":"here"}]},
+          "perch":{"steps":[],"effects":[{"change":"reparent","what":"actor","into":"chair"}]}},
+        "state":{"n":{"n":1,"type":"int","default":0,"min":0,"max":9}}}"#,
+    )
+    .expect("JSON");
+    let stand = |slot| Step::Sit {
+        slot,
+        lie: false,
+        stand: true,
+    };
+    let steps = bind(&entry, "step_in").expect("binds");
+    assert_eq!(steps.len(), 2);
+    assert!(matches!(steps[0], Step::WalkTo { .. }));
+    assert_eq!(steps[1], stand(1));
+    assert!(
+        bind_effects(&entry, "step_in").expect("binds").is_empty(),
+        "the reparent is the hand-off's"
+    );
+    let side = BTreeMap::from([("place".to_owned(), 2u64)]);
+    let steps = bind_in(&entry, "play", &BTreeMap::new(), &side).expect("binds");
+    assert_eq!(steps.last(), Some(&stand(2)));
+    let effects = bind_effects_in(&entry, "play", &BTreeMap::new(), &side).expect("binds");
+    assert_eq!(effects.len(), 1, "only the set: {effects:?}");
+    assert_eq!(
+        bind_effects(&entry, "play").unwrap_err().name,
+        "arg-missing"
+    );
+    let out = bind(&entry, "step_out").expect("binds");
+    assert_eq!(out[0], Step::Rise);
+    assert!(matches!(out[1], Step::WalkTo { .. }));
+    assert_eq!(bind(&entry, "leave").expect("binds"), vec![Step::Rise]);
+    // A seat is taken only by a sit or lie step.
+    assert_eq!(bind(&entry, "perch").expect("binds"), vec![]);
+    assert_eq!(
+        bind_effects(&entry, "perch").unwrap_err().name,
+        "body-moves-by-step"
+    );
+    // The run asks the world for the standing slot, the effect's instant at its contact.
+    let mut h = Fake::default();
+    let mut r = Runner::new(vec![stand(1)], node(), Limits::default());
+    assert!(matches!(
+        r.wake(&mut h, Woke::Start),
+        Next::Sit {
+            slot: 1,
+            stand: true,
+            ..
+        }
+    ));
+    r.wake(&mut h, Woke::Contact);
+    assert!(
+        r.take_effect(),
+        "the effect's instant is the hand-off's contact"
+    );
+    let end = r.wake(&mut h, Woke::Moved(Name::new("done").unwrap()));
+    assert_eq!(ended(&end), Some("done"));
 }
