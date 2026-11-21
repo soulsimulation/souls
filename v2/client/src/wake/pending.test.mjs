@@ -159,6 +159,7 @@ test('help schedule-wake gives the gated line for any harness, Claude Code and C
   assert.equal(h.ok, true);
   for (const k of ['any', 'claude', 'codex']) assert.match(h.command[k], /pending --check && /);
   assert.match(h.command.claude, /claude -p '.*' --allowedTools 'Bash\(node:\*\)'$/);
-  assert.match(h.prompt, /wait 0/);
+  assert.match(h.prompt, / pending\. For each message under open/);
+  assert.match(h.prompt, /ack <its id>/);
   assert.match(h.prompt, /--for <its id>/);
 });

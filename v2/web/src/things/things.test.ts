@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as THREE from 'three';
 import { indexOf, type Part } from './models.ts';
-import { SHARED, ThingLayer } from './things.ts';
+import { FAR, HIDDEN, NEAR, SHARED, ThingLayer } from './things.ts';
 
 const part = (glow = false): Part => {
   const geometry = new THREE.BoxGeometry(1, 1, 1);
@@ -83,4 +83,67 @@ test('copies: each thing drawn again one spacing further east', () => {
   assert.equal(new THREE.Vector3().setFromMatrixPosition(l.things.get('a#1')!.matrix).x, 1003);
   l.remove('a');
   assert.equal(l.waiting, 0);
+});
+
+// C12 (#3683) A2: parts drop detail with distance as today's WorldDistanceDetail: sub-pixel parts are not drawn, small
+// far parts go to the batch that casts no shadow, big parts (a building's walls) stay; a light still switches.
+test('A2: parts drop detail with distance: hidden under the pixel, no shadow far away, back when near', () => {
+  const things = Object.fromEntries(Array.from({ length: SHARED }, (_, i) => [`e_${i}`, 'lamp']));
+  const detail = { minRadiusPx: 1.25, shadowNear: 24, shadowPerMetre: 14, shadowMaxRadius: 6 };
+  const l = new ThingLayer({ index: indexOf({ kinds: [], things: { ...things, e_house: 'house' } }), fetch: () => new Promise(() => {}), detail, view: () => ({ height: 844, fov: 50 }) });
+  for (let i = 0; i < SHARED; i++) l.set(`t${i}`, `e_${i}`, at(i * 100), box);
+  l.set('house', 'e_house', at(500), box);
+  // a lamp's small glow part (radius ~0.087 m) and its post (~0.87 m); a house's wall part (radius ~17 m) and a sill (~0.17 m)
+  const small = part(true), post = part(false), wall = part(false), sill = part(false);
+  small.matrix = new THREE.Matrix4().makeScale(0.1, 0.1, 0.1);
+  wall.matrix = new THREE.Matrix4().makeScale(20, 20, 20);
+  sill.matrix = new THREE.Matrix4().makeScale(0.2, 0.2, 0.2);
+  l.arrive('lamp', [post, small]);
+  l.arrive('house', [wall, sill]);
+  l.update(new THREE.Vector3(0, 0, 0));
+  const band = (id: string, k: number) => l.things.get(id)!.slots[k].band;
+  assert.deepEqual([band('t0', 0), band('t0', 1)], [NEAR, NEAR], 'at the eye: everything, with shadows');
+  assert.equal(band('t1', 0), FAR, 'a post 100 m away casts no shadow (24 + 14·0.87 m)');
+  assert.equal(band('t1', 1), HIDDEN, 'a 9 cm glass 100 m away is under 1.25 px on a phone');
+  assert.equal(band('house', 0), NEAR, 'a house wall 500 m away is drawn with its shadow');
+  assert.equal(band('house', 1), HIDDEN, 'its sill is not');
+  const hidden = l.things.get('t1')!.slots[1];
+  assert.equal(hidden.batch, null);
+  assert.equal(l.light('t1', true), 1, 'a hidden light still switches');
+  const far = l.things.get('t1')!.slots[0];
+  assert.equal((far.batch as unknown as { mesh: THREE.InstancedMesh }).mesh.castShadow, false);
+  assert.equal(l.stats.hidden, (SHARED - 1) + 1 + 1, 'every far lamp\'s glass, the sill, and the 700 m lamp\'s post (1.1 px)');
+  // The eye walks up to the far lamp: its parts come back, lit, into the casting batch.
+  for (let f = 0; f < 10; f++) l.update(new THREE.Vector3(100, 0, 1));
+  assert.equal(band('t1', 0), NEAR);
+  assert.equal(band('t1', 1), NEAR);
+  const back = l.things.get('t1')!.slots[1], mesh = (back.batch as unknown as { mesh: THREE.InstancedMesh }).mesh;
+  assert.ok(mesh.castShadow);
+  assert.equal(mesh.instanceColor!.getX(back.index), 1, 'lit, as switched while hidden');
+  const m = new THREE.Matrix4();
+  mesh.getMatrixAt(back.index, m);
+  assert.equal(new THREE.Vector3().setFromMatrixPosition(m).x, 100, 'at its place');
+});
+
+test('hover: pick never lands on a thing whose every part distance detail hides', () => {
+  const detail = { minRadiusPx: 1.25, shadowNear: 24, shadowPerMetre: 14, shadowMaxRadius: 6 };
+  const l = new ThingLayer({ index: indexOf({ kinds: [], things: { e_a: 'cup' } }), fetch: () => new Promise(() => {}), detail, view: () => ({ height: 844, fov: 50 }) });
+  l.set('a', 'e_a', at(100), box);
+  const cup = part();
+  cup.matrix = new THREE.Matrix4().makeScale(0.1, 0.1, 0.1);
+  l.arrive('cup', [cup]);
+  const pick = () => l.pick(new THREE.Vector3(100, 0.5, -5), new THREE.Vector3(0, 0, 1))?.id ?? null;
+  l.update(new THREE.Vector3(0, 0, 0));
+  assert.equal(l.things.get('a')!.slots[0].band, HIDDEN);
+  assert.equal(pick(), null, 'a 9 cm cup 100 m away is not drawn, so not picked');
+  for (let f = 0; f < 10; f++) l.update(new THREE.Vector3(100, 0, -3));
+  assert.equal(l.things.get('a')!.slots[0].band, NEAR);
+  assert.equal(pick(), 'a', 'near: drawn and picked');
+});
+
+test('A2: no detail, no bands (the measure\'s other arm and every test above)', () => {
+  const l = new ThingLayer({ index: indexOf({ kinds: [], things: { e_a: 'one' } }), fetch: () => new Promise(() => {}), detail: null });
+  l.set('a', 'e_a', at(5000), box);
+  l.update(new THREE.Vector3(0, 0, 0));
+  assert.equal(l.things.get('a')!.slots[0].band, NEAR);
 });
