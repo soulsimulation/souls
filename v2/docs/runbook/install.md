@@ -27,7 +27,9 @@ gets, and all of it when today's is idle; neither system's world time is throttl
 runs with `NoNewPrivileges`, `ProtectSystem=strict` (writing only under `/var/lib/souls`), `ProtectHome` and
 `PrivateTmp`. Units read the secrets file as root before they drop to `souls`. The directory
 and the origin listen on loopback only (ports 7310 and 7320); each world's gateway gets its port from its own
-`/etc/souls/gateway-<world>.env`, written when the world is placed (X5).
+`/etc/souls/gateway-<world>.env`, written when the world is placed (X5). That file also names the world's kind
+entries (`--entries <world>/entries`), which the gateway serves to the world's paired clients at `/v2/entries` (#3760);
+a gateway whose entries folder is missing or empty refuses to start.
 
 **Does it fit beside today's system?** Production: 8 cores, 30.6 GB of memory, about 173 GB of disk free. Today's
 worlds use 6.3 GB, and their unit may use at most 26 GB (O14, `v2/docs/machines.md`). With the new system's 3 GB
