@@ -223,3 +223,45 @@ export function groupShot(points: P3[], fov: number, aspect: number, from: P3, s
   // Straight above, a hair toward the first side so the view keeps its heading.
   return { eye: side(0, 0.01, d), target: c };
 }
+
+// Where a line was said (#3776, today's `channelChip`): the dock's hearing label names the place, `inside · <room>` when
+// the speaker stands in a named room (an ancestor with a public name and an outline), else `aloud · <place>` for the
+// smallest named area beside it (a child of one of its ancestors, the open ground's places) whose outline holds the
+// speaker. Read from the copy when drawn, so a renamed
+// place shows its new name while the thread is open.
+
+/** What `placeOf` reads of a node. */
+export type PlaceNode = { parent: string | null; placeName?: string | null; outline?: number[][] };
+
+/** Whether `[x, z]` mm is inside `poly` (even-odd rule). */
+function holds(poly: number[][], x: number, z: number): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i], [xj, zj] = poly[j];
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Twice a polygon's area, mm². */
+const area = (poly: number[][]) => Math.abs(poly.reduce((s, [x, z], i) => { const [x2, z2] = poly[(i + 1) % poly.length]; return s + x * z2 - x2 * z; }, 0));
+
+/** The named place `speaker` stood in when at `p` (world m), or null when none is named. */
+export function placeOf(speaker: string, p: { x: number; z: number } | null, nodes: ReadonlyMap<string, PlaceNode>, words: (n: string) => string): { name: string; inside: boolean } | null {
+  const up = new Set<string>();
+  for (let id = nodes.get(speaker)?.parent ?? null; id && !up.has(id); ) {
+    const n = nodes.get(id);
+    if (!n) break;
+    if (n.placeName && n.outline?.length) return { name: words(n.placeName), inside: true };
+    up.add(id), (id = n.parent);
+  }
+  if (!p) return null;
+  const x = p.x * 1000, z = p.z * 1000;
+  let best: { name: string; a: number } | null = null;
+  for (const n of nodes.values()) {
+    if (!n.parent || !up.has(n.parent) || !n.placeName || !n.outline || n.outline.length < 3 || !holds(n.outline, x, z)) continue;
+    const a = area(n.outline);
+    if (!best || a < best.a) best = { name: words(n.placeName), a };
+  }
+  return best && { name: best.name, inside: false };
+}

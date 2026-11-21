@@ -11,7 +11,8 @@ import * as THREE from 'three';
 import type { NodeRec, PartRec } from '../source/source.ts';
 import type { WorldView } from '../draw/world.ts';
 import { SoulsCopy, TestMark, label, spoken, TALK_MM, wrap, type Status } from './souls.ts';
-import { Conversations, SPEECH_W, groupShot, measurer, paint, place, type Candidate, type Ctx, type Placed, type Thread } from './layer.ts';
+import { Conversations, SPEECH_W, groupShot, measurer, paint, place, placeOf, type Candidate, type Ctx, type Placed, type Thread } from './layer.ts';
+import { placeWords } from '../places/places.ts';
 import { mountCard, nowText, readNow, type NowLine } from './mine.ts';
 import { enters, inside, solidsNear } from '../camera/follow.ts';
 
@@ -157,6 +158,14 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     document.body.append(b);
     return (markers[i] = b);
   };
+  /** Where a line was said (#3776): the named place, read again at most once a second so a rename shows; null when none. */
+  let saidAt: { key: string; ms: number; at: ReturnType<typeof placeOf> } | null = null;
+  const whereSaid = (l: { key: string; speaker: string; at: number } | undefined) => {
+    if (!l) return null;
+    const ms = performance.now();
+    if (saidAt?.key !== l.key || ms - saidAt.ms > 1000) saidAt = { key: l.key, ms, at: placeOf(l.speaker, where(l.speaker, l.at), world.nodes, placeWords) };
+    return saidAt.at;
+  };
   /** A thread's line as text: the speaker's name, then the words. */
   const lineText = (l: { speaker: string; words: string }) => `${nameOf(l.speaker)}: ${l.words}`;
   const showDock = (t: number) => {
@@ -167,10 +176,11 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     const members = Conversations.members(th).map(nameOf);
     const speakers = new Set(Conversations.members(th));
     const also = [...th.hearers].filter(([id, at]) => !speakers.has(id) && th.lastAt - at < 240_000_000).map(([id]) => nameOf(id));
+    const at = whereSaid(said.at(-1));
     const since = ago(Math.max(0, t - (said.at(-1)?.at ?? t)));
-    // A private conversation (#3775): who is in it, never what they say.
+    // A private conversation (#3775): who is in it, never what they say. A public one names where it was said (#3776).
     const hear = th.members ? `🔒 private — only they hear · ${since}`
-      : `💬 aloud · anyone near hears${also.length ? ` · also heard by ${joinNames(also, 2)}` : ''} · ${since}`;
+      : `${at?.inside ? `🏠 inside · ${at.name}` : `💬 aloud${at ? ` · ${at.name}` : ''}`} · anyone near hears${also.length ? ` · also heard by ${joinNames(also, 2)}` : ''} · ${since}`;
     const key = `${th.id}\u0000${said.length}\u0000${talk.version}\u0000${members.join()}\u0000${hear}`;
     if (key === dockShown) return;
     const fresh = !dockShown.startsWith(`${th.id}\u0000`);

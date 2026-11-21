@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as THREE from 'three';
 import type { NodeRec, SaidRec } from '../source/source.ts';
-import { Conversations, GAP_US, HIDDEN, groupShot } from './layer.ts';
+import { Conversations, GAP_US, HIDDEN, groupShot, placeOf, type PlaceNode } from './layer.ts';
 import { enters, inside, solidsNear } from '../camera/follow.ts';
 
 const said = (speaker: string, at: number, words: string | null, ref = `r${speaker}${at}`): SaidRec => ({ speaker, at, length: 2_000_000, reach: 12_000, ref, words });
@@ -122,6 +122,25 @@ test('the dock and the Soul page show a thread as text, live; opening it frames 
   souls.draw(9e6, camera);
   assert.equal(dock.style.display, 'flex');
   assert.equal(dock.children.find((c) => c.tag === 'ol')!.children.length, 3);
+  // #3776: the hearing label names the place the newest line was said in, and follows a rename while open.
+  const hearing = () => dock.children[2].textContent;
+  assert.ok(hearing().startsWith('💬 aloud · anyone near hears'), `no named place: as before: ${hearing()}`);
+  nodes.set('g.0', { id: 'g.0', kind: 'souls:ground@1', parent: null, slot: null, pos: [0, 0, 0], rot: [1 << 30, 0, 0, 0], at: null });
+  nodes.set('p.5', { id: 'p.5', kind: 'souls:place@1', parent: 'g.0', slot: null, pos: [0, 0, 0], rot: [1 << 30, 0, 0, 0], at: null, placeName: 'place-the-lake-shore', outline: [[-5000, -5000], [5000, -5000], [5000, 5000], [-5000, 5000]] });
+  for (const id of ['a.1', 'b.2', 'w.3']) nodes.get(id)!.parent = 'g.0';
+  const clock = globalThis.performance.now;
+  let now = clock.call(globalThis.performance);
+  globalThis.performance.now = () => now;
+  try {
+    now += 2000, souls.draw(9.2e6, camera);
+    assert.ok(hearing().startsWith('💬 aloud · the lake shore · anyone near hears'), hearing());
+    nodes.get('p.5')!.placeName = 'place-the-north-shore';
+    now += 500, souls.draw(9.25e6, camera);
+    now += 1000, souls.draw(9.3e6, camera);
+    assert.ok(hearing().startsWith('💬 aloud · the north shore'), `a rename while the thread is open: ${hearing()}`);
+  } finally {
+    globalThis.performance.now = clock;
+  }
   // #3775: a private conversation between Bo and Wren: the dock names them, says it is private, and shows '…' a turn.
   const secret = (speaker: string, at: number): SaidRec => ({ speaker, at, length: 1_000_000, reach: 0, ref: 'private:c.9', words: null, private: { conversation: 'c.9', members: ['b.2', 'w.3'] } });
   souls.apply(part(4, [secret('w.3', 9.2e6), secret('b.2', 9.4e6)]));
@@ -172,6 +191,26 @@ test('a group beside a wall is framed from a clear side, every member in view; a
   assert.ok(steep.eye.y > 4 && steep.eye.z > 0, `steeply above, on their side: ${JSON.stringify(steep.eye)}`);
   const above = groupShot(heads, 50, 16 / 9, { x: 0, y: 0, z: 0 }, { faces, clear: () => false })!;
   assert.ok(Math.hypot(above.eye.x - 1, above.eye.z) < 0.1 && above.eye.y > 6, `straight above: ${JSON.stringify(above.eye)}`);
+});
+
+// #3776: where a line was said, from the copy's public place names.
+test('placeOf: inside a named room, in the smallest named area, or nowhere named', () => {
+  const words = (n: string) => n.replace(/^place-/, '').replace(/-/g, ' ');
+  const sq = (h: number): number[][] => [[-h, -h], [h, -h], [h, h], [-h, h]];
+  const nodes = new Map<string, PlaceNode>([
+    ['ground', { parent: null }],
+    ['park', { parent: 'ground', placeName: 'place-the-park', outline: sq(50_000) }],
+    ['pond', { parent: 'ground', placeName: 'place-the-pond-edge', outline: sq(5_000) }],
+    ['cafe', { parent: 'ground', placeName: 'the-cafe' }],
+    ['floor', { parent: 'cafe' }],
+    ['room', { parent: 'floor', placeName: 'the-reading-room', outline: sq(3_000) }],
+    ['out', { parent: 'ground' }], ['in', { parent: 'room' }], ['far', { parent: 'ground' }],
+  ]);
+  assert.deepEqual(placeOf('out', { x: 1, z: 1 }, nodes, words), { name: 'the pond edge', inside: false }, 'the smallest area that holds it');
+  assert.deepEqual(placeOf('out', { x: 20, z: 1 }, nodes, words), { name: 'the park', inside: false });
+  assert.deepEqual(placeOf('in', { x: 900, z: 900 }, nodes, words), { name: 'the reading room', inside: true }, "a room's outline is its own frame: the room is its ancestor");
+  assert.equal(placeOf('far', { x: 500, z: 0 }, nodes, words), null, 'outside any named place');
+  assert.equal(placeOf('far', null, nodes, words), null);
 });
 
 // #3775: a private conversation's public record (who spoke, when, among whom; never words) folds into one private
