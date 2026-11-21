@@ -1959,20 +1959,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                                 replica::effects::Change::Set { node, .. } => {
                                     self.touched.insert(*node);
                                 }
-                                other => {
-                                    eprintln!(
-                                        "CUTWHY change {}",
-                                        match other {
-                                            replica::effects::Change::Create { .. } => "create",
-                                            replica::effects::Change::Remove { .. } => "remove",
-                                            replica::effects::Change::Reparent { .. } => "reparent",
-                                            replica::effects::Change::Link { .. } => "link",
-                                            replica::effects::Change::Unlink { .. } => "unlink",
-                                            _ => "?",
-                                        }
-                                    );
-                                    self.structural = true
-                                }
+                                _ => self.structural = true,
                             }
                         }
                     }
@@ -1986,17 +1973,7 @@ impl<S: ObjectStore> PublicWriter<S> {
                             }
                         }
                     }
-                    b => {
-                        eprintln!(
-                            "CUTWHY body {}",
-                            match b {
-                                Body::Transfer(_) => "transfer",
-                                Body::Time(_) => "time",
-                                _ => "?",
-                            }
-                        );
-                        self.structural = true
-                    }
+                    _ => self.structural = true,
                 }
             }
             let at = part.effects.last().map(|e| e.envelope.at);
@@ -2092,10 +2069,8 @@ impl<S: ObjectStore> PublicWriter<S> {
         Ok(())
     }
     pub fn push(&mut self, record: u64, raw: &[u8]) -> R<()> {
-        let tp = std::time::Instant::now();
         let window = self.window;
         self.apply_record(record, raw)?;
-        eprintln!("TIMING apply {:.1}", tp.elapsed().as_secs_f64() * 1e3);
         if let (Some(before), Some(last)) = (window, self.records.last())
             && stream_effect(&self.header, last.clone())?
                 .envelope
@@ -2120,7 +2095,6 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.timers.clear();
     }
     pub fn flush(&mut self) -> R<()> {
-        let tf = std::time::Instant::now();
         if self.chunks.is_empty() && !self.force_remainder {
             return Ok(());
         }
@@ -2173,7 +2147,6 @@ impl<S: ObjectStore> PublicWriter<S> {
         } else {
             None
         };
-        eprintln!("TIMING flush delta {:.1}", tf.elapsed().as_secs_f64() * 1e3);
         let (after, after_digest) = match &delta {
             Some(d) => (None, self.player.digest_with(d)?),
             None => {
@@ -2303,10 +2276,6 @@ impl<S: ObjectStore> PublicWriter<S> {
                 }
             }
         }
-        eprintln!(
-            "TIMING flush context-start {:.1}",
-            tf.elapsed().as_secs_f64() * 1e3
-        );
         let changed = self
             .changes
             .iter()
@@ -2352,10 +2321,8 @@ impl<S: ObjectStore> PublicWriter<S> {
         let chunk_hash = self.put(&chunk)?;
         let part_hash = self.put(&bytes)?;
         let text = self.words_after(after.as_ref(), delta.as_ref())?;
-        eprintln!("TIMING flush words {:.1}", tf.elapsed().as_secs_f64() * 1e3);
         let text_hash = self.put(&text)?;
         self.player.play(&bytes)?;
-        eprintln!("TIMING flush play {:.1}", tf.elapsed().as_secs_f64() * 1e3);
         let manifest = wire(Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.seed.clone())),
             (2, Value::Bytes(self.head.clone().unwrap_or_default())),
@@ -2372,11 +2339,6 @@ impl<S: ObjectStore> PublicWriter<S> {
         immutable(&self.generation_dir().join(format!("{number}.text")), &text)?;
         self.last_to = Some(sp.to);
         self.clear_pending();
-        eprintln!(
-            "TIMING flush end {:.1} fast {}",
-            tf.elapsed().as_secs_f64() * 1e3,
-            delta.is_some()
-        );
         self.pointer(None)
     }
     fn pointer(&self, quiet: Option<i64>) -> R<()> {
