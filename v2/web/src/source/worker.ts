@@ -142,9 +142,7 @@ async function run(stream: URL) {
     if (rest) post({ t: 'part', p: { ...rest, nodes: visible, removed: gone, samples: samples.filter(s => next.has(s[0])) } }, transfer);
     else post({ t: 'snapshot', s: { nodes: visible, removed: gone } }, transfer);
   };
-  // `crossing`: a live viewer that drained the old generation to the state this baseline holds (its digest checked)
-  // has nothing new to show, so no snapshot is posted and nothing on the page moves (#3825).
-  const install = async (p: StreamPointer, crossing = false) => {
+  const install = async (p: StreamPointer) => {
     const header = await get(new URL(`../../../headers/${p.header}`, stream));
     if (!header) throw new Error('no header');
     if (!p.generation) { player = new StreamPlayer(header); active = undefined; return; }
@@ -152,18 +150,17 @@ async function run(stream: URL) {
     const baseline = await get(new URL(path(p, 'baseline'), stream));
     if (!baseline || hex(new Uint8Array(await crypto.subtle.digest('SHA-256', baseline as BufferSource))) !== p.baseline) throw new Error('stream-baseline-hash');
     const nextPlayer = StreamPlayer.fromBaseline(header, baseline);
-    let nodes: NodeRec[] = [], nextVersion: number;
+    let nodes: NodeRec[], nextVersion: number;
     try {
       const baselineRecord = decode(baseline, { useMaps: true }) as Map<number, unknown>;
       nextVersion = num((baselineRecord.get(3) as Map<number, unknown>).get(1));
       if (p.legacyHash && nextPlayer.publicHash() !== p.legacyHash) throw new Error('stream-handoff-baseline');
       await readText('baseline.text', p);
-      if (!crossing) nodes = (decode(nextPlayer.snapshot(), { useMaps: true }) as Map<number, unknown>[]).map(nodeRec);
+      nodes = (decode(nextPlayer.snapshot(), { useMaps: true }) as Map<number, unknown>[]).map(nodeRec);
     } catch (error) { nextPlayer.free(); throw error; }
     const previous = player;
     player = nextPlayer; version = nextVersion; active = p.generation;
     previous?.free();
-    if (crossing) return;
     resolveWords(nodes);
     showAll(nodes);
   };
@@ -246,7 +243,10 @@ async function run(stream: URL) {
           while (drained && Number(player.next()) < latest.legacyNext!) drained = await playOne(ptr);
           if (drained && (version !== latest.legacyVersion || player.publicHash() !== latest.legacyHash)) throw new Error('stream-handoff-state');
           if (!drained && active === undefined) return;
-          await install(latest, drained && active !== undefined);
+          // A live viewer on a generation holds the state the new baseline holds (the digest just checked): it goes on
+          // in the new generation without fetching that baseline, and nothing on the page moves.
+          if (drained && active !== undefined) { player.cross(latest.generation!, latest.legacyHash!); active = latest.generation; }
+          else await install(latest);
         } else if (!latest.generation) throw new Error('stream-generation-gap');
         else await install(latest);
       }

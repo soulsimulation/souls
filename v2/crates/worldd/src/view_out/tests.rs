@@ -3085,7 +3085,15 @@ fn i3825_generations_roll_over_prune_after_the_grace_and_restart_with_the_same_b
                 "no gap at generation {i}"
             );
             assert_eq!(next.version(), live.version());
-            live = next;
+            assert_eq!(next.record(), live.record());
+            // A live viewer goes on without the new baseline; a wrong digest is refused.
+            let id = replica::encode::from_hex(g).unwrap();
+            let digest = live.hash().unwrap();
+            assert_eq!(
+                live.cross(&id, &[0; 32]).unwrap_err().name,
+                "stream-handoff-state"
+            );
+            live.cross(&id, &digest).unwrap();
         }
         let parts = if i == 3 { 2 } else { 3 };
         for n in 0..parts {

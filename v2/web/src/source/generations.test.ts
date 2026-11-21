@@ -3,6 +3,7 @@
 // only the newest generation; a live viewer drains the old generation to the handoff's end, checks its version and
 // digest, and plays on in the new one with no gap, no snapshot and no `stream-generation-gap`; a viewer more than one
 // generation behind starts again from the newest baseline. No build needed.
+// A live viewer crosses without fetching the new baseline: its state is the baseline's, the digest checked.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -43,6 +44,7 @@ export class StreamPlayer {
   samples() { return '[]'; }
   events() { return new Uint8Array([0x80]); }
   publicHash() { return 'd' + this.v; }
+  cross(g, d) { if (!/^[0-9a-f]{64}$/.test(g) || d !== 'd' + this.v) throw new Error('stream-handoff-state'); this.n = 0; }
   free() {}
 }
 `);
@@ -116,8 +118,9 @@ test('a new viewer fetches only the newest generation', async () => {
 test('a live viewer drains the old generation and crosses to the new one with no gap and no snapshot', async () => {
   const a = gen(0, 5), b = gen(5, 3);
   // On A at part 2; the writer finishes A (parts 3, 4) and rolls over to B, whose parts 0 and 1 are out.
-  const { parts, errors, snapshots } = await viewer([a, b], [pointerOf(a, 2), pointerOf(b, 1, a), pointerOf(b, 2, a)]);
+  const { parts, errors, snapshots, fetched } = await viewer([a, b], [pointerOf(a, 2), pointerOf(b, 1, a), pointerOf(b, 2, a)]);
   assert.deepEqual(errors, [], 'no stream-generation-gap and no handoff refusal');
+  assert.ok(!fetched.includes(`/a/b/c/d/g/${b.id}/baseline`), 'the new baseline is not fetched');
   assert.deepEqual(parts.map((p) => p.number), [0, 1, 2, 3, 4, 0, 1, 2], 'every part of A, then B from its first');
   assert.deepEqual(parts.map((p) => p.to), [1, 2, 3, 4, 5, 1, 2, 3].map((n) => n * PERIOD_US));
   assert.equal(snapshots, 1, 'only the first baseline is shown whole; the crossing shows nothing new');

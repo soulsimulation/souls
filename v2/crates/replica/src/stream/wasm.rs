@@ -179,6 +179,15 @@ impl WasmPlayer {
         .map_err(|e| JsError::new(&e.to_string()))
     }
 
+    /// Continues on the next generation, both given in hex, without its baseline ([`PublicPlayer::cross`], #3825).
+    pub fn cross(&mut self, generation: &str, digest: &str) -> Result<(), JsError> {
+        let hex = |h: &str| crate::encode::from_hex(h).map_err(|e| JsError::new(&e));
+        match &mut self.0 {
+            Copy::Legacy(_) => Err(JsError::new("a legacy copy does not cross")),
+            Copy::Public(p) => p.cross(&hex(generation)?, &hex(digest)?).map_err(js),
+        }
+    }
+
     /// Exact public projection digest, including unresolved references, for an explicit legacy handoff.
     #[wasm_bindgen(js_name = publicHash)]
     pub fn public_hash(&self) -> Result<String, JsError> {
