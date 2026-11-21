@@ -442,13 +442,6 @@ impl Sight<'_> {
 }
 
 impl Sight<'_> {
-    /// Where a body walks, at step `step`, to its run's named point of a thing on `node` that is drawn in the world's
-    /// own frame (C22 sweep): a thing placed at its parent's origin with a line (a path's, a bridge's) or an outline (a
-    /// pond's) in that frame, as Eden's land features are. The entry's point is laid on that shape: a line's way along
-    /// the entry's x axis from its first point to its last, stretched from the entry's bounds to the line's length,
-    /// across it unstretched; an outline's around its box's middle, each axis stretched from the bounds to the box.
-    /// `None` for any other walk, planned at the entry's point as before.
-
     /// The radius of the area a body walks to, at step `step`, to be there (no move or sit after it): the walk may end
     /// within reach of the area's circle. `None` for any other walk.
     fn area_radius(&self, body: Id, step: usize) -> Option<i64> {
