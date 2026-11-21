@@ -2984,7 +2984,11 @@ fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_qu
     out.idle(real + 2_000_000).unwrap();
     out.idle(real + 3_000_000).unwrap();
     out.idle(real + 4_000_000).unwrap();
-    assert_eq!(projections() - before, 1, "one projection while nothing changes");
+    assert_eq!(
+        projections() - before,
+        1,
+        "one projection while nothing changes"
+    );
     assert_eq!(quiet(&out), Some(4_000_000 - SETTLE_US));
     // The world sets a field on the thing by itself at 5 s: no Soul, no intent.
     let mut changed = w3e_effect(
@@ -3011,7 +3015,11 @@ fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_qu
     assert_eq!(out.public_player().next(), 1, "not yet cut");
     // Settled: the change is published, then the world is still again from there.
     out.idle(real + 7_000_000).unwrap();
-    assert_eq!(out.public_player().next(), 2, "the world's change is a part");
+    assert_eq!(
+        out.public_player().next(),
+        2,
+        "the world's change is a part"
+    );
     assert_eq!(
         out.public_player().state(),
         &project(&h, &actual.tree().to_state()).unwrap()
@@ -3019,7 +3027,10 @@ fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_qu
     let after = projections();
     out.idle(real + 8_000_000).unwrap();
     out.idle(real + 9_000_000).unwrap();
-    assert!(projections() - after <= 1, "still again: at most one projection");
+    assert!(
+        projections() - after <= 1,
+        "still again: at most one projection"
+    );
     assert_eq!(quiet(&out), Some(9_000_000 - SETTLE_US));
     let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
     for n in 0..2 {
