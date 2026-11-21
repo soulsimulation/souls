@@ -84,6 +84,7 @@ impl Store {
              COMMIT;",
         )
         .map_err(owned)?;
+        db.execute_batch(super::now::SCHEMA).map_err(owned)?;
         Ok(Store { db: Mutex::new(db) })
     }
 

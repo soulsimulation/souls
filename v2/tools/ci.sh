@@ -168,7 +168,7 @@ client_steps() {
 # The client's library by build hash (R5, #2699): cached or downloaded, refused by name, run in a worker with a limit.
 step client-sync node --test client/src/sync/*.test.mjs
 # The resident daemon (R6, #2700): ten forced drops against the real gateway and the world's end of it (I4); R5b's resync after a long cut.
-step client-daemon bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/daemon/*.test.mjs'
+step client-daemon bash -c 'cargo build -p gatewayd -p worldd -p directoryd -p testworld --locked --quiet && node --test client/src/daemon/*.test.mjs'
 # The world's clock on every copy (E7b, #3516): world now from the root's fields, against `worldd serve` across a rate change.
 step client-clock bash -c 'cargo build -p gatewayd -p worldd -p testworld --locked --quiet && node --test client/src/clock/*.test.mjs'
 # The thin command, the brief and find (R7, #2701): 100 scripted command sequences against the same gateway and world.

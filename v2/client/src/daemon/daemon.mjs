@@ -62,6 +62,10 @@
 //     {"op":"pray","words":".."}          a prayer to the world's creator, at most 2,000 characters
 //     {"op":"prayers","all":bool}         a Soul's own, waiting or answered; a creator's, waiting first (all: answered too)
 //     {"op":"answer","id":"p_..","words":".."}   a creator's answer, at most 4,000 characters
+//   and C14's (#3684), the Soul's public status line (today's `now`), kept by the directory and shown on the Soul's
+//   page and its owner's, set the same way through the gateway:
+//     {"op":"now","text":".."}            sets it: one line, at most 140 characters; empty or null clears it. A line
+//                                         holding an open owner's message is refused (`now.owner-words`)
 //   and E26's (#3329), conversations (`../converse/converse.mjs`): an invitation to this Soul, or a decline or lapse of
 //   its own offer, is an event `{"kind":"conversation","what":"invited|declined|lapsed","conversation":"<id>",..}`:
 //     {"op":"converse","do":"start","with":"<body id>","words":"..","private":bool}   the offer and the opening line
@@ -310,10 +314,25 @@ function askDirectory(kind, body) {
   if (!ws || !signedIn) return Promise.resolve({ ok: false, code: 'not-connected', detail: 'the daemon is not signed in: status shows when it is' });
   const n = ++replyN;
   return new Promise((ok) => {
-    const t = setTimeout(() => { replies.delete(n); ok({ ok: false, code: 'prayer.unanswered', detail: 'no reply within 10 s' }); }, PRAYER_WITHIN);
+    const t = setTimeout(() => { replies.delete(n); ok({ ok: false, code: `${kind === 'now' ? 'now' : 'prayer'}.unanswered`, detail: 'no reply within 10 s' }); }, PRAYER_WITHIN);
     replies.set(n, (r) => { clearTimeout(t); replies.delete(n); ok(r); });
     ws.send(JSON.stringify({ [kind]: { n, ...body } }));
   });
+}
+
+// --- C14 (#3684): the public status line -----------------------------------------------------------------------
+const NOW_MOST = 140;
+/** The line as the directory keeps it (today's cleaning: control, zero-width and bidi characters become spaces, runs of
+ *  space one, ends trimmed), `null` to clear; or a refusal by name: too long, or holding an open owner's message. */
+export function nowLine(raw, open = [...mail.values()].map((m) => String(m.text))) {
+  // eslint-disable-next-line no-control-regex
+  const text = String(raw ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g, ' ').replace(/\s+/g, ' ').trim();
+  if ([...text].length > NOW_MOST) return { code: 'now.too-long', detail: `at most ${NOW_MOST} characters, not ${[...text].length}` };
+  const plain = (s) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (open.some((m) => plain(m).length >= 8 && plain(text).includes(plain(m)))) {
+    return { code: 'now.owner-words', detail: 'the status line is public: write your own short line, not your owner\'s message' };
+  }
+  return { text: text || null };
 }
 
 /** G11: a text frame that is a reply to a prayer request, or an answer to this Soul's prayer; true if it was one. */
@@ -546,7 +565,8 @@ function fire(event) {
   firedKeys.add(key);
   if (firedKeys.size > FIRED_KEYS_KEPT) firedKeys.delete(firedKeys.values().next().value);
   for (const { intent } of reflexes.onEvent(event, Date.now())) {
-    sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor });
+    // Marked as a reflex (#3764): sent on the Soul's standing consent, it is not its agent acting.
+    sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor, reflex: true });
   }
 }
 
@@ -628,7 +648,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer']);
+const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now']);
 const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
@@ -735,12 +755,15 @@ function actsOf(words) {
   return out;
 }
 
-/** Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in). */
-function sendIntent(ranked, { target, words, args, params, basis, expiry }) {
+/**
+ * Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in).
+ * `reflex` marks an R9 reflex's intent (#3764); an agent's never is.
+ */
+function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex = false }) {
   state.sequence++;
   const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
     basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words, args,
-    params ? JSON.stringify(params) : undefined);
+    params ? JSON.stringify(params) : undefined, reflex);
   save();
   const sequence = state.sequence, sent = signedIn;
   if (ranked[0] === 'life:join') joinsOf.add(sequence);
@@ -795,7 +818,7 @@ async function answer(req) {
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),
         hearing: ws?.hearing ?? null, viewGrants, viewKinds: [...viewKinds],
-        rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since,
+        rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since, now: state.now ?? null,
       };
     }
     case 'look': return closing({ ok: true }, (rows, changes) => {
@@ -929,6 +952,15 @@ async function answer(req) {
       if ([...words].length > most) return { ok: false, code: `${name}.too-long`, detail: `at most ${most} characters, not ${[...words].length}` };
       const r = await askDirectory(req.op, req.op === 'pray' ? { text: words } : { id: String(req.id ?? ''), text: words });
       return r.ok === false ? r : { ok: true, ...r };
+    }
+    case 'now': {
+      const line = nowLine(req.text);
+      if (line.code) return { ok: false, ...line };
+      const r = await askDirectory('now', { text: line.text });
+      if (r.ok === false) return r;
+      state.now = r.now ?? null;
+      save();
+      return { ok: true, now: state.now };
     }
     case 'prayers': {
       const r = await askDirectory('prayers', { all: req.all === true });

@@ -31,11 +31,12 @@ const ANSWER_MOST: u64 = 4 << 20;
 /// The longest frame passed on: a close, or a prayer or an answer (G11; the directory reads at most 40,000 bytes).
 const CLOSE_MOST: usize = 40_000;
 /// The frames passed on to the directory by their first key, and where; G11's prayers are answered back.
-const PASSED: [(&str, &str); 4] = [
+const PASSED: [(&str, &str); 5] = [
     ("{\"close\"", "close"),
     ("{\"pray\"", "pray"),
     ("{\"prayers\"", "prayers"),
     ("{\"answer\"", "answer"),
+    ("{\"now\"", "now"),
 ];
 
 /// The directory's address (`host:port`) and the key its mailbox requests take.
