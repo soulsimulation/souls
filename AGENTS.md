@@ -169,6 +169,9 @@ re-read the agenda issue before dispatching anything.
   classifier refusal, report the exact step and the workaround tried; never hand back silently.
   [docs/release.md](docs/release.md#release-owner)
 - Never touch services, users, DNS or proxies on the host that aren't Soul's. [docs/operations.md](docs/operations.md)
+- Shell on the production host (soul.game): `bash -c 'source tools/world-launcher/deploy/deploy-env.sh && ssh "$(deploy_target)"'`
+  from the repo root. The target lives only in the untracked `deploy.env`; never write it into the repo.
+  [Runbook](docs/operations/runbook.md)
 
 ## Visitor analytics
 
