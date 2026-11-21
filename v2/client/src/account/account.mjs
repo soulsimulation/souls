@@ -189,6 +189,8 @@ export async function soulProfile(home, soul, args, io = {}) {
     } else body[field] = value;
   }
   const b = await post(seat.address, '/v1/pair/profile', body, null, io.send);
+  // The home knows the Soul by its new name too (list, and a retire by name).
+  if (body.name && b.profile?.name) { const c = read(home, 'config.json'); c.souls = { ...c.souls, [soul]: { ...c.souls?.[soul], id: soul, name: b.profile.name } }; put(home, 'config.json', c); }
   return { ok: true, soul, profile: { name: b.profile?.name ?? null, description: b.profile?.description ?? null, photo: b.profile?.picture ?? 'auto', retireAsked: !!b.profile?.retire_asked } };
 }
 /** `retire <name|id>` asks; the owner's click on their Souls page decides. `retire wait` waits for that click. */
