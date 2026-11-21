@@ -3,7 +3,7 @@
 
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { nearestIds, nearestOffers, offerNamed, offersOf } from './offers.mjs';
+import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from './offers.mjs';
 import { argsOf, requestOf } from '../cli/souls.mjs';
 
 const ID = `${'ab'.repeat(16)}-7`;
@@ -38,6 +38,18 @@ test('A1: a kind with a form named sit offers that form, not the bare move; no e
   const steps = { kind: 'eden:steps', slots: { lower_1: { posture: 'sit' } }, forms: { sit: { who: 'anyone', takes: { seat: { type: 'slot' } } } } };
   assert.deepEqual(offersOf(ID, steps).map((o) => [o.name, o.form ?? null]), [['walk', null], ['sit', 'sit']]);
   assert.deepEqual(offersOf(ID, undefined).map((o) => o.name), ['walk']);
+});
+
+test('A2: a form named as a move names its slot, so object sends the form (which walks there), not the bare move', () => {
+  const table = { kind: 'eden:picnic_table', slots: { seat_1: { admits: 'body', posture: 'sit' }, seat_2: { admits: 'body', posture: 'sit' } },
+    forms: { sit: { who: 'anyone', takes: { seat: { type: 'slot', select: { of: 'free_slots' } } } }, wipe: { who: 'anyone' } } };
+  const [, sit, wipe] = offersOf(ID, table);
+  assert.deepEqual(sit.params.seat.of, ['seat_1', 'seat_2']);
+  assert.equal(sit.params.seat.default, 'seat_1');
+  assert.equal(sit.usage, `act sit:${ID} [seat=<seat_1|seat_2>]`);
+  assert.deepEqual(actWords(sit), [`sit:${ID}`, 'seat=seat_1']);
+  assert.deepEqual(actWords(sit, ['seat=seat_2']), [`sit:${ID}`, 'seat=seat_2']);
+  assert.deepEqual(actWords(wipe), [`wipe:${ID}`]);
 });
 
 test('A2, A3: an offer is named by its name, its act word or a namespaced verb; an unknown one gets the nearest', () => {

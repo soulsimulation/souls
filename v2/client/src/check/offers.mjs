@@ -12,6 +12,16 @@
 
 import { find } from '../find/find.mjs';
 
+/** Verbs that are the world's own moves when sent with no form arguments (`daemon.mjs` `MOVES`). */
+const MOVE_NAMES = new Set(['walk', 'sit', 'lie', 'rise']);
+
+/** The entry's body slots, those of posture `form` first when it names one. */
+function slotNames(entry, form) {
+  const all = Object.entries(entry?.slots ?? {}).filter(([, s]) => s?.admits === 'body' || s?.posture);
+  const of = all.filter(([, s]) => s?.posture === form);
+  return (of.length ? of : all).map(([n]) => n);
+}
+
 /** A parameter's placeholder in `usage`: its choices when the entry lists them, else its type. */
 const placeholder = (t) => (Array.isArray(t?.of) ? t.of.join('|') : t?.type === 'thing' ? 'id' : String(t?.type ?? 'value'));
 
@@ -25,11 +35,27 @@ export function offersOf(id, entry) {
   }
   for (const [name, f] of Object.entries(forms)) {
     const takes = f?.takes ?? {};
-    const params = Object.fromEntries(Object.entries(takes).map(([n, t]) => [n, { ...t, ...(t?.select ? { optional: true } : {}) }]));
-    const words = Object.entries(params).map(([n, t]) => (t.optional ? `[${n}=<${placeholder(t)}>]` : `${n}=<${placeholder(t)}>`));
+    // A form named as a move (`sit` on a picnic table) is that form only when it is given its arguments; bare, the
+    // word is the move, which does not walk there first. So its slot is not left to the world: the first is named.
+    const moveNamed = MOVE_NAMES.has(name);
+    const params = Object.fromEntries(Object.entries(takes).map(([n, t]) => {
+      const slots = t?.type === 'slot' && !Array.isArray(t.of) ? slotNames(entry, name) : null;
+      const p = { ...t, ...(slots?.length ? { of: slots } : {}) };
+      if (moveNamed && slots?.length) p.default = slots[0];
+      else if (t?.select) p.optional = true;
+      return [n, p];
+    }));
+    const words = Object.entries(params).map(([n, t]) => (t.optional || t.default !== undefined ? `[${n}=<${placeholder(t)}>]` : `${n}=<${placeholder(t)}>`));
     out.push({ name, act: `${name}:${id}`, form: name, who: f?.who ?? 'anyone', ...(Object.keys(params).length ? { params } : {}), usage: ['act', `${name}:${id}`, ...words].join(' ') });
   }
   return out;
+}
+
+/** The offer's words for `act`: given arguments, then each parameter's `default` the arguments leave out. */
+export function actWords(offer, args = []) {
+  const named = new Set(args.map((a) => String(a).split('=')[0]));
+  const filled = Object.entries(offer.params ?? {}).filter(([n, p]) => p.default !== undefined && !named.has(n)).map(([n, p]) => `${n}=${p.default}`);
+  return [offer.act, ...args.map(String), ...filled];
 }
 
 /** Edit distance, for naming the offers or ids nearest a word that names none. */

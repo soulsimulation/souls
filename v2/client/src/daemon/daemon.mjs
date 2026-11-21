@@ -119,7 +119,7 @@ import { ageOf } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
-import { nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
+import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
@@ -828,7 +828,7 @@ async function answer(req) {
       if (!offer) {
         return closing({ ok: false, code: 'object.unknown-offer', detail: `${req.this} offers no ${req.action}`, did_you_mean: nearestOffers(seen.offers, req.action), offers: seen.offers.map((o) => o.name) }, null, { now: true });
       }
-      return answer({ op: 'act', acts: [offer.act, ...(req.args ?? []).map(String)], ...(req.for !== undefined ? { for: req.for } : {}) });
+      return answer({ op: 'act', acts: actWords(offer, req.args ?? []), ...(req.for !== undefined ? { for: req.for } : {}) });
     }
     case 'describe': return closing({ ok: true }, (rows) => ({
       nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...(r.text ? { text: r.text } : {}) })),
@@ -908,6 +908,13 @@ function thingOf(id) {
   return { ok: true, row, entry, offers: offersOf(row.id, entry), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
 }
 
+/** A field the copy holds as bytes (hex), shown as its text when that is plain printable text. */
+const readable = (fields) => Object.fromEntries(Object.entries(fields).map(([k, v]) => {
+  if (typeof v !== 'string' || !/^(?:[0-9a-f]{2})+$/.test(v)) return [k, v];
+  const t = Buffer.from(v, 'hex').toString('utf8');
+  return [k, /^[\x20-\x7e]+$/.test(t) ? t : v];
+}));
+
 /** `inspect <id>`: what the thing is, where, its state as the copy holds it, and its own offers with their parameters. */
 function inspect(req) {
   const seen = thingOf(req.this);
@@ -917,7 +924,7 @@ function inspect(req) {
     ok: true, id: row.id, name: row.name, kind: row.kind, ...(row.parent ? { parent: row.parent } : {}),
     ...(row.path?.length ? { in: row.path.slice().reverse().join(', ') } : {}),
     ...(typeof entry?.text?.[entry?.card?.text] === 'string' ? { card: entry.text[entry.card.text] } : {}),
-    ...(fields ? { state: fields } : {}), offers,
+    ...(fields ? { state: readable(fields) } : {}), offers,
     ...(entry ? {} : { note: 'its kind\'s entry is not on this machine: walking to it is all that is known here' }),
   }, null, { now: true });
 }
