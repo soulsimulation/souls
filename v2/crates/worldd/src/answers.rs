@@ -1094,7 +1094,7 @@ fn reserve_edit(edit: &Edit, lineage: Scope, next: &mut u64) -> Result<Minter, R
     let reserved = Minter::at(lineage, *next);
     let mut end = reserved.clone();
     for op in &edit.ops {
-        if matches!(op, edit::Op::Place { .. }) {
+        if matches!(op, edit::Op::Place { .. } | edit::Op::Doorway { .. }) {
             end.mint().map_err(|e| Refused {
                 op: None,
                 name: "edit.ids-exhausted",
@@ -1958,7 +1958,8 @@ impl Clock {
                     self.unsealed = true;
                     // The edit checker's town takes it too, as an edit's commit (G1e).
                     if let Some(w) = &self.walkers {
-                        w.committed(Arc::clone(&c.part), self.replica.version());
+                        // A set-down hands no prepared ground on; the checker's town installs its part as G3b does.
+                        w.committed(Arc::clone(&c.part), self.replica.version(), None);
                     }
                     self.receipts.index(&c.part.effects);
                     self.effects.extend(c.part.effects.iter().cloned());
@@ -2053,19 +2054,22 @@ impl Clock {
                     )
                 };
                 let done = match (&mut self.bodies, maps) {
-                    (Some(b), Some(maps)) => b.commit_map(maps, commit),
+                    (Some(b), Some(mut maps)) => {
+                        let mine = maps.checker.take();
+                        b.commit_map(maps, commit).map(|c| (c, mine))
+                    }
                     // Every edit a world with walkers commits reaches their town: none without its maps.
                     (Some(_), None) => Err(Refused {
                         op: None,
                         name: "edit.map-unchecked",
                         detail: "no walkers' map was prepared for the edit".into(),
                     }),
-                    (None, _) => commit(),
+                    (None, _) => commit().map(|c| (c, None)),
                 };
-                done.map(|c| (c, places))
+                done.map(|(c, mine)| (c, mine, places))
             });
             match committed {
-                Ok((c, places)) => {
+                Ok((c, mine, places)) => {
                     if let Some(b) = &mut self.bodies
                         && let Err(e) = places.install(&mut b.slots, &c.names)
                     {
@@ -2073,9 +2077,10 @@ impl Clock {
                         eprintln!("worldd: edit places {}", e.name);
                     }
                     self.unsealed = true;
-                    // The edit checker's town is built again from a copy with this edit (G1e).
+                    // The edit checker's town installs the ground prepared for this edit (#3743), or is built again
+                    // from a copy with it (G1e).
                     if let Some(w) = &self.walkers {
-                        w.committed(Arc::clone(&c.part), self.replica.version());
+                        w.committed(Arc::clone(&c.part), self.replica.version(), mine);
                     }
                     self.receipts.index(&c.part.effects);
                     self.effects.extend(c.part.effects.iter().cloned());
@@ -4616,13 +4621,13 @@ fn edit_checker(
                     next => next,
                 };
                 // Each edit committed since, on the town; a copy that holds them all, for a town built whole.
-                let committed = walkers.take();
+                town.add(walkers.take());
                 let edited = walkers.edited();
                 let job = match next {
                     Ok(job) => job,
                     Err(_) => {
                         let copy = publisher.wait_for(edited, Duration::from_secs(1));
-                        town.on(&copy, buildsafe::open_ground(&copy), &committed);
+                        town.on(&copy, buildsafe::open_ground(&copy), true);
                         continue;
                     }
                 };
@@ -4647,7 +4652,7 @@ fn edit_checker(
                             Some((rules, mint)) => {
                                 let souls = buildsafe::souls(&copy, &kinds);
                                 let bodies = buildsafe::judged(souls.clone(), &snapshot.bodies);
-                                let t = town.on(&copy, ground, &committed);
+                                let t = town.on(&copy, ground, false);
                                 crate::setdown::check(&a, &copy, t, rules, mint, &bodies, souls)
                             }
                             None => Err(Refusal {
@@ -4742,16 +4747,19 @@ fn edit_checker(
                 };
                 let checked = checked
                     .and_then(|c| {
-                        let known = town.on(&copy, ground, &committed).map(|t| Known::of(t));
+                        let known = town.on(&copy, ground, false).map(|t| Known::of(t));
+                        // Planned with the ids the commit will mint, so its guard's ground is the map's (#3743).
                         sim::edit::plan_classes(
                             c,
                             &copy,
                             ground,
                             known.as_ref(),
                             snapshot.classes.values().copied(),
+                            reserved.clone(),
                         )
                     })
-                    .and_then(|p| {
+                    .and_then(|mut p| {
+                        let kept = p.take_map();
                         let places = crate::edit_places::Projection::prepare(&copy, &p, &entries)?;
                         let tree = buildsafe::souls(&copy, &world.kinds);
                         let souls = buildsafe::judged(tree, &snapshot.bodies);
@@ -4760,6 +4768,7 @@ fn edit_checker(
                                 buildsafe::PreparedMaps::prepare_classes(
                                     &copy,
                                     &p,
+                                    kept,
                                     reserved.clone(),
                                     &souls,
                                     source,
