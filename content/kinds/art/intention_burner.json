@@ -1,0 +1,529 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:intention_burner",
+  "owner": "thing",
+  "state": {
+    "words": {
+      "n": 28,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "on": {
+      "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "spent": {
+      "n": 30,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        650
+      ],
+      "yaw_mdeg": 180000
+    },
+    "paper": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1150,
+        30
+      ]
+    },
+    "edge": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1020,
+        60
+      ]
+    },
+    "valve": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1025,
+        120
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      500,
+      1320,
+      420
+    ]
+  },
+  "forms": {
+    "write": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "words": {
+          "type": "text"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "spent",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "on",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "words",
+          "is": null
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "paper"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "words",
+          "to": {
+            "arg": "words"
+          },
+          "event": "written"
+        }
+      ]
+    },
+    "erase": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "spent",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "on",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "words",
+          "not": null
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "paper"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "words",
+          "to": null,
+          "event": "erased"
+        }
+      ]
+    },
+    "light": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "spent",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "on",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "words",
+          "not": null
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "edge"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "on",
+          "to": true,
+          "event": "lit"
+        },
+        {
+          "change": "set",
+          "field": "spent",
+          "to": true,
+          "event": "released"
+        },
+        {
+          "change": "set",
+          "field": "words",
+          "to": null,
+          "event": "burned"
+        }
+      ]
+    },
+    "put_out": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "on",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "valve"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "on",
+          "to": false,
+          "event": "put_out"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:intention_burner",
+    "table": [
+      {
+        "part": "flame",
+        "field": "on",
+        "do": "flame",
+        "at": {
+          "false": 0,
+          "true": 800
+        }
+      },
+      {
+        "sound": "fire",
+        "field": "on",
+        "at": {
+          "false": 0,
+          "true": 200
+        },
+        "reach_mm": 4000
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            20,
+            0
+          ],
+          "r": 230,
+          "h": 40,
+          "segments": 8,
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -170,
+            490,
+            0
+          ],
+          "size": [
+            35,
+            940,
+            35
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            170,
+            490,
+            0
+          ],
+          "size": [
+            35,
+            940,
+            35
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            990,
+            20
+          ],
+          "size": [
+            480,
+            35,
+            380
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1015,
+            -160
+          ],
+          "size": [
+            480,
+            50,
+            20
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -230,
+            1015,
+            20
+          ],
+          "size": [
+            20,
+            50,
+            380
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            230,
+            1015,
+            20
+          ],
+          "size": [
+            20,
+            50,
+            380
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -170,
+            1150,
+            0
+          ],
+          "size": [
+            12,
+            300,
+            12
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            170,
+            1150,
+            0
+          ],
+          "size": [
+            12,
+            300,
+            12
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1150,
+            20
+          ],
+          "size": [
+            340,
+            280,
+            6
+          ],
+          "tint": "paper",
+          "when": "!@spent"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -55,
+            1021,
+            15
+          ],
+          "size": [
+            150,
+            8,
+            140
+          ],
+          "yaw": 17189,
+          "tint": "ash",
+          "when": "@spent"
+        },
+        {
+          "kind": "box",
+          "at": [
+            55,
+            1027,
+            55
+          ],
+          "size": [
+            130,
+            6,
+            130
+          ],
+          "yaw": -25783,
+          "tint": "char",
+          "when": "@spent"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1025,
+            120
+          ],
+          "size": [
+            25,
+            12,
+            25
+          ],
+          "tint": "valve"
+        },
+        {
+          "kind": "cone",
+          "at": [
+            0,
+            1070,
+            80
+          ],
+          "r": 25,
+          "h": 100,
+          "segments": 6,
+          "tint": "flame",
+          "glow": 900,
+          "role": "flame",
+          "pivot": [
+            0,
+            1020,
+            80
+          ]
+        }
+      ],
+      "palette": {
+        "metal": "#4d4840",
+        "paper": "#f1e4c5",
+        "ash": "#817d73",
+        "char": "#302d28",
+        "valve": "#3a3028",
+        "flame": "#ffb257"
+      },
+      "tags": [
+        "ritual",
+        "paper",
+        "hand-writable",
+        "hand-operated"
+      ]
+    }
+  },
+  "text": {
+    "card": "An intention stand: write words on its paper, burn them, put the fire out.",
+    "ritual": "ritual",
+    "intention_paper": "intention paper",
+    "burn_a_wish": "burn a wish",
+    "release_words": "release words",
+    "howto_release": "Write your words, light the paper, then put the fire out."
+  },
+  "card": {
+    "text": "card",
+    "category": "ritual",
+    "synonyms": [
+      "intention_paper",
+      "burn_a_wish",
+      "release_words"
+    ]
+  },
+  "howtos": {
+    "release": {
+      "text": "howto_release",
+      "steps": [
+        {
+          "form": "write"
+        },
+        {
+          "form": "light"
+        },
+        {
+          "form": "put_out"
+        }
+      ]
+    }
+  }
+}

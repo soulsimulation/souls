@@ -1,0 +1,215 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:poetry_folio",
+  "owner": "thing",
+  "state": {
+    "poem": {
+      "n": 28,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        700
+      ],
+      "yaw_mdeg": 180000
+    },
+    "page": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1260,
+        40
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      740,
+      1520,
+      400
+    ]
+  },
+  "forms": {
+    "write": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "poem": {
+          "type": "text"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "poem",
+          "is": null
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "page"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "poem",
+          "to": {
+            "arg": "poem"
+          },
+          "event": "written"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:poetry_folio",
+    "shape": {
+      "round": 5,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            25,
+            0
+          ],
+          "size": [
+            500,
+            50,
+            400
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            570,
+            -20
+          ],
+          "size": [
+            70,
+            1100,
+            70
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1260,
+            0
+          ],
+          "size": [
+            740,
+            520,
+            35
+          ],
+          "tint": "cover"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -174,
+            1260,
+            26
+          ],
+          "size": [
+            342,
+            480,
+            25
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            174,
+            1260,
+            26
+          ],
+          "size": [
+            342,
+            480,
+            25
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1260,
+            37
+          ],
+          "size": [
+            9,
+            480,
+            9
+          ],
+          "tint": "cover"
+        }
+      ],
+      "palette": {
+        "wood": "#75523d",
+        "cover": "#38595b",
+        "paper": "#f5efd9"
+      },
+      "tags": [
+        "signage",
+        "sign-text",
+        "hand-writable",
+        "poetry",
+        "book"
+      ]
+    }
+  },
+  "text": {
+    "card": "A blank poetry folio: write one poem in it; it is kept as written, for good.",
+    "poetry": "poetry",
+    "poem": "poem",
+    "folio": "folio",
+    "howto_write": "Write one poem; it stays as written."
+  },
+  "card": {
+    "text": "card",
+    "category": "poetry",
+    "synonyms": [
+      "poem",
+      "folio"
+    ]
+  },
+  "howtos": {
+    "write_poem": {
+      "text": "howto_write",
+      "steps": [
+        {
+          "form": "write"
+        }
+      ]
+    }
+  }
+}

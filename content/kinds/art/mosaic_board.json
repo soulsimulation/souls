@@ -1,0 +1,533 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:mosaic_board",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        700
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "slots": {
+    "cell_a1": {
+      "admits": "thing",
+      "kinds": [
+        "eden:mosaic_tile"
+      ],
+      "most": 1,
+      "at_mm": [
+        -160,
+        860,
+        -160
+      ],
+      "fits_mm": [
+        130,
+        60,
+        130
+      ],
+      "stand": "front"
+    },
+    "cell_a2": {
+      "admits": "thing",
+      "kinds": [
+        "eden:mosaic_tile"
+      ],
+      "most": 1,
+      "at_mm": [
+        0,
+        860,
+        -160
+      ],
+      "fits_mm": [
+        130,
+        60,
+        130
+      ],
+      "stand": "front"
+    },
+    "cell_a3": {
+      "admits": "thing",
+      "kinds": [
+        "eden:mosaic_tile"
+      ],
+      "most": 1,
+      "at_mm": [
+        160,
+        860,
+        -160
+      ],
+      "fits_mm": [
+        130,
+        60,
+        130
+      ],
+      "stand": "front"
+    },
+    "cell_b1": {
+      "admits": "thing",
+      "kinds": [
+        "eden:mosaic_tile"
+      ],
+      "most": 1,
+      "at_mm": [
+        -160,
+        860,
+        0
+      ],
+      "fits_mm": [
+        130,
+        60,
+        130
+      ],
+      "stand": "front"
+    },
+    "cell_b2": {
+      "admits": "thing",
+      "kinds": [
+        "eden:mosaic_tile"
+      ],
+      "most": 1,
+      "at_mm": [
+        0,
+        860,
+        0
+      ],
+      "fits_mm": [
+        130,
+        60,
+        130
+      ],
+      "stand": "front"
+    },
+    "cell_b3": {
+      "admits": "thing",
+      "kinds": [
+        "eden:mosaic_tile"
+      ],
+      "most": 1,
+      "at_mm": [
+        160,
+        860,
+        0
+      ],
+      "fits_mm": [
+        130,
+        60,
+        130
+      ],
+      "stand": "front"
+    },
+    "cell_c1": {
+      "admits": "thing",
+      "kinds": [
+        "eden:mosaic_tile"
+      ],
+      "most": 1,
+      "at_mm": [
+        -160,
+        860,
+        160
+      ],
+      "fits_mm": [
+        130,
+        60,
+        130
+      ],
+      "stand": "front"
+    },
+    "cell_c2": {
+      "admits": "thing",
+      "kinds": [
+        "eden:mosaic_tile"
+      ],
+      "most": 1,
+      "at_mm": [
+        0,
+        860,
+        160
+      ],
+      "fits_mm": [
+        130,
+        60,
+        130
+      ],
+      "stand": "front"
+    },
+    "cell_c3": {
+      "admits": "thing",
+      "kinds": [
+        "eden:mosaic_tile"
+      ],
+      "most": 1,
+      "at_mm": [
+        160,
+        860,
+        160
+      ],
+      "fits_mm": [
+        130,
+        60,
+        130
+      ],
+      "stand": "front"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      560,
+      910,
+      560
+    ]
+  },
+  "forms": {
+    "put_on": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        },
+        "place": {
+          "type": "slot"
+        }
+      },
+      "needs": [
+        {
+          "need": "held_by_actor",
+          "thing": {
+            "arg": "thing"
+          }
+        },
+        {
+          "need": "hand",
+          "holds": "eden:mosaic_tile"
+        },
+        {
+          "need": "slot_free",
+          "slot": {
+            "arg": "place"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "put",
+          "slot": {
+            "arg": "place"
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": {
+            "arg": "place"
+          },
+          "event": "tile_placed"
+        }
+      ]
+    },
+    "take_off": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "in": "this",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1,
+            "kind": "eden:mosaic_tile"
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "actor_hand",
+          "event": "tile_taken"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:mosaic_board",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            810,
+            0
+          ],
+          "size": [
+            560,
+            60,
+            560
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -220,
+            390,
+            -220
+          ],
+          "size": [
+            55,
+            780,
+            55
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -220,
+            390,
+            220
+          ],
+          "size": [
+            55,
+            780,
+            55
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            220,
+            390,
+            -220
+          ],
+          "size": [
+            55,
+            780,
+            55
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            220,
+            390,
+            220
+          ],
+          "size": [
+            55,
+            780,
+            55
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            850,
+            -160
+          ],
+          "size": [
+            150,
+            20,
+            150
+          ],
+          "tint": "cell"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            -160
+          ],
+          "size": [
+            150,
+            20,
+            150
+          ],
+          "tint": "cell"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            850,
+            -160
+          ],
+          "size": [
+            150,
+            20,
+            150
+          ],
+          "tint": "cell"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            850,
+            0
+          ],
+          "size": [
+            150,
+            20,
+            150
+          ],
+          "tint": "cell"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            0
+          ],
+          "size": [
+            150,
+            20,
+            150
+          ],
+          "tint": "cell"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            850,
+            0
+          ],
+          "size": [
+            150,
+            20,
+            150
+          ],
+          "tint": "cell"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            850,
+            160
+          ],
+          "size": [
+            150,
+            20,
+            150
+          ],
+          "tint": "cell"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            160
+          ],
+          "size": [
+            150,
+            20,
+            150
+          ],
+          "tint": "cell"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            850,
+            160
+          ],
+          "size": [
+            150,
+            20,
+            150
+          ],
+          "tint": "cell"
+        }
+      ],
+      "palette": {
+        "wood": "#a68761",
+        "cell": "#333c48"
+      },
+      "tags": [
+        "art",
+        "mosaic",
+        "furniture"
+      ]
+    }
+  },
+  "text": {
+    "card": "A nine-cell mosaic table: put a tile on a cell, take tiles off to rearrange.",
+    "art": "art",
+    "mosaic_table": "mosaic table",
+    "mosaic_frame": "mosaic frame",
+    "howto_compose": "Hold a tile and put it on a free cell; take one off with a hand free to rearrange."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "mosaic_table",
+      "mosaic_frame"
+    ]
+  },
+  "howtos": {
+    "compose": {
+      "text": "howto_compose",
+      "steps": [
+        {
+          "form": "put_on"
+        },
+        {
+          "form": "take_off"
+        }
+      ]
+    }
+  }
+}

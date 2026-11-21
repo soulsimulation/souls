@@ -1,0 +1,73 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:mosaic_tile",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        25,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      120,
+      50,
+      120
+    ]
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:mosaic_tile",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            25,
+            0
+          ],
+          "size": [
+            120,
+            50,
+            120
+          ],
+          "tint": "pigment"
+        }
+      ],
+      "palette": {
+        "pigment": "#d55b46"
+      },
+      "tags": [
+        "art",
+        "mosaic-tile",
+        "item"
+      ]
+    }
+  },
+  "text": {
+    "card": "A coloured ceramic mosaic tile, carried in one hand and put on a mosaic cell.",
+    "art": "art",
+    "mosaic_piece": "mosaic piece",
+    "colored_tile": "colored tile"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "mosaic_piece",
+      "colored_tile"
+    ]
+  }
+}
