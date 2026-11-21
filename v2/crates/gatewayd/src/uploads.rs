@@ -17,7 +17,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use assets::child::Checker;
 use assets::store::{State as Kept, Store};
@@ -157,7 +156,7 @@ pub async fn upload(State(gw): State<Arc<Gateway>>, headers: HeaderMap, body: By
     let size = body.len();
     let dir = up.dir.clone();
     let gw2 = gw.clone();
-    let started = Instant::now();
+    let started = crate::times::stamp();
     let done = tokio::task::spawn_blocking(move || {
         let up = gw2.uploads.get().expect("checked above");
         let mut store = up.store.lock().unwrap_or_else(|e| e.into_inner());
@@ -168,7 +167,7 @@ pub async fn upload(State(gw): State<Arc<Gateway>>, headers: HeaderMap, body: By
         Ok::<_, assets::check::Refused>((receipt, record, bytes))
     })
     .await;
-    let ms = started.elapsed().as_millis();
+    let ms = crate::times::stamp().saturating_sub(started) / 1000;
     let (receipt, record, kept) = match done {
         Ok(Ok(r)) => r,
         Ok(Err(r)) => {
