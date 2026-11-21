@@ -13,6 +13,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync",
 # Constant-time compare of token hashes; a token's 32 bytes from the operating system's random source.
 subtle = "2.6"
 getrandom = "0.3"
+# The kind entries are served gzip-encoded (#3760).
+miniz_oxide = "0.8"
 rustix = { version = "1", default-features = false, features = ["time", "std"] }
 
 [dev-dependencies]

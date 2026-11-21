@@ -8,6 +8,7 @@ import init, { StreamPlayer, readPointer } from 'replica';
 import { decode, encode } from 'cborg';
 import { publicSoul, type NodeRec, type PartRec, type Pointer, type SaidRec, type SnapshotRec } from './source.ts';
 import { happenedInPart } from '../sound/record.ts';
+import { readChanged } from './changed.ts';
 import { skyFields } from '../sky/record.ts';
 
 type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string };
@@ -38,8 +39,6 @@ const refOf = (v: unknown): string | null => {
 const nameKey = (b: Uint8Array) => `n:${hex(b)}`;
 const SAID = 'souls:said';
 const PLACE_NAME = 4;
-/** More changed nodes than this in one part are read from one snapshot rather than one query each. */
-const BULK = 64;
 const NAME = 30;
 const DESCRIPTION = 31;
 
@@ -164,17 +163,12 @@ async function run(stream: URL) {
     const played = JSON.parse(player.play(bytes));
     const changed = query(new Map<number, unknown>([[1, 5], [2, version]])) as [IdValue, number][];
     version = played.version;
-    const nodes: NodeRec[] = [], removed: string[] = [];
-    // Each node query reads the whole public state, so a part that changes many nodes (a whole world's first part:
-    // ten thousand in Eden) reads them from one snapshot, which holds the same values for the same live nodes.
-    const all = changed.length > BULK
-      ? new Map((decode(player.snapshot(), { useMaps: true }) as Map<number, unknown>[]).map(v => [key(v.get(1) as IdValue), v]))
-      : null;
-    for (const [id] of changed) {
-      if (all) { const v = all.get(key(id)); if (v) nodes.push(nodeRec(v)); else removed.push(key(id)); continue; }
-      try { nodes.push(nodeRec(query(new Map<number, unknown>([[1, 1], [2, id]])) as Map<number, unknown>)); }
-      catch { removed.push(key(id)); }
-    }
+    const { nodes, removed } = readChanged(
+      changed.map(([id]) => id), key,
+      (id) => query(new Map<number, unknown>([[1, 1], [2, id]])) as Map<number, unknown>,
+      () => new Map((decode(player.snapshot(), { useMaps: true }) as Map<number, unknown>[]).map(v => [key(v.get(1) as IdValue), v])),
+      nodeRec,
+    );
     const samples = JSON.parse(player.samples());
     let happened: PartRec['happened'] = [];
     try { happened = happenedInPart(bytes); } catch { /* sound observes only a successfully played part */ }

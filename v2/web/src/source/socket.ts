@@ -28,7 +28,7 @@ export const ENTRY = 1, GRANT = 5;
 /** T7's levels by number. */
 export const LEVELS = ['', 'full', 'sampled', 'outline', 'counts'];
 /** T10's protocol. */
-const PROTOCOL = 1;
+const PROTOCOL = 2;
 /** After a drop, the socket is tried again after this long. */
 const RETRY_MS = 1000;
 

@@ -31,6 +31,35 @@ const ID_RE = /^f([1-9]\d{0,9})$/;
 const num = (i) => Number(ID_RE.exec(i.id)[1]);
 const json = (res, status, body, headers = {}) => res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-robots-tag': 'noindex', ...headers }).end(JSON.stringify(body));
 
+// C1 (#3673): a person's browser asking for a path nobody serves gets today's plain "No page here" (apps/web main.tsx
+// NoPage, page-route.ts) with a link home, as a 404; programs (an Accept without text/html) and API paths keep JSON or
+// empty answers.
+const API_PATH = /^\/(?:v1|v2|s)(?:\/|$)|^\/(?:preview\/)?w\/[^/]+\/(?:v1|v2)(?:\/|$)/;
+const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** Whether `req` is a browser asking for a page (GET or HEAD, Accept naming text/html) at a path that is not an API's. */
+export function wantsPage(req) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  let path; try { path = new URL(req.url, 'http://origin').pathname; } catch { return false; }
+  return !API_PATH.test(path) && /\btext\/html\b/i.test(String(req.headers.accept ?? ''));
+}
+
+/** The "No page here" page for `path`, linking home. */
+export function noPageHtml(path) {
+  let shown; try { shown = decodeURIComponent(path); } catch { shown = path; }
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+    + '<meta name="robots" content="noindex"><title>No page here</title><style>body{margin:0;background:#10141a;color:#e8e6e1;font:16px/1.5 system-ui,sans-serif}'
+    + 'main{max-width:640px;margin:12vh auto;padding:0 20px}h1{font-size:24px;margin:0 0 12px}code{overflow-wrap:anywhere}a{color:#8fb8f0;display:inline-block;padding:10px 0;min-height:24px}</style></head>'
+    + `<body><main><h1>No page here</h1><p>There is nothing at <code>${escapeHtml(shown.slice(0, 200))}</code>.</p><p><a href="/">See the worlds</a></p></main></body></html>`;
+}
+
+/** Answers `req` with the 404 "No page here" page. */
+export function noPage(req, res) {
+  const body = Buffer.from(noPageHtml(new URL(req.url, 'http://origin').pathname));
+  res.writeHead(404, { 'content-type': 'text/html; charset=utf-8', 'content-length': body.length, 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'x-content-type-options': 'nosniff' })
+    .end(req.method === 'HEAD' ? undefined : body);
+}
+
 /** One line of news.jsonl as a feed item, or null. O18's release entry becomes today's `release` item. */
 export function feedItem(line, n) {
   let i;

@@ -58,7 +58,9 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    link (`<origin>/changelog#v<version>`); the tag `v<version>` at the sha and its GitHub Release; the changelog's
    section through a pull request (`release/changelog-<version>`), as `publish.yml`. Each is skipped when already
    there, so a second dispatch adds no section, tag or entry; a tag at another commit is refused
-   (`release.tag-elsewhere`).
+   (`release.tag-elsewhere`). Today's `release.yml` tags the same `v<version>` line, so the preflight refuses a
+   version already tagged at another commit before anything is staged: whichever workflow ships a version first owns
+   its tag (0.131 is `release.yml`'s, which carries the cut-over fence; the first v2 release is 0.132 or later).
    The viewers' origin serves the entry in the feed (`/v1/feed`, today's shape) on its next read, and the page the
    release moved carries the changelog with this release's section compiled in (`/changelog`, `/changelog.md`), both
    from `v2/tools/origin/site.mjs` (O23).
