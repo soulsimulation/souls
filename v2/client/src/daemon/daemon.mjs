@@ -143,7 +143,7 @@ import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { clockOf, worldNow } from '../clock/clock.mjs';
 import { worldOps } from '../creator/world.mjs';
-import { exportOf } from '../creator/genesis.mjs';
+import { exportOf, importOf } from '../creator/genesis.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
@@ -863,6 +863,13 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex
   return { sequence, sent };
 }
 
+/** How far an import got: its edits, what it placed and set, and what it did not bring over. */
+const summary = (plan, edits, started) => ({
+  edits, placed: plan.counts.placed, set: plan.counts.set, matched: plan.counts.matched, seconds: Math.round((performance.now() - started) / 100) / 10,
+  ...(plan.counts.links ? { links_not_brought: plan.counts.links } : {}),
+  ...(plan.counts.dropped ? { fields_not_brought: Object.fromEntries(plan.counts.droppedFields) } : {}),
+});
+
 /** World time now: the copy's clock mapping (E7b), else the machine's clock, as a world without a mapping runs on it
  *  (`worldd::answers::now`). For the creator's weather end and strike time (#3695). */
 const worldNowOrReal = () => worldNow(clockOf(copy)) ?? Date.now() * 1000;
@@ -1074,6 +1081,25 @@ async function answer(req) {
       const out = exportOf(copy, { names: toldNames(copy), world: seat.world, at: sequenceOf(copyVersion) });
       writeFileSync(file, JSON.stringify(out));
       return { ok: true, file, nodes: out.nodes.length, bodies: out.bodies, at: out.at, ...age };
+    }
+    case 'import': {
+      // #3728: a file's nodes into this world, one edit at a time (each answered before the next is planned, so a
+      // level's places name the nodes the level above became). The first refusal stops it, and says how far it got.
+      if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
+      let file, plan;
+      try { file = JSON.parse(readFileSync(String(req.file ?? ''), 'utf8')); } catch (e) { return { ok: false, code: 'import.file', detail: String(e.message ?? e).slice(0, 200) }; }
+      await ageAfter();
+      if (!copyVersion) return { ok: false, code: 'edit.no-copy', detail: 'no copy of the world yet' };
+      try { plan = importOf(file, exportOf(copy)); } catch (e) { return { ok: false, code: e.code ?? 'import.format', detail: String(e.message ?? e).slice(0, 200) }; }
+      const started = performance.now();
+      let edits = 0;
+      for (let ops; (ops = plan.next());) {
+        const a = await answer({ op: 'edit', ops });
+        if (!a.ok) return { ok: false, code: a.code, op: a.op, detail: `edit ${edits + 1} was refused (${ops.length} operations, the first ${ops[0].op} ${ops[0].kind ?? ops[0].node}); ${edits} edits were made`, ...summary(plan, edits, started) };
+        plan.took(a.names);
+        edits++;
+      }
+      return { ok: plan.left() === 0, ...(plan.left() ? { code: 'import.unplaced', detail: `${plan.left()} nodes name a parent or support that was not placed` } : {}), ...summary(plan, edits, started) };
     }
     case 'check': {
       // On the copy as it is: no sync, no frame to the world (A4). A world verb (#3695) is made into its sets first.

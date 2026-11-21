@@ -71,3 +71,122 @@ export function exportOf(copy, { names = new Map(), world = null, at = null } = 
   }
   return { format: FORMAT, world, at, nodes, bodies, names: Object.fromEntries(names) };
 }
+
+// --- import --------------------------------------------------------------------------------------------------------
+
+/** A file value as a batch's value, ids mapped through `ids`; `null` when it names something not brought over (a
+ *  doorway's or a stair's link) or has no batch form. */
+export function batchValue(v, ids) {
+  if (Array.isArray(v)) {
+    const out = [];
+    for (const x of v) { const y = batchValue(x, ids); if (y === null) return null; out.push(y); }
+    return out;
+  }
+  if (v && typeof v === 'object') {
+    if (v.hex !== undefined) return { hex: v.hex };
+    if (v.id !== undefined) {
+      const to = ids.get(v.id);
+      if (!to) return null;
+      const [scope, counter] = to.split('-');
+      return [{ hex: scope }, Number(counter)];
+    }
+    if (v.int !== undefined && Number.isSafeInteger(Number(v.int))) return Number(v.int);
+    return null;
+  }
+  return v;
+}
+
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+/** Ids as they are: a target's own values, compared with a file's mapped ones. */
+const SELF = { get: (id) => id };
+
+/**
+ * The import of `file` (an export) into the world `target` (an export of the copy it goes into), step by step: each
+ * `next()` is one edit's operations, and `took(answer)` records the ids its places became. The file's root is the
+ * target's root; a node whose id the target holds with the same kind, or the one node of its kind under a node both
+ * share (the open ground), is that node, and only its fields that differ are set; every other node is placed, parents
+ * first (a child rests on its parent, which an edit names by id, so a level's places follow the level above's answer).
+ * A field naming a link (a doorway's, a stair's) is not brought over: links are not places, and are counted.
+ */
+export function importOf(file, target) {
+  if (file?.format !== FORMAT || !Array.isArray(file.nodes)) throw Object.assign(new Error(`not a ${FORMAT} file`), { code: 'import.format' });
+  const ids = new Map(), there = new Map(target.nodes.map((n) => [n.id, n]));
+  const kids = (nodes) => { const m = new Map(); for (const n of nodes) { if (!m.has(n.parent)) m.set(n.parent, []); m.get(n.parent).push(n); } return m; };
+  const srcKids = kids(file.nodes), dstKids = kids(target.nodes);
+  const root = file.nodes.find((n) => n.parent === null), troot = target.nodes.find((n) => n.parent === null);
+  if (!root || !troot) throw Object.assign(new Error('a world has one root'), { code: 'import.format' });
+  const matched = [];
+  const match = (s, t) => { ids.set(s.id, t.id); matched.push([s, t]); };
+  match(root, troot);
+  const depth = new Map([[root.id, 0]]);
+  const placed = [];
+  for (const n of file.nodes) {
+    if (n === root) continue;
+    depth.set(n.id, (depth.get(n.parent) ?? 0) + 1);
+    const same_ = there.get(n.id);
+    if (same_ && same_.kind === n.kind) { match(n, same_); continue; }
+    const tp = ids.get(n.parent);
+    const sibs = (srcKids.get(n.parent) ?? []).filter((x) => x.kind === n.kind);
+    const theirs = tp ? (dstKids.get(tp) ?? []).filter((x) => x.kind === n.kind) : [];
+    if (sibs.length === 1 && theirs.length === 1 && !ids.has(n.id)) { match(n, theirs[0]); continue; }
+    placed.push(n);
+  }
+  const counts = { placed: 0, set: 0, matched: matched.length, links: file.nodes.reduce((k, n) => k + (n.links?.length ?? 0), 0), dropped: 0, droppedFields: new Map() };
+  const drop = (n, k) => { counts.dropped++; const key = `${n.kind.replace(/@.*/, '')} ${k}`; counts.droppedFields.set(key, (counts.droppedFields.get(key) ?? 0) + 1); };
+  const fieldsOf = (n) => {
+    const out = {};
+    for (const [k, v] of Object.entries(n.fields ?? {})) { const b = batchValue(v, ids); if (b === null) drop(n, k); else out[k] = b; }
+    return out;
+  };
+  // The matched nodes' fields that differ, one set each (the open ground's tiles are one large set).
+  const sets = [];
+  for (const [s, t] of matched) {
+    for (const [k, v] of Object.entries(fieldsOf(s))) if (!same(batchValue(t.fields?.[k] ?? null, SELF), v)) sets.push({ op: 'set', node: t.id, field: Number(k), value: v });
+  }
+  // Places by level: a level goes once every node above it is answered.
+  const levels = [];
+  for (const n of placed) { const d = depth.get(n.id); (levels[d] ??= []).push(n); }
+  const todo = levels.filter(Boolean).flat();
+  let waiting = null; // the batch sent and not yet answered: name -> source id
+  const spot = (n) => {
+    const p = n.pose;
+    if (!p) return {};
+    const sup = p.support.which === 2 ? null : { which: p.support.which, ...(p.support.node ? { node: ids.get(p.support.node) } : {}), ...(p.support.height !== undefined ? { height: Number(p.support.height) } : {}) };
+    return { atUm: p.at.map(Number), orientation: p.orientation.map(Number), ...(p.slot !== undefined ? { slot: p.slot } : {}), ...(sup ? { support: sup } : {}) };
+  };
+  return {
+    counts,
+    /** The next edit's operations, or null when nothing is left (or the rest waits for an answer). */
+    next() {
+      if (sets.length) {
+        // A large set (the ground's tiles) goes alone; small ones together.
+        const big = sets.findIndex((o) => JSON.stringify(o.value).length > 64 << 10);
+        const batch = big >= 0 ? sets.splice(big, 1) : sets.splice(0, OPS_MOST);
+        counts.set += batch.length;
+        return batch;
+      }
+      const ops = [], names = new Map();
+      for (let k = 0; k < todo.length && ops.length < OPS_MOST;) {
+        const n = todo[k];
+        const parent = ids.get(n.parent), sup = n.pose?.support?.node;
+        if (!parent || (sup && !ids.has(sup))) { k++; continue; }
+        todo.splice(k, 1);
+        const name = ops.length + 1;
+        names.set(name, n.id);
+        ops.push({ op: 'place', name, kind: n.kind, in: parent, ...spot(n), fields: fieldsOf(n) });
+      }
+      if (!ops.length) return null;
+      waiting = names;
+      counts.placed += ops.length;
+      return ops;
+    },
+    /** The answer's `names` (name -> id) for the batch `next` gave. */
+    took(answerNames = {}) {
+      if (!waiting) return;
+      for (const [name, src] of waiting) { const id = answerNames[name] ?? answerNames[String(name)]; if (id) ids.set(src, id); }
+      waiting = null;
+    },
+    left: () => todo.length + sets.length,
+    ids,
+  };
+}
