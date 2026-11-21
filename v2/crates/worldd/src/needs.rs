@@ -422,11 +422,20 @@ pub fn check(
         return Ok(());
     }
     let reason = verdict.get("reason").and_then(Value::str).unwrap_or("");
-    let name = REASONS
-        .iter()
-        .find(|r| **r == reason)
-        .copied()
-        .unwrap_or("bad_input");
+    let what = verdict
+        .get("detail")
+        .and_then(|d| d.get("what"))
+        .and_then(Value::str);
+    // An argument the act does not give is the runner's own `arg-missing`, whichever need reads it.
+    let name = if reason == "bad_input" && what == Some("argument_missing") {
+        "arg-missing"
+    } else {
+        REASONS
+            .iter()
+            .find(|r| **r == reason)
+            .copied()
+            .unwrap_or("bad_input")
+    };
     let i = match verdict.get("need") {
         Some(Value::Int(i)) => *i,
         _ => -1,

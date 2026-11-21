@@ -1052,21 +1052,34 @@ impl Acts {
             if !self.forms.known(intent.id) {
                 let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
                 let t0 = std::time::Instant::now();
+                // The binder's refusals and who may's come first, from the run's own path below: a form the binder or who
+                // may refuses is left to it, so its refusal is the same as before.
+                let bound = match sim::forms::bind_stages(&entry, form) {
+                    Ok(Some(_)) => true,
+                    Ok(None) => skills::form_runner::bind_with(&entry, form, &all)
+                        .and_then(|_| skills::form_runner::bind_effects_args(&entry, form, &all))
+                        .is_ok(),
+                    Err(_) => false,
+                };
                 let checked =
-                    sim::forms::may(tree, &audiences, &|_| None, body, *node, &entry, form)
-                        .and_then(|()| {
-                            crate::needs::check(
-                                tree,
-                                bodies.as_deref(),
-                                &self.kinds,
-                                body,
-                                *node,
-                                &entry,
-                                form,
-                                &all,
-                                now,
-                            )
-                        });
+                    if !bound {
+                        Ok(())
+                    } else {
+                        sim::forms::may(tree, &audiences, &|_| None, body, *node, &entry, form)
+                            .map_or(Ok(()), |()| {
+                                crate::needs::check(
+                                    tree,
+                                    bodies.as_deref(),
+                                    &self.kinds,
+                                    body,
+                                    *node,
+                                    &entry,
+                                    form,
+                                    &all,
+                                    now,
+                                )
+                            })
+                    };
                 let us = t0.elapsed().as_nanos() as u64;
                 MEASURE_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 MEASURE_NS.fetch_add(us, std::sync::atomic::Ordering::Relaxed);
