@@ -151,10 +151,13 @@ export function grantOf(home, named) {
 }
 
 /** `souls.mjs view …` / `map …`. `ask` reaches the Soul's daemon (names, and the words with no browser). */
-export async function runView(args, { home, env = {}, cwd = process.cwd(), ask = null, pw, map = false, who } = {}) {
+export async function runView(args, { home, env = {}, cwd = process.cwd(), ask = null, askOf = null, pw, map = false, who } = {}) {
   const o = parseView(args, { map });
   const page = pageOf(o, home, env);
-  const { soul, grant } = o.of ? { soul: null, grant: null } : (who ?? grantOf(home, o.soul));
+  // The Soul whose eyes (`--soul`, else the home's one); with `--of`, another Soul's, named from this one's copy.
+  const chosen = who ?? (o.of && !soulsWithTokens(home).length ? null : grantOf(home, o.soul));
+  const soul = chosen?.soul ?? null, grant = o.of ? null : chosen.grant;
+  ask ??= soul && askOf ? askOf(soul) : null;
   const roots = [env.SOULS_PLAYWRIGHT, cwd, home];
   const out = o.out ? resolve(cwd, o.out) : null;
   try {

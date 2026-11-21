@@ -215,8 +215,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.exit(0);
     }
     if (process.argv[2] === 'view' || process.argv[2] === 'map') { // #3687: today's view, read in the same browser
-      const souls = soulsWithTokens(home), soul = souls.length ? chooseSoul(home, named, souls) : null;
-      out(await runView(process.argv.slice(3), { home, env: process.env, map: process.argv[2] === 'map', ask: soul ? (r) => call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null }));
+      const askOf = (soul) => (r) => call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG });
+      out(await runView(process.argv.slice(3), { home, env: process.env, map: process.argv[2] === 'map', askOf }));
       process.exit(0);
     }
     if (refused && process.argv[2] !== 'upgrade') throw Object.assign(new Error(detail), { code: refused });
