@@ -36,7 +36,7 @@ function dock(onClose: () => void, onFollow: () => void) {
   const el = document.createElement('aside');
   el.id = 'conversation';
   el.setAttribute('aria-label', 'Live conversation');
-  el.style.cssText = 'position:fixed;z-index:12;left:12px;bottom:56px;width:min(340px,calc(100vw - 24px));max-height:min(45vh,420px);display:none;flex-direction:column;'
+  el.style.cssText = 'position:fixed;z-index:12;left:12px;bottom:56px;width:min(340px,calc(100vw - 24px));max-height:min(40vh,420px);display:none;flex-direction:column;'
     + 'padding:10px 12px;background:rgba(16,20,26,0.92);color:#e8e6e1;font:13px/1.45 system-ui,sans-serif;border-radius:6px;box-sizing:border-box;border-left:3px solid transparent';
   const close = document.createElement('button');
   close.textContent = '×';
@@ -257,6 +257,8 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     converse(id, framed = false) {
       focus = id && talk.threads.has(id) ? id : null;
       dockShown = '';
+      // On a phone the Soul's page would cover the view the conversation is framed in (today's 700 px breakpoint).
+      if (focus && innerWidth <= 700) out.open(null);
       if (focus && framed) frame(focus);
     },
     open(id) {
