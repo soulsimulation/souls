@@ -772,13 +772,13 @@ fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, us
 }
 
 /// The nearest place to `at` (µm, `floor`'s frame) within [`skills::form_runner::REACH`] where a body may stand, that
-/// is out of every doorway and stair (`passage`) and no nearer the seat's point `seat` than `at` is (so not into the
+/// is out of every doorway and stair (`passage`) and no nearer the slot's point `slot_at` than `at` is (so not into the
 /// thing: a bed's mattress is not a solid), on [`sim::spots::within`]'s rings; `None` when none is.
 fn out_of_passage(
     view: &sim::walk::town::View<'_>,
     floor: Id,
     at: Vec3,
-    seat: Vec3,
+    slot_at: Vec3,
     passage: &dyn Fn(Vec3) -> bool,
 ) -> Option<Vec3> {
     let pitch = sim::spots::REACH_PITCH;
@@ -797,7 +797,7 @@ fn out_of_passage(
                 continue;
             };
             let gap = sim::spots::flat(p, at);
-            let out = sim::spots::flat(p, seat) >= sim::spots::flat(at, seat);
+            let out = sim::spots::flat(p, slot_at) >= sim::spots::flat(at, slot_at);
             if out && !passage(p) && best.is_none_or(|b| gap < b.0) {
                 best = Some((gap, p));
             }
