@@ -13,10 +13,14 @@
 // in that piece's first slot. Each piece is named as today names it (field 1, `<room>-<item>`), so a second furnish
 // leaves what is there.
 //
-// Not here: today's walk-raster check that a piece keeps the ways between doors and every seat's way on and off (the
-// world's own placement rules still hold), a recipe's params (a kind has no size of its own to set), and prices.
+// A solid piece also keeps the room's ways through (`ways.mjs`, today's check): its doorways, stair ends and the
+// pieces standing there stay reachable from each other, and the piece is reached from a doorway.
+//
+// Not here: today's check of every seat's way on and off (the world's own placement rules still hold), a recipe's
+// params (a kind has no size of its own to set), and prices.
 
 import { RECIPES } from './recipes.mjs';
+import { waysOf } from './ways.mjs';
 
 const FRONT_YAW = { s: 0, e: Math.PI / 2, n: Math.PI, w: -Math.PI / 2 };
 const ROOM = 'eden:room', FLOOR = 'eden:floor', WINDOW = 'eden:window', DOOR = 'eden:door';
@@ -37,6 +41,16 @@ const meets = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
 const turned = (c, [hx, hz], a) => {
   const ex = Math.abs(hx * Math.cos(a)) + Math.abs(hz * Math.sin(a)), ez = Math.abs(hx * Math.sin(a)) + Math.abs(hz * Math.cos(a));
   return [c[0] - ex, c[1] - ez, c[0] + ex, c[1] + ez];
+};
+
+/** Whether (x, z) is inside the polygon `poly`. */
+const inside = (poly, [x, z]) => {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i], [xj, zj] = poly[j];
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) c = !c;
+  }
+  return c;
 };
 
 /** The style of today's def ref (`core-townhouse@3` → `townhouse`). */
@@ -145,6 +159,7 @@ export function furnishOps(nodes, ref, { style, kinds = {}, entries = {} } = {})
       ...stairs.flatMap((s) => [...(s.from === level ? [s.foot] : []), ...(s.to === level ? [s.head] : [])]).map((p) => [p[0] - 900, p[1] - 900, p[0] + 900, p[1] + 900]),
       ...stairs.filter((s) => s.from === level || s.to === level).map((s) => s.flight),
     ];
+    const ways = waysOf(outline, doors.filter((d) => d.level === level), stairs.flatMap((s) => [...(s.from === level ? [s.foot] : []), ...(s.to === level ? [s.head] : [])]).filter((p) => inside(outline, p)));
     const named = {};
     for (const it of items) {
       const name = `${origin}-${it.name ?? 'item'}`.slice(0, 48);
@@ -175,6 +190,7 @@ export function furnishOps(nodes, ref, { style, kinds = {}, entries = {} } = {})
         if (solid(size) && zones.slice(0, doors.filter((d) => d.level === level).length).some((z) => meets(box, z))) { why = 'in a doorway'; continue; }
         if (zones.slice(doors.filter((d) => d.level === level).length).some((z) => meets(box, z))) { why = 'at the stairs'; continue; }
         if (solid(size) && taken.some((t) => meets(box, t))) { why = 'overlaps another piece'; continue; }
+        if (solid(size)) { const w = ways.ok(taken, box); if (!w.ok) { why = w.why; continue; } }
         got = { p, box, yaw: fyaw + th };
         break;
       }
