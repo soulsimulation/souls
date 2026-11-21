@@ -10,6 +10,10 @@ import { publicSoul, type NodeRec, type PartRec, type Pointer, type SaidRec, typ
 import { happenedInPart } from '../sound/record.ts';
 import { readChanged } from './changed.ts';
 import { skyFields } from '../sky/record.ts';
+import { BEHIND_US, CUT_US } from '../clock/clock.ts';
+
+/** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
+const AHEAD = 16;
 
 type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string };
 const post = (m: Msg, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
@@ -27,7 +31,7 @@ async function get(url: URL): Promise<Uint8Array | null> {
 
 function readPtr(bytes: Uint8Array): StreamPointer {
   const p = JSON.parse(readPointer(bytes));
-  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header, ...(p.baseline ? { baseline: p.baseline, generation: p.generation } : {}), ...(p.legacyHash ? { legacyVersion: p.legacyVersion, legacyNext: p.legacyNext, legacyHash: p.legacyHash } : {}) };
+  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header, ...(p.baseline ? { baseline: p.baseline, generation: p.generation } : {}), ...(p.legacyHash ? { legacyVersion: p.legacyVersion, legacyNext: p.legacyNext, legacyHash: p.legacyHash } : {}), ...(p.handoffFrom ? { handoffFrom: p.handoffFrom } : {}) };
 }
 
 /** The reference in a `{21: id}` value, as the page keys it, or null. */
@@ -77,7 +81,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   return rec;
 }
 
-type StreamPointer = Pointer & { header: string; baseline?: string; generation?: string; legacyVersion?: number; legacyNext?: number; legacyHash?: string };
+type StreamPointer = Pointer & { header: string; baseline?: string; generation?: string; legacyVersion?: number; legacyNext?: number; legacyHash?: string; handoffFrom?: string };
 
 async function run(stream: URL) {
   await init();
@@ -92,10 +96,22 @@ async function run(stream: URL) {
   let drawn = new Set<string>();
   const text = new TextDecoder();
   const path = (p: StreamPointer, file: string) => p.generation ? `g/${p.generation}/${file}` : file;
-  const readText = async (file: string, p = ptr) => {
-    const b = await get(new URL(path(p, file), stream));
+  const addWords = (b: Uint8Array | null) => {
     if (!b) return;
     for (const [id, w] of decode(b, { useMaps: true }) as [IdValue | Uint8Array, Uint8Array][]) words.set(id instanceof Uint8Array ? nameKey(id) : key(id), text.decode(w));
+  };
+  const readText = async (file: string, p = ptr) => addWords(await get(new URL(path(p, file), stream)));
+  // A part's file (`suffix` '') or its words ('.text'), with the next AHEAD the pointer names already asked for.
+  const fetching = new Map<string, Promise<Uint8Array | null>>();
+  const partFile = (p: StreamPointer, n: number, suffix: string): Promise<Uint8Array | null> => {
+    for (let k = n; k < n + AHEAD && k <= (p.newest ?? n); k++) {
+      const file = path(p, `${k}${suffix}`);
+      if (!fetching.has(file)) fetching.set(file, get(new URL(file, stream)).catch(() => null));
+    }
+    const file = path(p, `${n}${suffix}`);
+    const bytes = fetching.get(file) ?? get(new URL(file, stream));
+    fetching.delete(file);
+    return bytes;
   };
   const query = (q: Map<number, unknown>) => decode(player.query(encode(q)), { useMaps: true });
   const resolveWords = (nodes: NodeRec[]) => {
@@ -156,14 +172,39 @@ async function run(stream: URL) {
     player = nextPlayer; version = nextVersion; active = p.generation;
     previous?.free();
     resolveWords(nodes);
-    const removed = [...known.keys()].filter(id => !nodes.some(n => n.id === id));
-    observe(nodes, removed, []);
+    showAll(nodes);
+  };
+  // The whole public copy as one snapshot: what a baseline or a catch-up shows.
+  const showAll = (nodes: NodeRec[]) => {
+    const present = new Set(nodes.map(n => n.id));
+    observe(nodes, [...known.keys()].filter(id => !present.has(id)), []);
+  };
+  // #3822: a joiner far behind plays the parts the clock would cut past anyway (more than BEHIND_US + CUT_US before
+  // the newest) deferred: no digest each, nothing read back or posted. The state they make is then checked against
+  // the newest claimed digest once and shown as one snapshot; the parts after it play as before.
+  const catchUp = async (p: StreamPointer, last: number): Promise<boolean> => {
+    let any = false;
+    while (Number(player.next()) <= last) {
+      const n = Number(player.next());
+      const [bytes, said] = await Promise.all([partFile(p, n, ''), partFile(p, n, '.text')]);
+      if (!bytes) break;
+      version = JSON.parse(player.playDeferred(bytes)).version;
+      addWords(said);
+      any = true;
+    }
+    if (!any) return false;
+    player.verify();
+    const nodes = (decode(player.snapshot(), { useMaps: true }) as Map<number, unknown>[]).map(nodeRec);
+    resolveWords(nodes);
+    showAll(nodes);
+    return true;
   };
   const playOne = async (p: StreamPointer): Promise<boolean> => {
     const n = Number(player.next());
-    const bytes = await get(new URL(path(p, String(n)), stream));
+    const bytes = await partFile(p, n, '');
     if (!bytes) return false;
-    const played = JSON.parse(player.play(bytes));
+    // #3822: the state's digest is worked out once a batch, at the newest part, not at each one before it.
+    const played = JSON.parse(n < (p.newest ?? n) ? player.playDeferred(bytes) : player.play(bytes));
     const changed = query(new Map<number, unknown>([[1, 5], [2, version]])) as [IdValue, number][];
     version = played.version;
     const { nodes, removed } = readChanged(
@@ -202,15 +243,31 @@ async function run(stream: URL) {
       const b = await get(new URL('pointer', stream));
       const latest = b ? readPtr(b) as StreamPointer : ptr;
       if (latest.generation !== active) {
-        if (active !== undefined || latest.legacyNext === undefined || latest.legacyVersion === undefined || !latest.legacyHash) throw new Error('stream-generation-gap');
-        // Drain exactly the old published bytes, even when its public terminal lies within a source Part.
-        while (Number(player.next()) < latest.legacyNext) if (!(await playOne(ptr))) return;
-        if (version !== latest.legacyVersion || player.publicHash() !== latest.legacyHash) throw new Error('stream-handoff-state');
-        await install(latest);
+        // #3825: the handoff names the generation it closes (none for the legacy stream). A viewer on it drains it and
+        // crosses over; one further behind starts again from the newest baseline, as a new viewer does.
+        const handoff = latest.legacyNext !== undefined && latest.legacyVersion !== undefined && !!latest.legacyHash && latest.handoffFrom === active;
+        if (handoff) {
+          // Drain exactly the old published bytes, even when its public terminal lies within a source Part. All of
+          // them were written before the pointer named the next generation, so a missing one has been pruned.
+          let drained = true;
+          while (drained && Number(player.next()) < latest.legacyNext!) drained = await playOne(ptr);
+          if (drained && (version !== latest.legacyVersion || player.publicHash() !== latest.legacyHash)) throw new Error('stream-handoff-state');
+          if (!drained && active === undefined) return;
+          // A live viewer on a generation holds the state the new baseline holds (the digest just checked): it goes on
+          // in the new generation without fetching that baseline, and nothing on the page moves.
+          if (drained && active !== undefined) { player.cross(latest.generation!, latest.legacyHash!); active = latest.generation; }
+          else await install(latest);
+        } else if (!latest.generation) throw new Error('stream-generation-gap');
+        else await install(latest);
       }
       ptr = latest;
       tell();
+      const far = Math.ceil((BEHIND_US + CUT_US) / ptr.period);
       while (ptr.newest !== null && Number(player.next()) <= ptr.newest) {
+        if (ptr.newest - Number(player.next()) > far) {
+          if (!(await catchUp(ptr, ptr.newest - far))) break;
+          continue;
+        }
         if (!(await playOne(ptr))) break;
         if (Number(player.next()) > (ptr.newest ?? -1)) tell();
       }
