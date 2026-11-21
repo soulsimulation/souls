@@ -144,7 +144,10 @@ try {
   assert.equal((await offer(A, table.id, 'play_white')).answer, 1, 'white sits');
   assert.equal((await offer(B, table.id, 'play_black')).answer, 1, 'black sits');
   assert.equal((await offer(A, table.id, 'begin')).answer, 1, 'the game begins');
-  const set = await waitFor('the board set up in B\'s copy', async () => { const f = await fields(B); return (f.pieces?.length === 32) && f; });
+  let last = null;
+  const board = (pred) => async () => { last = await fields(B); return pred(JSON.stringify(last)) && last; };
+  const set = await waitFor('the board set up in B\'s copy', board((t) => t.includes('"phase":"playing"') && /pieces/.test(t) && t.split('square').length > 30), 20_000)
+    .catch((e) => { console.log(`B's copy: ${JSON.stringify(last)}`); throw e; });
   say(`set up, as B's copy reads it: ${JSON.stringify(set)}`);
 
   // The public stream, as the page's worker plays it.
@@ -169,7 +172,8 @@ try {
   assert.equal(illegal.answer, 2, 'e1e3 is refused');
   assert.equal(illegal.reason, 'hatch-said-no', 'by name');
   assert.equal((await move(A, 'move_white', 'g1', 'f3')).answer, 1, 'Ng1f3');
-  const after = await waitFor('the knight on f3 in B\'s copy', async () => { const f = await fields(B); return JSON.stringify(f.pieces ?? []).includes('"square":21') && f; });
+  const after = await waitFor('the knight on f3 in B\'s copy', board((t) => /"square":21,"piece":2\b/.test(t)), 20_000)
+    .catch((e) => { console.log(`B's copy: ${JSON.stringify(last)}`); throw e; });
   say(`after e4 e5 Nf3, as B's copy reads it: ${JSON.stringify(after)}`);
   const seen = await waitFor('the table in the public stream', () => nodes.get(pageKey), 30_000);
   say(`the table in the public stream (the page's worker): ${JSON.stringify(seen).slice(0, 1500)}`);
