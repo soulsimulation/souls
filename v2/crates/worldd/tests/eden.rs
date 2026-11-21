@@ -3352,7 +3352,7 @@ fn served_steps(at: &str, tag: &str, cases: &[Step]) -> Vec<String> {
 /// L46 (#3715) A1: tea, coffee and eating on a served full Eden. In a cottage's kitchen a Soul takes a bowl from the
 /// table and eats from it, turns the sink's tap on, washes the bowl and turns it off, and switches the stove on and
 /// off. At the café it takes the kettle; there is no sink in the café to fill it at, as today's game finds no tap near
-/// it, so the fill has nothing to fill from. Carried to the cottage's kitchen, the kettle fills at the sink, the fill
+/// it, so the fill has nothing to fill from (refused `thing.none-selected`, #3914). Carried to the cottage's kitchen, the kettle fills at the sink, the fill
 /// choosing the nearest sink in the building itself, and switches on. Eden has no cup to pour it into (left open).
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
@@ -3378,11 +3378,11 @@ fn l46_tea_coffee_and_eating() {
         &[
             ("e_d77094d8", "walk", &[], "done"),
             ("e_d77094d8", "take", &[], "done"),
-            ("e_d77094d8", "fill", &[], "arg-missing"),
+            ("e_d77094d8", "fill", &[], "thing.none-selected"),
             ("e_645e8b7a", "walk", &[], "done"),
             ("e_d77094d8", "fill", &[], "done"),
             ("e_d77094d8", "switch_on", &[], "done"),
-            ("e_d77094d8", "pour", &[], "arg-missing"),
+            ("e_d77094d8", "pour", &[], "thing.none-selected"),
         ],
     ));
     assert!(wrong.is_empty(), "{wrong:#?}");

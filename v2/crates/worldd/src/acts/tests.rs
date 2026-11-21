@@ -451,6 +451,7 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
     by.sort();
     let nearest = select_thing(
         tree,
+        &Json::Null,
         &sel("nearest", Json::Int(1), None),
         this,
         nobody,
@@ -460,6 +461,7 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
     assert_ne!(nearest, Ok(Some(this)), "never the act's own node");
     let last = select_thing(
         tree,
+        &Json::Null,
         &sel("nearest", Json::Str("last".into()), None),
         this,
         nobody,
@@ -467,6 +469,7 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
     );
     let furthest = select_thing(
         tree,
+        &Json::Null,
         &sel("furthest", Json::Int(1), None),
         this,
         nobody,
@@ -476,6 +479,7 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
     assert_eq!(
         select_thing(
             tree,
+            &Json::Null,
             &sel("nearest", Json::Int(1), Some("test:no_such_kind")),
             this,
             nobody,
@@ -486,7 +490,7 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
     );
     let off = Json::Obj(vec![("of".into(), Json::Str("free_slots".into()))]);
     assert_eq!(
-        select_thing(tree, &off, this, nobody, None),
+        select_thing(tree, &Json::Null, &off, this, nobody, None),
         Err(()),
         "not a thing selector"
     );
