@@ -54,11 +54,11 @@ use replica::kinds::sizes::{Build, Size};
 use replica::move_check::{self, Seen, Verdict};
 use replica::moves::{Effector, Move};
 use replica::pose::{Frame, HandOff, Owner, Pose, Support, Vec3};
-use replica::tree::Tree;
-use replica::world_model::Audience;
 use replica::select::{self, Spot};
 use replica::speech::Said;
 use replica::time::Micros;
+use replica::tree::Tree;
+use replica::world_model::Audience;
 use sim::commit::bind::{Bound, Slot, bind};
 use sim::commit::spot;
 use sim::controller::Stance;
@@ -249,7 +249,9 @@ impl Shown {
             orientation: place.orientation,
             support: place.support,
         };
-        let (linear, at) = n.moved().map_or((Vec3::ZERO, Micros::MIN), |m| (m.linear, m.at));
+        let (linear, at) = n
+            .moved()
+            .map_or((Vec3::ZERO, Micros::MIN), |m| (m.linear, m.at));
         Some(Shown {
             pose,
             linear,

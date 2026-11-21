@@ -173,10 +173,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 type R<T> = Result<T, Refusal>;
 
-
 /// The entries of `samples` (#3799), numbered from `first`: per body, its leave and its arrive at its new parent when
 /// its frame changed (the transfer named from the leave's own number, which a zone gives once), then its sample.
-fn motion_effects(header: &replica::effects::Header, first: u64, samples: &[bodies::Sample]) -> Vec<Effect> {
+fn motion_effects(
+    header: &replica::effects::Header,
+    first: u64,
+    samples: &[bodies::Sample],
+) -> Vec<Effect> {
     let h = replica::ids::sha256(
         format!(
             "souls/worldd/motion/{}",
@@ -2703,7 +2706,7 @@ impl Clock {
         Ok(())
     }
 
-    /// 3. The bodies' motion on their nodes (#3799): each sample [`Bodies::motion`] gives, world-caused, in the node's
+    /// The bodies' motion on their nodes, at step 3 (#3799): each sample [`Bodies::motion`] gives, world-caused, in the node's
     /// audience, after a change of parent (T1's leave and arrive inside the zone) when its frame changed. One part for
     /// the tick; when the world refuses it, each body's in a part of its own, a refused one named.
     fn write_motion(&mut self) {
