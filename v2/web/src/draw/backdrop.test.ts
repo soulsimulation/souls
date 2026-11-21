@@ -46,16 +46,22 @@ test('A1: the backdrop meets the ground at its edge and runs past the far plane,
   assert.equal(maxX, 8 + FAR);
   assert.equal(minZ, -FAR);
   assert.ok(FAR > 1200 && SKIRT === 80, 'past the camera\'s far plane; today\'s 80 m margin');
-  // The colours are the ground's own terrain colours at the edge (C11's height and slope colour), not a fixed one.
-  const col = b.mesh.geometry.getAttribute('color'), c = new THREE.Color();
-  let matched = 0;
+  // The colours are the drawn ground's own vertex colours at the edge (C11's height and slope colour), not a fixed one.
+  const terrain = w.group.getObjectByName('terrain') as THREE.Mesh;
+  const tp = terrain.geometry.getAttribute('position'), tc = terrain.geometry.getAttribute('color');
+  const groundColour = new Map<string, THREE.Color>();
+  for (let i = 0; i < tp.count; i++) groundColour.set(`${tp.getX(i)},${tp.getZ(i)}`, new THREE.Color().fromBufferAttribute(tc, i));
+  const col = b.mesh.geometry.getAttribute('color'), edge = new Map<string, THREE.Color>();
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i), z = p.getZ(i);
     if (!(x >= 0 && x <= 8 && z >= 0 && z <= 4)) continue;
-    const want = w.colourAt(Math.min(x, 8 - 1e-6), Math.min(z, 4 - 1e-6))!;
-    c.fromBufferAttribute(col, i);
+    const c = new THREE.Color().fromBufferAttribute(col, i), want = groundColour.get(`${x},${z}`);
+    assert.ok(want, `a ground vertex at ${x},${z}`);
     assert.ok(Math.abs(c.r - want.r) + Math.abs(c.g - want.g) + Math.abs(c.b - want.b) < 1e-5, `the ground's colour at ${x},${z}`);
-    matched++;
+    edge.set(`${x},${z}`, c);
   }
-  assert.equal(matched, onEdge);
+  assert.equal(edge.size >= 2 * (8 + 4), true);
+  // The south edge's colour changes along it (not one colour, not the mean): this gentle slope stays meadow, so it is
+  // today's 4 m noise cell that differs between x 0 and 4 (x 0 and 8 happen to share a noise value).
+  assert.notEqual(edge.get('0,0')!.getHex(), edge.get('4,0')!.getHex());
 });

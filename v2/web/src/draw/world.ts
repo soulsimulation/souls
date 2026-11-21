@@ -251,11 +251,13 @@ export class WorldView {
     this.group.add(this.cover.group);
   }
 
-  /** The drawn ground's colour at world `x, z` (today's terrain colour at its height and slope); null off the tiles. */
+  /** The drawn ground's colour at world `x, z`, as its vertex there is painted (today's terrain colour at its height,
+   *  slope and noise cell); on the far edges the height is read just inside. Null off the tiles. */
   colourAt(x: number, z: number): THREE.Color | null {
-    const g = this.ground, y = this.heightAt(x, z);
+    const g = this.ground, e = this.extent;
+    const hx = e ? Math.min(x, e[2] - 1e-6) : x, hz = e ? Math.min(z, e[3] - 1e-6) : z, y = this.heightAt(hx, hz);
     if (!g || y === null) return null;
-    const t = g.tiles.get(`${Math.floor(x / g.side)},${Math.floor(z / g.side)}`)!, cell = (g.side / t.n) * t.k;
+    const t = g.tiles.get(`${Math.floor(hx / g.side)},${Math.floor(hz / g.side)}`)!, cell = (g.side / t.n) * t.k;
     const hx0 = this.heightAt(x - cell, z) ?? y, hx1 = this.heightAt(x + cell, z) ?? y, hz0 = this.heightAt(x, z - cell) ?? y, hz1 = this.heightAt(x, z + cell) ?? y;
     return terrainColour(new THREE.Color(), y, Math.hypot((hx1 - hx0) / (2 * cell), (hz1 - hz0) / (2 * cell)), x, z);
   }

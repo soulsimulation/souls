@@ -16,7 +16,8 @@ const STEP = 1;
 
 export type Backdrop = { mesh: THREE.Mesh; level: number; colour: THREE.Color };
 
-/** The backdrop around `extent` ([x0, z0, x1, z1] m). `heightAt` and `colourAt` read the drawn ground (null off it). */
+/** The backdrop around `extent` ([x0, z0, x1, z1] m). `heightAt` and `colourAt` read the drawn ground (null off it);
+ *  `colourAt` gets the edge point itself, as the ground's own vertex there is painted. */
 export function backdropMesh(
   extent: readonly [number, number, number, number],
   heightAt: (x: number, z: number) => number | null,
@@ -38,7 +39,7 @@ export function backdropMesh(
   const mean = new THREE.Color(0, 0, 0);
   let coloured = 0;
   const colours = ring.map(([x, z]) => {
-    const c = colourAt(inX(x), inZ(z));
+    const c = colourAt(x, z);
     if (c) (mean.add(c), coloured++);
     return c;
   });
