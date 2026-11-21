@@ -2,7 +2,8 @@
 // a white light that grows as the stream comes in, then dissolves into the first drawn frame. It ends at its largest with
 // the corners light grey, never a white screen; a `?shot` page never shows it; a failed load shows the reason in place
 // of the light. The light is a CSS disc whose growth is a compositor transition, so the card needs no frame of its own,
-// and once it has dissolved it is taken out of the page with no timer left behind.
+// and once it has dissolved it is taken out of the page with no timer left behind. A world's welcome (#3702), its
+// creator's words from the directory's list, is shown under the name, and the card stays at least READ_MS once it shows.
 
 /** How far the load has come at each step the page sees: the stream's pointer, its snapshot, its first part, and the
  *  first drawn frame. The page counts as begun when the card is mounted. */
@@ -12,6 +13,8 @@ export const STAGES: Record<Stage, number> = { begun: 0.12, pointer: 0.35, snaps
 export const DISSOLVE_MS = 2000, GROW_MS = 2400, FILL_MS = 1200;
 /** The disc's solid radius at scale 1, in CSS pixels; the light starts at START of the radius that covers the text and at
  *  full reaches PEAK of the way to the corners, so it never whites out (#1318). */
+/** The least time a welcome stays on the card before it dissolves, and the most characters shown (the directory's own). */
+export const READ_MS = 4000, WELCOME_MOST = 500;
 export const DISC_RADIUS = 146, START = 0.33, PEAK = 0.6, TEXT_MARGIN = 20;
 /** Today's growth curve: slow at first, flooding outward at the end, a little linear growth so the start still moves. */
 export const growth = (phase: number) => { const e = Math.min(1, Math.max(0, phase)); return 0.15 * e + 0.85 * e * e * e; };
@@ -47,16 +50,26 @@ const CSS = `
 #arrival progress::-moz-progress-bar{background:#000;border-radius:2px}
 #arrival[data-state="failed"] .arrival-disc,#arrival[data-state="failed"] progress{display:none}
 #arrival[data-state="failed"]{color:#e8e6e1}
+#arrival .arrival-title{order:-2}
+#arrival .arrival-welcome{order:-1;margin:0;font-size:14px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:9em;overflow:hidden}
+#arrival .arrival-welcome:empty{display:none}
 #arrival .arrival-reason{margin:0;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
 #arrival .arrival-reason:empty{display:none}
 `;
 
-export type ArrivalCard = { reach(stage: Stage): void; fail(reason: string): void; readonly state: Arrival['state'] };
+export type ArrivalCard = { reach(stage: Stage): void; fail(reason: string): void; greet(words: string): void; readonly state: Arrival['state'] };
+
+/** A world's welcome from the directory's list (`GET /v1/worlds`), or '' when it has none. */
+export function welcomeOf(listing: unknown, world: string): string {
+  const rows = (listing as { worlds?: unknown } | null)?.worlds;
+  const row = Array.isArray(rows) ? rows.find((w) => w?.name === world) : null;
+  return typeof row?.welcome === 'string' ? row.welcome.trim().slice(0, WELCOME_MOST) : '';
+}
 
 /** Mounts the card over the page, titled `title`, unless `shot`; returns what the page calls as the load goes on. */
 export function mountArrival(doc: Document, title: string, shot: boolean, later: (f: () => void, ms: number) => unknown = (f, ms) => setTimeout(f, ms)): ArrivalCard {
   let a: Arrival = { phase: 0, state: 'loading', reason: '' };
-  if (shot) return { reach() {}, fail() {}, get state() { return 'gone' as const; } };
+  if (shot) return { reach() {}, fail() {}, greet() {}, get state() { return 'gone' as const; } };
   const style = Object.assign(doc.createElement('style'), { textContent: CSS });
   const root = Object.assign(doc.createElement('div'), { id: 'arrival' });
   root.setAttribute('role', 'status');
@@ -68,7 +81,8 @@ export function mountArrival(doc: Document, title: string, shot: boolean, later:
   const bar = Object.assign(doc.createElement('progress'), { max: 1000, value: 0 });
   bar.setAttribute('aria-label', 'World loading progress');
   const reason = Object.assign(doc.createElement('p'), { className: 'arrival-reason' });
-  text.append(name, bar, reason);
+  const welcome = Object.assign(doc.createElement('p'), { className: 'arrival-welcome' });
+  text.append(name, bar, reason, welcome);
   root.append(disc, text);
   doc.head.append(style);
   doc.body.append(root);
@@ -92,9 +106,18 @@ export function mountArrival(doc: Document, title: string, shot: boolean, later:
     show();
     if (a.state === 'dissolving' && was !== 'dissolving') later(() => go({ t: 'gone' }), DISSOLVE_MS);
   };
+  // While a welcome is being read the first frame waits, then dissolves the card.
+  let reading = false, drawn = false;
   go({ t: 'stage', stage: 'begun' });
   return {
-    reach: (stage) => go({ t: 'stage', stage }),
+    reach: (stage) => { if (stage === 'drawn' && reading) drawn = true; else go({ t: 'stage', stage }); },
+    greet: (words) => {
+      if (!words || a.state !== 'loading' || welcome.textContent) return;
+      welcome.textContent = words; // plain text, never markup
+      show();
+      reading = true;
+      later(() => { reading = false; if (drawn) go({ t: 'stage', stage: 'drawn' }); }, READ_MS);
+    },
     fail: (r) => go({ t: 'fail', reason: r }),
     get state() { return a.state; },
   };

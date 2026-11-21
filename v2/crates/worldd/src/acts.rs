@@ -756,7 +756,7 @@ fn numbers(
     let (mut counts, mut slots) = (skills::form_runner::Args::new(), BTreeMap::new());
     for (k, &n) in given {
         match (takes(k), i64::try_from(n)) {
-            (Some("int" | "duration"), Ok(v)) => {
+            (Some("count" | "int" | "duration"), Ok(v)) => {
                 drop(counts.insert(k.clone(), skills::form_runner::Arg::Int(v)))
             }
             _ => drop(slots.insert(k.clone(), n)),
@@ -850,6 +850,8 @@ pub struct Acts {
     /// What blocked each body whose walk ended [`BLOCKED`], until its run's ending is read.
     blocked: BTreeMap<Id, String>,
     planning: RefCell<Planning>,
+    /// The code hatches' modules this world ships (F8, #3713), loaded and checked once, by their SHA-256 multihash.
+    hatches: BTreeMap<Vec<u8>, replica::hatch::Loaded>,
 }
 
 /// The moves a form's step may name: every move content declares, and the body's own (C23, [`crate::moves`]).
@@ -957,7 +959,60 @@ impl Acts {
             watch: Watch::new(),
             blocked: BTreeMap::new(),
             planning: RefCell::new(Planning::default()),
+            hatches: BTreeMap::new(),
         }
+    }
+
+    /// Loads the code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713), each named by the hash of
+    /// its bytes: a module refused at load is refused here by its name, before the world serves.
+    pub fn hatches(&mut self, modules: &[Vec<u8>]) -> Result<usize, Refusal> {
+        for bytes in modules {
+            let mut named = vec![replica::ids::SHA2_256, 32];
+            named.extend(replica::ids::sha256(bytes));
+            let loaded = replica::hatch::Loaded::load(bytes, &named)?;
+            self.hatches.insert(named, loaded);
+        }
+        Ok(self.hatches.len())
+    }
+
+    /// The sets form `form`'s code hatch answers for `node`, if the form has one (F8, #3713): its declared reads from
+    /// the node's fields and the act's arguments, run in the module the world ships under its hash. A no refuses the
+    /// act `hatch-said-no` with the hatch's `why`; a module the world does not ship is `hatch-module-missing`.
+    fn hatch_sets(
+        &self,
+        tree: &Tree,
+        node: Id,
+        entry: &Json,
+        form: &str,
+        args: &skills::form_runner::Args,
+    ) -> Result<Option<Vec<skills::form_runner::Effect>>, Refusal> {
+        let Some(hatch) = skills::form_runner::bind_hatch(entry, form)? else {
+            return Ok(None);
+        };
+        let Some(module) = self.hatches.get(&hatch.module) else {
+            return Err(refusal("hatch-module-missing", form));
+        };
+        let empty = BTreeMap::new();
+        let fields = tree
+            .handle(node)
+            .and_then(|h| tree.node(h))
+            .map(|n| n.fields().clone());
+        let reads = skills::form_runner::hatch_reads(
+            entry,
+            &hatch,
+            fields.as_ref().unwrap_or(&empty),
+            args,
+        )?;
+        let v = skills::form_runner::run_hatch(&hatch, module, entry, &reads)?;
+        if !v.yes {
+            return Err(skills::form_runner::hatch_no(&hatch));
+        }
+        Ok(Some(
+            v.sets
+                .into_iter()
+                .map(|(field, to)| skills::form_runner::Effect::Set { field, to })
+                .collect(),
+        ))
     }
 
     /// Runs `f` on the world the runner reaches.
@@ -1135,8 +1190,8 @@ impl Acts {
                 first.get_or_insert(refusal("arg-ambiguous", key));
                 continue;
             }
-            // A whole number the form takes as an `int` or a `duration` is that value (#3703); any other is a slot
-            // of the node by number (C12).
+            // A whole number the form takes as a `count`, an `int` or a `duration` is that value (#3703, #3713); any
+            // other is a slot of the node by number (C12).
             let (counts, slots) = numbers(entry, form, &args.slots);
             let mut all = match skills::form_runner::args_in(entry, &args.things, &slots) {
                 Ok(all) => all,
@@ -1240,6 +1295,15 @@ impl Acts {
                     continue;
                 }
             };
+            // A form's code hatch (F8, #3713) checks the act before any walk, and its answered fields are written
+            // with the form's effects, in place of the form's own sets of those fields.
+            let hatched = match self.hatch_sets(tree, *node, &entry, form, &all) {
+                Ok(h) => h,
+                Err(e) => {
+                    first.get_or_insert(e);
+                    continue;
+                }
+            };
             let was = match thing {
                 Some(t) => self.toward.insert(body, t),
                 None => self.toward.remove(&body),
@@ -1251,6 +1315,7 @@ impl Acts {
             let audiences = BTreeMap::<Id, BTreeSet<Id>>::new();
             let r = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
                 if !picked
+                    && hatched.is_none()
                     && args.things.is_empty()
                     && args.slots.is_empty()
                     && args.values.is_empty()
@@ -1270,7 +1335,14 @@ impl Acts {
                 }
                 // Thing, slot and value arguments (F4, C12, C24, C25): bound here, as `Forms::commit` binds none yet.
                 let steps = skills::form_runner::bind_with(&entry, form, &all)?;
-                let effects = skills::form_runner::bind_effects_args(&entry, form, &all)?;
+                let mut effects = skills::form_runner::bind_effects_args(&entry, form, &all)?;
+                if let Some(sets) = hatched {
+                    effects.retain(|e| {
+                        !matches!(e, skills::form_runner::Effect::Set { field, .. }
+                            if sets.iter().any(|s| matches!(s, skills::form_runner::Effect::Set { field: f, .. } if f == field)))
+                    });
+                    effects.extend(sets);
+                }
                 sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
                 forms.start(w, body, *node, intent, steps, effects, limits(), now)
             });

@@ -237,6 +237,14 @@ fn w9_settings_by_the_creator_alone_and_off_the_list_wakes_no_world() {
     );
     assert_eq!(store.keys(), keys, "only the list's object changed");
     assert_eq!(forks.load(Ordering::SeqCst), 1, "the create's fork alone");
+    // Still on its creator's own list, marked unlisted, and on nobody else's (#3698).
+    let own = w.list_for(Some(person(1))).expect("her list");
+    assert_eq!(own["worlds"][0]["name"], "mine");
+    assert_eq!(own["worlds"][0]["unlisted"], true);
+    assert_eq!(
+        w.list_for(Some(person(2))).expect("his list")["worlds"],
+        json!([])
+    );
     // Read back by its creator, and back on the list.
     assert_eq!(
         w.settings("mine", person(1), None, None, None)

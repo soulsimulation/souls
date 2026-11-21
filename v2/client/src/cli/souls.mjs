@@ -110,12 +110,53 @@ import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount } from '../account/account.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
-export const OPS = ['query', 'batch', 'catalog', 'context', 'status', 'pair', 'look', 'find', 'act', 'inspect', 'object', 'can', 'say', 'shout', 'whisper', 'converse', 'lie', 'wear', 'pray', 'prayers', 'now', 'wait', 'history', 'stats', 'pending', 'ack', 'stop', 'quit', 'receipt', 'events', 'conversations', 'whatson', 'calendar'];
+export const OPS = [
+  'ack',
+  'act',
+  'batch',
+  'calendar',
+  'can',
+  'catalog',
+  'context',
+  'conversations',
+  'converse',
+  'events',
+  'find',
+  'history',
+  'inspect',
+  'lie',
+  'look',
+  'now',
+  'object',
+  'pair',
+  'pending',
+  'pray',
+  'prayers',
+  'query',
+  'quit',
+  'receipt',
+  'say',
+  'shout',
+  'stats',
+  'status',
+  'stop',
+  'wait',
+  'wear',
+  'whatson',
+  'whisper',
+];
 /** #3705: today's names, kept: `stop` ends your act (the daemon's op `halt`), `quit` ends the daemon (its op `stop`). */
 const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse' };
 const CALENDAR_USAGE = 'calendar | calendar add "<title>" --place <placeId> --in <minutes> --for <minutes> ["description"] | calendar interest|not-coming <id>';
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
-export const LOCAL = ['digest', 'consolidate', 'schedule', 'help', 'memory', 'remember'];
+export const LOCAL = [
+  'consolidate',
+  'digest',
+  'help',
+  'memory',
+  'remember',
+  'schedule',
+];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /**
