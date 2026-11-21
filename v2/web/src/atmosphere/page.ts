@@ -3,7 +3,7 @@
 // or a garden is followed), and moves them by the page clock's world time with today's weather rules.
 import * as THREE from 'three';
 import type { WorldView } from '../draw/world.ts';
-import { KINDS, plain } from '../sound/plan.ts';
+import { kindSounds } from '../sound/plan.ts';
 import type { SkyState } from '../sky/sky.ts';
 import { faunaAnchors, faunaLevels, type Source, type Water } from './anchors.ts';
 import { Fauna } from './fauna.ts';
@@ -15,8 +15,8 @@ export function anchorInput(world: WorldView): { extent: WorldView['extent']; he
   const water: Water[] = [], sources: Source[] = [], v = new THREE.Vector3();
   for (const n of world.nodes.values()) {
     if (n.waterLevel !== undefined && n.outline) water.push({ level: n.waterLevel * MM, points: n.outline.map(([x, z]) => [x * MM, z * MM]) });
-    const specs = KINDS[plain(n.kind)];
-    if (!specs?.some((s) => s.kind === 'birds' || s.kind === 'bees' || s.kind === 'waterfowl')) continue;
+    const specs = kindSounds(n.kind);
+    if (!specs.some((s) => s.kind === 'birds' || s.kind === 'bees' || s.kind === 'waterfowl')) continue;
     v.setFromMatrixPosition(world.frame(n.id));
     sources.push({ pos: [v.x, v.y, v.z], sounds: specs.map((s) => s.kind) });
   }
