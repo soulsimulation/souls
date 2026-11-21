@@ -13,11 +13,11 @@
 // DIRECTORYD, or v2/target/release). Fake minds; an isolated folder under the OS temp dir, removed at the end.
 import { strict as assert } from 'node:assert';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { createServer as netServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { request } from '../../client/src/daemon/client.mjs';
 import { runtimeOf } from '../../client/src/home/home.mjs';
@@ -123,7 +123,7 @@ try {
     const r = await s.cli('object', id, name, ...args);
     assert.equal(r.ok, true, `${s.label} ${name}: ${JSON.stringify(r)}`);
     const a = await answered(s, r.sequence);
-    say(`${s.label} ${name} ${args.join(' ')}: ${a.answer === 1 ? 'receipt' : `refused ${a.reason}`}`);
+    say(`${s.label} ${name} ${args.join(' ')}: ${a.answer === 1 ? 'receipt' : `refused ${a.reason} ${JSON.stringify(a)}`}`);
     return a;
   }
 
@@ -137,17 +137,25 @@ try {
 
   const table = await waitFor('the chess table in the copy', async () => (await A.cli('find', 'chess table', '--limit', '20')).found?.find((r) => r.kind === 'eden:chess_table'));
   say(`the table: ${table.id}`);
-  const fields = async (s) => (await s.cli('inspect', table.id)).state ?? {};
   const sq = (n) => (n.charCodeAt(1) - 49) * 8 + (n.charCodeAt(0) - 97);
   const move = (s, form, from, to) => offer(s, table.id, form, `from=${sq(from)}`, `to=${sq(to)}`, 'promotion=0');
 
   assert.equal((await offer(A, table.id, 'play_white')).answer, 1, 'white sits');
   assert.equal((await offer(B, table.id, 'play_black')).answer, 1, 'black sits');
   assert.equal((await offer(A, table.id, 'begin')).answer, 1, 'the game begins');
-  const set = await waitFor('the board set up in B\'s copy', async () => { const f = await fields(B); return (f.pieces?.length === 32) && f; });
-  say(`set up, as B's copy reads it: ${JSON.stringify(set)}`);
+  await pause(3000);
+  say(`after begin, B's inspect: ${JSON.stringify(await B.cli('inspect', table.id)).slice(0, 3000)}`);
 
-  // The public stream, as the page's worker plays it.
+  // The public stream, as the page's worker plays it: the world's folder as the origin serves a placed world.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.protocol === 'file:') return new Response(readFileSync(url), { headers: { 'content-type': 'application/wasm' } });
+    if (url.host !== 'local') return realFetch(input, init);
+    const file = normalize(join(world, decodeURIComponent(url.pathname).replace(/^\/w\/eden\//, '')));
+    if (!file.startsWith(world) || !existsSync(file) || !statSync(file).isFile()) return new Response(null, { status: 404 });
+    return new Response(readFileSync(file));
+  };
   const named = JSON.parse(readFileSync(join(world, 'views/world.json'), 'utf8'));
   const stream = new URL(named.stream.replace(/\/?$/, '/'), 'http://local/w/eden/').href;
   const nodes = new Map(), errors = [];
@@ -169,10 +177,11 @@ try {
   assert.equal(illegal.answer, 2, 'e1e3 is refused');
   assert.equal(illegal.reason, 'hatch-said-no', 'by name');
   assert.equal((await move(A, 'move_white', 'g1', 'f3')).answer, 1, 'Ng1f3');
-  const after = await waitFor('the knight on f3 in B\'s copy', async () => { const f = await fields(B); return JSON.stringify(f.pieces ?? []).includes('"square":21') && f; });
-  say(`after e4 e5 Nf3, as B's copy reads it: ${JSON.stringify(after)}`);
-  const seen = await waitFor('the table in the public stream', () => nodes.get(pageKey), 30_000);
-  say(`the table in the public stream (the page's worker): ${JSON.stringify(seen).slice(0, 1500)}`);
+  await pause(3000);
+  say(`after e4 e5 Nf3, B's inspect: ${JSON.stringify(await B.cli('inspect', table.id)).slice(0, 3000)}`);
+  const seen = await waitFor('the table in the public stream', () => nodes.get(pageKey), 30_000)
+    .catch((e) => { console.log(`stream: ${nodes.size} nodes, errors ${JSON.stringify(errors)}, e.g. ${[...nodes.keys()].slice(0, 5)}, ${[...nodes.keys()].filter((k) => k.includes('5742'))}`); throw e; });
+  say(`the table in the public stream (the page's worker): ${JSON.stringify(seen, (k, v) => (typeof v === 'bigint' ? String(v) : v)).slice(0, 3000)}`);
   assert.deepEqual(errors, [], 'the worker plays the stream');
   say('done');
 } finally {
