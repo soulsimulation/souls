@@ -19,6 +19,8 @@ export type NodeRec = {
   at: number | null;
   /** Today's id of an imported thing (import-eden's field 1), the key of V17's model table (V8). */
   origin?: string;
+  /** Soul grant from the existing public body-of link; null when missing or ambiguous. */
+  soul?: string | null;
   /** Solids `[cx, cz, hx, hz, yaw mdeg, y0, y1, tag, abs]` mm in its own frame (import-eden's field 12). */
   solids?: number[][];
   /** Slots `[n, x, y, z, yaw mdeg, capacity]` mm (field 13). */
@@ -57,7 +59,20 @@ export type SaidRec = { speaker: string; at: number; length: number; reach: numb
  * utterance in it (V1b). */
 export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[]; happened?: Happened[] };
 
+/** The COMPLETE currently drawable public state, including no opaque-frame descendants. A new source/worker
+ * cannot know the caller's previous nodes. No invented part time, effects, events or motion. */
+export type SnapshotRec = { nodes: NodeRec[]; removed: string[] };
+
+/** Reconcile a full snapshot against the actual caller's retained state, including a history/live/source restart. */
+export function reconcileSnapshot(previous: Iterable<string>, snapshot: SnapshotRec): SnapshotRec {
+  const present = new Set(snapshot.nodes.map(n => n.id));
+  const removed = new Set(snapshot.removed);
+  for (const id of previous) if (!present.has(id)) removed.add(id);
+  return { nodes: snapshot.nodes, removed: [...removed] };
+}
+
 export type SourceEvents = {
+  snapshot?(s: SnapshotRec): void;
   pointer(p: Pointer): void;
   part(p: PartRec): void;
   error(message: string): void;
@@ -66,4 +81,22 @@ export type SourceEvents = {
 export interface Source {
   start(on: SourceEvents): void;
   stop(): void;
+}
+
+/** R1 query node key9 is [link id, type, other id, audience], not the Merkle node layout.
+ * Only a unique public body-of relation names a Soul; malformed or ambiguous relations stay unknown. */
+export function publicSoul(links: unknown): string | null {
+  if (!Array.isArray(links)) return null;
+  const souls = new Set<string>();
+  for (const link of links) {
+    if (!Array.isArray(link) || typeof link[1] !== 'string' || link[1].split('@')[0] !== 'souls:body-of') continue;
+    const id = link[2], audience = link[3];
+    if (!(audience instanceof Map) || audience.size !== 1 || audience.get(1) !== 1
+        || !Array.isArray(id) || id.length !== 2 || !(id[0] instanceof Uint8Array) || id[0].length !== 16
+        || !((typeof id[1] === 'number' && Number.isSafeInteger(id[1]) && id[1] >= 0)
+          || (typeof id[1] === 'bigint' && id[1] >= 0n && id[1] <= 0xffffffffffffffffn))) return null;
+    const scope = Array.from(id[0], (b: number) => b.toString(16).padStart(2, '0')).join('');
+    souls.add(`soul-${scope}-${id[1]}`);
+  }
+  return souls.size === 1 ? [...souls][0] : null;
 }

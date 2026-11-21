@@ -151,3 +151,16 @@ no fifth, and no field for a start time or a condition.
   an arrive; its receipt would point at half of it.
 - **A checker that imports anything,** wasm-bindgen's glue included. It could not be run with nothing granted.
 - **A field added to the envelope without a new protocol version.** Old checkers would accept what they cannot read.
+
+### Named form arguments
+
+Form parameter 1 keeps its existing `[[UTF-8 name bytes, value], ...]` representation: a thing id, a one-based
+slot number, a declared part name as UTF-8 bytes, or T8 text by reference. Bare argument values use bytes so durable parts retain their names-only text contract; ids remain `[scope bytes, counter]`, including when a part name is exactly 16 bytes long. The thin client's `wireIntent` accepts `drawer=top`
+alongside existing `item=<id>` arguments. Its numbered JSON surface also accepts name/value pairs, for example
+`{"1":[["drawer","top"]]}`; string keys become the same UTF-8 byte keys. A text value may use the existing
+`{"23":"private words"}` input wrapper or `{"21":"<id>"}` reference wrapper. The authority stores words and
+replaces input text with its reference; another argument's text remains private to its sender. Arbitrary JSON
+objects are refused. Duplicate argument names and incompatible physical move targets are refused rather than
+selecting the last value. Signed whole-number parameters keep their exact canonical T0 values, including nested
+coordinate arrays; floating-point parameters remain unsupported. Named room/floor movement uses its separate
+existing target contract.

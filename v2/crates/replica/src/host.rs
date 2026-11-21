@@ -81,6 +81,8 @@ pub const F_HELD: u64 = 46;
 /// A field the world shows on a body standing on the standing spot it was granted (N9, T9c): 1. A walk to its own
 /// spot passes between such bodies.
 pub const F_SETTLED: u64 = 47;
+/// The world-assigned queue spot on a body, `[x, y, z]` in its floor frame (B7).
+pub const F_LINE: u64 = 48;
 
 /// How a skill's step ended (rule 7).
 #[derive(Clone, Debug, PartialEq, Eq)]

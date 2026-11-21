@@ -9,6 +9,8 @@ Wants=network-online.target
 User=souls
 Group=souls
 Slice=souls.slice
+# Public provider fields and private ops owner/upstream settings; never receives secrets.env.
+EnvironmentFile=-/etc/souls/origin.env
 ExecStart=/usr/bin/env node /usr/local/lib/souls/origin/origin.mjs /var/lib/souls/views 7320 localhost
 Restart=always
 RestartSec=1s

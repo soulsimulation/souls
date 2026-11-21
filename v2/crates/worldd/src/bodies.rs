@@ -172,6 +172,7 @@ pub struct Bodies {
     pub runner: Runner,
     pub town: Town,
     pub slots: Slots,
+    pub orders: sim::orders::Orders,
     moves: Moves,
     due: DueList,
     mint: Minter,
@@ -288,6 +289,7 @@ impl Bodies {
             form_questions: BTreeMap::new(),
             town,
             slots: Slots::new(),
+            orders: sim::orders::Orders::new(),
             moves: Moves::new(),
             due: DueList::new(),
             mint: Minter::new(Scope([0xb4; 16])),
@@ -878,6 +880,7 @@ impl Bodies {
             }
             // A refusal of one body's input is the controller's and leaves the others going; its walk ends by name.
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
+            crate::orders::step(self, at);
             let planned = std::mem::take(&mut self.planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
             // Every body in a seat move, with its seat: its reach for the next tick's phase timers.

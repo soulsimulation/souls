@@ -50,7 +50,8 @@ gh workflow run release-v2.yml --ref main -f version=<v> -f sha=<full sha> -f dr
    `gateway-upgrade` (never in the same step as a world's deploy: the step lock); then the page (`/usr/local/lib/souls/web`);
    then the served client (`/usr/local/lib/souls/client`, which a world's address answers from, `v2/client/served/serve.mjs`).
    A failed deploy stops the release: worlds before it keep the new build, worlds after it the old. Each world's probe
-   is a sync ask that needs no body, so a release never drives anyone's Soul
+   enters and retires its own unpaired operator body through K10/C3 and requires an ordinary committed action,
+   so a release never drives a user's Soul
    ([deploy-and-roll-back.md](runbook/deploy-and-roll-back.md#what-a-deploy-does)). Each step is done
    once per release (`releases/<sha>/moved/`), so a second dispatch of the same commit moves nothing again.
 5. **Publish.** Only when every world runs the release: one news entry in `/var/lib/souls/news.jsonl`, keyed by its
@@ -106,6 +107,4 @@ dies when served (`plant`), or one that never serves (`mute`).
 
 - The workflows have not been dispatched: a new workflow runs only once it is on main, and the `scratch` and
   `production` environments wait for the owner's checklist. Every step they run was run on a scratch machine.
-- The served client is moved to `/usr/local/lib/souls/client`; answering a world's `/eden.mjs`, `/skill.md` and
-  `/v1/config` from it is the front-door follow-up (#3576). Nothing reads `news.jsonl` yet.
 - `install.sh apply` with an older bundle writes its own page over a released one.

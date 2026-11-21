@@ -51,6 +51,13 @@
 //! retires the body by K10's path: its seat freed, its timers and run ended, its link ended and its node removed.
 //! After a restart a Soul's body is found again by its `souls:body-of` link.
 //!
+//! **The directory's word** (W11b, #3511; [`crate::directory`]): [`Event::Directory`] hands the world the directory's
+//! Souls file. At the next tick, after its births, each Soul it names that has a body here is brought in line with it
+//! by an intent of its own: a retired Soul's [`LEAVE`], a Soul whose saved words differ from its body's a
+//! [`DESCRIBE`]. They go the way any intent goes, under a key of their own ([`notice_key`]) so they never take a
+//! sequence of the Soul's agent, and are answered on the event's reply. A retired Soul is never born again: its intent
+//! is refused `soul-retired`.
+//!
 //! **Sync by hash** (R5b, #3164): a frame with key 20 is R5's sync request (`replica::sync::wire`), not an intent.
 //! The [`Door`] hands it to the sync thread (`crate::syncs`, C16 #3450), never to the clock thread: it answers from
 //! its own sealed copy of the zone, which takes each tick's parts from the answers thread once they are on the disk,
@@ -58,11 +65,13 @@
 //! before the change is on the disk, never waits for a tick, and never delays one.
 //!
 //! **The world's tick** (K18, #3160). One loop per zone, run by K7's ticker at the clock's rate (one tick each
-//! [`Config::tick`]; world time is real time in µs from the Unix epoch, rate one). Each tick, in the trunk's order
+//! [`Config::tick`]; world time starts as real time in µs from the Unix epoch, rate one, and [`Config::rate`] may
+//! apply another at a start, published on the zone root). Each tick, in the trunk's order
 //! (T1: everything reads the state as of the tick's start, and what a tick writes is seen from the next):
 //!
 //! 0. the intents that arrived since the last tick are taken (the recorder's inputs, K12);
-//! 1. due timers: acts whose deadline passed end `act.timed-out` (K9's due list); the world node's light, day and
+//! 1. due timers: acts whose deadline passed end `act.timed-out` (K9's due list); at a start's first tick, the
+//!    mapping it applies, as its time effect and the zone root's fields (E7b, #3516); the world node's light, day and
 //!    weather timers due before the next tick fire at their due times and write their entries (E6, #3369; a first
 //!    start writes [`Config::sky`] when the node holds no settings); loose things' ends due fire likewise (F10b,
 //!    [`crate::loose`]); a move's phase timers fire;
@@ -109,6 +118,7 @@ use crate::acts::{self, Acts};
 use crate::bodies::{self, Ask, Asked, Bodies, Cut, Placed};
 use crate::buildsafe;
 use crate::checkers::{self, Act, Candidate, Rules, SpotAct};
+use crate::directory::Directory;
 use crate::engine::{self, Engine};
 use crate::loose::Ends;
 use crate::measures::{self, Measures, Stamps};
@@ -132,7 +142,7 @@ use replica::select::Spot;
 use replica::select::wire::SPOT;
 use replica::sky::{self, Sky};
 use replica::sync::Records;
-use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
+use replica::time::{Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline};
 use replica::views::Redactions;
 use replica::world_model::Audience;
 use sim::audit::Auditor;
@@ -216,6 +226,8 @@ pub enum Event {
     /// An edit checked off the clock thread on a frozen copy (G1b): to commit at the next tick with the Souls' bodies
     /// read from that copy (G1c), or its refusal.
     Edited(Box<(Id, Result<Checked, Refused>)>),
+    /// The directory's Souls file as it now reads, and where the answers to the intents it causes go (W11b).
+    Directory(Box<(Directory, Reply)>),
     /// Holds the clock thread for this long: the stuck-thread run (O4 A4).
     Stall(Duration),
     Stop,
@@ -294,10 +306,17 @@ struct Carry {
     next_intent: u64,
     placed: Placed,
     tick: i64,
+    orders: Vec<Value>,
 }
 
 impl Carry {
-    fn of(sequences: &Sequences, next_intent: u64, placed: Placed, tick: i64) -> Carry {
+    fn of(
+        sequences: &Sequences,
+        next_intent: u64,
+        placed: Placed,
+        tick: i64,
+        orders: &[Effect],
+    ) -> Carry {
         Carry {
             sequences: sequences
                 .kept()
@@ -306,6 +325,7 @@ impl Carry {
             next_intent,
             placed,
             tick,
+            orders: orders.iter().map(Effect::to_value).collect(),
         }
     }
 
@@ -342,6 +362,9 @@ impl Carry {
         ]);
         if let Ok(t) = u64::try_from(self.tick) {
             m.insert(4, Value::Uint(t));
+        }
+        if !self.orders.is_empty() {
+            m.insert(5, Value::Array(self.orders.clone()));
         }
         encode(&Value::Map(m)).unwrap_or_default()
     }
@@ -385,7 +408,38 @@ impl Carry {
         if let Some(Value::Uint(t)) = m.get(&4) {
             c.tick = i64::try_from(*t).unwrap_or(i64::MAX);
         }
+        if let Some(Value::Array(rows)) = m.get(&5) {
+            c.orders = rows.clone();
+        }
         Some(c)
+    }
+}
+
+/// Keep only active order starts in original arrival order, including across checkpoint/tail overlap.
+fn remember_orders(active: &mut Vec<Effect>, effects: &[Effect]) {
+    for e in effects {
+        for ev in e.events.iter().flatten() {
+            let Some(id) = ev.fields.get(&1) else {
+                continue;
+            };
+            if ev.name.as_str() == "souls:order-ended" {
+                active.retain(|e| {
+                    !e.events
+                        .iter()
+                        .flatten()
+                        .any(|ev| ev.fields.get(&1) == Some(id))
+                });
+            } else if ev.name.as_str() == "souls:order"
+                && !active.iter().any(|e| {
+                    e.events
+                        .iter()
+                        .flatten()
+                        .any(|ev| ev.fields.get(&1) == Some(id))
+                })
+            {
+                active.push(e.clone());
+            }
+        }
     }
 }
 
@@ -432,12 +486,19 @@ pub struct Config {
     pub served: Option<crate::views::served::Feed>,
     /// K16's text store, where an intent's words are kept (V1b); a store in memory when none is given.
     pub text: Option<Arc<Store>>,
+    /// Immutable imported public name bytes, attached only to delivered public record references off the clock.
+    pub public_names: Arc<crate::views::names::PublicNames>,
     /// Called once at start with the log's durable mark; what it gives is handed each part record as it is appended
     /// (its number and bytes): a view tier's `offer`, so a stream writer follows the world (V1b).
     pub follow: Option<Follow>,
     /// Each log record once it is on the disk, input records included, in order (C1, #3365): `worldd serve`'s own
     /// view tier and shipper read them here, off the clock thread.
     pub synced: Option<Sender<Synced>>,
+    /// The clock's rate, world µs per real µs as `(num, den)` (E7b, #3516). With one, the mapping in force is
+    /// published on the zone root ([`replica::time::F_CLOCK_WORLD`]) with its time effect, at the first tick of each
+    /// start that applies a mapping: a first start's (world time is real time), or a new one when the rate differs
+    /// from the last logged, continuous with it. `None`: world time is real time and nothing is published.
+    pub rate: Option<(i64, i64)>,
     /// How long a free-running tick waits for each of the bodies' planner batches (K18b); `None` is a tenth of a tick.
     pub planner_wait: Option<Duration>,
     /// A replay's planner batches (K18b): the recorder's `Planned` inputs, body time µs and batches taken there.
@@ -466,6 +527,16 @@ pub struct Join {
 pub const JOIN: &str = "life:join";
 /// A Soul's leave (C3): its body retired.
 pub const LEAVE: &str = "life:leave";
+/// A Soul's saved words given to its body (W11b): a describe (V1b), its name parameter 1, its description 2.
+pub const DESCRIBE: &str = "life:describe";
+
+/// The key the directory's intents for `soul` are numbered under (W11b): not its agent's, so they never take one of
+/// its sequences.
+pub fn notice_key(soul: Id) -> Vec<u8> {
+    let mut k = b"directory:".to_vec();
+    k.extend(encode(&soul.to_value()).unwrap_or_default());
+    k
+}
 /// The link from a body to its Soul (K10).
 const BODY_OF: &str = "souls:body-of";
 
@@ -521,7 +592,9 @@ impl Config {
             sky: None,
             served: None,
             text: None,
+            public_names: Arc::new(Default::default()),
             follow: None,
+            rate: None,
             engine: None,
             join: None,
         }
@@ -725,6 +798,7 @@ struct Clock {
     engine_acts: Vec<engine::Act>,
     /// Engine acts written this tick, answered with a receipt once their entries are applied.
     engine_done: Vec<Id>,
+    order_records: Vec<Effect>,
     /// Intents arrived since the last tick, taken at the start of the next; and those a script set for a tick.
     pending: Vec<(Vec<u8>, Reply, Stamps)>,
     scheduled: BTreeMap<i64, Vec<(Vec<u8>, Reply)>>,
@@ -749,8 +823,14 @@ struct Clock {
     sky: Option<Heavens>,
     /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
     tick_us: Micros,
+    /// The mappings this start applies and the one in force, written at its first tick (E7b, [`Config::rate`]).
+    clock: Option<Publish>,
     /// Joins and leaves (C3), when the world births its Souls' bodies.
     life: Option<Lives>,
+    /// The directory's word (W11b): its file as last read and where its answers go, and the Souls to bring in line
+    /// with it at the next tick.
+    directory: Option<(Directory, Reply)>,
+    told: BTreeSet<Id>,
     /// Loose things' ends (F10b, #3476), and the ends of owner's links the tick's acts ended.
     loose: Ends,
     unlinked: Vec<Id>,
@@ -847,38 +927,83 @@ enum Taken {
 
 /// A form's arguments from an intent's parameter 1: `[[name as bytes, id or slot number], ...]`, a thing by its id
 /// (F4) and a slot of the node by its number, 1, 2, ... in its entry's order (C12).
-fn thing_args(intent: &Intent) -> acts::Args {
-    let mut args = acts::Args::default();
-    let Some(Value::Array(pairs)) = intent.parameters.get(&1) else {
-        return args;
+fn keep_arg_names(intent: &mut Value) {
+    let Value::Map(intent) = intent else { return };
+    let Some(Value::Map(parameters)) = intent.get_mut(&4) else {
+        return;
     };
-    for p in pairs {
-        if let Value::Array(kv) = p
-            && let [Value::Bytes(k), v] = kv.as_slice()
-            && let Ok(k) = String::from_utf8(k.clone())
+    let Some(Value::Array(pairs)) = parameters.get_mut(&1) else {
+        return;
+    };
+    for pair in pairs {
+        let Value::Array(pair) = pair else { continue };
+        let [Value::Bytes(key), value] = pair.as_mut_slice() else {
+            continue;
+        };
+        if !key.is_empty()
+            && std::str::from_utf8(key).is_ok()
+            && let Value::Text(name) = value
+            && !name.as_str().contains(':')
         {
-            use skills::form_runner::Arg;
-            match v {
-                Value::Uint(n) => drop(args.slots.insert(k, *n)),
-                // A value by name, and words by their reference (`{21: id}`, K16): a set's arguments (C24).
-                Value::Text(n) => drop(args.values.insert(k, Arg::Name(n.as_str().to_owned()))),
-                Value::Map(m) if m.len() == 1 => {
-                    if let Some(Ok(id)) = m
-                        .get(&replica::audience::REFERENCE)
-                        .map(replica::effects::read_id)
-                    {
-                        args.values.insert(k, Arg::Text(id));
-                    }
+            *value = Value::Bytes(name.as_str().as_bytes().to_vec());
+        }
+    }
+}
+
+fn thing_args(intent: &Value) -> Result<acts::Args, &'static str> {
+    let mut args = acts::Args::default();
+    let pairs = match intent {
+        Value::Map(intent) => match intent.get(&4) {
+            Some(Value::Map(parameters)) => parameters.get(&1),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(Value::Array(pairs)) = pairs else {
+        return Ok(args);
+    };
+    let mut seen = BTreeSet::new();
+    for p in pairs {
+        let Value::Array(kv) = p else {
+            return Err("arg-malformed");
+        };
+        let [Value::Bytes(k), v] = kv.as_slice() else {
+            return Err("arg-malformed");
+        };
+        let k = String::from_utf8(k.clone()).map_err(|_| "arg-malformed")?;
+        if k.is_empty() {
+            return Err("arg-malformed");
+        }
+        if !seen.insert(k.clone()) {
+            return Err("arg-ambiguous");
+        }
+        use skills::form_runner::Arg;
+        match v {
+            Value::Uint(n) => drop(args.slots.insert(k, *n)),
+            Value::Bytes(b) => {
+                let n = std::str::from_utf8(b).map_err(|_| "arg-malformed")?;
+                if n.is_empty() || Name::new(n).is_none() {
+                    return Err("arg-malformed");
                 }
-                _ => {
-                    if let Ok(id) = replica::effects::read_id(v) {
-                        args.things.insert(k, id);
-                    }
-                }
+                args.values.insert(k, Arg::Name(n.to_owned()));
+            }
+            Value::Text(n) => drop(args.values.insert(k, Arg::Name(n.as_str().to_owned()))),
+            Value::Map(m) if m.len() == 1 => {
+                let id = m
+                    .get(&replica::audience::REFERENCE)
+                    .ok_or("arg-malformed")
+                    .and_then(|v| replica::effects::read_id(v).map_err(|_| "arg-malformed"))?;
+                args.values.insert(k, Arg::Text(id));
+            }
+            _ => {
+                args.things.insert(
+                    k,
+                    replica::effects::read_id(v).map_err(|_| "arg-malformed")?,
+                );
             }
         }
     }
-    args
+    Ok(args)
 }
 
 /// The event of the entry that names how a form's run ended (C2): field 1 the body, 2 how, by name.
@@ -1146,6 +1271,18 @@ impl Clock {
     }
 
     fn arrival(&mut self, bytes: &[u8], reply: Reply, stamps: Stamps, now: Micros) {
+        self.arrival_as(bytes, None, reply, stamps, now);
+    }
+
+    /// An intent's arrival, numbered under `key` when given (the directory's, W11b), else its actor's.
+    fn arrival_as(
+        &mut self,
+        bytes: &[u8],
+        key: Option<Vec<u8>>,
+        reply: Reply,
+        stamps: Stamps,
+        now: Micros,
+    ) {
         let intent = match Intent::read(bytes) {
             Ok(i) => i,
             Err(r) => {
@@ -1156,7 +1293,9 @@ impl Clock {
                 return;
             }
         };
-        let Some(key) = actor_key(bytes) else { return };
+        let Some(key) = key.or_else(|| actor_key(bytes)) else {
+            return;
+        };
         let (actor, sequence) = (intent.actor, intent.sequence);
         // Sent again while still open (a gateway's resend after a reconnect): answered once, to both.
         if let Some(id) = self.in_flight.get(&(key.clone(), sequence)) {
@@ -1179,6 +1318,15 @@ impl Clock {
                 let a = self.refusal(actor, sequence, "soul-not-embodied");
                 return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
             }
+            // A Soul its owner retired is never born again (W11b).
+            if self
+                .directory
+                .as_ref()
+                .is_some_and(|(d, _)| d.retired.contains(&soul))
+            {
+                let a = self.refusal(actor, sequence, "soul-retired");
+                return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+            }
             if let Some(l) = self.life.as_mut() {
                 let entry = l.entry;
                 // Refused `soul-embodied` only when a birth is already waiting: this intent waits with it.
@@ -1197,6 +1345,7 @@ impl Clock {
             let _ = f.write_all(format!("{hex} {sequence}\n").as_bytes());
         }
         let mut value = intent.to_value();
+        keep_arg_names(&mut value);
         let form = words::form(&intent);
         // A turn into an activity is its members' alone: refused before its words are kept when the speaker is not one.
         let mut members = BTreeSet::new();
@@ -1282,6 +1431,56 @@ impl Clock {
                 return self.answered(key, sequence, id, Some(value), &a, (vec![reply], stamps));
             }
         }
+        // Standing orders are accepted once and recorded now; their later inputs and named ends are logged.
+        if matches!(intent.kind(), Ok(Kind::Order)) || intent.verb.as_str() == "souls:cancel" {
+            let result = self
+                .body_of(&intent)
+                .map_err(|name| Refusal {
+                    name,
+                    detail: String::new(),
+                })
+                .and_then(|body| match self.bodies.as_mut() {
+                    Some(b) => crate::orders::accept(b, &intent, body, id, now),
+                    None => Err(Refusal {
+                        name: "orders-off",
+                        detail: String::new(),
+                    }),
+                });
+            let effects = self
+                .bodies
+                .as_mut()
+                .map(|b| std::mem::take(&mut b.orders.log))
+                .unwrap_or_default();
+            let result = result.and_then(|()| self.write_all(effects));
+            let answer = match result {
+                Ok(()) => {
+                    self.next_intent += 1;
+                    self.inputs.push(Input::Intent {
+                        id,
+                        soul: self.body_of(&intent).unwrap_or(self.zone),
+                        verb: intent.verb.clone(),
+                        words: None,
+                    });
+                    Answer::Receipt {
+                        actor,
+                        sequence,
+                        intent: id,
+                        entries: self.receipts.entries(id).to_vec(),
+                        names: BTreeMap::new(),
+                    }
+                }
+                Err(r) => self.refusal(actor, sequence, r.name),
+            };
+            let accepted = matches!(answer, Answer::Receipt { .. }).then_some(id);
+            return self.answered(
+                key,
+                sequence,
+                accepted,
+                Some(value),
+                &answer,
+                (vec![reply], stamps),
+            );
+        }
         // A move goes to the bodies when the world has them (I4b); anything else is a form's act.
         let moved = match self.bodies {
             Some(_) => self
@@ -1339,6 +1538,18 @@ impl Clock {
                 return self.answered(key, sequence, None, Some(value), &a, (vec![reply], stamps));
             }
         };
+        let form_args = if matches!(&taken, Taken::Form(a) if self.bodies.is_some() && a.spot.is_none())
+        {
+            match thing_args(&value) {
+                Ok(args) => args,
+                Err(reason) => {
+                    let a = self.refusal(actor, sequence, reason);
+                    return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+                }
+            }
+        } else {
+            acts::Args::default()
+        };
         let body = match &taken {
             Taken::Form(a) => a.body,
             Taken::Move(m) => m.body,
@@ -1388,7 +1599,7 @@ impl Clock {
             // With bodies, a form's act goes to the form runner at the next tick (C2), not to the checkers.
             Taken::Form(act) => {
                 let i = acts::intent(id, intent.expiry, actor, bytes);
-                self.forming.push((id, act, i, thing_args(&intent)));
+                self.forming.push((id, act, i, form_args));
             }
             Taken::Engine(a) => self.engine_acts.push(a),
             Taken::Edit(e) => match reserve_edit(&e, self.lineage, &mut self.next_intent) {
@@ -1510,6 +1721,94 @@ impl Clock {
         }
     }
 
+    /// The directory's word, at a tick's start after its births (W11b): each Soul told of since the last tick that has
+    /// a body here is retired when the directory retired it, or given its saved words when its body's differ, by an
+    /// intent of its own taken as any intent is, under [`notice_key`]. A Soul with no body here is left alone.
+    fn notices(&mut self, now: Micros) {
+        let told = std::mem::take(&mut self.told);
+        let Some((d, reply)) = self.directory.as_ref().map(|(d, r)| (d.clone(), r.clone())) else {
+            return;
+        };
+        if self.life.is_none() {
+            return;
+        }
+        for soul in told {
+            let (verb, parameters) = if d.retired.contains(&soul) {
+                (LEAVE, BTreeMap::new())
+            } else if let Some(w) = d.words.get(&soul) {
+                let said = |n: &Option<Vec<u8>>| {
+                    n.as_ref().map(|b| {
+                        Value::Map(BTreeMap::from([(words::WORDS, Value::Bytes(b.clone()))]))
+                    })
+                };
+                let p: BTreeMap<u64, Value> = [(1, said(&w.name)), (2, said(&w.description))]
+                    .into_iter()
+                    .filter_map(|(k, v)| Some((k, v?)))
+                    .collect();
+                (DESCRIBE, p)
+            } else {
+                continue;
+            };
+            let Some(verb) = Name::new(verb) else {
+                continue;
+            };
+            let mut intent = Intent {
+                actor: Actor::Soul(soul),
+                verb,
+                target: None,
+                parameters,
+                sequence: 0,
+                basis: self.version(),
+                expiry: now.saturating_add(self.deadline),
+                resources: Vec::new(),
+                fallbacks: Vec::new(),
+                replaces: None,
+                body: None,
+            };
+            // Only a Soul with a body here (its link after a restart included); the directory never births one.
+            if self.unborn(&intent).is_some() {
+                continue;
+            }
+            if intent.verb.as_str() == DESCRIBE {
+                let body = self.life.as_ref().and_then(|l| l.life.body_of(soul));
+                if intent.parameters.is_empty()
+                    || body.is_some_and(|b| self.says(b, &d.words[&soul]))
+                {
+                    continue;
+                }
+            }
+            let key = notice_key(soul);
+            intent.sequence = self
+                .sequences
+                .kept()
+                .find(|(k, _, _)| *k == key.as_slice())
+                .map_or(1, |(_, last, _)| last + 1);
+            let Ok(bytes) = encode(&intent.to_value()) else {
+                continue;
+            };
+            self.arrival_as(&bytes, Some(key), reply.clone(), Stamps::default(), now);
+        }
+    }
+
+    /// Whether `body`'s public name and description already read as the saved words `w` (a word not saved agrees).
+    fn says(&self, body: Id, w: &crate::directory::Words) -> bool {
+        let tree = self.replica.tree();
+        let Some(n) = tree.handle(body).and_then(|h| tree.node(h)) else {
+            return false;
+        };
+        let reads = |field: u64, want: &Option<Vec<u8>>| {
+            let Some(want) = want else { return true };
+            let r = match n.fields().get(&field) {
+                Some(Value::Map(m)) => m.get(&replica::audience::REFERENCE),
+                _ => None,
+            };
+            r.and_then(|r| replica::effects::read_id(r).ok())
+                .and_then(|r| self.text.read(r, &[]).ok())
+                .is_some_and(|got| &got == want)
+        };
+        reads(words::NAME, &w.name) && reads(words::DESCRIPTION, &w.description)
+    }
+
     /// This tick's births (C3, K10): each body born, its node and link written, a join among its Soul's waiting
     /// intents answered with that entry, and its other intents taken now.
     fn births(&mut self, now: Micros) {
@@ -1546,6 +1845,7 @@ impl Clock {
                     later.push((bytes, reply, stamps));
                 }
             }
+            self.told.insert(x.soul);
             self.born(x, join, now);
             for (bytes, reply, stamps) in later {
                 self.arrival(&bytes, reply, stamps, now);
@@ -1984,6 +2284,40 @@ impl Clock {
         self.write_own(vec![changes, timers], "the sky");
     }
 
+    /// The mapping this start applies, as its time effect and the zone root's fields in one part (E7b, #3516).
+    fn put_clock(&mut self, now: Micros) {
+        let Some((applied, latest)) = self.clock.take() else {
+            return;
+        };
+        let zone = self.replica.header().zone;
+        let mut effects = Vec::new();
+        if !applied.is_empty() {
+            effects.push(Effect {
+                envelope: Clock::own(zone, now),
+                body: Body::Time(applied.into_iter().map(TimeEffect::Mapping).collect()),
+                events: None,
+                rest: Rest::new(),
+            });
+        }
+        let sets = latest
+            .fields()
+            .into_iter()
+            .map(|(field, to)| Change::Set {
+                node: zone,
+                field,
+                to,
+                by: None,
+            })
+            .collect();
+        effects.push(Effect {
+            envelope: Clock::own(zone, now),
+            body: Body::Changes(recs_of(sets)),
+            events: None,
+            rest: Rest::new(),
+        });
+        self.write_own(effects, "the clock's mapping");
+    }
+
     /// Step 1 for the world node's sky (E6, #3369): a first start's settings and first light, date and weather at
     /// world time `now`; then each of its timers due before the next tick's start, fired at its due time against what
     /// the node announces then, in K9's order. Nothing runs between changes, so a world that catches up 48 hours
@@ -2070,6 +2404,7 @@ impl Clock {
             return;
         };
         let mut ended = b.step(now);
+        let orders = std::mem::take(&mut b.orders.log);
         let mut deadlines = Vec::new();
         for (id, walk) in &mut self.walks {
             let (due, blocked) = walk.step(b, now);
@@ -2088,6 +2423,9 @@ impl Clock {
             });
         }
         let heard = std::mem::take(&mut b.heard);
+        if !orders.is_empty() {
+            self.write_own(orders, "standing orders");
+        }
         for (speaker, said, at) in heard {
             let e = speech::entry(Clock::own(speaker, at), speaker, &said);
             self.write_own(vec![e], "an utterance");
@@ -2378,6 +2716,7 @@ impl Clock {
         // 0. This tick's births (C3) and the intents that waited for them; then what arrived since the last tick, and
         // what a script set for this one, is taken now.
         self.births(now);
+        self.notices(now);
         for (bytes, reply, stamps) in std::mem::take(&mut self.pending) {
             self.arrival(&bytes, reply, stamps, now);
         }
@@ -2412,7 +2751,9 @@ impl Clock {
             }
             self.end(id, |c| c.refusal(actor, sequence, TIMED_OUT));
         }
-        // 1. The world node's sky: its timers due in this tick, each at its due time (E6, #3369).
+        // 1. The clock's mapping, when this start applies one (E7b, #3516); then the world node's sky: its timers due
+        // in this tick, each at its due time (E6, #3369).
+        self.put_clock(now);
         self.fire_sky(now);
         // 1. Loose things' ends due in this tick, each at its due time (F10b, #3476).
         self.fire_loose(now);
@@ -2489,6 +2830,7 @@ impl Clock {
             w.offer_map(b, self.replica.version());
         }
         at[5] = mark();
+        remember_orders(&mut self.order_records, &self.effects);
         // 5. The tick's input record, then its part: effects, answers, the bodies that moved, the tick, the state.
         let inputs = match std::mem::take(&mut self.inputs) {
             i if i.is_empty() => None,
@@ -2599,6 +2941,7 @@ impl Clock {
             self.next_intent,
             self.bodies.as_ref().map(Bodies::placed).unwrap_or_default(),
             self.tick,
+            &self.order_records,
         );
         let version = Version {
             lineage: self.lineage,
@@ -2657,6 +3000,35 @@ impl Clock {
     }
 }
 
+// Diagnostic only: enabled on the I/O threads, never by the deterministic clock. No payload or actor id leaves.
+fn delivery_trace(enabled: bool, stage: &str, frame: &[u8], outcome: &str) {
+    if !enabled {
+        return;
+    }
+    let Ok(d) = decode(frame) else { return };
+    let Value::Map(m) = d.value else { return };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return;
+    };
+    let (Some(actor), Some(Value::Uint(sequence)), Some(Value::Uint(kind))) =
+        (a.get(&1), a.get(&2), a.get(&3))
+    else {
+        return;
+    };
+    let Ok(actor) = encode(actor) else { return };
+    let actor = replica::encode::to_hex(&replica::ids::sha256(&actor));
+    let version = match m.get(&1) {
+        Some(Value::Array(v)) => v.last().and_then(|v| match v {
+            Value::Uint(n) => Some(*n),
+            _ => None,
+        }),
+        _ => None,
+    };
+    eprintln!(
+        "worldd: join-delivery stage={stage} actor-hash={actor} sequence={sequence} kind={kind} version={version:?} outcome={outcome}"
+    );
+}
+
 /// The answers thread: each tick's records appended and on the disk before its answers leave, then the part handed to
 /// the view tier. A log that fails stops it for good: nothing is answered that is not on the disk.
 // Each argument is one consumer of the durable tick (views, follower, served feed, sync thread); a struct would only
@@ -2672,6 +3044,7 @@ fn answer_loop<S: Storage + 'static>(
     mut follow: Option<Offer>,
     syncs: Sender<ToSync>,
 ) {
+    let trace = std::env::var_os("SOULS_JOIN_DELIVERY_TRACE").is_some_and(|v| v == "1");
     for (k, t) in ticks.into_iter().enumerate() {
         let k = k as u64;
         if let Some(m) = &measures {
@@ -2713,11 +3086,21 @@ fn answer_loop<S: Storage + 'static>(
                 }
             }
         }
+        if trace {
+            for (_, frame, _) in &t.replies {
+                delivery_trace(trace, "log-wait", frame, "appended");
+            }
+        }
         if let Some(n) = last
             && let Err(e) = log.wait_durable(n + 1)
         {
             eprintln!("worldd: the log failed, nothing more is answered: {e}");
             return;
+        }
+        if trace {
+            for (_, frame, _) in &t.replies {
+                delivery_trace(trace, "log-durable", frame, "ready");
+            }
         }
         if let Some(tx) = &synced {
             for s in appended {
@@ -2744,7 +3127,13 @@ fn answer_loop<S: Storage + 'static>(
                 None => frame,
             };
             for w in waiters {
-                let _ = w.send(frame.clone());
+                let sent = w.send(frame.clone());
+                delivery_trace(
+                    trace,
+                    "reply-channel",
+                    &frame,
+                    if sent.is_ok() { "queued" } else { "closed" },
+                );
             }
         }
         for (waiters, frame) in t.bare {
@@ -2775,6 +3164,61 @@ fn time(e: replica::time::TimeRefusal) -> Refusal {
         name: "time",
         detail: e.name().to_string(),
     }
+}
+
+/// The mappings a start applies, and the one in force, for its first tick to write (E7b).
+type Publish = (Vec<Mapping>, Mapping);
+
+/// The world's time line at a start (E7b, #3516): the first mapping (world time is real time), then each the log
+/// holds; with a rate (`Config::rate`), a new mapping at real time `real0` when the last one's rate differs, on its
+/// line, so world time does not jump. Gives the line, the mapping in force, and what the first tick writes: the
+/// mappings this start applies, and the one in force, when either is new or the root's fields do not hold it.
+fn timeline(
+    world: &Replica,
+    rate: Option<(i64, i64)>,
+    real0: Micros,
+    tick_us: Micros,
+) -> R<(Timeline, Mapping, Option<Publish>)> {
+    let first = Mapping::new(0, 0, 1, 1).map_err(time)?;
+    let start = |m| -> R<Timeline> {
+        let ticks = TickRate::new(0, 0, 1_000_000 / tick_us).map_err(time)?;
+        Timeline::start(m, ticks, Tempo::per_minute(0, 0, 120).map_err(time)?).map_err(time)
+    };
+    let Some((num, den)) = rate else {
+        return Ok((start(first)?, first, None));
+    };
+    let tree = world.tree();
+    let logged: Vec<Mapping> = tree
+        .time()
+        .iter()
+        .filter_map(|t| match t {
+            TimeEffect::Mapping(m) => Some(*m),
+            _ => None,
+        })
+        .collect();
+    let mut line = start(logged.first().copied().unwrap_or(first))?;
+    for m in logged.iter().skip(1) {
+        line.apply(TimeEffect::Mapping(*m), m.world_us)
+            .map_err(time)?;
+    }
+    let mut last = logged.last().copied().unwrap_or(first);
+    let mut applied = if logged.is_empty() {
+        vec![first]
+    } else {
+        Vec::new()
+    };
+    if last.rate() != Mapping::new(0, 0, num, den).map_err(time)?.rate() {
+        let m = Mapping::new(last.world_at(real0).map_err(time)?, real0, num, den).map_err(time)?;
+        line.apply(TimeEffect::Mapping(m), m.world_us)
+            .map_err(time)?;
+        applied.push(m);
+        last = m;
+    }
+    let held = tree
+        .node(tree.root())
+        .and_then(|n| Mapping::from_fields(n.fields()));
+    let publish = (!applied.is_empty() || held != Some(last)).then_some((applied, last));
+    Ok((line, last, publish))
 }
 
 /// Opens the log in `storage`, replays it onto `world` (the world as built, before any record), and starts the
@@ -2809,6 +3253,7 @@ pub fn start<S: Storage + 'static>(
     let mut last = None;
     let mut restart = Restart::default();
     let mut blobs = Blobs::default();
+    let mut order_records = Vec::new();
     let records: &[Vec<u8>] = match restored {
         Some(r) => {
             let logged = found.first + found.records.len() as u64;
@@ -2826,6 +3271,17 @@ pub fn start<S: Storage + 'static>(
                 }
                 next_intent = c.next_intent.max(1);
                 placed = c.placed;
+                if !c.orders.is_empty() {
+                    let v = Value::Map(BTreeMap::from([
+                        (1, Value::Bytes(world.header().hash().to_bytes())),
+                        (2, Value::Array(c.orders)),
+                    ]));
+                    let bytes = encode(&v).map_err(|e| Refusal {
+                        name: "encoding",
+                        detail: e.to_string(),
+                    })?;
+                    order_records = Part::read(&bytes)?.effects;
+                }
                 last = (c.tick >= 0).then_some(c.tick);
             }
             restart.checkpoint = Some(r.root.record);
@@ -2846,6 +3302,7 @@ pub fn start<S: Storage + 'static>(
         }
         restart.applied += 1;
         receipts.index(&part.effects);
+        remember_orders(&mut order_records, &part.effects);
         read_back(&part, &mut placed, &mut last);
         // Nodes an edit placed took their ids on the intents' counter (G1b): never give one out again.
         for e in &part.effects {
@@ -2874,10 +3331,23 @@ pub fn start<S: Storage + 'static>(
             }
         }
     }
-    let zone = Id::new(cfg.lineage, 0).ok_or(Refusal {
-        name: "id-counter",
-        detail: "the zone".into(),
-    })?;
+    // Active starts are carried by the checkpoint; later starts/ends have just replayed above.
+    let order_parts = if order_records.is_empty() {
+        Vec::new()
+    } else {
+        let value = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(world.header().hash().to_bytes())),
+            (
+                2,
+                Value::Array(order_records.iter().map(Effect::to_value).collect()),
+            ),
+        ]));
+        vec![Part::read(&encode(&value).map_err(|e| Refusal {
+            name: "encoding",
+            detail: e.to_string(),
+        })?)?]
+    };
+    let zone = world.header().zone;
     let records = found.first + found.records.len() as u64;
     // Restored trees retain sealed hashes: their unchanged records will not be emitted by the next seal.
     // Keep the validated blobs for sync before the checkpoint writer takes ownership of them.
@@ -2895,7 +3365,13 @@ pub fn start<S: Storage + 'static>(
     {
         let at = log.durable_mark().at();
         if at.record >= records {
-            let carry = Carry::of(&sequences, next_intent, placed.clone(), last.unwrap_or(-1));
+            let carry = Carry::of(
+                &sequences,
+                next_intent,
+                placed.clone(),
+                last.unwrap_or(-1),
+                &order_records,
+            );
             let version = Version {
                 lineage: cfg.lineage,
                 zone,
@@ -2929,14 +3405,6 @@ pub fn start<S: Storage + 'static>(
             detail: format!("a tick of {tick_us} µs is not a whole number of ticks a second"),
         });
     }
-    // World time is real time, µs from the Unix epoch (rate one); tick n starts at n ticks from it.
-    let mapping = Mapping::new(0, 0, 1, 1).map_err(time)?;
-    let line = Timeline::start(
-        mapping,
-        TickRate::new(0, 0, 1_000_000 / tick_us).map_err(time)?,
-        Tempo::per_minute(0, 0, 120).map_err(time)?,
-    )
-    .map_err(time)?;
     let shared = Arc::new(Mutex::new(0));
     let mut pace: Box<dyn Pace + Send> = match (cfg.lockstep, cfg.clock.take()) {
         (true, _) => Box::new(Stepped(Arc::clone(&shared))),
@@ -2944,12 +3412,30 @@ pub fn start<S: Storage + 'static>(
         (false, None) => Box::new(Real::start()),
     };
     let real0 = pace.now();
+    // World time starts as real time, µs from the Unix epoch (rate one); tick n starts at n ticks from it. The logged
+    // mappings follow, and the configured rate's (E7b).
+    let (line, mapping, publish) = timeline(&world, cfg.rate, real0, tick_us)?;
+    if cfg.rate.is_some() {
+        eprintln!(
+            "worldd: clock world {} real {} rate {}/{}",
+            mapping.world_us,
+            mapping.real_us,
+            mapping.rate().num(),
+            mapping.rate().den()
+        );
+    }
     // A first start begins at the tick due now, not at the epoch's.
     let last = match (last, cfg.lockstep) {
         (Some(n), _) => Some(n),
         (None, true) => None,
-        (None, false) => Some(real0.div_euclid(tick_us) - 1),
+        (None, false) => Some(
+            line.tick_of(line.world_at(real0).map_err(time)?)
+                .map_err(time)?
+                - 1,
+        ),
     };
+    // Body time is the next world tick start, not the real-time deadline returned by Ticker::due.
+    let body_start = line.tick_start(last.map_or(0, |n| n + 1)).map_err(time)?;
     let mut ticker = Ticker::new(line, mapping, last, real0).map_err(time)?;
     let beat = Arc::new(Heartbeat::new(real0));
     let tier = match cfg.views {
@@ -3054,7 +3540,13 @@ pub fn start<S: Storage + 'static>(
     // one complete cache: restored records, the pre-clock checkpoint's records, and this seal's incremental records.
     let first = world.seal()?;
     kept.keep(&first);
-    let syncs = syncs::start(world.frozen(), kept, (cfg.lineage, zone, cfg.epoch)).map_err(io)?;
+    let syncs = syncs::start(
+        world.frozen(),
+        kept,
+        (cfg.lineage, zone, cfg.epoch),
+        Arc::clone(&cfg.public_names),
+    )
+    .map_err(io)?;
     let fresh = if cfg.checkpoints.is_some() {
         first.nodes
     } else {
@@ -3120,6 +3612,7 @@ pub fn start<S: Storage + 'static>(
             .map(|(rules, kinds)| Engine::new(engine_header, rules, kinds, engine_scope)),
         engine_acts: Vec::new(),
         engine_done: Vec::new(),
+        order_records,
         pending: Vec::new(),
         scheduled: BTreeMap::new(),
         inputs: Vec::new(),
@@ -3136,7 +3629,10 @@ pub fn start<S: Storage + 'static>(
         sky,
         tick_us,
         text,
+        clock: publish,
         life,
+        directory: None,
+        told: BTreeSet::new(),
         loose,
         unlinked: Vec::new(),
     };
@@ -3159,7 +3655,7 @@ pub fn start<S: Storage + 'static>(
             if let Some(make) = make {
                 match make(&placed) {
                     Ok(mut b) => {
-                        let at = ticker.due().unwrap_or(0);
+                        let at = body_start;
                         b.begin(at);
                         // A free-running clock waits at most a tenth of a tick for each planner batch (K18b); a
                         // replay takes the batches where the recorder says the live run took them.
@@ -3173,6 +3669,9 @@ pub fn start<S: Storage + 'static>(
                                 "worldd: {} stands, not seated again: {why}",
                                 replica::world_model::show(body)
                             );
+                        }
+                        if let Err(r) = crate::orders::resume(&mut b, &order_parts, at) {
+                            eprintln!("worldd: standing orders were not restored: {r}");
                         }
                         if let Some(w) = &c.walkers {
                             w.offer_map(&b, c.replica.version());
@@ -3227,6 +3726,11 @@ pub fn start<S: Storage + 'static>(
                     Event::Edited(k) => {
                         c.outstanding = c.outstanding.saturating_sub(1);
                         c.edited.push(*k);
+                    }
+                    Event::Directory(d) => {
+                        let (d, reply) = *d;
+                        c.told.extend(d.souls());
+                        c.directory = Some((d, reply));
                     }
                     Event::Stall(d) => thread::sleep(d),
                     Event::RunTo { done, .. } => return Some(done),
@@ -3454,16 +3958,20 @@ fn edit_checker(
 /// bytes): each intent read goes through `world`'s door (stamped there, O4), each answer goes back on the same
 /// connection, in the order sent.
 pub fn serve(world: Door, mut stream: UnixStream) {
+    let trace = std::env::var_os("SOULS_JOIN_DELIVERY_TRACE").is_some_and(|v| v == "1");
     let Ok(mut out) = stream.try_clone() else {
         return;
     };
     let (reply, answers) = channel::<Vec<u8>>();
     std::thread::spawn(move || {
         for frame in answers {
+            delivery_trace(trace, "native-write-start", &frame, "ready");
             let len = u32::try_from(frame.len()).unwrap_or(u32::MAX).to_be_bytes();
             if out.write_all(&len).is_err() || out.write_all(&frame).is_err() {
+                delivery_trace(trace, "native-write", &frame, "failed");
                 return;
             }
+            delivery_trace(trace, "native-write", &frame, "sent");
         }
     });
     loop {
@@ -4442,5 +4950,295 @@ mod tests {
         );
         world.stop();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- E7b (#3516): the clock's mapping on the zone root. ----------------------------------------------------
+
+    /// The mapping the root record of a copy holds.
+    fn root_mapping(copy: &sync::Copy, place: Id) -> Option<Mapping> {
+        let rec = copy.record(copy.roots().get(&place)?)?;
+        let Value::Map(m) = decode(rec).ok()?.value else {
+            return None;
+        };
+        let Some(Value::Map(f)) = m.get(&6) else {
+            return None;
+        };
+        Mapping::from_fields(f)
+    }
+
+    /// A lockstep lamps world at `rate`, run to tick `to`, then its root's mapping as a Soul's copy syncs it.
+    fn clock_run(store: Held, rate: (i64, i64), to: i64) -> Option<Mapping> {
+        let w = toggles::World::build(1, 4, 0);
+        let place = w.replica.header().zone;
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.lockstep = true;
+        cfg.measures = false;
+        cfg.rate = Some(rate);
+        let world = start(w.replica, toggles::rules(), store, cfg).expect("the world starts");
+        let (done, ran) = channel();
+        world.events.send(Event::RunTo { tick: to, done }).unwrap();
+        ran.recv().unwrap();
+        // A Soul's copy: the scope the world grants every actor is the place, the zone's root (`sync_by_frames`).
+        let mut copy = sync::Copy::default();
+        sync_by_frames(&world, &mut copy, place);
+        world.stop();
+        root_mapping(&copy, place)
+    }
+
+    #[test]
+    fn w3b_a_mapped_free_running_fork_ticks_answers_and_restarts_without_a_gap() {
+        // A filtered fork retains a world clock far below its real-time anchor and has no logged tick yet.
+        struct MappedPace {
+            real: Micros,
+            zero: std::sync::OnceLock<Instant>,
+        }
+        impl Pace for MappedPace {
+            fn now(&mut self) -> Micros {
+                self.real + self.zero.get_or_init(Instant::now).elapsed().as_micros() as Micros
+            }
+            fn sleep_until(&mut self, _: Micros) {}
+        }
+        let real = 1_000_000_000_000;
+        let first_mapping = Mapping::new(0, real - 1_000_000, 1, 1).unwrap();
+        let mapping = Mapping::new(1_000_000, real, 1, 1).unwrap();
+        let mappings = [first_mapping, mapping].map(TimeEffect::Mapping);
+        let mut seed = toggles::World::build(1, 1, 0);
+        let pair = seed.pairs[0];
+        let effect = Effect {
+            envelope: Envelope {
+                sequence: seed.replica.version(),
+                at: mapping.world_us,
+                cause: Cause::World,
+                actor: Actor::World,
+                audience: Audience::Everyone,
+                node: seed.replica.header().zone,
+            },
+            body: Body::Time(mappings.to_vec()),
+            events: None,
+            rest: Rest::new(),
+        };
+        let part = Part::read(
+            &encode(&Value::Map(BTreeMap::from([
+                (1, Value::Bytes(seed.replica.header().hash().to_bytes())),
+                (2, Value::Array(vec![effect.to_value()])),
+            ])))
+            .unwrap(),
+        )
+        .unwrap();
+        seed.replica.apply(&part).unwrap();
+        let store = Held::new(Vec::new());
+        let mut last_logged = None;
+        for restart in 0..2 {
+            let mut cfg = Config::new(LINEAGE, 1);
+            cfg.measures = true;
+            cfg.rate = Some((1, 1));
+            cfg.clock = Some(Box::new(MappedPace {
+                real: real + restart * 1_000_000,
+                zero: std::sync::OnceLock::new(),
+            }));
+            let world = start(seed.replica.frozen(), toggles::rules(), store.clone(), cfg).unwrap();
+            let response = answer(&send(
+                &world,
+                &toggle(pair.0, pair.1, restart as u64 + 1, 60_000_000),
+            ));
+            let beat = Arc::clone(&world.beat);
+            let measured = Arc::clone(world.measures.as_ref().unwrap());
+            world.stop();
+            // Joined clock: measures and heartbeat now describe exactly the same completed ticks.
+            let beat = beat.read();
+            let health = replica::rules::json::parse(&measured.health(0)).unwrap();
+            let Some(replica::rules::json::Value::Int(count)) =
+                health.get("ticks").and_then(|t| t.get("count"))
+            else {
+                panic!("actual completed tick count: {health:?}");
+            };
+            let first = last_logged.map_or(20, |tick| tick + 1);
+            assert_eq!(
+                *count,
+                i128::from(beat.0 - first + 1),
+                "every due tick runs, including idle catch-up"
+            );
+            assert_eq!(read(&response).0, 1, "mapped free-running act is admitted");
+            assert!(beat.0 >= 20, "the mapped clock advances: {beat:?}");
+            assert!(
+                beat.0 <= mapping.world_at(beat.1).unwrap().div_euclid(50_000),
+                "heartbeat never precedes its start on the preserved world line: {beat:?}"
+            );
+            last_logged = recover(&store.bytes())
+                .unwrap()
+                .records
+                .iter()
+                .filter(|bytes| !recorder::is_input(bytes))
+                .filter_map(|bytes| match Part::read(bytes).unwrap().rest.get(&TICK) {
+                    Some(Value::Uint(tick)) => Some(*tick as i64),
+                    _ => None,
+                })
+                .next_back();
+            assert!(last_logged.is_some(), "receipt's actual logged tick");
+        }
+        let mut replay = seed.replica.frozen();
+        let mut ticks = Vec::new();
+        for bytes in recover(&store.bytes()).unwrap().records {
+            if recorder::is_input(&bytes) {
+                continue;
+            }
+            let part = Part::read(&bytes).unwrap();
+            if let Some(Value::Uint(tick)) = part.rest.get(&TICK) {
+                ticks.push(*tick);
+            }
+            replay.apply(&part).unwrap();
+        }
+        assert_eq!(
+            ticks.first(),
+            Some(&20),
+            "first tick is due on the preserved world line"
+        );
+        assert!(
+            ticks.windows(2).all(|w| w[1] > w[0]),
+            "persisted ticks increase; idle ticks need no record: {ticks:?}"
+        );
+        assert_eq!(replay.tree().time(), &mappings);
+        let tree = replay.tree();
+        assert_eq!(
+            Mapping::from_fields(tree.node(tree.root()).unwrap().fields()),
+            Some(mapping)
+        );
+    }
+
+    #[test]
+    fn e7b_a1_a3_the_mapping_is_on_the_root_with_its_effect_and_a_replay_gives_the_same() {
+        let store = Held::new(Vec::new());
+        let first = clock_run(store.clone(), (1, 1), 3);
+        assert_eq!(first, Mapping::new(0, 0, 1, 1).ok(), "A1: a first start's");
+        // A restart at another rate applies a new mapping, continuous with the last; one at the same rate writes none.
+        let store = Held::new(store.bytes());
+        let second = clock_run(store.clone(), (2, 1), 6).expect("A1: the new mapping");
+        assert_eq!(second.rate(), Mapping::new(0, 0, 2, 1).unwrap().rate());
+        let store = Held::new(store.bytes());
+        assert_eq!(
+            clock_run(store.clone(), (2, 1), 9),
+            Some(second),
+            "A1: kept"
+        );
+        let log = store.bytes();
+        let parts: Vec<Part> = recover(&log)
+            .unwrap()
+            .records
+            .iter()
+            .filter(|r| !recorder::is_input(r))
+            .map(|r| Part::read(r).unwrap())
+            .collect();
+        // A1: each mapping's time effect and the root's fields are in one part.
+        let mut written = Vec::new();
+        for p in &parts {
+            let time: Vec<TimeEffect> = p
+                .effects
+                .iter()
+                .filter_map(|e| match &e.body {
+                    Body::Time(t) => Some(t.clone()),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+            if time.is_empty() {
+                continue;
+            }
+            let sets = p.effects.iter().any(|e| match &e.body {
+                Body::Changes(c) => c.iter().any(|c| {
+                    matches!(c.change, Change::Set { field, .. } if field == replica::time::F_CLOCK_WORLD)
+                }),
+                _ => false,
+            });
+            assert!(sets, "A1: the fields in the effect's part");
+            written.extend(time);
+        }
+        let want = [first.unwrap(), second].map(TimeEffect::Mapping);
+        println!("E7b A1: mappings written {written:?}");
+        assert_eq!(written, want, "A1: one effect for each mapping applied");
+        // A3: the log replayed onto the world as built gives the same root fields.
+        let mut replayed = toggles::World::build(1, 4, 0).replica;
+        for p in &parts {
+            replayed.apply(p).unwrap();
+        }
+        let tree = replayed.tree();
+        let root = tree.node(tree.root()).unwrap();
+        assert_eq!(
+            Mapping::from_fields(root.fields()),
+            Some(second),
+            "A3: the same on replay"
+        );
+    }
+}
+
+#[cfg(test)]
+mod standing_order_carry_tests {
+    use super::*;
+
+    fn effect(intent: Id, ended: bool) -> Effect {
+        Effect {
+            envelope: Envelope {
+                sequence: 0,
+                at: 1,
+                cause: Cause::Intent(intent),
+                actor: Actor::Soul(intent),
+                audience: Audience::Everyone,
+                node: intent,
+            },
+            body: Body::Changes(Vec::new()),
+            events: Some(vec![replica::effects::Event {
+                name: name(if ended {
+                    "souls:order-ended"
+                } else {
+                    "souls:order"
+                }),
+                fields: BTreeMap::from([
+                    (1, intent.to_value()),
+                    (
+                        2,
+                        Value::Text(name(if ended {
+                            "souls:order-cancelled"
+                        } else {
+                            "souls:hold"
+                        })),
+                    ),
+                ]),
+                changes: Vec::new(),
+                rest: Rest::new(),
+            }]),
+            rest: Rest::new(),
+        }
+    }
+
+    #[test]
+    fn carry_preserves_fifo_ignores_overlap_and_forgets_ended_orders() {
+        let a = Id::new(Scope([0x73; 16]), 1).unwrap();
+        let b = Id::new(Scope([0x73; 16]), 2).unwrap();
+        let mut active = Vec::new();
+        remember_orders(&mut active, &[effect(a, false), effect(b, false)]);
+        remember_orders(&mut active, &[effect(a, false)]); // checkpoint/tail overlap is idempotent.
+        assert_eq!(
+            active.iter().map(|e| e.envelope.node).collect::<Vec<_>>(),
+            vec![a, b]
+        );
+        let carry = Carry::of(&Sequences::default(), 1, Placed::new(), 0, &active);
+        let bytes = carry.to_bytes();
+        assert_eq!(Carry::read(&bytes).unwrap().orders, carry.orders);
+        let Value::Map(mut old) = decode(&bytes).unwrap().value else {
+            panic!("carry")
+        };
+        old.remove(&5);
+        assert!(
+            Carry::read(&encode(&Value::Map(old)).unwrap())
+                .unwrap()
+                .orders
+                .is_empty(),
+            "older carry reads without orders"
+        );
+        remember_orders(&mut active, &[effect(a, true)]);
+        assert_eq!(
+            active.iter().map(|e| e.envelope.node).collect::<Vec<_>>(),
+            vec![b],
+            "cancelled order cannot restart"
+        );
     }
 }

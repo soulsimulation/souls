@@ -19,6 +19,7 @@ import { migrateRegistry } from '../../../../tools/world-launcher/reslug.mjs';
 import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../../../../apps/server/test/clerk-fixture.ts';
 import { testPort } from '../../../../apps/server/test/test-port.ts';
 import { createOrigin } from '../../origin/origin.mjs';
+import { build } from '../../../client/served/build.mjs';
 import { frontCheck, POINTS } from '../front-check.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url)), repo = resolve(here, '../../../..');
@@ -72,7 +73,11 @@ writeFileSync(join(streams, 'pointer'), 'standin');
 const news = join(dir, 'news');
 mkdirSync(news);
 writeFileSync(join(news, 'news.jsonl'), `${JSON.stringify({ kind: 'release', version: '0.0-standin', commit: '0'.repeat(40), date: '2026-11-19', link: `${PUBLIC}/changelog#v0.0-standin` })}\n`);
-const origin = createOrigin(streams, { web, data: news }).server.listen(port.origin, '127.0.0.1');
+const client = join(dir, 'client');
+build({ out: client, version: '0.0.0' });
+const worldRoutes = join(dir, 'world-routes.json');
+writeFileSync(worldRoutes, JSON.stringify({ schema: 'souls/world-routes/1', worlds: Object.fromEntries(listed.worlds.map(w => [w.name, { gateway: at(port.directory), stream: '/s/standin/', canonical: true }])) }));
+const origin = createOrigin(streams, { web, data: news, client, worldRoutes }).server.listen(port.origin, '127.0.0.1');
 stops.push(() => directory.close(), () => origin.close());
 
 // the scratch host: /etc, the live release and the map under the scratch folder
@@ -88,6 +93,9 @@ const names = (text) => text
   .replaceAll('/srv/sim-worlds/production/tools/world-launcher/deploy/caddy', today).replaceAll('/srv/sim-worlds/production', release);
 for (const f of ['soul-game.caddy', 'souls-game.caddy', 'souls-routes.service', 'souls-routes.timer']) writeFileSync(join(src, f), names(readFileSync(join(here, f), 'utf8')));
 writeFileSync(join(src, 'routes.mjs'), readFileSync(join(here, 'routes.mjs')));
+const originModules = join(release, 'v2/tools/origin');
+mkdirSync(originModules, { recursive: true });
+writeFileSync(join(originModules, 'world-routes.mjs'), readFileSync(join(here, '../../origin/world-routes.mjs')));
 writeFileSync(join(etc, 'sim-worlds/production.conf'), `SIM_WORLDS_ARGS="--port ${port.launcher} --data /nowhere"\n`);
 writeFileSync(join(etc, 'caddy/cdn-trust.snippet'), readFileSync(join(today, 'cdn-trust.snippet')));
 writeFileSync(join(etc, 'caddy/Caddyfile'), `{\n\tadmin localhost:${port.admin}\n\tauto_https off\n\timport cdn-trust.snippet\n}\nimport sites/*.caddy\n`);
@@ -108,7 +116,7 @@ async function script(name) {
   const text = readFileSync(join(here, 'README.md'), 'utf8'), body = new RegExp(`bash -s <<'${name}'\\n([\\s\\S]*?)\\n${name}\\n`).exec(text)?.[1];
   if (!body) throw Error(`README.md has no ${name} script`);
   const local = body.replaceAll('/etc/', etc + '/').replaceAll('/srv/sim-worlds/production', release).replaceAll('localhost:7310', `localhost:${port.directory}`);
-  const sh = spawn('bash', ['-s'], { env: { ...process.env, PATH: `${shims}:${process.env.PATH}` }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const sh = spawn('bash', ['-s'], { env: { ...process.env, SOULS_WORLD_ROUTES: worldRoutes, PATH: `${shims}:${process.env.PATH}` }, stdio: ['pipe', 'pipe', 'pipe'] });
   let out = '';
   sh.stdout.on('data', (d) => { out += d; });
   sh.stderr.resume();
@@ -134,7 +142,7 @@ try {
   const up = await run('switched, everything up', { points: POINTS });
   await L.close();
   L = null;
-  const down = await run("switched, today's launcher stopped", { points: ['poster', 'site'], stopped: `/w/${slugs[1]}/` });
+  const down = await run("switched, today's launcher stopped", { points: ['poster', 'site', 'client'], today: undefined, stopped: `/w/${slugs[1]}/` });
   L = await openLauncher(launcherCfg);
   await script('BACK');
   const back = await run('switched back (must fail as before the switch)', { points: ['worlds', 'list'] }, true);

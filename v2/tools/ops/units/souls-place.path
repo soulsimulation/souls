@@ -1,0 +1,10 @@
+# Only request identities enter this inbox; the root-owned finite initializer validates the durable ownership.
+[Unit]
+Description=Souls created-world placement requests
+
+[Path]
+DirectoryNotEmpty=/etc/souls/placement-data/requests
+Unit=souls-place.service
+
+[Install]
+WantedBy=multi-user.target

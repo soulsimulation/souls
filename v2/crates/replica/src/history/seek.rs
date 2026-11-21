@@ -117,6 +117,9 @@ pub fn snapshot_state(snapshot: &Value) -> R<State> {
 /// view's records are T6 entries the audience may see, the thinned motion samples left out (R3's `sampled` level),
 /// or the subtree an arrival brought (`{0: ...}`), inserted as it stood.
 pub fn state_at(bundle: &Bundle, header: &crate::effects::Header, at: i64) -> R<State> {
+    if let Some(observation) = &bundle.observation {
+        return observed_state(bundle, header, observation, at);
+    }
     let mut s = snapshot_state(&bundle.snapshot)?;
     let Value::Map(view) = &bundle.view else {
         return bad("a view is a map");
@@ -151,4 +154,148 @@ pub fn state_at(bundle: &Bundle, header: &crate::effects::Header, at: i64) -> R<
 /// before `at` (the caller looks at earlier days).
 pub fn nearest(ix: &DayIndex, at: i64) -> Option<&(i64, String, [u8; 32])> {
     ix.bundles.iter().rev().find(|(s, _, _)| *s <= at)
+}
+
+/// The complete public carry context remains in `projection`; the existing history API returns live state only.
+fn observed_state(
+    bundle: &Bundle,
+    header: &crate::effects::Header,
+    observation: &Value,
+    at: i64,
+) -> R<State> {
+    use crate::stream::public::{apply_observation, digest, validate_projection};
+    let Value::Map(m) = observation else {
+        return bad("observation is a map");
+    };
+    if bundle.header != header.hash().to_bytes()
+        || m.get(&1) != Some(&Value::Uint(1))
+        || m.get(&2) != Some(&Value::Bytes(header.hash().to_bytes()))
+    {
+        return bad("observation format or header");
+    }
+    if at < bundle.start {
+        return bad("observation predates its genuine start");
+    }
+    let mut projection = m.get(&3).cloned().ok_or_else(|| Refusal {
+        name: "history-bad",
+        detail: "missing public baseline".into(),
+    })?;
+    validate_projection(header, &projection)?;
+    let Some(Value::Array(cursor)) = m.get(&4) else {
+        return bad("observation baseline cursor");
+    };
+    let [Value::Uint(record), Value::Uint(offset)] = cursor.as_slice() else {
+        return bad("observation baseline cursor shape");
+    };
+    let (mut record, mut offset) = (*record, *offset);
+    let Some(Value::Array(rows)) = m.get(&5) else {
+        return bad("observation rows");
+    };
+    if !matches!(m.get(&8),Some(Value::Bytes(hash)) if hash.len()==32) {
+        return bad("original archive base digest");
+    }
+    let mut selected = projection.clone();
+    let mut previous_at = bundle.start;
+    for row in rows {
+        let Value::Array(row) = row else {
+            return bad("observation row");
+        };
+        let [
+            Value::Uint(r),
+            Value::Uint(o),
+            Value::Uint(sequence),
+            time,
+            Value::Bytes(before),
+            Value::Bytes(after),
+            delta,
+        ] = row.as_slice()
+        else {
+            return bad("observation row fields");
+        };
+        let time = match time {
+            Value::Uint(n) => i64::try_from(*n).map_err(|_| Refusal {
+                name: "history-bad",
+                detail: "observation time overflow".into(),
+            })?,
+            Value::Nint(n) => {
+                -1 - i64::try_from(*n).map_err(|_| Refusal {
+                    name: "history-bad",
+                    detail: "observation time overflow".into(),
+                })?
+            }
+            _ => return bad("observation time"),
+        };
+        if (*r, *o) <= (record, offset)
+            || time < previous_at
+            || time
+                >= bundle
+                    .start
+                    .checked_add(bundle.length)
+                    .ok_or_else(|| Refusal {
+                        name: "history-bad",
+                        detail: "window overflow".into(),
+                    })?
+            || *before != digest(&projection)?
+        {
+            return bad("observation order or prior digest");
+        }
+        let next = apply_observation(header, &projection, delta)?;
+        let Value::Map(next_map) = &next else {
+            unreachable!("validated public projection");
+        };
+        let Value::Map(prior_map) = &projection else {
+            unreachable!("validated public projection");
+        };
+        if !matches!(prior_map.get(&1),Some(Value::Uint(version)) if *version <= *sequence)
+            || *after != digest(&next)?
+            || !matches!(next_map.get(&1),Some(Value::Uint(version)) if sequence.checked_add(1)==Some(*version))
+        {
+            return bad("observation result or sequence");
+        }
+        projection = next;
+        (record, offset, previous_at) = (*r, *o, time);
+        if time <= at {
+            selected = projection.clone();
+        }
+    }
+    if m.get(&6) != Some(&Value::Bytes(digest(&projection)?))
+        || m.get(&7)
+            != Some(&Value::Array(vec![
+                Value::Uint(record),
+                Value::Uint(offset),
+            ]))
+    {
+        return bad("observation terminal differs");
+    }
+    live_observation(header, &selected)
+}
+
+/// Existing history callers consume the live authorized nodes/links, while the reader retains carry context.
+pub fn live_observation(header: &crate::effects::Header, projection: &Value) -> R<State> {
+    crate::stream::public::validate_projection(header, projection)?;
+    let Value::Map(public) = projection else {
+        unreachable!("validated public projection");
+    };
+    let nodes = pairs(public.get(&2), "public live nodes")?
+        .into_iter()
+        .map(|(id, node)| Ok((id, NodeState::read(&Value::Map(node))?)))
+        .collect::<R<BTreeMap<_, _>>>()?;
+    let kind = nodes
+        .get(&header.zone)
+        .ok_or_else(|| Refusal {
+            name: "history-root-missing",
+            detail: "public root missing".into(),
+        })?
+        .kind
+        .clone();
+    let mut state = State::start(header.zone, kind);
+    state.nodes = nodes;
+    state.links.clear();
+    if let Some(Value::Uint(next)) = public.get(&1) {
+        state.next = *next;
+    }
+    for (id, link) in pairs(public.get(&3), "public live links")? {
+        state.links.insert(id, LinkState::read(&Value::Map(link))?);
+    }
+    Ok(state)
 }

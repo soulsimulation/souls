@@ -18,12 +18,12 @@ use std::fs;
 use std::path::Path;
 
 use replica::effects::{Refusal, State};
-use replica::encode::{Value, encode};
+use replica::encode::{Name, Value, encode};
 use replica::hash::state_hash;
 use replica::ids::{Id, Scope, Version};
 use replica::tree::Tree;
 use replica::world_model::{Audience, plain};
-use sim::checkpoint::fork::{EPOCH, Request, fork};
+use sim::checkpoint::fork::{EPOCH, Request, fork_with_kinds};
 use sim::checkpoint::{Blobs, Checkpoints};
 
 pub type R<T> = Result<T, Refusal>;
@@ -84,11 +84,26 @@ pub fn publish(
     real_us: i64,
     build: Vec<u8>,
 ) -> R<Template> {
+    publish_with_kinds(source, out, name, scope, seed, real_us, build, &[])
+}
+
+/// Publishes the same filtered template with previously validated public boot pins, before its header is sealed.
+#[allow(clippy::too_many_arguments)]
+pub fn publish_with_kinds(
+    source: &Path,
+    out: &Path,
+    name: &str,
+    scope: Scope,
+    seed: Vec<u8>,
+    real_us: i64,
+    build: Vec<u8>,
+    boot_pins: &[Name],
+) -> R<Template> {
     // In no audience: the highest counter of the template's own scope, which nothing it mints reaches.
     let Some(nobody) = Id::new(scope, (1 << 53) - 1) else {
         return refuse("template-publisher", "no id");
     };
-    let mut f = fork(
+    let mut f = fork_with_kinds(
         source,
         out,
         Request {
@@ -99,6 +114,7 @@ pub fn publish(
             build,
             every: EVERY,
         },
+        boot_pins,
     )?;
     let zone = f.version.zone;
     // Taken again after the head of the log, so the newest checkpoint holds no body.

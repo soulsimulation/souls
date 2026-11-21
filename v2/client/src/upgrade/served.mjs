@@ -54,6 +54,7 @@ async function get(site, path) {
   } catch (e) {
     throw new Refused('upgrade.unreachable', `${path}: ${e.cause?.code ?? e.message}`);
   }
+  if (path === '/v1/config' && r.headers.get('x-souls-engine') === 'old') throw new Refused('world.previous-engine', 'This world has rolled back to the previous engine. Run: node eden.mjs upgrade --rollback');
   if (r.status >= 300 && r.status < 400) throw new Refused('upgrade.redirect', `${path} answered ${r.status}; no redirect is followed`);
   if (r.status !== 200) throw new Refused('upgrade.not-served', `${path} answered ${r.status}`);
   return Buffer.from(await r.arrayBuffer());

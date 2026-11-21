@@ -12,7 +12,7 @@ import type { NodeRec, PartRec, SaidRec } from '../source/source.ts';
 export const RECENT = 8;
 const WALKING_US = 1_000_000;
 
-export type Soul = { id: string; name: string | null; description: string | null };
+export type Soul = { id: string; name: string | null; description: string | null; soul?: string | null };
 export type Status = 'speaking' | 'seated' | 'walking' | 'standing';
 /** What the copy needs from the world view to say where a Soul is and how it moves. */
 export type Bodies = { nodes: Map<string, NodeRec>; tracks: Map<string, { samples: { at: number }[] }> };
@@ -28,21 +28,27 @@ export class SoulsCopy {
   /** Utterances that may still be on screen (their time not over at the newest part's end). */
   private live: SaidRec[] = [];
 
-  apply(p: Pick<PartRec, 'nodes' | 'removed' | 'said' | 'to'>): void {
-    for (const n of p.nodes) {
+  /** Reconcile authorized nodes without changing speech, event history or time. */
+  snapshot(nodes: NodeRec[], removed: string[]): void {
+    for (const n of nodes) {
       if (!isSoul(n)) continue;
       const had = this.souls.get(n.id);
       // A part that does not carry the name field leaves the name it had.
       this.souls.set(n.id, {
         id: n.id,
+        soul: n.soul !== undefined ? n.soul : had?.soul,
         name: n.name !== undefined ? n.name : had?.name ?? null,
         description: n.description !== undefined ? n.description : had?.description ?? null,
       });
     }
-    for (const id of p.removed) {
+    for (const id of removed) {
       this.souls.delete(id);
       this.recent.delete(id);
     }
+  }
+
+  apply(p: Pick<PartRec, 'nodes' | 'removed' | 'said' | 'to'>): void {
+    this.snapshot(p.nodes, p.removed);
     for (const s of p.said ?? []) {
       if (s.words === null) continue; // not in the public text file: not drawn
       const r = this.recent.get(s.speaker) ?? this.recent.set(s.speaker, []).get(s.speaker)!;
@@ -101,4 +107,24 @@ export function wrap(text: string, max: number, width: (s: string) => number, li
   while (last.length > 1 && width(`${last}…`) > max) last = last.slice(0, -1);
   kept[lines - 1] = `${last}…`;
   return kept;
+}
+
+/** One immutable status lookup per public Soul identity, only opened cards trigger it.
+ * Unknown/failed results never assert that a Soul is ordinary; stale results cannot change another card. */
+export class TestMark {
+  private readonly cache = new Map<string, Promise<boolean | null>>();
+  private generation = 0;
+  private readonly load: (soul: string) => Promise<boolean | null>;
+  constructor(load: (soul: string) => Promise<boolean | null>) { this.load = load; }
+  open(soul: string | null, show: (test: boolean | null) => void): void {
+    const generation = ++this.generation;
+    show(null);
+    if (!soul) return;
+    let result = this.cache.get(soul);
+    if (!result) {
+      result = this.load(soul).catch(() => null);
+      this.cache.set(soul, result);
+    }
+    result.then((test) => { if (generation === this.generation) show(test); });
+  }
 }

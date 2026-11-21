@@ -4,7 +4,7 @@
 //!    `{"worlds": [{name, label, template, lineage, zone, creator, made}]}`, written after G9's create on condition of
 //!    the version read (rows are only added). The list request is answered from this machine's cached copy of it,
 //!    read from the store at most once; it asks no world anything, so it wakes none. Awake or asleep comes from the
-//!    world records this machine's directory has cached, never from the store or a world. No picture yet (G10).
+//!    world records this machine's directory has cached, never from the store or a world.
 //! 2. **Create** takes a name, a template and the creator's label, and runs G9's create
 //!    ([`crate::worlds::create`]) with the starter: the fork, in its own process (`worldd fork`).
 //! 3. **A request key.** Each create carries the page's key for that one click. Creates are made one at a time, and
@@ -16,8 +16,12 @@
 //!    off the list (the row's flag alone: it wakes no world), and `closed` closes it to visitors (today's one travel
 //!    switch; it refuses nothing until travel exists, X9). Each is a field of the row, written on condition of the
 //!    version read, and the list shows it from this machine's copy at once.
+//! 7. **The list's picture** (G10, #2800), set by the creator with the settings, from a shot: it passes G6's check
+//!    and hold point with [`PICTURE_BYTES`] and [`PICTURE_SIDE`], is kept stripped of metadata, and is one field of
+//!    the world's row, `picture`, a `data:` URL; a row without one lists `picture: null`.
 
 pub mod http;
+mod placement;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -25,7 +29,7 @@ use std::sync::Mutex;
 
 use replica::effects::{Refusal, read_id};
 use replica::encode::{Name, Value, decode, from_hex, to_hex};
-use replica::ids::{Hash, Id, Purpose};
+use replica::ids::{Id, sha256};
 use serde_json::{Value as Json, json};
 
 use crate::accounts::{principal_text, random};
@@ -35,6 +39,42 @@ use crate::worlds::create::{Create, NameRecord, Source, create};
 
 /// The list's one object.
 pub const KEY: &str = "world-list";
+/// The most bytes a world's list picture may have, after its metadata is stripped (rule 7).
+pub const PICTURE_BYTES: u64 = 131_072;
+/// The longest side of a world's list picture, px (rule 7).
+pub const PICTURE_SIDE: u64 = 1280;
+
+/// A file as the list's picture (rule 7): G6's check with the picture's limits, then the hold point; the stripped
+/// bytes as a `data:` URL, or the refusal's name.
+pub fn list_picture(file: &[u8]) -> Result<String, String> {
+    let limits = assets::check::Limits {
+        bytes: PICTURE_BYTES,
+        image_bytes: PICTURE_BYTES,
+        side: PICTURE_SIDE,
+        textures: 1,
+        pixels: PICTURE_SIDE * PICTURE_SIDE,
+        ..assets::check::Limits::default()
+    };
+    let checked = assets::check::check(file, &limits).map_err(|r| r.code.to_string())?;
+    if checked.format == assets::check::Format::Glb {
+        return Err("picture-format".into());
+    }
+    let checked = std::sync::Arc::new(checked);
+    match assets::hold::judge(
+        std::sync::Arc::new(assets::hold::NoClassifier),
+        checked.clone(),
+        assets::hold::CLASSIFY_WITHIN,
+    ) {
+        assets::hold::Verdict::Allow => {}
+        assets::hold::Verdict::Hold(_) => return Err("picture-held".into()),
+        assets::hold::Verdict::Reject(_) => return Err("picture-rejected".into()),
+    }
+    let mut b = crate::accounts::b64url(&checked.bytes)
+        .replace('-', "+")
+        .replace('_', "/");
+    b.push_str(&"=".repeat((4 - b.len() % 4) % 4));
+    Ok(format!("data:image/{};base64,{b}", checked.format.name()))
+}
 
 /// Per-account limits (rule 4), as settings.
 #[derive(Clone, Copy, Debug)]
@@ -118,7 +158,9 @@ pub struct Start<'a> {
     pub template: &'a Path,
     pub lineage: [u8; 16],
     pub creator: Id,
-    pub claim: &'a Claim,
+    pub claim: Option<&'a Claim>,
+    /// Stable, creator-bound durable request identity.
+    pub request: &'a str,
 }
 
 pub type Starter = Box<dyn Fn(&Start) -> R<()> + Send + Sync>;
@@ -158,8 +200,6 @@ impl Template {
 
 struct Inner<S: Store> {
     dir: Directory<S>,
-    /// Answers by request key (rule 3).
-    answered: BTreeMap<String, Result<Json, Refusal>>,
 }
 
 /// The list and create, over one directory.
@@ -183,10 +223,7 @@ impl<S: Store> Worlds<S> {
         starter: Starter,
     ) -> Worlds<S> {
         Worlds {
-            inner: Mutex::new(Inner {
-                dir,
-                answered: BTreeMap::new(),
-            }),
+            inner: Mutex::new(Inner { dir }),
             cache: Mutex::new(None),
             templates,
             limits: Limits::default(),
@@ -237,7 +274,9 @@ impl<S: Store> Worlds<S> {
                 Some(rec.current().is_some() && rec.wake.is_none())
             })();
             row["awake"] = json!(awake.unwrap_or(false));
-            row["picture"] = Json::Null;
+            if row.get("picture").is_none() {
+                row["picture"] = Json::Null;
+            }
         }
         Ok(json!({"worlds": rows, "templates": self.templates.keys().collect::<Vec<_>>()}))
     }
@@ -251,15 +290,7 @@ impl<S: Store> Worlds<S> {
         now: u64,
     ) -> Result<Json, Refusal> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(a) = inner.answered.get(&ask.key) {
-            return a.clone();
-        }
-        let out = self.make(&mut inner, ask, creator, account_made, now);
-        // A refusal by the store is not kept: the same click may be sent again and pass.
-        if !matches!(&out, Err(e) if e.name == "store-unreachable") {
-            inner.answered.insert(ask.key.clone(), out.clone());
-        }
-        out
+        self.make(&mut inner, ask, creator, account_made, now)
     }
 
     fn make(
@@ -286,70 +317,172 @@ impl<S: Store> Worlds<S> {
         let Some(template) = self.templates.get(&ask.template) else {
             return refuse("template-missing", ask.template.clone());
         };
-        let (etag, rows) = read_rows(&inner.dir.store)?;
         let who = principal_text(creator);
-        let made: Vec<u64> = rows
-            .iter()
-            .filter(|r| row_creator(r) == Some(&who))
-            .filter_map(|r| r.get("made").and_then(Json::as_u64))
-            .collect();
-        if let Err(o) = self.limits.check(account_made, &made, now) {
-            return Err(Refusal {
-                name: o.name,
-                detail: json!({"limit": o.limit, "retry_after": o.retry_after}).to_string(),
-            });
+        let request = to_hex(&sha256(format!("{who}:{}", ask.key).as_bytes()));
+        let intent_key = format!("world-create/{request}");
+        let fingerprint =
+            json!({"name": ask.name, "template": ask.template, "label": label, "creator": who});
+        let mut intent = match inner.dir.store.get(&intent_key)? {
+            Some(o) => {
+                let value: Json = serde_json::from_slice(&o.bytes)
+                    .or_else(|_| refuse("create-intent-invalid", "the stored create request"))?;
+                if value.get("ask") != Some(&fingerprint) {
+                    return refuse(
+                        "create-key-reused",
+                        "this click already names a different world request",
+                    );
+                }
+                value
+            }
+            None => {
+                crate::worlds::create::check_name(&ask.name)?;
+                let (_, rows) = read_rows(&inner.dir.store)?;
+                let made: Vec<u64> = rows
+                    .iter()
+                    .filter(|r| row_creator(r) == Some(&who))
+                    .filter_map(|r| r.get("made").and_then(Json::as_u64))
+                    .collect();
+                if let Err(o) = self.limits.check(account_made, &made, now) {
+                    return Err(Refusal {
+                        name: o.name,
+                        detail: json!({"limit": o.limit, "retry_after": o.retry_after}).to_string(),
+                    });
+                }
+                if rows.iter().any(|r| {
+                    r.get("label").and_then(Json::as_str) == Some(label)
+                        && row_creator(r) != Some(&who)
+                }) {
+                    return refuse("label-taken", label.to_owned());
+                }
+                if inner.dir.store.get(&NameRecord::key(&ask.name))?.is_some() {
+                    return refuse("name-taken", ask.name.clone());
+                }
+                let lineage: [u8; 16] = random();
+                let value = json!({"request": request, "ask": fingerprint, "row": {
+                    "name": ask.name, "label": label, "template": ask.template,
+                    "lineage": to_hex(&lineage), "zone": principal_text(template.zone),
+                    "creator": who, "made": now, "ready": false,
+                }});
+                inner.dir.store.put(
+                    &intent_key,
+                    &serde_json::to_vec(&value).unwrap(),
+                    When::Absent,
+                )?;
+                value
+            }
+        };
+        let mut row = intent["row"].clone();
+        if row.get("ready") == Some(&Json::Bool(true)) {
+            return Ok(json!({"world": row, "epoch": 1}));
         }
-        if rows.iter().any(|r| {
-            r.get("label").and_then(Json::as_str) == Some(label) && row_creator(r) != Some(&who)
-        }) {
-            return refuse("label-taken", label.to_owned());
+        let lineage: [u8; 16] = from_hex(row["lineage"].as_str().unwrap_or_default())
+            .ok()
+            .and_then(|s| s.try_into().ok())
+            .ok_or_else(|| Refusal {
+                name: "create-intent-invalid",
+                detail: "lineage".into(),
+            })?;
+        if row["zone"] != principal_text(template.zone) || row["creator"] != who {
+            return refuse(
+                "create-intent-invalid",
+                "the template or creator no longer matches",
+            );
         }
-        let lineage: [u8; 16] = random();
-        let build = Hash::of(Purpose::Fixture, b"souls/worldd/0.0.0").to_bytes();
-        let (claim, ()) = create(
-            &mut inner.dir,
-            Create {
-                name: &ask.name,
-                creator,
-                source: Source::Template {
-                    lineage: template.lineage,
-                },
-                lineage,
-                zone: template.zone,
-                build: &build,
-            },
-            |claim| {
-                (self.starter)(&Start {
-                    name: &ask.name,
-                    template: &template.dir,
-                    lineage,
-                    creator,
-                    claim,
-                })
-            },
-        )?;
-        let row = json!({
-            "name": ask.name,
-            "label": label,
-            "template": ask.template,
-            "lineage": to_hex(&lineage),
-            "zone": principal_text(template.zone),
-            "creator": who,
-            "made": now,
-        });
-        let rows = add_row(&inner.dir.store, etag, rows, row.clone())?;
+        let build = placement::build_pin()?;
+        let claim = match inner.dir.store.get(&NameRecord::key(&ask.name))? {
+            None => Some(
+                create(
+                    &mut inner.dir,
+                    Create {
+                        name: &ask.name,
+                        creator,
+                        source: Source::Template {
+                            lineage: template.lineage,
+                        },
+                        lineage,
+                        zone: template.zone,
+                        build: &build,
+                    },
+                    |_| Ok(()),
+                )?
+                .0,
+            ),
+            Some(o) => {
+                let named = NameRecord::read(&o.bytes)?;
+                if named.creator != creator
+                    || named.lineage != lineage
+                    || named.zone != template.zone
+                    || named.source != template.lineage
+                {
+                    return refuse("name-taken", ask.name.clone());
+                }
+                // A crash after name reservation may precede the build/claim; the supervisor owns later epochs.
+                inner.dir.set_build(&lineage, template.zone, &build)?;
+                if inner
+                    .dir
+                    .world(&lineage, template.zone)?
+                    .current()
+                    .is_none()
+                {
+                    Some(inner.dir.claim(&lineage, template.zone)?)
+                } else {
+                    None
+                }
+            }
+        };
+        let (etag, rows) = read_rows(&inner.dir.store)?;
+        let (rows, ()) = write_rows(&inner.dir.store, etag, rows, |rows| {
+            if !rows.iter().any(|r| r.get("name") == row.get("name")) {
+                rows.push(row.clone());
+            }
+            Ok(())
+        })?;
         *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
-        Ok(json!({"world": row, "epoch": claim.takeover.epoch}))
+        (self.starter)(&Start {
+            name: &ask.name,
+            template: &template.dir,
+            lineage,
+            creator,
+            claim: claim.as_ref(),
+            request: &request,
+        })?;
+        row["ready"] = json!(true);
+        let (etag, rows) = read_rows(&inner.dir.store)?;
+        let (rows, ()) = write_rows(&inner.dir.store, etag, rows, |rows| {
+            let found = rows
+                .iter_mut()
+                .find(|r| r.get("name") == row.get("name"))
+                .ok_or_else(|| Refusal {
+                    name: "create-intent-invalid",
+                    detail: "the world row is absent".into(),
+                })?;
+            *found = row.clone();
+            Ok(())
+        })?;
+        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(rows);
+        intent["row"] = row.clone();
+        let prior = inner.dir.store.get(&intent_key)?.ok_or_else(|| Refusal {
+            name: "create-intent-invalid",
+            detail: "the create request is absent".into(),
+        })?;
+        inner.dir.store.put(
+            &intent_key,
+            &serde_json::to_vec(&intent).unwrap(),
+            When::Is(&prior.etag),
+        )?;
+        Ok(json!({"world": row, "epoch": 1}))
     }
 
-    /// A world's settings (rule 6): `creator` sets `unlisted` and `closed` on the row of `world` (either may be
-    /// `None`, left as it is; both `None` reads the row). Answers the row. Writes the list's one object alone.
+    /// A world's settings (rules 6 and 7): `creator` sets `unlisted`, `closed` and the list's `picture` (a checked
+    /// `data:` URL, [`list_picture`]) on the row of `world` (each may be `None`, left as it is; all `None` reads the
+    /// row). Answers the row. Writes the list's one object alone.
     pub fn settings(
         &self,
         world: &str,
         creator: Id,
         unlisted: Option<bool>,
         closed: Option<bool>,
+        picture: Option<&str>,
     ) -> Result<Json, Refusal> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let who = principal_text(creator);
@@ -369,9 +502,12 @@ impl<S: Store> Worlds<S> {
                     row[k] = json!(v);
                 }
             }
+            if let Some(p) = picture {
+                row["picture"] = json!(p);
+            }
             Ok(row.clone())
         };
-        if unlisted.is_none() && closed.is_none() {
+        if unlisted.is_none() && closed.is_none() && picture.is_none() {
             return set(&mut rows.clone());
         }
         let (rows, row) = write_rows(&inner.dir.store, etag, rows, set)?;
@@ -414,20 +550,6 @@ fn read_rows<S: Store>(store: &S) -> R<(String, Vec<Json>)> {
             }
         }
     }
-}
-
-/// Adds `row` on condition of the version read; a write refused because another machine added a row reads again.
-fn add_row<S: Store>(
-    store: &S,
-    etag: String,
-    rows: Vec<Json>,
-    row: Json,
-) -> R<(String, Vec<Json>)> {
-    let ((etag, rows), ()) = write_rows(store, etag, rows, |next| {
-        next.push(row.clone());
-        Ok(())
-    })?;
-    Ok((etag, rows))
 }
 
 /// Changes the rows with `change` and writes them on condition of the version read; a write refused because another
@@ -491,7 +613,9 @@ pub fn from_env(machine: &str) -> Option<R<Worlds<&'static (dyn Store + Send + S
     let run = || -> R<Worlds<&'static (dyn Store + Send + Sync)>> {
         let store: Box<dyn Store + Send + Sync> = match crate::directory::s3::S3::from_env() {
             Some(s) => Box::new(s?),
-            None => Box::new(crate::directory::store::Memory::default()),
+            None => Box::new(crate::directory::folder::Folder::new(PathBuf::from(
+                std::env::var_os("DIRECTORYD_WORLD_STORE").unwrap_or_else(|| "directory".into()),
+            ))),
         };
         let store: &'static (dyn Store + Send + Sync) = Box::leak(store);
         let mut found = BTreeMap::new();
@@ -513,10 +637,7 @@ pub fn from_env(machine: &str) -> Option<R<Worlds<&'static (dyn Store + Send + S
         Ok(Worlds::new(
             Directory::new(store, machine),
             found,
-            worldd_starter(
-                var("DIRECTORYD_WORLDD", "worldd"),
-                var("DIRECTORYD_WORLDS", "worlds"),
-            ),
+            placement::starter(var("DIRECTORYD_PLACEMENT", "placement")),
         ))
     };
     Some(run())

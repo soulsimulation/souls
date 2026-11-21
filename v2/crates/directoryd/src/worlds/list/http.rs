@@ -5,7 +5,8 @@
 //!   token as `Authorization: Bearer <token>`, or, with the sign-in for test worlds on, `Bearer test:<name>`.
 //!   Answers `{"world": {...}}`, or `{"refused", "detail"}`; a limit's refusal (429) adds `limit` and `retry_after`.
 //! - `POST /v1/worlds/settings` with `{"world", "unlisted"?, "closed"?}`, signed in the same way as the world's creator
-//!   (W9, #2827): answers `{"world": {...}}`, the row as set; with neither switch, the row as it is.
+//!   (W9, #2827): answers `{"world": {...}}`, the row as set; with neither switch, the row as it is. With
+//!   `"picture": <base64url>` it also sets the list's picture (G10, #2800), refused by G6's code when the file fails.
 
 use serde_json::{Value, json};
 
@@ -59,11 +60,22 @@ pub fn settings(req: &Request, app: &App) -> Answer {
         .unwrap_or_default();
     let switch = |k: &str| body.get(k).and_then(Value::as_bool);
     let note = format!("account#{}", correlate(&account.account));
+    let picture = match body.get("picture").and_then(Value::as_str) {
+        None => None,
+        Some(t) => match crate::accounts::from_b64url(t)
+            .ok_or_else(|| "picture".to_string())
+            .and_then(|f| super::list_picture(&f))
+        {
+            Ok(url) => Some(url),
+            Err(code) => return (400, json!({"refused": code}), format!("{note} {code}")),
+        },
+    };
     match worlds.settings(
         world,
         account.principal,
         switch("unlisted"),
         switch("closed"),
+        picture.as_deref(),
     ) {
         Ok(row) => (200, json!({"world": row}), note),
         Err(e) => {
@@ -114,7 +126,16 @@ pub fn route(req: &Request, app: &App) -> Answer {
     };
     let note = format!("account#{}", correlate(&account.account));
     match worlds.create(&ask, account.principal, made, now()) {
-        Ok(v) => (200, v, note),
+        Ok(v) => {
+            let grant = format!(
+                "creator-{}",
+                crate::accounts::principal_text(account.principal).replace(':', "-")
+            );
+            if app.store.own(&account.account, &grant, None).is_err() {
+                return refuse(503, "store");
+            }
+            (200, v, note)
+        }
         Err(e) if e.name.starts_with("world-limit") => {
             let mut v: Value = serde_json::from_str(&e.detail).unwrap_or(json!({}));
             v["refused"] = json!(e.name);
@@ -122,7 +143,7 @@ pub fn route(req: &Request, app: &App) -> Answer {
         }
         Err(e) => {
             let status = match e.name {
-                "store-unreachable" | "start-failed" => 503,
+                "store-unreachable" | "start-failed" | "world-starting" => 503,
                 _ => 409,
             };
             // A failed start's detail is the machine's (its paths): it stays in the machine's own log.

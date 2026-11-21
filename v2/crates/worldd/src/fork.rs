@@ -8,7 +8,7 @@
 use crate::watchdog::Real;
 use replica::encode::{from_hex, to_hex};
 use replica::ids::{Hash, Id, Purpose, Scope};
-use sim::checkpoint::fork::{Request, fork};
+use sim::checkpoint::fork::{Request, fork, fork_with_kinds};
 use sim::clock::Clock;
 use std::io::Read;
 use std::path::PathBuf;
@@ -65,8 +65,82 @@ pub fn run(args: &[String]) -> i32 {
         build: Hash::of(Purpose::Fixture, b"souls/worldd/0.0.0").to_bytes(),
         every: EVERY,
     };
-    match fork(&from, &to, req) {
+    let template = arg("--template").map(PathBuf::from);
+    // Validate all serving data and exact pins before the fork can create output.
+    let pins = match template
+        .as_ref()
+        .map(|dir| crate::serve::template_pins(dir))
+        .transpose()
+    {
+        Ok(pins) => pins,
+        Err(e) => {
+            eprintln!("worldd: fork: {e}");
+            return 1;
+        }
+    };
+    if let Some(dir) = &template
+        && from != dir.join("ckpt")
+    {
+        eprintln!("worldd: fork: template-checkpoint-mismatch");
+        return 1;
+    }
+    let result = match &pins {
+        Some(pins) => fork_with_kinds(&from, &to, req, pins),
+        None => fork(&from, &to, req),
+    };
+    match result {
         Ok(f) => {
+            if let Some(template) = &template {
+                let support = || -> Result<(), String> {
+                    let cp = |name: &str| {
+                        std::fs::copy(template.join(name), to.join(name))
+                            .map(|_| ())
+                            .map_err(|e| e.to_string())
+                    };
+                    cp("facts.json")?;
+                    cp("boot")?;
+                    for name in ["moves.json", "entry.json"] {
+                        if template.join(name).exists() {
+                            cp(name)?;
+                        }
+                    }
+                    std::fs::create_dir_all(to.join("entries")).map_err(|e| e.to_string())?;
+                    if template.join("entries").is_dir() {
+                        for entry in std::fs::read_dir(template.join("entries"))
+                            .map_err(|e| e.to_string())?
+                        {
+                            let entry = entry.map_err(|e| e.to_string())?;
+                            if !entry.file_type().map_err(|e| e.to_string())?.is_file() {
+                                return Err("template-support-invalid".into());
+                            }
+                            std::fs::copy(entry.path(), to.join("entries").join(entry.file_name()))
+                                .map_err(|e| e.to_string())?;
+                        }
+                    }
+                    let entry = std::fs::read_to_string(to.join("entry.json"))
+                        .unwrap_or_else(|_| "[0, 0]".into());
+                    let creator = directoryd::accounts::principal_text(through).replace(':', "-");
+                    let name = format!(
+                        "{}-{}-{}",
+                        to_hex(&scope.0),
+                        to_hex(&f.header.zone.scope().0),
+                        f.header.zone.counter()
+                    );
+                    let meta = format!(
+                        "{{\"format\":\"souls/world/1\",\"name\":\"{name}\",\"fork\":true,\"souls_scope\":\"{}\",\"souls\":[],\"entry\":{entry},\"creator\":\"{creator}\"}}",
+                        to_hex(&scope.0)
+                    );
+                    std::fs::write(to.join("world.json"), meta).map_err(|e| e.to_string())?;
+                    std::fs::write(to.join("tokens"), b"").map_err(|e| e.to_string())?;
+                    std::fs::rename(to.join("ckpt"), to.join("checkpoints"))
+                        .map_err(|e| e.to_string())?;
+                    Ok(())
+                };
+                if let Err(e) = support() {
+                    eprintln!("worldd: fork: support-incomplete: {e}");
+                    return 1;
+                }
+            }
             println!(
                 "fork: lineage {} at sequence {}, {} bodies removed, {} things set down, {} bytes written, {} us",
                 to_hex(&f.version.lineage.0),

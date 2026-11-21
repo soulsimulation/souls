@@ -552,7 +552,7 @@ fn obj_mut<'a>(v: &'a mut Json, key: &str) -> Option<&'a mut Json> {
 /// argument is at [`AT_ARG`], that thing (returned). A point of this thing named by `at` stays as it is. An argument
 /// not given as a thing is refused `arg-missing`. The two points are added to the copy's points, at its origin, so the
 /// binder knows them; [`Sight`] measures them.
-fn targets(entry: &Json, form: &str, args: &Args) -> R<(Json, Option<Id>)> {
+fn targets(entry: &Json, form: &str, args: &skills::form_runner::Args) -> R<(Json, Option<Id>)> {
     let mut e = entry.clone();
     let mut thing = None;
     let steps = obj_mut(&mut e, "forms")
@@ -571,12 +571,17 @@ fn targets(entry: &Json, form: &str, args: &Args) -> R<(Json, Option<Id>)> {
             (Some(Json::Str(_)), ..) => continue,
             (None, None, None) => AT_SELF,
             (_, Some(a), _) | (None, None, Some(a)) => {
-                thing = Some(
-                    *args
-                        .things
-                        .get(a)
-                        .ok_or_else(|| refusal("arg-missing", a))?,
-                );
+                match args.get(a) {
+                    Some(skills::form_runner::Arg::Name(_)) => continue,
+                    Some(skills::form_runner::Arg::Node(id)) => {
+                        if thing.is_some_and(|old| old != *id) {
+                            return Err(refusal("arg-ambiguous", a));
+                        }
+                        thing = Some(*id);
+                    }
+                    Some(_) => return Err(refusal("step-malformed", a)),
+                    None => return Err(refusal("arg-missing", a)),
+                }
                 AT_ARG
             }
             _ => continue,
@@ -792,8 +797,57 @@ impl Acts {
                 first.get_or_insert(refusal("no_such_kind", kind));
                 continue;
             };
-            // C23: a move's target from the form's arguments, or the body itself.
-            let (entry, thing) = match targets(entry, form, args) {
+            if let Some(key) = args.things.keys().find(|k| args.slots.contains_key(*k)) {
+                first.get_or_insert(refusal("arg-ambiguous", key));
+                continue;
+            }
+            let mut all = match skills::form_runner::args_in(entry, &args.things, &args.slots) {
+                Ok(all) => all,
+                Err(e) => {
+                    first.get_or_insert(e);
+                    continue;
+                }
+            };
+            let mut ambiguous = None;
+            for (key, value) in &args.values {
+                if all.insert(key.clone(), value.clone()).is_some() {
+                    ambiguous = Some(key.clone());
+                    break;
+                }
+            }
+            if let Some(key) = ambiguous {
+                first.get_or_insert(refusal("arg-ambiguous", key));
+                continue;
+            }
+            let incompatible = entry
+                .get("forms")
+                .and_then(|f| f.get(form))
+                .and_then(|f| f.get("takes"))
+                .and_then(Json::obj)
+                .unwrap_or(&[])
+                .iter()
+                .find_map(|(key, take)| {
+                    let fits = match take.get("type").and_then(Json::str) {
+                        Some("part") => all
+                            .get(key)
+                            .map(|a| matches!(a, skills::form_runner::Arg::Name(_))),
+                        Some("text") => all
+                            .get(key)
+                            .map(|a| matches!(a, skills::form_runner::Arg::Text(_))),
+                        _ => return None,
+                    };
+                    match fits {
+                        Some(true) => None,
+                        Some(false) => Some(refusal("arg-type", key)),
+                        None => Some(refusal("arg-missing", key)),
+                    }
+                });
+            if let Some(e) = incompatible {
+                first.get_or_insert(e);
+                continue;
+            }
+            // The same complete arguments reach target resolution, step binding and effects.
+            let (entry, thing) = match targets(entry, form, &all) {
                 Ok(t) => t,
                 Err(e) => {
                     first.get_or_insert(e);
@@ -825,9 +879,7 @@ impl Acts {
                     );
                 }
                 // Thing, slot and value arguments (F4, C12, C24, C25): bound here, as `Forms::commit` binds none yet.
-                let steps = skills::form_runner::bind_in(&entry, form, &args.things, &args.slots)?;
-                let mut all = skills::form_runner::args_in(&entry, &args.things, &args.slots)?;
-                all.extend(args.values.clone());
+                let steps = skills::form_runner::bind_with(&entry, form, &all)?;
                 let effects = skills::form_runner::bind_effects_args(&entry, form, &all)?;
                 sim::forms::may(w.tree, &audiences, &|_| None, body, *node, &entry, form)?;
                 forms.start(w, body, *node, intent, steps, effects, limits(), now)
@@ -1002,9 +1054,6 @@ pub fn intent(id: Id, expiry: Micros, actor: Actor, bytes: &[u8]) -> Intent {
 }
 
 #[cfg(test)]
-mod tests;
-
-#[cfg(test)]
 mod gateway_walk_tests {
     use super::*;
 
@@ -1017,3 +1066,6 @@ mod gateway_walk_tests {
         assert_eq!(walk_span(u64::MAX, usize::MAX), WALK_MOST);
     }
 }
+
+#[cfg(test)]
+mod tests;

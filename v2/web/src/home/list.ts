@@ -2,9 +2,10 @@
 // (W3) and today's `/__sim/worlds.json`. Every world opens at /w/<slug>/ on the public name; the proxy sends a slug the
 // directory lists to the new system and any other to today's launcher, so a slug both name is the new system's here too.
 // front-check.mjs reads the same two answers through this module, so the page and the check agree.
+import { worldAddress } from '../source/address.ts';
 
 export type Row = { slug: string; name: string; href: string; system: 'v2' | 'today'; note: string };
-export type DirectoryList = { worlds?: { name: string; label?: string; template?: string; awake?: boolean }[] };
+export type DirectoryList = { worlds?: { name: string; label?: string; template?: string; awake?: boolean; ready?: boolean }[] };
 export type TodayList = {
   worlds?: { slug: string; name?: string; unlisted?: boolean; souls?: number | null }[];
   auth?: { clerkSatellite?: { signInUrl?: string } };
@@ -27,6 +28,15 @@ export function rows(directory: DirectoryList | null, today: TodayList | null): 
     out.push({ slug: w.slug, name: w.name || w.slug, href: `/w/${w.slug}/`, system: 'today', note: w.souls ? `${w.souls} Souls` : '' });
   }
   return out;
+}
+
+/** Preview-only directory rows must not replace today's canonical world before activation. */
+export async function canonicalRows(directory: DirectoryList | null, today: TodayList | null, origin: string, get: typeof fetch = fetch): Promise<Row[]> {
+  const candidates = (directory?.worlds ?? []).filter(w => w.ready !== false && SLUG.test(w.name));
+  const active = await Promise.all(candidates.map(async w => {
+    try { return await worldAddress(new URL(`/w/${w.name}/`, origin).href, get) ? w : null; } catch { return null; }
+  }));
+  return rows(directory ? { ...directory, worlds: active.filter((w): w is NonNullable<typeof w> => w !== null) } : null, today);
 }
 
 /** The sign-in link: the primary origin's bridge, returning to `here` (the page it left). Null without a bridge. */
