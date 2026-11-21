@@ -136,7 +136,7 @@
    "steps": [
     {
      "step": "walk_to",
-     "point": "end_a"
+     "point": "by_end_a"
     }
    ],
    "effects": [
@@ -170,7 +170,7 @@
    "steps": [
     {
      "step": "walk_to",
-     "point": "end_b"
+     "point": "by_end_b"
     }
    ],
    "effects": [
@@ -204,7 +204,7 @@
    "steps": [
     {
      "step": "walk_to",
-     "point": "corner"
+     "point": "by_corner"
     }
    ],
    "effects": [
@@ -241,8 +241,7 @@
    "steps": [
     {
      "step": "move",
-     "move": "swing",
-     "at": "by_end_a"
+     "move": "swing"
     }
    ],
    "effects": [
@@ -279,8 +278,7 @@
    "steps": [
     {
      "step": "move",
-     "move": "swing",
-     "at": "by_end_a"
+     "move": "swing"
     }
    ],
    "effects": [
@@ -317,8 +315,7 @@
    "steps": [
     {
      "step": "move",
-     "move": "swing",
-     "at": "by_end_b"
+     "move": "swing"
     }
    ],
    "effects": [
@@ -355,8 +352,7 @@
    "steps": [
     {
      "step": "move",
-     "move": "swing",
-     "at": "by_end_b"
+     "move": "swing"
     }
    ],
    "effects": [
@@ -393,8 +389,7 @@
    "steps": [
     {
      "step": "move",
-     "move": "swing",
-     "at": "by_corner"
+     "move": "swing"
     }
    ],
    "effects": [
@@ -431,8 +426,7 @@
    "steps": [
     {
      "step": "move",
-     "move": "swing",
-     "at": "by_corner"
+     "move": "swing"
     }
    ],
    "effects": [
