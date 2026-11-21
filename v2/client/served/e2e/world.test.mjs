@@ -321,10 +321,14 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const apple = (await waitFor("the apple on the shelf in B's copy", async () => (await apples(B)).at(0))).id;
   const shelf = (await A.cli('find', 'shelf')).found.find((r) => r.kind?.startsWith('eden:swap_shelf'));
   assert.ok(shelf, 'the shelf is found by its words');
-  const took = await act(A, `take:${shelf.id}`, `thing=${apple}`);
-  assert.ok(accepted(took.answer), `A takes the apple from the shelf: ${JSON.stringify(took.answer)}`);
+  // #3914: the take names no thing; the shelf's selector (things in this shelf, nearest me) binds the apple.
+  const took = await act(A, `take:${shelf.id}`);
+  assert.ok(accepted(took.answer), `A takes the apple from the shelf with no argument: ${JSON.stringify(took.answer)}`);
   const stump = (await A.cli('find', 'stump')).found.find((r) => r.kind?.startsWith('eden:hollow_stump'));
   assert.ok(stump, 'the stump is found by its words');
+  // #3914: a search of the empty stump is refused by name, not `arg-missing`.
+  const emptySearch = await act(B, `search:${stump.id}`);
+  assert.equal(emptySearch.answer.reason, 'thing.none-selected', `B's search of the empty stump: ${JSON.stringify(emptySearch.answer)}`);
   const hid = await act(A, `hide:${stump.id}`, `thing=${apple}`);
   assert.ok(accepted(hid.answer), `A hides the apple in the stump: ${JSON.stringify(hid.answer)}`);
   await waitFor("the apple in the stump in A's copy", async () => (await apples(A)).find((r) => r.id === apple && r.in?.startsWith(stump.name)), 20_000);
@@ -336,6 +340,11 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const streamB = JSON.stringify((await request(B.rt.socket, { op: 'read' })).events);
   assert.ok(!streamB.includes(apple), "(e) no event B's daemon was handed names the hidden apple");
   stage('hidden apple withheld from the seeker');
+  // #3914 A2: B searches the stump with no argument and finds what is hidden: the apple is in B's hand, in B's copy.
+  const found = await act(B, `search:${stump.id}`);
+  assert.ok(accepted(found.answer), `B's search finds the apple: ${JSON.stringify(found.answer)}`);
+  await waitFor("the found apple in B's copy", async () => (await apples(B)).find((r) => r.id === apple), 20_000);
+  stage('the seeker searched and found the apple');
 
   // The acts. A walks to the bench and sits on it.
   const bench = (await A.cli('find', 'bench')).found.find((r) => r.kind?.startsWith('eden:bench'));
