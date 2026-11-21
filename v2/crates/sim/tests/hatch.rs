@@ -3,13 +3,16 @@
 //! in `replica`'s interpreter. The cases and the world's answers are written for the daemon's and the page's runs of
 //! the same WASM build (`v2/client/src/hatch`, `v2/web/src/hatch`, both run by v2/tools/ci.sh), which must give the
 //! same verdicts at the same counted steps. Over its budget a hatch ends `hatch-over-budget`; a module with a float
-//! instruction or an import is refused at load; a fault is contained in its call. Prints the hatch uses in the kit.
+//! instruction or an import is refused at load; a fault is contained in its call. A hatch may answer several fields
+//! (#3713): an echo module's words come back as the chess table's own values, enums by name, and a word that does not
+//! fit its field is refused by name. Prints the hatch uses in the kit.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use replica::encode::Value as V;
 use replica::hatch::{Loaded, run_cases};
+use replica::host::{Answers, Hatch, Read};
 use replica::ids::sha256;
 use replica::rules::json::{self, Value};
 use skills::form_runner::{bind_hatch, hatch_no, hatch_words, run_hatch};
@@ -162,7 +165,7 @@ fn a1_a2_the_chess_check_through_the_form_runner_and_its_table_for_the_daemon_an
         ((3, 39, 0), false),  // Qd1h5 through its own pawn
     ];
     for (mv, want) in known {
-        let v = run_hatch(&hatch, &module, &case(&start(), 0, 64, 15, mv)).unwrap();
+        let v = run_hatch(&hatch, &module, &entry, &case(&start(), 0, 64, 15, mv)).unwrap();
         assert_eq!(v.yes, want, "{mv:?}");
     }
 
@@ -171,7 +174,7 @@ fn a1_a2_the_chess_check_through_the_form_runner_and_its_table_for_the_daemon_an
     let mut lines = String::new();
     let (mut yes, mut steps) = (0, 0);
     for (i, c) in cases.iter().enumerate() {
-        let v = run_hatch(&hatch, &module, c).unwrap();
+        let v = run_hatch(&hatch, &module, &entry, c).unwrap();
         yes += usize::from(v.yes);
         steps += v.steps;
         lines.push_str(&format!(
@@ -189,7 +192,7 @@ fn a1_a2_the_chess_check_through_the_form_runner_and_its_table_for_the_daemon_an
     let mut small = hatch.clone();
     small.steps_most = SMALL;
     for (i, c) in cases.iter().enumerate() {
-        let refused = run_hatch(&small, &module, c).unwrap_err();
+        let refused = run_hatch(&small, &module, &entry, c).unwrap_err();
         assert_eq!(refused.name, "hatch-over-budget", "case {i}");
         lines.push_str(&format!("{SMALL} {i} refused {}\n", refused.name));
     }
@@ -199,7 +202,7 @@ fn a1_a2_the_chess_check_through_the_form_runner_and_its_table_for_the_daemon_an
     let words: Vec<String> = cases
         .iter()
         .map(|c| {
-            let w = hatch_words(&hatch, c).unwrap();
+            let w = hatch_words(&entry, &hatch, c).unwrap();
             format!(
                 "[{}]",
                 w.iter()
@@ -317,5 +320,128 @@ fn a4_the_hatch_uses_in_the_kit_are_counted() {
         "hatch uses in the kit: {} of {forms} forms in {kinds} kinds: {}",
         uses.len(),
         uses.join(", ")
+    );
+}
+
+/// A module of one section each of `sections`: `(id, contents)`, the size written here.
+fn sections(sections: &[(u8, &[u8])]) -> Vec<u8> {
+    let mut m = Vec::new();
+    for (id, c) in sections {
+        assert!(c.len() < 128, "one-byte sizes");
+        m.push(*id);
+        m.push(c.len() as u8);
+        m.extend_from_slice(c);
+    }
+    module(&m)
+}
+
+/// The echo: memory, `input` at 0, `output` at 1024 and `run`, which copies its input to its output and answers 1,
+/// so each read comes back as the answered field in the same place.
+fn echo() -> Vec<u8> {
+    sections(&[
+        (1, &[1, 0x60, 1, 0x7f, 1, 0x7e]),
+        (3, &[1, 0]),
+        (5, &[1, 0, 1]),
+        (6, &[2, 0x7f, 0, 0x41, 0, 0x0b, 0x7f, 0, 0x41, 0x80, 0x08, 0x0b]),
+        (
+            7,
+            &[
+                4, 6, b'm', b'e', b'm', b'o', b'r', b'y', 2, 0, 5, b'i', b'n', b'p', b'u', b't', 3,
+                0, 6, b'o', b'u', b't', b'p', b'u', b't', 3, 1, 3, b'r', b'u', b'n', 0, 0,
+            ],
+        ),
+        (
+            10,
+            &[
+                1, 15, 0, 0x41, 0x80, 0x08, 0x41, 0, 0x20, 0, 0xfc, 0x0a, 0, 0, 0x42, 1, 0x0b,
+            ],
+        ),
+    ])
+}
+
+#[test]
+fn a_hatch_answers_several_fields_checked_against_their_definitions() {
+    let entry = chess_table();
+    let (pieces, turn, castling, en_passant) = (31, 28, 32, 33);
+    let bytes = echo();
+    let module = Loaded::load(&bytes, &named(&bytes)).expect("the echo loads");
+    let hatch = |reads: &[u64], answers: &[u64]| Hatch {
+        module: named(&bytes),
+        reads: reads.iter().map(|f| Read::Field(*f)).collect(),
+        steps_most: 1000,
+        answers: Answers::Fields(answers.to_vec()),
+        why: replica::encode::Name::new("why_chess").unwrap(),
+    };
+    let board: Vec<V> = start()
+        .iter()
+        .take(3)
+        .map(|&(s, p)| V::Map([(1, V::Uint(s)), (2, V::Uint(p))].into()))
+        .collect();
+    let black = V::Text(replica::encode::Name::new("eden:black").unwrap());
+    let values = [V::Array(board), black.clone(), V::Uint(9)];
+    let h = hatch(&[pieces, turn, castling], &[pieces, turn, castling]);
+    assert_eq!(
+        hatch_words(&entry, &h, &values).unwrap(),
+        vec![vec![0, 4, 8, 1, 48, 9], vec![1], vec![9]],
+        "an enum is read as its place in its values"
+    );
+    let v = run_hatch(&h, &module, &entry, &values).unwrap();
+    assert!(v.yes);
+    assert_eq!(
+        v.sets,
+        vec![
+            (pieces, values[0].clone()),
+            (turn, black),
+            (castling, V::Uint(9))
+        ],
+        "the words come back as the fields' own values"
+    );
+
+    // A word that does not fit the field it answers is refused by name: past its bounds, not one of an enum's
+    // values, the wrong number of words.
+    let refused = |reads: &[u64], answers: &[u64], values: &[V]| {
+        run_hatch(&hatch(reads, answers), &module, &entry, values)
+            .map(|_| ())
+            .map_err(|r| r.name)
+    };
+    assert_eq!(
+        refused(&[en_passant], &[castling], &[V::Uint(64)]),
+        Err("hatch-answer-malformed")
+    );
+    assert_eq!(
+        refused(&[castling], &[turn], &[V::Uint(15)]),
+        Err("hatch-answer-malformed")
+    );
+    assert_eq!(
+        refused(&[pieces], &[turn], &values[..1]),
+        Err("hatch-answer-malformed")
+    );
+    // The chess check has no output: as a fields hatch it is refused by name, and a no answers no fields.
+    let chess = Loaded::load(CHESS, &named(CHESS)).unwrap();
+    let mut move_white = bind_hatch(&entry, "move_white").unwrap().unwrap();
+    move_white.answers = Answers::Fields(vec![turn]);
+    let ok = case(&start(), 0, 64, 15, (12, 28, 0));
+    assert_eq!(
+        run_hatch(&move_white, &chess, &entry, &ok).map_err(|r| r.name),
+        Err("hatch-module-shape")
+    );
+    let no = run_hatch(&move_white, &chess, &entry, &case(&start(), 0, 64, 15, (12, 36, 0)));
+    assert_eq!(no.map(|v| (v.yes, v.sets.len())), Ok((false, 0)));
+
+    // The entry's form names the fields it answers.
+    let text = entry.to_json().replacen(
+        "\"answers\":\"verdict\"",
+        "\"answers\":{\"fields\":[\"pieces\",\"turn\"]}",
+        1,
+    );
+    let bound = bind_hatch(&json::parse(&text).unwrap(), "move_white")
+        .unwrap()
+        .unwrap();
+    assert_eq!(bound.answers, Answers::Fields(vec![pieces, turn]));
+    println!(
+        "fields: echo of {} bytes answered pieces, turn and castling as their values in {} steps; \
+         misfits refused hatch-answer-malformed",
+        bytes.len(),
+        v.steps
     );
 }
