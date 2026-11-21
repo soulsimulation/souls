@@ -52,13 +52,31 @@ test('into a new world: the root and the one ground are matched, their differing
   assert.equal(plan.counts.placed, 3);
 });
 
-test('a field naming a link is not brought over, and is counted', () => {
-  const file = world(S, [node(`${S}-2`, 'eden:door@1', `${S}-1`, { 7: { id: `${S}-900` }, 5: 0 }, { links: [] }), { ...node(`${S}-3`, 'eden:room@1', `${S}-1`), links: ['eden:doorway'] }]);
+test('a doorway: the room, the door and the far room placed, then one link with its row and its door', () => {
+  const link = `${S}-900`;
+  const file = world(S, [
+    { ...node(`${S}-2`, 'eden:room@1', `${S}-1`, { 22: [[{ id: link }, 'eden:door', 0, 1490, 0, 1500, 2100]], 9: 2720 }), links: [{ id: link, type: 'eden:doorway', ends: [`${S}-2`, `${S}-4`], owner: 0 }] },
+    node(`${S}-3`, 'eden:door@1', `${S}-2`, { 7: { id: link }, 5: 0 }),
+    node(`${S}-4`, 'eden:room@1', `${S}-1`),
+  ]);
   const plan = importOf(file, world(T));
-  const [ops] = drain(plan);
-  assert.deepEqual(ops[0].fields, { 5: 0 });
-  assert.equal(plan.counts.links, 1);
-  assert.deepEqual(Object.fromEntries(plan.counts.droppedFields), { 'eden:door 7': 1 });
+  let minted = 200;
+  const edits = drain(plan, (ops) => Object.fromEntries(ops.map((o) => [o.name, `${T}-${++minted}`])));
+  assert.deepEqual(edits.map((ops) => ops.map((o) => o.op)), [['place', 'place'], ['place'], ['link']]);
+  // A field naming the link is not on the place: the link's operation writes it.
+  assert.deepEqual(edits[0][0].fields, { 9: 2720 });
+  assert.deepEqual(edits[1][0].fields, { 5: 0 });
+  assert.deepEqual(edits[2][0], { op: 'link', name: 1, type: 'eden:doorway', ends: [`${T}-201`, `${T}-202`], owner: 0, field: 22, row: ['eden:door', 0, 1490, 0, 1500, 2100], door: `${T}-203` });
+  assert.equal(plan.counts.linked, 1);
+  assert.equal(plan.counts.links, 0);
+  assert.equal(plan.counts.dropped, 0);
+  assert.equal(plan.left(), 0);
+});
+
+test('a link the target already holds is not made again', () => {
+  const link = `${S}-900`;
+  const w = world(S, [{ ...node(`${S}-2`, 'eden:room@1', `${S}-1`, { 22: [[{ id: link }, 'eden:door']] }), links: [{ id: link, type: 'eden:doorway', ends: [`${S}-2`, `${S}-1`], owner: 0 }] }]);
+  assert.deepEqual(drain(importOf(w, w)), []);
 });
 
 test('a level of more than OPS_MOST places goes in several edits, each within the limit', () => {

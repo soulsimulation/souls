@@ -866,6 +866,7 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex
 /** How far an import got: its edits, what it placed and set, and what it did not bring over. */
 const summary = (plan, edits, started) => ({
   edits, placed: plan.counts.placed, set: plan.counts.set, matched: plan.counts.matched, seconds: Math.round((performance.now() - started) / 100) / 10,
+  linked: plan.counts.linked,
   ...(plan.counts.links ? { links_not_brought: plan.counts.links } : {}),
   ...(plan.counts.dropped ? { fields_not_brought: Object.fromEntries(plan.counts.droppedFields) } : {}),
 });
@@ -1099,7 +1100,7 @@ async function answer(req) {
         plan.took(a.names);
         edits++;
       }
-      return { ok: plan.left() === 0, ...(plan.left() ? { code: 'import.unplaced', detail: `${plan.left()} nodes name a parent or support that was not placed` } : {}), ...summary(plan, edits, started) };
+      return { ok: plan.left() === 0, ...(plan.left() ? { code: 'import.unplaced', detail: `${plan.left()} nodes or links name a parent, support, end or door that was not placed` } : {}), ...summary(plan, edits, started) };
     }
     case 'check': {
       // On the copy as it is: no sync, no frame to the world (A4). A world verb (#3695) is made into its sets first.

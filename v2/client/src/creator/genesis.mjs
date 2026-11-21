@@ -6,7 +6,8 @@
 // The file:  { format: 'souls-world/1', world, at, nodes: [{ id, kind, parent, fields, pose, links? }], names }
 //   fields   { <number>: value } as replica's `ops_of` reads them: an integer, a name, bytes as { hex }, an array
 //   pose     { frame, slot?, at: [x, y, z] µm, orientation: [w, x, y, z], support: { which, node?, height? } }
-//   links    what a node owns that no place carries (a doorway's or a stair's link): counted, not brought over
+//   links    the links a node owns (a doorway, a stair): { id, type, ends, owner }; its row is in a field of its owner
+//            end (`[link, ...]`) and a door standing in it names it in field 7
 //   names    the public names the copy was told (`sha256 hex` -> words), so the file reads as the world does
 //
 // Bodies (a node owning a `souls:body-of` link) and what they hold are left out: a Soul is not content.
@@ -57,14 +58,14 @@ export function exportOf(copy, { names = new Map(), world = null, at = null } = 
     const bytes = copy.record(hash);
     if (!bytes) continue;
     const m = decode(bytes);
-    const links = (m.get(9) ?? []).map(([, l]) => l).filter((l) => l instanceof Map);
-    if (links.some((l) => plainKind(l.get(1)) === 'souls:body-of')) { bodies++; continue; }
+    const owned = (m.get(9) ?? []).filter(([, l]) => l instanceof Map);
+    if (owned.some(([, l]) => plainKind(l.get(1)) === 'souls:body-of')) { bodies++; continue; }
     const fields = m.get(6) instanceof Map ? Object.fromEntries([...m.get(6)].map(([k, v]) => [Number(k), plainValue(v)])) : {};
     const pose = poseOf(m.get(7));
     nodes.push({
       id: idText(m.get(1)), kind: String(m.get(2)), parent: m.has(3) ? idText(m.get(3)) : null, fields,
       ...(pose ? { pose } : {}),
-      ...(links.length ? { links: links.map((l) => plainKind(l.get(1))) } : {}),
+      ...(owned.length ? { links: owned.map(([id, l]) => ({ id: idText(id), type: String(l.get(1)), ends: l.get(2).map(idText), owner: Number(l.get(3)) })) } : {}),
     });
     const children = (m.get(10) ?? []).map(hex);
     for (let k = children.length - 1; k >= 0; k--) todo.push(children[k]);
@@ -113,7 +114,9 @@ const SELF = { get: (id) => id };
  * target's root; a node whose id the target holds with the same kind, or the one node of its kind under a node both
  * share (the open ground), is that node, and only its fields that differ are set; every other node is placed, parents
  * first (a child rests on its parent, which an edit names by id, so a level's places follow the level above's answer).
- * A field naming a link (a doorway's, a stair's) is not brought over: links are not places, and are counted.
+ * Then each link the target lacks (a doorway, a stair), once its ends and its door are there: one `link` operation
+ * makes it with its row in its owner's field and the door naming it, so a world's rows never name a link it does not
+ * hold. A field that names a link goes with its link, not with its node's place.
  */
 export function importOf(file, target) {
   if (file?.format !== FORMAT || !Array.isArray(file.nodes)) throw Object.assign(new Error(`not a ${FORMAT} file`), { code: 'import.format' });
@@ -138,12 +141,35 @@ export function importOf(file, target) {
     if (sibs.length === 1 && theirs.length === 1 && !ids.has(n.id)) { match(n, theirs[0]); continue; }
     placed.push(n);
   }
-  const counts = { placed: 0, set: 0, matched: matched.length, links: file.nodes.reduce((k, n) => k + (n.links?.length ?? 0), 0), dropped: 0, droppedFields: new Map() };
+  // The links: each with its row (in a field of its owner end: `[{ id: link }, ...]`) and the door naming it.
+  const byId = new Map(file.nodes.map((n) => [n.id, n]));
+  const theirLinks = new Set(target.nodes.flatMap((n) => (n.links ?? []).map((l) => l.id)));
+  const linkIds = new Set(file.nodes.flatMap((n) => (n.links ?? []).map((l) => l.id)));
+  const doors = new Map();
+  for (const n of file.nodes) { const v = n.fields?.[7]; if (v?.id && linkIds.has(v.id)) doors.set(v.id, n.id); }
+  const pending = [];
+  let unlinked = 0;
+  for (const n of file.nodes) {
+    for (const l of n.links ?? []) {
+      if (theirLinks.has(l.id)) continue;
+      const at = byId.get(l.ends[l.owner]);
+      let found = null;
+      for (const [k, v] of Object.entries(at?.fields ?? {})) {
+        const row = Array.isArray(v) ? v.find((r) => Array.isArray(r) && r[0]?.id === l.id) : null;
+        if (row) { found = { field: Number(k), row: row.slice(1) }; break; }
+      }
+      if (!found || !Array.isArray(l.ends) || l.ends.some((e) => !byId.has(e))) { unlinked++; continue; }
+      pending.push({ ...l, ...found, door: doors.get(l.id) });
+    }
+  }
+  const namesLink = (v) => JSON.stringify(v ?? null).match(/"id":"[^"]+"/g)?.some((m) => linkIds.has(m.slice(6, -1))) ?? false;
+  const counts = { placed: 0, set: 0, matched: matched.length, linked: 0, links: unlinked, dropped: 0, droppedFields: new Map() };
   const drop = (n, k) => { counts.dropped++; const key = `${n.kind.replace(/@.*/, '')} ${k}`; counts.droppedFields.set(key, (counts.droppedFields.get(key) ?? 0) + 1); };
   const fieldsOf = (n) => {
     const out = {};
     for (const [k, v] of Object.entries(n.fields ?? {})) {
       if (n.parent === null && !ROOT_CARRIED.includes(Number(k))) continue;
+      if (namesLink(v)) continue; // its link's operation writes it
       const b = batchValue(v, ids);
       if (b === null || depthOf(b) > SET_DEPTH) drop(n, k); else out[k] = b;
     }
@@ -190,9 +216,22 @@ export function importOf(file, target) {
         const later = deep.map((f) => { const value = fields[f]; delete fields[f]; return { op: 'set', node: name, field: Number(f), value }; });
         ops.push({ op: 'place', name, kind: n.kind, in: parent, ...spot(n), fields }, ...later);
       }
+      if (!ops.length && !todo.length) {
+        // The links, once every place is answered: their ends and doors are there.
+        for (let k = 0; k < pending.length && ops.length < OPS_MOST;) {
+          const l = pending[k], ends = l.ends.map((e) => ids.get(e)), door = l.door ? ids.get(l.door) : null;
+          const row = batchValue(l.row, ids);
+          if (ends.some((e) => !e) || (l.door && !door) || row === null) { k++; continue; }
+          pending.splice(k, 1);
+          const name = names.size + 1;
+          names.set(name, l.id);
+          ops.push({ op: 'link', name, type: l.type, ends, owner: l.owner, field: l.field, row, ...(door ? { door } : {}) });
+          counts.linked++;
+        }
+      }
       if (!ops.length) return null;
       waiting = names;
-      counts.placed += names.size;
+      counts.placed += ops.filter((o) => o.op === 'place').length;
       return ops;
     },
     /** The answer's `names` (name -> id) for the batch `next` gave. */
@@ -201,7 +240,7 @@ export function importOf(file, target) {
       for (const [name, src] of waiting) { const id = answerNames[name] ?? answerNames[String(name)]; if (id) ids.set(src, id); }
       waiting = null;
     },
-    left: () => todo.length + sets.length,
+    left: () => todo.length + sets.length + pending.length,
     ids,
   };
 }
