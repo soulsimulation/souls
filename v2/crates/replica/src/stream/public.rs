@@ -724,6 +724,9 @@ pub struct PublicPlayer {
     digest: Vec<u8>,
     /// Each node row's encoding (key 2), once worked out, kept as rows change in place (#3799).
     enc: Option<Vec<Vec<u8>>>,
+    /// Each live node's link rows as a node query lists them, by node, once worked out (#3799): links change only in
+    /// a part played whole, which drops it.
+    incident: std::cell::RefCell<Option<BTreeMap<Id, Vec<Value>>>>,
     next: u64,
     changed: BTreeMap<Id, u64>,
     samples: Vec<HandOff>,
@@ -752,6 +755,7 @@ impl PublicPlayer {
             baseline: sha256(baseline).to_vec(),
             digest: digest(&state)?,
             enc: None,
+            incident: std::cell::RefCell::new(None),
             state,
             next: 0,
             changed,
@@ -908,6 +912,7 @@ impl PublicPlayer {
                     (Some(w), _) => {
                         self.state = w;
                         self.enc = None;
+                        self.incident.replace(None);
                     }
                     (None, Some(p)) => {
                         // The swapped rows' new encodings.
@@ -1172,29 +1177,46 @@ impl PublicPlayer {
             return refuse("node-missing", "not a public live node");
         };
         let n = NodeState::read(v)?;
-        let mut rows = Vec::new();
-        for row in arr(field(map(&self.state)?, 3)?)? {
-            let row = arr(row)?;
-            if row.len() != 2 {
-                return bad("expected an id/value pair");
+        if self.incident.borrow().is_none() {
+            let mut by: BTreeMap<Id, Vec<Value>> = BTreeMap::new();
+            for row in arr(field(map(&self.state)?, 3)?)? {
+                let row = arr(row)?;
+                if row.len() != 2 {
+                    return bad("expected an id/value pair");
+                }
+                let Ok(l) = LinkState::read(&row[1]) else {
+                    continue;
+                };
+                let lid = read_id(&row[0])?;
+                // As a node's query lists them: once for each end it is, its other end beside it (a link to
+                // itself once).
+                for (end, other) in [(l.ends[0], l.ends[1]), (l.ends[1], l.ends[0])] {
+                    if end == other
+                        && end == l.ends[1]
+                        && by.get(&end).is_some_and(|r| {
+                            r.last().is_some_and(
+                                |x| matches!(x, Value::Array(a) if a[0] == lid.to_value()),
+                            )
+                        })
+                    {
+                        continue;
+                    }
+                    by.entry(end).or_default().push(Value::Array(vec![
+                        lid.to_value(),
+                        Value::Text(l.ty.clone()),
+                        other.to_value(),
+                        crate::hash::audience(l.audience),
+                    ]));
+                }
             }
-            let Ok(l) = LinkState::read(&row[1]) else {
-                continue;
-            };
-            let other = if l.ends[0] == id {
-                l.ends[1]
-            } else if l.ends[1] == id {
-                l.ends[0]
-            } else {
-                continue;
-            };
-            rows.push(Value::Array(vec![
-                read_id(&row[0])?.to_value(),
-                Value::Text(l.ty),
-                other.to_value(),
-                crate::hash::audience(l.audience),
-            ]));
+            self.incident.replace(Some(by));
         }
+        let rows = self
+            .incident
+            .borrow()
+            .as_ref()
+            .and_then(|by| by.get(&id).cloned())
+            .unwrap_or_default();
         self.node_value_with_rows(id, n, rows)
     }
     fn node_value_with_rows(&self, id: Id, n: NodeState, rows: Vec<Value>) -> R<Value> {
