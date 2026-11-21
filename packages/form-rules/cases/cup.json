@@ -44,7 +44,7 @@
         }
       },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "yes", "read": [["b1/hand/left", "c1"], ["b1/hand/right", null], ["c1/field/1", 250]] }
+      "expect": { "verdict": "yes", "read": [["b1/hand/left", "c1"], ["b1/hand/right", null], ["c1/field/28", 250]] }
     },
     {
       "name": "sip_not_held",

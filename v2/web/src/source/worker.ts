@@ -42,6 +42,7 @@ const refOf = (v: unknown): string | null => {
 /** The key of a name's hash (field 4), kept apart from `{21: id}` references. */
 const nameKey = (b: Uint8Array) => `n:${hex(b)}`;
 const SAID = 'souls:said';
+const SAID_PRIVATELY = 'souls:said-privately'; // #3775: who spoke in a private conversation, and when; no words
 const PLACE_NAME = 4;
 const NAME = 30;
 const DESCRIPTION = 31;
@@ -219,13 +220,19 @@ async function run(stream: URL) {
     const events = decode(player.events(), { useMaps: true }) as Map<number, unknown>[];
     const said: SaidRec[] = [];
     for (const e of events) {
+      if (e.get(1) === SAID_PRIVATELY) {
+        const f = e.get(2) as Map<number, unknown>, conv = f.get(1) as IdValue | undefined;
+        if (conv) said.push({ speaker: key(e.get(3) as IdValue), at: num(e.get(4)), length: 0, reach: 0, ref: `private:${key(conv)}`, words: null,
+          private: { conversation: key(conv), members: ((f.get(3) ?? []) as IdValue[]).map(key) } });
+        continue;
+      }
       if (e.get(1) !== SAID) continue;
       const f = e.get(2) as Map<number, unknown>, ref = refOf(f.get(1));
       if (ref) said.push({ speaker: key(e.get(3) as IdValue), at: num(e.get(4)), length: num(f.get(4)), reach: num(f.get(2)), ref, words: null });
     }
-    const refs = [...said.map(x => x.ref), ...nodes.flatMap(r => [r.name, r.description, r.placeName])].filter((r): r is string => !!r);
+    const refs = [...said.filter(x => !x.private).map(x => x.ref), ...nodes.flatMap(r => [r.name, r.description, r.placeName])].filter((r): r is string => !!r);
     if (refs.some(r => !words.has(r))) await readText(`${n}.text`, p);
-    for (const x of said) x.words = words.get(x.ref) ?? null;
+    for (const x of said) if (!x.private) x.words = words.get(x.ref) ?? null;
     resolveWords(nodes);
     observe(nodes, removed, samples, { number: played.number, from: played.from, to: played.to, hash: played.hash, said, happened });
     return true;

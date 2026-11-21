@@ -7,7 +7,7 @@
       "act": { "this": "r1", "form": "collect" },
       "state": { "actor": "b1", "nodes": { "o1": { "kind": "test:open_air", "fields": { "rain": 400 } }, "r1": { "kind": "eden:rain_collector", "fields": { "covered": false }, "links": { "place": ["o1"] } }, "b1": { "hands": { "left": null, "right": null } } } },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "yes", "read": [["b1/hand/left", null], ["b1/hand/right", null], ["r1/field/2", false], ["r1/field/1", 0], ["r1/link/1", 1], ["o1/field/1", 400]] }
+      "expect": { "verdict": "yes", "read": [["b1/hand/left", null], ["b1/hand/right", null], ["r1/field/29", false], ["r1/field/28", 0], ["r1/link/1", 1], ["o1/field/1", 400]] }
     },
     {
       "name": "collect_one_hand_holds_something",

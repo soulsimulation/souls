@@ -3,7 +3,7 @@
   "kind": "eden:tap",
   "owner": "thing",
   "state": {
-    "water": { "n": 1, "type": "int", "unit": "g", "default": 1000000000, "min": 0, "audience": { "rule": "everyone" } }
+    "water": { "n": 28, "type": "int", "unit": "g", "default": 1000000000, "min": 0, "audience": { "rule": "everyone" } }
   },
   "points": {
     "outlet": { "role": "outlet", "at_mm": [0, 300, 120], "yaw_mdeg": 0 },

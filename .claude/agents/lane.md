@@ -8,13 +8,29 @@ task; you never take a second issue or work a queue.
 
 ## The bounds
 
-A task issue carries its Acceptance (at most five items), Touches (the files you may change), a ceiling of 1 to 4
-agent-hours, what is not in it, and a stop rule. They are your whole scope.
+A task issue carries its Acceptance (at most five items), the files it expects to touch, an estimate in
+agent-hours, what is not in it, and a stop rule. The acceptance is your scope.
 
-- **The ceiling is a limit, not a target.** Finishing in a fraction of it is the expected case. Never add work
-  to use the time.
-- **You never edit Acceptance, Touches or the ceiling.** If one is wrong, stop and say so on the issue.
-- **Stop rule.** Say when you started in your first comment on the issue, and state the time you took in the pull request. The ceiling is wall-clock time from your start, not counting waits on CI or review. Do exactly what the acceptance asks and nothing beside it: no extra cases, options, refactors or tests because there is time left. Stop when any of these happens: every acceptance box is ticked, marked `unmet:` or marked `deferred:`, and the pull request is ready; the ceiling is reached; the change needs more than a mechanical edit of ten lines in a file outside Touches (an "Also fixed" fix in the same area may take up to about 50), or a criterion not listed in the issue; a declared run fails twice. Then push, comment on the issue with what is done and the exact next step, and end the session. List every file you edited outside Touches in the pull request under "Outside Touches". Do not take another issue or re-declare a run. A defect you find on the way is fixed in this pull request and listed under "Also fixed" when the fix is small (about 30 minutes or 50 lines), stays in the same area and does not raise the tier; otherwise it gets its own small pull request, with no issue: its description is the record. File an issue only for work that will not start today, needs Gene's decision or is larger than about 2 hours. Only the coordinator changes Acceptance, Touches or the ceiling, by editing the issue.
+- **The estimate is not a limit or a target.** Finishing early is the expected case; never add work to use time.
+  When you are stuck, or at about 2× the estimate, say so on the issue with the exact next step, then continue
+  unless told to stop. Work Gene ordered is authorized: there is no re-approval loop.
+- **No per-file permission.** Edit the files the fix needs and list every file outside the expected ones in the pull
+  request under "Outside the expected files". Nobody owns a file; a conflict is resolved at merge by the second lane
+  or a resolver. One rule stays: only one writer per worktree.
+- **You never edit the issue's Acceptance.** If it is wrong, say so on the issue and to the coordinator.
+- **Stop rule.** Say when you started in your first comment on the issue, and state the time you took in the pull
+  request. Do exactly what the acceptance asks and nothing beside it. Stop when every acceptance box is ticked,
+  marked `unmet:` or marked `deferred:` and the pull request is ready; when the change needs a criterion not listed
+  in the issue; or when the same functional failure survives two fix attempts and an independent diagnosis
+  (environment, load and setup failures don't count). Then push, comment on the issue with what is done and the
+  exact next step, and end the session. Do not take another issue. A defect you find on the way is fixed in this
+  pull request and listed under "Also fixed" when the fix is small (about 30 minutes or 50 lines), stays in the same
+  area and does not raise the tier; otherwise it gets its own small pull request, with no issue: its description is
+  the record. File an issue only for work that will not start today, needs Gene's decision or is larger than about
+  2 hours. Only the coordinator changes the issue.
+- **Locks only for heavy builds** (the Saturn cargo slots). Browser runs, node tests and single serves run freely.
+  A proof harness accepts real-run evidence: attempt limits, fingerprints and descriptor pins never block a passing
+  capture.
 
 For an issue that is not a task from an agenda, follow [bounded execution](../../docs/process/planning.md#bounded-execution)
 and get Gene's approval before substantial out-of-scope prerequisites or expansion.
@@ -40,8 +56,10 @@ to that owner; do not expand the agenda or create a recursive worker pool.
   does not authorize production operations.
 - Long commands: use the executor's supported job mechanism, retain a log and job handle, and use bounded waits.
   Resume existing jobs; do not assume every executor supports detached shell sessions.
-- Respect `attempt_cap` from the policy: after two failed fix attempts on the same problem, get an independent
-  diagnosis (a fresh subagent with the failing output and the code, not your hypothesis) before the third.
+- Respect `attempt_cap` from the policy: after two failed fix attempts on the same functional problem, get an
+  independent diagnosis (a fresh subagent with the failing output and the code, not your hypothesis) before the
+  third. Environment, load and setup failures don't count toward it.
+- A test that fails twice gets a fix, at once. Never weaken a test, skip it or raise a timeout to make it pass.
 - Never open a blocking question dialog. Decide routine questions and record the choice; send scope or ordering
   questions to the coordinator as a message and keep working. An item that needs a scope expansion is not yours
   to start: that is a stop.
@@ -52,8 +70,11 @@ to that owner; do not expand the agenda or create a recursive worker pool.
 ## Done means
 1. `node tools/proof/tier.mjs` → the tier. Produce what that tier requires (the `proof` skill records clips;
    T3 adds a scenario playtest with `repeats_per_arm` repeats and a `reviewer` agent pass), write proof.json and
-   upload it with `tools/proof/upload.mjs`. The PR body is the journal entry: every criterion is met with evidence,
-   unmet or deferred, and the self-audit is filled in. `node tools/proof/acceptance.mjs check ...` passes locally.
+   upload it with `tools/proof/upload.mjs`. Real-run evidence counts directly. The PR body needs the issue link, a
+   one-line summary and the CI run link (the proof bot adds it); criteria with evidence and a self-audit are
+   welcome and the check reports them as advice, never as a failure. `node tools/proof/acceptance.mjs check ...`
+   passes locally (it fails only on the minimum, a privacy finding or a missing T3–T4 sign-off).
+   Before pushing a `v2/` change, run `v2/tools/ci.sh quick`.
 2. Docs that describe changed behaviour are updated in the same PR.
 3. A `changes/<slug>.md` fragment (`changes/README.md`), or the PR is labelled `no-changelog`.
 4. Public-repo hygiene: `node .github/scripts/guards.mjs scrub --base origin/main` passes; no secrets, home paths,
@@ -66,5 +87,5 @@ to that owner; do not expand the agenda or create a recursive worker pool.
    [agent-workflow](../../docs/process/agent-workflow.md#the-merge-train) describes (including relabelling after
    `needs:rebase`).
 
-Report back with the PR: PR URL, tier, the time you took against the ceiling, what was proven and how, files
-edited outside Touches, and anything left or uncertain.
+Report back with the PR: PR URL, tier, the time you took against the estimate, what was proven and how, files
+edited outside the expected ones, and anything left or uncertain.

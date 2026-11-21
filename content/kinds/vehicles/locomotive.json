@@ -3,8 +3,8 @@
   "kind": "eden:locomotive",
   "owner": "thing",
   "state": {
-    "fire": {"n":1,"type":"bool","default":true,"audience":{"rule":"everyone"}},
-    "under_way": {"n":2,"type":"bool","default":false,"audience":{"rule":"everyone"}}
+    "fire": {"n":28,"type":"bool","default":true,"audience":{"rule":"everyone"}},
+    "under_way": {"n":29,"type":"bool","default":false,"audience":{"rule":"everyone"}}
   },
   "points": {
     "cab_left": {"role":"stand","at_mm":[-1900,0,-2400],"yaw_mdeg":90000},

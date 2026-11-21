@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "green": {
-      "n": 1,
+      "n": 28,
       "type": "int",
       "unit": "count",
       "default": 8,
@@ -15,7 +15,7 @@
       }
     },
     "mint": {
-      "n": 2,
+      "n": 29,
       "type": "int",
       "unit": "count",
       "default": 8,
@@ -26,7 +26,7 @@
       }
     },
     "well_green": {
-      "n": 3,
+      "n": 30,
       "type": "int",
       "unit": "count",
       "default": 0,
@@ -37,7 +37,7 @@
       }
     },
     "well_mint": {
-      "n": 4,
+      "n": 31,
       "type": "int",
       "unit": "count",
       "default": 0,
@@ -48,7 +48,7 @@
       }
     },
     "reserve_green": {
-      "n": 5,
+      "n": 32,
       "type": "int",
       "unit": "count",
       "default": 0,
@@ -59,7 +59,7 @@
       }
     },
     "reserve_mint": {
-      "n": 6,
+      "n": 33,
       "type": "int",
       "unit": "count",
       "default": 0,

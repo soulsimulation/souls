@@ -3,7 +3,7 @@
   "kind": "eden:fire_laying_site",
   "owner": "thing",
   "state": {
-    "supplies": { "n": 1, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+    "supplies": { "n": 28, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
   },
   "points": {
     "stand": { "role": "stand", "at_mm": [0, 0, 1250], "yaw_mdeg": 180000 }
