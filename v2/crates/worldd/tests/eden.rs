@@ -806,7 +806,7 @@ fn a_600_m_walk_across_eden_ends_done() {
     // The far point: the first on a 50 m grid of the open ground whose route from the births is 650 to 900 m by the map.
     let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
     let next = im.tree.to_state().next;
-    let town = sim::walk::town::Town::new(
+    let mut town = sim::walk::town::Town::new(
         im.tree,
         ground,
         sim::links::Doors::new(header, im.rules, next),
