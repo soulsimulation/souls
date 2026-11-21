@@ -193,7 +193,8 @@ async function run(stream: URL) {
     const n = Number(player.next());
     const bytes = await partFile(p, n, '');
     if (!bytes) return false;
-    const played = JSON.parse(player.play(bytes));
+    // #3822: the state's digest is worked out once a batch, at the newest part, not at each one before it.
+    const played = JSON.parse(n < (p.newest ?? n) ? player.playDeferred(bytes) : player.play(bytes));
     const changed = query(new Map<number, unknown>([[1, 5], [2, version]])) as [IdValue, number][];
     version = played.version;
     const { nodes, removed } = readChanged(
