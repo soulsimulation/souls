@@ -8,6 +8,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { CrowdBodies } from '../crowd/bodies.ts';
 import { BANKS, DECKS, DRAPES, WATER, GroundCover, drapeMesh, drapeName, turfMaterial, type Area } from './drapes.ts';
 import { asWater } from '../water/water.ts';
+import { CoursePlace, type CourseAt } from './course.ts';
 import { backdropMesh, type Backdrop } from './backdrop.ts';
 
 const UM = 1e-6, MM = 1e-3;
@@ -120,6 +121,19 @@ export class WorldView {
   extent: [number, number, number, number] | null = null;
   /** False when V8's thing layer draws the things instead of these boxes. */
   drawThings = true;
+  /** #3603: the replica's `courseAt` once the page has loaded it; until then a course node stands where it was placed. */
+  courseAt: CourseAt | null = null;
+  /** Called once, when the first node with a course arrives (the page loads `courseAt` then). */
+  onCourse: (() => void) | null = null;
+  /** The nodes on a course, each with its place at the drawn time. */
+  private courses = new Map<string, CoursePlace>();
+  /** The frames that move with a course (the course nodes and everything in them), at `liveT`. */
+  private live = new Map<string, THREE.Matrix4>();
+  private liveT: number | null = null;
+  /** The things on or in a course node, found again after each part. */
+  private movers: string[] | null = null;
+  /** Their boxes, drawn each frame when the world view draws the things. */
+  private moverBoxes: THREE.InstancedMesh | null = null;
 
   constructor() {
     const capsule = new THREE.CapsuleGeometry(0.28, 1.1, 4, 10);
@@ -142,6 +156,10 @@ export class WorldView {
   apply(nodes: NodeRec[], removed: string[], samples: SampleRec[] = []): void {
     for (const n of nodes) {
       this.nodes.set(n.id, n);
+      if (n.course) {
+        if (!this.courses.has(n.id)) this.courses.set(n.id, new CoursePlace());
+        if (this.onCourse) (this.onCourse(), (this.onCourse = null));
+      } else this.courses.delete(n.id);
       if (isBody(n)) {
         if (!this.tracks.has(n.id)) {
           this.tracks.set(n.id, new Track());
@@ -157,33 +175,73 @@ export class WorldView {
     for (const n of nodes) if (isBody(n)) this.tracks.get(n.id)!.add(n.at ?? 0, n.pos, `${n.parent}/${n.slot}`);
     for (const id of removed) {
       this.nodes.delete(id);
+      this.courses.delete(id);
       if (this.tracks.delete(id)) this.bodyIds = this.bodyIds.filter((b) => b !== id);
       else this.thingsDirty = this.coverDirty = true;
     }
     this.matrices.clear();
+    this.live.clear();
+    this.movers = null;
+    // What a part changed is read again at the last drawn time, so a thing placed now is placed where it is drawn.
+    const t = this.liveT;
+    this.liveT = null;
+    if (t !== null) this.at(t);
+  }
+
+  /** #3603: reads every course node's place at world time `t`; the frames that move with them are computed afresh. */
+  at(t: number): void {
+    if (!this.courses.size || t === this.liveT) return;
+    // Frames read before the first time was drawn hold course nodes where they were placed: read them again.
+    if (this.liveT === null) this.matrices.clear();
+    this.liveT = t;
+    this.live.clear();
+    const q = new THREE.Quaternion();
+    for (const [id, c] of this.courses) {
+      const n = this.nodes.get(id);
+      const [w, x, y, z] = n!.rot;
+      c.at(this.courseAt, n!.course!, t, n!.pos, q.set(x, y, z, w).normalize());
+    }
+  }
+
+  /** The things (not bodies or structure) that move with a course node, itself included. */
+  moving(): string[] {
+    if (!this.courses.size) return [];
+    if (this.movers) return this.movers;
+    const on = (id: string | null): boolean => {
+      for (let depth = 0; id !== null && depth <= 32; depth++) {
+        if (this.courses.has(id)) return true;
+        id = this.nodes.get(id)?.parent ?? null;
+      }
+      return false;
+    };
+    return (this.movers = [...this.nodes.values()].filter((n) => !isBody(n) && !STRUCTURE.has(plain(n.kind)) && on(n.id)).map((n) => n.id));
   }
 
   /** A node's frame in the world: its parent's, then its slot's, then its own pose. */
   frame(id: string | null): THREE.Matrix4 {
     if (id === null) return new THREE.Matrix4();
-    const cached = this.matrices.get(id);
+    const cached = this.matrices.get(id) ?? this.live.get(id);
     if (cached) return cached;
     const n = this.nodes.get(id);
     const m = new THREE.Matrix4();
+    // #3603: a course node, and whatever is in one, moves with world time: its frame is kept only for that time.
+    const course = this.liveT !== null ? this.courses.get(id) : undefined;
+    let moving = !!course;
     if (n) {
       m.copy(this.frame(n.parent));
+      moving ||= n.parent !== null && this.live.has(n.parent);
       const parent = n.parent ? this.nodes.get(n.parent) : undefined;
       const slot = n.slot !== null ? parent?.slots?.find((s) => s[0] === n.slot) : undefined;
       // A slot's point only, as T4's carry adds it: the slot's yaw does not turn what is in it.
       if (slot) m.multiply(new THREE.Matrix4().makeTranslation(slot[1] * MM, slot[2] * MM, slot[3] * MM));
       const [w, x, y, z] = n.rot;
       m.multiply(new THREE.Matrix4().compose(
-        new THREE.Vector3(n.pos[0] * UM, n.pos[1] * UM, n.pos[2] * UM),
-        new THREE.Quaternion(x, y, z, w).normalize(),
+        course ? course.pos.clone().multiplyScalar(UM) : new THREE.Vector3(n.pos[0] * UM, n.pos[1] * UM, n.pos[2] * UM),
+        course ? course.rot : new THREE.Quaternion(x, y, z, w).normalize(),
         new THREE.Vector3(1, 1, 1),
       ));
     }
-    this.matrices.set(id, m);
+    (moving ? this.live : this.matrices).set(id, m);
     return m;
   }
 
@@ -286,20 +344,22 @@ export class WorldView {
     this.thingsDirty = false;
     const boxes: THREE.Matrix4[] = [];
     const tags: number[] = [];
+    const moving = new Set(this.moving());
     for (const n of this.nodes.values()) {
-      if (isBody(n) || STRUCTURE.has(plain(n.kind))) continue;
+      if (isBody(n) || STRUCTURE.has(plain(n.kind)) || moving.has(n.id)) continue;
       const f = this.frame(n.id);
-      const s = (n.scale ?? 1_000_000) / 1_000_000;
-      const solids = n.solids?.length ? n.solids : [[0, 0, 250, 250, 0, 0, 500, 0, 0]];
-      for (const [cx, cz, hx, hz, yaw, y0, y1, tag] of solids) {
-        const local = new THREE.Matrix4().compose(
-          new THREE.Vector3(cx * MM * s, ((y0 + y1) / 2) * MM * s, cz * MM * s),
-          yawQuat(yaw),
-          new THREE.Vector3(Math.max(0.05, 2 * hx * MM * s), Math.max(0.05, (y1 - y0) * MM * s), Math.max(0.05, 2 * hz * MM * s)),
-        );
+      for (const [local, tag] of this.boxesOf(n)) {
         boxes.push(f.clone().multiply(local));
         tags.push(tag);
       }
+    }
+    if (this.moverBoxes) (this.group.remove(this.moverBoxes), this.moverBoxes.dispose(), (this.moverBoxes = null));
+    if (moving.size) {
+      const n = [...moving].reduce((k, id) => k + this.boxesOf(this.nodes.get(id)!).length, 0);
+      this.moverBoxes = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0x9c7a52 }), Math.max(1, n));
+      this.moverBoxes.frustumCulled = false;
+      this.moverBoxes.castShadow = true;
+      this.group.add(this.moverBoxes);
     }
     for (const m of this.things) {
       this.group.remove(m);
@@ -324,6 +384,33 @@ export class WorldView {
       this.group.add(mesh);
       return mesh;
     });
+  }
+
+  /** A thing's boxes in its own frame, with their tags: its solids, or a half-metre box when it has none. */
+  private boxesOf(n: NodeRec): [THREE.Matrix4, number][] {
+    const s = (n.scale ?? 1_000_000) / 1_000_000;
+    const solids = n.solids?.length ? n.solids : [[0, 0, 250, 250, 0, 0, 500, 0, 0]];
+    return solids.map(([cx, cz, hx, hz, yaw, y0, y1, tag]) => [new THREE.Matrix4().compose(
+      new THREE.Vector3(cx * MM * s, ((y0 + y1) / 2) * MM * s, cz * MM * s),
+      yawQuat(yaw),
+      new THREE.Vector3(Math.max(0.05, 2 * hx * MM * s), Math.max(0.05, (y1 - y0) * MM * s), Math.max(0.05, 2 * hz * MM * s)),
+    ), tag]);
+  }
+
+  /** #3603: the boxes of what moves with a course, where it is at the drawn time. */
+  private drawMovers(): void {
+    const mesh = this.moverBoxes;
+    if (!mesh) return;
+    let k = 0;
+    const m = new THREE.Matrix4();
+    for (const id of this.moving()) {
+      const n = this.nodes.get(id);
+      if (!n) continue;
+      const f = this.frame(id);
+      for (const [local] of this.boxesOf(n)) if (k < mesh.instanceMatrix.count) mesh.setMatrixAt(k++, m.multiplyMatrices(f, local));
+    }
+    mesh.count = k;
+    mesh.instanceMatrix.needsUpdate = true;
   }
 
   /** Is this thing a ground-laid area, drawn flat on the ground rather than as a thing? */
@@ -398,8 +485,10 @@ export class WorldView {
 
   /** Places every body at world time `t` and returns how many were drawn. */
   draw(t: number, camera?: THREE.Camera): number {
+    this.at(t);
     if (this.drapesDirty && this.ground) this.rebuildDrapes();
     if (this.thingsDirty && this.drawThings) this.rebuildThings();
+    if (this.drawThings) this.drawMovers();
     if (this.coverDirty && this.cover && !this.drapesDirty) this.rebuildCoverShapes();
     if (camera && this.cover) this.cover.update(camera);
     if (this.bodyIds.length > this.bodies.instanceMatrix.count) {
@@ -435,6 +524,7 @@ export class WorldView {
 
   /** Where the bodies are thickest, for the first view: the body with the most others within 60 m. */
   crowd(t: number): THREE.Vector3 | null {
+    this.at(t);
     const at: THREE.Vector3[] = [];
     for (const id of this.bodyIds) {
       const n = this.nodes.get(id), p = this.tracks.get(id)!.at(t) ?? n?.pos;

@@ -1393,13 +1393,16 @@ fn report<T: Send + 'static>(what: &'static str, h: std::thread::JoinHandle<Resu
 /// V3's archiver on a thread of its own: each part as it comes, and the day's bundle index written again each time a
 /// bundle closes, so a running world's bundles are found before its day ends. The open day's event index and counts
 /// (V4) are written as they stand at most each [`VIEWS_EVERY`] while new parts come, so R16's `history` reads a
-/// running world's day (R16b, #3480).
+/// running world's day (R16b, #3480). `open` runs first, on the same thread: a fork's archive re-derives its public
+/// history from its base, which takes a full-Eden world tens of seconds, and the world serves meanwhile; parts wait
+/// in `rx` in order (#3746).
 fn archiving(
-    mut a: Archiver<Again>,
+    open: impl FnOnce() -> Result<Archiver<Again>, Refusal> + Send + 'static,
     rx: Receiver<(u64, Vec<u8>)>,
     text: Arc<sim::text::Store>,
 ) -> std::thread::JoinHandle<Result<(), Refusal>> {
     std::thread::spawn(move || {
+        let mut a = open()?;
         let mut indexed = a.shelf.writes.bundles;
         let (mut fresh, mut viewed) = (false, std::time::Instant::now());
         loop {
@@ -1651,18 +1654,26 @@ fn off_machine(
         header: built.header.stored().to_vec(),
     };
     let archive = if let Some(base) = fork_base {
-        let mut a =
-            Archiver::open_based_with_redactions(again.clone(), "", &base, text.redactions())
-                .map_err(refusal)?;
-        archive_bridge(&store, &mut a, &built.header, first).map_err(refusal)?;
+        // The opened archive's base is this one: `fork_archive_base` read the stored head's base, as the open does.
         based = true;
-        archive_base = a.source_base();
-        again
-            .put("header", built.header.stored(), When::Absent)
-            .map_err(refusal)?;
-        again.restore_public().map_err(refusal)?;
+        archive_base = base.record;
+        let (store, header, words) = (store.clone(), built.header.clone(), Arc::clone(&text));
+        let open = move || {
+            let mut a =
+                Archiver::open_based_with_redactions(again.clone(), "", &base, words.redactions())?;
+            archive_bridge(&store, &mut a, &header, first)?;
+            if a.source_base() != base.record {
+                return Err(Refusal {
+                    name: "archive-base-mismatch",
+                    detail: "opened archive base differs".into(),
+                });
+            }
+            again.put("header", header.stored(), When::Absent)?;
+            again.restore_public()?;
+            Ok(a)
+        };
         let (tx, rx) = channel();
-        report("the archiver", archiving(a, rx, Arc::clone(&text)));
+        report("the archiver", archiving(open, rx, Arc::clone(&text)));
         Some(tx)
     } else if let Some(kind) = built
         .header
@@ -1677,7 +1688,10 @@ fn off_machine(
         let a = Archiver::open(again.clone(), "", &built.header, zone, kind).map_err(refusal)?;
         again.restore_public().map_err(refusal)?;
         let (tx, rx) = channel();
-        report("the archiver", archiving(a, rx, Arc::clone(&text)));
+        report(
+            "the archiver",
+            archiving(move || Ok(a), rx, Arc::clone(&text)),
+        );
         Some(tx)
     } else {
         None
@@ -1835,6 +1849,8 @@ fn serve(args: &[String]) -> R<()> {
     let log_path = dir.join("log");
     let (log, found) =
         Log::open(FileStore::open(&log_path).map_err(refusal)?, EPOCH).map_err(refusal)?;
+    // Shared with the public stream's thread, which reads it after the world has started (#3746).
+    let found = Arc::new(found);
     let store = log.close();
     // A fork's checkpoint is its authoritative base. Seed all readers with that base, then replay only later
     // records; imported facts contribute registered geometry/definitions, never replacement world state.
@@ -2069,11 +2085,22 @@ fn serve(args: &[String]) -> R<()> {
         text: cfg_text,
         names: Some(Arc::clone(&built.public_names)),
         clock_seed: stream_mapping.map(|s| s.mapping),
-        history: Some(&found),
+        history: Some(&*found),
     };
     public_start
         .earlier_legacy_checkpoint(&dir.join("checkpoints"))
         .map_err(refusal)?;
+    // The source is chosen; the public stream opens on its own thread below, from these parts.
+    let view_out::PublicStart {
+        key,
+        initial: stream_initial,
+        record: stream_record,
+        checkpoint: stream_checkpoint,
+        text: stream_text,
+        names: stream_names,
+        clock_seed: stream_clock,
+        ..
+    } = public_start;
     stamp("before replay");
     let world = answers::start(initial.frozen(), rules, store, cfg).map_err(refusal)?;
     stamp("replay");
@@ -2101,24 +2128,15 @@ fn serve(args: &[String]) -> R<()> {
         crate::watchdog::Real::start(),
         crate::watchdog::LIMIT_MS,
     );
-    let mut writer = view_out::PublicWriter::open(public_start, stream_store).map_err(refusal)?;
-    // Both the pointer and placement bootstrap resolve the existing strict public history export.
-    let history = "history/";
-    let pointer = format!(
-        "{{\"stream\":\"views/{}/\",\"history\":\"{history}\"}}\n",
-        stream::dir(&built.header, &key)
-    );
-    view_out::write_whole(&views.join("world.json"), pointer.as_bytes()).map_err(refusal)?;
-    // Physical cursor includes input records; public effect versions are independently validated by the observer.
-    writer.bridge_to(found.first).map_err(refusal)?;
-    for (offset, bytes) in found.records.iter().enumerate() {
-        let record = found.first + offset as u64;
-        if record >= writer.source_cursor() {
-            writer.push(record, bytes).map_err(refusal)?;
-        }
-    }
-    writer.flush().map_err(refusal)?;
-    stamp("public stream");
+    let views_dir = views.clone();
+    // "Listening" means servable: the public pointer (views/world.json) and the stream it names are there (#3746). A
+    // restart already has them from its last run (the same header and key, so the same pointer); a fresh world waits
+    // for the stream's first flush, which on a fresh world has no history to replay.
+    let pointer_path = views.join("world.json");
+    let fresh = !pointer_path.exists();
+    let (ready_tx, ready_rx) = channel::<()>();
+    let stream_header = built.header.clone();
+    let stream_found = Arc::clone(&found);
     drop(found);
     let (stream_tx, stream_rx) = channel::<(u64, Vec<u8>)>();
     // Shipping/archive delivery remains independent of a stopped public observer.
@@ -2133,10 +2151,45 @@ fn serve(args: &[String]) -> R<()> {
             }
         })
         .map_err(|e| e.to_string())?;
+    // The public stream recovers its history on its own thread, as it already follows the world there: on a restarted
+    // full-Eden fork that replay takes seconds, and the world serves meanwhile; records wait in `stream_rx` (#3746).
     std::thread::Builder::new()
         .name("public-stream".into())
         .spawn(move || {
             let result = (|| -> Result<(), Refusal> {
+                let start = view_out::PublicStart {
+                    root: &views_dir,
+                    header: &stream_header,
+                    key,
+                    initial: stream_initial,
+                    record: stream_record,
+                    checkpoint: stream_checkpoint,
+                    text: stream_text,
+                    names: stream_names,
+                    clock_seed: stream_clock,
+                    history: Some(&*stream_found),
+                };
+                let mut writer = view_out::PublicWriter::open(start, stream_store)?;
+                // Both the pointer and placement bootstrap resolve the existing strict public history export.
+                let history = "history/";
+                let pointer = format!(
+                    "{{\"stream\":\"views/{}/\",\"history\":\"{history}\"}}\n",
+                    stream::dir(&stream_header, &key)
+                );
+                view_out::write_whole(&views_dir.join("world.json"), pointer.as_bytes())?;
+                // Physical cursor includes input records; public effect versions are independently validated by the
+                // observer.
+                writer.bridge_to(stream_found.first)?;
+                for (offset, bytes) in stream_found.records.iter().enumerate() {
+                    let record = stream_found.first + offset as u64;
+                    if record >= writer.source_cursor() {
+                        writer.push(record, bytes)?;
+                    }
+                }
+                writer.flush()?;
+                stamp("public stream");
+                let _ = ready_tx.send(());
+                drop(stream_found);
                 loop {
                     match stream_rx.recv_timeout(std::time::Duration::from_millis(20)) {
                         Ok((record, bytes)) => {
@@ -2167,6 +2220,23 @@ fn serve(args: &[String]) -> R<()> {
             }
         })
         .map_err(|e| e.to_string())?;
+    if fresh && ready_rx.recv().is_err() {
+        return Err(
+            "public-stream: stopped before its first flush; the world is not servable".into(),
+        );
+    }
+    // ... and the clock runs: its first tick is done, after it reports the state this start resumes from (`worldd:
+    // started at tick`). The public stream no longer holds the start-up path, so without this a restart could say
+    // listening before the clock had started.
+    while world.beat.read().0 < 0 {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    if !pointer_path.is_file() {
+        return Err(format!(
+            "public-pointer-missing: {}",
+            pointer_path.display()
+        ));
+    }
     let _ = std::fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket).map_err(io(&socket))?;
     stamp("listening");

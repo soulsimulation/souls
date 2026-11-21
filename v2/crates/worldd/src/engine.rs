@@ -8,8 +8,9 @@
 //! - **Parameters.** The target is the place (propose, offer), the activity (join, start, leave, lift, set down) or the
 //!   offer (accept, decline). Propose: 1 the activity's kind. Offer: 1 the kind, 2 the asker's role, 3 the bodies
 //!   asked (ids). Join: 1 the role, 2 the revision (default 1). Lift: 1 the thing carried. Its two carriers are the
-//!   activity's first two members, the first in front. `carrier:steer` and `carrier:land` steer the boat the Soul sits
-//!   in ([`crate::carrier`], #3603): the target the boat, steer's 1 a point `[x, z]` µm.
+//!   activity's first two members, the first in front. `carrier:steer`, `carrier:stop` and `carrier:land` steer the
+//!   boat the Soul sits in ([`crate::carrier`], #3603): the target the boat, steer's 1 a point `[x, z]` µm (land's 1
+//!   optional, a point by its home).
 //! - **Written once, as the Soul's.** Each system writes through its own writer onto a copy of the tree; its entries,
 //!   caused by the intent and acted by its Soul, are applied to the world with the tick's other entries
 //!   ([`Engine::out`]), so the intent's receipt names them. An act is answered at once: a receipt, or its refusal by
@@ -63,6 +64,7 @@ pub enum Verb {
     /// A rider steers or lands the boat it sits in (#3603, [`crate::carrier`]).
     Steer,
     Land,
+    Stop,
 }
 
 impl Verb {
@@ -80,6 +82,7 @@ impl Verb {
             "carry:set-down" => Verb::SetDown,
             "carrier:steer" => Verb::Steer,
             "carrier:land" => Verb::Land,
+            "carrier:stop" => Verb::Stop,
             _ => return None,
         })
     }
@@ -197,6 +200,7 @@ impl Engine {
         if let Some(ask) = match a.verb {
             Verb::Steer => Some(crate::carrier::Ask::Steer),
             Verb::Land => Some(crate::carrier::Ask::Land),
+            Verb::Stop => Some(crate::carrier::Ask::Stop),
             _ => None,
         } {
             let by = (Cause::Intent(a.id), Actor::Soul(a.soul));
@@ -298,7 +302,7 @@ impl Engine {
                     self.carries.remove(&activity);
                 }
             }
-            Verb::Steer | Verb::Land => {}
+            Verb::Steer | Verb::Land | Verb::Stop => {}
             Verb::Lift | Verb::SetDown => {
                 let activity = target("carry-needs-an-activity")?;
                 let members = self
