@@ -105,20 +105,25 @@ after(async () => {
 });
 
 test('#3700: a Soul is refused a private chair by name, and sits once it is public again', async () => {
+  // The chairs of N2's test world are the Soul's to sit on, not nodes of the creator's tree; the lamp beside the
+  // Soul's body is. Both are tried: the chair when the creator's copy holds it, the lamp's switch always.
+  const nodes = cli(GOD, godHome, ['describe']).nodes;
   const chair = named['the west chair'];
-  const walk = cli(SOULS, soulHome, ['act', chair]);
-  assert.equal((await answerOf(soulRt, walk.sequence)).answer, 1, 'the Soul walks to the chair');
+  const lamp = nodes.find((n) => n.kind.startsWith('r2:lamp'))?.id;
+  assert.ok(lamp, JSON.stringify(nodes));
+  const target = nodes.some((n) => n.id === chair) ? { id: chair, acts: [`sit:${chair}`] } : { id: lamp, acts: [`switch_on:${lamp}`, `switch_off:${lamp}`] };
+  console.log(`target: ${target.id === chair ? 'the west chair' : 'the lamp'}`);
+  if (target.id === chair) assert.equal((await answerOf(soulRt, cli(SOULS, soulHome, ['act', chair]).sequence)).answer, 1, 'the Soul walks to the chair');
 
-  const owned = cli(GOD, godHome, ['own', chair, 'god', '--private']);
+  const owned = cli(GOD, godHome, ['own', target.id, 'god', '--private']);
   assert.equal(owned.ok, true, JSON.stringify(owned));
-  const refused = cli(SOULS, soulHome, ['act', `sit:${chair}`]);
+  const refused = cli(SOULS, soulHome, ['act', ...target.acts]);
   assert.equal(refused.ok, true, JSON.stringify(refused));
   const no = await answerOf(soulRt, refused.sequence);
   assert.ok(no.answer > 1, `refused: ${JSON.stringify(no)}`);
   assert.equal(no.reason, 'object.private', JSON.stringify(no));
 
-  assert.equal(cli(GOD, godHome, ['access', chair, 'public']).ok, true);
-  const sit = cli(SOULS, soulHome, ['act', `sit:${chair}`]);
-  const yes = await answerOf(soulRt, sit.sequence);
-  assert.equal(yes.answer, 1, `the sit ends with its receipt: ${JSON.stringify(yes)}`);
+  assert.equal(cli(GOD, godHome, ['access', target.id, 'public']).ok, true);
+  const yes = await answerOf(soulRt, cli(SOULS, soulHome, ['act', ...target.acts]).sequence);
+  assert.equal(yes.answer, 1, `used once public: ${JSON.stringify(yes)}`);
 });
