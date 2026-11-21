@@ -5195,6 +5195,7 @@ mod tests {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         };
         let cfg = || {
             let mut cfg = Config::new(LINEAGE, 1);
