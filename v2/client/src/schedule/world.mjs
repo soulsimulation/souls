@@ -154,12 +154,18 @@ const hhmm = (cal, worldUs) => {
 const soulName = (rows, soul) => [...rows.values()].find((r) => r.soul === soul || r.id === soul)?.name ?? soul;
 
 /**
+ * Whether an item is posted: a Soul's poster link, or (#3699) words and a start with no poster, as a creator's event
+ * placed by an edit is (an edit makes no links). A blank notice has neither.
+ */
+export const isPosted = (item) => item.links.poster?.length > 0 || (item.words !== null && item.start !== null);
+
+/**
  * One calendar item as today's row: its title (the Soul's words), where, when in real minutes from `nowMs`, how long,
  * who posted it, how many are coming and whether `me` is. `phase` is `on`, `soon` or `over`; an item never posted is
  * `blank` (a notice nobody has written yet).
  */
 export function calendarRow(item, { rows, me, clock, cal, nowMs }) {
-  const posted = item.links.poster?.length > 0;
+  const posted = isPosted(item);
   const placeId = item.links.place?.[0] ?? item.parent;
   const startMs = clock && item.start !== null ? realDeadline(clock, item.start) : null;
   const endMs = clock && item.end !== null ? realDeadline(clock, item.end) : null;
@@ -170,7 +176,7 @@ export function calendarRow(item, { rows, me, clock, cal, nowMs }) {
     ...(posted && startMs !== null ? { startsInMinutes: Math.round((startMs - nowMs) / 60_000) } : {}),
     ...(posted && startMs !== null && endMs !== null ? { forMinutes: Math.round((endMs - startMs) / 60_000) } : {}),
     ...(posted && cal ? { at: hhmm(cal, item.start) } : {}),
-    ...(posted ? { by: soulName(rows, item.links.poster[0]) } : {}),
+    ...(item.links.poster?.length ? { by: soulName(rows, item.links.poster[0]) } : {}),
     coming: item.links.interested?.length ?? 0, ...(item.links.interested?.includes(me) ? { youAreComing: true } : {}),
     ...(posted ? { untrusted: true } : {}),
   };
@@ -217,7 +223,7 @@ export function calendarList(items, { rows, me, clock, cal, nowMs, limit = 50 })
 /** The blank notice to post on at `place` (an id): one linked to it, or inside it; null when there is none. */
 export function blankAt(items, rows, place) {
   const inside = (id) => { for (let r = rows.get(id); r; r = rows.get(r.parent)) if (r.id === place) return true; return false; };
-  return items.find((i) => !i.links.poster?.length && (i.links.place?.[0] === place || inside(i.id))) ?? null;
+  return items.find((i) => !isPosted(i) && (i.links.place?.[0] === place || inside(i.id))) ?? null;
 }
 
 /**
@@ -238,5 +244,5 @@ export function noticeBoards(rows, kinds, place = null) {
 /** A blank notice `body` holds (an item never posted, with that body above it), or null. */
 export function heldBlank(items, rows, body) {
   const under = (id) => { for (let r = rows.get(rows.get(id)?.parent); r; r = rows.get(r.parent)) if (r.id === body) return true; return false; };
-  return items.find((i) => !i.links.poster?.length && under(i.id)) ?? null;
+  return items.find((i) => !isPosted(i) && under(i.id)) ?? null;
 }
