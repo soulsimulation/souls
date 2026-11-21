@@ -3073,6 +3073,7 @@ fn i3825_run(
     let open = || {
         let mut w = PublicWriter::open(
             PublicStart {
+                names: None,
                 root: &views,
                 header: &h,
                 key: key(&h),

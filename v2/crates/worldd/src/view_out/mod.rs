@@ -1705,7 +1705,8 @@ impl<S: ObjectStore> PublicWriter<S> {
     fn rollover(&mut self) -> R<()> {
         let number = self.player.next();
         let baseline = self.generation_baseline()?;
-        let words = self.words(self.player.state())?;
+        // A new generation's baseline text holds every public name, as the first baseline's does (#3574).
+        let words = self.words(self.player.state(), self.player.state())?;
         let text = self.put(&words)?;
         let manifest = wire(Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.seed.clone())),
