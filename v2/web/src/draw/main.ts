@@ -94,7 +94,7 @@ const hover = new WorldHover(canvas, () => cam.camera, { world, things: () => th
 Object.assign(globalThis, { v2: { renderer, scene, sky, cam, director, world, things, fx, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 installCapture(globalThis as any, q, document); // G10: `shoot` names a place, Soul or thing and the camera goes there
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
-loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
+loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './assets/bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
 
 // V21: the world heard, from the same parts and history the picture plays.
 const where = (id: string, local?: [number, number, number]) => (world.nodes.has(id) ? (local ? new THREE.Vector3(...local).multiplyScalar(1e-6) : new THREE.Vector3()).applyMatrix4(world.frame(id)).toArray() : null);

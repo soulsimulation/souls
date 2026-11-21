@@ -54,3 +54,23 @@ test('W16 each explicit submission uses fresh sign-in and rejects late account-s
   assert.equal(stopped, 3);
   await assert.rejects(handoffRequest('https://example.invalid', 'cancel', 'garden', identity, {}, (async () => Response.json({ refused: 'not-the-creator' }, { status: 403 })) as typeof fetch), /not-the-creator/);
 });
+
+import { archiveRequest } from './archive.ts';
+
+test('W17 archive requires exact name and fresh identity, and distinguishes pending from stopped', async () => {
+  let fresh = 0, stopped = 0; let changed: (() => void) | undefined;
+  const identity = { bearer: async () => `fresh${++fresh}`, subscribeIdentity: (f: () => void) => { changed = f; return () => { stopped++; }; } };
+  const post = (async (url: string | URL | Request, init?: RequestInit) => {
+    assert.equal(String(url), 'https://example.invalid/v1/worlds/archive');
+    assert.equal(init?.redirect, 'error'); assert.equal(init?.cache, 'no-store'); assert.equal(init?.credentials, 'omit');
+    assert.deepEqual(JSON.parse(String(init?.body)), { world: 'garden', confirm: 'garden' });
+    assert.equal(new Headers(init?.headers).get('authorization'), `Bearer fresh${fresh}`);
+    return Response.json({ pending: true }, { status: 202 });
+  }) as typeof fetch;
+  await assert.rejects(archiveRequest('https://example.invalid', 'garden', 'Garden', identity, post), /exact world name/); assert.equal(fresh, 0);
+  assert.deepEqual(await archiveRequest('https://example.invalid', 'garden', 'garden', identity, post), { pending: true, archived: false });
+  assert.deepEqual(await archiveRequest('https://example.invalid', 'garden', 'garden', identity, (async () => Response.json({ archived: true })) as typeof fetch), { pending: false, archived: true });
+  assert.equal(fresh, 2);
+  await assert.rejects(archiveRequest('https://example.invalid', 'garden', 'garden', identity, (async () => { changed?.(); return Response.json({ archived: true }); }) as typeof fetch), /Account changed/);
+  assert.equal(stopped, 3);
+});

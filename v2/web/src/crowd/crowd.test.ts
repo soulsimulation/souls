@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import type { BakedModel } from './bake.ts';
 import { CrowdBodies } from './bodies.ts';
 import { Crowd } from './crowd.ts';
-import { cluster, type LodMesh } from './lod.ts';
+import { cluster, simplify, type LodMesh } from './lod.ts';
 
 /** A strip of `n` quads along x, 1 cm wide and 5 cm high, two triangles each. */
 function strip(n: number): LodMesh {
@@ -26,8 +26,9 @@ test('clustering merges the vertices of a cell, drops collapsed triangles and ke
   assert.ok(c.index.length < m.index.length && c.index.length > 0);
   assert.equal(c.position.length / 3, Math.max(...c.index) + 1, 'only used vertices kept');
   for (let v = 0; v < c.position.length / 3; v++) {
-    const from = [...Array(m.position.length / 3).keys()].find((u) => m.position[u * 3] === c.position[v * 3] && m.position[u * 3 + 1] === c.position[v * 3 + 1])!;
-    assert.equal(c.skinIndex[v * 4], m.skinIndex[from * 4]);
+    assert.ok([...Array(m.position.length / 3).keys()].some((from) =>
+      m.skinIndex.slice(from * 4, from * 4 + 4).every((value, k) => value === c.skinIndex[v * 4 + k]) &&
+      m.skinWeight.slice(from * 4, from * 4 + 4).every((value, k) => value === c.skinWeight[v * 4 + k])));
   }
 });
 
@@ -62,4 +63,136 @@ test('bodies enter the crowd when placed and leave it when a frame no longer pla
   assert.ok(crowd.blend[iq] > 0.5, 'q walks');
   assert.ok(Math.abs(crowd.yaw[iq]) < 1e-6, 'q faces +z, the way it moved');
   assert.ok(crowd.stats.draws >= 1 && crowd.stats.draws <= 2 * 3, 'at most one draw per model per level');
+});
+
+test('body hash loading is single-flight, preserves model-specific clips and never substitutes for unknown hashes', async () => {
+  const crowd = new Crowd([model('default')], 1), bodies = new CrowdBodies(crowd);
+  let requests = 0;
+  crowd.worn = async (hash) => { requests++; if (hash === 'unknown') throw Error('body.unknown-hash'); const m = model(hash); m.clips.reverse(); m.clips[0].seconds = 4; m.fixedWalk = true; return m; };
+  bodies.begin(0); bodies.place('one', 0, 0, 0, 'known'); bodies.place('two', 0, 0, 0, 'known');
+  assert.equal(crowd.ready[0], 0); assert.equal(requests, 1);
+  await Promise.resolve();
+  bodies.begin(1); bodies.place('one', 0, 0, 0, 'known'); bodies.place('two', 0, 0, 0, 'known');
+  assert.equal(crowd.ready[0], 1); assert.equal(crowd.models[crowd.model[0]].name, 'known');
+  assert.equal(crowd.clipA[0], 1); assert.equal(crowd.clipB[0], 0); assert.equal(crowd.rateB[0], 1 / 4, 'rigid motion keeps its authored period');
+  bodies.begin(2); bodies.place('one', 0, 0, 0, 'unknown'); await Promise.resolve();
+  assert.equal(crowd.ready[0], 0); assert.equal(crowd.bodyLoads.get('unknown')?.reason, 'body.unknown-hash');
+  bodies.place('one', 0, 0, 0); assert.equal(crowd.models[crowd.model[0]].name, 'default'); assert.equal(crowd.ready[0], 1);
+});
+
+test('material batches retain UV seams and actual maps while capacity growth removes every old batch', async () => {
+  const { merge, geometry } = await import('./bake.ts');
+  const root = new THREE.Group(), map = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+  const red = new THREE.MeshStandardMaterial({ color: 0xff0000, map }), blue = new THREE.MeshStandardMaterial({ color: 0x0000ff });
+  root.add(new THREE.Mesh(new THREE.BoxGeometry(), [red, blue, red, blue, red, blue]));
+  const scalarBox = new THREE.BoxGeometry();
+  assert.ok(scalarBox.groups.some((group) => group.materialIndex! > 0));
+  const scalar = merge({ scene: new THREE.Group().add(new THREE.Mesh(scalarBox, red)) } as any);
+  assert.equal(scalar.mesh.index.length, scalarBox.index!.count);
+  assert.ok(scalar.mesh.material!.every((material) => material === 0));
+  assert.deepEqual(scalar.sourceMaterials, [red]);
+  const invalid = new THREE.Group().add(new THREE.Mesh(new THREE.BoxGeometry(), [red]));
+  assert.throws(() => merge({ scene: invalid } as any), /body.material-missing/);
+  const merged = merge({ scene: root } as any);
+  assert.equal(merged.sourceMaterials[0], red); assert.equal(merged.sourceMaterials[1], blue); assert.ok(merged.mesh.uv?.some((v) => v === 1));
+  const geo = geometry(merged.mesh), m = model('textured'); m.lods = [geo, geo, geo]; m.sourceMaterials = merged.sourceMaterials;
+  assert.throws(() => new Crowd([{ ...m, sourceMaterials: [red] }], 1), /body.material-missing/);
+  const crowd = new Crowd([m], 1), count = crowd.group.children.length;
+  assert.ok(count > 3); crowd.add(0); crowd.add(0); assert.equal(crowd.group.children.length, count);
+  for (const child of crowd.group.children) assert.ok((child as THREE.InstancedMesh).material instanceof THREE.MeshStandardMaterial);
+  const materials = crowd.group.children.map((child) => (child as THREE.InstancedMesh).material as THREE.MeshStandardMaterial);
+  assert.ok(materials.some((material) => material.map === map)); assert.ok(materials.some((material) => material.color.getHex() === 0xff0000));
+  const large = { ...strip(1), material: new Uint16Array(4), index: Uint32Array.from({ length: 300_000 }, (_, i) => i % 3) };
+  const complete = geometry(large);
+  assert.equal(complete.index!.count, large.index.length);
+  assert.deepEqual(complete.groups, [{ start: 0, count: large.index.length, materialIndex: 0 }]);
+  for (let i = 0; i < large.index.length; i++) assert.equal(complete.index!.getX(i), large.index[i]);
+});
+
+test('CMESH2 retains textured material seams and legacy CMESH1 remains byte-compatible', async () => {
+  const { encodeMesh, decodeMesh } = await import('./lod.ts');
+  const original = strip(4), legacy = encodeMesh(original); assert.equal(new TextDecoder().decode(legacy.slice(0, 6)), 'CMESH1');
+  assert.deepEqual(encodeMesh(decodeMesh(legacy)), legacy);
+  const textured = { ...original, uv: new Float32Array(original.position.length / 3 * 2).map((_, i) => i % 2), material: new Uint16Array(original.position.length / 3).fill(1) };
+  const encoded = encodeMesh(textured); assert.equal(new TextDecoder().decode(encoded.slice(0, 6)), 'CMESH2');
+  assert.deepEqual(decodeMesh(encoded), textured); assert.ok(cluster(textured, 0.015).uv); assert.ok(cluster(textured, 0.015).material?.every((m) => m === 1));
+  for (const bytes of [legacy, encoded]) {
+    assert.deepEqual(encodeMesh(decodeMesh(Buffer.from(bytes))), bytes);
+    const backing = Buffer.alloc(bytes.length + 14); backing.set(bytes, 7);
+    const offset = backing.subarray(7, 7 + bytes.length);
+    assert.deepEqual(encodeMesh(decodeMesh(offset)), bytes);
+    assert.deepEqual(encodeMesh(decodeMesh(new Uint8Array(backing.buffer, backing.byteOffset + 7, bytes.length))), bytes);
+  }
+  const seam: LodMesh = {
+    position: Float32Array.of(0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, -1, 0),
+    normal: new Float32Array(18).fill(1), color: new Float32Array(18).fill(0.5),
+    uv: Float32Array.of(0, 0, 1, 0, 0, 1, 0.8, 0.7, 0, 0, 1, 1), material: Uint16Array.of(0, 0, 0, 1, 1, 1),
+    skinIndex: new Uint16Array(24), skinWeight: new Float32Array(24).map((_, i) => i % 4 === 0 ? 1 : 0),
+    index: Uint32Array.of(0, 1, 2, 3, 4, 5),
+  };
+  const clustered = cluster(seam, 0.001);
+  const at = [...Array(clustered.position.length / 3).keys()].filter((i) => clustered.position[i * 3] === 0 && clustered.position[i * 3 + 1] === 0);
+  assert.equal(clustered.index.length, 6, 'both seam triangles survive geometrically');
+  assert.equal(at.length, 2); assert.notDeepEqual([...clustered.uv!.slice(at[0] * 2, at[0] * 2 + 2)], [...clustered.uv!.slice(at[1] * 2, at[1] * 2 + 2)]);
+  assert.notEqual(clustered.material![at[0]], clustered.material![at[1]]);
+
+  // Independent corners on every textured grid triangle must not prevent geometric simplification.
+  const points: number[] = [], uv: number[] = [], material: number[] = [], skin: number[] = [], weight: number[] = [];
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+    for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 0], [1, 1], [0, 1]]) {
+      points.push((x + dx) / 32, (y + dy) / 32, 0); uv.push(dx, dy); material.push(x < 16 ? 0 : 1);
+      skin.push(0, 1, 0, 0); weight.push((x + 1) / 33, 1 - (x + 1) / 33, 0, 0);
+    }
+  }
+  const dense: LodMesh = { position: Float32Array.from(points), normal: new Float32Array(points.length).fill(1), color: new Float32Array(points.length).fill(0.5),
+    uv: Float32Array.from(uv), material: Uint16Array.from(material), skinIndex: Uint16Array.from(skin), skinWeight: Float32Array.from(weight),
+    index: Uint32Array.from({ length: points.length / 3 }, (_, i) => i) };
+  const before = encodeMesh(dense), low = simplify(dense, 600);
+  assert.ok(low.index.length > 0 && low.index.length / 3 <= 600);
+  assert.deepEqual(encodeMesh(dense), before, 'full source input is unchanged');
+  const tuple = (mesh: LodMesh, v: number) => JSON.stringify([mesh.material![v], ...mesh.uv!.slice(v * 2, v * 2 + 2),
+    ...mesh.normal.slice(v * 3, v * 3 + 3), ...mesh.color.slice(v * 3, v * 3 + 3),
+    ...mesh.skinIndex.slice(v * 4, v * 4 + 4), ...mesh.skinWeight.slice(v * 4, v * 4 + 4)]);
+  const sourceCorners = new Set([...Array(dense.position.length / 3).keys()].map((v) => tuple(dense, v)));
+  for (let v = 0; v < low.position.length / 3; v++) assert.ok(sourceCorners.has(tuple(low, v)));
+  for (let i = 0; i < low.index.length; i += 3) {
+    const [a, b, c] = [...low.index.slice(i, i + 3)];
+    assert.equal(low.material![a], low.material![b]); assert.equal(low.material![b], low.material![c]);
+    const cross = (low.position[b * 3] - low.position[a * 3]) * (low.position[c * 3 + 1] - low.position[a * 3 + 1]) -
+      (low.position[b * 3 + 1] - low.position[a * 3 + 1]) * (low.position[c * 3] - low.position[a * 3]);
+    assert.notEqual(cross, 0, 'no geometrically degenerate triangles survive');
+  }
+});
+
+
+test('a wider live bone texture preserves rows and rebinds every color and depth material before disposal', () => {
+  const crowd = new Crowd([model('old')], 1), old = crowd.live;
+  const rowWidth = old.image.width * 4, oldData = old.image.data as Float32Array;
+  oldData[0] = 7; oldData[rowWidth] = 11;
+  const uniform = (material: THREE.Material) => {
+    const shader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: '' };
+    material.onBeforeCompile(shader as Parameters<THREE.Material['onBeforeCompile']>[0], {} as THREE.WebGLRenderer);
+    return shader.uniforms.uLive;
+  };
+  const oldBindings = crowd.group.children.flatMap(child => {
+    const mesh = child as THREE.InstancedMesh;
+    return [uniform(mesh.material as THREE.Material), uniform(mesh.customDepthMaterial!)];
+  });
+  let disposed = 0;
+  old.addEventListener('dispose', () => {
+    disposed++; assert.notEqual(crowd.live, old);
+    for (const binding of oldBindings) assert.equal(binding.value, crowd.live, 'rebound before old storage is disposed');
+  });
+  crowd.addModel({ ...model('wider'), bones: 3 });
+  const texture = crowd.live;
+  assert.notEqual(texture, old); assert.equal(old.image.width, 6); assert.equal(texture.image.width, 9);
+  assert.equal(disposed, 1); assert.equal(texture.minFilter, THREE.NearestFilter);
+  const data = texture.image.data as Float32Array;
+  assert.equal(data[0], 7); assert.equal(data[texture.image.width * 4], 11);
+  for (const child of crowd.group.children) {
+    const mesh = child as THREE.InstancedMesh;
+    assert.equal(uniform(mesh.material as THREE.Material).value, texture);
+    assert.equal(uniform(mesh.customDepthMaterial!).value, texture);
+  }
+  crowd.addModel(model('smaller')); assert.equal(crowd.live, texture); assert.equal(disposed, 1);
 });

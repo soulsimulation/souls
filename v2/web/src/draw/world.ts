@@ -506,11 +506,11 @@ export class WorldView {
     for (const id of this.bodyIds) {
       const tr = this.tracks.get(id)!;
       tr.trim(t);
-      const p = tr.at(t);
       const n = this.nodes.get(id);
-      if (!p || !n) continue;
+      if (!n) continue;
+      const p = tr.at(t) ?? n.pos;
       v.set(p[0] * UM, p[1] * UM, p[2] * UM).applyMatrix4(this.frame(n.parent));
-      if (crowd) (crowd.place(id, v.x, v.y, v.z), k++);
+      if (crowd) (crowd.place(id, v.x, v.y, v.z, n.body), k++);
       else this.bodies.setMatrixAt(k++, m.makeTranslation(v.x, v.y, v.z));
     }
     if (crowd) {
@@ -527,7 +527,7 @@ export class WorldView {
     this.at(t);
     const at: THREE.Vector3[] = [];
     for (const id of this.bodyIds) {
-      const p = this.tracks.get(id)!.at(t), n = this.nodes.get(id);
+      const n = this.nodes.get(id), p = this.tracks.get(id)!.at(t) ?? n?.pos;
       if (p && n) at.push(new THREE.Vector3(p[0] * UM, p[1] * UM, p[2] * UM).applyMatrix4(this.frame(n.parent)));
     }
     let best: THREE.Vector3 | null = null, most = -1;
