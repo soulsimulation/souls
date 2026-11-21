@@ -1348,6 +1348,10 @@ impl<S: Store> Archiver<S> {
     pub fn source_cursor(&self) -> u64 {
         self.packer.next
     }
+    /// Records `..durable_cursor()` are in closed objects the head reaches: a reopen resumes from here (#3837).
+    pub fn durable_cursor(&self) -> u64 {
+        self.packer.open_first
+    }
     pub fn is_based(&self) -> bool {
         self.based.is_some()
     }
