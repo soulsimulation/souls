@@ -142,12 +142,15 @@ pub struct Places<'a> {
 
 /// A seat's reach for one body, as the gateway's sit measures it (`worldd`'s bodies): a seat is taken from its stand
 /// point and left there (B3), so its contacts are at the stand point ([`PlaceAt::stand`]), measured across x and z
-/// from where the body stands (its seat's stand point while it is in one); any other target as `inner`.
+/// from where the body stands (its seat's stand point while it is in one), when it stands on the seat's own floor;
+/// from any other floor (the one below or above), and any other target, as `inner` measures it, height and all.
 struct SeatReach<'b, R> {
     inner: &'b R,
     body: Id,
     from: Vec3,
-    place: Option<(Id, Vec3)>,
+    /// The floor the body stands on (its seat's while it is in one).
+    on: Option<Id>,
+    place: Option<(Id, Vec3, Id)>,
 }
 
 impl<R: Reach> Reach for SeatReach<'_, R> {
@@ -159,7 +162,10 @@ impl<R: Reach> Reach for SeatReach<'_, R> {
         target: Id,
         point: &Name,
     ) -> Option<i64> {
-        let Some((_, to)) = self.place.filter(|p| p.0 == target && body == self.body) else {
+        let Some((_, to, _)) = self
+            .place
+            .filter(|p| p.0 == target && body == self.body && self.on == Some(p.2))
+        else {
             return self.inner.distance(body, effector, limb, target, point);
         };
         if !matches!(point.as_str(), "souls:slot" | "souls:stand") {
@@ -183,17 +189,20 @@ fn seat_reach<'b, R: Reach>(
     place: Option<&PlaceAt>,
 ) -> SeatReach<'b, R> {
     let at = |p: &PlaceAt| p.stand().ok();
-    let from = c.body(body).map_or(Vec3::ZERO, |b| {
+    let (from, on) = c.body(body).map_or((Vec3::ZERO, None), |b| {
         match (b.pose.support, slots.held_place(body)) {
-            (replica::pose::Support::Slot, Some(p)) => at(p).unwrap_or(b.pose.position),
-            _ => b.pose.position,
+            (replica::pose::Support::Slot, Some(p)) => {
+                (at(p).unwrap_or(b.pose.position), Some(p.floor))
+            }
+            _ => (b.pose.position, Some(crate::walk::node_of(b))),
         }
     });
     SeatReach {
         inner,
         body,
         from,
-        place: place.and_then(|p| Some((p.thing, at(p)?))),
+        on,
+        place: place.and_then(|p| Some((p.thing, at(p)?, p.floor))),
     }
 }
 
