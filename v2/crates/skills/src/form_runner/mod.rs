@@ -1418,8 +1418,11 @@ pub fn run_hatch(
         Answers::Fields(fs) => fs,
         _ => &[],
     };
-    let (ran, written) =
-        module.run_writing(&hatch_words(entry, hatch, reads)?, hatch.steps_most, fields.len())?;
+    let (ran, written) = module.run_writing(
+        &hatch_words(entry, hatch, reads)?,
+        hatch.steps_most,
+        fields.len(),
+    )?;
     if let Answers::Field(f) = hatch.answers {
         return Ok(Verdict {
             yes: true,

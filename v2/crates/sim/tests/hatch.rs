@@ -342,7 +342,10 @@ fn echo() -> Vec<u8> {
         (1, &[1, 0x60, 1, 0x7f, 1, 0x7e]),
         (3, &[1, 0]),
         (5, &[1, 0, 1]),
-        (6, &[2, 0x7f, 0, 0x41, 0, 0x0b, 0x7f, 0, 0x41, 0x80, 0x08, 0x0b]),
+        (
+            6,
+            &[2, 0x7f, 0, 0x41, 0, 0x0b, 0x7f, 0, 0x41, 0x80, 0x08, 0x0b],
+        ),
         (
             7,
             &[
@@ -425,7 +428,12 @@ fn a_hatch_answers_several_fields_checked_against_their_definitions() {
         run_hatch(&move_white, &chess, &entry, &ok).map_err(|r| r.name),
         Err("hatch-module-shape")
     );
-    let no = run_hatch(&move_white, &chess, &entry, &case(&start(), 0, 64, 15, (12, 36, 0)));
+    let no = run_hatch(
+        &move_white,
+        &chess,
+        &entry,
+        &case(&start(), 0, 64, 15, (12, 36, 0)),
+    );
     assert_eq!(no.map(|v| (v.yes, v.sets.len())), Ok((false, 0)));
 
     // The entry's form names the fields it answers.
