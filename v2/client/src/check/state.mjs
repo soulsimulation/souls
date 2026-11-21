@@ -3,11 +3,12 @@
 // no pose, hands or the actor's moves, and links and slots are not read here yet, so only a field's `no` is a local
 // one (`SEEN_FIELDS`). A kind with no entry held gives a node with no fields, and its candidates are `unknown`.
 //
-// Kind entries (`souls-entry/1`) are read from a folder, `<home>/kinds/`, by their `kind` name.
+// Kind entries (`souls-entry/1`) are read from a folder, `<home>/kinds/`, by their `kind` name, and a creator's own
+// kinds (#3697) from the copy: each a `souls:kind` node at the root holding its record (`kindsHeld`).
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { decode, entryKind, idText } from '../brief/copy.mjs';
+import { decode, entryKind, idText, plainKind } from '../brief/copy.mjs';
 
 /** The `souls-entry/1` entries in `dir`, by kind name; none if the folder is missing. Unreadable files are skipped. */
 export function kindsIn(dir) {
@@ -21,6 +22,37 @@ export function kindsIn(dir) {
     } catch { /* not an entry */ }
   }
   return kinds;
+}
+
+/**
+ * The records of a creator's own kinds (#3697) the copy holds, by kind name: each `souls:kind` node at a root, its
+ * field 2 the record's bytes (`souls-entry/1`), as the world's loader reads them (`replica::kinds::defined`).
+ */
+export function definedIn(copy) {
+  const kinds = {};
+  if (!copy) return kinds;
+  for (const h of Object.values(JSON.parse(copy.roots()))) {
+    const root = copy.record(h);
+    if (!root) continue;
+    for (const c of decode(root).get(10) ?? []) {
+      const bytes = copy.record(Buffer.from(c).toString('hex'));
+      if (!bytes) continue;
+      const m = decode(bytes);
+      if (plainKind(m.get(2)) !== 'souls:kind') continue;
+      const f = m.get(6) instanceof Map ? m.get(6) : new Map(), b = f.get(2) ?? f.get(2n);
+      if (!(b instanceof Uint8Array)) continue;
+      try {
+        const e = JSON.parse(Buffer.from(b).toString('utf8'));
+        if (e?.format === 'souls-entry/1' && typeof e.kind === 'string') kinds[e.kind] = e;
+      } catch { /* not a record */ }
+    }
+  }
+  return kinds;
+}
+
+/** Every kind entry this Soul holds: the world's, from `dir`, and the creator's own from the copy (`definedIn`). */
+export function kindsHeld(dir, copy) {
+  return { ...definedIn(copy), ...kindsIn(dir) };
 }
 
 const plain = (v) => (typeof v === 'bigint' ? Number(v) : v instanceof Uint8Array ? Buffer.from(v).toString('hex') : v);
