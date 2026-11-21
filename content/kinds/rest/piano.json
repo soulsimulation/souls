@@ -6,15 +6,17 @@
     "music": {"n":28,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
   },
   "links": {"player":{"n":1,"from":"soul","most":1,"audience":{"rule":"everyone"}}},
-  "points": {"player":{"role":"stand","at_mm":[0,0,650]},"keys":{"role":"contact","at_mm":[0,780,100]}},
+  "points": {"bench_back":{"role":"stand","at_mm":[0,0,1100]},"keys":{"role":"contact","at_mm":[0,780,100]}},
+  "slots": {"bench":{"admits":"body","posture":"sit","most":1,"at_mm":[0,475,650],"stand":"bench_back"}},
   "geometry": {"bounds_mm":[1420,1290,600]},
   "forms": {
     "play": {
       "who": "anyone",
       "starts": "act",
-      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"}],
-      "steps": [{"step":"walk_to","point":"player"}],
+      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"},{"need":"slot_free","slot":"bench"}],
+      "steps": [{"step":"walk_to","point":"bench"},{"step":"sit","slot":"bench"}],
       "effects": [
+        {"change":"reparent","what":"actor","into":"bench","event":"sat_to_play"},
         {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
         {"change":"set","field":"music","to":"calm","event":"played_calm"}
       ]
@@ -22,9 +24,10 @@
     "play_happy": {
       "who": "anyone",
       "starts": "act",
-      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"}],
-      "steps": [{"step":"walk_to","point":"player"}],
+      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"},{"need":"slot_free","slot":"bench"}],
+      "steps": [{"step":"walk_to","point":"bench"},{"step":"sit","slot":"bench"}],
       "effects": [
+        {"change":"reparent","what":"actor","into":"bench","event":"sat_to_play"},
         {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
         {"change":"set","field":"music","to":"happy","event":"played_happy"}
       ]
@@ -32,9 +35,10 @@
     "play_sad": {
       "who": "anyone",
       "starts": "act",
-      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"}],
-      "steps": [{"step":"walk_to","point":"player"}],
+      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"},{"need":"slot_free","slot":"bench"}],
+      "steps": [{"step":"walk_to","point":"bench"},{"step":"sit","slot":"bench"}],
       "effects": [
+        {"change":"reparent","what":"actor","into":"bench","event":"sat_to_play"},
         {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
         {"change":"set","field":"music","to":"sad","event":"played_sad"}
       ]
@@ -43,10 +47,11 @@
       "who": {"link":"player"},
       "starts": "act",
       "needs": [{"need":"state","field":"music","not":"silent"}],
-      "steps": [],
+      "steps": [{"step":"rise"}],
       "effects": [
         {"change":"set","field":"music","to":"silent","event":"stopped_playing"},
-        {"change":"unlink","link":"player","from":"actor","event":"stepped_away"}
+        {"change":"unlink","link":"player","from":"actor","event":"stepped_away"},
+        {"change":"reparent","what":"actor","into":"here","event":"rose"}
       ]
     }
   },
@@ -81,7 +86,7 @@
     }
   },
   "text": {
-    "card": "An upright piano: play a tune at its keys, by mood; never sit or lie on it.",
+    "card": "An upright piano: sit at its bench and play a tune at its keys, by mood; never sit or lie on the piano itself.",
     "instrument": "instrument",
     "keys": "keys",
     "howto_play": "Play it (a tune by mood: play, play_happy or play_sad), then stop."
