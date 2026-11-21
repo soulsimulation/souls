@@ -134,6 +134,7 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(requestOf(['move', 'aa-3', '--at', '1,2,3']).req.ops[0].op, 'move');
   assert.deepEqual(requestOf(['check', 'clone', 'aa-3', '--count', '3', '--step', '4,0']).req, { op: 'check', world: { verb: 'clone', count: '3', step: '4,0', ref: 'aa-3' } });
   assert.throws(() => requestOf(['clone']), /clone <id>/);
+  assert.deepEqual(requestOf(['select', '--kind', 'lamp_post', '--near', '100,-30', '--radius', '20', '--remove']).req, { op: 'edit', world: { verb: 'select', remove: true, kind: 'lamp_post', near: '100,-30', radius: '20' } });
 });
 
 test('#3695: a creator sets the weather and the sky palette and strikes lightning; each has a dry run and a refusal', async () => {

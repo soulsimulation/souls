@@ -152,7 +152,7 @@ import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { clockOf, worldNow } from '../clock/clock.mjs';
 import { worldOps } from '../creator/world.mjs';
 import { exportOf, importOf } from '../creator/genesis.mjs';
-import { cloneFile, moveByOps } from '../creator/things.mjs';
+import { cloneFile, moveByOps, removeOps, selectOf } from '../creator/things.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
@@ -931,6 +931,25 @@ async function moveBatch(w) {
   return moveByOps(exportOf(copy).nodes, w.refs ?? [], by, { yaw, ...lifted });
 }
 
+/** #3728: `select` (today's `eden-god select`): what matches on the copy, as a list; with `--remove` or `--by` the
+ *  batch that removes or moves all of it in one edit. */
+async function selectBatch(w) {
+  const pair = (v, n, f) => { if (v === undefined) return undefined; const p = String(v).split(',').map(Number); return p.length === n && p.every(Number.isFinite) ? p : { bad: f }; };
+  const area = pair(w.area, 4, 'area'), near = pair(w.near, 2, 'near'), radius = w.radius === undefined ? undefined : Number(w.radius);
+  const bad = [area, near].find((x) => x?.bad);
+  if (bad) return { ok: false, code: 'select.flag', detail: `--${bad.bad} in metres` };
+  if (radius !== undefined && !(radius > 0)) return { ok: false, code: 'select.flag', detail: '--radius is more than 0 m' };
+  if (w.remove && w.by !== undefined) return { ok: false, code: 'select.flag', detail: '--remove or --by, not both' };
+  const nodes = exportOf(copy).nodes;
+  const rows = selectOf(nodes, { kind: w.kind, name: w.name, in: w.in, area, near, radius });
+  if (!w.remove && w.by === undefined) return { list: rows };
+  if (!rows.length) return { ok: false, code: 'select.nothing', detail: 'nothing matches; nothing changed' };
+  const out = w.remove ? { ops: removeOps(nodes, rows.map((r) => r.id)), says: `removed ${rows.length} (and what was in them)` } : await moveBatch({ by: w.by, yaw: w.yaw, refs: rows.map((r) => r.id) });
+  if (out.ok === false) return out;
+  if (out.ops.length > 256) return { ok: false, code: 'select.too-many', detail: `${rows.length} selected, ${out.ops.length} operations` };
+  return { ...out, says: `${out.says}: ${rows.length} selected` };
+}
+
 /** #3728: `clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]` as an import plan of the copies. */
 async function clonePlan(w) {
   const at = metresPair(w.at), step = metresPair(w.step), count = w.count === undefined ? 1 : Number(w.count);
@@ -961,6 +980,7 @@ async function worldBatch(req) {
     return land.landOps(copy, req.world);
   }
   if (req.world.verb === 'move') return moveBatch(req.world);
+  if (req.world.verb === 'select') return selectBatch(req.world);
   return worldOps(copy, req.world, worldNowOrReal());
 }
 
@@ -1199,6 +1219,7 @@ async function answer(req) {
       }
       const w = await worldBatch(req);
       if (w.ok === false) return closing({ ...w, local: true }, null, { now: true });
+      if (w.list) return closing({ ok: true, local: true, selected: w.list.length, things: w.list }, null, { now: true });
       const v = JSON.parse(wire.editCheck(copy, batchOf(w.ops), kindsText()));
       return closing({ ...v, local: true, ...(w.says ? { would: w.says, ops: w.ops } : {}) }, null, { now: true });
     }
@@ -1215,6 +1236,7 @@ async function answer(req) {
       // #3695: weather, sky and strike are sets on the world node, made from the copy as it is now, after the sync.
       const w = await worldBatch(req);
       if (w.ok === false) return closing({ ...w, sent: false, local: true }, null, { age });
+      if (w.list) return closing({ ok: true, sent: false, selected: w.list.length, things: w.list }, null, { age });
       const batch = batchOf(w.ops);
       const v = JSON.parse(wire.editCheck(copy, batch, kindsText()));
       if (!v.ok) return closing({ ...v, sent: false, local: true }, null, { age });
