@@ -20,7 +20,10 @@
 //     {"op":"act","verbs":["a","b"]}      a ranked list: the first is the act, the rest its fallbacks, each on `target`
 //     {"op":"wait","seconds":30}          returns when something addressed to this Soul happened, or at the timeout
 //   and C4's (#3368), each sent once as `act` is, its answer arriving as an event (`answer` 1 is a receipt):
-//     {"op":"say","words":".."}           words out loud, T8's `{23: words}` in parameter 1 (V1b, #3361)
+//     {"op":"say","words":".."}           words out loud, T8's `{23: words}` in parameter 1 (V1b, #3361); with
+//                                         "loud":true a shout, heard farther (C26, #3689); with "to":"<name|id">
+//                                         [and "gesture":"<g>"] then the body turns to that Soul, or plays its kind's
+//                                         gesture form <g> toward it; an unknown name or gesture sends nothing
 //     {"op":"whisper","to":"<id>","words":".."}  words to one listener's body alone
 //     {"op":"lie","this":"<id>"}          lie down on a bed (worldd's bodies, as a sit)
 //   and #3604's, sent once as `act` is: E4's set-down of a held thing, `word` one of the placements words (`here`
@@ -658,8 +661,38 @@ function formOf(req) {
   }
   const words = String(req.words ?? '');
   if (!words.trim() || [...words].length > WORDS_MOST) return { code: 'words-empty-or-long', detail: `1 to ${WORDS_MOST} characters` };
-  if (req.op === 'say') return { verb: `${NS}:say`, words };
+  if (req.op === 'say') return { verb: `${NS}:${req.loud ? 'shout' : 'say'}`, words };
   return ID.test(String(req.to ?? '')) ? { verb: `${NS}:whisper`, target: req.to, words } : { code: 'whisper-names-a-body', detail: 'whisper <body id> "<words>"' };
+}
+
+/**
+ * C26 (#3689): what `say --to <name|id> [--gesture <g>]` does toward that Soul after the words: the Soul named in the
+ * copy (its body's id, its Soul's id, or its name, any case, but not the speaker), then the speaker's own body's form
+ * from its kind: the gesture's (`<g>_at`, `<g>_to` or `<g>` taking `toward`, else `<g>` alone), or with no gesture the
+ * gaze's `look_at`. A refusal by name when the name or the gesture is not known: then nothing is sent.
+ */
+function towardOf(req) {
+  if (req.to === undefined) return { code: 'gesture-needs-to', detail: 'say --to <name> --gesture <g> "<words>"' };
+  const rows = [...rowsOf(copy).values()], me = rows.find((r) => r.id === ME || r.soul === ME);
+  const want = String(req.to).trim(), lower = want.toLowerCase();
+  const souls = rows.filter((r) => r !== me && (r.soul !== undefined || r.kind === me?.kind));
+  const exact = souls.filter((r) => r.id === want || r.soul === want);
+  const found = exact.length ? exact : souls.filter((r) => r.name.toLowerCase() === lower);
+  if (found.length === 0) return { code: 'say-to-unknown', detail: `no Soul called ${want} in the copy: find "${want}" or look` };
+  if (found.length > 1) return { code: 'say-to-ambiguous', detail: `${found.length} Souls are called ${want}: use the id (${found.map((r) => r.id).join(', ')})` };
+  const them = found[0], forms = kindsIn(join(home, 'kinds'))[me?.kind]?.forms ?? {};
+  const takes = (f) => Object.keys(forms[f]?.takes ?? {});
+  const gestures = Object.entries(forms).filter(([, f]) => f.steps?.length && f.steps.every((x) => x.step === 'move') && Object.keys(f.takes ?? {}).every((k) => k === 'toward'));
+  const g = req.gesture === undefined ? null : String(req.gesture);
+  let form = g === null ? (forms.look_at && takes('look_at').includes('target') ? 'look_at' : null) : null, arg = 'target';
+  if (g !== null) {
+    form = [`${g}_at`, `${g}_to`, g].find((f) => gestures.some(([n]) => n === f) && takes(f).includes('toward')) ?? (gestures.some(([n]) => n === g) ? g : null);
+    arg = 'toward';
+    if (!form) return { code: 'gesture-unknown', detail: `one of ${[...new Set(gestures.map(([n]) => n.replace(/_(at|to)$/, '')))].sort().join(', ') || 'none: the body\'s kind is not in the copy'}` };
+  }
+  const to = { id: them.id, name: them.name };
+  if (!form || !me) return { to };
+  return { to, verb: `${NS}:${form}`, target: me.id, ...(takes(form).includes(arg) ? { args: `${arg}=${them.id}` } : {}) };
 }
 
 const MOVES = new Set(['walk', 'sit', 'lie', 'rise']); // worldd's bodies take these (I4b); they are not checked as forms
@@ -839,9 +872,13 @@ async function answer(req) {
     case 'say': case 'whisper': case 'lie': {
       const f = formOf(req);
       if (f.code) return { ok: false, code: f.code, detail: f.detail };
+      const t = req.op === 'say' && (req.to !== undefined || req.gesture !== undefined) ? towardOf(req) : null;
+      if (t?.code) return { ok: false, code: t.code, detail: t.detail, sent: false };
       const basis = shownVersion ?? state.cursor;
       const { sequence, sent } = sendIntent([f.verb], { target: f.target, words: f.words, basis });
-      return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis) }, null, { now: true });
+      // C26: the turn or gesture toward them goes after the words, as its own intent; its answer is its own.
+      const toward = t ? { ...t.to, ...(t.verb ? { verb: t.verb, sequence: sendIntent([t.verb], { target: t.target, args: t.args, basis }).sequence } : { turned: false }) } : null;
+      return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis), ...(toward ? { to: toward } : {}) }, null, { now: true });
     }
     case 'describe': return closing({ ok: true }, (rows) => ({
       nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...(r.text ? { text: r.text } : {}) })),
