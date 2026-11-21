@@ -44,7 +44,26 @@ import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
 import { TRACE_MOST } from './trace.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'weather', 'sky', 'strike', 'land', 'time', 'check', 'status', 'stop', 'trace', 'welcome', 'visitors'];
+export const VERBS = [
+  'batch',
+  'check',
+  'describe',
+  'land',
+  'move',
+  'pair',
+  'place',
+  'remove',
+  'set',
+  'sky',
+  'status',
+  'stop',
+  'strike',
+  'time',
+  'trace',
+  'visitors',
+  'weather',
+  'welcome',
+];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
 export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -85,7 +104,7 @@ export const FIX = {
   'land.no-water': 'name a pond, lake or river\'s id from describe',
   'land.nothing': 'shape the land on the world\'s ground',
   'land.smooth': 'use flatten',
-  'land.unavailable': 'run souls-god from a checkout with packages/ground and zod installed',
+  'land.unavailable': 'use Node 22.18 or later, and the client a world serves (it carries the ground model) or a checkout with packages/ground and zod installed',
   'strike.off-the-ground': 'strike somewhere on the world\'s ground',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'which-creator': 'name one with --creator',
