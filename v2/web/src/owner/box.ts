@@ -8,7 +8,7 @@
 // - page → gateway: `put <grant>\n<words>`.
 // - gateway → page: `{"sent": {"id"}}` or `{"sent": {"refused"}}`, then for each message `{"mail": {"id", "state":
 //   "picked"}}`, `{"doing": {"seq", "verb", "phase", "outcome"}}` for each of the agent's intents while it is open,
-//   and `{"close": {"id", "state", "outcome"}}`.
+//   and `{"close": {"id", "state", "outcome", "reply"?}}`: `reply` is the agent's answer in words (C15, #3685).
 //
 // The agent's words and the world's names are drawn as text (`textContent`), never as markup.
 
@@ -22,7 +22,12 @@ export type Message = {
   act: { verb: string; phase: string; outcome: string | null } | null;
   /** The close's outcome, or the refusal's name. */
   outcome: string | null;
+  /** The agent's reply, sent with its close (C15: `ack <id> "<reply>"`), drawn as text. */
+  reply?: string | null;
 };
+
+/** The longest reply drawn, in characters (the client's). */
+export const REPLY_MOST = 1000;
 
 const OPEN = new Set(['thinking', 'doing']);
 
@@ -76,6 +81,8 @@ export class OwnerBox {
       if (!m) return true;
       m.state = f.close.state === 'done' ? 'done' : 'failed';
       m.outcome = str(f.close.outcome);
+      const reply = str(f.close.reply)?.trim();
+      if (reply) m.reply = [...reply].slice(0, REPLY_MOST).join('');
     } else return false;
     this.onChange();
     return true;
@@ -140,6 +147,13 @@ export function mountOwnerBox(sock: BoxSocket, grant: string, title: () => strin
       doing.style.cssText = 'color:#9fb3c4;font-size:12px';
       doing.textContent = line(m);
       li.append(words, doing);
+      if (m.reply) {
+        const reply = document.createElement('div');
+        reply.dataset.reply = '';
+        reply.style.cssText = 'margin:2px 0 0;padding-left:8px;border-left:2px solid #3a6ea5;white-space:pre-wrap';
+        reply.textContent = m.reply;
+        li.append(reply);
+      }
       return li;
     }));
   };

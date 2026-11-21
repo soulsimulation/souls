@@ -49,7 +49,8 @@ function makeRelay(port) {
   const r = { up: 0, port: 0 };
   const server = createServer((down) => {
     const upstream = createConnection(port, '127.0.0.1');
-    down.on('data', (d) => { r.up += d.length; upstream.write(d); });
+    let entries = null; // the daemon's entries fetch at sign-in (#3760) is not a request to the world
+    down.on('data', (d) => { entries ??= d.subarray(0, 15).toString('latin1') === 'GET /v2/entries'; if (!entries) r.up += d.length; upstream.write(d); });
     upstream.on('data', (d) => down.write(d));
     for (const s of [down, upstream]) { s.on('error', () => {}); s.on('close', () => { down.destroy(); upstream.destroy(); }); }
   });

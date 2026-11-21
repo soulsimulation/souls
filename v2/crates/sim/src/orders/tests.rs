@@ -270,6 +270,7 @@ impl World {
             fallbacks: Vec::new(),
             replaces: None,
             body: None,
+            reflex: false,
         }
     }
 
