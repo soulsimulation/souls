@@ -1209,6 +1209,8 @@ pub const MOVE_STARTED: &str = "souls:move-started";
 pub const MOVE_ENDED: &str = "souls:move-ended";
 /// How an act still going at its deadline ends (C8), and the move it drove with it.
 pub const TIMED_OUT: &str = "act.timed-out";
+/// How an act its own Soul stopped ends (#3705, a `souls:cancel` naming it), and the walk it drove with it.
+pub const STOPPED: &str = "act.stopped";
 
 /// The event a form or gateway walk writes when planned (C20/C29): field 1 the body, 5 the act's
 /// deadline, world time µs (its start plus its steps' span or planned route time). Its cause is the intent, so the
@@ -1667,6 +1669,48 @@ impl Clock {
                 let id = matches!(a, Answer::Receipt { .. }).then_some(id);
                 return self.answered(key, sequence, id, Some(value), &a, (vec![reply], stamps));
             }
+        }
+        // #3705 (today's `stop`): a cancel naming an open act of the same actor ends it where the body stands, as its
+        // deadline would: a walk stops in this tick (`act.stopped`), a form's run is left, and a sit, a lie or a rise,
+        // short, runs to its end. The cancel is answered with a receipt and recorded as an input, so a replay agrees.
+        if intent.verb.as_str() == "souls:cancel"
+            && let Some((&open, o)) = self
+                .open
+                .iter()
+                .find(|(_, o)| o.actor == actor && Some(o.sequence) == intent.replaces)
+        {
+            let (stopped, body) = (o.sequence, o.body);
+            let cut = self.bodies.as_mut().and_then(|b| b.cancel(open));
+            self.forms
+                .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+            if cut == Some(Cut::Stopped) {
+                self.note(open, MOVE_ENDED, Some(STOPPED), now);
+            }
+            if cut != Some(Cut::Finishing) {
+                self.end(open, |c| c.refusal(actor, stopped, STOPPED));
+            }
+            self.next_intent += 1;
+            self.inputs.push(Input::Intent {
+                id,
+                soul: body,
+                verb: intent.verb.clone(),
+                words: None,
+            });
+            let a = Answer::Receipt {
+                actor,
+                sequence,
+                intent: id,
+                entries: Vec::new(),
+                names: BTreeMap::new(),
+            };
+            return self.answered(
+                key,
+                sequence,
+                Some(id),
+                Some(value),
+                &a,
+                (vec![reply], stamps),
+            );
         }
         // Standing orders are accepted once and recorded now; their later inputs and named ends are logged.
         if matches!(intent.kind(), Ok(Kind::Order)) || intent.verb.as_str() == "souls:cancel" {
