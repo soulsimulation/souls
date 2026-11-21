@@ -50,7 +50,8 @@ the next train run; `gh workflow run merge-train.yml --ref main` starts one.
 see the header of `merge-train.yml`): `merge:ready` enqueues the PR through auto-merge once its required checks are
 green at its head, and the queue re-tests the combination with what is ahead of it (`merge_group` runs) and lands it.
 `proof-ok` is a required check, so T3–T4 still wait for approval. Removing `merge:ready` takes a PR out; a PR the
-queue drops loses the label with a comment giving the reason. A PR with any file outside the low-risk paths (`LOW_RISK`
+queue drops loses the label with a comment giving the reason, and the same alert goes to the agenda issue (#1960, or
+the repo variable `MERGE_TRAIN_NOTIFY_ISSUE`), so a dropped PR never sits unnoticed. A PR with any file outside the low-risk paths (`LOW_RISK`
 in `.github/scripts/ci-scope.mjs`) waits, keeping its label, while eight such PRs are queued or set to auto-merge
 (`MIXED_CAP`); low-risk PRs enqueue up to the queue's own limit, and every queue exit starts the train again. The
 non-strict and strict landing below apply only when the ruleset does not require the queue.
@@ -132,7 +133,9 @@ The strict steps:
 
 A PR that fails a check leaves the train with its result in the PR; fix it and relabel.
 
-**Stacked PRs.** When a PR squash-merges, the `restack` workflow (`.github/workflows/restack.yml`,
+**Stacked PRs.** Keep stacks short-lived: a stacked branch lands within about 4 hours or merges into `main` early, and
+the integrator lands the base first, so fixes never sit off `main` while later work builds on them. When a PR
+squash-merges, the `restack` workflow (`.github/workflows/restack.yml`,
 `.github/scripts/restack.mjs`) handles the PRs stacked on it. It retargets each one to the merged PR's base (GitHub
 already does this when it deletes the merged branch) and merges that base forward. A child still carries the old
 branch's commits, so a plain `git merge main` diffs from the old `main` fork point and conflicts on files the child
@@ -140,6 +143,21 @@ never changed. The restack merge is 3-way against the child's fork point from th
 own diff doesn't touch take the squashed content. The result is an ordinary merge commit, pushed as a fast-forward with
 `MERGE_TRAIN_TOKEN` (never forced), so CI runs on it. A real conflict pushes nothing; the child gets `needs:rebase`
 and a comment naming the files. To redo one by hand, run `gh workflow run restack.yml -f pr=<merged PR>`.
+
+## PR body
+
+A green, reviewed PR is never blocked by its description. The required minimum is:
+
+- the issue link (`Closes #n`, a bare `#n` or the issue's URL);
+- a one-line summary of the change;
+- the CI run link, which the proof bot adds to its comment from the newest `ci` run at the head.
+
+`proof-ok` (`.github/workflows/proof-check.yml`, `tools/proof/acceptance.mjs`) fails only when the minimum is missing,
+when it finds device details anywhere it reads (the [publication privacy](publication-privacy.md) scan), or, at
+T3–T4, until the maintainer signs off. Everything else it reads (the Problem, Acceptance and Self-audit sections,
+evidence syntax, clips, `proof.json`) is advisory: its comment lists the advice and the workflow logs a warning.
+Rich proof is optional, and real-run evidence counts as it is. `node tools/proof/acceptance.mjs check --strict` still
+reports a full journal entry as pass or fail for anyone who wants it.
 
 ## Review
 

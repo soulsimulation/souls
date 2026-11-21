@@ -254,6 +254,19 @@ strict tiers for the core (`v2/crates/sim`, `replica`, `skills` T3; `v2/web` T2)
 `docs/process/PROOF-POLICY.yml` and switched on at the cut-over by X8 (#2839). The publication check and the secret
 scanner always apply. Later tasks add their steps to a leg in `v2/tools/ci.sh`, not new jobs.
 
+<a id="pre-push-quick-check"></a>**Pre-push quick check.** Before pushing a `v2/` change, run `v2/tools/ci.sh quick`
+(about a minute warm): `cargo fmt --check`, the `no-kind-names` rule and Clippy with warnings as errors on the crates
+the branch changed against its merge base with `origin/main` (uncommitted and untracked files included;
+`V2_QUICK_BASE` names another base). A change to the workspace `Cargo.toml`, `Cargo.lock`, `clippy.toml` or the
+toolchain file lints the whole workspace. It is not a CI leg and replaces none: it exists so a three-second rule
+never costs a CI run. A crate whose dependents break is still CI's catch.
+
+**Served-world end-to-end (being added).** The served-world e2e CI test (`ci/served-world-e2e`, its own lane) runs a
+representative Eden world through the real pairing and join path on every v2 PR and checks real Soul actions (walk,
+sit, gesture, say and whisper, a malformed word, a restart) against the public stream and the client's copy. With a
+full-Eden served smoke on every release head, it is the gate for what no unit test reaches: a real body through the
+world loop to the public stream.
+
 **Self-hosted runners.** The `qualify` legs that `ci-scope.mjs` marks `heavy: true` (the server shards and the legs
 whose hosted median is over about 8 minutes: `packages`, `launcher-*`, `soul-actions-*`) run on the runners named by the
 repository variable `CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`, or a JSON array of labels). Every
@@ -388,6 +401,7 @@ parts that need it are reported as not shown, never as passed.
 |---|---|
 | Docs, tools only | links resolve; the tool's own tests if it has them |
 | Server or package logic | `node --test` on touched files, `tsc -p` of touched packages |
+| Engine v2 (`v2/`) | `v2/tools/ci.sh quick` before each push; the touched crate's or client's tests |
 | Anything that can move geometry, navigation or god builds | add the walk gate |
 | Web app | `pnpm --filter @souls/web build`, the bundle gate, the local smoke, an uncut clip of the changed journey |
 | Library defs, generators, compiler | `library.test.ts` and `catalogue-checks.test.ts` (budgets and holds), conformance, plus a supplement when a revision changes |

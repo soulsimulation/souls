@@ -2,8 +2,13 @@
 // Reads the acceptance checklist of an issue or PR (the PR body is the journal entry) and validates the proof.json
 // machine summary against it, for the tier the change needs (docs/process/PROOF-POLICY.yml `pr_checks`).
 //
+// Advisory (process rule 6, docs/process/agent-workflow.md#pr-body): the journal-entry checks only warn. What blocks
+// (`result.required`) is the minimum body (an issue link and a one-line summary), a publication-privacy finding and,
+// at T3-T4, the maintainer's sign-off. `result.ok` stays the full journal verdict, reported as advice.
+//
 //   node tools/proof/acceptance.mjs check --body pr.md [--issue issue.md] [--proof proof.json] [--tier T2 |
 //        --files a,b | --base <ref>] [--label tier:T3 ...] [--head <sha>] [--repo owner/name] [--json] [--comment out.md]
+//        [--strict]                                 (--strict: exit 1 on any journal-entry problem, not only blocking)
 //   node tools/proof/acceptance.mjs init --issue issue.md [--pr <n>] [--tier T2] [--issue-number <n>] [--commit <sha>]
 //        > .e2e/journal/<n>/proof.json      (issue: from --issue-number or a .e2e/journal/<n>/ path; commit: the
 //                                            git HEAD of the current directory, so run it from the PR's worktree)
@@ -16,8 +21,9 @@
 // tools/proof/upload.mjs), GitHub attachments, or the SIM_PROOF_PUBLIC_URL endpoint. Others are ignored with a warning,
 // and `pr` fetches proof.json only from such a host. GitHub releases are no longer proof hosts.
 //
-// Exit codes: 0 proof-ok, 1 proof missing or invalid, 2 usage error. `pr` always exits 0 unless the tool itself
-// failed; it reports the verdict through --output so the workflow can post the comment first.
+// Exit codes: 0 proof-ok (the required minimum passes; advice is printed), 1 the required minimum fails (or, with
+// `check --strict`, the full journal entry), 2 usage error. `pr` always exits 0 unless the tool itself failed; it
+// reports the verdict through --output (ok = required, journal = the full entry) so the workflow can post first.
 //
 // proof.json (schema "sim-proof/1"), written while the work runs and uploaded with tools/proof/upload.mjs:
 //   { schema, pr, issue, commit, tier,
@@ -154,6 +160,31 @@ export function linkedIssues(text = '') {
   return [...nums];
 }
 
+/** The PR body's required minimum (process rule 6): an issue link (the Problem section's first, else any in the body)
+ *  and a one-line summary. Everything else in the body is optional; the CI run link is added by the proof bot. */
+export function minimumBody(body = '') {
+  const text = stripComments(String(body));
+  const fromProblem = linkedIssues(sections(body).problem ?? '');
+  const issues = fromProblem.length ? fromProblem : linkedIssues(text);
+  const summary = summaryLine(body);
+  const problems = [];
+  if (!issues.length) problems.push('issue link: link the issue the PR works (Closes #n)');
+  if (!summary) problems.push('summary: add a one-line summary of the change');
+  return { issues, summary, problems };
+}
+
+/** The first prose line with at least three words besides issue references and links; null when there is none. */
+export function summaryLine(body = '') {
+  for (const raw of stripComments(String(body)).replace(/\r\n/g, '\n').split('\n')) {
+    const line = raw.trim();
+    if (!line || /^#{1,6}\s/.test(line) || /^[-*+]\s+\[[ xX]\]/.test(line) || /^(tier\s*:|```|\|)/i.test(line)) continue;
+    const rest = line.replace(URL_RE, ' ').replace(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|part of|refs?)\s*:?\s+#\d+/gi, ' ')
+      .replace(/#\d+/g, ' ').replace(/^[-*+>]\s+/, '').replace(/^\*\*[^*]*\*\*\s*:?/, '').replace(/^[\w ./-]{1,30}:\s*$/, '');
+    if (rest.split(/\s+/).filter(w => /\p{L}{2,}/u.test(w)).length >= 3) return line;
+  }
+  return null;
+}
+
 const NOTE = /(?:^|\s)(?:[—–-]{1,2}\s*)?(evidence|unmet|deferred)\s*:\s*/i;
 const ID = /^(?:\*\*)?([A-Z]{1,2}\d{1,3})(?:\*\*)?[.:)]?\s+/;
 
@@ -279,7 +310,7 @@ const label = c => `${c.id ? `${c.id} ` : ''}${String(c.text ?? '').slice(0, 70)
  */
 function privacyFailure(tier, privacy) {
   const detail = `device details detected (${privacy.join(', ')}); sanitize source text/metadata before publication`;
-  return { ok: false, tier, rows: [{ name: 'publication privacy', ok: false, detail }], problems: [detail], warnings: [], checklist: [], links: { videos: [], images: [], proofJson: [] }, clips: [] };
+  return { ok: false, required: { ok: false, problems: [`publication privacy: ${detail}`] }, tier, rows: [{ name: 'publication privacy', ok: false, detail }], problems: [detail], warnings: [], checklist: [], links: { videos: [], images: [], proofJson: [] }, clips: [] };
 }
 
 export function checkPr({ body = '', tier = 'T0', issueBody = null, proof = undefined, head = null, policy = loadChecks(), repo = null }) {
@@ -350,7 +381,8 @@ export function checkPr({ body = '', tier = 'T0', issueBody = null, proof = unde
   }
   const uniq = [...new Set(problems)];
   const clips = clipPreviews(videos, images, proof);
-  return { ok: uniq.length === 0, tier, checks: [...need], rows, problems: uniq, warnings: [...new Set(warnings)], checklist, links: { videos, images, proofJson: proofLinks }, clips };
+  const min = minimumBody(body);
+  return { ok: uniq.length === 0, required: { ok: min.problems.length === 0, problems: min.problems }, tier, checks: [...need], rows, problems: uniq, warnings: [...new Set(warnings)], checklist, links: { videos, images, proofJson: proofLinks }, clips };
 }
 
 /** Each clip with its inline preview (tools/proof/upload.mjs uploads `<clip>.preview.gif` beside it): from proof.json
@@ -378,9 +410,13 @@ function clipNote(note, max = 120) {
 const cell = s => s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 
 /** The bot comment (updated in place by proof-check.yml). */
-export function renderComment(result, { required = [], files = [], raisedByLabel = null, note = null } = {}) {
+export function renderComment(result, { required = [], files = [], raisedByLabel = null, note = null, ciRun = null } = {}) {
   const mark = ok => ok === true ? 'ok' : ok === false ? '**missing**' : '-';
-  const out = [MARKER, `### Proof check: ${result.ok ? '`proof-ok` passes' : '`proof-ok` fails'}`, ''];
+  const req = result.required ?? { ok: result.ok, problems: [] };
+  const out = [MARKER, `### Proof check: ${req.ok ? '`proof-ok` passes' : '`proof-ok` fails'}`, ''];
+  if (req.problems.length) out.push('**Blocking** (the required minimum: an issue link, a one-line summary, no device details, and the maintainer\'s sign-off at T3-T4)', ...req.problems.map(p => `- ${p}`), '');
+  if (ciRun) out.push(`CI run at the head: ${ciRun}`, '');
+  out.push(result.ok ? 'Journal entry: complete.' : 'Journal entry: **advisory**. The items below are warnings; they never fail `proof-ok` (docs/process/agent-workflow.md#pr-body).', '');
   const top = files.filter(f => f.tier === result.tier).slice(0, 4).map(f => `\`${f.file}\``);
   out.push(`**Tier ${result.tier}**${raisedByLabel ? ` (raised by the \`tier:${raisedByLabel}\` label)` : top.length ? ` from ${top.join(', ')}${files.filter(f => f.tier === result.tier).length > 4 ? ', ...' : ''}` : ''} (\`node tools/proof/tier.mjs\`).`);
   if (required.length) out.push(`**Required at ${result.tier}** (docs/process/PROOF-POLICY.yml): ${required.join('; ')}.`);
@@ -403,7 +439,8 @@ export function renderComment(result, { required = [], files = [], raisedByLabel
       if (c.preview) out.push('', `[![${name(c.video)}](${c.preview})](${c.video})`, '');
     }
   }
-  if (result.problems.length) out.push('', '**To fix**', ...result.problems.map(p => `- ${p}`));
+  const advice = result.problems.filter(p => !req.problems.some(q => q === p || q.endsWith(`: ${p}`)));
+  if (advice.length) out.push('', '**Advice** (warnings: fix what is worth fixing; none of these fails `proof-ok`)', ...advice.map(p => `- ${p}`));
   if (result.warnings.length) out.push('', '**Warnings**', ...result.warnings.map(w => `- ${w}`));
   out.push('', '<sub>Updated on every edit, push, label and review. How to fill it: `.claude/skills/journal/SKILL.md`. T3-T4 also need the maintainer\'s sign-off (`tools/proof/gate.mjs`). A maintainer can waive with the `proof:waived` label.</sub>');
   const comment = out.join('\n');
@@ -470,7 +507,10 @@ export async function prMode({ repo, pr, head, gh = ghJson, fetchImpl = fetch, p
   const addGate = result => {
     if (!gate) return result;
     result.rows.unshift({ name: 'maintainer sign-off', ok: gate.ok, detail: gate.detail });
-    if (!gate.ok) { result.problems.unshift(`maintainer sign-off: ${gate.detail}`); result.ok = false; }
+    if (!gate.ok) {
+      result.problems.unshift(`maintainer sign-off: ${gate.detail}`); result.ok = false;
+      result.required = { ok: false, problems: [`maintainer sign-off: ${gate.detail}`, ...(result.required?.problems ?? [])] };
+    }
     return result;
   };
   const body = p.body ?? '';
@@ -492,12 +532,22 @@ export async function prMode({ repo, pr, head, gh = ghJson, fetchImpl = fetch, p
   }
   if (waived || author === 'dependabot[bot]') {
     const why = waived ? `Waived by the maintainer with the \`proof:waived\` label.` : 'Dependency update from Dependabot: CI is its proof.';
-    const result = addGate({ ok: true, tier: t.tier, rows: [], problems: [], warnings: warningsOut, checklist: [], links: { videos: [], images: [], proofJson: [] } });
+    const result = addGate({ ok: true, required: { ok: true, problems: [] }, tier: t.tier, rows: [], problems: [], warnings: warningsOut, checklist: [], links: { videos: [], images: [], proofJson: [] } });
     return { result, comment: renderComment(result, { required, files: t.byFile, raisedByLabel: t.raisedByLabel, note: why }) };
   }
   const result = addGate(checkPr({ body, tier: t.tier, issueBody, proof, head: headSha, policy, repo }));
   result.warnings.push(...warningsOut);
-  return { result, comment: renderComment(result, { required, files: t.byFile, raisedByLabel: t.raisedByLabel, note: p.draft ? 'Draft PR: proof-check skips drafts and runs when the PR is marked ready for review.' : null }) };
+  const ciRun = headSha ? ciRunAt(gh, repo, headSha) : null;
+  return { result, comment: renderComment(result, { required, files: t.byFile, raisedByLabel: t.raisedByLabel, ciRun, note: p.draft ? 'Draft PR: proof-check skips drafts and runs when the PR is marked ready for review.' : null }) };
+}
+
+/** The newest `ci` run at the head (an exact-head dispatch first), for the comment's CI link; null when none or unreadable. */
+export function ciRunAt(gh, repo, sha) {
+  try {
+    const runs = gh(`repos/${repo}/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=20`)?.workflow_runs ?? [];
+    const run = runs.find(r => r.event === 'workflow_dispatch') ?? runs.find(r => r.event !== 'pull_request') ?? runs[0];
+    return typeof run?.html_url === 'string' && /^https:\/\/github\.com\//.test(run.html_url) ? run.html_url : null;
+  } catch { return null; }
 }
 
 async function main(argv) {
@@ -527,21 +577,23 @@ async function main(argv) {
     if (opt('--comment')) writeFileSync(opt('--comment'), renderComment(result, { required: policy.required[tier], files: byFile, raisedByLabel: raised }));
     if (rest.includes('--json')) console.log(JSON.stringify(result, null, 2));
     else {
-      console.log(`proof check (${tier}): ${result.ok ? 'ok' : 'FAIL'}`);
+      console.log(`proof-ok (${tier}): ${result.required.ok ? 'ok' : 'FAIL'}; journal entry: ${result.ok ? 'complete' : 'advisory warnings below'}`);
+      for (const p of result.required.problems) console.log(`  BLOCK ${p}`);
       for (const r of result.rows) console.log(`  ${r.ok === true ? 'ok  ' : r.ok === false ? 'MISS' : '-   '} ${r.name}: ${r.detail}`);
-      for (const p of result.problems.filter(p => !result.rows.some(r => p === `${r.name}: ${r.detail}`))) console.log(`  fix: ${p}`);
+      for (const p of result.problems.filter(p => !result.rows.some(r => p === `${r.name}: ${r.detail}`))) console.log(`  advice: ${p}`);
       for (const w of result.warnings) console.log(`  warn: ${w}`);
     }
-    return result.ok ? 0 : 1;
+    return (rest.includes('--strict') ? result.ok : result.required.ok) ? 0 : 1;
   }
   if (mode === 'pr') {
     if (!opt('--repo') || !opt('--pr')) { console.error('pr needs --repo and --pr'); return 2; }
     const { result, comment } = await prMode({ repo: opt('--repo'), pr: opt('--pr'), head: opt('--head') });
     if (opt('--comment')) writeFileSync(opt('--comment'), `${comment}\n`);
     if (opt('--summary')) appendFileSync(opt('--summary'), `${comment.replace(MARKER, '')}\n`);
-    if (opt('--output')) appendFileSync(opt('--output'), `ok=${result.ok}\ntier=${result.tier}\n`);
-    console.log(`proof check (${result.tier}): ${result.ok ? 'ok' : 'FAIL'}`);
-    for (const p of result.problems) console.log(`  fix: ${p}`);
+    if (opt('--output')) appendFileSync(opt('--output'), `ok=${result.required.ok}\njournal=${result.ok}\ntier=${result.tier}\n`);
+    console.log(`proof-ok (${result.tier}): ${result.required.ok ? 'ok' : 'FAIL'}; journal entry: ${result.ok ? 'complete' : 'advisory'}`);
+    for (const p of result.required.problems) console.log(`  block: ${p}`);
+    for (const p of result.problems) console.log(`  advice: ${p}`);
     return 0;
   }
   console.error('usage: acceptance.mjs check --body <file> [...] | init --issue <file> | pr --repo <r> --pr <n>');

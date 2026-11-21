@@ -15,8 +15,9 @@
 //        squash-merges exactly <sha>; with --queue, hands exactly <sha> to GitHub's merge queue instead
 //   node .github/scripts/merge-train.mjs hold --repo o/r --pr <n>
 //        merge:ready was removed: takes the PR out of the merge queue, or disables its auto-merge
-//   node .github/scripts/merge-train.mjs dequeued --repo o/r --pr <n> [--reason r]
-//        the queue dropped the PR: unless it merged or re-entered, ejects it with the reason
+//   node .github/scripts/merge-train.mjs dequeued --repo o/r --pr <n> [--reason r] [--notify-issue n]
+//        the queue dropped the PR: unless it merged or re-entered, ejects it with the reason and posts the same alert on
+//        --notify-issue (the agenda issue), so a dropped PR never sits unnoticed (process rule 11)
 //   node .github/scripts/merge-train.mjs eject --repo o/r --pr <n> [--label needs:rebase] --message-file <file>
 //        takes the PR off the train (removes merge:ready), adds the label, comments why
 //
@@ -258,6 +259,16 @@ export function readChecks(api, repo, sha) {
   };
 }
 
+/** The alert for a PR the queue dropped without merging: one comment on the PR, one on the notify issue (best effort). */
+export function reportDequeued({ repo, pr, reason, notifyIssue, api }) {
+  const why = reason || 'not given';
+  api.eject({ repo, pr, message: `Merge queue: this PR left the queue without merging (reason: \`${why}\`), so it left the train. The failing run is on the \`gh-readonly-queue\` commit in the Actions tab.\n\nFix it and add \`merge:ready\` again.` });
+  if (!notifyIssue) return;
+  try {
+    api.comment(repo, notifyIssue, `Merge queue: #${pr} left the queue without merging (reason: \`${why}\`) and lost \`merge:ready\`. Its author or the integrator fixes it and relabels; the failing run is on its \`gh-readonly-queue\` commit.`);
+  } catch (e) { console.error(`merge-train: could not post the dequeue alert on #${notifyIssue}: ${e.message}`); }
+}
+
 /** A PR with auto-merge on but a failed required check never enters the queue: say so on the notify issue, once per head. */
 function reportStuck({ repo, pr, sha, failed, notifyIssue, api }) {
   console.error(`::warning::merge-train: #${pr} has auto-merge on but required checks failed, so it will not enter the queue: ${failed.join(', ')}`);
@@ -448,7 +459,7 @@ async function main([mode, ...argv]) {
     const freeze = releaseFreeze(process.env.RELEASE_FREEZE);
     if (freeze) { console.log(`#${opt('--pr')} left the queue during the release freeze at ${freeze.sha}: kept merge:ready, the train re-enqueues it after the freeze`); return 0; }
     hold(state); // auto-merge left on would make the next merge:ready look already queued
-    eject({ repo, pr: opt('--pr'), message: `Merge queue: this PR left the queue without merging (reason: \`${opt('--reason') || 'not given'}\`), so it left the train. The failing run is on the \`gh-readonly-queue\` commit in the Actions tab.\n\nFix it and add \`merge:ready\` again.` });
+    reportDequeued({ repo, pr: opt('--pr'), reason: opt('--reason'), notifyIssue: opt('--notify-issue') || undefined, api: { eject, comment } });
     return 0;
   }
   console.error('usage: merge-train.mjs next | wait | merge | eject | hold | dequeued (see the header)');

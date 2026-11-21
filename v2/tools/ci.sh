@@ -6,11 +6,13 @@
 #
 # CI runs it as parallel legs, one per runner: `ci.sh <leg>` with leg rust, sim, worldd, wasm or client (ci-scope.mjs
 # JOBS, the v2-* names). No argument (or `all`) runs every leg in turn, the same checks as the five legs together.
+# `ci.sh quick` is the pre-push check, not a CI leg: format, no-kind-names and Clippy on the crates the branch changed,
+# about a minute, so a three-second rule never costs a CI run (docs/testing.md#pre-push-quick-check).
 # A leg builds what its own steps read: the WASM package (wasm_pkg) where a step loads it, the binaries the client
 # tests start, and the Rust test that writes a file a later step reads (rules: rust leg; hatch: sim leg).
 set -euo pipefail
 leg=${1:-all}
-case "$leg" in all | rust | sim | worldd | wasm | client) ;; *) echo "ci.sh: unknown leg '$leg'" >&2; exit 2 ;; esac
+case "$leg" in all | rust | sim | worldd | wasm | client | quick) ;; *) echo "ci.sh: unknown leg '$leg'" >&2; exit 2 ;; esac
 cd "$(dirname "$0")/.."
 
 step() {
@@ -25,12 +27,15 @@ step() {
 # The pinned toolchain's components and WASM target, when the install left them out (no-ops otherwise).
 step toolchain bash -c 'rustup component add rustfmt clippy && rustup target add wasm32-unknown-unknown'
 
-rust_checks() {
-step format cargo fmt --all --check
 # Engine code names no kind (K3, #2667): the fixture kinds' names are in no Rust code under the crates' src/. Comment
 # lines and lines that embed a fixture file (data) are set aside; tests and fixtures name kinds on purpose.
+no_kind_names() {
 step no-kind-names bash -c '! grep -rniEw --include="*.rs" "lamps?|seats?|cups?" crates/*/src |
   grep -vE "^[^:]+:[0-9]+:[[:space:]]*//" | grep -v "include_str!"'
+}
+rust_checks() {
+step format cargo fmt --all --check
+no_kind_names
 step lints cargo clippy --workspace --all-targets --locked -- -D warnings
 # replica's WASM-only code (the wasm-bindgen export) is linted on its own target too.
 step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked -- -D warnings
@@ -261,6 +266,30 @@ speed_bars() {
     node --test client/src/reflex/*.test.mjs client/src/cli/*.test.mjs client/src/daemon/daemon.test.mjs ||
     echo "::warning::a speed bar was missed (see above)"'
 }
+
+# The pre-push check. Changed means against the merge base with V2_QUICK_BASE (default origin/main), plus uncommitted
+# and untracked files. A change to the workspace's Cargo.toml, Cargo.lock, clippy.toml or toolchain lints everything.
+# It lints the changed crates only: a crate whose dependents break is CI's catch, not this one's.
+quick() {
+  step format cargo fmt --all --check
+  no_kind_names
+  local base all= f d name seen=' ' args=()
+  base=$(git merge-base HEAD "${V2_QUICK_BASE:-origin/main}" 2>/dev/null) || base=HEAD
+  while IFS= read -r f; do
+    [[ -n $f ]] || continue
+    case "$f" in Cargo.toml | Cargo.lock | clippy.toml | rust-toolchain.toml) all=1; continue ;; esac
+    d=$(dirname "$f")
+    while [[ $d != . && ! -f $d/Cargo.toml ]]; do d=$(dirname "$d"); done
+    [[ $d != . ]] || continue
+    name=$(sed -n 's/^name *= *"\(.*\)"$/\1/p' "$d/Cargo.toml" | head -n1)
+    [[ -n $name && $seen != *" $name "* ]] || continue
+    seen+="$name "; args+=(-p "$name")
+  done < <({ git diff --name-only --relative "$base"; git ls-files --others --exclude-standard; } | sort -u)
+  if [[ -n $all ]]; then step lints cargo clippy --workspace --all-targets --locked -- -D warnings
+  elif ((${#args[@]})); then step lints cargo clippy "${args[@]}" --all-targets --locked -- -D warnings
+  else echo "v2: no Rust crate changed since $(git rev-parse --short "$base"); Clippy skipped"; fi
+}
+if [[ $leg == quick ]]; then quick; exit 0; fi
 
 # The legs. `all` keeps one order that satisfies every read above.
 on() { [[ $leg == all || $leg == "$1" ]]; }

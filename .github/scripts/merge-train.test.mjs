@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { awaitHead, blocker, releaseFreeze, dropped, enqueueArgs, fullScope, HEAD_WAIT_MS, holdAction, landingMode, mainCiState, maintainerApproved, MIXED_CAP, next, parseChecks, queued, queueRequired, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
+import { awaitHead, blocker, releaseFreeze, dropped, enqueueArgs, fullScope, HEAD_WAIT_MS, holdAction, landingMode, mainCiState, maintainerApproved, MIXED_CAP, next, parseChecks, queued, queueRequired, reportDequeued, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
 import { JOBS } from './ci-scope.mjs';
 
 const M = 'owner';
@@ -582,4 +582,19 @@ test('a pinned-sha release (release.yml -f sha) sets no freeze: the train keeps 
   const r = during.run();
   assert.deepEqual([r.pr, r.mode, r.frozen], [22, 'queue', undefined]);
   assert.deepEqual(during.reads.held, [], 'nothing is dequeued or has its auto-merge disabled');
+});
+
+test('reportDequeued: a PR the queue dropped is ejected with the reason and alerted on the agenda issue (rule 11)', () => {
+  const ejected = [], comments = [];
+  const api = { eject: x => ejected.push(x), comment: (repo, n, body) => comments.push({ repo, n, body }) };
+  reportDequeued({ repo: 'o/r', pr: 3657, reason: 'CI_FAILURE', notifyIssue: '1960', api });
+  assert.equal(ejected.length, 1);
+  assert.match(ejected[0].message, /reason: `CI_FAILURE`/);
+  assert.deepEqual(comments.map(c => [c.repo, c.n]), [['o/r', '1960']]);
+  assert.match(comments[0].body, /#3657 left the queue without merging \(reason: `CI_FAILURE`\)/);
+  // No notify issue: the PR comment only. A failed alert never stops the ejection.
+  reportDequeued({ repo: 'o/r', pr: 1, api });
+  assert.equal(comments.length, 1);
+  reportDequeued({ repo: 'o/r', pr: 2, notifyIssue: 9, api: { eject: x => ejected.push(x), comment: () => { throw Error('locked'); } } });
+  assert.equal(ejected.length, 3);
 });

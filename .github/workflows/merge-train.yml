@@ -8,7 +8,8 @@
 #                        untested against what is ahead of it
 #   conflict             a PR that conflicts takes the rebase and Claude resolution below, then enqueues
 #   unlabeled            removing merge:ready takes the PR out of the queue, or disables its auto-merge
-#   dequeued             a PR the queue drops without merging loses merge:ready and gets a comment with the reason
+#   dequeued             a PR the queue drops without merging loses merge:ready and gets a comment with the reason;
+#                        the same alert goes to the agenda issue (MERGE_TRAIN_NOTIFY_ISSUE, default 1960 for this alert)
 #   A red head check does not eject in this mode: auto-merge waits, and a fix enters the queue by itself.
 #   mixed cap            a PR with any file outside the low-risk paths (LOW_RISK in .github/scripts/ci-scope.mjs) waits,
 #                        keeping merge:ready, while MIXED_CAP (8, merge-train.mjs) such PRs are queued or set to
@@ -157,6 +158,7 @@ jobs:
       ACTION: ${{ inputs.exit }}
       REASON: ${{ inputs.reason }}
       RELEASE_FREEZE: ${{ vars.RELEASE_FREEZE }}
+      NOTIFY_ISSUE: ${{ vars.MERGE_TRAIN_NOTIFY_ISSUE || '1960' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -170,7 +172,7 @@ jobs:
             node .github/scripts/merge-train.mjs hold --repo "$REPO" --pr "$PR"
           else
             sleep 20
-            node .github/scripts/merge-train.mjs dequeued --repo "$REPO" --pr "$PR" --reason "$REASON"
+            node .github/scripts/merge-train.mjs dequeued --repo "$REPO" --pr "$PR" --reason "$REASON" --notify-issue "$NOTIFY_ISSUE"
           fi
       - name: Start the train
         env:

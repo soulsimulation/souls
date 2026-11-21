@@ -49,17 +49,26 @@ Fresh-session starter (orientation only):
 
 - **Only the agenda is dispatched**, in its order: one task issue per lane. New work enters by adding a task issue
   to the agenda. A feature idea, a label or a restarted session authorizes nothing.
-- **The coordinator writes each task's bounds before dispatch**: a ceiling of 1 to 4 agent-hours, a Touches list,
-  at most five acceptance items, what is not in it and a stop rule
+- **The coordinator writes each task before dispatch**: an estimate in agent-hours, the files it expects to
+  touch, at most five acceptance items, what is not in it and a stop rule
   ([template](../../.github/ISSUE_TEMPLATE/task.yml)). Split larger outcomes into several tasks without dropping
   scope; sequence shared-contract changes before their consumers.
 - **The brief is short**: "Work task issue #N to its stop rule. Read AGENTS.md, .claude/agents/lane.md and the issue.
   Do nothing outside it. State the time you took in the pull request." Add only the base revision and private
   bindings, the latter through a private channel.
-- **Never extend a task by message.** Edit the issue or open a new one. Only the coordinator changes Acceptance,
-  Touches or the ceiling.
+- **Never extend a task by message.** Edit the issue or open a new one. Only the coordinator changes the issue.
+- **No per-file grants, minute ceilings or pool grants.** A lane edits what the fix needs and lists the files in its
+  pull request; conflicts are resolved at merge by the second lane or a resolver. An estimate is not a limit: a lane
+  reports when stuck or about 2× over and continues unless told to stop. Work Gene ordered needs no re-approval.
+- **Locks only for heavy builds** (the Saturn cargo slots). Browser runs, node tests and single serves run freely,
+  and proof harnesses accept real-run evidence (attempt limits, fingerprints and descriptor pins never block a
+  passing capture).
+- **No long-lived stacks.** A stacked branch lands within about 4 hours or merges into main early; the integrator
+  lands the base first. A PR that leaves the merge queue unmerged is posted automatically on the PR and on the
+  agenda issue (the merge train's `queue-exit`); whoever owns it fixes and relabels it the same hour.
 - **Isolate writers.** One writer per worktree, test data directory and port set; read-only assets and caches are
-  shared. Prefer lanes that touch different files; serialize coupled work. A claim label is a record, not a lock.
+  shared. Prefer lanes that touch different files and serialize coupled work, but nobody owns a file. A claim label
+  is a record, not a lock.
 - **Capacity.** The worker ceiling is a maximum, not a target; the steward and reviewers count against it. Honor
   the executor's real limit and report it. Stop dispatching while more than eight pull requests are ready and
   unmerged. When a lane hands back, dispatch its next task in the same turn. On every wake, reconcile every lane.
@@ -90,9 +99,8 @@ outcome; a standing rule that must survive handoffs goes in the state file with 
 
 ## Review and sign
 
-Review each pull request against its issue's Acceptance and Touches. Send back work that goes beyond the
-acceptance, however good. Outside Touches, only mechanical edits of ten lines or fewer per file, each listed in the
-pull request, are allowed, plus a fix listed under "Also fixed" of up to about 50 lines in the same area. A small
+Review each pull request against its issue's Acceptance. Send back work that goes beyond the acceptance, however
+good. Files outside the expected ones are fine when the fix needs them and the pull request lists them. A small
 defect a lane found on the way is fixed in its pull request under "Also fixed" when it keeps the tier and the area;
 otherwise it gets its own small pull request, with no issue. An issue is filed only for work that will not start
 today, needs Gene's decision or is larger than about 2 hours. A follow-up you dispatch from a finding carries its
@@ -128,8 +136,8 @@ the workaround tried.
 ## Reporting
 
 After each wave of dispatches and each release, post a checkpoint on the agenda issue: running, merged, waiting on
-Gene. With each release, add the table of tasks merged since the last one: ceiling, hours taken and how each ended
-(done, stopped at the ceiling, stopped on scope). For the queue, run `node tools/coordinator/status.mjs --since
+Gene. With each release, add the table of tasks merged since the last one: estimate, hours taken and how each ended
+(done, reported over the estimate, stopped on scope). For the queue, run `node tools/coordinator/status.mjs --since
 <time>`: merges, the `merge:ready` queue in train order, `needs:rebase` and Actions. Report milestones,
 releases, failures and decisions to Gene, not every pull request, and do not refresh unchanged status.
 
