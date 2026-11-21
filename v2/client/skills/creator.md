@@ -50,6 +50,8 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `find <words> [--category c] [--has slot:sit]` | kinds that match, best first, each with why |
 | `recommend <what you want to make>` | kinds for each need it names, the words no kind answers, and an example batch |
 | `catalog [--category c] [--has ...]` / `taxonomy` | every kind, one each / categories and what kinds offer (`--has` names) |
+| `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
+| `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
 
 `find`, `recommend`, `catalog` and `taxonomy` read the world's kinds kept in your home: they ask the world nothing
 and cost nothing. They print JSON; add `--lines` for one line per kind.
