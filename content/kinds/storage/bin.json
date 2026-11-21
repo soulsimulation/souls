@@ -34,6 +34,8 @@
   "slots": {
     "inside": {
       "admits": "thing",
+      "kinds": ["eden:wrapper", "eden:litter"],
+      "stand": "stand",
       "most": 10,
       "at_mm": [
         0,
@@ -115,6 +117,22 @@
           "event": "shut"
         }
       ]
+    },
+    "put_in": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "thing": { "type": "thing" } },
+      "needs": [{ "need": "held_by_actor", "thing": { "arg": "thing" } }, { "need": "slot_free", "slot": "inside" }],
+      "steps": [{ "step": "walk_to", "point": "stand" }, { "step": "put", "slot": "inside" }],
+      "effects": [{ "change": "reparent", "what": { "arg": "thing" }, "into": "inside", "event": "binned" }]
+    },
+    "take_out": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "thing": { "type": "thing" } },
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "walk_to", "point": "stand" }, { "step": "take" }],
+      "effects": [{ "change": "reparent", "what": { "arg": "thing" }, "into": "actor_hand", "event": "taken_out" }]
     }
   },
   "motion": {
@@ -141,7 +159,7 @@
     "shape": {"round":15,"shapes":[{"kind":"cyl","at":[0,390,0],"r":210,"h":780,"segments":10,"r2":240,"tint":"body"},{"kind":"cyl","at":[0,800,0],"r":270,"h":50,"segments":10,"tint":"lid","role":"lid","pivot":[0,800,-270]},{"kind":"sphere","at":[0,840,0],"r":90,"segments":6,"tint":"lid","scale":[1000,600,1000],"role":"lid","pivot":[0,800,-270]},{"kind":"cyl","at":[0,600,0],"r":245,"h":40,"segments":10,"tint":"band"}],"palette":{"body":"#3d5a45","lid":"#2b3a30","band":"#c9b26b"},"tags":["prop","street","bin","litter"]}
   },
   "text": {
-    "card": "A litter bin with a lid: open it to put rubbish in, carry it in both hands.",
+    "card": "A litter bin: put rubbish in it by hand; its lid opens and closes.",
     "storage": "storage",
     "rubbish": "rubbish",
     "dustbin": "dustbin"
