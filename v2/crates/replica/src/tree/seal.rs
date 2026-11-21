@@ -390,6 +390,33 @@ impl Tree {
             .collect())
     }
 
+    /// Every node's record and each audience's record, worked out whole, reading and writing no mark (#3833): what
+    /// [`Tree::unseal`] reads a tree back from, without the records an earlier seal already gave.
+    pub fn seal_whole(&self) -> R<Sealed> {
+        let scan = self.scan();
+        let mut nodes = Vec::new();
+        let mut tops = BTreeMap::new();
+        for (a, slots) in &scan.tops {
+            let mut hashes = Vec::with_capacity(slots.len());
+            for slot in slots {
+                hashes.push(self.whole_record(*slot, &mut nodes)?.to_value());
+            }
+            tops.insert(*a, hashes);
+        }
+        let audiences = self.audiences(scan, tops)?;
+        Ok(Sealed { nodes, audiences })
+    }
+
+    fn whole_record(&self, slot: u32, out: &mut Vec<(Hash, Vec<u8>)>) -> R<Hash> {
+        let mut hashes = Vec::new();
+        for c in self.covered(slot) {
+            hashes.push(self.whole_record(c, out)?.to_value());
+        }
+        let (h, bytes) = self.node_record(slot, hashes)?;
+        out.push((h, bytes));
+        Ok(h)
+    }
+
     /// No change waits for a seal: the root holds its sealed hash, so every node does (a change marks its ancestors).
     pub fn sealed(&self) -> bool {
         self.nodes[self.root as usize].hash.is_some()

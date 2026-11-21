@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  allowedProofLinks, carriedIssues, checkPr, clipPreviews, issueNumberFromPath, linkedIssues, loadChecks, parseAudit, parseChecklist, prMode, renderComment, sections, skeleton, validateProof, proofHostProblem, MARKER, SCHEMA,
+  allowedProofLinks, carriedIssues, checkPr, ciRunAt, clipPreviews, minimumBody, summaryLine, issueNumberFromPath, linkedIssues, loadChecks, parseAudit, parseChecklist, prMode, renderComment, sections, skeleton, validateProof, proofHostProblem, MARKER, SCHEMA,
 } from './acceptance.mjs';
 
 const policy = loadChecks();
@@ -416,4 +416,65 @@ test('a note cut inside a link renders without the partial link, and device deta
   const kept = withNote('fine');
   kept.checklist[0].note = `see ${hostUrl}`;
   assert.throws(() => renderComment(kept), /Publication blocked: local service URL/);
+});
+
+// Process rule 6 (docs/process/agent-workflow.md#pr-body): the journal entry is advice; the required minimum blocks.
+test('advisory: a body with an issue link and a one-line summary passes proof-ok at every tier, with the journal as warnings', () => {
+  const minimal = 'Closes #12\n\nPhones open the seat menu on tap.\n';
+  for (const tier of ['T0', 'T1', 'T2', 'T3']) {
+    const r = checkPr({ body: minimal, tier, policy });
+    assert.equal(r.required.ok, true, `${tier}: ${r.required.problems.join('; ')}`);
+    if (tier !== 'T0') assert.equal(r.ok, false, `${tier}: the full journal entry is still reported as incomplete`);
+    const c = renderComment(r, { required: policy.required[tier] });
+    assert.match(c, /`proof-ok` passes/);
+    if (tier !== 'T0') assert.match(c, /\*\*Advice\*\*/);
+  }
+  // A full journal entry passes both.
+  const full = checkPr({ body: body(), tier: 'T1', policy });
+  assert.deepEqual([full.ok, full.required.ok], [true, true]);
+});
+
+test('advisory: the required minimum is an issue link and a one-line summary', () => {
+  assert.deepEqual(minimumBody('Closes #12\n\nPhones open the seat menu on tap.').problems, []);
+  assert.deepEqual(minimumBody('Phones open the seat menu on tap (https://github.com/o/r/issues/12).').issues, [12]);
+  assert.match(minimumBody('Phones open the seat menu on tap.').problems.join(), /issue link/);
+  assert.match(minimumBody('Closes #12').problems.join(), /summary/);
+  assert.match(minimumBody('').problems.join(), /issue link.*summary|summary/);
+  assert.equal(summaryLine('## Problem\n<!-- not this -->\nCloses #12\n- [x] **A1** done\nThe seat menu opens on phones.'), 'The seat menu opens on phones.');
+  // The unfilled template has neither, so it still fails the required check.
+  const template = readFileSync(fileURLToPath(new URL('../../.github/pull_request_template.md', import.meta.url)), 'utf8');
+  assert.equal(checkPr({ body: template, tier: 'T0', policy }).required.ok, false);
+});
+
+test('advisory: a privacy finding still blocks, at every tier and in the minimal body', () => {
+  const privatePath = ['', 'Users', 'private-person', 'workspace'].join('/');
+  for (const tier of ['T0', 'T2']) {
+    const r = checkPr({ body: `Closes #12\n\nThe menu failed in ${privatePath} on tap.`, tier, policy });
+    assert.equal(r.required.ok, false);
+    assert.match(r.required.problems.join(' '), /publication privacy: device details detected/);
+    const c = renderComment(r);
+    assert.match(c, /`proof-ok` fails/);
+    assert.ok(!c.includes('private-person'));
+  }
+});
+
+test('advisory: prMode passes a minimal body, keeps the T3 maintainer gate blocking, and links the CI run', async () => {
+  const run = 'https://github.com/o/r/actions/runs/99';
+  const gh = (files, labels = []) => path => {
+    if (path.endsWith('/pulls/7')) return { body: 'Closes #12\n\nPhones open the seat menu on tap.', labels, user: { login: 'agent' }, head: { sha: 'abc1234' }, draft: false };
+    if (path.includes('/pulls/7/files')) return [[{ filename: files }]];
+    if (path.includes('/pulls/7/reviews')) return [[]];
+    if (path.endsWith('/issues/12')) return { body: '### Acceptance\n- [ ] **A1** Tapping a seat opens its menu' };
+    if (path.includes('/actions/workflows/ci.yml/runs')) return { workflow_runs: [{ event: 'pull_request', html_url: 'https://github.com/o/r/actions/runs/98' }, { event: 'workflow_dispatch', html_url: run }] };
+    throw Error(`unexpected ${path}`);
+  };
+  const t2 = await prMode({ repo: 'o/r', pr: 7, gh: gh('apps/web/src/seat.ts'), fetchImpl: async () => { throw Error('no fetch'); }, policy });
+  assert.equal(t2.result.required.ok, true, t2.result.required.problems.join('; '));
+  assert.equal(t2.result.ok, false, 'the missing clip and proof.json are advice');
+  assert.match(t2.comment, /`proof-ok` passes/);
+  assert.ok(t2.comment.includes(`CI run at the head: ${run}`));
+  const t3 = await prMode({ repo: 'o/r', pr: 7, gh: gh('apps/server/src/nav/a.ts'), fetchImpl: async () => { throw Error('no fetch'); }, policy, maintainer: 'o' });
+  assert.equal(t3.result.required.ok, false, 'T3-T4 still wait for the maintainer');
+  assert.match(t3.result.required.problems[0], /maintainer sign-off/);
+  assert.equal(ciRunAt(() => { throw Error('down'); }, 'o/r', 'abc'), null, 'an unreadable CI run never fails the check');
 });
