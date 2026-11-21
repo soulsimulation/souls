@@ -52,7 +52,8 @@
 //     {"op":"pending"}                                R20's (#3328) check for a scheduler: `due` when a message is
 //                                                     open or wakes can be handed now; it sends and takes nothing
 //     {"op":"pending","list":true}                    C15's (#3685): the open messages, and what arrived since the
-//                                                     last read (taken, as `wait 0` takes it), with no wait
+//                                                     last read (taken, as `wait 0` takes it), with no wait; then, as `brief`,
+//                                                     the brief `look` gives (#3782), so a turn needs no `look` first
 //     {"op":"ack","id":"<message id>","reply":"..","close":"done|failed"}   C15's: a reply that answers the message
 //                                                     with no act, closing it `done` or `failed`; with no `close`, an
 //                                                     interim note to the owner's page, the message left open (#3781)
@@ -826,7 +827,13 @@ async function answer(req) {
       const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
       return closing({ ok: true, connected: signedIn, open, events: got, ...said, ...(handed.length ? { wakes: handed } : {}),
         ...(open.length ? { next: 'serve each open message: act <act> --for <its id>, or answer it: ack <its id> "<reply>" --close done|failed' } : {}) },
-      (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)) }), { now: true });
+      (rows, changes) => {
+        // #3782: the brief `look` gives, after the messages and arrivals (today's `pending` carries it, N-C18), so the
+        // turn needs no `look` first. What was heard is in `events` above, so not again in the brief.
+        const b = brief(rows, { me: ME, changes, ageMs: performance.now() - (confirmedAt ?? startedAt) });
+        delete b.changed; // the answer's own closes it
+        return { events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)), brief: b };
+      }, { now: true });
     }
     case 'ack': {
       // C15 (#3685): an answer to the owner's message with no act: a reply, and the close (`done`, or `failed` for a no).

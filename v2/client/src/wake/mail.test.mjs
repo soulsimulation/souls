@@ -13,6 +13,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
+import { BRIEF_MOST } from '../brief/brief.mjs';
 
 const v2 = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const bin = (n) => process.env[n.toUpperCase()] ?? join(v2, 'target/debug', n);
@@ -208,4 +209,25 @@ test('C15 (#3685): pending lists what is open and what arrived; ack answers with
   assert.ok(rides.open || rides.code === 'mail-not-found', JSON.stringify(rides));
   const byAct = await read(lamp.id);
   assert.notEqual(byAct.outcome, 'replied', 'closed once, by its act');
+});
+
+test('#3782: pending carries the brief look gives, after the messages and arrivals, within the brief\'s own limit', async () => {
+  await ask({ op: 'wait', seconds: 0 }); // what came before, taken
+  const m = await mailbox('put', { soul: GRANT, text: 'where are you?' });
+  const p = await waitFor(async () => { const r = await ask({ op: 'pending', list: true }); return r.open.some((o) => o.id === m.id) && r; });
+  const look = await ask({ op: 'look' });
+  assert.ok(p.brief, JSON.stringify(p));
+  // The same brief: the room, what is in it, the places around it and the bodies, as `look` has them.
+  for (const k of ['room', 'here', 'outward', 'bodies']) assert.deepEqual(p.brief[k], look[k], k);
+  assert.equal(p.brief.changed, undefined, 'the answer\'s own changed block closes it, as look\'s does');
+  const keys = Object.keys(p);
+  assert.ok(keys.indexOf('open') < keys.indexOf('brief') && keys.indexOf('events') < keys.indexOf('brief'), keys.join(' '));
+  const bytes = (v) => Buffer.byteLength(JSON.stringify(v));
+  assert.ok(bytes(p.brief) <= BRIEF_MOST, `brief ${bytes(p.brief)} bytes`);
+  // Today's pending is its fields plus the brief under its budget: without the messages and arrivals themselves, the
+  // answer is the brief and at most 600 bytes of fields.
+  const { open, events, ...rest } = p;
+  report.pendingBytes = { brief: bytes(p.brief), rest: bytes(rest), whole: bytes(p) };
+  assert.ok(bytes(rest) <= BRIEF_MOST + 600, JSON.stringify(report.pendingBytes));
+  await ask({ op: 'ack', id: m.id, reply: 'here', close: 'done' });
 });
