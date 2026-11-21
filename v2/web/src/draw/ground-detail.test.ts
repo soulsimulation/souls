@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import type { NodeRec } from '../source/source.ts';
 import { WorldView, terrainColour } from './world.ts';
+import { WIND, setWind } from '../sky/wind.ts';
 import { DRAPES, GroundCover, bankColour, cellKind, coverSetting, drapeMesh, siteAt, wetness, type CoverGround } from './drapes.ts';
 
 const ROT: NodeRec['rot'] = [1 << 30, 0, 0, 0];
@@ -90,6 +91,32 @@ test('A1: the cover fills around the camera, thins with distance, and is off on 
   assert.equal(coverSetting('', { tier: 'phone', reason: 'touch' }).enabled, false);
   assert.equal(coverSetting('?cover=1', { tier: 'phone', reason: 'touch' }).enabled, true);
   assert.equal(coverSetting('?cover=0', { tier: 'full', reason: 'desktop' }).enabled, false);
+});
+
+test('#3783: every blade, tuft and flower sways with the shared wind, rooted at its foot', () => {
+  const cover = new GroundCover(meadow(), { enabled: true, reason: 'test' });
+  for (const kind of ['tall', 'tuft', 'flower']) {
+    const mesh = cover.group.children.find((m) => m.name === `ground cover: ${kind}`) as THREE.InstancedMesh;
+    const g = mesh.geometry, w = g.getAttribute('edenWind'), pos = g.getAttribute('position');
+    assert.ok(w && w.count === pos.count, `${kind} carries its sway weights`);
+    for (let i = 0; i < pos.count; i++) assert.equal(w.getX(i), Math.max(0, pos.getY(i)), `${kind}: the bend grows with height, none at the root`);
+    const m = mesh.material as THREE.Material;
+    assert.equal(m.userData.windMode, 'grass');
+    const shader = { uniforms: {} as Record<string, unknown>, vertexShader: '#include <begin_vertex>\n#include <color_vertex>', fragmentShader: '#include <normal_fragment_begin>\n#include <color_fragment>' };
+    m.onBeforeCompile(shader as any, null as any);
+    assert.ok(shader.uniforms.uEdenWind === WIND && 'uCover' in shader.uniforms, `${kind}: the wind and the cover's fade both apply`);
+    assert.match(shader.vertexShader, /edenWind/);
+    assert.match(m.customProgramCacheKey(), /ground-cover-1:.*wind-1:grass/);
+  }
+});
+
+test('#3783: still air under reduced motion; the sway follows world time only', () => {
+  setWind(100, 0.9, 0, true);
+  assert.equal(WIND.value.y, 0, 'reduced motion holds the grass still');
+  setWind(100, 0.9, 0, false);
+  const a = { ...WIND.value };
+  setWind(100, 0.9, 0, false);
+  assert.deepEqual({ ...WIND.value }, a, 'the same world second, the same sway');
 });
 
 test('A1: what stands on the ground and every non-lawn area keep the cover off', () => {
