@@ -203,6 +203,47 @@ fn b16_the_walk_out_is_todays_shuffle() {
     );
 }
 
+/// The stance values the world wrote on `body`'s node since the last call (#3791, `bodies::F_STANCE`).
+fn stances(b: &mut Bodies, body: replica::ids::Id) -> Vec<u64> {
+    std::mem::take(&mut b.stance_log)
+        .into_iter()
+        .flat_map(|e| match e.body {
+            replica::effects::Body::Changes(cs) => cs,
+            _ => Vec::new(),
+        })
+        .filter_map(|c| match c.change {
+            replica::effects::Change::Set {
+                node,
+                field: worldd::bodies::F_STANCE,
+                to: replica::encode::Value::Uint(v),
+                ..
+            } if node == body => Some(v),
+            _ => None,
+        })
+        .collect()
+}
+
+/// #3791 A2: a body the wind-down lays down on the ground has its stance, lie, written on its node in that tick, and
+/// cleared when its agent wakes it: the page draws it from the node, a page opened later included.
+#[test]
+fn b16_the_sleeping_body_is_public_as_lying() {
+    let mut b = testbodies::bodies().unwrap();
+    let soul = testbodies::body();
+    b.wind.set_knobs(SHORT, 0);
+    let mut now = 0;
+    let mut seen = Vec::new();
+    while now <= 120 * S {
+        b.step(now);
+        b.wind_log.clear();
+        seen.extend(stances(&mut b, soul));
+        now += TICK;
+    }
+    assert_eq!(b.wind.word(soul), Some(Word::Asleep));
+    assert_eq!(seen, [2], "lying, written once");
+    b.agent_acted(soul, now);
+    assert_eq!(stances(&mut b, soul), [0], "woken: cleared");
+}
+
 // --- Served on Eden ------------------------------------------------------------------------------------------------
 
 // A served run waits on the real clock for the world it serves (as `tests/serve.rs`).
