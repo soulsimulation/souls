@@ -54,7 +54,7 @@ export const FIX = {
   'edit.too-many-operations': 'split the batch: at most 256 operations',
   'edit.too-many-nodes': 'remove less at once',
   'edit.batch': 'see the usage: souls-god.mjs with no arguments',
-  'edit.unanswered': 'the world did not answer within 10 s: describe to see whether it was done',
+  'edit.unanswered': 'the world did not answer in time (10 s, a land edit 120 s): describe to see whether it was done',
   'edit.no-copy': 'the daemon has no copy yet: run status until connected is true',
   'edit.weather-level': 'levels are 0 to 1',
   'edit.weather-ended': 'give --minutes from 5 to 360',
@@ -185,7 +185,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
     const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
     if (!creator) throw Object.assign(new Error(`creators here: ${creators.join(', ') || 'none; pair first'}`), { code: 'which-creator' });
-    const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: 15_000 });
+    const answer = await call(home, creator, asked.req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: asked.req.world?.verb === 'land' ? 130_000 : 15_000 });
     out(withFix(answer));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {

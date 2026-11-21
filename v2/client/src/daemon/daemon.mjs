@@ -737,6 +737,7 @@ const nothingYet = () => !events.some((e) => e.kind !== 'synced');
 
 // --- G7 (#2796): a creator's edits -------------------------------------------------------------------------------
 const EDIT_WITHIN = 10_000; // an edit's answer is awaited this long; past it, it stays unanswered in `status`
+const EDIT_BULK_WITHIN = 120_000; // a bulk edit's (#3695)
 /** The world's kinds text, which the creator's pairing or setup keeps in the home; empty when there is none. */
 const kindsText = () => { try { return readFileSync(join(home, 'kinds', `${seat.world}.kinds`), 'utf8'); } catch { return ''; } };
 /** The pinned kinds by full name, with what each admits; {} without a kinds text. */
@@ -1084,8 +1085,11 @@ async function answer(req) {
       const bytes = wire.wireEdit(scope, seat.grant.counter, true, BigInt(state.sequence), unhex(copyVersion), batch);
       save();
       const sequence = state.sequence;
+      // A bulk edit (#3695, a landform: the open ground rebuilt off the clock for its walkers) is answered in under a
+      // minute on full Eden; its answer is awaited that long.
+      const within = bytes.length > INTENT_MOST ? EDIT_BULK_WITHIN : EDIT_WITHIN;
       const got = new Promise((ok) => {
-        const t = setTimeout(() => { editsWaiting.delete(sequence); ok(null); }, EDIT_WITHIN);
+        const t = setTimeout(() => { editsWaiting.delete(sequence); ok(null); }, within);
         editsWaiting.set(sequence, (a) => { clearTimeout(t); editsWaiting.delete(sequence); ok(a); });
       });
       if (bytes.length > INTENT_MOST) {
