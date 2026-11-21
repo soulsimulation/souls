@@ -199,7 +199,7 @@ renderer.setAnimationLoop((now) => {
   const dt = now - last;
   fps = fps * 0.95 + (1000 / Math.max(1, dt)) * 0.05;
   last = now;
-  things.update(cam.camera.position);
+  things.update(cam.camera.position, cam.camera);
   // The shadow's square moves in whole texels, so standing shadows don't shimmer as the camera moves.
   const texel = (2 * SHADOW) / sun.shadow.mapSize.x, at = cam.controls.target;
   sun.target.position.set(Math.round(at.x / texel) * texel, at.y, Math.round(at.z / texel) * texel);
