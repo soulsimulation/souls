@@ -367,7 +367,13 @@ mod tests {
 
     /// Walks `who` round and round the closed line `ring` at 1.4 m/s, aiming at the corner `ahead` corners on from
     /// the one it last passed, its leg's end `to`, for `ticks` ticks: the tick it was found stalled, if any.
-    fn round(w: &mut Watch, ring: &[[i64; 2]], ahead: usize, to: [i64; 2], ticks: u32) -> Option<u32> {
+    fn round(
+        w: &mut Watch,
+        ring: &[[i64; 2]],
+        ahead: usize,
+        to: [i64; 2],
+        ticks: u32,
+    ) -> Option<u32> {
         let (mut k, mut p) = (0, ring[0]);
         for t in 0..ticks {
             let aim = ring[(k + ahead) % ring.len()];
@@ -382,7 +388,10 @@ mod tests {
                 if d <= go {
                     (p, k, go) = (next, (k + 1) % ring.len(), go - d);
                 } else {
-                    p = [p[0] + (next[0] - p[0]) * go / d, p[1] + (next[1] - p[1]) * go / d];
+                    p = [
+                        p[0] + (next[0] - p[0]) * go / d,
+                        p[1] + (next[1] - p[1]) * go / d,
+                    ];
                     go = 0;
                 }
             }
@@ -437,7 +446,13 @@ mod tests {
             } else {
                 (1_470_000 - f, [-30_000_000, -1_000_000])
             };
-            w.seen(fixture(9), [x, 0], aim, [0, -40_000_000], Micros::from(t) * TICK)
+            w.seen(
+                fixture(9),
+                [x, 0],
+                aim,
+                [0, -40_000_000],
+                Micros::from(t) * TICK,
+            )
         });
         assert!(found.is_some_and(|t| t <= 240), "{found:?}");
     }

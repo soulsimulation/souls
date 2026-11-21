@@ -919,9 +919,7 @@ fn a_walk_whose_act_times_out_mid_move_stops_and_ends_by_name() {
         .send(answers::Event::RunTo { tick: 100, done })
         .unwrap();
     ran.recv().unwrap();
-    let frame = rx
-        .recv_timeout(Duration::from_secs(20))
-        .expect("an answer");
+    let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
     assert_eq!(read_answer(&frame), Err("act.timed-out".into()));
     world.stop();
 

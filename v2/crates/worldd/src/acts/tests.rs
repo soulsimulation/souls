@@ -472,10 +472,9 @@ fn a_gateway_walk_is_watched_against_its_legs_end_not_its_granted_place() {
         let (_, stalled) = walk.step(&mut b, t * 50_000);
         assert!(!stalled, "found stalled at tick {t}, at {p:?}");
         // On 70 mm toward its corner.
-        let d = i64::try_from(
-            (i128::from(c[0] - p.x).pow(2) + i128::from(c[1] - p.z).pow(2)).isqrt(),
-        )
-        .unwrap();
+        let d =
+            i64::try_from((i128::from(c[0] - p.x).pow(2) + i128::from(c[1] - p.z).pow(2)).isqrt())
+                .unwrap();
         let go = d.min(70_000);
         let next = Vec3::new(
             p.x + (c[0] - p.x) * go / d.max(1),
