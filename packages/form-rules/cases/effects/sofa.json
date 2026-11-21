@@ -67,7 +67,7 @@
             "verdict": "yes",
             "changes": [
               { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "seat_1" } },
-              { "change": "set", "node": "t1", "field": "cushions", "n": 1, "to": "squashed" }
+              { "change": "set", "node": "t1", "field": "cushions", "n": 28, "to": "squashed" }
             ],
             "events": [
               { "event": "eden:flopped_down", "node": "t1", "changes": [0] },
@@ -81,7 +81,7 @@
           "receipt": "rc2",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "t1", "field": "cushions", "n": 1, "to": "plump" }],
+            "changes": [{ "change": "set", "node": "t1", "field": "cushions", "n": 28, "to": "plump" }],
             "events": [{ "event": "eden:cushions_plumped", "node": "t1", "changes": [0] }],
             "timers": []
           }

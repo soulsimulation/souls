@@ -173,6 +173,13 @@ fn serve_entries(
         lines.push(std::mem::take(&mut line));
     }
     print!("serve: {line}");
+    // The world's stdout stays read (#3825): with the pipe closed, its first line after start-up (a watchdog's stall
+    // report) panicked the thread that wrote it.
+    std::thread::spawn(move || {
+        for l in out.lines().map_while(Result::ok) {
+            println!("worldd: {l}");
+        }
+    });
     let s = UnixStream::connect(dir.join("gateway.sock")).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(90))).unwrap();
     let mut soul = Client(s, Id::new(Scope([0xc1; 16]), 1).unwrap(), 0, lineage);
@@ -488,16 +495,28 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
     );
     let mut on_things: Vec<Id> = mine.iter().map(|s| s.thing).collect();
     on_things.dedup();
+    // The world adds today's rowing punts to the facts it is built from (#3603), each with its entry's riders' seats:
+    // the facts read here have none.
+    let punts = lines
+        .iter()
+        .filter(|l| l.starts_with("punt: rowing-punt-") && l.contains(" is "))
+        .count();
+    let riders = found
+        .iter()
+        .find(|(k, _)| k == "eden:rowing_punt")
+        .and_then(|(_, e)| e.get("slots").and_then(|s| s.obj()))
+        .map_or(0, <[_]>::len);
+    println!("{punts} rowing punts added by the world, {riders} seats each");
     assert_eq!(
-        mine.len(),
+        mine.len() + punts * riders,
         registered,
         "the world registers every slot the entries declare"
     );
     assert_eq!(left, 0, "every seat placed on a floor");
-    assert_eq!(on, on_things.len(), "the things they are on");
+    assert_eq!(on, on_things.len() + punts, "the things they are on");
     assert_eq!(registered, declared, "every declared body slot registered");
-    // Every def today seats has at least today's slots, but those whose entries declare no body slot with a stand
-    // point (C17: the campfire's and the piano's).
+    // Every def today seats has at least today's slots, but the one whose entry declares no body slot with a stand
+    // point (C17: the campfire's). The piano's bench seats its pianist, as today (#3714).
     let none: Vec<&str> = short
         .iter()
         .filter(|d| by_def.get(*d).copied().unwrap_or(0) > 0)
@@ -506,8 +525,8 @@ fn c17_a1_a_seeded_eden_registers_its_seats_and_the_gateway_sits_on_one() {
     assert!(none.is_empty(), "short of today's slots: {none:?}");
     assert_eq!(
         short,
-        vec!["core-campfire@1".to_owned(), "core-piano@1".to_owned()],
-        "only the entries with no body slot"
+        vec!["core-campfire@1".to_owned()],
+        "only the entry with no body slot"
     );
     walked.expect("walked in to the armchair's stand point");
     sat.expect("sat in the armchair");
@@ -1288,6 +1307,17 @@ fn c22_a1_the_arcade_cabinets_play_ends_done() {
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c22_a2_the_desks_write_ends_done() {
     act_at("74.0,-1.0", "e_0f7fb44b", "eden:write", "c22a2").expect("written, done");
+}
+
+/// C22 sweep follow-up: a walk before a sit goes to the seat's own stand point, as the world's places hold it, not
+/// the entry's. The narrowboat's (today's e_13a2e4cf) `towpath` point is on the water by its hull, so no place within
+/// a sit's reach of it can be stood on; `worldd serve` moves the stern's stand point onto the bank, and `ride` (a walk
+/// to `stern`, then a sit in it) walks there and sits. Before, the walk searched only round the entry's point and
+/// ended `souls:no-way`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_walk_before_a_sit_goes_to_the_seats_own_stand_point() {
+    act_at("132.5,-21.7", "e_13a2e4cf", "eden:ride", "c22seat").expect("walked and seated, done");
 }
 
 /// How one form of a sweep ended ([`sweep`]): `done`, `refused <name>` at its start, `failed <name>` by its run's
@@ -2083,10 +2113,11 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
             )
             .unwrap();
             let stream = dir.join(world.get("stream").and_then(|v| v.str()).unwrap());
-            let (mut player, mut generation, mut next) = (None, Vec::new(), 0u64);
+            let (mut player, mut generation, mut next) = (None::<PublicPlayer>, Vec::new(), 0u64);
+            let mut crossed = 0u64;
             let (mut played, mut samples, mut lags, mut busy) =
                 (0u64, 0usize, Vec::new(), Duration::ZERO);
-            let (start, mut first_newest, mut last_newest) = (Instant::now(), None, 0u64);
+            let start = Instant::now();
             // Writer lag: world time now less the newest published part's end, µs, while measuring.
             let mut behind: Vec<i64> = Vec::new();
             // The same during the warm-up (the joins just made): (seconds since the walkers started, µs behind).
@@ -2095,7 +2126,7 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
             while !stop.load(Ordering::Relaxed) {
                 if measuring.is_none() && start.elapsed() >= warmup {
                     measuring = Some(Instant::now());
-                    (played, samples, busy, first_newest) = (0, 0, Duration::ZERO, None);
+                    (played, samples, busy) = (0, 0, Duration::ZERO);
                     lags.clear();
                 }
                 let Ok(bytes) = std::fs::read(stream.join("pointer")) else {
@@ -2112,25 +2143,62 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
                 };
                 let parts = stream.join("g").join(replica::encode::to_hex(g));
                 if *g != generation {
+                    // #3825: a live reader on the generation the handoff closes drains it to its end, where its state
+                    // is the new baseline's (the same digest), and crosses with no gap.
+                    if let (Some(p), Some(Value::Array(h)), Some(Value::Bytes(from))) =
+                        (player.as_mut(), fields.get(&9), fields.get(&10))
+                        && *from == generation
+                    {
+                        let old = stream.join("g").join(replica::encode::to_hex(from));
+                        let [Value::Uint(_), Value::Uint(end), Value::Bytes(digest)] = h.as_slice()
+                        else {
+                            panic!("a handoff")
+                        };
+                        while next < *end {
+                            let bytes = std::fs::read(old.join(next.to_string()))
+                                .expect("the old generation's part");
+                            p.play(&bytes)
+                                .expect("the public reader drains the old generation");
+                            samples += p.samples().len();
+                            next += 1;
+                        }
+                        assert_eq!(
+                            p.hash().unwrap(),
+                            *digest,
+                            "the old generation ends at the handoff"
+                        );
+                        crossed += 1;
+                    }
                     let headers = stream.ancestors().nth(3).unwrap().join("headers");
                     let header =
                         std::fs::read(headers.join(replica::encode::to_hex(&pointer.header)))
                             .unwrap();
                     let baseline = std::fs::read(parts.join("baseline")).unwrap();
-                    player =
-                        Some(PublicPlayer::start(&header, &baseline).expect("the public reader"));
+                    let fresh = PublicPlayer::start(&header, &baseline).expect("the public reader");
+                    if let Some(p) = &player
+                        && next > 0
+                    {
+                        assert_eq!(
+                            fresh.hash().unwrap(),
+                            p.hash().unwrap(),
+                            "no gap at the crossing"
+                        );
+                    }
+                    player = Some(fresh);
                     generation = g.clone();
                     next = 0;
                 }
-                let newest = pointer.newest.unwrap_or(0);
+                // A generation just begun has no part yet.
+                let Some(newest) = pointer.newest else {
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                };
                 let lag = answers::now() - pointer.newest_to.unwrap_or(0);
                 if measuring.is_some() {
-                    first_newest.get_or_insert(newest);
                     behind.push(lag);
                 } else {
                     warming.push((start.elapsed().as_secs_f64(), lag));
                 }
-                last_newest = newest;
                 let p = player.as_mut().unwrap();
                 while next <= newest {
                     let t = Instant::now();
@@ -2165,7 +2233,11 @@ fn i3799_a5_two_hundred_walkers_and_a_reader_that_keeps_up() {
                 behind.iter().max().copied().unwrap_or(0) as f64 / 1e6,
                 behind.last().copied().unwrap_or(0) as f64 / 1e6
             );
-            let written = last_newest - first_newest.unwrap_or(0);
+            // Parts are numbered within a generation (#3825): those written while measuring are those played then,
+            // and those left to play at the end, less those left at the start.
+            let written = (played + lags.last().copied().unwrap_or(0))
+                .saturating_sub(lags.first().copied().unwrap_or(0));
+            println!("generations crossed by the live reader: {crossed}");
             (
                 written as f64 / wall,
                 played as f64 / wall,
@@ -2255,17 +2327,46 @@ fn stream_files(views: &Path) -> BTreeMap<String, Vec<u8>> {
     out
 }
 
+/// How many generations of the public stream are on the disk under `views` (#3833).
+fn generations_on_disk(views: &Path) -> usize {
+    fn walk(d: &Path) -> usize {
+        let Ok(entries) = std::fs::read_dir(d) else {
+            return 0;
+        };
+        let mut n = 0;
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                n += if p.ends_with("g") {
+                    std::fs::read_dir(&p).map_or(0, |g| g.count())
+                } else {
+                    walk(&p)
+                };
+            }
+        }
+        n
+    }
+    walk(views)
+}
+
 /// #3799: the public writer cuts a part that only moves nodes by their rows, and any other whole; the stream is the
 /// same, byte for byte, as when every part is worked out whole (`SOULS_STREAM_WHOLE`). A recorded world
 /// (`V2_RECORDED_WORLD`, e.g. kept by the A5 run with `V2_KEEP_WORLD`) is served twice from copies with no stream: the
 /// stream is written again from the whole log at start-up, once each way; the two are compared file by file, and
-/// the time each start-up took to write it is printed.
+/// the time each start-up took to write it is printed. Both runs roll the stream over to a new generation every
+/// `V2_GENERATION_PARTS` (100) parts (#3825), so the rollovers' baselines are compared too. A third run (#3833) is
+/// killed twice while it writes, once 2 generations are on the disk and once 4 are, and started again each time from
+/// the newest generation's recovery seed: its stream is the same, byte for byte.
 #[test]
 #[ignore = "needs a recorded world (V2_RECORDED_WORLD) and a built worldd (see the module doc)"]
 fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
     let recorded = PathBuf::from(std::env::var("V2_RECORDED_WORLD").expect("V2_RECORDED_WORLD"));
     let mut runs = Vec::new();
-    for (tag, whole) in [("rows", false), ("whole", true)] {
+    for (tag, whole, kills) in [
+        ("rows", false, &[][..]),
+        ("whole", true, &[][..]),
+        ("restarted", false, &[2usize, 4][..]),
+    ] {
         let dir = std::env::temp_dir().join(format!("m3799r-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         copy_dir(&recorded, &dir);
@@ -2274,15 +2375,37 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
             let _ = std::fs::remove_dir_all(&p);
             let _ = std::fs::remove_file(&p);
         }
-        let mut c = Command::new(env!("CARGO_BIN_EXE_worldd"));
-        c.args(["serve", "--dir"])
-            .arg(&dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        if whole {
-            c.env("SOULS_STREAM_WHOLE", "1");
+        let command = || {
+            let mut c = Command::new(env!("CARGO_BIN_EXE_worldd"));
+            c.args(["serve", "--dir"])
+                .arg(&dir)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null());
+            if whole {
+                c.env("SOULS_STREAM_WHOLE", "1");
+            }
+            c.env(
+                "SOULS_STREAM_GENERATION_PARTS",
+                std::env::var("V2_GENERATION_PARTS").unwrap_or_else(|_| "100".into()),
+            );
+            // Nothing pruned while the start-up writes, however long it takes: every run keeps every generation.
+            c.env("SOULS_STREAM_PRUNE_GRACE_S", "86400");
+            c
+        };
+        // #3833: killed as a crash would, once `n` generations are on the disk, then started again.
+        for &n in kills {
+            let mut c = command();
+            let mut child = c.stdout(Stdio::null()).spawn().unwrap();
+            while generations_on_disk(&dir.join("views")) < n {
+                assert!(child.try_wait().unwrap().is_none(), "{tag}: still writing");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            child.kill().unwrap();
+            let _ = child.wait();
+            let _ = std::fs::remove_file(dir.join("gateway.sock"));
+            println!("{tag}: killed with {n} generations written");
         }
-        let mut child = c.spawn().unwrap();
+        let mut child = command().spawn().unwrap();
         let mut out = BufReader::new(child.stdout.take().unwrap());
         let (mut line, mut before, mut written) = (String::new(), None, None);
         while out.read_line(&mut line).unwrap() > 0 {
@@ -2323,6 +2446,10 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
         assert!(written.is_some(), "{tag}: the start-up wrote its stream");
         runs.push(files);
     }
+    assert_eq!(
+        runs[2], runs[0],
+        "#3833: restarted twice, the same stream byte for byte"
+    );
     let (rows, whole) = (&runs[0], &runs[1]);
     let both: Vec<&String> = rows.keys().filter(|k| whole.contains_key(*k)).collect();
     let differ: Vec<&&String> = both.iter().filter(|k| rows[**k] != whole[**k]).collect();
@@ -2334,11 +2461,93 @@ fn i3799_cuts_by_rows_are_byte_identical_to_whole_cuts_on_a_recorded_world() {
         whole.len() - both.len()
     );
     assert!(both.len() > 100, "a recorded world of many parts");
+    let generations: std::collections::BTreeSet<&str> = rows
+        .keys()
+        .filter_map(|k| k.split("/g/").nth(1)?.split('/').next())
+        .collect();
+    println!("{} generations", generations.len());
+    assert!(generations.len() > 1, "the stream rolled over (#3825)");
     assert!(
         differ.is_empty(),
         "byte for byte: {:?}",
         &differ[..differ.len().min(5)]
     );
+}
+
+/// #3833 A3: a world that ran with walkers is started again from a copy of its folder, as after a crash
+/// (`V2_RESTART_WORLD`, e.g. kept by the A5 run with `V2_KEEP_WORLD` after an hour of 60 walkers). It prints each
+/// start-up stage, how long the public writer took to open, the generations on the disk and the parts of the newest
+/// one (the only ones a restart reads again), and the recovery objects kept; the whole start-up is under 30 s.
+#[test]
+#[ignore = "needs a recorded world (V2_RESTART_WORLD) and a built worldd (see the module doc)"]
+#[allow(clippy::disallowed_methods)]
+fn i3833_a3_a_restart_after_an_hour_reads_only_the_newest_generation() {
+    let kept = PathBuf::from(std::env::var("V2_RESTART_WORLD").expect("V2_RESTART_WORLD"));
+    let dir = std::env::temp_dir().join(format!("m3833-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_dir(&kept, &dir);
+    let _ = std::fs::remove_file(dir.join("gateway.sock"));
+    let started = std::time::Instant::now();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let (mut line, mut stages) = (String::new(), BTreeMap::new());
+    while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+        if let Some(rest) = line.trim().strip_prefix("start-up: ")
+            && let Some((stage, ms)) = rest.rsplit_once(" at ")
+            && let Some(ms) = ms.strip_suffix(" ms").and_then(|m| m.parse::<u64>().ok())
+        {
+            println!("start-up: {stage} at {ms} ms");
+            stages.insert(stage.to_owned(), ms);
+        }
+        line.clear();
+    }
+    let took = started.elapsed();
+    let _ = child.kill();
+    let _ = child.wait();
+    let views = dir.join("views");
+    let world =
+        replica::rules::json::parse(&std::fs::read_to_string(views.join("world.json")).unwrap())
+            .unwrap();
+    let stream = dir.join(world.get("stream").and_then(|v| v.str()).unwrap());
+    let pointer = std::fs::read(stream.join("pointer")).unwrap();
+    let Value::Map(p) = decode(&pointer).unwrap().value else {
+        panic!("a pointer is a map")
+    };
+    let newest = match (&p[&8], &p[&1]) {
+        (Value::Bytes(g), Value::Uint(n)) => (replica::encode::to_hex(g), n + 1),
+        (Value::Bytes(g), _) => (replica::encode::to_hex(g), 0),
+        _ => panic!("the pointer names its generation"),
+    };
+    fn objects(d: &Path) -> usize {
+        std::fs::read_dir(d).map_or(0, |entries| {
+            entries
+                .flatten()
+                .map(|e| match e.path() {
+                    p if p.ends_with("objects") => std::fs::read_dir(&p).map_or(0, |o| o.count()),
+                    p if p.is_dir() => objects(&p),
+                    _ => 0,
+                })
+                .sum()
+        })
+    }
+    let objects = objects(&dir.join(".stream-recovery-store"));
+    let writer = stages["public stream"].saturating_sub(stages["replay"]);
+    println!(
+        "A3: listening after {:.2} s ({} ms by the world's own clock); the public writer opened in {writer} ms; {} \
+         generations on the disk; the newest has {} parts; {objects} recovery objects kept",
+        took.as_secs_f64(),
+        stages.get("listening").copied().unwrap_or(0),
+        generations_on_disk(&views),
+        newest.1,
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(took < Duration::from_secs(30), "a restart under 30 s");
 }
 
 /// C34 (#3599) A2: a building's named area resolves onto its own room and floor. Born outside, a Soul climbs a
@@ -2901,4 +3110,209 @@ fn p1_a_soul_boards_rides_steers_and_lands_the_commons_punt() {
     );
     let d = ((x - px).powi(2) + (z - pz).powi(2)).sqrt();
     assert!(d < 1.5, "out at the plank: {d:.2} m from it");
+}
+
+/// A body's logged frame, height and stance: `(node, slot, y µm, stance)`.
+type Stood = (Id, Option<u64>, i64, Option<sim::controller::Stance>);
+
+/// Each body's last logged frame, height and stance in the world's log in `dir`.
+fn last_stances(dir: &Path) -> BTreeMap<Id, Stood> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = BTreeMap::new();
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        if let Some(Value::Array(rows)) = Part::read(&r).unwrap().rest.get(&answers::BODIES) {
+            for row in rows {
+                if let Some((id, pose, stance)) = worldd::bodies::read_row(row) {
+                    out.insert(
+                        id,
+                        (pose.frame.node, pose.frame.slot, pose.position.y, stance),
+                    );
+                }
+            }
+        }
+    }
+    out
+}
+
+/// #3802 A2: Souls step up onto Eden's festival stage (e_569eb676, at (265, 34) m, its steps at z 37.3 m) and stand on
+/// it, each on its own standing point (the stage's 40 spots, 0.94 m up on its boards). The first names no spot (the world
+/// picks the free one nearest it), the second names spot 40; the rest fill the stage naming none. A 41st Soul naming a
+/// taken spot is refused `place-taken`; naming none it is refused `place.none-free` up front and stays where it stood.
+/// The world is stopped and served again on the same folder: the 40 are still standing in their spots, the 41st is
+/// still refused, and once one steps down the 41st steps up into the freed spot.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn i3802_souls_step_up_onto_the_stage_and_stand_there_over_a_restart() {
+    use sim::controller::Stance;
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (stage, lineage) = (im.nodes["e_569eb676"], im.nodes["world"].scope());
+    let (served, first, dir) = serve(&facts, "265,39", "i3802", lineage);
+    let mut souls = vec![first];
+    for n in 2..=41 {
+        souls.push(join(&dir, n, lineage));
+    }
+    let on_stage = |dir: &Path| -> Vec<Stood> {
+        let mut v: Vec<_> = last_stances(dir)
+            .into_iter()
+            .filter(|(_, f)| f.0 == stage)
+            .map(|(b, f)| (b, f.1, f.2, f.3))
+            .collect();
+        v.sort_by_key(|f| f.1);
+        v
+    };
+    let spot = |n: u64| args(&[("spot", Value::Uint(n))]);
+    for (i, soul) in souls.iter_mut().enumerate().take(2) {
+        let named = if i == 0 { BTreeMap::new() } else { spot(40) };
+        let up = soul.act("eden:step_up", Some(stage), named);
+        println!("Soul {}: step up {up:?}", i + 1);
+        up.expect("stepped up onto a free spot");
+    }
+    let two = on_stage(&dir);
+    println!("on the stage after two: {two:?}");
+    assert_eq!(two.len(), 2, "both on the stage");
+    assert_ne!(two[0].1, two[1].1, "each on its own point");
+    assert!(
+        two.iter()
+            .all(|f| f.1.is_some() && f.3 == Some(Stance::Stand)),
+        "each standing in a spot"
+    );
+    for (i, soul) in souls.iter_mut().enumerate().take(40).skip(2) {
+        let up = soul.act("eden:step_up", Some(stage), BTreeMap::new());
+        println!("Soul {}: step up {up:?}", i + 1);
+        up.expect("stepped up onto a free spot");
+    }
+    let off = |dir: &Path| -> Vec<(Id, Stood)> {
+        last_stances(dir)
+            .into_iter()
+            .filter(|(_, f)| f.0 != stage)
+            .collect()
+    };
+    let before = off(&dir);
+    let taken = souls[40].act("eden:step_up", Some(stage), spot(1));
+    println!("Soul 41: step up onto a taken spot {taken:?}");
+    let full = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
+    println!("Soul 41: step up onto the full stage {full:?}");
+    let all = on_stage(&dir);
+    let slots: Vec<Option<u64>> = all.iter().map(|f| f.1).collect();
+    assert_eq!(
+        slots,
+        (1..=40).map(Some).collect::<Vec<_>>(),
+        "40 spots, one each"
+    );
+    assert!(
+        all.iter().all(|f| f.3 == Some(Stance::Stand)),
+        "all standing"
+    );
+    assert_eq!(
+        taken,
+        Err("place-taken".to_owned()),
+        "a taken spot refuses by name"
+    );
+    assert_eq!(
+        full,
+        Err("place.none-free".to_owned()),
+        "a full stage refuses by name"
+    );
+    assert_eq!(off(&dir), before, "the refused Soul stays where it stood");
+
+    // Stopped and served again on the same folder (K18c): the 40 come back standing in their spots.
+    drop(served);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(child.stdout.take().unwrap());
+    let served = Served(child);
+    let mut line = String::new();
+    while out.read_line(&mut line).unwrap() > 0 && !line.contains("listening ") {
+        line.clear();
+    }
+    print!("restarted: {line}");
+    let mut souls: Vec<Client> = souls
+        .iter()
+        .enumerate()
+        .map(|(i, s)| reconnect(&dir, i as u64 + 1, s.2, lineage))
+        .collect();
+    let again = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
+    println!("after the restart, Soul 41: step up {again:?}");
+    let down = souls[0].act("eden:step_down", Some(stage), BTreeMap::new());
+    println!("after the restart, Soul 1: step down {down:?}");
+    let up = souls[40].act("eden:step_up", Some(stage), BTreeMap::new());
+    println!("after the restart, Soul 41: step up {up:?}");
+    let after = on_stage(&dir);
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(again, Err("place.none-free".to_owned()), "still full");
+    down.expect("Soul 1 steps down");
+    up.expect("Soul 41 steps up into the freed spot");
+    assert_eq!(after.len(), 40, "the stage full again: {after:?}");
+    assert!(
+        after.iter().all(|f| f.3 == Some(Stance::Stand)),
+        "all standing after the restart: {after:?}"
+    );
+    // One body left and one came: every other body kept its own spot over the restart.
+    let kept = after.iter().filter(|f| all.contains(f)).count();
+    assert_eq!(kept, 39, "39 kept their spots: {after:?}");
+    let left: Vec<_> = all
+        .iter()
+        .filter(|f| !after.iter().any(|a| a.0 == f.0))
+        .collect();
+    let came: Vec<_> = after
+        .iter()
+        .filter(|f| !all.iter().any(|a| a.0 == f.0))
+        .collect();
+    assert_eq!((left.len(), came.len()), (1, 1), "one stepped down, one up");
+    assert_eq!(left[0].1, came[0].1, "the 41st took the freed spot");
+}
+
+/// #3802: a form that selects a body's slot from the thing's free ones, sent with no slot, is given the free one nearest
+/// the body: three Souls `flop` onto the roundhouse's three-seat sofa (e_3bfd13e0, see C19's test) naming no seat, each
+/// in its own slot, and a fourth is refused `place.none-free` up front, staying where it stood.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn i3802_a_form_with_no_slot_takes_the_nearest_free_one() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (sofa, lineage) = (im.nodes["e_3bfd13e0"], im.nodes["world"].scope());
+    let (served, first, dir) = serve(&facts, "66.5,-13.5", "i3802-sofa", lineage);
+    let mut souls = vec![first];
+    for n in 2..=4 {
+        souls.push(join(&dir, n, lineage));
+    }
+    for (i, soul) in souls.iter_mut().enumerate().take(3) {
+        let flop = soul.act("eden:flop", Some(sofa), BTreeMap::new());
+        println!("Soul {}: flop onto the sofa {flop:?}", i + 1);
+        flop.expect("flopped into a free slot");
+    }
+    let off = |dir: &Path| -> Vec<_> {
+        last_stances(dir)
+            .into_iter()
+            .filter(|(_, f)| f.0 != sofa)
+            .collect()
+    };
+    let before = off(&dir);
+    let fourth = souls[3].act("eden:flop", Some(sofa), BTreeMap::new());
+    println!("Soul 4: flop onto the full sofa {fourth:?}");
+    let after = off(&dir);
+    let mut slots: Vec<Option<u64>> = last_stances(&dir)
+        .values()
+        .filter(|f| f.0 == sofa)
+        .map(|f| f.1)
+        .collect();
+    slots.sort_unstable();
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(
+        slots,
+        vec![Some(1), Some(2), Some(3)],
+        "each in its own slot"
+    );
+    assert_eq!(fourth, Err("place.none-free".to_owned()));
+    assert_eq!(after, before, "the fourth stays where it stood");
 }

@@ -4,7 +4,7 @@
   "owner": "thing",
   "state": {
     "back_left": {
-      "n": 1,
+      "n": 28,
       "type": "enum",
       "values": [
         "smooth",
@@ -17,7 +17,7 @@
       }
     },
     "back_right": {
-      "n": 2,
+      "n": 29,
       "type": "enum",
       "values": [
         "smooth",
@@ -30,7 +30,7 @@
       }
     },
     "front_left": {
-      "n": 3,
+      "n": 30,
       "type": "enum",
       "values": [
         "smooth",
@@ -43,7 +43,7 @@
       }
     },
     "front_right": {
-      "n": 4,
+      "n": 31,
       "type": "enum",
       "values": [
         "smooth",

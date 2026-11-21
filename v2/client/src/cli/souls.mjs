@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The thin command (Engine v2 R7, #2701): any harness reaches a Soul's daemon (R6) through it. It passes its
 // arguments to the daemon's socket and prints the answer, as JSON; it loads no WASM and holds no copy. The first
-// command starts the daemon. Every answer but status's and stop's ends with `at` and `changed`.
+// command starts the daemon. Every answer but status's and quit's ends with `at` and `changed`.
 //
 //   souls.mjs status                          the daemon: connected, cursor, intents sent and answered
 //   souls.mjs look                            the brief: my room, cards outward, what changed, the age
@@ -40,15 +40,23 @@
 //                                             default, at most seven, five lines, the rest counted (R16); --as <id>
 //                                             names which Soul asks, when the home has more than one
 //   souls.mjs stats                           per achieved intent: commands, bytes printed, first-send result (R10)
-//   souls.mjs stop                            ends the daemon
+//   souls.mjs stop [<sequence>]               ends your own act where it stands, as today (#3705): a walk stops now, a
+//                                             sit, a lie or a rise finishes, a standing order ends. The newest act
+//                                             still going unless a sequence is named
+//   souls.mjs quit                            ends the daemon (the next command starts it again)
+//   souls.mjs receipt [<sequence>]            an intent's receipt: its verbs and every answer it had (the newest sent
+//                                             by default); `act` prints the sequence (#3705)
+//   souls.mjs events [--since <cursor>]       the events after a cursor (each has `n`; the answer's `cursor` is the
+//                                             newest), without taking them from `wait` (#3705)
+//   souls.mjs conversations                   the conversations in the copy (converse list)
 //   souls.mjs pending                         the owner's messages still open, and what arrived since the last read
 //                                             (C15): mail, words heard, answers, and the wakes due now; no wait
 //   souls.mjs pending --check                 for a scheduler (R20): prints nothing, exits 0 when a message or a wake
 //                                             waits, 1 when not (2 on a failure); starts the daemon, sends nothing
 //   souls.mjs ack <message id> "<reply>" [--close done|failed]   answers an owner's message with no act (C15): the
-//                                             reply shows on the owner's page and closes it, done unless --close
-//                                             failed (a no). With no --close while an act serves it, the reply rides
-//                                             on that act's close
+//                                             reply shows on the owner's page; --close done|failed closes it (failed:
+//                                             a no). With no --close it is an interim note and the message stays open
+//                                             for a later act --for it or ack --close (#3781, as today)
 //   souls.mjs help schedule-wake              the scheduler line that serves a message while no chat is open (R20)
 //   act ... --for <message id>                the act serves that owner's message; its outcome closes it (R13)
 //   souls.mjs shoot <place|soul|thing> [--eyes] [--page <url>] [--out f.png]   a picture drawn here from the public
@@ -68,6 +76,14 @@
 //   souls.mjs schedule [list] | schedule remove <id>   the entries and what became of each
 //   souls.mjs upgrade [--rollback]            brings today's client's Souls across, one owner approval each (R18); with
 //                                             --rollback, today's client again
+//   souls.mjs query '<json list>' [--budget <bytes>]   several reads of the copy in one call, each answered in turn
+//                                             (#3704): {"find":"<words>"}, {"place":"<id>","depth":1..3}, {"kind":"<k>"},
+//                                             {"in":"<id>"}; asks the world nothing
+//   souls.mjs batch '<json list>'             several read commands in one call: [{"look":{}},{"find":"library"},
+//                                             {"inspect":"<id>"}]; a write in it is refused, not sent (#3704)
+//   souls.mjs catalog                         the kinds in the copy, how many of each, and their offers where known
+//   souls.mjs context [<words>] [--cursor n]  the named places and things, with the world's text for them (#3704)
+//   souls.mjs views <name> [<name>...] [--out f.png]   reference pictures: each drawn here as shoot draws it (#3704)
 //   any of them [--soul <id>]                 which Soul, when the home has more than one
 //
 // The home is SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG.
@@ -88,7 +104,9 @@ import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount } from '../account/account.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
-export const OPS = ['status', 'pair', 'look', 'find', 'act', 'inspect', 'object', 'can', 'say', 'shout', 'whisper', 'converse', 'lie', 'wear', 'pray', 'prayers', 'now', 'wait', 'history', 'stats', 'pending', 'ack', 'stop'];
+export const OPS = ['query', 'batch', 'catalog', 'context', 'status', 'pair', 'look', 'find', 'act', 'inspect', 'object', 'can', 'say', 'shout', 'whisper', 'converse', 'lie', 'wear', 'pray', 'prayers', 'now', 'wait', 'history', 'stats', 'pending', 'ack', 'stop', 'quit', 'receipt', 'events', 'conversations'];
+/** #3705: today's names, kept: `stop` ends your act (the daemon's op `halt`), `quit` ends the daemon (its op `stop`). */
+const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse' };
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = ['digest', 'consolidate', 'schedule', 'help', 'memory', 'remember'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -138,7 +156,7 @@ export function requestOf(argv) {
   }
   // history's --soul is its question; --as is the Soul asking.
   const asking = args.includes('history');
-  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for', '--close', '--to', '--gesture']) {
+  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for', '--close', '--to', '--gesture', '--budget', '--cursor']) {
     const k = args.indexOf(name);
     if (k >= 0) { opts[name.slice(2)] = args[k + 1]; args.splice(k, 2); }
     if (name === '--missed' && opts.missed === 'late') { opts.missed = `late ${args[k]}`; args.splice(k, 1); }
@@ -153,7 +171,33 @@ export function requestOf(argv) {
   if (op === 'memory' || op === 'remember') return { local: op, soul: opts.soul, args: rest };
   if (LOCAL.includes(op)) return { local: op, soul: opts.soul, since: opts.since ?? null, refs: rest.includes('--refs'), force: rest.includes('--force') };
   if (!OPS.includes(op)) return { refused: 'unknown-command', detail: `one of ${OPS.join(', ')}` };
-  const req = { op };
+  const req = { op: RENAMED[op] ?? op };
+  if (op === 'conversations') req.do = 'list';
+  if ((op === 'stop' || op === 'receipt') && rest[0] !== undefined) {
+    if (!/^\d+$/.test(rest[0])) return { refused: `${op}-sequence`, detail: `${op} [<sequence>]: the number act printed as sequence` };
+    req.sequence = Number(rest[0]);
+  }
+  if (op === 'events' && opts.since !== undefined) {
+    if (!/^\d+$/.test(opts.since)) return { refused: 'events-since', detail: 'events [--since <cursor>]: the cursor an earlier events answer printed' };
+    req.since = Number(opts.since);
+  }
+  // #3704: today's reads from the copy, several in one call.
+  if (op === 'query' || op === 'batch') {
+    let list = null;
+    try { list = JSON.parse(rest.join(' ')); } catch { /* answered below */ }
+    if (!Array.isArray(list)) return { refused: `${op}-form`, detail: op === 'query' ? `query '[{"find":"library"},{"place":"<id>","depth":2},{"kind":"<kind>"}]' [--budget <bytes>]` : `batch '[{"look":{}},{"find":"library"},{"inspect":"<id>"}]'` };
+    if (op === 'query') { req.questions = list; if (opts.budget !== undefined) req.budget = Number(opts.budget); }
+    else {
+      // Each item is a command and its arguments, as on the command line: {"find":"library"} is `find library`.
+      req.reads = list.map((item) => {
+        const [name, arg] = item && typeof item === 'object' && Object.keys(item).length === 1 ? Object.entries(item)[0] : [null];
+        const args = arg == null || (typeof arg === 'object' && !Array.isArray(arg)) ? [] : Array.isArray(arg) ? arg.map(String) : [String(arg)];
+        const r = name === 'batch' ? null : requestOf([name, ...args]);
+        return r?.req ?? { op: name, refused: r?.refused ?? 'batch-item' };
+      });
+    }
+  }
+  if (op === 'context') { req.words = rest.join(' '); if (opts.cursor !== undefined) req.cursor = Number(opts.cursor); }
   if (op === 'find') { req.words = rest.join(' '); if (opts.limit) req.limit = Number(opts.limit); }
   if (op === 'act' || op === 'can') req.acts = rest;
   if ((op === 'act' || op === 'object') && opts.for !== undefined) req.for = opts.for;
@@ -217,12 +261,28 @@ const shq = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
  * served: `pending --check` gates a headless turn, which starts only when a message or a wake waits. The turn uses
  * the harness's own login.
  */
+/**
+ * #3704 (today's `views <ref>... [--out f]`): one picture per name, at most six, each drawn by `shoot` (the public
+ * stream, in this machine's browser; with no browser, its words). With several and `--out f.png`, f-1.png, f-2.png...
+ */
+export async function runViews(args, shootOne) {
+  const k = args.indexOf('--out'), out = k >= 0 ? args[k + 1] : undefined;
+  const names = args.filter((a, i) => !(k >= 0 && (i === k || i === k + 1)) && !a.startsWith('--'));
+  if (!names.length || names.length > 6 || (k >= 0 && !out)) return { ok: false, code: 'views-form', detail: 'views <name> [<name>...] [--out f.png]: one to six places, things or Souls, by name' };
+  const file = (i) => (!out ? [] : ['--out', names.length === 1 ? out : out.replace(/(\.[a-z]+)?$/i, (ext) => `-${i + 1}${ext || '.png'}`)]);
+  const views = [];
+  for (const [i, name] of names.entries()) {
+    try { views.push({ name, ...(await shootOne([name, ...file(i)])) }); } catch (e) { views.push({ name, ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }); }
+  }
+  return { ok: views.some((v) => v.ok !== false), views, source: 'drawn here from the public stream, as a visitor sees it' };
+}
+
 function help(home, named, topic) {
   if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
   if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake'), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;
-  const prompt = `Work in the folder ${folder}. Run: ${cli} pending. For each message under open, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, or for an answer or a no, ${cli} ack <its id> "<reply>" [--close failed], as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
+  const prompt = `Work in the folder ${folder}. Run: ${cli} pending. For each message under open, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, or for an answer or a no, ${cli} ack <its id> "<reply>" --close done|failed, as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
   const check = `cd ${shq(folder)} && ${shq(process.execPath)} ${shq(script)}${sel} pending --check`;
   return {
     ok: true, topic, folder, prompt,
@@ -265,6 +325,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (process.argv[2] === 'shoot') { // G10: drawn here, in a browser, from the public stream; no daemon unless it must use words
       const souls = soulsWithTokens(home), ask = souls.length === 1 ? (r) => call(home, souls[0], r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
       out(await runShoot(process.argv.slice(3), { home, env: process.env, ask }));
+      process.exit(0);
+    }
+    if (process.argv[2] === 'views') { // #3704: today's reference pictures, each drawn here as shoot draws it
+      const souls = soulsWithTokens(home), ask = souls.length === 1 ? (r) => call(home, souls[0], r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
+      out(await runViews(process.argv.slice(3), (args) => runShoot(args, { home, env: process.env, ask })));
       process.exit(0);
     }
     if (process.argv[2] === 'view' || process.argv[2] === 'map') { // #3687: today's view, read in the same browser

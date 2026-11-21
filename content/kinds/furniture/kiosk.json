@@ -3,10 +3,10 @@
   "kind": "eden:kiosk",
   "owner": "thing",
   "state": {
-    "open": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
-    "locked": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "open": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "locked": { "n": 29, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
     "open_times": {
-      "n": 3,
+      "n": 30,
       "type": "schedule",
       "most": 14,
       "default": [

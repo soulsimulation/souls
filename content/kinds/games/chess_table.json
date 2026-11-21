@@ -3,23 +3,23 @@
   "kind": "eden:chess_table",
   "owner": "thing",
   "state": {
-    "turn": {"n": 1, "type": "enum", "values": ["white", "black"], "default": "white", "audience": {"rule": "everyone"}},
+    "turn": {"n": 28, "type": "enum", "values": ["white", "black"], "default": "white", "audience": {"rule": "everyone"}},
     "phase": {
-      "n": 2,
+      "n": 29,
       "type": "enum",
       "values": ["waiting", "playing", "checkmate", "stalemate", "resigned", "draw"],
       "default": "waiting",
       "audience": {"rule": "everyone"}
     },
     "winner": {
-      "n": 3,
+      "n": 30,
       "type": "enum",
       "values": ["none", "white", "black"],
       "default": "none",
       "audience": {"rule": "everyone"}
     },
     "pieces": {
-      "n": 4,
+      "n": 31,
       "type": "list",
       "most": 32,
       "of": {"square": {"type": "int", "unit": "count"}, "piece": {"type": "int", "unit": "count"}},
@@ -27,8 +27,8 @@
       "default": [],
       "audience": {"rule": "everyone"}
     },
-    "castling": {"n": 5, "type": "int", "unit": "count", "default": 15, "min": 0, "max": 15, "audience": {"rule": "everyone"}},
-    "en_passant": {"n": 6, "type": "int", "unit": "count", "default": 64, "min": 0, "max": 64, "audience": {"rule": "everyone"}}
+    "castling": {"n": 32, "type": "int", "unit": "count", "default": 15, "min": 0, "max": 15, "audience": {"rule": "everyone"}},
+    "en_passant": {"n": 33, "type": "int", "unit": "count", "default": 64, "min": 0, "max": 64, "audience": {"rule": "everyone"}}
   },
   "links": {
     "white": {"n": 1, "from": "soul", "most": 1, "audience": {"rule": "everyone"}},

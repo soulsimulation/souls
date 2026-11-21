@@ -61,7 +61,9 @@ export type SampleRec = [string, string, number | null, number, number, number, 
 
 /** One `souls:said` event (V1b): the speaker's body, world time µs, length µs, reach mm, its words' reference and the
  * words from the part's text file (null when the file does not hold them, e.g. removed). */
-export type SaidRec = { speaker: string; at: number; length: number; reach: number; ref: string; words: string | null };
+export type SaidRec = { speaker: string; at: number; length: number; reach: number; ref: string; words: string | null; private?: Private };
+/** A private turn's public record (`souls:said-privately`, #3775): the conversation and its members; never words. */
+export type Private = { conversation: string; members: string[] };
 
 /** What one part changed, in the order played; `samples` is every motion sample in it, in entry order; `said` every
  * utterance in it (V1b). */

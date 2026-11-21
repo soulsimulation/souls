@@ -3,8 +3,8 @@
   "kind": "eden:damper_bell",
   "owner": "thing",
   "state": {
-    "damped": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
-    "ringing": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+    "damped": { "n": 28, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "ringing": { "n": 29, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
   },
   "points": {
     "rope": { "role": "grip", "at_mm": [250, 1000, 0] },

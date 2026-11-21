@@ -81,7 +81,9 @@ export { SPEECH_W };
 // local scene as today's `dialogue-threads.ts` folds aloud talk. A line joins the live thread whose recent speakers
 // include its speaker or someone within its reach when it was said; otherwise it opens a new thread. Only lines whose
 // words are in the public text file are folded: a whisper or a private conversation's turn is never in the public view,
-// and one listed without words is left out. A line is keyed by its speaker, time and reference, so a part played again
+// and one listed without words is left out. A private conversation's turn shows as its public record does (#3775, today's
+// sealed thread): one thread per conversation, its members named, each turn its speaker, its time and '…', never words.
+// A line is keyed by its speaker, time and reference, so a part played again
 // after a reconnect folds once.
 
 /** A scene stays one thread while someone in it keeps talking within this gap (today's `ALOUD_GAP_MS`), µs. */
@@ -92,7 +94,10 @@ export const SCENE_LINES = 8, THREAD_LINES = 80, THREADS = 24;
 const TALK_MM = 5_000;
 
 export type Line = { key: string; at: number; speaker: string; words: string };
-export type Thread = { id: string; lines: Line[]; lastAt: number; colour: string; hearers: Map<string, number> };
+/** `members` is set on a private conversation's thread: who is in it, from its public record (#3775). */
+export type Thread = { id: string; lines: Line[]; lastAt: number; colour: string; hearers: Map<string, number>; members?: string[] };
+/** What a private turn's line shows in place of its words. */
+export const HIDDEN = '…';
 /** Where a body was at a world time, metres; null when it is not drawn. */
 export type Where = (id: string, at: number) => { x: number; y: number; z: number } | null;
 
@@ -111,12 +116,19 @@ export class Conversations {
   private order: string[] = [];
 
   /** Folds one public line; `bodies` are the Souls that could have heard it. Returns its thread, or null. */
-  add(s: { speaker: string; at: number; reach: number; ref: string; words: string | null }, where: Where, bodies: Iterable<string>): Thread | null {
-    if (s.words === null || !s.words.trim()) return null;
+  add(s: { speaker: string; at: number; reach: number; ref: string; words: string | null; private?: { conversation: string; members: string[] } }, where: Where, bodies: Iterable<string>): Thread | null {
+    if (!s.private && (s.words === null || !s.words.trim())) return null;
     const key = `${s.speaker}|${s.at}|${s.ref}`;
     if (this.seen.has(key)) return null;
     this.seen.add(key), this.order.push(key);
     if (this.order.length > 4000) for (const k of this.order.splice(0, 2000)) this.seen.delete(k);
+    if (s.private) {
+      const id = `private:${s.private.conversation}`;
+      let t = this.threads.get(id);
+      if (!t) (t = { id, lines: [], lastAt: s.at, colour: hue(id), hearers: new Map() }), this.threads.set(id, t), this.trim();
+      t.members = [...new Set([...(t.members ?? []), ...s.private.members, s.speaker])];
+      return this.put(t, { key, at: s.at, speaker: s.speaker, words: HIDDEN }, []);
+    }
     const reach = (s.reach > 0 ? s.reach : TALK_MM) / 1000, from = where(s.speaker, s.at);
     const heard: string[] = [];
     if (from) for (const id of bodies) {
@@ -124,33 +136,42 @@ export class Conversations {
       if (p && Math.hypot(p.x - from.x, p.y - from.y, p.z - from.z) <= reach) heard.push(id);
     }
     const people = new Set([s.speaker, ...heard]);
-    const live = [...this.threads.values()].filter((t) => Math.abs(s.at - t.lastAt) <= GAP_US).sort((a, b) => b.lastAt - a.lastAt);
+    const live = [...this.threads.values()].filter((t) => !t.members && Math.abs(s.at - t.lastAt) <= GAP_US).sort((a, b) => b.lastAt - a.lastAt);
     let t = live.find((t) => t.lines.slice(-SCENE_LINES).some((l) => people.has(l.speaker)));
     if (!t) {
       const id = `${s.speaker}:${s.at}`;
       t = { id, lines: [], lastAt: s.at, colour: hue(id), hearers: new Map() };
       this.threads.set(id, t);
-      if (this.threads.size > THREADS) for (const o of [...this.threads.values()].sort((a, b) => a.lastAt - b.lastAt).slice(0, this.threads.size - THREADS)) this.threads.delete(o.id);
+      this.trim();
     }
-    const line: Line = { key, at: s.at, speaker: s.speaker, words: s.words };
+    return this.put(t, { key, at: s.at, speaker: s.speaker, words: s.words! }, heard);
+  }
+
+  /** Keeps the newest `THREADS` threads. */
+  private trim(): void {
+    if (this.threads.size > THREADS) for (const o of [...this.threads.values()].sort((a, b) => a.lastAt - b.lastAt).slice(0, this.threads.size - THREADS)) this.threads.delete(o.id);
+  }
+
+  /** Puts `line` in `t` in time order, and notes who heard it. */
+  private put(t: Thread, line: Line, heard: string[]): Thread {
     let i = t.lines.length;
     while (i > 0 && t.lines[i - 1].at > line.at) i--;
     t.lines.splice(i, 0, line);
     if (t.lines.length > THREAD_LINES) t.lines.splice(0, t.lines.length - THREAD_LINES);
-    t.lastAt = Math.max(t.lastAt, s.at);
-    for (const id of heard) t.hearers.set(id, Math.max(t.hearers.get(id) ?? 0, s.at));
+    t.lastAt = Math.max(t.lastAt, line.at);
+    for (const id of heard) t.hearers.set(id, Math.max(t.hearers.get(id) ?? 0, line.at));
     this.version++;
     return t;
   }
 
-  /** A thread's speakers, by their first line. */
+  /** A thread's speakers, by their first line; a private conversation's members, from its public record. */
   static members(t: Thread): string[] {
-    return [...new Set(t.lines.map((l) => l.speaker))];
+    return t.members ?? [...new Set(t.lines.map((l) => l.speaker))];
   }
 
   /** The threads a Soul spoke in, newest first. */
   of(soul: string): Thread[] {
-    return [...this.threads.values()].filter((t) => t.lines.some((l) => l.speaker === soul)).sort((a, b) => b.lastAt - a.lastAt);
+    return [...this.threads.values()].filter((t) => t.members?.includes(soul) || t.lines.some((l) => l.speaker === soul)).sort((a, b) => b.lastAt - a.lastAt);
   }
 
   /** Threads still talking at `t` (a line said at or before `t`, within `within` µs of it), newest first. */
@@ -166,17 +187,81 @@ export class Conversations {
   }
 }
 
-/** A shot that frames a group (today's `conversationFrame`): their middle, from the side the camera is on, far enough
- *  back that the widest of them fits the view. Points in metres, at head height. */
-export function groupShot(points: { x: number; y: number; z: number }[], fov: number, aspect: number, from: { x: number; y: number; z: number }) {
+type P3 = { x: number; y: number; z: number };
+/** What a shot can know of the scene (#3774): the members' facings (unit, on the ground plane), whether an eye sees
+ *  every member clear of opaque scenery (not inside a solid, no solid across a sightline), and the ground's height. */
+export type ShotScene = { faces?: { x: number; z: number }[]; clear?: (eye: P3, heads: P3[]) => boolean; ground?: (x: number, z: number) => number };
+
+/** A shot that frames a group (today's `conversationFrame`, apps/web/src/WorldConversationFrame.ts): their middle,
+ *  far enough back that the widest of them fits the view, from one of twelve sides around them, the side they face
+ *  first, then 30° either way in turn. A side whose eye is inside or behind opaque scenery (`scene.clear`) is passed
+ *  over. With every side blocked, the same twelve sides are tried from steeply above, and last straight above the
+ *  group. With no facing the first side is the camera's. Points in metres, at head height. */
+export function groupShot(points: P3[], fov: number, aspect: number, from: P3, scene: ShotScene = {}) {
   if (!points.length) return null;
   const c = { x: 0, y: 0, z: 0 };
   for (const p of points) (c.x += p.x / points.length), (c.y += p.y / points.length), (c.z += p.z / points.length);
   const spread = Math.max(1, ...points.map((p) => Math.hypot(p.x - c.x, p.y - c.y, p.z - c.z)));
   const d = Math.max(5, (spread / (Math.tan((fov * Math.PI) / 360) * Math.min(1, aspect))) * 1.4);
-  let dx = from.x - c.x, dz = from.z - c.z;
-  const n = Math.hypot(dx, dz);
-  if (n < 0.01) (dx = 0), (dz = 1);
-  else (dx /= n), (dz /= n);
-  return { eye: { x: c.x + dx * d, y: c.y + Math.max(1.5, d * 0.24), z: c.z + dz * d }, target: c };
+  let fx = 0, fz = 0;
+  for (const f of scene.faces ?? []) (fx += f.x), (fz += f.z);
+  if (fx * fx + fz * fz < 0.1) (fx = from.x - c.x), (fz = from.z - c.z); // facing apart, or none: the camera's side
+  if (Math.hypot(fx, fz) < 0.01) (fx = 0), (fz = 1);
+  const base = Math.atan2(fz, fx), clear = scene.clear ?? (() => true);
+  const side = (i: number, out: number, up: number) => {
+    const a = base + (i % 2 ? -1 : 1) * Math.ceil(i / 2) * (Math.PI / 6);
+    const eye = { x: c.x + Math.cos(a) * out, y: c.y + up, z: c.z + Math.sin(a) * out };
+    if (scene.ground) eye.y = Math.max(eye.y, scene.ground(eye.x, eye.z) + 1.5);
+    return eye;
+  };
+  for (const [out, up] of [[d, Math.max(1.5, d * 0.24)], [d * 0.45, d * 0.9]]) {
+    for (let i = 0; i < 12; i++) {
+      const eye = side(i, out, up);
+      if (clear(eye, points)) return { eye, target: c };
+    }
+  }
+  // Straight above, a hair toward the first side so the view keeps its heading.
+  return { eye: side(0, 0.01, d), target: c };
+}
+
+// Where a line was said (#3776, today's `channelChip`): the dock's hearing label names the place, `inside · <room>` when
+// the speaker stands in a named room (an ancestor with a public name and an outline), else `aloud · <place>` for the
+// smallest named area beside it (a child of one of its ancestors, the open ground's places) whose outline holds the
+// speaker. Read from the copy when drawn, so a renamed
+// place shows its new name while the thread is open.
+
+/** What `placeOf` reads of a node. */
+export type PlaceNode = { parent: string | null; placeName?: string | null; outline?: number[][] };
+
+/** Whether `[x, z]` mm is inside `poly` (even-odd rule). */
+function holds(poly: number[][], x: number, z: number): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i], [xj, zj] = poly[j];
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Twice a polygon's area, mm². */
+const area = (poly: number[][]) => Math.abs(poly.reduce((s, [x, z], i) => { const [x2, z2] = poly[(i + 1) % poly.length]; return s + x * z2 - x2 * z; }, 0));
+
+/** The named place `speaker` stood in when at `p` (world m), or null when none is named. */
+export function placeOf(speaker: string, p: { x: number; z: number } | null, nodes: ReadonlyMap<string, PlaceNode>, words: (n: string) => string): { name: string; inside: boolean } | null {
+  const up = new Set<string>();
+  for (let id = nodes.get(speaker)?.parent ?? null; id && !up.has(id); ) {
+    const n = nodes.get(id);
+    if (!n) break;
+    if (n.placeName && n.outline?.length) return { name: words(n.placeName), inside: true };
+    up.add(id), (id = n.parent);
+  }
+  if (!p) return null;
+  const x = p.x * 1000, z = p.z * 1000;
+  let best: { name: string; a: number } | null = null;
+  for (const n of nodes.values()) {
+    if (!n.parent || !up.has(n.parent) || !n.placeName || !n.outline || n.outline.length < 3 || !holds(n.outline, x, z)) continue;
+    const a = area(n.outline);
+    if (!best || a < best.a) best = { name: words(n.placeName), a };
+  }
+  return best && { name: best.name, inside: false };
 }

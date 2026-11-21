@@ -12,7 +12,14 @@
 //     {"op":"act","verb":"...","target":"<scope hex>-<counter>"}  builds the next intent (the target optional) and
 //                                sends it once (now, or at the next sign-in)
 //     {"op":"read"}              gives and clears what happened since the last read (it never wakes the model)
-//     {"op":"stop"}              ends the process
+//     {"op":"stop"}              ends the process (the thin command's `quit`)
+//     {"op":"query","questions":[..],"budget":n}   #3704: several reads of the copy, each answered in turn (reads.mjs)
+//     {"op":"catalog"} | {"op":"context","words":"..","cursor":n}   #3704: the kinds in the copy; its named targets
+//     {"op":"batch","reads":[{"op":..},..]}       #3704: several read ops in one call, each answered as alone
+//     {"op":"halt","sequence":n}  #3705, the thin command's `stop`: a `souls:cancel` ending this Soul's own act (the
+//                                 newest still going, or `sequence`) where it stands
+//     {"op":"receipt","sequence":n}   #3705: that intent's receipt, as its answers came (the newest sent by default)
+//     {"op":"events","since":n}  #3705: the events numbered after `since`, kept or not yet taken; takes nothing
 //   and R7's (#2701), each answer ending with `at` (the copy's version) and `changed` (what changed since the answer
 //   before, by name, capped, the rest counted), the copy brought current first:
 //     {"op":"look"}                       the brief (`../brief/brief.mjs`)
@@ -52,10 +59,11 @@
 //     {"op":"pending"}                                R20's (#3328) check for a scheduler: `due` when a message is
 //                                                     open or wakes can be handed now; it sends and takes nothing
 //     {"op":"pending","list":true}                    C15's (#3685): the open messages, and what arrived since the
-//                                                     last read (taken, as `wait 0` takes it), with no wait
+//                                                     last read (taken, as `wait 0` takes it), with no wait; then, as `brief`,
+//                                                     the brief `look` gives (#3782), so a turn needs no `look` first
 //     {"op":"ack","id":"<message id>","reply":"..","close":"done|failed"}   C15's: a reply that answers the message
-//                                                     with no act, closing it (`done` unless `close` says `failed`); with
-//                                                     no `close` while an act serves it, the reply rides on that close
+//                                                     with no act, closing it `done` or `failed`; with no `close`, an
+//                                                     interim note to the owner's page, the message left open (#3781)
 //   and G11's (#3335), prayers, the mailbox's other direction: a request goes to the gateway as a text frame and the
 //   directory's reply comes back on the socket (`n` matches them); an answer to this Soul's prayer arrives as a
 //   `prayer-answered` event, which wakes a `wait`, its words quoted as data. A creator's daemon lists and answers:
@@ -129,6 +137,7 @@ import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
 import { ageOf } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
+import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
 import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
@@ -235,8 +244,32 @@ let wakers = []; // `wait`s waiting for something addressed to this Soul
 const note = (e) => {
   events.push(e);
   if (events.length > EVENTS_KEPT) events.shift();
+  // #3705 (today's `events --since`): every event, numbered, kept for reading again; a read takes nothing.
+  if (e.kind !== 'synced') { logged.push({ n: ++eventN, ...e }); if (logged.length > LOGGED_KEPT) logged.shift(); }
+  if (e.kind === 'answer' && e.sequence !== null) receiptAnswered(e);
   if (e.kind !== 'synced') for (const w of wakers.splice(0)) w();
 };
+// #3705: the events since this daemon started, numbered (`n`, the cursor `events --since` takes), the newest kept.
+const logged = [], LOGGED_KEPT = 500;
+let eventN = 0;
+// #3705 (today's `receipt`): each intent this daemon sent, by sequence, with every answer it had, the newest kept;
+// and the acts still going, newest last, that `stop` ends (an order stays until cancelled).
+const receipts = new Map(), RECEIPTS_KEPT = 200, going = [];
+const ANSWER_NAMES = ['', 'receipt', 'refused', 'accepted', 'resolved', 'unread'];
+const ORDERS = new Set(['souls:hold', 'souls:follow', 'souls:queue']);
+function receiptSent(sequence, ranked, { target, replaces, words }) {
+  receipts.set(sequence, { sequence, verbs: ranked, ...(target ? { target: String(target) } : {}), ...(replaces !== undefined ? { replaces } : {}), sentAt: new Date().toISOString(), answers: [] });
+  if (receipts.size > RECEIPTS_KEPT) receipts.delete(receipts.keys().next().value);
+  if (words === undefined && ranked[0] !== 'souls:cancel') going.push(sequence);
+}
+function receiptAnswered(e) {
+  const r = receipts.get(e.sequence);
+  if (r) r.answers.push({ answer: ANSWER_NAMES[e.answer] ?? String(e.answer), ...(e.reason ? { reason: e.reason } : {}), ...(e.version ? { version: e.version } : {}), at: new Date().toISOString() });
+  const order = r && ORDERS.has(r.verbs[0]) && e.answer === 1;
+  if (e.answer !== 3 && !order) { const k = going.indexOf(e.sequence); if (k >= 0) going.splice(k, 1); }
+  // A cancel's receipt: what it named has ended.
+  if (r?.replaces !== undefined && e.answer === 1) { const k = going.indexOf(r.replaces); if (k >= 0) going.splice(k, 1); }
+}
 let copyVersion = null, shown = new Map(); // the copy's version, and the rows the last answer saw
 let shownVersion = null; // the version the last answer showed the model: an intent's basis (R8)
 let stopped = 0; // acts stopped locally, for the trace
@@ -674,7 +707,7 @@ const ageNow = () => ageOf({ now: performance.now(), startedAt, confirmedAt, cha
 const ME = `${seat.grant.scope}-${seat.grant.counter}`;
 const ACT_MOST = 5, WAIT_MOST_S = 600, REFRESH_WITHIN = 2000;
 
-const OPS = new Set(['status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
+const OPS = new Set(['query', 'catalog', 'context', 'batch', 'status', 'look', 'find', 'wait', 'can', 'act', 'say', 'whisper', 'converse', 'lie', 'wear', 'history', 'read', 'stats', 'reflex', 'wake', 'event', 'pending', 'ack', 'stop', 'halt', 'receipt', 'events', 'describe', 'check', 'edit', 'pray', 'prayers', 'answer', 'now', 'inspect', 'object']);
 const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const MAILBOX_FIRST_MS = 1500; // gatewayd reads the open messages every second (mailbox.rs POLL)
@@ -791,11 +824,12 @@ function actsOf(words) {
  * Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in).
  * `reflex` marks an R9 reflex's intent (#3764); an agent's never is.
  */
-function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex = false }) {
+function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex = false, replaces }) {
   state.sequence++;
   const bytes = wire.wireIntent(scope, seat.grant.counter, ranked.join(' '), BigInt(state.sequence),
     basis ? unhex(basis) : new Uint8Array(), BigInt(expiry ?? Number.MAX_SAFE_INTEGER), String(target ?? ''), words, args,
-    params ? JSON.stringify(params) : undefined, reflex);
+    params ? JSON.stringify(params) : undefined, reflex, replaces === undefined ? undefined : BigInt(replaces));
+  receiptSent(state.sequence, ranked, { target, replaces, words });
   if (!signedIn) save(); // signed in, send() writes it down once, before it goes
   const sequence = state.sequence, sent = signedIn;
   if (ranked[0] === 'life:join') joinsOf.add(sequence);
@@ -825,8 +859,14 @@ async function answer(req) {
       const open = [...mail.values()].map((m) => ({ id: m.id, text: String(m.text), at: m.at, ...(served.has(m.id) ? { serving: true } : {}) }));
       const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
       return closing({ ok: true, connected: signedIn, open, events: got, ...said, ...(handed.length ? { wakes: handed } : {}),
-        ...(open.length ? { next: 'serve each open message: act <act> --for <its id>, or answer it: ack <its id> "<reply>" [--close failed]' } : {}) },
-      (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)) }), { now: true });
+        ...(open.length ? { next: 'serve each open message: act <act> --for <its id>, or answer it: ack <its id> "<reply>" --close done|failed' } : {}) },
+      (rows, changes) => {
+        // #3782: the brief `look` gives, after the messages and arrivals (today's `pending` carries it, N-C18), so the
+        // turn needs no `look` first. What was heard is in `events` above, so not again in the brief.
+        const b = brief(rows, { me: ME, changes, ageMs: performance.now() - (confirmedAt ?? startedAt) });
+        delete b.changed; // the answer's own closes it
+        return { events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)), brief: b };
+      }, { now: true });
     }
     case 'ack': {
       // C15 (#3685): an answer to the owner's message with no act: a reply, and the close (`done`, or `failed` for a no).
@@ -834,12 +874,17 @@ async function answer(req) {
       if (close !== null && close !== 'done' && close !== 'failed') return { ok: false, code: 'ack-close', detail: '--close done|failed' };
       if (!reply || [...reply].length > REPLY_MOST) return { ok: false, code: 'ack-reply', detail: `ack <message id> "<reply>": 1 to ${REPLY_MOST} characters` };
       if (!mail.has(id)) return { ok: false, code: 'mail-not-found', detail: 'ack names an open message this daemon was given: pending lists them' };
-      replyOf.set(id, reply);
-      if (close === null && [...serving.values()].includes(id)) {
-        return { ok: true, acked: id, reply, closes: 'with the act that serves it: its outcome, your reply beside it' };
+      if (close === null) {
+        // #3781 (today's N-C12): an interim note. The owner's page shows it under the message, which stays open, so a
+        // later `act --for` or `ack --close` closes it. It goes to the owner's view sockets alone, never the directory.
+        const line = JSON.stringify({ note: { id, reply } });
+        if (ws && signedIn) ws.send(line); else closes.push(line);
+        return { ok: true, acked: id, reply, open: true, sent: signedIn,
+          next: `still open: act <act> --for ${id}, or ack ${id} "<reply>" --close done|failed`, ...ageNow() };
       }
-      closeMail(id, close ?? 'done', 'replied');
-      return { ok: true, acked: id, reply, closed: close ?? 'done', sent: signedIn, ...ageNow() };
+      replyOf.set(id, reply);
+      closeMail(id, close, 'replied');
+      return { ok: true, acked: id, reply, closed: close, sent: signedIn, ...ageNow() };
     }
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
@@ -960,6 +1005,23 @@ async function answer(req) {
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis), ...(toward ? { to: toward } : {}) }, null, { now: true });
     }
     case 'inspect': return inspect(req);
+    // #3704 (today's `query`, `catalog`, `context` and `batch`): reads from the copy, asking the world nothing.
+    case 'query': { const q = query(rowsOf(copy), req.questions, { budget: req.budget }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
+    case 'catalog': return closing(catalog(rowsOf(copy), kindsIn(join(home, 'kinds'))), null, { now: true });
+    case 'context': return closing(context(rowsOf(copy), req.words ?? '', { cursor: req.cursor }), null, { now: true });
+    case 'batch': {
+      // Several reads in one call, each answered as it would be alone, in order; a write in it is refused, not sent.
+      const reads = Array.isArray(req.reads) ? req.reads : [];
+      if (reads.length < 1 || reads.length > BATCH_MOST) return { ok: false, code: 'batch-form', detail: `batch '<json list>': 1 to ${BATCH_MOST} reads`, ...ageNow() };
+      const results = [];
+      for (const r of reads) {
+        const read = r && BATCH_READS.has(r.op) && (r.op !== 'converse' || r.do === 'list');
+        if (!read) { results.push({ op: r?.op ?? null, ok: false, code: 'batch-reads-only', detail: `a batch runs reads only: ${[...BATCH_READS].join(', ')}` }); continue; }
+        const { at: _a, changed: _c, ...one } = await answer(r);
+        results.push({ op: r.op, ...one });
+      }
+      return closing({ ok: true, results }, null, { now: true });
+    }
     case 'object': {
       // #3686: today's `object <id> [action]`: no action lists the offers (as inspect); an action is that offer sent
       // through `act` below, with its arguments, and nothing else.
@@ -1049,6 +1111,30 @@ async function answer(req) {
       return { ok: true, fired, ...(scheduled.length ? { scheduled } : {}) };
     }
     case 'stop': setImmediate(stop); return { ok: true };
+    case 'halt': {
+      // #3705 (today's `stop`): ends this Soul's own act where it stands: a walk stops now, a sit, a lie or a rise
+      // finishes, a standing order ends. A `souls:cancel` naming it; the world answers both.
+      const which = req.sequence !== undefined ? Number(req.sequence) : going.at(-1);
+      if (which === undefined || !going.includes(which)) {
+        return closing({ ok: false, code: 'nothing-to-stop', sent: false, detail: `no act of yours is going${which !== undefined ? ` as ${which}` : ''}. Seated or lying: act <ns>:rise. To end the daemon: quit` }, null, { now: true });
+      }
+      const { sequence, sent } = sendIntent(['souls:cancel'], { replaces: which, basis: shownVersion ?? state.cursor });
+      return closing({ ok: true, sequence, sent, stops: which, verbs: receipts.get(which)?.verbs ?? null }, null, { now: true });
+    }
+    case 'receipt': {
+      // #3705: an intent's receipt, as this daemon had its answers; the newest sent when none is named.
+      const which = req.sequence !== undefined ? Number(req.sequence) : [...receipts.keys()].at(-1);
+      const r = receipts.get(which);
+      if (!r) return { ok: false, code: 'receipt-not-found', detail: which === undefined ? 'no intent sent since the daemon started' : `no intent ${which} among the last ${RECEIPTS_KEPT} this daemon sent`, ...ageNow() };
+      return closing({ ok: true, receipt: { ...r, going: going.includes(r.sequence) } }, null, { now: true });
+    }
+    case 'events': {
+      // #3705: the events after cursor `since` (0: every one kept), without taking them: `wait` still hands them.
+      const after = Math.max(Number(req.since ?? 0) || 0, 0), got = logged.filter((e) => e.n > after);
+      const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
+      return closing({ ok: true, since: after, cursor: eventN, events: got, ...said, ...(logged.length && logged[0].n > after + 1 ? { older: `events before ${logged[0].n} are no longer kept` } : {}) },
+        (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? { ...named(rows, [e])[0], n: e.n } : e)) }), { now: true });
+    }
     default: return { ok: false, code: 'unknown-op' };
   }
 }

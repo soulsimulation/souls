@@ -7,7 +7,9 @@
 // with windows, stairs, slots), the doors paired with their doorways, the ground (recipe, 1 m heights and classes),
 // each water, and the named places derived by the rules in apps/server/src/god/places.ts (read, not imported).
 //
-//   node v2/tools/import-eden/export/export.ts [--seed <s>] [--out <file>]     (from the repository root)
+//   node v2/tools/import-eden/export/export.ts [--seed <s>] [--out <file>] [--template <file>]   (from the repository root)
+//
+// `--template` replays another committed world template (worlds/templates/*.json) the same way; Eden 2026 by default.
 //
 // The output is generated: it goes under the ignored .local/ and is never committed.
 import { createHash } from 'node:crypto';
@@ -23,7 +25,7 @@ const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); retur
 // The catalog this is compared with (.local/import-eden/catalog.ts) boots its world with this seed, so ids match.
 const SEED = arg('--seed', 'eden-local-lifecycle:genesis');
 const OUT = arg('--out', '.local/import-eden/eden-2026.facts.json');
-const TEMPLATE = 'worlds/templates/eden-2026.json';
+const TEMPLATE = arg('--template', 'worlds/templates/eden-2026.json');
 
 const mm = (m: number) => Math.round(m * 1000);
 const mdeg = (rad: number) => { let d = Math.round((rad * 180_000) / Math.PI) % 360_000; if (d < 0) d += 360_000; return d; };
@@ -34,11 +36,14 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 // X6 (#2819): `--backup <file> [--world <id>] [--map <map.json>]` takes a live world's model from a backup of its
 // database (v2/tools/import-world/export/backup.ts) in place of the template's replay.
 const BACKUP = arg('--backup', '');
-const live = BACKUP ? (await import('../../import-world/export/backup.ts')).fromBackup(BACKUP, arg('--world', ''), arg('--map', 'content/worlds/eden/map.json')) : null;
+const backup = await import('../../import-world/export/backup.ts');
+const live = BACKUP ? backup.fromBackup(BACKUP, arg('--world', ''), arg('--map', 'content/worlds/eden/map.json')) : null;
 const text = live ? '' : readFileSync(TEMPLATE, 'utf8');
 const g = live ? { batches: [] } : JSON.parse(text);
 const t0 = performance.now();
-const m = live?.m ?? new WorldModel({ constants: { ground: 'land', extent: 1000, ...g.constants }, seed: SEED });
+// A template's mesh things name core assets by hash (the Mars campus does); resolve them as the server does.
+const core = live ? {} : backup.coreAssets();
+const m = live?.m ?? new WorldModel({ constants: { ground: 'land', extent: 1000, ...g.constants }, seed: SEED, assets: (sha) => core[sha] });
 if (!live) m.library = coreLibrary();
 let tick = 1;
 const apply = (batch: unknown, what: string) => { const r = applyBatch(m, batch, 'genesis', tick++, { trusted: true }); if (!r.result.accepted) throw new Error(`${what} refused: ${JSON.stringify(r.result).slice(0, 600)}`); };
@@ -132,8 +137,9 @@ for (const e of m.entities.values()) {
     return { id: r.id, name: r.name, floor: r.floor, pose: out(scaled), height: S(r.height), polygon: r.polygon.map(inRoom) };
   });
   if (b.openings?.length) rec.openings = (b.openings as Opening[]).map((o) => {
-    // A window names no room: the room it opens from is the one on its floor whose wall it sits in (nearest edge).
-    const from = o.from ?? (o.kind === 'window' ? wallRoom(b.rooms ?? [], o) : undefined);
+    // A window names no room, nor does a door a model's author placed in a mesh building's wall (the Mars campus's):
+    // the room it opens from is the one on its floor whose wall it sits in (nearest edge); the door leads outside.
+    const from = o.from ?? (o.kind === 'window' || !o.to ? wallRoom(b.rooms ?? [], o) : undefined);
     const room = from && b.rooms?.find((r) => r.id === from);
     let at: number[] | undefined;
     if (room) {

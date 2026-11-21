@@ -44,14 +44,14 @@
                 "change": "set",
                 "node": "p1",
                 "field": "red",
-                "n": 1,
+                "n": 28,
                 "to": 0
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "strokes",
-                "n": 4,
+                "n": 31,
                 "to": 7
               }
             ],
@@ -98,14 +98,14 @@
                 "change": "set",
                 "node": "p1",
                 "field": "blue",
-                "n": 2,
+                "n": 29,
                 "to": 7
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "strokes",
-                "n": 4,
+                "n": 31,
                 "to": 8
               }
             ]
@@ -136,7 +136,7 @@
                 "change": "set",
                 "node": "p1",
                 "field": "strokes",
-                "n": 4,
+                "n": 31,
                 "to": 7
               }
             ],
@@ -164,14 +164,14 @@
                 "change": "set",
                 "node": "p1",
                 "field": "yellow",
-                "n": 3,
+                "n": 30,
                 "to": 7
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "strokes",
-                "n": 4,
+                "n": 31,
                 "to": 8
               }
             ]
