@@ -155,6 +155,15 @@ pub fn kind_name(t: &str) -> String {
     }
 }
 
+/// The name a thing's Soul Actions entry goes by, as the world's entries are keyed: the entry it names in field 27
+/// ([`F_ENTRY`], from its world's map: a Mars chair borrows `eden:chair`), else its own kind's plain name.
+pub fn entry_name<'a>(kind: &'a str, fields: &'a BTreeMap<u64, Value>) -> &'a str {
+    match fields.get(&F_ENTRY) {
+        Some(Value::Text(e)) => plain(e.as_str()),
+        _ => plain(kind),
+    }
+}
+
 /// `eden:<word>` for a label of lower-case letters, digits, `-` and `_` that starts with a letter.
 fn label(t: &str) -> Option<Name> {
     let ok = t.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
@@ -1482,7 +1491,7 @@ pub struct BodySlot {
 
 /// Every slot that admits a body ([`BodySlot`]) on the things of `tree` whose kind's entry (`entries`, `(kind,
 /// souls-entry/1 entry)` as `worldd seed` reads them) declares one, by thing id and slot (C19, #3457: a sofa's three,
-/// a bed's two); and the count of every such slot on those things. A slot with no stand point, or a point not in whole
+/// a bed's two), the entry being the one the thing names ([`entry_name`]); and the count of every such slot on those things. A slot with no stand point, or a point not in whole
 /// millimetres, is left out.
 pub fn body_slots(
     tree: &Tree,
@@ -1522,16 +1531,32 @@ pub fn body_slots(
     while let Some(h) = next.pop() {
         next.extend(tree.children(h).unwrap_or(&[]).iter().copied());
         let Some(n) = tree.node(h) else { continue };
-        let Some(found) = by_kind.get(plain(n.kind().as_str())) else {
+        let entry = entry_name(n.kind().as_str(), n.fields());
+        let Some(found) = by_kind.get(entry) else {
             continue;
         };
         all += found.len();
-        out.extend(found.iter().map(|&(slot, lie, at, stand)| BodySlot {
-            thing: n.id(),
-            slot,
-            lie,
-            at,
-            stand,
+        // A thing that borrows another kind's entry (field 27: a Mars chair names `eden:chair`) has its own shape: each
+        // seat is at the thing's own slot of that number (field 13, its def's geometry), its stand point kept at the
+        // entry's offset from the seat, on the floor. An entry seat the thing has no slot for is not offered.
+        let borrowed = entry != plain(n.kind().as_str());
+        out.extend(found.iter().filter_map(|&(slot, lie, at, stand)| {
+            let (at, stand) = if borrowed {
+                let own = slot_point(n.fields(), slot)?;
+                (
+                    own,
+                    Vec3::new(own.x + stand.x - at.x, stand.y, own.z + stand.z - at.z),
+                )
+            } else {
+                (at, stand)
+            };
+            Some(BodySlot {
+                thing: n.id(),
+                slot,
+                lie,
+                at,
+                stand,
+            })
         }));
     }
     out.sort_by_key(|s| (s.thing, s.slot));
