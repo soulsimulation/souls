@@ -1284,9 +1284,21 @@ impl Forms {
                         fr.mv = Some(n);
                         // The move's record (B2) for viewers: the page draws a gesture from it (#3741).
                         if let Some(r) = w.moves.record(n) {
-                            let o = Open { run, body, node: fr.node, intent: fr.intent.id, actor: fr.intent.actor, link: None };
-                            let fields = BTreeMap::from([(1, Value::Uint(run)), (2, body.to_value()), (3, r.to_value())]);
-                            self.out.push(entry(&o, now, Vec::new(), name(MOVED), fields));
+                            let o = Open {
+                                run,
+                                body,
+                                node: fr.node,
+                                intent: fr.intent.id,
+                                actor: fr.intent.actor,
+                                link: None,
+                            };
+                            let fields = BTreeMap::from([
+                                (1, Value::Uint(run)),
+                                (2, body.to_value()),
+                                (3, r.to_value()),
+                            ]);
+                            self.out
+                                .push(entry(&o, now, Vec::new(), name(MOVED), fields));
                         }
                     }
                     Err(r) => self.wake(w, run, Woke::Moved(name(r.name)), now),

@@ -683,7 +683,10 @@ fn f2_a3_a_resend_across_a_restart_gets_the_first_receipt() {
 
 /// Whether entry `e` is a run's move record for viewers (#3741).
 fn is_move_record(e: &Effect) -> bool {
-    e.events.iter().flatten().any(|v| v.name.as_str() == "souls:form-move")
+    e.events
+        .iter()
+        .flatten()
+        .any(|v| v.name.as_str() == "souls:form-move")
 }
 
 /// #3741: a run's move writes its B2 record for viewers (the body, and the move's name, start and phase ends), seen
@@ -705,16 +708,25 @@ fn a_runs_move_record_is_written_for_viewers_and_a_restart_ignores_it() {
         b.flush(&mut log);
     }
     let rec = log.iter().find(|e| is_move_record(e)).expect("the record");
-    assert_eq!(rec.envelope.audience, replica::world_model::Audience::Everyone);
+    assert_eq!(
+        rec.envelope.audience,
+        replica::world_model::Audience::Everyone
+    );
     assert_eq!(rec.envelope.cause, Cause::Intent(it.id));
-    assert!(matches!(&rec.body, Body::Changes(c) if c.is_empty()), "it changes nothing");
+    assert!(
+        matches!(&rec.body, Body::Changes(c) if c.is_empty()),
+        "it changes nothing"
+    );
     let ev = &rec.events.as_ref().expect("events")[0];
     assert_eq!(ev.fields.get(&2), Some(&body.to_value()));
     let Some(Value::Map(m)) = ev.fields.get(&3) else {
         panic!("a move record: {ev:?}")
     };
     assert!(matches!(m.get(&2), Some(Value::Text(_))), "the move's name");
-    assert!(matches!(m.get(&8), Some(Value::Array(a)) if !a.is_empty()), "its phase ends");
+    assert!(
+        matches!(m.get(&8), Some(Value::Array(a)) if !a.is_empty()),
+        "its phase ends"
+    );
     // A restart mid-run: the same endings, entries and runs with the record as without it.
     let now = b.now;
     let without: Vec<Effect> = log.iter().filter(|e| !is_move_record(e)).cloned().collect();
