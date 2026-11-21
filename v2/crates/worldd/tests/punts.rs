@@ -58,7 +58,7 @@ fn eden_waters_and_their_punts() {
             .unwrap();
     let header = import_eden::header(im2.nodes["world"], &im2.rules).unwrap();
     let next = im2.tree.to_state().next;
-    let town = sim::walk::town::Town::new(
+    let mut town = sim::walk::town::Town::new(
         im2.tree,
         ground,
         sim::links::Doors::new(header, im2.rules, next),
