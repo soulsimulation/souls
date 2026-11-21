@@ -30,7 +30,9 @@
 //! - A Soul's status line (C14, #3684; [`super::now`]): `POST /v1/mailbox/now` `{"now": {"n", "text"}}`, the
 //!   gateway's, with the socket's grant in the `souls-soul` header, answered as a prayer is (`{"reply": {"n", "ok",
 //!   "now": {"text", "at"} | null}}`); and `POST /v1/account/now` `{"souls": [grant, ..]}`, public, answered
-//!   `{"now": {grant: {"text", "at"}}}` for those with a line.
+//!   `{"now": {grant: {"text", "at"}}, "state": {grant: word}}` for those with a line, and those a world has said are
+//!   idle, a zombie or asleep (#3784; `POST /v1/mailbox/state` `{"states": {grant: word}}` from the gateway, the word
+//!   `awake` clearing it).
 //!
 //! Answers carry `cache-control: no-store` (the world list's a short while) and may be read by the page's own origin
 //! alone (CORS). A message's text is never in a log line. The log line of a request holds its method, path, status
@@ -287,8 +289,9 @@ fn handle(mut stream: TcpStream, app: &App) {
                     v => (status, "application/json", text(&v), note),
                 }
             });
-    // The world list may be cached a short while (W3, #2799); everything else is no-store.
-    let list = req.method == "GET" && req.path == "/v1/worlds" && status == 200;
+    // The public world list may be cached a short while (W3, #2799); a signed-in one and everything else is no-store.
+    let list =
+        req.method == "GET" && req.path == "/v1/worlds" && status == 200 && req.bearer.is_none();
     let cache = if list {
         crate::worlds::list::http::CACHE
     } else {
@@ -412,6 +415,23 @@ fn mailbox(req: &Request, app: &App) -> Option<(u16, Value, String)> {
             Some(prayers(req, app))
         }
         ("POST", "/v1/mailbox/now") if gateway() => Some(now_set(req, app)),
+        // #3784: a world's word on its Souls, passed on by its gateway on each change: `{"states": {grant: word}}`.
+        ("POST", "/v1/mailbox/state") if gateway() => {
+            let b = body();
+            let words: Vec<(&str, &str)> = b
+                .get("states")
+                .and_then(Value::as_object)
+                .map(|m| {
+                    m.iter()
+                        .filter_map(|(g, w)| Some((g.as_str(), w.as_str()?)))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some(match app.store.states_set(words, now()) {
+                Ok(n) => (200, json!({"ok": true, "n": n}), format!("states {n}")),
+                Err(e) => store(e),
+            })
+        }
         ("GET", "/v1/mailbox/open")
         | (
             "POST",
@@ -419,7 +439,8 @@ fn mailbox(req: &Request, app: &App) -> Option<(u16, Value, String)> {
             | "/v1/mailbox/pray"
             | "/v1/mailbox/prayers"
             | "/v1/mailbox/answer"
-            | "/v1/mailbox/now",
+            | "/v1/mailbox/now"
+            | "/v1/mailbox/state",
         ) => refuse(401, "mailbox-key"),
         ("POST", "/v1/mailbox/put") if app.test_sign_in || gateway() => {
             let b = body();
@@ -560,7 +581,8 @@ fn now_set(req: &Request, app: &App) -> (u16, Value, String) {
 }
 
 /// C14 (#3684): the public read of Souls' status lines, `{"souls": [grant, ..]}` (at most `now::READ_MOST`), answered
-/// `{"now": {grant: {"text", "at"}}}` for those that have one. Public, as the Soul's page is; no sign-in.
+/// `{"now": {grant: {"text", "at"}}, "state": {grant: word}}` for those that have one. Public, as the Soul's page is
+/// (the word is what the world's stream already shows anyone); no sign-in.
 fn now_read(req: &Request, app: &App) -> (u16, Value, String) {
     let body = serde_json::from_slice::<Value>(&req.body).unwrap_or(Value::Null);
     let Some(souls) = body.get("souls").and_then(Value::as_array) else {
@@ -574,16 +596,24 @@ fn now_read(req: &Request, app: &App) -> (u16, Value, String) {
         );
     }
     let asked: Vec<&str> = souls.iter().filter_map(Value::as_str).collect();
-    match app.store.now_of(&asked) {
-        Ok(lines) => {
+    match (app.store.now_of(&asked), app.store.states_of(&asked)) {
+        (Ok(lines), Ok(states)) => {
             let map: serde_json::Map<String, Value> = lines
                 .iter()
                 .map(|(g, n)| (g.clone(), now_json(n)))
                 .collect();
+            let state: serde_json::Map<String, Value> =
+                states.into_iter().map(|(g, w)| (g, json!(w))).collect();
             let note = format!("now {} of {}", map.len(), asked.len());
-            (200, json!({"now": map}), note)
+            // The words only when a Soul asked about has one: an answer with none is today's, `{"now": ..}` alone.
+            let body = if state.is_empty() {
+                json!({ "now": map })
+            } else {
+                json!({"now": map, "state": state})
+            };
+            (200, body, note)
         }
-        Err(_) => (500, json!({"refused": "store"}), "store".into()),
+        _ => (500, json!({"refused": "store"}), "store".into()),
     }
 }
 
