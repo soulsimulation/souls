@@ -1141,8 +1141,8 @@ async fn g7b_standalone_metadata_creator_still_edits_without_a_directory() {
     );
 }
 
-/// #3923: BUILDSAFE on a served world, in CI (N2's test world, no Eden facts): a wall where a Soul stands is refused
-/// `edit.would-bury` by the record's creator, and the same wall beside it commits.
+/// #3923: BUILDSAFE on a served world, in CI (N2's test world, no Eden facts): a wall where a Soul stands, once its
+/// first act has born it, is refused `edit.would-bury` by the record's creator, and the same wall beside it commits.
 #[tokio::test(flavor = "multi_thread")]
 async fn g1e_buildsafe_refuses_a_wall_on_a_standing_soul_on_the_test_world() {
     let d = scratch("g1e-buildsafe");
@@ -1153,11 +1153,20 @@ async fn g1e_buildsafe_refuses_a_wall_on_a_standing_soul_on_the_test_world() {
     let socket = d.join("s");
     let s = serve(&w, &socket, &bucket);
     s.line("listening ", 60);
+    // No Soul stands in a world until it acts (C3): the Soul's walk births its body and ends where it stands.
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (sx, sz) = (-37 * M, 30 * M);
+    walk(&mut souls, &w, w.souls[0], 1, sx, sz);
+    let got = socket_answer(&mut souls);
+    assert_eq!(got.kind, 1, "the Soul's walk ends: {got:?}");
     let (url, tokens) = gateway(&socket, &[creator]).await;
     let mut ws = sign_in(&url, &tokens[0]).await;
     let (got, _) = send(
         &mut ws,
-        edit_intent(&w, creator, 1, 0, wall(&w, -40 * M, 30 * M)),
+        edit_intent(&w, creator, 1, 0, wall(&w, sx, sz)),
     )
     .await;
     println!("a wall where the Soul stands: {got:?}");
