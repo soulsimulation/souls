@@ -22,6 +22,9 @@
 //   place, move, set, remove, batch, check ... --claim <claim>   sent under a build claim: it builds only inside it,
 //                                                and others stay out of it until it is released
 //   souls-god.mjs status | stop                  the daemon
+//   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
+//   souls-god.mjs visitors                       the world's welcome and its most recent visitors, newest first
+//                                                these two ask the world's directory, with the creator's token
 //   any of them [--creator <c_id>]               which creator, when the home holds more than one
 //
 // A refusal prints its code, the operation that failed (`op`, its place in the batch) and a fix. The home is
@@ -34,10 +37,10 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
-import { findHome, soulsWithTokens } from '../home/home.mjs';
+import { findHome, readSeat, soulsWithTokens } from '../home/home.mjs';
 import { worldOf } from '../cli/souls.mjs';
 
-export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'build', 'status', 'stop'];
+export const VERBS = ['pair', 'describe', 'place', 'move', 'set', 'remove', 'batch', 'check', 'build', 'status', 'stop', 'welcome', 'visitors'];
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
@@ -66,6 +69,10 @@ export const FIX = {
   'district.plot': 'build district <id> lists its plots',
   'claim.unknown': 'build claims lists the live claims',
   'which-creator': 'name one with --creator',
+  'not-the-creator': 'only the world\'s creator: pair with --creator <its creator grant>',
+  'welcome-too-long': 'at most 500 characters',
+  'welcome-not-text': 'plain words and line breaks only',
+  'token-refused': 'pair again with --creator <the world\'s creator grant>',
 };
 
 const usage = (detail) => Object.assign(new Error(detail), { code: 'usage' });
@@ -117,6 +124,11 @@ export function requestOf(argv) {
   const [verb = 'status', ...rest] = args;
   if (!VERBS.includes(verb)) throw Object.assign(new Error(`one of ${VERBS.join(', ')}`), { code: 'unknown-command' });
   if (verb === 'pair') return { pair: rest[0], creator };
+  if (verb === 'welcome') {
+    if (rest.length > 1) throw usage("welcome '<words>': quote the words as one argument");
+    return { directory: '/v1/worlds/welcome', body: { welcome: rest[0] ?? '' }, creator };
+  }
+  if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe') return { req: { op: verb }, creator };
   if (verb === 'build') return { build: buildOf(rest), creator };
   if (verb === 'check') return { req: { op: 'check', ops: opsOf(rest[0], rest.slice(1)), ...under }, creator };
@@ -243,6 +255,23 @@ export async function runBuild(b, ask) {
   return out.ok === false ? out : { ...out, claim: { id, part: slug(b.part), area }, then: `send its edits with --claim ${id}` };
 }
 
+/**
+ * Asks the world's directory (#3702) as the creator: the seat's world and token from the home, sent as a Bearer to
+ * the directory the pairing kept. The token is never printed.
+ */
+async function askDirectory(home, creator, path, body) {
+  const seat = readSeat(home, creator);
+  let url;
+  try { url = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')).worlds?.[seat.world]?.url; } catch { /* below */ }
+  if (typeof url !== 'string') throw Object.assign(new Error(`no directory kept for ${seat.world}; pair again`), { code: 'no-directory' });
+  const r = await fetch(new URL(path, url), {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${seat.token}` },
+    body: JSON.stringify({ world: seat.world, ...body }), signal: AbortSignal.timeout(15_000),
+  });
+  const got = await r.json().catch(() => ({}));
+  return got.refused ? { ok: false, code: got.refused } : { ok: true, ...got };
+}
+
 /** An answer with its fix, when it is a refusal the table knows. */
 export const withFix = (out) => (out?.ok === false && FIX[out.code] ? { ...out, fix: FIX[out.code] } : out);
 
@@ -274,6 +303,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const creators = soulsWithTokens(home).filter((id) => id.startsWith('c_'));
     const creator = asked.creator ?? (creators.length === 1 ? creators[0] : undefined);
     if (!creator) throw Object.assign(new Error(`creators here: ${creators.join(', ') || 'none; pair first'}`), { code: 'which-creator' });
+    if (asked.directory) {
+      const said = await askDirectory(home, creator, asked.directory, asked.body);
+      out(withFix(said));
+      if (said.ok === false) process.exitCode = 1;
+      process.exit();
+    }
     const ask = (req) => call(home, creator, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: 15_000 });
     const answer = asked.build ? await runBuild(asked.build, ask) : await ask(asked.req);
     out(withFix(answer));
