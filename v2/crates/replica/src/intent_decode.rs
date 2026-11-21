@@ -133,13 +133,21 @@ fn measure(v: &Value, depth: u32, most: &mut (u32, u64)) {
 
 /// Reads one intent from an arriving frame, or refuses it by a name in `refusals::REFUSALS`.
 pub fn decode(bytes: &[u8]) -> Result<Intent, Refusal> {
+    decode_within(bytes, u64::from(LIMITS.frame_bytes))
+}
+
+/// Reads a creator's bulk edit (#3695, the gateway's creator route): as [`decode`], with
+/// [`crate::intents::BULK_MOST`] for its length; `Intent::read` refuses any but a creator's edit over the frame limit
+/// (`intent.too-large`).
+pub fn decode_bulk(bytes: &[u8]) -> Result<Intent, Refusal> {
+    decode_within(bytes, crate::intents::BULK_MOST)
+}
+
+fn decode_within(bytes: &[u8], most: u64) -> Result<Intent, Refusal> {
     // 1. The length alone: nothing is parsed and nothing reserved for a frame over the limit.
     let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-    if size > u64::from(LIMITS.frame_bytes) {
-        return refused(
-            "intent.too-large",
-            format!("{size} bytes; at most {}", LIMITS.frame_bytes),
-        );
+    if size > most {
+        return refused("intent.too-large", format!("{size} bytes; at most {most}"));
     }
     // 2. One value in the encoding profile. Its decoder reserves at most a fixed count whatever a length claims.
     let value = match decode_value(bytes) {

@@ -11,6 +11,9 @@ token, and you never need it.
 
 ## Start
 
+With the client a world serves (`<world url>/eden.mjs`), the command is `node eden.mjs god <verb> ...`: read
+`node souls-god.mjs` in this skill as that.
+
 1. `node souls-god.mjs status`: `connected: true` means the daemon holds a current copy. If it is false, run it
    again after a second or two.
 2. `node souls-god.mjs describe`: everything in the world (`nodes`: `id`, `kind`, `parent`) and what you can place
@@ -47,8 +50,13 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `batch '<json list>'` | several operations at once: all happen, or none |
 | `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
 | `describe` | what is there, and what each kind admits |
+| `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
+| `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
 
 A kind may be written as its bare name (`room`) when only one kind has that name, or as `namespace:name`.
+
+These are all the verbs there are. If you know today's god command (`eden-god`), its undo, place by relation, land,
+weather, search of kinds and the others are not here yet; do not try them. `v2/docs/creator-verbs.md` maps each one.
 
 ### Batches
 
