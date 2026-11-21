@@ -732,6 +732,8 @@ pub struct PublicPlayer {
     samples: Vec<HandOff>,
     events: Vec<Value>,
     record: u64,
+    /// `digest` is the newest part's claim, not yet worked out from `state` (parts played deferred, #3822).
+    unverified: bool,
 }
 impl PublicPlayer {
     pub fn start(header: &[u8], baseline: &[u8]) -> R<Self> {
@@ -762,6 +764,7 @@ impl PublicPlayer {
             samples: Vec::new(),
             events: Vec::new(),
             record: uint(field(&m, 4)?)?,
+            unverified: false,
         })
     }
     pub fn state(&self) -> &Value {
@@ -858,6 +861,35 @@ impl PublicPlayer {
         digest(&self.state)
     }
     pub fn play(&mut self, bytes_: &[u8]) -> R<Played> {
+        self.play_digest(bytes_, true)
+    }
+    /// [`PublicPlayer::play`] without working out the next state's digest (#3822): every check but that one, the
+    /// part's claimed result digest kept as the state's, so the next part's prior digest still has to match it. A
+    /// joiner far behind plays the parts it will not show this way, then [`PublicPlayer::verify`] (or the next part
+    /// played checked) works out the digest of the state they made and refuses it unless it is the newest claimed one.
+    pub fn play_deferred(&mut self, bytes_: &[u8]) -> R<Played> {
+        self.play_digest(bytes_, false)
+    }
+    /// Works out the state's digest when parts were played deferred since it was last worked out, and refuses the
+    /// state (`stream-digest`) unless it is the digest the newest part claimed.
+    pub fn verify(&mut self) -> R<()> {
+        if !self.unverified {
+            return Ok(());
+        }
+        let actual = match self.enc.as_deref() {
+            Some(enc) => streamed_digest(&self.state, enc, None)?,
+            None => digest(&self.state)?,
+        };
+        if actual != self.digest {
+            return refuse(
+                "stream-digest",
+                "the parts played deferred do not make the claimed state",
+            );
+        }
+        self.unverified = false;
+        Ok(())
+    }
+    fn play_digest(&mut self, bytes_: &[u8], check: bool) -> R<Played> {
         let sp = StreamPart::read(bytes_)?;
         if sp.number != self.next {
             return refuse("stream-gap", "public part number");
@@ -887,6 +919,7 @@ impl PublicPlayer {
         };
         let mut plan = plan;
         let in_place_digest = match &plan {
+            _ if !check => Some(bytes(field(&c, 4)?)?.to_vec()),
             Some(p) => {
                 self.encodings()?;
                 let enc = self.enc.as_deref().unwrap_or_default();
@@ -905,6 +938,7 @@ impl PublicPlayer {
             in_place_digest,
             old_version,
             &flying,
+            check,
         );
         match (r, whole) {
             (Ok((digest, changes, part, version)), whole) => {
@@ -931,6 +965,7 @@ impl PublicPlayer {
                     (None, None) => {}
                 }
                 self.digest = digest;
+                self.unverified = !check;
                 self.finish(sp, part, changes, record, version)
             }
             (Err(e), _) => {
@@ -988,7 +1023,8 @@ impl PublicPlayer {
         in_place_digest: Option<Vec<u8>>,
         old_version: u64,
         flying: &BTreeSet<Id>,
-    ) -> R<(Vec<u8>, BTreeMap<Id, u64>, Part, u64)> {
+        effects: bool,
+    ) -> R<(Vec<u8>, BTreeMap<Id, u64>, Option<Part>, u64)> {
         let next = whole.unwrap_or(&self.state);
         let next_digest = match in_place_digest {
             Some(d) => d,
@@ -997,8 +1033,73 @@ impl PublicPlayer {
         if bytes(field(c, 4)?)? != next_digest || sp.hash.as_deref() != Some(bytes(field(c, 4)?)?) {
             return bad("context result digest");
         }
-        let part = Part::read(&sp.part)?;
         let version = uint(field(map(next)?, 1)?)?;
+        // #3822: a part played deferred is not shown, so its entries are not read: the checks on them are skipped.
+        let part = match effects {
+            true => Some(self.check_effects(sp, c, old_version, version)?),
+            false if sp.from > sp.to || version < old_version => return bad("public part range"),
+            false => None,
+        };
+        // Whole: the old state and the next, by id. In place: the same ids before and after, and the swapped rows.
+        let (old_nodes, new_nodes) = match whole {
+            Some(next) => (
+                pairs(field(map(&self.state)?, 2)?)?,
+                pairs(field(map(next)?, 2)?)?,
+            ),
+            None => (BTreeMap::new(), BTreeMap::new()),
+        };
+        let rows = arr(field(map(next)?, 2)?)?;
+        let has = |id: &Id, nodes: &BTreeMap<Id, Value>| match whole {
+            Some(_) => Ok(nodes.contains_key(id)),
+            None => row_index(rows, *id).map(|i| i.is_some()),
+        };
+        let mut changes = BTreeMap::new();
+        for row in arr(field(c, 8)?)? {
+            let row = arr(row)?;
+            if row.len() != 2 {
+                return bad("change version shape");
+            };
+            let id = read_id(&row[0])?;
+            let v = uint(&row[1])?;
+            let (was, is) = (has(&id, &old_nodes)?, has(&id, &new_nodes)?);
+            let reenters = !was && is && flying.contains(&id);
+            // Return/Settle need not touch each carried child. A checkpoint-restored flying child has
+            // canonical fallback zero; a previously observed child retains its exact known version.
+            let retained = reenters && v == self.changed.get(&id).copied().unwrap_or(0);
+            if (!was && !is)
+                || (v <= old_version && !retained)
+                || v > version
+                || changes.insert(id, v).is_some()
+            {
+                return bad("unauthorized change version");
+            }
+        }
+        for id in old_nodes.keys().chain(new_nodes.keys()) {
+            if old_nodes.get(id) != new_nodes.get(id) && !changes.contains_key(id) {
+                return bad("missing changed node version");
+            }
+        }
+        for (i, old) in old.iter().flat_map(|p| &p.rows) {
+            let Value::Array(row) = &rows[*i] else {
+                return bad("expected an id/value pair");
+            };
+            if &rows[*i] != old && !changes.contains_key(&read_id(&row[0])?) {
+                return bad("missing changed node version");
+            }
+        }
+        Ok((next_digest, changes, part, version))
+    }
+
+    /// The checks of a part's entries against the versions it moves between: its range, identity, entries and gaps,
+    /// and its duplicates. The part.
+    fn check_effects(
+        &self,
+        sp: &StreamPart,
+        c: &BTreeMap<u64, Value>,
+        old_version: u64,
+        version: u64,
+    ) -> R<Part> {
+        let part = Part::read(&sp.part)?;
         if sp.from > sp.to
             || sp.first
                 != part
@@ -1055,68 +1156,21 @@ impl PublicPlayer {
             let id = read_id(&row[1])?;
             if !duplicates.insert(seq)||!part.effects.iter().any(|e|e.envelope.sequence==seq&&matches!(&e.body,Body::Transfer(TransferRec::Arrive{transfer,..}) if *transfer==id)){return bad("duplicate context has no public arrival")}
         }
-        // Whole: the old state and the next, by id. In place: the same ids before and after, and the swapped rows.
-        let (old_nodes, new_nodes) = match whole {
-            Some(next) => (
-                pairs(field(map(&self.state)?, 2)?)?,
-                pairs(field(map(next)?, 2)?)?,
-            ),
-            None => (BTreeMap::new(), BTreeMap::new()),
-        };
-        let rows = arr(field(map(next)?, 2)?)?;
-        let has = |id: &Id, nodes: &BTreeMap<Id, Value>| match whole {
-            Some(_) => Ok(nodes.contains_key(id)),
-            None => row_index(rows, *id).map(|i| i.is_some()),
-        };
-        let mut changes = BTreeMap::new();
-        for row in arr(field(c, 8)?)? {
-            let row = arr(row)?;
-            if row.len() != 2 {
-                return bad("change version shape");
-            };
-            let id = read_id(&row[0])?;
-            let v = uint(&row[1])?;
-            let (was, is) = (has(&id, &old_nodes)?, has(&id, &new_nodes)?);
-            let reenters = !was && is && flying.contains(&id);
-            // Return/Settle need not touch each carried child. A checkpoint-restored flying child has
-            // canonical fallback zero; a previously observed child retains its exact known version.
-            let retained = reenters && v == self.changed.get(&id).copied().unwrap_or(0);
-            if (!was && !is)
-                || (v <= old_version && !retained)
-                || v > version
-                || changes.insert(id, v).is_some()
-            {
-                return bad("unauthorized change version");
-            }
-        }
-        for id in old_nodes.keys().chain(new_nodes.keys()) {
-            if old_nodes.get(id) != new_nodes.get(id) && !changes.contains_key(id) {
-                return bad("missing changed node version");
-            }
-        }
-        for (i, old) in old.iter().flat_map(|p| &p.rows) {
-            let Value::Array(row) = &rows[*i] else {
-                return bad("expected an id/value pair");
-            };
-            if &rows[*i] != old && !changes.contains_key(&read_id(&row[0])?) {
-                return bad("missing changed node version");
-            }
-        }
-        Ok((next_digest, changes, part, version))
+        Ok(part)
     }
 
     /// A checked part played: its versions, samples and events kept, the cursor moved on.
     fn finish(
         &mut self,
         sp: StreamPart,
-        part: Part,
+        part: Option<Part>,
         changes: BTreeMap<Id, u64>,
         record: u64,
         version: u64,
     ) -> R<Played> {
         self.changed.extend(changes);
-        self.samples = part
-            .effects
+        let effects = part.map(|p| p.effects).unwrap_or_default();
+        self.samples = effects
             .iter()
             .flat_map(|e| match &e.body {
                 Body::Changes(cs) => cs
@@ -1132,8 +1186,7 @@ impl PublicPlayer {
                 _ => Vec::new(),
             })
             .collect();
-        self.events = part
-            .effects
+        self.events = effects
             .iter()
             .flat_map(|e| {
                 e.events.iter().flatten().map(|ev| {
