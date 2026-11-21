@@ -257,14 +257,13 @@ test('A1 to A3: two joined Souls converse, a bystander hears no private turn, an
     assert.ok(!log.includes('bring the blue key'), 'the private words are not in the log');
     console.log('log', log.length, 'bytes: no private words in it');
     // #3775: spectators see who is in the private conversation, never its words: the words are in no public part, no
-    // views/ file and no history/ file, and the public stream carries the turn's record without words.
+    // views/ file and no history/ file (the record itself is read by the page's worker in the served e2e gate).
     // The world is still writing: a file renamed away between the listing and the read is skipped.
     const read = (f) => { try { return statSync(f).isFile() ? readFileSync(f) : null; } catch { return null; } };
     const files = (root) => (existsSync(root) ? readdirSync(root, { recursive: true }).map((f) => join(root, f)).filter((f) => read(f)) : []);
     const publicFiles = [...files(join(world, 'views')), ...files(join(world, 'history'))];
     for (const f of publicFiles) assert.ok(!read(f)?.includes('blue key'), `the private words are in no public file: ${f.slice(world.length)}`);
-    await waitFor(() => files(join(world, 'views')).some((f) => read(f)?.includes('souls:said-privately')));
-    console.log('public files', publicFiles.length, ': no private words; the private turn\'s record is in the public stream');
+    console.log('public files', publicFiles.length, ': no private words');
 
     // A3: the entry's two-role activity, offered by the first to the second, joined by the second.
     const plainGame = game;
