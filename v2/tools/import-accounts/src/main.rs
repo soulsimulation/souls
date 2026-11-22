@@ -49,7 +49,8 @@ fn main() {
             .map(|w| {
                 serde_json::json!({
                     "world": w.world, "live": w.live, "retired": w.retired, "brought": w.brought,
-                    "unowned": w.unowned, "noKind": w.no_kind, "creator": w.creator, "equal": w.equal,
+                    "unowned": w.unowned, "operatorTest": w.operator, "noKind": w.no_kind,
+                    "defaulted": w.defaulted, "creator": w.creator, "equal": w.equal,
                 })
             })
             .collect();
@@ -66,23 +67,28 @@ fn main() {
             r.stage, r.forks, r.aliases, r.conflicts, r.accounts_equal
         );
         println!(
-            "| world | live | retired | brought | unowned | no kind (by preset) | creator | equal |"
+            "| world | live | retired | brought | unowned | operator test | no kind (by preset) | default body (by reason) | creator | equal |"
         );
-        println!("|---|---|---|---|---|---|---|---|");
+        println!("|---|---|---|---|---|---|---|---|---|---|");
+        let counts = |m: &std::collections::BTreeMap<String, usize>| {
+            let v: Vec<String> = m.iter().map(|(p, n)| format!("{p} {n}")).collect();
+            if v.is_empty() {
+                "0".to_owned()
+            } else {
+                v.join(", ")
+            }
+        };
         for w in &r.worlds {
-            let nk: Vec<String> = w.no_kind.iter().map(|(p, n)| format!("{p} {n}")).collect();
             println!(
-                "| {} | {} | {} | {} | {} | {} | {} | {} |",
+                "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
                 w.world,
                 w.live,
                 w.retired,
                 w.brought,
                 w.unowned,
-                if nk.is_empty() {
-                    "0".to_owned()
-                } else {
-                    nk.join(", ")
-                },
+                w.operator,
+                counts(&w.no_kind),
+                counts(&w.defaulted),
                 w.creator,
                 w.equal
             );
