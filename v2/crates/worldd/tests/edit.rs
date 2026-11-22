@@ -1266,21 +1266,12 @@ impl Doorways {
             .expect("the test world loads");
         let root = im.nodes["world"];
         let h = import_eden::header(root, &im.rules).expect("a header");
-        let mut live = Replica::start(h.stored()).expect("a replica");
-        let part = replica::encode::encode(&Value::Map(BTreeMap::from([
-            (1, Value::Bytes(h.hash().to_bytes())),
-            (
-                2,
-                Value::Array(im.effects.iter().map(Effect::to_value).collect()),
-            ),
-        ])))
-        .expect("bytes");
-        live.apply(&Part::read(&part).expect("a part"))
-            .expect("the world as imported");
+        let next = im.tree.to_state().next;
+        let leaf = im.nodes["door-building-to-b"];
         Doorways {
-            live,
+            live: Replica::restored(h, im.tree, next),
             root,
-            leaf: im.nodes["door-building-to-b"],
+            leaf,
             world: World {
                 creator: Id::new(Scope([0xc0; 16]), 1).expect("an id"),
                 kinds: BTreeMap::new(),
