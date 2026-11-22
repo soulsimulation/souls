@@ -771,11 +771,22 @@ impl Sight<'_> {
         node: Id,
         reach: i64,
     ) -> Option<(Id, [Vec3; 4], Vec3, bool, i64)> {
+        let dbg = |s: &str| eprintln!("FPDBG {s}");
+        dbg(&format!(
+            "walks {:?} step {step} node {node:?}",
+            self.walks.get(&body)
+        ));
         let &(at_step, thing, ref point) = self.walks.get(&body)?;
         if at_step != step || self.bodies.contains_key(&thing) {
             return None;
         }
         let n = self.tree.node(self.tree.handle(thing)?)?;
+        dbg(&format!(
+            "parent {:?} entry {} has {}",
+            n.parent(),
+            entry_of(&n),
+            self.kinds.get(entry_of(&n)).is_some()
+        ));
         if n.parent() != Some(node) {
             return None;
         }
@@ -795,8 +806,10 @@ impl Sight<'_> {
             }
             None => reach,
         };
+        dbg(&format!("footprint {corners:?} on {on} reach {reach}"));
         let (floor, ring, middle) =
             self.with_view(body, |v| v.footprint_on_floor(thing, &corners))??;
+        dbg(&format!("floor {floor:?} ring {ring:?}"));
         Some((floor, ring, middle, on, reach))
     }
 }

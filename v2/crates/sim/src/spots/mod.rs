@@ -483,7 +483,7 @@ pub fn within_footprint(
         let step = REACH_PITCH.max((whole + BAND_PLACES - 1) / BAND_PLACES);
         for i in 0..k {
             let (a, b, len) = (ring[i], ring[(i + 1) % k], lens[i]);
-            if len == 0 || len + 2 * d < 0 {
+            if len == 0 || len + 2 * d <= 0 {
                 continue;
             }
             // The edge's line moved out by `d`, at `s` µm along it from `a`.
@@ -501,7 +501,14 @@ pub fn within_footprint(
             };
             for j in 0..=(len + 2 * d) / step {
                 let p = at(j * step - d);
-                if to_outline(p, ring) > reach {
+                // A place on a band in is as deep inside as the band (not past the far side of a narrow thing).
+                let shallow = || {
+                    (0..k)
+                        .map(|e| to_segment(p, ring[e], ring[(e + 1) % k]))
+                        .min()
+                        .is_none_or(|x| x < -d - 1)
+                };
+                if to_outline(p, ring) > reach || (d < 0 && shallow()) {
                     continue;
                 }
                 let Some((at, world)) = g.stand(target.node, p) else {
