@@ -321,7 +321,12 @@ impl Store for S3 {
         }
         req = match when {
             When::Absent => req.header("if-none-match", "*"),
-            When::Is(e) => req.header("if-match", format!("\"{e}\"")),
+            When::Is(e) => match std::env::var("DIAG_IFMATCH").as_deref() {
+                Ok("bare") => req.header("if-match", e),
+                Ok("weak") => req.header("if-match", format!("W/\"{e}\"")),
+                Ok("star") => req.header("if-match", "*"),
+                _ => req.header("if-match", format!("\"{e}\"")),
+            },
         };
         let res = req.send(bytes).or_else(|e| unreachable(key, e))?;
         status(res.status().as_u16(), key)?;
