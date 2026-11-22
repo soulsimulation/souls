@@ -4,6 +4,7 @@
 // rotated about the Mimos origin (world 0,-30) and gets the same yaw added; children are parent-local and follow.
 // Pure reads until --apply. The credential is consumed by path at runtime, never copied into a receipt.
 //   node patch.mjs --base <world URL> --receipt <abs JSON> [--bearing 82] [--token-file <path>] [--apply | --recover | --rollback [--apply]]
+import { isMain } from '../lib/is-main.mjs';
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
 import {readFileSync,writeFileSync,existsSync} from 'node:fs';
@@ -60,7 +61,7 @@ export function guardRollback(edits,receipt,snapshot){
  assert(authored&&authored.seq===receipt.appliedSeq&&authored.grp===receipt.batch.group&&authored.kind==='edit'&&!authored.undone&&edits.filter(e=>e.grp===receipt.batch.group&&!e.undone&&(e.kind==='edit'||e.kind==='redo')).length===1,'rollback refused: an authored edit intervened (undo later patches first), or this is not the latest authored edit');
  return receipt.rollbackPath;
 }
-if(import.meta.url==='file://'+process.argv[1]){
+if(isMain(import.meta.url)){
  const args=process.argv.slice(2),flag=(k,d)=>{const i=args.indexOf('--'+k);return i<0?d:args[i+1];};
  const base=flag('base',null)?.replace(/\/+$/,''),out=flag('receipt',null),rollback=args.includes('--rollback'),bearing=Number(flag('bearing',82));
  assert(base&&out,'--base <world URL> --receipt <absolute JSON path> [--bearing 82] [--apply|--recover|--rollback [--apply]]');

@@ -35,6 +35,7 @@
 // When the upload is blocked (no R2 credentials, no permission, no network: always in cloud sessions) it exits 3
 // and says so. Then tell the user where the files are and ask them to attach them; never commit media to get
 // around it, and never push it to another branch.
+import { isMain } from '../lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -345,4 +346,4 @@ async function main(argv) {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = await main(process.argv.slice(2));

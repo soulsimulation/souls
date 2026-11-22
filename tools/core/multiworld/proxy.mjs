@@ -1,11 +1,11 @@
 // Local multi-world routing, HTTP streaming/SSE and WebSocket passthrough. No
 // credentials, tunnels, production services or DNS are managed by this module.
+import { isMain } from '../../lib/is-main.mjs';
 import {createServer,request} from 'node:http';
 import {connect} from 'node:net';
 import {readFileSync,realpathSync,lstatSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {resolve,relative,sep,extname} from 'node:path';
-import {pathToFileURL} from 'node:url';
 const KEYS=['eden','mars','littlemartians'];
 export function worldForPath(path='/'){
  const url=new URL(path,'http://local');
@@ -112,7 +112,7 @@ export async function openWorldProxy({port=4966,worlds,exposure='local',expected
  await listenWorldProxy(server,port,beforeListen);
  return{server,artifactAttribution:overlay?.attribution??null,url:`http://127.0.0.1:${port}`,close:async()=>{closing=true;const done=new Promise(r=>server.close(r));for(const socket of sockets)socket.destroy();await done;}};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  try{const path=process.argv[2];if(!path)throw Error('usage: node tools/core/multiworld/proxy.mjs <descriptor.json>');const proxy=await openWorldProxy(JSON.parse(readFileSync(resolve(path),'utf8')));console.log(proxy.url);for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>void proxy.close().then(()=>process.exit(0)));}
  catch(error){console.error('World proxy refused:',error.message);process.exitCode=1;}
 }

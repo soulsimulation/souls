@@ -16,6 +16,7 @@
 //                                                  server root's apps/web/src and apps/server/src reference
 // Resumable: finished files are kept (downloads land in .part and are renamed); <dir>/overlay-manifest.json records
 // url, bytes and sha256 of every file and what was missing. Exit 1 when a required file could not be fetched.
+import { isMain } from '../../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync, createReadStream } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -161,4 +162,4 @@ async function main() {
   console.log(JSON.stringify({ ok: r.ok, dir: resolve(dir), files: r.files.length, bytes: r.bytes, missing: r.missing.map((m) => `${m.rel} (${m.status}${m.required ? ', required' : ''})`), seconds: Math.round((Date.now() - t0) / 1000), manifest: r.manifestFile }, null, 1));
   process.exit(r.ok ? 0 : 1);
 }
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (isMain(import.meta.url)) main();

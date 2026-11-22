@@ -6,10 +6,10 @@
 //
 // Prints one JSON line per file: its kind, its provisional reference `namespace:name@prov-1220<sha-256>`, and any
 // errors, each naming the path of the field at fault. Exits 1 if any entry is refused.
+import { isMain } from '../lib/is-main.mjs';
 import {createHash} from 'node:crypto';
 import {readFileSync, readdirSync, statSync} from 'node:fs';
 import {join} from 'node:path';
-import {pathToFileURL} from 'node:url';
 
 export const FORMAT = 'souls-entry/1';
 
@@ -1210,7 +1210,7 @@ export function loadDir(dir) {
   return files;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   const files = process.argv.slice(2).flatMap(loadDir);
   const rows = files.map(file => {
     const {entry, errors} = parseEntry(readFileSync(file, 'utf8'));

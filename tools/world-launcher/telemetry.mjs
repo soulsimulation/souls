@@ -15,10 +15,10 @@
 //   node tools/world-launcher/telemetry.mjs packet --dir <d> [--cost <file>] [--bench <dir>] [--range 24h] [--json]   context packet
 //   node tools/world-launcher/telemetry.mjs units --dir <d> --cost <file> [--range 24h] [--json]   unit costs (#739 S3)
 //   node tools/world-launcher/telemetry.mjs scenarios --cost <file> --bench <capacity-qualify dir> [--worlds 10,50,100,200,400] [--json]
+import { isMain } from '../lib/is-main.mjs';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pathToFileURL } from 'node:url';
 import { parsePrometheus } from './telemetry/prom.mjs';
 import { Store, DEFAULTS } from './telemetry/store.mjs';
 import { reduceHour } from './telemetry/reduce.mjs';
@@ -131,4 +131,4 @@ async function main() {
   }
   throw new Error('usage: telemetry.mjs collect|report|close|alerts|cost|packet|units|scenarios ...');
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main().catch((e) => { console.error(`telemetry: ${e.message}`); process.exit(1); });
+if (isMain(import.meta.url)) main().catch((e) => { console.error(`telemetry: ${e.message}`); process.exit(1); });

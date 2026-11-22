@@ -1,7 +1,7 @@
 // Actual flat Greenfield body/controller, canonical input log and anonymous
 // Hono publications. No renderer kit installation, model or network listener.
+import { isMain } from '../../../../../tools/lib/is-main.mjs';
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -95,4 +95,4 @@ export async function generateDryCommons() {
       faultCount,violations:[],paid:0}));
   } finally {db.close();rmSync(directory,{recursive:true,force:true});}
 }
-if(process.argv[1]===fileURLToPath(import.meta.url))process.stdout.write(JSON.stringify(await generateDryCommons(),null,2)+'\n');
+if(isMain(import.meta.url))process.stdout.write(JSON.stringify(await generateDryCommons(),null,2)+'\n');

@@ -12,6 +12,7 @@
 //   node apps/server/src/god/walk-audit.ts --genesis worlds/templates/eden-2026.json [--name n] [--shard k/n] [--out part.json]
 // The world copy is never written: it is copied (or gunzipped) into a temporary directory first. That walk-audit-* directory
 // is removed when the process exits, on success, failure or a kill (SIGINT/SIGTERM/SIGKILL); --keep keeps it.
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -224,7 +225,7 @@ export async function walkAudit(w: Booted, shard: [number, number] = [0, 1], o: 
     bad: bad.sort(by), goalless: goalless.sort(by), goallessAliases: goallessAliases.sort(by), floats: floats.sort((a, b) => (a[0] < b[0] ? -1 : 1)), ...(unusable ? { unusable: unusable.sort(by) } : {}), ms };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2), arg = (k: string) => { const i = a.indexOf(`--${k}`); return i < 0 ? undefined : a[i + 1]; };
   const db = arg('db'), genesis = arg('genesis'), fuzz = arg('fuzz'), out = arg('out'), sh = (arg('shard') ?? '0/1').split('/').map(Number) as [number, number];
   if (!(sh[1] >= 1 && sh[0] >= 0 && sh[0] < sh[1])) { console.error('--shard k/n with 0 <= k < n'); process.exit(2); }
