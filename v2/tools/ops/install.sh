@@ -13,7 +13,7 @@
 #
 # What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd,
 # directoryd, register-world, deploy, gateway-upgrade, import-accounts, import-world, publish-template, the origin and the page's files); data in
-# /var/lib/souls; settings in /etc/souls, the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
+# /var/lib/souls; settings in /etc/souls (751), the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
 # souls-directory and souls-origin.
 # Carried over from today's installer: idempotent, and it starts, enables and restarts nothing. It never reads or
 # writes today's units, users, data, proxy, DNS or firewall: it refuses, changing nothing, when anything it would
@@ -159,15 +159,18 @@ install_all() {
   from=$(cd "$from" && pwd)
   # The record's folder first, then the user recorded before it is made, so a run that stops anywhere leaves nothing
   # unrecorded. The folder's group is the user's, so it is root's until the user exists.
+  # 751: today's launcher (simworlds, no Souls group) reads its cut-over fence's binding,
+  # /etc/souls/cutover-binding.json (v2/docs/cutover.md), through this folder; it can list nothing here. Every
+  # file keeps its own mode, and every folder below stays 750 or tighter.
   local group=root
   if has_user; then group=$ACCOUNT; fi
-  ensure_dir "$ETC" 750 root "$group" "tree $ETC"
+  ensure_dir "$ETC" 751 root "$group" "tree $ETC"
   record "user $ACCOUNT"
   ensure_user
   if [ "$MODE" = apply ] || [ -d "$R$ETC" ]; then
-    ensure_dir "$ETC" 750 root "$ACCOUNT"
+    ensure_dir "$ETC" 751 root "$ACCOUNT"
   else
-    act "perms $ETC 750 root:$ACCOUNT" true
+    act "perms $ETC 751 root:$ACCOUNT" true
   fi
   ensure_dir "$LIB" 755 root root "tree $LIB"
   for p in "${PROGRAMS[@]}"; do ensure_file "$from/bin/$p" "$LIB/$p" 755 root root; done
@@ -304,6 +307,22 @@ check() {
   printf '%s\n' "${OWNED[@]}" > "$tmp/placed$STATE"
   INSTALL_ROOT=$tmp/placed bash "$0" plan --from "$tmp/b" > "$tmp/plan2" || die "check: the plan over a placed client refused"
   ! grep -q "^would client" "$tmp/plan2" || die "check: an install would replace a placed client"
+  grep -qxF "would dir $ETC 751 root:root" "$tmp/plan" && grep -qxF "would perms $ETC 751 root:$ACCOUNT" "$tmp/plan" ||
+    die "check: a fresh install does not make $ETC 751"
+  (
+    # A re-install over a 750 $ETC, with the user and root ownership simulated: it puts back 751, then changes nothing.
+    R=$tmp/etc
+    mkdir -p "$R$ETC" && chmod 750 "$R$ETC"
+    printf '%s\n' "${OWNED[@]}" > "$R$STATE"
+    has_user() { true; }
+    perms() { echo "$(stat -c %a "$1" 2> /dev/null || stat -f %Lp "$1") root $ACCOUNT"; }
+    install_all "$tmp/b" > "$tmp/etc.plan"
+    grep -qxF "would perms $ETC 751 root:$ACCOUNT" "$tmp/etc.plan" || die "check: a re-install leaves $ETC at 750"
+    chmod 751 "$R$ETC"
+    install_all "$tmp/b" > "$tmp/etc.plan2"
+    ! grep -qE "^would (dir|perms) $ETC " "$tmp/etc.plan2" || die "check: a re-install changes a 751 $ETC"
+  )
+  echo "check: $ETC is 751 after a fresh install and after a re-install over 750"
   for p in import-accounts import-world publish-template; do
     cmp -s "$tmp/bins/$(built "$p")" "$tmp/b/bin/$p" || die "check: $p missing or changed in bundle"
     [ -n "$(find "$tmp/b/bin/$p" -prune -perm 755)" ] || die "check: $p bundle mode is not 755"

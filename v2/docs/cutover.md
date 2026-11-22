@@ -29,6 +29,8 @@ Before starting the old launcher, install its operator-owned `/etc/souls/cutover
 {"oldWorldId":"<stable old registry worldId>","canonicalSlug":"eden","routesFile":"/var/lib/souls/routes/worlds.json","clientDir":"/usr/local/lib/souls/client"}
 ```
 
+The launcher reads `cutover-binding.json` through `/etc/souls`, which the install makes and keeps 751 (it can enter, not list); give the file mode 644 (check: `runuser -u simworlds -- test -r /etc/souls/cutover-binding.json`).
+
 Today's launcher runs as `simworlds`, outside the Souls group, and reads `routesFile` on every Eden write: the install keeps `/var/lib/souls` at 751 and `routes/` at 755 so it can (check: `runuser -u simworlds -- test -r /var/lib/souls/routes/worlds.json`). Unreadable, Eden's writes answer `cutover.activation-unavailable`. Use the resolved old registry identity, including existing aliases, rather than assuming the public slug is the
 database identity. The installed client must be the release's matching served bundle. `SOULS_CUTOVER_BINDING` may
 name a different binding file; an explicitly configured missing file or invalid binding refuses launcher startup.
@@ -89,7 +91,7 @@ decides only which of them the public name sends Eden's page to.
 
 Posted on #2836 and on the feed before the switch, with the minute filled in by the release owner:
 
-> **Eden moves to the new engine on Friday 20 November, between 08:00 and 12:00 UTC** (the switch at `<HH:MM>` UTC).
+> **Eden moves to the new engine on Sunday 22 November** (the switch at `<HH:MM>` UTC).
 > The address stays soul.game; no DNS changes. The new Eden has served as a preview for about two hours before it.
 >
 > **Stop conditions.** The release owner switches back if any of these holds after the switch: the front door's check
