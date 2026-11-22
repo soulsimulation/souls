@@ -78,10 +78,27 @@ test('the edit is checked under its claim: a piece the check refuses is dropped,
   });
   assert.equal(asked, 2);
   assert.ok(!out.ops.some((o) => o.kind === 'eden:table@1' || o.kind === 'eden:bowl@1'), JSON.stringify(out.ops));
-  assert.match(out.says, /4 pieces in 1 rooms, 2 dropped; dropped: e_1\/kitchen-table \(edit.slot\), e_1\/kitchen-bowl \(edit.slot\)/);
+  // The second chair was dropped by the ways check before the edit was checked (#3961).
+  assert.match(out.says, /3 pieces in 1 rooms, 3 dropped; dropped: e_1\/kitchen-chair-2 \(would cut the way[^)]*\), e_1\/kitchen-table \(edit.slot\), e_1\/kitchen-bowl \(edit.slot\)/);
   // Inside another's live claim (or outside a helper's own): the whole furnish is refused by name, nothing dropped.
   for (const code of ['edit.claimed', 'edit.outside-claim', 'edit.claim-unknown']) {
     const refused = checkedFurnish(furnishOps(house(false), `${S}-2`, { kinds, entries }), () => ({ ok: false, code, op: 0, detail: 'x' }));
     assert.deepEqual([refused.ok, refused.code, refused.op, refused.ops], [false, code, 0, undefined]);
   }
+});
+
+test('#3961: a furnish whose ways check dropped a piece is still one edit under its claim: refused edit.claimed in another\'s', () => {
+  // The kitchen is inside a live claim. The stand-in judge is the claims rule (#3701): a batch under no claim that
+  // places anything in the claimed room is refused edit.claimed at that operation; under the claim it is made.
+  const judge = (claim) => (ops) => {
+    const k = ops.findIndex((o) => o.in === `${S}-4`);
+    return claim === 'c:kitchen' || k < 0 ? { ok: true } : { ok: false, code: 'edit.claimed', op: k, detail: 'inside c:kitchen' };
+  };
+  const ways = furnishOps(house(false), `${S}-2`, { kinds, entries });
+  assert.deepEqual(ways.dropped.map((d) => d.name), ['e_1/kitchen-chair-2'], 'the ways check dropped the second chair first');
+  const refused = checkedFurnish(ways, judge(undefined));
+  assert.deepEqual([refused.ok, refused.code, refused.op, refused.ops], [false, 'edit.claimed', 0, undefined], JSON.stringify(refused));
+  const under = checkedFurnish(furnishOps(house(false), `${S}-2`, { kinds, entries }), judge('c:kitchen'));
+  assert.equal(under.ops.filter((o) => o.in === `${S}-4`).length, 4, JSON.stringify(under.ops));
+  assert.match(under.says, /5 pieces in 1 rooms, 1 dropped; dropped: e_1\/kitchen-chair-2 \(would cut the way/);
 });
