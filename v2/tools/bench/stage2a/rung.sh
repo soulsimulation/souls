@@ -24,7 +24,8 @@ W=${WORLD_ROOT:+$WORLD_ROOT/stage2a-$N-$ARM-$RATE-${CPUS//,/_}}
 W=${W:-$D}/w
 rm -rf "$D" "$(dirname "$W")"; mkdir -p "$D/run" "$E" "$(dirname "$W")"
 [ -f "$E/ok" ] || { cp -r "$V2/../content/kinds/." "$E/"; touch "$E/ok"; }
-pin() { if [ "$CPUS" = all ]; then "$@"; else taskset -c "$CPUS" "$@"; fi; }
+# Run in the background (`pin ... &`), so `exec`: the background job's pid is the program's own.
+pin() { if [ "$CPUS" = all ]; then exec "$@"; else exec taskset -c "$CPUS" "$@"; fi; }
 cat /proc/loadavg > "$D/loadavg.before"
 echo "world folder: ${WORLD_ROOT:-run folder}" > "$D/world-root.txt"
 
