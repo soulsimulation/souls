@@ -460,3 +460,21 @@ fn a_thing_made_after_the_check_still_refuses_the_removal() {
         "kind.in-use"
     );
 }
+
+/// #3697 review: a thing a creator's form makes stands as its kind's bounds say, as a placed one does (field 12, the
+/// solids walkers go round and the safety rule judges); a boot kind's made thing starts with no fields, as before.
+#[test]
+fn a_made_thing_of_a_creators_kind_has_its_solids() {
+    let mut w = W::new();
+    let (_, name) = w.define(1, BIRDBATH).expect("defined");
+    let made = crate::forms::amounts::made_fields(w.live.tree(), &full(&name));
+    let record = defined::read(BIRDBATH.as_bytes(), &|_| false).expect("a record");
+    assert_eq!(
+        made.get(&12),
+        defined::solids_of(&record.entry).as_ref(),
+        "the record's solids"
+    );
+    assert!(made.contains_key(&12));
+    let room = pinned(&w.header, "souls:room");
+    assert!(crate::forms::amounts::made_fields(w.live.tree(), &room).is_empty());
+}

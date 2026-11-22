@@ -988,7 +988,7 @@ function actsOf(words) {
       if (arg) {
         kinds ??= kindsHeld(join(home, 'kinds'), copy);
         rows ??= rowsOf(copy);
-        const take = kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
+        const take = kinds[rows.get(c.this)?.entry ?? rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
         args[arg[1]] = take?.type === 'text' ? { 23: arg[2] } : /^-?\d{1,16}$/.test(arg[2]) && Number.isSafeInteger(Number(arg[2])) ? Number(arg[2]) : arg[2];
         continue;
       }

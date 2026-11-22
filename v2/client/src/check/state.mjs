@@ -25,11 +25,14 @@ export function kindsIn(dir) {
 }
 
 /**
- * The records of a creator's own kinds (#3697) the copy holds, by kind name: each `souls:kind` node at a root, its
- * field 2 the record's bytes (`souls-entry/1`), as the world's loader reads them (`replica::kinds::defined`).
+ * The records of a creator's own kinds (#3697) the copy holds, by full name (`namespace:name@hash`, field 1 of each
+ * `souls:kind` node at a root; field 2 the record's bytes, `souls-entry/1`), as the world's loader reads them
+ * (`replica::kinds::defined`). A thing's row names its creator kind by that full name (`rowsOf`'s `entry`), so two
+ * revisions of one kind never lend each other their forms or state. The plain name also finds a record while only one
+ * revision of it is defined.
  */
 export function definedIn(copy) {
-  const kinds = {};
+  const kinds = {}, plains = {};
   if (!copy) return kinds;
   for (const h of Object.values(JSON.parse(copy.roots()))) {
     const root = copy.record(h);
@@ -39,14 +42,17 @@ export function definedIn(copy) {
       if (!bytes) continue;
       const m = decode(bytes);
       if (plainKind(m.get(2)) !== 'souls:kind') continue;
-      const f = m.get(6) instanceof Map ? m.get(6) : new Map(), b = f.get(2) ?? f.get(2n);
-      if (!(b instanceof Uint8Array)) continue;
+      const f = m.get(6) instanceof Map ? m.get(6) : new Map(), b = f.get(2) ?? f.get(2n), full = f.get(1) ?? f.get(1n);
+      if (!(b instanceof Uint8Array) || typeof full !== 'string') continue;
       try {
         const e = JSON.parse(Buffer.from(b).toString('utf8'));
-        if (e?.format === 'souls-entry/1' && typeof e.kind === 'string') kinds[e.kind] = e;
+        if (e?.format !== 'souls-entry/1' || typeof e.kind !== 'string' || plainKind(full) !== e.kind) continue;
+        kinds[full] = e;
+        (plains[e.kind] ??= []).push(e);
       } catch { /* not a record */ }
     }
   }
+  for (const [plain, es] of Object.entries(plains)) if (es.length === 1) kinds[plain] = es[0];
   return kinds;
 }
 
@@ -68,7 +74,8 @@ export function stateOf(copy, kinds, me) {
     const bytes = copy.record(todo.pop());
     if (!bytes) continue;
     const m = decode(bytes), id = idText(m.get(1)), kind = entryKind(m);
-    const state = kinds[kind]?.state ?? {};
+    // A creator's kind by its full name first (#3697): its own revision's state numbering.
+    const state = (kinds[String(m.get(2))] ?? kinds[kind])?.state ?? {};
     const byN = Object.fromEntries(Object.entries(state).map(([name, def]) => [def.n, name]));
     const fields = {};
     if (m.get(6) instanceof Map) for (const [n, v] of m.get(6)) if (byN[n]) fields[byN[n]] = state[byN[n]].type === 'text' ? textValue(v) : plain(v);

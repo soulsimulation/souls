@@ -520,7 +520,7 @@ impl Cx<'_> {
                                 support: Support::Slot,
                             },
                             audience: Audience::Everyone,
-                            fields: BTreeMap::new(),
+                            fields: made_fields(self.view.tree, kind),
                         },
                         rest: Rest::new(),
                     }]),
@@ -672,4 +672,14 @@ impl Cx<'_> {
             None => Ok(()),
         }
     }
+}
+
+/// The fields a made thing starts with: a creator's kind's solids (N1's field 12, from its record's bounds), as the
+/// creator's own place gives it (#3697 review), so walkers go round it and the safety rule judges it; none for a boot
+/// kind, whose solids come from its geometry as today.
+pub(crate) fn made_fields(tree: &Tree, kind: &Name) -> BTreeMap<u64, Value> {
+    replica::kinds::defined::defined_named(tree, kind.as_str())
+        .and_then(|d| replica::kinds::defined::solids_of(&d.entry))
+        .map(|s| BTreeMap::from([(crate::ground::scene::F_SOLIDS, s)]))
+        .unwrap_or_default()
 }
