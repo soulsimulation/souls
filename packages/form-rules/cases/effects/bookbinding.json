@@ -95,7 +95,7 @@
                 "node": "bench",
                 "field": "gathered",
                 "n": 31,
-                "to": true
+                "to": 1
               }
             ],
             "events": [
@@ -155,7 +155,7 @@
                 "node": "bench",
                 "field": "pierced",
                 "n": 32,
-                "to": true
+                "to": 1
               }
             ],
             "events": [
@@ -344,14 +344,14 @@
                 "node": "bench",
                 "field": "gathered",
                 "n": 31,
-                "to": false
+                "to": 0
               },
               {
                 "change": "set",
                 "node": "bench",
                 "field": "pierced",
                 "n": 32,
-                "to": false
+                "to": 0
               },
               {
                 "change": "set",
@@ -431,7 +431,7 @@
                 "node": "bench",
                 "field": "gathered",
                 "n": 31,
-                "to": true
+                "to": 1
               }
             ],
             "events": [
@@ -491,7 +491,7 @@
                 "node": "bench",
                 "field": "pierced",
                 "n": 32,
-                "to": true
+                "to": 1
               }
             ],
             "events": [
@@ -723,14 +723,14 @@
                 "node": "bench",
                 "field": "gathered",
                 "n": 31,
-                "to": false
+                "to": 0
               },
               {
                 "change": "set",
                 "node": "bench",
                 "field": "pierced",
                 "n": 32,
-                "to": false
+                "to": 0
               },
               {
                 "change": "set",
@@ -839,8 +839,8 @@
             "paper_sets": 0,
             "thread_lengths": 0,
             "cover_pairs": 0,
-            "gathered": false,
-            "pierced": false,
+            "gathered": 0,
+            "pierced": 0,
             "stitches": 0
           },
           "slots": {
