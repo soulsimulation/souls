@@ -77,6 +77,7 @@ impl Head {
             0
         };
         let k = (first / KIDS_STRIDE).min(self.marks.len() - 1);
+        PROF.with(|p| { let mut p = p.borrow_mut(); p[7] += first as u64; p[8] += (hashes.len() - k * KIDS_STRIDE) as u64; });
         self.marks.truncate(k + 1);
         let mut sha = self.marks[k].clone();
         for (j, h) in hashes.iter().enumerate().skip(k * KIDS_STRIDE) {
@@ -158,6 +159,8 @@ fn int(n: i64) -> Value {
         Err(_) => Value::Nint(n.unsigned_abs() - 1),
     }
 }
+
+thread_local! { static PROF: std::cell::RefCell<[u64; 10]> = const { std::cell::RefCell::new([0; 10]) }; }
 
 impl Tree {
     /// A node's record without its children (field 10), its parent given (a flight's root names the node it left).
@@ -274,10 +277,13 @@ impl Tree {
                 return Ok(self.stated(slot, Hash::of_taken(sha)));
             }
         }
+        let tk = std::time::Instant::now();
+        let nk = hashes.len() as u64;
         let h = match self.heads.get_mut(&slot) {
             Some(head) => head.take(hashes)?,
             None => unreachable!("a head kept above"),
         };
+        PROF.with(|p| { let mut p = p.borrow_mut(); p[5] += 1; p[6] += nk; p[9] += tk.elapsed().as_micros() as u64; });
         Ok(self.stated(slot, h))
     }
 
@@ -477,7 +483,10 @@ impl Tree {
         {
             return Ok(h.clone());
         }
+        let t0 = std::time::Instant::now();
+        let r0 = self.rehashed;
         let scan = self.scan();
+        let t1 = std::time::Instant::now();
         let mut tops = BTreeMap::new();
         for (a, slots) in &scan.tops {
             let mut hashes = Vec::with_capacity(slots.len());
@@ -486,11 +495,25 @@ impl Tree {
             }
             tops.insert(*a, hashes);
         }
+        let t2 = std::time::Instant::now();
         let hashes: Vec<(Audience, Hash)> = self
             .audiences(scan, tops)?
             .into_iter()
             .map(|(a, h, _)| (a, h))
             .collect();
+        let t3 = std::time::Instant::now();
+        PROF.with(|p| {
+            let mut p = p.borrow_mut();
+            p[0] += 1;
+            p[1] += (t1 - t0).as_micros() as u64;
+            p[2] += (t2 - t1).as_micros() as u64;
+            p[3] += (t3 - t2).as_micros() as u64;
+            p[4] += self.rehashed - r0;
+            if p[0] % 400 == 0 {
+                let n = p[0];
+                eprintln!("PROF state_hashes n={n} scan_us={} nodes_us={} audiences_us={} rehashed={} | take n={} kids={} first={} taken={} take_us={}", p[1] / n, p[2] / n, p[3] / n, p[4] / n, p[5], p[6] / p[5].max(1), p[7] / p[5].max(1), p[8] / p[5].max(1), p[9] / p[5].max(1));
+            }
+        });
         self.kept = Some((self.changes, hashes.clone()));
         Ok(hashes)
     }

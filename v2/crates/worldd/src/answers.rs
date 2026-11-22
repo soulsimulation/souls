@@ -3925,12 +3925,18 @@ impl Clock {
             i if i.is_empty() => None,
             i => recorder::record(u64::try_from(n).unwrap_or(0), &i).ok(),
         };
+        let tq0 = std::time::Instant::now();
         let moved = self.bodies.as_mut().map(Bodies::moved).unwrap_or_default();
+        let tq1 = std::time::Instant::now();
+        let mut tq = [tq1; 3];
         let record =
             (!self.rows.is_empty() || !self.effects.is_empty() || !moved.is_empty()).then(|| {
                 let state = self.state();
+                tq[0] = std::time::Instant::now();
+                let hh = self.replica.header().hash().to_bytes();
+                tq[1] = std::time::Instant::now();
                 let v = Value::Map(BTreeMap::from([
-                    (1, Value::Bytes(self.replica.header().hash().to_bytes())),
+                    (1, Value::Bytes(hh)),
                     (
                         2,
                         Value::Array(self.effects.drain(..).map(|e| e.to_value()).collect()),
@@ -3948,10 +3954,26 @@ impl Clock {
                     (TICK, Value::Uint(u64::try_from(n).unwrap_or(0))),
                     (STATE, Value::Bytes(state.to_vec())),
                 ]));
-                encode(&v).unwrap_or_default()
+                let e = encode(&v).unwrap_or_default();
+                tq[2] = std::time::Instant::now();
+                e
             });
         if record.is_some() {
             self.unsealed = true;
+            thread_local! { static Q: std::cell::RefCell<[u64; 6]> = const { std::cell::RefCell::new([0; 6]) }; }
+            Q.with(|p| {
+                let mut p = p.borrow_mut();
+                p[0] += 1;
+                p[1] += (tq1 - tq0).as_micros() as u64;
+                p[2] += (tq[0] - tq1).as_micros() as u64;
+                p[3] += (tq[1] - tq[0]).as_micros() as u64;
+                p[4] += (tq[2] - tq[1]).as_micros() as u64;
+                p[5] += record.as_ref().map_or(0, Vec::len) as u64;
+                if p[0] % 400 == 0 {
+                    let n = p[0];
+                    eprintln!("PROF record n={n} moved_us={} state_us={} header_us={} encode_us={} bytes={}", p[1] / n, p[2] / n, p[3] / n, p[4] / n, p[5] / n);
+                }
+            });
         }
         at[6] = mark();
         // 6. The frozen copy, for the checkers and readers.
