@@ -21,15 +21,24 @@
 //!   same way under a mark of its own: a change clears both marks, the state hash sets only its own and keeps no
 //!   record, so it never takes a record from the next checkpoint; a seal sets both. A tree no part has touched since
 //!   the last gives the same hashes without a scan. [`Tree::state_hashes_whole`] hashes every node, for checks.
+//! - **A large node keeps its head** (#1960): a record's children (field 10) come last, so its bytes are a head (the
+//!   rest) and then its children's hashes. The state hash keeps SHA-256 past the head of a node whose head is
+//!   [`HEAD_KEPT`] bytes or more, and while only nodes below it change takes just its children's hashes again: with
+//!   Souls walking on Eden's ground (megabytes of fields), a tick no longer hashes the ground's fields. A change to
+//!   the node itself lets its head go; attaching or taking out a child keeps it.
 
 use super::{Away, Life, LinkRec, Moved, NONE, NodeRec, Place, R, Tree, Where, refuse, show};
 use crate::effects::{TimerState, read_id};
 use crate::encode::{Name, Value, decode, encode, to_hex};
-use crate::ids::{Hash, Id, Purpose, Scope};
+use crate::ids::{Hash, Id, Purpose, Scope, Sha256};
 use crate::pose::{Frame, HandOff, Pose};
 use crate::time::TimeEffect;
 use crate::world_model::{Audience, End};
 use std::collections::{BTreeMap, BTreeSet};
+
+/// A node's head (its record up to its children) of this many bytes or more is kept between state hashes
+/// ([`Tree::head`]): below it, encoding the record again costs less than keeping a SHA-256 state per node.
+const HEAD_KEPT: usize = 4096;
 
 /// What a seal gives: the records of nodes hashed again, and each audience's record, with their hashes.
 pub struct Sealed {
@@ -102,6 +111,8 @@ fn int(n: i64) -> Value {
 
 impl Tree {
     /// A node's record without its children (field 10), its parent given (a flight's root names the node it left).
+    /// Field 10 must stay the record's last key (every key here below 10): [`Tree::head`] takes the record's bytes
+    /// before the children as a head that ends where field 10's array begins, and checks that only in debug builds.
     fn record(&self, rec: &NodeRec, parent: Option<Id>) -> Value {
         let mut m = BTreeMap::from([
             (1, rec.id.to_value()),
@@ -196,7 +207,9 @@ impl Tree {
         Ok(h)
     }
 
-    /// The node's hash for the state hash: as `seal_node`, by its own mark, keeping no record.
+    /// The node's hash for the state hash: as `seal_node`, by its own mark, keeping no record. The record's bytes are
+    /// its head ([`Tree::head`]) then its children's hashes; a large head is kept (`heads`) while only nodes below it
+    /// change, so a node such as the ground, with megabytes of fields, takes only its children's hashes again.
     fn state_node(&mut self, slot: u32) -> R<Hash> {
         if let Some(h) = self.nodes[slot as usize].state {
             return Ok(h);
@@ -205,15 +218,47 @@ impl Tree {
         for c in self.covered(slot) {
             hashes.push(self.state_node(c)?.to_value());
         }
-        let (h, _) = self.node_record(slot, hashes)?;
+        let mut sha = match self.heads.get(&slot) {
+            Some(head) => head.clone(),
+            None => self.head(slot)?,
+        };
+        let children = bytes_of(&Value::Array(hashes))?;
+        sha.update(&children);
+        let h = Hash::of_taken(sha);
         self.nodes[slot as usize].state = Some(h);
         self.rehashed += 1;
         Ok(h)
     }
 
+    /// A node's record up to its children, field 10's key included, taken by SHA-256 after its audience's label:
+    /// [`Tree::node_record`]'s bytes are these, then the children's array, since field 10 is the record's last. Kept
+    /// in `heads` when it is [`HEAD_KEPT`] bytes or more, until the node itself changes (`touch`).
+    fn head(&mut self, slot: u32) -> R<Sha256> {
+        let rec = &self.nodes[slot as usize];
+        let Value::Map(mut m) = self.record(rec, self.parent_id(rec)) else {
+            unreachable!("a record is a map")
+        };
+        m.insert(10, Value::Array(Vec::new()));
+        let mut bytes = bytes_of(&Value::Map(m))?;
+        // The empty array, one byte, ends the record: what is before it is the head.
+        debug_assert_eq!(bytes.last(), Some(&0x80));
+        bytes.pop();
+        let mut sha = Hash::taking(purpose(rec.audience));
+        sha.update(&bytes);
+        if bytes.len() >= HEAD_KEPT {
+            self.heads.insert(slot, sha.clone());
+        }
+        Ok(sha)
+    }
+
     /// Nodes [`Tree::state_hashes`] has hashed again since the tree was built: a measure of its work.
     pub fn rehashed(&self) -> u64 {
         self.rehashed
+    }
+
+    /// Nodes whose head [`Tree::state_hashes`] keeps now: a measure.
+    pub fn heads_kept(&self) -> usize {
+        self.heads.len()
     }
 
     /// The node's hash worked out whole, reading and writing no mark.
