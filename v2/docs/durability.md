@@ -39,7 +39,8 @@ and rolling builds (O1, O7) are not here.
    claim itself is what makes it safe.
 7. **The store refuses a stale writer's record write.** The stores are asked for only two conditions, which S3 and R2
    both offer atomically: create if absent (`If-None-Match: *`) and replace if unchanged (`If-Match`). There is no
-   plain write. A writer whose claim was taken, a paused one that resumes included, may still write to its own disk,
+   plain write. A create whose answer is a 5xx or never comes is read back: the same bytes there count as created,
+   other bytes as the condition failing, and a store that cannot be read stays out of reach (#4014). A writer whose claim was taken, a paused one that resumes included, may still write to its own disk,
    and the store accepts the parts it creates under its own claim's token, but its move of the mark is refused: it
    writes the record on condition of the version it read, and only while the claim in force there carries its token.
    So it acknowledges nothing that waits for the mark, and readers ignore its parts (rule 8). A writer refused because
@@ -118,5 +119,6 @@ ignores the same. The modelled store refuses the stale writer.
 - **Comparing clocks across machines** for a lease, or counting it from the reply. A stale writer acknowledges late.
 - **Acknowledging travel at the disk.** A dead machine loses a Soul between worlds.
 - **A store that ignores the conditions.** Test each S3-compatible store; one that accepts a stale `If-Match` lets
-  two writers write.
+  two writers write. `cargo run -p directoryd --example store-check -- --env-file <unit's settings>` checks the
+  store a unit uses on one scratch key under `diag/`. R2 matches `If-Match` only on the bare ETag, without quotes.
 - **Checkpoints by time rather than by amount of log.** A busy world's restart grows without bound.

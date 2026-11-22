@@ -313,6 +313,62 @@ fn a1_a2_a5_seeded_world_serves_walks_and_restarts_after_sigkill() {
     serves_walks_and_restarts(w, &d, &dir, body, root, ground);
 }
 
+/// #4013 A1: while it loads, `serve` tells the service manager it made progress (`EXTEND_TIMEOUT_USEC`, as much as
+/// the unit's 30 s `TimeoutStartSec`), then `READY=1`, and no more progress notices after it.
+#[test]
+fn x5_a1_serve_says_progress_while_it_loads_and_none_once_ready() {
+    let d = scratch("x5");
+    let (dir, ..) = seeded(&d);
+    let notify = d.join("n");
+    let manager = std::os::unix::net::UnixDatagram::bind(&notify).expect("a notify socket");
+    manager
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .expect("a read timeout");
+    let w = serve_env(
+        &dir,
+        &d.join("s"),
+        &[],
+        &[("NOTIFY_SOCKET", notify.to_str().expect("a path"))],
+    );
+    let mut said = Vec::new();
+    let mut buf = [0u8; 512];
+    while !said.iter().any(|s: &String| s.starts_with("READY=1")) {
+        let n = manager.recv(&mut buf).expect("a notice before READY=1");
+        said.push(String::from_utf8_lossy(&buf[..n]).into_owned());
+    }
+    let before = said
+        .iter()
+        .filter(|s| *s == "EXTEND_TIMEOUT_USEC=30000000")
+        .count();
+    println!("A1: {before} progress notices, then {:?}", said.last());
+    assert!(before >= 1, "no progress before ready: {said:?}");
+    // The watchdog's thread starts before READY=1, so its word may come first too.
+    let other = said[..said.len() - 1]
+        .iter()
+        .filter(|s| *s != "EXTEND_TIMEOUT_USEC=30000000" && *s != "WATCHDOG=1")
+        .count();
+    assert_eq!(other, 0, "only progress and alive, then ready: {said:?}");
+    // After READY=1, only the watchdog's word, twice a second: no progress notice in the next second.
+    after_ready(&manager);
+    drop(w);
+}
+
+// A real process on the real clock: the second read after READY=1 is real time.
+#[allow(clippy::disallowed_methods)]
+fn after_ready(manager: &std::os::unix::net::UnixDatagram) {
+    let mut buf = [0u8; 512];
+    manager
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .expect("a read timeout");
+    let end = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < end {
+        if let Ok(n) = manager.recv(&mut buf) {
+            let s = String::from_utf8_lossy(&buf[..n]).into_owned();
+            assert_eq!(s, "WATCHDOG=1", "after READY=1");
+        }
+    }
+}
+
 /// The seeded world: its folder, its Soul's body, its root and its ground.
 fn seeded(d: &Path) -> (PathBuf, Id, Id, Id) {
     let facts = d.join("facts.json");
@@ -747,6 +803,85 @@ fn o3c_a2_a3_ships_history_to_an_s3_bucket_across_three_kills() {
     assert!(
         s.paths().iter().all(|p| p.starts_with("souls/o3c/")),
         "every object under the URL's prefix"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// #1960: a restart whose first reads of an S3 bucket go unanswered past the client's timeout tries them again and
+/// starts; with the bucket out of reach for good it still ends, with the store's refusal, in bounded time.
+// A real process on the real clock: the stalls and the bound are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn i1960_a_world_starts_through_slow_store_reads_and_ends_on_an_unreachable_store() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let d = scratch("i1960");
+    let (dir, ..) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/i1960", s.url("souls"));
+    let more = |spec: &str| {
+        [
+            OsStr::new("--store").to_owned(),
+            OsStr::new(spec).to_owned(),
+            OsStr::new("--machine").to_owned(),
+            OsStr::new("test-machine").to_owned(),
+        ]
+    };
+    let args = more(&spec);
+    let args: Vec<&OsStr> = args.iter().map(|a| a.as_os_str()).collect();
+    // The first start claims the world and writes its history's first objects.
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    w.kill();
+
+    // The restart: its first two reads of the history's header (the archiver's, as production's counts read was) each
+    // go unanswered for 6 s, past the client's 5 s.
+    s.stall_reads(2, Duration::from_secs(6), "/header");
+    let begun = Instant::now();
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let took = begun.elapsed();
+    let retried: Vec<String> = w
+        .all
+        .lock()
+        .map(|l| l.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|l| l.starts_with("store: ") && l.contains("out of reach"))
+        .collect();
+    println!("restart through 2 stalled reads in {took:?}: {retried:?}");
+    assert_eq!(retried.len(), 2, "the stalled read tried again twice");
+    assert!(
+        retried.iter().all(|l| l.contains("/header: timeout")),
+        "{retried:?}"
+    );
+    w.kill();
+
+    // The bucket gone: nothing listens at its address. Four tries of the first read, then the refusal.
+    let gone = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    let port = gone.local_addr().expect("its address").port();
+    drop(gone);
+    let args = more(&format!("s3:http://127.0.0.1:{port}/souls/i1960"));
+    let args: Vec<&OsStr> = args.iter().map(|a| a.as_os_str()).collect();
+    let begun = Instant::now();
+    let mut w = serve_env(&dir, &socket, &args, &env);
+    let ended = w.line("worldd serve: ");
+    let status = w.child.wait().expect("it ends");
+    let took = begun.elapsed();
+    println!("unreachable: {ended} after {took:?}");
+    assert!(!status.success());
+    assert!(
+        ended.starts_with("worldd serve: store-unreachable: "),
+        "{ended}"
+    );
+    assert!(
+        took >= Duration::from_secs(14) && took < Duration::from_secs(60),
+        "four tries over the waits, bounded: {took:?}"
     );
     let _ = std::fs::remove_dir_all(&d);
 }
