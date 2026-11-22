@@ -40,9 +40,11 @@
 //!   timer ([`Acts::fired`]). A form's value arguments ([`Args::values`]: a value by name, words by reference) reach
 //!   its sets.
 //! - **A walk that stalls** (C21, #3484). Each tick, every form's walk that asked its way is watched
-//!   ([`sim::walk::stall::Watch`]): one that gains less than a quarter metre toward its goal over 3 s of world time
-//!   ends `walk.blocked` in that tick, its body's driver released, and the act's ending entry names the nearest thing
-//!   or edge in its way ([`sim::walk::stall::blocker`]).
+//!   ([`sim::walk::stall::Watch`]) against the corner its line aims at and that line's leg's end (never the walk's
+//!   goal, which on a route with crossings lies past the leg's end): one that gains less than a quarter metre on
+//!   them over 3 s of world time, or whose least way left to the leg's end has not shrunk by a quarter metre in 30 s
+//!   (it circles or goes to and fro), ends `walk.blocked` in that tick, its body's driver released, and the act's
+//!   ending entry names the nearest thing or edge in its way ([`sim::walk::stall::blocker`]).
 //!
 //! - **Needs at commit** (#3888). After who may, every need of the form is decided by R2's one evaluator on the
 //!   world's own state, links, seats and hands included ([`crate::needs`]): an unmet need is refused by its reason's
