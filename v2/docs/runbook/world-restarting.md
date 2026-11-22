@@ -5,7 +5,12 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
 
 ## How a world runs
 
-- **The unit** is `v2/tools/ops/units/worldd@.service`. `Type=notify`: the world says READY=1 once it ticks, then
+- **The unit** is `v2/tools/ops/units/worldd@.service`. `Type=notify`: while it loads, the world says
+  `EXTEND_TIMEOUT_USEC=30000000` at each load stage and while it applies its log (at most ten a second), so a long
+  load runs as long as it makes progress, and a load with no progress for 30 s (`TimeoutStartSec`) is ended
+  (`Result=timeout`) and restarted. Never raise `TimeoutStartSec` or add an override for a slow world: read its
+  `start-up: <stage> at <ms>` lines in the journal for the stage that went 30 s without progress (#4013;
+  `v2/tools/ops/x5-start-progress.sh` runs both cases under the unit). The world says READY=1 once it ticks, then
   WATCHDOG=1 twice a second while its clock is not wedged. No word for 5 s ends it: a process frozen whole. K7's own
   watchdog inside says a stall (no tick for 0.5 s) in the journal (`watchdog: stalled`) and in `health.json`
   (`stalled`: `now_ms` while it lasts, `ended`, `longest_ms`), and the world runs on: a busy host's pause never
