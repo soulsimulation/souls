@@ -171,6 +171,8 @@ owner. Rules: `v2/crates/directoryd/src/worlds/list/register.rs`.
    ```
 
 4. Start units by name when a world is placed (X5): `systemctl start souls-origin souls-agents souls-directory`.
+   `souls-agents` must be running before any Caddy reload whose `soul-game.caddy` routes agents to 7330 (#4152),
+   or agents get 502 until it starts; the cut-over's `check` refuses while it is not active.
 
 ## A world's models
 

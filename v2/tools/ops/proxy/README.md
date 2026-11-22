@@ -41,6 +41,7 @@ PORT="$(sed -n 's/.*--port \([0-9][0-9]*\).*/\1/p' /etc/sim-worlds/production.co
 [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "no --port in production.conf: stopping, nothing changed"; exit 1; }
 [ -f "$SRC/soul-game.caddy" ] || { echo "the live release has no $SRC: ship it first"; exit 1; }
 curl -fsS http://localhost:7310/v1/worlds >/dev/null || { echo "the directory does not answer: stopping, nothing changed"; exit 1; }
+systemctl is-active --quiet souls-agents.service || { echo "souls-agents (the agents' relay) is not running: start it first, nothing changed"; exit 1; }
 cp -a /etc/caddy/sites/soul-game.caddy /etc/caddy/soul-game.caddy.before-o19
 sed "s/@@PRODUCTION_PORT@@/$PORT/g" "$SRC/souls-routes.service" > /etc/systemd/system/souls-routes.service
 cp "$SRC/souls-routes.timer" /etc/systemd/system/souls-routes.timer
