@@ -1,0 +1,4734 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Every literal directed edge, each independent need, reset and complete endpoint claim.",
+  "cases": [
+    {
+      "name": "trace_a_to_b_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_a_to_b_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 1,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_a_to_b_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": true,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_a_to_b_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_a_to_b_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "trace_b_to_a_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_b_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 1,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_b_to_a_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_b_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_b_to_a_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_b_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 1,
+              "used_ab": true,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_b_to_a_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_b_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 1,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_b_to_a_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_b_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 1,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "trace_b_to_d_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_b_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 1,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_b_to_d_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_b_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_b_to_d_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_b_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 1,
+              "used_ab": false,
+              "used_bd": true,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_b_to_d_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_b_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 1,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_b_to_d_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_b_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 1,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "trace_d_to_b_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_d_to_b_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_d_to_b_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": true,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_d_to_b_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_d_to_b_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "trace_d_to_c_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_d_to_c_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_d_to_c_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": true,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_d_to_c_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_d_to_c_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "trace_c_to_d_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_c_to_d_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_c_to_d_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": true,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_c_to_d_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_c_to_d_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "trace_c_to_a_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_c_to_a_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_c_to_a_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": true,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_c_to_a_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_c_to_a_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "trace_a_to_c_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_a_to_c_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 1,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_a_to_c_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": true,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_a_to_c_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_a_to_c_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "trace_a_to_d_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_a_to_d_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 1,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_a_to_d_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": true,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_a_to_d_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_a_to_d_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_a_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "trace_d_to_a_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_d_to_a_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_d_to_a_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": true,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_d_to_a_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_d_to_a_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "trace_d_to_e_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_e"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_d_to_e_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_e"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_d_to_e_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_e"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": true,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_d_to_e_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_e"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_d_to_e_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_d_to_e"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "trace_e_to_d_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_e_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_e_to_d_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_e_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_e_to_d_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_e_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": true,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_e_to_d_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_e_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_e_to_d_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_e_to_d"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "trace_e_to_c_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_e_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_e_to_c_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_e_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_e_to_c_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_e_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_e_to_c_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_e_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_e_to_c_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_e_to_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "trace_c_to_e_ready",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_e"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "trace_c_to_e_need_0",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_e"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_c_to_e_need_1",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_e"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "trace_c_to_e_need_2",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_e"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "trace_c_to_e_need_3",
+      "act": {
+        "this": "p1",
+        "form": "trace_c_to_e"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reset_ready",
+      "act": {
+        "this": "p1",
+        "form": "reset"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reset_need_0",
+      "act": {
+        "this": "p1",
+        "form": "reset"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reset_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reset"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "claim_trail_ready",
+      "act": {
+        "this": "p1",
+        "form": "claim_trail"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": true,
+              "used_bd": true,
+              "used_dc": true,
+              "used_ca": true,
+              "used_ad": true,
+              "used_de": true,
+              "used_ec": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "claim_trail_need_0",
+      "act": {
+        "this": "p1",
+        "form": "claim_trail"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": true,
+              "used_bd": true,
+              "used_dc": true,
+              "used_ca": true,
+              "used_ad": true,
+              "used_de": true,
+              "used_ec": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_trail_need_1",
+      "act": {
+        "this": "p1",
+        "form": "claim_trail"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": true,
+              "used_dc": true,
+              "used_ca": true,
+              "used_ad": true,
+              "used_de": true,
+              "used_ec": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_trail_need_2",
+      "act": {
+        "this": "p1",
+        "form": "claim_trail"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": true,
+              "used_bd": false,
+              "used_dc": true,
+              "used_ca": true,
+              "used_ad": true,
+              "used_de": true,
+              "used_ec": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_trail_need_3",
+      "act": {
+        "this": "p1",
+        "form": "claim_trail"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": true,
+              "used_bd": true,
+              "used_dc": false,
+              "used_ca": true,
+              "used_ad": true,
+              "used_de": true,
+              "used_ec": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_trail_need_4",
+      "act": {
+        "this": "p1",
+        "form": "claim_trail"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": true,
+              "used_bd": true,
+              "used_dc": true,
+              "used_ca": false,
+              "used_ad": true,
+              "used_de": true,
+              "used_ec": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 4,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_trail_need_5",
+      "act": {
+        "this": "p1",
+        "form": "claim_trail"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": true,
+              "used_bd": true,
+              "used_dc": true,
+              "used_ca": true,
+              "used_ad": false,
+              "used_de": true,
+              "used_ec": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 5,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_trail_need_6",
+      "act": {
+        "this": "p1",
+        "form": "claim_trail"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": true,
+              "used_bd": true,
+              "used_dc": true,
+              "used_ca": true,
+              "used_ad": true,
+              "used_de": false,
+              "used_ec": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 6,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_trail_need_7",
+      "act": {
+        "this": "p1",
+        "form": "claim_trail"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": true,
+              "used_bd": true,
+              "used_dc": true,
+              "used_ca": true,
+              "used_ad": true,
+              "used_de": true,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 7,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_trail_need_8",
+      "act": {
+        "this": "p1",
+        "form": "claim_trail"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": true,
+              "used_bd": true,
+              "used_dc": true,
+              "used_ca": true,
+              "used_ad": true,
+              "used_de": true,
+              "used_ec": true,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 8,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_trail_need_9",
+      "act": {
+        "this": "p1",
+        "form": "claim_trail"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": true,
+              "used_bd": true,
+              "used_dc": true,
+              "used_ca": true,
+              "used_ad": true,
+              "used_de": true,
+              "used_ec": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 9,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "claim_trail_need_10",
+      "act": {
+        "this": "p1",
+        "form": "claim_trail"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": true,
+              "used_bd": true,
+              "used_dc": true,
+              "used_ca": true,
+              "used_ad": true,
+              "used_de": true,
+              "used_ec": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 10,
+        "reason": "out_of_reach"
+      }
+    }
+  ]
+}

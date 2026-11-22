@@ -1,0 +1,2276 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:euler_trail_board",
+  "owner": "thing",
+  "state": {
+    "vertex": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "used_ab": {
+      "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "used_bd": {
+      "n": 30,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "used_dc": {
+      "n": 31,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "used_ca": {
+      "n": 32,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "used_ad": {
+      "n": 33,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "used_de": {
+      "n": 34,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "used_ec": {
+      "n": 35,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "claimed": {
+      "n": 36,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        900
+      ],
+      "yaw_mdeg": 180000
+    },
+    "board": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        850,
+        350
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1100,
+      890,
+      900
+    ]
+  },
+  "forms": {
+    "trace_a_to_b": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 0,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_ab",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_ab",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 1,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "trace_b_to_a": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 1,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_ab",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_ab",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 0,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "trace_b_to_d": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 1,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_bd",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_bd",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 3,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "trace_d_to_b": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 3,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_bd",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_bd",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 1,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "trace_d_to_c": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 3,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_dc",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_dc",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 2,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "trace_c_to_d": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 2,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_dc",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_dc",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 3,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "trace_c_to_a": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 2,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_ca",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_ca",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 0,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "trace_a_to_c": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 0,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_ca",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_ca",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 2,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "trace_a_to_d": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 0,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_ad",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_ad",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 3,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "trace_d_to_a": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 3,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_ad",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_ad",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 0,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "trace_d_to_e": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 3,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_de",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_de",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 4,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "trace_e_to_d": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 4,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_de",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_de",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 3,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "trace_e_to_c": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 4,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_ec",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_ec",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 2,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "trace_c_to_e": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 2,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "used_ec",
+          "is": false,
+          "says": "already_used"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "used_ec",
+          "to": true,
+          "event": "edge_used"
+        },
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 4,
+          "event": "marker_moved"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "reset": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "vertex",
+          "to": 0,
+          "event": "route_reset"
+        },
+        {
+          "change": "set",
+          "field": "used_ab",
+          "to": false,
+          "event": "route_reset"
+        },
+        {
+          "change": "set",
+          "field": "used_bd",
+          "to": false,
+          "event": "route_reset"
+        },
+        {
+          "change": "set",
+          "field": "used_dc",
+          "to": false,
+          "event": "route_reset"
+        },
+        {
+          "change": "set",
+          "field": "used_ca",
+          "to": false,
+          "event": "route_reset"
+        },
+        {
+          "change": "set",
+          "field": "used_ad",
+          "to": false,
+          "event": "route_reset"
+        },
+        {
+          "change": "set",
+          "field": "used_de",
+          "to": false,
+          "event": "route_reset"
+        },
+        {
+          "change": "set",
+          "field": "used_ec",
+          "to": false,
+          "event": "route_reset"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "route_reset"
+        }
+      ]
+    },
+    "claim_trail": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "vertex",
+          "is": 2,
+          "says": "wrong_endpoint"
+        },
+        {
+          "need": "state",
+          "field": "used_ab",
+          "is": true,
+          "says": "incomplete"
+        },
+        {
+          "need": "state",
+          "field": "used_bd",
+          "is": true,
+          "says": "incomplete"
+        },
+        {
+          "need": "state",
+          "field": "used_dc",
+          "is": true,
+          "says": "incomplete"
+        },
+        {
+          "need": "state",
+          "field": "used_ca",
+          "is": true,
+          "says": "incomplete"
+        },
+        {
+          "need": "state",
+          "field": "used_ad",
+          "is": true,
+          "says": "incomplete"
+        },
+        {
+          "need": "state",
+          "field": "used_de",
+          "is": true,
+          "says": "incomplete"
+        },
+        {
+          "need": "state",
+          "field": "used_ec",
+          "is": true,
+          "says": "incomplete"
+        },
+        {
+          "need": "state",
+          "field": "claimed",
+          "is": false,
+          "says": "already_claimed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": true,
+          "event": "trail_claimed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:euler_trail_board",
+    "table": [
+      {
+        "part": "used_ab",
+        "field": "used_ab",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "used_bd",
+        "field": "used_bd",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "used_dc",
+        "field": "used_dc",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "used_ca",
+        "field": "used_ca",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "used_ad",
+        "field": "used_ad",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "used_de",
+        "field": "used_de",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "used_ec",
+        "field": "used_ec",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "marker",
+        "field": "vertex",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "0": -360,
+          "1": -360,
+          "2": 0,
+          "3": 0,
+          "4": 360
+        }
+      },
+      {
+        "part": "marker",
+        "field": "vertex",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": -240,
+          "1": 240,
+          "2": -240,
+          "3": 240,
+          "4": 0
+        }
+      },
+      {
+        "part": "claimed",
+        "field": "claimed",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      }
+    ],
+    "shape": {
+      "round": 2,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            790,
+            0
+          ],
+          "size": [
+            1080,
+            40,
+            860
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -480,
+            385,
+            -370
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -480,
+            385,
+            370
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            480,
+            385,
+            -370
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            480,
+            385,
+            370
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            817,
+            0
+          ],
+          "size": [
+            1010,
+            14,
+            790
+          ],
+          "tint": "board"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            -400
+          ],
+          "size": [
+            1060,
+            32,
+            20
+          ],
+          "tint": "rim"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            400
+          ],
+          "size": [
+            1060,
+            32,
+            20
+          ],
+          "tint": "rim"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -520,
+            835,
+            0
+          ],
+          "size": [
+            20,
+            32,
+            790
+          ],
+          "tint": "rim"
+        },
+        {
+          "kind": "box",
+          "at": [
+            520,
+            835,
+            0
+          ],
+          "size": [
+            20,
+            32,
+            790
+          ],
+          "tint": "rim"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -360,
+            830,
+            0
+          ],
+          "size": [
+            16,
+            5,
+            480
+          ],
+          "tint": "unused",
+          "turn": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -360,
+            837,
+            0
+          ],
+          "size": [
+            22,
+            5,
+            480
+          ],
+          "tint": "used",
+          "role": "used_ab",
+          "turn": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            830,
+            240
+          ],
+          "size": [
+            16,
+            5,
+            360
+          ],
+          "tint": "unused",
+          "turn": [
+            0,
+            90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            837,
+            240
+          ],
+          "size": [
+            22,
+            5,
+            360
+          ],
+          "tint": "used",
+          "role": "used_bd",
+          "turn": [
+            0,
+            90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            830,
+            0
+          ],
+          "size": [
+            16,
+            5,
+            480
+          ],
+          "tint": "unused",
+          "turn": [
+            0,
+            180000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            837,
+            0
+          ],
+          "size": [
+            22,
+            5,
+            480
+          ],
+          "tint": "used",
+          "role": "used_dc",
+          "turn": [
+            0,
+            180000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            830,
+            -240
+          ],
+          "size": [
+            16,
+            5,
+            360
+          ],
+          "tint": "unused",
+          "turn": [
+            0,
+            -90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            837,
+            -240
+          ],
+          "size": [
+            22,
+            5,
+            360
+          ],
+          "tint": "used",
+          "role": "used_ca",
+          "turn": [
+            0,
+            -90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            830,
+            0
+          ],
+          "size": [
+            16,
+            5,
+            600
+          ],
+          "tint": "unused",
+          "turn": [
+            0,
+            36870,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            837,
+            0
+          ],
+          "size": [
+            22,
+            5,
+            600
+          ],
+          "tint": "used",
+          "role": "used_ad",
+          "turn": [
+            0,
+            36870,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            830,
+            120
+          ],
+          "size": [
+            16,
+            5,
+            433
+          ],
+          "tint": "unused",
+          "turn": [
+            0,
+            123690,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            837,
+            120
+          ],
+          "size": [
+            22,
+            5,
+            433
+          ],
+          "tint": "used",
+          "role": "used_de",
+          "turn": [
+            0,
+            123690,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            830,
+            -120
+          ],
+          "size": [
+            16,
+            5,
+            433
+          ],
+          "tint": "unused",
+          "turn": [
+            0,
+            -123690,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            837,
+            -120
+          ],
+          "size": [
+            22,
+            5,
+            433
+          ],
+          "tint": "used",
+          "role": "used_ec",
+          "turn": [
+            0,
+            -123690,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -360,
+            844,
+            -240
+          ],
+          "size": [
+            54,
+            12,
+            54
+          ],
+          "tint": "vertex"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -360,
+            844,
+            240
+          ],
+          "size": [
+            54,
+            12,
+            54
+          ],
+          "tint": "vertex"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            844,
+            -240
+          ],
+          "size": [
+            54,
+            12,
+            54
+          ],
+          "tint": "vertex"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            844,
+            240
+          ],
+          "size": [
+            54,
+            12,
+            54
+          ],
+          "tint": "vertex"
+        },
+        {
+          "kind": "box",
+          "at": [
+            360,
+            844,
+            0
+          ],
+          "size": [
+            54,
+            12,
+            54
+          ],
+          "tint": "vertex"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -369,
+            853,
+            -312
+          ],
+          "size": [
+            7,
+            5,
+            47
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            158875,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -352,
+            853,
+            -312
+          ],
+          "size": [
+            7,
+            5,
+            47
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            21125,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -360,
+            853,
+            -306
+          ],
+          "size": [
+            7,
+            5,
+            20
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -377,
+            853,
+            168
+          ],
+          "size": [
+            7,
+            5,
+            44
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -362,
+            853,
+            146
+          ],
+          "size": [
+            7,
+            5,
+            31
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -346,
+            853,
+            157
+          ],
+          "size": [
+            7,
+            5,
+            22
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -362,
+            853,
+            168
+          ],
+          "size": [
+            7,
+            5,
+            31
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -346,
+            853,
+            179
+          ],
+          "size": [
+            7,
+            5,
+            22
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -362,
+            853,
+            190
+          ],
+          "size": [
+            7,
+            5,
+            31
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            853,
+            -334
+          ],
+          "size": [
+            7,
+            5,
+            32
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -16,
+            853,
+            -312
+          ],
+          "size": [
+            7,
+            5,
+            44
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            853,
+            -290
+          ],
+          "size": [
+            7,
+            5,
+            32
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -17,
+            853,
+            168
+          ],
+          "size": [
+            7,
+            5,
+            44
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -4,
+            853,
+            146
+          ],
+          "size": [
+            7,
+            5,
+            27
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            15,
+            853,
+            151
+          ],
+          "size": [
+            7,
+            5,
+            14
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            45000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            20,
+            853,
+            168
+          ],
+          "size": [
+            7,
+            5,
+            24
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            15,
+            853,
+            185
+          ],
+          "size": [
+            7,
+            5,
+            14
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            -45000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -4,
+            853,
+            190
+          ],
+          "size": [
+            7,
+            5,
+            27
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            343,
+            853,
+            -72
+          ],
+          "size": [
+            7,
+            5,
+            44
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            360,
+            853,
+            -94
+          ],
+          "size": [
+            7,
+            5,
+            34
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            357,
+            853,
+            -72
+          ],
+          "size": [
+            7,
+            5,
+            29
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            360,
+            853,
+            -50
+          ],
+          "size": [
+            7,
+            5,
+            34
+          ],
+          "tint": "ink",
+          "turn": [
+            0,
+            90000,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            860,
+            0
+          ],
+          "size": [
+            32,
+            16,
+            32
+          ],
+          "tint": "marker",
+          "role": "marker"
+        },
+        {
+          "kind": "box",
+          "at": [
+            360,
+            845,
+            -330
+          ],
+          "size": [
+            200,
+            16,
+            28
+          ],
+          "tint": "green",
+          "role": "claimed"
+        }
+      ],
+      "palette": {
+        "wood": "#75543b",
+        "board": "#ddd8bd",
+        "rim": "#bb9766",
+        "unused": "#687783",
+        "used": "#e58a36",
+        "vertex": "#334c62",
+        "ink": "#172d38",
+        "marker": "#ed4848",
+        "green": "#43c96b"
+      },
+      "tags": [
+        "puzzle",
+        "route",
+        "labelled",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "Trace each edge once in one continuous trail from A to C, then claim it.",
+    "puzzle": "puzzle",
+    "route": "route puzzle",
+    "euler": "edge once puzzle",
+    "wrong_source": "Continue from the vertex where the red marker stands.",
+    "already_used": "That edge is already orange; each edge may be used only once.",
+    "hands_empty": "Put down what you hold before tracing the board.",
+    "wrong_endpoint": "A completed trail must end at C.",
+    "incomplete": "Use all seven edges before claiming the trail.",
+    "already_claimed": "This completed trail has already been claimed.",
+    "start": "Begin at A. Trace unused incident edges; orange edges cannot be retraced. The red marker shows the current vertex. One solution is A-B-D-C-A-D-E-C. These first four steps return to A. Reset clears this board only. Changes commit at hand contact; the marker jumps between labelled vertices, without physical bridge travel or an animated drawn stroke.",
+    "finish": "After A-B-D-C-A, continue A-D-E-C and claim all seven used edges for green feedback. The trail A-C-D-E-C is a premature dead end: reset to try another route."
+  },
+  "card": {
+    "text": "card",
+    "category": "puzzle",
+    "synonyms": [
+      "route",
+      "euler"
+    ]
+  },
+  "howtos": {
+    "start_trail": {
+      "text": "start",
+      "steps": [
+        {
+          "form": "trace_a_to_b"
+        },
+        {
+          "form": "trace_b_to_d"
+        },
+        {
+          "form": "trace_d_to_c"
+        },
+        {
+          "form": "trace_c_to_a"
+        }
+      ]
+    },
+    "finish_trail": {
+      "text": "finish",
+      "steps": [
+        {
+          "form": "trace_a_to_d"
+        },
+        {
+          "form": "trace_d_to_e"
+        },
+        {
+          "form": "trace_e_to_c"
+        },
+        {
+          "form": "claim_trail"
+        }
+      ]
+    }
+  }
+}

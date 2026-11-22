@@ -1,0 +1,3028 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Whole edge/marker changes, complete solution and premature dead-end reset. Saved fixtures are not native cancellation proof.",
+  "cases": [
+    {
+      "name": "trace_a_to_b_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_a_to_b"
+          },
+          "receipt": "trace_a_to_b",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ab",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 1,
+            "used_ab": 1,
+            "used_bd": false,
+            "used_dc": false,
+            "used_ca": false,
+            "used_ad": false,
+            "used_de": false,
+            "used_ec": false,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "trace_b_to_a_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 1,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_b_to_a"
+          },
+          "receipt": "trace_b_to_a",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ab",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 0,
+            "used_ab": 1,
+            "used_bd": false,
+            "used_dc": false,
+            "used_ca": false,
+            "used_ad": false,
+            "used_de": false,
+            "used_ec": false,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "trace_b_to_d_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 1,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_b_to_d"
+          },
+          "receipt": "trace_b_to_d",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_bd",
+                "n": 30,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 3,
+            "used_ab": false,
+            "used_bd": 1,
+            "used_dc": false,
+            "used_ca": false,
+            "used_ad": false,
+            "used_de": false,
+            "used_ec": false,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "trace_d_to_b_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_d_to_b"
+          },
+          "receipt": "trace_d_to_b",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_bd",
+                "n": 30,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 1,
+            "used_ab": false,
+            "used_bd": 1,
+            "used_dc": false,
+            "used_ca": false,
+            "used_ad": false,
+            "used_de": false,
+            "used_ec": false,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "trace_d_to_c_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_d_to_c"
+          },
+          "receipt": "trace_d_to_c",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_dc",
+                "n": 31,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 2,
+            "used_ab": false,
+            "used_bd": false,
+            "used_dc": 1,
+            "used_ca": false,
+            "used_ad": false,
+            "used_de": false,
+            "used_ec": false,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "trace_c_to_d_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_c_to_d"
+          },
+          "receipt": "trace_c_to_d",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_dc",
+                "n": 31,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 3,
+            "used_ab": false,
+            "used_bd": false,
+            "used_dc": 1,
+            "used_ca": false,
+            "used_ad": false,
+            "used_de": false,
+            "used_ec": false,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "trace_c_to_a_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_c_to_a"
+          },
+          "receipt": "trace_c_to_a",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ca",
+                "n": 32,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 0,
+            "used_ab": false,
+            "used_bd": false,
+            "used_dc": false,
+            "used_ca": 1,
+            "used_ad": false,
+            "used_de": false,
+            "used_ec": false,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "trace_a_to_c_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_a_to_c"
+          },
+          "receipt": "trace_a_to_c",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ca",
+                "n": 32,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 2,
+            "used_ab": false,
+            "used_bd": false,
+            "used_dc": false,
+            "used_ca": 1,
+            "used_ad": false,
+            "used_de": false,
+            "used_ec": false,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "trace_a_to_d_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_a_to_d"
+          },
+          "receipt": "trace_a_to_d",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ad",
+                "n": 33,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 3,
+            "used_ab": false,
+            "used_bd": false,
+            "used_dc": false,
+            "used_ca": false,
+            "used_ad": 1,
+            "used_de": false,
+            "used_ec": false,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "trace_d_to_a_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_d_to_a"
+          },
+          "receipt": "trace_d_to_a",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ad",
+                "n": 33,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 0,
+            "used_ab": false,
+            "used_bd": false,
+            "used_dc": false,
+            "used_ca": false,
+            "used_ad": 1,
+            "used_de": false,
+            "used_ec": false,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "trace_d_to_e_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 3,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_d_to_e"
+          },
+          "receipt": "trace_d_to_e",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_de",
+                "n": 34,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 4,
+            "used_ab": false,
+            "used_bd": false,
+            "used_dc": false,
+            "used_ca": false,
+            "used_ad": false,
+            "used_de": 1,
+            "used_ec": false,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "trace_e_to_d_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_e_to_d"
+          },
+          "receipt": "trace_e_to_d",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_de",
+                "n": 34,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 3,
+            "used_ab": false,
+            "used_bd": false,
+            "used_dc": false,
+            "used_ca": false,
+            "used_ad": false,
+            "used_de": 1,
+            "used_ec": false,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "trace_e_to_c_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 4,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_e_to_c"
+          },
+          "receipt": "trace_e_to_c",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ec",
+                "n": 35,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 2,
+            "used_ab": false,
+            "used_bd": false,
+            "used_dc": false,
+            "used_ca": false,
+            "used_ad": false,
+            "used_de": false,
+            "used_ec": 1,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "trace_c_to_e_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_c_to_e"
+          },
+          "receipt": "trace_c_to_e",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ec",
+                "n": 35,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 4,
+            "used_ab": false,
+            "used_bd": false,
+            "used_dc": false,
+            "used_ca": false,
+            "used_ad": false,
+            "used_de": false,
+            "used_ec": 1,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "reset_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "reset"
+          },
+          "receipt": "reset",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ab",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_bd",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_dc",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ca",
+                "n": 32,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ad",
+                "n": 33,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_de",
+                "n": 34,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ec",
+                "n": 35,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  5
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  6
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  7
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  8
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 0,
+            "used_ab": 0,
+            "used_bd": 0,
+            "used_dc": 0,
+            "used_ca": 0,
+            "used_ad": 0,
+            "used_de": 0,
+            "used_ec": 0,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "claim_trail_whole_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 2,
+              "used_ab": true,
+              "used_bd": true,
+              "used_dc": true,
+              "used_ca": true,
+              "used_ad": true,
+              "used_de": true,
+              "used_ec": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "claim_trail"
+          },
+          "receipt": "claim_trail",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:trail_claimed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 2,
+            "used_ab": true,
+            "used_bd": true,
+            "used_dc": true,
+            "used_ca": true,
+            "used_ad": true,
+            "used_de": true,
+            "used_ec": true,
+            "claimed": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "solution_claim_reset",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_a_to_b"
+          },
+          "receipt": "solution_claim_reset0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ab",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_b_to_d"
+          },
+          "receipt": "solution_claim_reset1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_bd",
+                "n": 30,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_d_to_c"
+          },
+          "receipt": "solution_claim_reset2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_dc",
+                "n": 31,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_c_to_a"
+          },
+          "receipt": "solution_claim_reset3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ca",
+                "n": 32,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_a_to_d"
+          },
+          "receipt": "solution_claim_reset4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ad",
+                "n": 33,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_d_to_e"
+          },
+          "receipt": "solution_claim_reset5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_de",
+                "n": 34,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_e_to_c"
+          },
+          "receipt": "solution_claim_reset6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ec",
+                "n": 35,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "claim_trail"
+          },
+          "receipt": "solution_claim_reset7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:trail_claimed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "reset"
+          },
+          "receipt": "solution_claim_reset8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ab",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_bd",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_dc",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ca",
+                "n": 32,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ad",
+                "n": 33,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_de",
+                "n": 34,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ec",
+                "n": 35,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  5
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  6
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  7
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  8
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 0,
+            "used_ab": 0,
+            "used_bd": 0,
+            "used_dc": 0,
+            "used_ca": 0,
+            "used_ad": 0,
+            "used_de": 0,
+            "used_ec": 0,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "premature_dead_end_reset",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:euler_trail_board",
+            "fields": {
+              "vertex": 0,
+              "used_ab": false,
+              "used_bd": false,
+              "used_dc": false,
+              "used_ca": false,
+              "used_ad": false,
+              "used_de": false,
+              "used_ec": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_a_to_c"
+          },
+          "receipt": "premature_dead_end_reset0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ca",
+                "n": 32,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_c_to_d"
+          },
+          "receipt": "premature_dead_end_reset1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_dc",
+                "n": 31,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_d_to_e"
+          },
+          "receipt": "premature_dead_end_reset2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_de",
+                "n": 34,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "trace_e_to_c"
+          },
+          "receipt": "premature_dead_end_reset3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ec",
+                "n": 35,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:edge_used",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:marker_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "reset"
+          },
+          "receipt": "premature_dead_end_reset4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "vertex",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ab",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_bd",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_dc",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ca",
+                "n": 32,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ad",
+                "n": 33,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_de",
+                "n": 34,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "used_ec",
+                "n": 35,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  5
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  6
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  7
+                ]
+              },
+              {
+                "event": "eden:route_reset",
+                "node": "p1",
+                "changes": [
+                  8
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:euler_trail_board",
+          "fields": {
+            "vertex": 0,
+            "used_ab": 0,
+            "used_bd": 0,
+            "used_dc": 0,
+            "used_ca": 0,
+            "used_ad": 0,
+            "used_de": 0,
+            "used_ec": 0,
+            "claimed": 0
+          }
+        }
+      }
+    }
+  ]
+}
