@@ -61,9 +61,11 @@ fn import_fields() -> BTreeMap<u64, String> {
 /// numbered like an import field reads the import's value (today's id, def, name …) and its forms refuse or misbehave
 /// on a served Eden (#1960: 99 of 173 Eden kinds with entries did). No entry's state field takes an import field's
 /// number, but the door's, which are the engine's own door fields on purpose (`sim::links`: `open` is the import's
-/// `F_OPEN`, and `locked` is `F_LOCKED`, a number the import gives only the open ground).
+/// `F_OPEN`, and `locked` is `F_LOCKED`, a number the import gives only the open ground). Nor does one take a number
+/// the engine keeps on things (`replica::fields`: the door leaf's owned geometry, which an edit refuses to set, a moving
+/// thing's course, hours …), or leave the entries' 28 to 79.
 #[test]
-fn no_entry_state_field_takes_a_number_the_import_writes() {
+fn no_entry_state_field_takes_a_number_the_import_or_engine_writes() {
     let reserved = import_fields();
     assert!(reserved.len() > 20 && reserved.get(&1).map(String::as_str) == Some("F_ORIGIN"));
     let shared: [(&str, &str, u64); 2] = [
@@ -91,13 +93,19 @@ fn no_entry_state_field_takes_a_number_the_import_writes() {
                 && !shared.contains(&(kind.as_str(), field.as_str(), n))
             {
                 clash.push(format!("{kind} {field} = {n} ({f})"));
+            } else if let Some(f) = replica::fields::on_things(n) {
+                clash.push(format!("{kind} {field} = {n} (engine {})", f.name));
+            } else if n > 27 && !replica::fields::ENTRY_FIELDS.contains(&n) {
+                clash.push(format!(
+                    "{kind} {field} = {n} (outside the entries' 28 to 79)"
+                ));
             }
         }
     }
     assert!(found.len() > 300, "the entries are found");
     assert!(
         clash.is_empty(),
-        "state fields numbered as import fields:\n{}",
+        "state fields numbered as import or engine fields:\n{}",
         clash.join("\n")
     );
 }

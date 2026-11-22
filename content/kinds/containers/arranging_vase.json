@@ -87,14 +87,7 @@
           "type": "thing"
         },
         "place": {
-          "type": "slot",
-          "select": {
-            "of": "free_slots",
-            "in": "this",
-            "anchor": "me",
-            "order": "nearest",
-            "rank": 1
-          }
+          "type": "slot"
         }
       },
       "needs": [
@@ -145,15 +138,7 @@
       "starts": "act",
       "takes": {
         "thing": {
-          "type": "thing",
-          "select": {
-            "of": "things",
-            "in": "this",
-            "anchor": "me",
-            "order": "nearest",
-            "rank": 1,
-            "kind": "eden:cut_flower"
-          }
+          "type": "thing"
         }
       },
       "needs": [

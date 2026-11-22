@@ -14,11 +14,14 @@
 //   (src/changelog/page.ts, carried from apps/web), and changelog.md is its Markdown twin; the origin serves both
 //   (v2/tools/origin/site.mjs). `V2_CHANGELOG_FILE` names another copy: the release builds the page from CHANGELOG.md
 //   with the shipping release's section compiled in (tools/changelog/compile.mjs --out), so the page shows it.
+// - Kinds (#3871): each content kind's state fields and looks, as `assets/kinds/<namespace>/<name>.json`, for the things the
+//   page draws from their kind's entry (kind-entries.ts).
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Connect, type Plugin } from 'vite';
 import { bodyAssets } from './body-assets.ts';
+import { kindEntries } from './kind-entries.ts';
 import { changelogHtml } from './src/changelog/page.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -75,5 +78,5 @@ export default defineConfig({
     target: 'es2022', outDir: 'dist', assetsInlineLimit: 0, chunkSizeWarningLimit: 1024,
     rollupOptions: { input: { main: resolve(here, 'index.html'), pairing: resolve(here, 'src/pairing/card.html'), worlds: resolve(here, 'src/worlds/index.html'), home: resolve(here, 'src/home/index.html'), account: resolve(here, 'src/account/index.html'), changelog: resolve(here, 'changelog.html'), panel: resolve(here, 'src/panel/index.html') } },
   },
-  plugins: [streamFiles(), changelogPage(), bodyAssets(process.env.V2_BODY_ASSETS)],
+  plugins: [streamFiles(), changelogPage(), bodyAssets(process.env.V2_BODY_ASSETS), kindEntries()],
 });

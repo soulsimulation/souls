@@ -169,7 +169,7 @@ impl Client {
         target: Option<Target>,
         fallbacks: &[Id],
     ) {
-        self.send_as_until(
+        let bytes = intent_bytes(
             actor,
             sequence,
             verb,
@@ -177,46 +177,6 @@ impl Client {
             fallbacks,
             answers::now() + 60_000_000,
         );
-    }
-
-    fn send_as_until(
-        &mut self,
-        actor: Id,
-        sequence: u64,
-        verb: &str,
-        target: Option<Target>,
-        fallbacks: &[Id],
-        expiry: i64,
-    ) {
-        let i = Intent {
-            actor: Actor::Soul(actor),
-            verb: name(verb),
-            target,
-            parameters: BTreeMap::new(),
-            sequence,
-            basis: Version {
-                lineage: LINEAGE,
-                zone: Id::new(LINEAGE, 0).unwrap(),
-                epoch: 1,
-                sequence: 0,
-            }
-            .to_value(),
-            expiry,
-            resources: Vec::new(),
-            fallbacks: fallbacks
-                .iter()
-                .map(|&t| Fallback {
-                    verb: name(verb),
-                    target: Some(Target::Node(t)),
-                    parameters: BTreeMap::new(),
-                    resources: Vec::new(),
-                })
-                .collect(),
-            replaces: None,
-            body: None,
-            reflex: false,
-        };
-        let bytes = encode(&i.to_value()).unwrap();
         self.0
             .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
             .unwrap();
@@ -229,25 +189,70 @@ impl Client {
         self.0.read_exact(&mut len).expect("an answer");
         let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
         self.0.read_exact(&mut frame).unwrap();
-        let Value::Map(m) = decode(&frame).unwrap().value else {
-            panic!("a frame")
-        };
-        let Some(Value::Map(a)) = m.get(&2) else {
-            panic!("an answer")
-        };
-        match (a.get(&3), a.get(&4), a.get(&5)) {
-            (Some(Value::Uint(1)), Some(id), Some(Value::Array(e))) => Ok((
-                read_id(id).unwrap(),
-                e.iter()
-                    .map(|v| match v {
-                        Value::Uint(n) => *n,
-                        _ => panic!("an entry"),
-                    })
-                    .collect(),
-            )),
-            (Some(Value::Uint(2)), Some(Value::Text(t)), _) => Err(t.as_str().to_owned()),
-            other => panic!("an answer: {other:?}"),
+        read_answer(&frame)
+    }
+}
+
+/// An intent by Soul `actor`, with ranked fallbacks of `verb` on each of `fallbacks` (C14), as the socket carries it.
+fn intent_bytes(
+    actor: Id,
+    sequence: u64,
+    verb: &str,
+    target: Option<Target>,
+    fallbacks: &[Id],
+    expiry: i64,
+) -> Vec<u8> {
+    let i = Intent {
+        actor: Actor::Soul(actor),
+        verb: name(verb),
+        target,
+        parameters: BTreeMap::new(),
+        sequence,
+        basis: Version {
+            lineage: LINEAGE,
+            zone: Id::new(LINEAGE, 0).unwrap(),
+            epoch: 1,
+            sequence: 0,
         }
+        .to_value(),
+        expiry,
+        resources: Vec::new(),
+        fallbacks: fallbacks
+            .iter()
+            .map(|&t| Fallback {
+                verb: name(verb),
+                target: Some(Target::Node(t)),
+                parameters: BTreeMap::new(),
+                resources: Vec::new(),
+            })
+            .collect(),
+        replaces: None,
+        body: None,
+        reflex: false,
+    };
+    encode(&i.to_value()).unwrap()
+}
+
+/// An answer frame: a receipt's intent id and entries, or a refusal's reason.
+fn read_answer(frame: &[u8]) -> Result<(Id, Vec<u64>), String> {
+    let Value::Map(m) = decode(frame).unwrap().value else {
+        panic!("a frame")
+    };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        panic!("an answer")
+    };
+    match (a.get(&3), a.get(&4), a.get(&5)) {
+        (Some(Value::Uint(1)), Some(id), Some(Value::Array(e))) => Ok((
+            read_id(id).unwrap(),
+            e.iter()
+                .map(|v| match v {
+                    Value::Uint(n) => *n,
+                    _ => panic!("an entry"),
+                })
+                .collect(),
+        )),
+        (Some(Value::Uint(2)), Some(Value::Text(t)), _) => Err(t.as_str().to_owned()),
+        other => panic!("an answer: {other:?}"),
     }
 }
 
@@ -870,23 +875,53 @@ fn tick_of(ticks: &[Tick], id: Id, event: &str) -> (usize, u64, Option<String>) 
 }
 
 /// A walk whose explicit expiry passes mid-move stops in the tick its deadline passes: its end is written in that tick by the
-/// deadline's name, `act.timed-out`, and the body is not moved after it.
+/// deadline's name, `act.timed-out`, and the body is not moved after it. In lockstep, so its expiry is world time from
+/// the tick it arrives at, whatever the machine's load: on the machine's clock it could pass before the intent arrived
+/// (`intent.expired`).
 #[test]
 fn a_walk_whose_act_times_out_mid_move_stops_and_ends_by_name() {
     // The walk is about 4 m, near 3 s; the caller explicitly permits only 1 s (C29).
-    let (world, mut c, store, path) = served(10_000_000, "timeout");
-    c.send_as_until(
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.deadline = 10_000_000;
+    cfg.lockstep = true;
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    // World time starts at 0 in lockstep: the intent arrives at tick 0 and expires 1 s on.
+    let (reply, rx) = channel();
+    let bytes = intent_bytes(
         body_id(),
         1,
         "eden:walk",
         Some(Target::Node(thing())),
         &[],
-        answers::now() + 1_000_000,
+        1_000_000,
     );
-    assert_eq!(c.answer(), Err("act.timed-out".into()));
-    std::thread::sleep(Duration::from_millis(600));
+    world
+        .events
+        .send(answers::Event::ArrivalAt {
+            tick: 0,
+            bytes,
+            reply,
+        })
+        .unwrap();
+    // 5 s of world time: the walk would have arrived by then.
+    let (done, ran) = channel();
+    world
+        .events
+        .send(answers::Event::RunTo { tick: 100, done })
+        .unwrap();
+    ran.recv().unwrap();
+    let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+    assert_eq!(read_answer(&frame), Err("act.timed-out".into()));
     world.stop();
-    let _ = std::fs::remove_file(&path);
 
     let bytes = store.0.lock().unwrap().bytes.clone();
     let log = logged(&bytes);
@@ -1571,4 +1606,53 @@ fn a_seat_one_metre_up_is_walked_to_sat_in_and_risen_from_through_the_gateway() 
     let r = end(&rise.0);
     assert_eq!(r.3, w.3, "standing on the ground again");
     assert!(near(r.4, stand, 1_000), "on the stand point: {:?}", r.4);
+}
+
+/// #3700 review: a private thing is its owner's alone on the served path too. A bare lie at a bed private to another
+/// Soul is refused `object.private` before the bodies take it; a walk up to it is not; a sit on a chair private to the
+/// Soul itself is taken. The marks are the bed's and the chair's own fields 143 (owner) and 144 (access 2, private).
+#[test]
+fn a_bare_lie_at_a_private_bed_is_refused_and_the_owner_sits_on_its_own() {
+    use replica::who_may::{F_ACCESS, F_OWNER};
+    let mut w = toggles::World::build(0, 0, 0);
+    let mark =
+        |owner: Id| BTreeMap::from([(F_OWNER, owner.to_value()), (F_ACCESS, Value::Uint(2))]);
+    w.item_with(bed(), mark(soul(9_099)));
+    w.item_with(thing(), mark(body_id()));
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies_and_bed()));
+    let world = answers::start(w.replica, toggles::rules(), store, cfg).expect("the world starts");
+    let path = std::env::temp_dir().join(format!("private-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    let (ready, accepted) = channel();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        ready.send(()).unwrap();
+        answers::serve(door, stream);
+    });
+    let stream = UnixStream::connect(&path).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+    accepted.recv().unwrap();
+    let mut c = Client(stream);
+
+    c.send(1, "eden:walk", Some(bed()));
+    c.answer().expect("a walk up to a private bed uses nothing");
+    c.send(2, "eden:lie", Some(bed()));
+    assert_eq!(
+        c.answer(),
+        Err("object.private".into()),
+        "another Soul's private bed"
+    );
+    c.send(3, "eden:walk", Some(thing()));
+    c.answer().expect("the walk to its own chair");
+    c.send(4, "eden:sit", Some(thing()));
+    c.answer().expect("its own private chair");
+    world.stop();
+    let _ = std::fs::remove_file(&path);
 }

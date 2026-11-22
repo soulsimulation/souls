@@ -89,7 +89,7 @@ const names = (text) => text
   .replace(/^https:\/\/sim\.eden\.art \{/m, `http://127.0.0.1:${port.primary} {`)
   .replace(/^https:\/\/souls\.game \{/m, `http://127.0.0.1:${port.old} {`)
   .replaceAll('localhost:7310', `localhost:${port.directory}`).replaceAll('localhost:7320', `localhost:${port.origin}`)
-  .replaceAll('/usr/local/lib/souls/web', web).replaceAll('/var/lib/souls-routes', routes).replaceAll('/usr/bin/node', process.execPath)
+  .replaceAll('/usr/local/lib/souls/web', web).replaceAll('/var/lib/souls/models', join(dir, 'models')).replaceAll('/var/lib/souls-routes', routes).replaceAll('/usr/bin/node', process.execPath)
   .replaceAll('/srv/sim-worlds/production/tools/world-launcher/deploy/caddy', today).replaceAll('/srv/sim-worlds/production', release);
 for (const f of ['soul-game.caddy', 'souls-game.caddy', 'souls-routes.service', 'souls-routes.timer']) writeFileSync(join(src, f), names(readFileSync(join(here, f), 'utf8')));
 writeFileSync(join(src, 'routes.mjs'), readFileSync(join(here, 'routes.mjs')));
