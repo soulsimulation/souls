@@ -312,13 +312,7 @@ fn basis(remote: bool) -> Value {
 /// served world (`targets.rs`), none on the driver's own.
 const WORDS: &str = "(load test)";
 
-fn intent(
-    actor: Actor,
-    verb: &Name,
-    target: Option<Id>,
-    sequence: u64,
-    basis: &Value,
-) -> Vec<u8> {
+fn intent(actor: Actor, verb: &Name, target: Option<Id>, sequence: u64, basis: &Value) -> Vec<u8> {
     let mut parameters = BTreeMap::new();
     if verb.as_str().ends_with(":say") {
         let words = Value::Map([(23, Value::Bytes(WORDS.as_bytes().to_vec()))].into());
@@ -770,7 +764,8 @@ async fn main() {
                     _ => continue,
                 };
                 let kind = s.kinds[act.kind].as_str();
-                let Some(c) = choices[k].next(t, kind, &s.verbs[v], act.agent, body, a.speech) else {
+                let Some(c) = choices[k].next(t, kind, &s.verbs[v], act.agent, body, a.speech)
+                else {
                     *withheld.entry(kind).or_insert(0u64) += 1;
                     continue;
                 };
@@ -832,7 +827,10 @@ async fn main() {
         .raw("all", total.json())
         .raw("byTenth", serde_like::list(&tenths))
         .s("world", if a.remote.is_some() { "remote" } else { "own" })
-        .raw("targets", aimed.as_ref().map_or("null".into(), targets::Targets::json))
+        .raw(
+            "targets",
+            aimed.as_ref().map_or("null".into(), targets::Targets::json),
+        )
         .raw("withheld", counts(&withheld))
         .raw("standIns", counts(&stand_ins))
         .raw("perMinute", serde_like::list(&minutes));

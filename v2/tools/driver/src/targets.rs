@@ -347,7 +347,9 @@ pub async fn read_entries(url: &str, token: &str) -> Result<Json, String> {
     let head = String::from_utf8_lossy(&buf[..at]);
     let status = head.lines().next().unwrap_or("");
     if status.contains(" 404 ") {
-        eprintln!("driver: the gateway serves no entries (no --entries): walks go to any node, forms stand in as walks");
+        eprintln!(
+            "driver: the gateway serves no entries (no --entries): walks go to any node, forms stand in as walks"
+        );
         return Ok(Json::Arr(Vec::new()));
     }
     if !status.contains(" 200 ") {
@@ -390,7 +392,10 @@ mod tests {
         let t = Targets::of(&nodes, &json::parse(ENTRIES).unwrap());
         assert_eq!(t.walk, [id(1), id(2)]);
         assert_eq!(t.sit, [id(1), id(2)]);
-        assert_eq!(t.forms["play-music"], ("eden:play_music".into(), vec![id(3)]));
+        assert_eq!(
+            t.forms["play-music"],
+            ("eden:play_music".into(), vec![id(3)])
+        );
         assert_eq!(t.forms["gesture"], ("eden:wave".into(), Vec::new()));
         assert_eq!(t.forms["sit-ground"], ("eden:sit_down".into(), Vec::new()));
         assert!(!t.forms.contains_key("read"));
@@ -402,14 +407,26 @@ mod tests {
         let t = Targets::of(&nodes, &json::parse(ENTRIES).unwrap());
         let mut c = Choice::default();
         let me = id(9);
-        let verb = |c: &mut Choice, kind| c.next(&t, kind, "eden:x", 0, me, false).map(|x| (x.verb, x.target));
+        let verb = |c: &mut Choice, kind| {
+            c.next(&t, kind, "eden:x", 0, me, false)
+                .map(|x| (x.verb, x.target))
+        };
         assert_eq!(verb(&mut c, "say"), None);
         assert_eq!(verb(&mut c, "sit"), Some(("eden:sit".into(), Some(id(1)))));
         assert_eq!(verb(&mut c, "walk"), Some(("eden:rise".into(), None)));
-        assert_eq!(verb(&mut c, "walk"), Some(("eden:walk".into(), Some(id(1)))));
-        assert_eq!(verb(&mut c, "gesture"), Some(("eden:wave".into(), Some(me))));
+        assert_eq!(
+            verb(&mut c, "walk"),
+            Some(("eden:walk".into(), Some(id(1))))
+        );
+        assert_eq!(
+            verb(&mut c, "gesture"),
+            Some(("eden:wave".into(), Some(me)))
+        );
         let read = c.next(&t, "read", "eden:read", 0, me, false).unwrap();
-        assert_eq!((read.verb.as_str(), read.stand_in.as_deref()), ("eden:walk", Some("read")));
+        assert_eq!(
+            (read.verb.as_str(), read.stand_in.as_deref()),
+            ("eden:walk", Some("read"))
+        );
         let say = c.next(&t, "say", "eden:say", 0, me, true).unwrap();
         assert!(say.words && say.verb == "eden:say");
     }
