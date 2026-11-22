@@ -608,9 +608,9 @@ async fn agent(
                                 if verb_of.remove(&s).is_some_and(|v| v.as_str().ends_with(":sit")) {
                                     seated.store(true, Ordering::Relaxed);
                                 }
+                                out.receipts += 1;
                                 let m = out.minute(s0, now);
                                 m.receipts += 1;
-                                out.receipts += 1;
                                 if !accepted.remove(&s) {
                                     m.latency_us.push(now.duration_since(sent_at).as_micros() as u64);
                                     out.trace.push(format!("first {k} {s} {sent_ms} {} receipt", unix_ms()));
