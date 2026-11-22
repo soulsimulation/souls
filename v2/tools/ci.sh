@@ -108,6 +108,8 @@ step web-deps npm ci --prefix web --no-audit --no-fund
 step web-kind-entries node --test web/kind-entries.test.ts
 # B15: acquire only the released inputs and exercise the actual prepared artifact, after the locked page dependencies.
 step body-presets bash -c 'node tools/import-body/prepare.mjs --out .local/ci-body-assets --test'
+# The page's typecheck, the first half of its `npm run build` (install-v2, release-v2), after the links above (#1960).
+step web-types bash -c 'cd web && npx tsc --noEmit -p .'
 # Every page unit test, found by name (web/src/**/*.test.ts and *.test.mjs), so a new one runs here with no edit. A
 # file that starts target/debug/worldd (the words path V1b #3361, a still world V5b, the sky live) times a served world
 # on the wall clock, so those run one at a time after the rest; the rest run in parallel. Some read the replica WASM

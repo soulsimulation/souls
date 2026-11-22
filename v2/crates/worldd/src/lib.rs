@@ -18,6 +18,7 @@ pub mod measures;
 pub mod moves;
 pub mod needs;
 pub mod orders;
+pub mod places;
 pub mod setdown;
 pub mod shipping;
 pub mod start;

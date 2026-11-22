@@ -703,3 +703,57 @@ fn c8_the_boxes_give_the_same_passages() {
     println!("C8: {checked} points, {inside} in a passage, the same with and without the boxes");
     assert!(inside > 0 && checked > inside);
 }
+
+/// #1960 (#3688's class): a move at a door aimed in its wall, short of the doorway, from a room on either side. Every
+/// floor place within an arm of the aim lies within [`CLEAR`] of the doorway's ends, so the plain search finds none
+/// (the bedroom close's `out-of-reach` on served Eden, 783 mm against 600). With the move's own door, its doorway
+/// counts and each side gets a place on its own side, within the arm; another thing's id changes nothing.
+#[test]
+fn a_door_is_reached_from_a_room_on_either_side() {
+    let (mut t, nodes) = town();
+    let f0 = nodes["building/floor-0"];
+    let door = nodes["door-building-a-b"];
+    let ends: Vec<_> = t
+        .buildings
+        .iter()
+        .flat_map(|b| &b.links)
+        .find(|l| l.door == Some(door))
+        .expect("the doorway a-b")
+        .ends
+        .iter()
+        .flatten()
+        .map(|e| e.middle().x)
+        .collect();
+    let (west, east) = (ends[0].min(ends[1]), ends[0].max(ends[1]));
+    let (aim, reach) = (Vec3::new((west + east) / 2, 0, -3_400_000), 600_000);
+    for (side, from) in [("west", west - 1_000_000), ("east", east + 1_000_000)] {
+        let body = stand(&t, id(1), f0, Vec3::new(from, 0, -3_000_000));
+        let v = t.view();
+        assert_eq!(
+            v.stand_near(f0, aim, reach, Some(&body)),
+            None,
+            "{side}: no place out of the doorway"
+        );
+        assert_eq!(
+            v.stand_near_door(f0, aim, reach, Some(&body), Some(f0)),
+            None,
+            "{side}: another thing's id frees no doorway"
+        );
+        let p = v
+            .stand_near_door(f0, aim, reach, Some(&body), Some(door))
+            .unwrap_or_else(|| panic!("{side}: a place in the door's own doorway"));
+        assert!(
+            flat(p, aim) <= reach,
+            "{side}: {p:?} within an arm of {aim:?}"
+        );
+        let near_side = if side == "west" {
+            p.x <= west
+        } else {
+            p.x >= east
+        };
+        assert!(
+            near_side,
+            "{side}: {p:?} on the body's own side of the door"
+        );
+    }
+}

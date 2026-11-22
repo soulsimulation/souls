@@ -3,6 +3,8 @@
 # `supervisor launch <name>` finds it and writes what its two units read. Runbook: v2/docs/runbook/install.md.
 #
 #   bash place-world.sh <seeded folder> --port <gateway port> [--build <hex>] [--start]
+#   (W3b's placement adds --configuration-only --instance --creator --directory, and --folder-store when the
+#   directory's store is its folder rather than a bucket)
 #
 # It writes, for the world <name> (its world.json's):
 #   /var/lib/souls/worlds/worlds/<name>/          the folder, copied (WORLDS_ROOT=/var/lib/souls/worlds, the unit's)
@@ -26,7 +28,7 @@ die() {
 
 R=${PLACE_ROOT:-}
 SRC='' NAME='' CREATOR='' PORT='' BUILD=unpinned START=0 RESUME=0 DIRECTORY=''
-DATA_ONLY=0 CONFIG_ONLY=0
+DATA_ONLY=0 CONFIG_ONLY=0 FOLDER_STORE=0
 if [ "${1:-}" = --configuration-only ]; then CONFIG_ONLY=1; shift
 else SRC=${1:-}; [ -n "$SRC" ] || die "a seeded folder is needed"; shift; fi
 while [ $# -gt 0 ]; do
@@ -39,6 +41,7 @@ while [ $# -gt 0 ]; do
     --instance) NAME=$2; shift 2 ;;
     --creator) CREATOR=$2; shift 2 ;;
     --directory) DIRECTORY=$2; shift 2 ;;
+    --folder-store) FOLDER_STORE=1; shift ;;
     *) die "unknown argument $1" ;;
   esac
 done
@@ -91,7 +94,10 @@ if [ "$DATA_ONLY" = 0 ]; then
   done
   mkdir -p "$R/etc/souls" "$R$(dirname "$DROPIN")" "$R$WANTS"
   EXCHANGE=''; STORE=''
-  if [ -n "$DIRECTORY" ]; then EXCHANGE=" --creator $CREATOR --directory $DIRECTORY --creator-authority-required"; STORE=$(printf '\nEnvironment=WORLDD_STORE=%s' "$DATA/worlds/directory"); fi
+  # The world's store is the directory's (#1960 B7): with a bucket, the DIRECTORY_STORE_URL the install drop-in's
+  # secrets file gives every worldd@; only a machine whose directory keeps a folder (--folder-store) names that folder.
+  if [ -n "$DIRECTORY" ]; then EXCHANGE=" --creator $CREATOR --directory $DIRECTORY --creator-authority-required"; fi
+  if [ -n "$DIRECTORY" ] && [ "$FOLDER_STORE" = 1 ]; then STORE=$(printf '\nEnvironment=WORLDD_STORE=%s' "$DATA/worlds/directory"); fi
   ENV_TEXT=$(printf 'GATEWAYD_ARGS=--listen 127.0.0.1:%s --world %s --tokens %s --build %s --receipts %s --entries %s%s' "$PORT" "$SOCKET" "$WORLD/tokens" "$BUILD" "$WORLD/receipts" "$WORLD/entries" "$EXCHANGE")
   DROP_TEXT=$(printf '# Written by place-world.sh (C1, #3365).\n[Service]\nEnvironment=WORLDD_SOCKET=%s%s' "$SOCKET" "$STORE")
   if [ -e "$R$ENV" ]; then [ "$(cat "$R$ENV")" = "$ENV_TEXT" ] || die "gateway configuration differs"; else printf '%s\n' "$ENV_TEXT" > "$R$ENV"; fi
