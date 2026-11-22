@@ -15,10 +15,13 @@
 //! With `--remote <gateway address> --tokens <file>` (X7, #4015) it starts nothing: it signs in the file's tokens, one
 //! pre-paired test Soul each (agent k takes line k), at a gateway that serves a world, and sends the same schedule as
 //! those Souls. Either way the report adds `perMinute`: receipts a second, act latency (send to the act's first answer)
-//! p50/p95/p99, refusals by name and errors by name.
+//! p50/p95/p99, refusals by name and errors by name. On a served world the walks, sits and forms go to the world's own
+//! ids, read before the clock starts as a client reads them (`targets.rs`), and says are withheld unless `--speech`.
 
 // The repeat rule's map ban (K12, v2/clippy.toml) is `sim`'s; the driver's maps are lookups.
 #![allow(clippy::disallowed_types)]
+
+mod targets;
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{BufRead, BufReader};
@@ -33,7 +36,7 @@ use gatewayd::token::{Grant, Token, Tokens};
 use replica::effects::Actor;
 use replica::encode::{Name, Value, decode, encode, to_hex};
 use replica::ids::{Id, Scope, Version};
-use replica::intents::{Hello, Intent, PROTOCOL};
+use replica::intents::{Hello, Intent, PROTOCOL, Target};
 use tokio::sync::{Semaphore, mpsc};
 use tokio_tungstenite::tungstenite::Message;
 
@@ -305,10 +308,17 @@ fn basis(remote: bool) -> Value {
 }
 
 /// The words a say carries (parameter 1, `{23: words}`, as the client's `wireIntent` sends them): a served world
-/// refuses a say with none (`intent.no-words`). Every other act goes with no target or parameter.
+/// refuses a say with none (`intent.no-words`). Every other act goes with no parameter, and with its target on a
+/// served world (`targets.rs`), none on the driver's own.
 const WORDS: &str = "(load test)";
 
-fn intent(actor: Actor, verb: &Name, sequence: u64, basis: &Value) -> Vec<u8> {
+fn intent(
+    actor: Actor,
+    verb: &Name,
+    target: Option<Id>,
+    sequence: u64,
+    basis: &Value,
+) -> Vec<u8> {
     let mut parameters = BTreeMap::new();
     if verb.as_str().ends_with(":say") {
         let words = Value::Map([(23, Value::Bytes(WORDS.as_bytes().to_vec()))].into());
@@ -317,7 +327,7 @@ fn intent(actor: Actor, verb: &Name, sequence: u64, basis: &Value) -> Vec<u8> {
     let i = Intent {
         actor,
         verb: verb.clone(),
-        target: None,
+        target: target.map(Target::Node),
         parameters,
         sequence,
         basis: basis.clone(),
@@ -499,6 +509,8 @@ struct Args {
     late_ms: u64,
     /// A served world's gateway, and the file of its pre-paired test Souls' tokens (X7).
     remote: Option<(String, PathBuf)>,
+    /// Send the schedule's says on a served world (out loud, where people may read them); withheld by default.
+    speech: bool,
 }
 
 fn args() -> Option<Args> {
@@ -515,6 +527,7 @@ fn args() -> Option<Args> {
             (None, None) => None,
             _ => return None,
         },
+        speech: a.iter().any(|x| x == "--speech"),
     })
 }
 
@@ -592,7 +605,7 @@ async fn main() {
     let Some(a) = args() else {
         eprintln!(
             "usage: driver --schedule <file from loads.mjs> --dir <empty folder> [--remote ws://<host>:<port> \
-             --tokens <file>] [--think-ms 0] [--late-ms 50]"
+             --tokens <file> [--speech]] [--think-ms 0] [--late-ms 50]"
         );
         std::process::exit(2);
     };
@@ -618,14 +631,32 @@ async fn main() {
         .expect("this binary's folder");
     std::fs::create_dir_all(&a.dir).expect("the run folder");
 
+    let mut aimed: Option<targets::Targets> = None;
     let (url, signed, children) = match &a.remote {
         Some((remote, file)) => {
             let read = socket_url(remote).and_then(|url| {
                 let text = std::fs::read_to_string(file).map_err(|e| format!("--tokens: {e}"))?;
                 Ok((url, read_tokens(&text, s.agents)?))
             });
+            let read = match read {
+                Ok((url, signed)) => {
+                    // The world's ids and forms, through the first test Soul, on a socket of its own before its agent's.
+                    let token = signed.first().map_or("", |(t, _)| t.as_str());
+                    match targets::read_copy(&url, token).await {
+                        Ok(nodes) => targets::read_entries(&url, token)
+                            .await
+                            .map(|e| (url, signed, nodes.len(), targets::Targets::of(&nodes, &e))),
+                        Err(e) => Err(e),
+                    }
+                }
+                Err(e) => Err(e),
+            };
             match read {
-                Ok((url, signed)) => (url, signed, Vec::new()),
+                Ok((url, signed, nodes, t)) => {
+                    println!("targets: {nodes} nodes in the copy; {}", t.json());
+                    aimed = Some(t);
+                    (url, signed, Vec::new())
+                }
                 Err(e) => {
                     eprintln!("driver: {e}");
                     std::process::exit(2);
@@ -721,21 +752,42 @@ async fn main() {
     let mut sequence = vec![first; s.agents as usize];
     let mut intended = vec![0u64; s.agents as usize];
     let mut unmapped: BTreeMap<&str, u64> = BTreeMap::new();
-    let mut by_verb: BTreeMap<&str, u64> = BTreeMap::new();
+    let mut by_verb: BTreeMap<String, u64> = BTreeMap::new();
+    let (mut withheld, mut stand_ins) = (BTreeMap::new(), BTreeMap::new());
+    let mut choices = vec![targets::Choice::default(); s.agents as usize];
     for act in &s.acts {
         let Some(v) = act.verb else {
             *unmapped.entry(&s.kinds[act.kind]).or_default() += 1;
             continue;
         };
+        let k = act.agent as usize;
+        // On a served world: the act's target from the world's ids, a rise first when seated, a say withheld.
+        let (verb, target) = match &aimed {
+            None => (verbs[v].clone(), None),
+            Some(t) => {
+                let body = match actors[k] {
+                    Actor::Soul(b) => b,
+                    _ => continue,
+                };
+                let kind = s.kinds[act.kind].as_str();
+                let Some(c) = choices[k].next(t, kind, &s.verbs[v], act.agent, body, a.speech) else {
+                    *withheld.entry(kind).or_insert(0u64) += 1;
+                    continue;
+                };
+                if let Some(x) = c.stand_in {
+                    *stand_ins.entry(x).or_insert(0u64) += 1;
+                }
+                (Name::new(&c.verb).expect("a verb is a name"), c.target)
+            }
+        };
         let due = start + Duration::from_millis(act.at_ms + think(act.agent));
         tokio::time::sleep_until(due.into()).await;
-        let k = act.agent as usize;
         sequence[k] += 1;
         intended[k] += 1;
-        *by_verb.entry(&s.verbs[v]).or_default() += 1;
+        *by_verb.entry(verb.as_str().to_owned()).or_default() += 1;
         let _ = chans[k].send(Due {
             at: due,
-            bytes: intent(actors[k], &verbs[v], sequence[k], &based),
+            bytes: intent(actors[k], &verb, target, sequence[k], &based),
             sequence: sequence[k],
             start,
         });
@@ -755,7 +807,7 @@ async fn main() {
 
     let all: Vec<&Sent> = sent.iter().collect();
     let total = group(&all, a.late_ms);
-    let intended_all = s.acts.len() as u64;
+    let intended_all = s.acts.len() as u64 - withheld.values().sum::<u64>();
     let achieved = ratio(total.get("sent").unwrap_or(0.0) as u64, intended_all);
     let cores = (1000.0 * cpu as f64 / wall.as_micros().max(1) as f64).round() / 1000.0;
     let receipts: u64 = sent.iter().map(|x| x.receipts).sum();
@@ -780,11 +832,15 @@ async fn main() {
         .raw("all", total.json())
         .raw("byTenth", serde_like::list(&tenths))
         .s("world", if a.remote.is_some() { "remote" } else { "own" })
+        .raw("targets", aimed.as_ref().map_or("null".into(), targets::Targets::json))
+        .raw("withheld", counts(&withheld))
+        .raw("standIns", counts(&stand_ins))
         .raw("perMinute", serde_like::list(&minutes));
     let on_time = total.get("onTimeShare").unwrap_or(0.0);
     println!(
         "Acts: {} achieved of {} intended ({:.1} %){}; {:.1} % sent within {} ms of due (p50 {} ms, p99 {} ms, max {} ms); \
-         driver {} cores over {:.0} s; receipts {}, other answers {}, sockets closed {}; unmapped {}",
+         driver {} cores over {:.0} s; receipts {}, other answers {}, sockets closed {}; unmapped {}; withheld {}; \
+         stand-ins {}",
         total.get("sent").unwrap_or(0.0),
         intended_all,
         100.0 * achieved,
@@ -804,6 +860,8 @@ async fn main() {
         other,
         closed,
         counts(&unmapped),
+        counts(&withheld),
+        counts(&stand_ins),
     );
     for t in &tenths {
         println!("  tenth {}", t.json());
