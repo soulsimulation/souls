@@ -1,7 +1,9 @@
 // The copy as rows (Engine v2 R7, #2701): the daemon's copy of its scope (R5's `Copy`, in WASM memory) read record by
 // record from its roots down, each record decoded once by its hash. A row is a node: its id, its name, its kind, its
 // parent and the path of names above it, its text quoted, and `own`, its record without its children's hashes, so
-// that two versions of a node compare equal when only something below it changed. A row never carries a position.
+// that two versions of a node compare equal when only something below it changed. A row carries its pose as the
+// record holds it (#3851: body motion reaches the copy, #3799): `pos`, µm in its parent's frame, and `rot`, a quaternion
+// [w, x, y, z]; a moving node's is where its last sample put it.
 //
 // The records are CBOR in T0's profile (`v2/docs/encoding.md`): unsigned and negative integers, bytes, text, arrays,
 // maps and the simple values; this reader takes those and nothing else.
@@ -71,6 +73,40 @@ export function rememberPublicNames(copy, bytes, allowed = null) {
   for (const [key, text] of pending) namesOf(copy).set(key, text);
 }
 
+const WORDS = new WeakMap();
+/** #3703: the public words the world sent beside a records answer (key 27), by reference (`<scope hex>-<counter>`). */
+export const publicWordsOf = (copy) => { if (!WORDS.has(copy)) WORDS.set(copy, new Map()); return WORDS.get(copy); };
+/**
+ * Keeps the `[[reference, words], ...]` sidecar (key 27) of a records answer: only a reference some public record of
+ * the same answer holds in its fields, so words reach the copy only beside the record that names them. Anything else
+ * in it is ignored, never trusted.
+ */
+export function rememberPublicWords(copy, bytes) {
+  const frame = decode(bytes), pairs = frame.get(27), records = frame.get(22);
+  if (!Array.isArray(pairs) || !Array.isArray(records)) return;
+  const held = new Set();
+  for (const raw of records) {
+    if (!(raw instanceof Uint8Array)) continue;
+    const r = decode(raw), audience = r.get(5), fields = r.get(6);
+    if (!(audience instanceof Map && audience.get(1) === 1 && fields instanceof Map)) continue;
+    for (const v of fields.values()) if (v instanceof Map && Array.isArray(v.get(21))) held.add(idText(v.get(21)));
+  }
+  const kept = publicWordsOf(copy);
+  for (const pair of pairs) {
+    if (!Array.isArray(pair) || pair.length !== 2 || !Array.isArray(pair[0]) || !(pair[1] instanceof Uint8Array)) continue;
+    const ref = idText(pair[0]);
+    if (!held.has(ref)) continue;
+    try { kept.set(ref, new TextDecoder('utf-8', { fatal: true }).decode(pair[1])); } catch { /* not text */ }
+  }
+}
+
+/** A field's public words given beside its record (`{21: id}`, key 27), or null when there are none. */
+function wordsAt(copy, fields, n) {
+  const v = fields.get(n) ?? fields.get(BigInt(n));
+  const ref = v instanceof Map && Array.isArray(v.get(21)) ? idText(v.get(21)) : null;
+  return (ref && publicWordsOf(copy).get(ref)?.trim()) || null;
+}
+
 /** Current reachable public records, never a dictionary or records retained outside the Copy's roots. */
 export function publicNameRecords(copy, missingOnly = true) {
   const todo = Object.values(JSON.parse(copy.roots())), seen = new Set(), found = [];
@@ -91,6 +127,10 @@ export const idText = (v) => `${hex(v[0])}-${v[1]}`;
 /** A kind `namespace:name@hash` as its plain name. */
 /** A node's course field (replica `schedule::F_COURSE`): a thing that moves on its own track. */
 export const F_COURSE = 80;
+/** A place's title (#3699): field 4, a public name's hash (named at import) or a creator's words (`{21: id}`). */
+export const F_TITLE = 4;
+/** A place's aliases (#3699): a creator's words (`{21: id}`), one alias a line; `find` scores them. */
+export const F_ALIASES = 101;
 export const plainKind = (k) => String(k).replace(/@.*$/, '');
 /** A node's Soul Actions entry field (import-eden `F_ENTRY`): the entry its world's map names for its kind. */
 export const F_ENTRY = 27;
@@ -138,7 +178,8 @@ export function rowsOf(copy) {
     const fields = m.get(6) instanceof Map ? m.get(6) : new Map();
     const text = [...fields].filter(([n, v]) => typeof v === 'string' && Number(n) !== F_ENTRY).map(([, v]) => v);
     const entry = entryKind(m);
-    const name = namesOf(copy).get(publicRef(m)) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
+    const name = namesOf(copy).get(publicRef(m)) ?? wordsAt(copy, fields, F_TITLE) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
+    const aliases = wordsAt(copy, fields, F_ALIASES)?.split('\n').map((a) => a.trim()).filter(Boolean) ?? [];
     const children = (m.get(10) ?? []).map(hex);
     // C30 (#3556): a body born by a join (C3) owns its `souls:body-of` link to its Soul: the row names that Soul.
     const of = (m.get(9) ?? []).map(([, l]) => l).find((l) => l instanceof Map && plainKind(l.get(1)) === 'souls:body-of');
@@ -146,10 +187,33 @@ export function rowsOf(copy) {
     const moving = fields.has(F_COURSE) || fields.has(BigInt(F_COURSE));
     // #3699: a place's opening hours (replica's F_HOURS, field 81), as its creator wrote them.
     const hours = hoursText(fields.get(F_HOURS) ?? fields.get(BigInt(F_HOURS)));
-    rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), ...(hours ? { hours } : {}), own: d.own });
+    const pose = m.get(7) instanceof Map ? m.get(7) : m.get(8) instanceof Map && m.get(8).get(5) instanceof Map ? m.get(8).get(5) : null;
+    const at = pose && Array.isArray(pose.get(2)) ? { pos: pose.get(2).map(Number), ...(Array.isArray(pose.get(3)) ? { rot: pose.get(3).map(Number) } : {}) } : {};
+    rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...at, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), ...(hours ? { hours } : {}), ...(aliases.length ? { aliases } : {}), own: d.own });
     for (const c of children) todo.push([c, [...path, name]]);
   }
   return rows;
+}
+
+/**
+ * Where each node stands in its parent, for the creator (#3694: placing by relation): `{ at: [x, y, z] mm, slot }`
+ * by id, from each record's pose (field 7, its position in µm) and slot (field 4). Rows never carry this; only the
+ * creator's describe does.
+ */
+export function posesOf(copy) {
+  const out = new Map();
+  const todo = Object.values(JSON.parse(copy.roots()));
+  while (todo.length) {
+    const d = read(copy, todo.pop());
+    if (!d) continue;
+    const { m } = d, pose = m.get(7), p = pose instanceof Map ? pose.get(2) : null;
+    out.set(idText(m.get(1)), {
+      ...(Array.isArray(p) ? { at: p.map((n) => Math.round(Number(n) / 1000)) } : {}),
+      ...(m.has(4) ? { slot: Number(m.get(4)) } : {}),
+    });
+    todo.push(...(m.get(10) ?? []).map(hex));
+  }
+  return out;
 }
 
 /** What changed between two sets of rows: the names added, removed or changed in their own record, in name order. */
