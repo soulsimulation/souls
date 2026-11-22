@@ -1,0 +1,35 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:notice_board",
+  "owner": "thing",
+  "state": {
+    "blanks": { "n": 28, "type": "int", "unit": "count", "default": 24, "min": 0, "max": 24, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 800], "yaw_mdeg": 180000 },
+    "notices": { "role": "contact", "at_mm": [0, 1320, 65] }
+  },
+  "geometry": { "bounds_mm": [1600, 1960, 400] },
+  "forms": {
+    "take_notice": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "blanks", "at_least": 1, "says": "no_blanks" }, { "need": "hand", "free": true }],
+      "steps": [{ "step": "walk_to", "point": "front" }, { "step": "move", "move": "press", "at": "notices" }],
+      "effects": [
+        { "change": "set", "field": "blanks", "by": -1, "event": "blank_used" },
+        { "change": "create", "kind": "eden:calendar_entry", "into": "actor_hand", "event": "notice_taken" }
+      ]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "text": {
+    "card": "A notice board: take a blank notice, write what is on and when, put it up.",
+    "no_blanks": "The board has no blank notices left.",
+    "notice_board": "notice board",
+    "board": "board",
+    "calendar": "calendar"
+  },
+  "card": { "text": "card", "category": "board", "synonyms": ["board", "calendar"] }
+}

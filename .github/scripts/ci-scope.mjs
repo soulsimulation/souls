@@ -8,7 +8,8 @@
 // runs (ci.yml only takes pushes to main) stay scoped to their paths (a merge group's diff is every PR in it).
 // A diff confined to the low-risk paths (LOW_RISK: entry, content, form-rules, docs, changelog fragments) runs only
 // their own tests; any other diff goes through the path map, where paths no rule names (root files, the lockfile, mars/,
-// worlds/, vendor/, .github/, changes/ ...) run every job; docs and tools-only changes run none (ci-ok still reports).
+// worlds/, vendor/, .github/ ...) run every job; docs and tools-only changes run none (ci-ok still reports). A changelog
+// fragment beside other files selects nothing itself. The v2 legs each run on their own inputs (V2_PATHS).
 // No diff, an unreadable one or an empty one runs every job. Writes `matrix`, `any`, `scope` and `smoke` to $GITHUB_OUTPUT.
 // `smoke` (the browser local smoke, e2e/local-smoke.mjs) runs when apps/web, apps/server or e2e change, or with no diff.
 //
@@ -41,6 +42,24 @@ import { TEST_LEGS } from './test-legs.mjs';
  * build against the native answers; the client and page tests against the built binaries. */
 export const V2_LEGS = ['rust', 'sim', 'worldd', 'wasm', 'client'];
 
+/** What each v2 leg reads, so a change runs only the legs it can affect (when in doubt, a path runs the leg).
+ * Every leg: the Rust workspace (v2/crates, v2/tools, the files at v2/'s root, any v2 folder not named below) and the
+ * content the Rust tests and the served world load (content/kinds, moves, worlds). On top of that:
+ * rust: its node steps import the client and the page (tools/origin, web/src/home); sim: the hatch step runs
+ * client/src/hatch and web/src/hatch; wasm: tools/facts imports client/src/history; client: the client and page steps,
+ * the served e2e and client/src/mcp's v2/docs/site/mcp.md. v2/docs outside docs/site is read by no leg.
+ * Files outside v2/ and content/ that a few v2 tests import (tools/world-launcher/soul, the pairing fixture's
+ * apps/server modules) select no leg, as before; the daily full run on main runs every leg. */
+const V2_EVERY = String.raw`v2/(?!(?:client|web|docs)/)|content/(?:kinds|moves|worlds)/`;
+const v2Paths = extra => new RegExp(`^(?:${V2_EVERY}${extra ? `|${extra}` : ''})`);
+export const V2_PATHS = {
+  rust: v2Paths(String.raw`v2/(?:client|web)/`),
+  sim: v2Paths(String.raw`v2/(?:client|web)/src/hatch/`),
+  worldd: v2Paths(''),
+  wasm: v2Paths(String.raw`v2/client/src/history/`),
+  client: v2Paths(String.raw`v2/(?:client|web|docs/site)/`),
+};
+
 export const JOBS = [
   // paths: a baseline or budget change is tools-only, so no step selects it, and this job is what compares it (#1117).
   { name: 'types-web', kind: 'types-web', light: true, assets: true, steps: ['V1-types', 'V2-build-root', 'V2-build-worlds', 'V3-bundle'], paths: /^tools\/test-harness\/bundle-budget\// },
@@ -67,7 +86,8 @@ export const JOBS = [
   // Engine v2 (#2635, K15 #2637): no gate step (v2/ is scope `none`), picked by its own paths. It builds and tests the
   // Rust workspace with v2/tools/ci.sh, on the toolchain v2/rust-toolchain.toml pins, without the pnpm install, in
   // V2_LEGS parallel legs (`ci.sh <leg>`): together the same checks as one `ci.sh` run, in about half the wall time.
-  ...V2_LEGS.map(leg => ({ name: `v2-${leg}`, kind: 'v2', leg, assets: false, steps: [], paths: /^v2\// })),
+  // Each leg by its own inputs (V2_PATHS): a client or page change skips the sim, worldd and WASM legs.
+  ...V2_LEGS.map(leg => ({ name: `v2-${leg}`, kind: 'v2', leg, assets: false, steps: [], paths: V2_PATHS[leg] })),
 ];
 
 /** The runner a qualify job gets, as ci.yml's runs-on computes it: a heavy job goes to CI_HEAVY_RUNNER (one label, or a
@@ -108,12 +128,18 @@ export const lowRisk = files => Array.isArray(files) && files.length > 0 && file
  * typecheck, build and bundle comparison (types-web) and the web unit suite. */
 export const LOW_RISK_WEB = /^packages\/form-rules\/src\//;
 
+/** Changelog fragments (changes/README.md). */
+export const FRAGMENT = /^changes\//;
+
 /** The jobs a diff needs. No diff (null: no usable base, or an unreadable one) and an empty diff run every job. A diff
- * confined to the low-risk paths runs only the jobs their own `paths` pick (soul-tools, docs-reference) and, for
- * form-rules source, the web jobs; any other diff is picked by the release gate's path map, where an unmapped path (the
- * lockfile, .github, changes/ beside other files ...) runs every job. */
-export function jobsFor(files, reason = files === null ? 'no usable base' : 'an empty diff') {
-  if (!files?.length) return { scope: 'full', steps: [...REQUIRED_STEPS], include: JOBS.map(strip), diff: { reason } };
+ * confined to the low-risk paths runs only the jobs their own `paths` pick (soul-tools, docs-reference, the v2 legs for
+ * content/kinds and moves) and, for form-rules source, the web jobs; any other diff is picked by the release gate's path
+ * map, where an unmapped path (the lockfile, .github, content/ outside the low-risk folders ...) runs every job. */
+export function jobsFor(all, reason = all === null ? 'no usable base' : 'an empty diff') {
+  if (!all?.length) return { scope: 'full', steps: [...REQUIRED_STEPS], include: JOBS.map(strip), diff: { reason } };
+  // A changelog fragment beside code selects nothing itself (the repo job checks fragments on every run); left in, the
+  // gate's map reads changes/ as unmapped and every PR with a fragment ran every job.
+  const files = all.some(f => !FRAGMENT.test(f)) ? all.filter(f => !FRAGMENT.test(f)) : all;
   if (lowRisk(files)) {
     const web = files.some(f => LOW_RISK_WEB.test(f)) ? ['types-web', 'web'] : [];
     const include = JOBS.filter(job => web.includes(job.name) || files.some(f => job.paths?.test(f))).map(strip);
