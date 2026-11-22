@@ -22,7 +22,7 @@
         {
           "act": {
             "this": "t1",
-            "form": "spin_drum"
+            "form": "turn_drum"
           },
           "receipt": "cycle-0",
           "expect": {
@@ -52,7 +52,7 @@
         {
           "act": {
             "this": "t1",
-            "form": "spin_drum"
+            "form": "turn_drum"
           },
           "receipt": "cycle-2",
           "expect": {
@@ -61,7 +61,7 @@
               {
                 "change": "set",
                 "node": "t1",
-                "field": "spinning",
+                "field": "released",
                 "n": 29,
                 "to": 1
               }
@@ -91,7 +91,7 @@
               {
                 "change": "set",
                 "node": "t1",
-                "field": "spinning",
+                "field": "released",
                 "n": 29,
                 "to": 0
               }
@@ -101,7 +101,7 @@
         {
           "act": {
             "this": "t1",
-            "form": "spin_drum"
+            "form": "turn_drum"
           },
           "receipt": "cycle-5",
           "expect": {
@@ -110,7 +110,7 @@
               {
                 "change": "set",
                 "node": "t1",
-                "field": "spinning",
+                "field": "released",
                 "n": 29,
                 "to": 1
               }
@@ -129,7 +129,7 @@
               {
                 "change": "set",
                 "node": "t1",
-                "field": "spinning",
+                "field": "released",
                 "n": 29,
                 "to": 0
               }
@@ -180,7 +180,7 @@
           "kind": "eden:zoetrope",
           "fields": {
             "strip": 2,
-            "spinning": 0
+            "released": 0
           }
         }
       }

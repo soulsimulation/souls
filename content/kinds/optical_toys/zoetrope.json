@@ -14,7 +14,7 @@
         "rule": "everyone"
       }
     },
-    "spinning": {
+    "released": {
       "n": 29,
       "type": "bool",
       "default": false,
@@ -56,7 +56,7 @@
       "needs": [
         {
           "need": "state",
-          "field": "spinning",
+          "field": "released",
           "says": "brake_first",
           "is": false
         },
@@ -98,7 +98,7 @@
       "needs": [
         {
           "need": "state",
-          "field": "spinning",
+          "field": "released",
           "says": "brake_first",
           "is": false
         },
@@ -140,7 +140,7 @@
       "needs": [
         {
           "need": "state",
-          "field": "spinning",
+          "field": "released",
           "says": "brake_first",
           "is": false
         },
@@ -176,13 +176,49 @@
         }
       ]
     },
-    "spin_drum": {
+    "brake_drum": {
       "who": "anyone",
       "starts": "act",
       "needs": [
         {
           "need": "state",
-          "field": "spinning",
+          "field": "released",
+          "says": "already_stopped",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "released",
+          "to": false,
+          "event": "picture_drum_braked"
+        }
+      ]
+    },
+    "turn_drum": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "released",
           "says": "brake_first",
           "is": false
         },
@@ -212,45 +248,9 @@
       "effects": [
         {
           "change": "set",
-          "field": "spinning",
+          "field": "released",
           "to": true,
-          "event": "picture_drum_spun"
-        }
-      ]
-    },
-    "brake_drum": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "spinning",
-          "says": "already_stopped",
-          "is": true
-        },
-        {
-          "need": "hand",
-          "empty": true,
-          "says": "empty_hands"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "press",
-          "at": "control"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "spinning",
-          "to": false,
-          "event": "picture_drum_braked"
+          "event": "picture_drum_turned"
         }
       ]
     }
@@ -266,7 +266,7 @@
     "table": [
       {
         "part": "flip",
-        "field": "spinning",
+        "field": "released",
         "do": "rotate",
         "axis": "y",
         "at": {
@@ -636,14 +636,14 @@
     }
   },
   "text": {
-    "card": "A slotted picture drum: fit a strip, spin it, then brake before changing it.",
+    "card": "A picture drum: fit a strip, turn it, then brake before changing the strip.",
     "optical": "optical",
     "empty_hands": "Empty your hands before operating this mounted optical toy.",
-    "brake_first": "Brake the spinning drum before changing strips or spinning again.",
+    "brake_first": "Brake the released drum before changing strips or turning again.",
     "remove_first": "Remove the fitted strip before choosing another.",
     "no_strip": "Fit a picture strip in the stopped drum first.",
     "already_stopped": "The picture drum is already stopped.",
-    "howto_play": "Fit a captive horse or ball strip, spin the drum, brake it, and remove the strip. Braking is explicit; the strip field is 0 when empty, 1 for horse and 2 for ball.",
+    "howto_play": "Fit a captive horse or ball strip, turn the drum once, brake it, then remove the strip. Released marks the unbraked latch, with one keyed turn rather than continuous animation. The strip field is 0 when empty, 1 for horse and 2 for ball.",
     "toy": "optical toy"
   },
   "card": {
@@ -661,7 +661,7 @@
           "form": "fit_horse_strip"
         },
         {
-          "form": "spin_drum"
+          "form": "turn_drum"
         },
         {
           "form": "brake_drum"

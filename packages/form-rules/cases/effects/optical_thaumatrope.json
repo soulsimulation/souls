@@ -12,7 +12,7 @@
             "kind": "eden:thaumatrope",
             "fields": {
               "twists": 0,
-              "spinning": false
+              "released": false
             }
           },
           "b1": {
@@ -65,7 +65,7 @@
             "kind": "eden:thaumatrope",
             "fields": {
               "twists": 1,
-              "spinning": false
+              "released": false
             }
           },
           "b1": {
@@ -118,7 +118,7 @@
             "kind": "eden:thaumatrope",
             "fields": {
               "twists": 1,
-              "spinning": false
+              "released": false
             }
           },
           "b1": {
@@ -149,7 +149,7 @@
               {
                 "change": "set",
                 "node": "t1",
-                "field": "spinning",
+                "field": "released",
                 "n": 29,
                 "to": 1
               }
@@ -185,7 +185,7 @@
             "kind": "eden:thaumatrope",
             "fields": {
               "twists": 0,
-              "spinning": true
+              "released": true
             }
           },
           "b1": {
@@ -209,7 +209,7 @@
               {
                 "change": "set",
                 "node": "t1",
-                "field": "spinning",
+                "field": "released",
                 "n": 29,
                 "to": 0
               }

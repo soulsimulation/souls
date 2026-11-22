@@ -14,7 +14,7 @@
       "min": 0,
       "max": 3
     },
-    "spinning": {
+    "released": {
       "n": 29,
       "type": "bool",
       "default": false,
@@ -56,7 +56,7 @@
       "needs": [
         {
           "need": "state",
-          "field": "spinning",
+          "field": "released",
           "says": "let_settle",
           "is": false
         },
@@ -98,7 +98,7 @@
       "needs": [
         {
           "need": "state",
-          "field": "spinning",
+          "field": "released",
           "says": "let_settle",
           "is": false
         },
@@ -140,7 +140,7 @@
       "needs": [
         {
           "need": "state",
-          "field": "spinning",
+          "field": "released",
           "says": "let_settle",
           "is": false
         },
@@ -176,7 +176,7 @@
         },
         {
           "change": "set",
-          "field": "spinning",
+          "field": "released",
           "to": true,
           "event": "picture_disc_spun"
         }
@@ -188,7 +188,7 @@
       "needs": [
         {
           "need": "state",
-          "field": "spinning",
+          "field": "released",
           "is": true,
           "says": "already_caught"
         },
@@ -212,7 +212,7 @@
       "effects": [
         {
           "change": "set",
-          "field": "spinning",
+          "field": "released",
           "to": false,
           "event": "picture_disc_caught"
         }
@@ -230,7 +230,7 @@
     "table": [
       {
         "part": "flip",
-        "field": "spinning",
+        "field": "released",
         "do": "rotate",
         "axis": "x",
         "at": {
@@ -435,7 +435,7 @@
     "let_settle": "Catch the released picture disc before winding or releasing it again.",
     "fully_wound": "The strings have three twists; release the disc or unwind a twist.",
     "not_wound": "Wind the strings before releasing or unwinding the disc.",
-    "howto_play": "Wind one to three twists into the strings, release the picture disc, and catch it before winding again. Catching is explicit; there is no automatic settling.",
+    "howto_play": "Wind one to three twists into the strings, release the picture disc, then catch it before winding again. Released marks the uncaught latch, with one keyed turn rather than continuous animation or automatic settling.",
     "toy": "optical toy",
     "already_caught": "The picture disc is already caught; wind and release it first."
   },

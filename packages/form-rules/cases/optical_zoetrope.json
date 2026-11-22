@@ -16,7 +16,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 0,
-              "spinning": false
+              "released": false
             }
           },
           "b1": {
@@ -50,7 +50,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 0,
-              "spinning": true
+              "released": true
             }
           },
           "b1": {
@@ -87,7 +87,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 1,
-              "spinning": false
+              "released": false
             }
           },
           "b1": {
@@ -124,7 +124,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 0,
-              "spinning": false
+              "released": false
             }
           },
           "b1": {
@@ -164,7 +164,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 0,
-              "spinning": false
+              "released": false
             }
           },
           "b1": {
@@ -198,7 +198,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 0,
-              "spinning": true
+              "released": true
             }
           },
           "b1": {
@@ -235,7 +235,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 1,
-              "spinning": false
+              "released": false
             }
           },
           "b1": {
@@ -272,7 +272,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 0,
-              "spinning": false
+              "released": false
             }
           },
           "b1": {
@@ -312,7 +312,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 1,
-              "spinning": false
+              "released": false
             }
           },
           "b1": {
@@ -346,7 +346,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 1,
-              "spinning": true
+              "released": true
             }
           },
           "b1": {
@@ -383,7 +383,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 0,
-              "spinning": false
+              "released": false
             }
           },
           "b1": {
@@ -420,155 +420,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 1,
-              "spinning": false
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": "held",
-              "right": null
-            }
-          },
-          "held": {
-            "kind": "eden:apple"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "need": 2,
-        "reason": "hand_not_empty",
-        "says": "empty_hands"
-      }
-    },
-    {
-      "name": "zoetrope_spin_drum_ready",
-      "act": {
-        "this": "t1",
-        "form": "spin_drum"
-      },
-      "state": {
-        "actor": "b1",
-        "now_us": 0,
-        "nodes": {
-          "t1": {
-            "kind": "eden:zoetrope",
-            "fields": {
-              "strip": 1,
-              "spinning": false
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
-    },
-    {
-      "name": "zoetrope_spin_drum_refuses_need_0",
-      "act": {
-        "this": "t1",
-        "form": "spin_drum"
-      },
-      "state": {
-        "actor": "b1",
-        "now_us": 0,
-        "nodes": {
-          "t1": {
-            "kind": "eden:zoetrope",
-            "fields": {
-              "strip": 1,
-              "spinning": true
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "need": 0,
-        "reason": "field_differs",
-        "says": "brake_first"
-      }
-    },
-    {
-      "name": "zoetrope_spin_drum_refuses_need_1",
-      "act": {
-        "this": "t1",
-        "form": "spin_drum"
-      },
-      "state": {
-        "actor": "b1",
-        "now_us": 0,
-        "nodes": {
-          "t1": {
-            "kind": "eden:zoetrope",
-            "fields": {
-              "strip": 0,
-              "spinning": false
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "need": 1,
-        "reason": "field_differs",
-        "says": "no_strip"
-      }
-    },
-    {
-      "name": "zoetrope_spin_drum_refuses_need_2",
-      "act": {
-        "this": "t1",
-        "form": "spin_drum"
-      },
-      "state": {
-        "actor": "b1",
-        "now_us": 0,
-        "nodes": {
-          "t1": {
-            "kind": "eden:zoetrope",
-            "fields": {
-              "strip": 1,
-              "spinning": false
+              "released": false
             }
           },
           "b1": {
@@ -608,7 +460,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 0,
-              "spinning": true
+              "released": true
             }
           },
           "b1": {
@@ -642,7 +494,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 0,
-              "spinning": false
+              "released": false
             }
           },
           "b1": {
@@ -679,7 +531,7 @@
             "kind": "eden:zoetrope",
             "fields": {
               "strip": 0,
-              "spinning": true
+              "released": true
             }
           },
           "b1": {
@@ -701,6 +553,154 @@
       "expect": {
         "verdict": "no",
         "need": 1,
+        "reason": "hand_not_empty",
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "zoetrope_turn_drum_ready",
+      "act": {
+        "this": "t1",
+        "form": "turn_drum"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:zoetrope",
+            "fields": {
+              "strip": 1,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "zoetrope_turn_drum_refuses_need_0",
+      "act": {
+        "this": "t1",
+        "form": "turn_drum"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:zoetrope",
+            "fields": {
+              "strip": 1,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs",
+        "says": "brake_first"
+      }
+    },
+    {
+      "name": "zoetrope_turn_drum_refuses_need_1",
+      "act": {
+        "this": "t1",
+        "form": "turn_drum"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:zoetrope",
+            "fields": {
+              "strip": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs",
+        "says": "no_strip"
+      }
+    },
+    {
+      "name": "zoetrope_turn_drum_refuses_need_2",
+      "act": {
+        "this": "t1",
+        "form": "turn_drum"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:zoetrope",
+            "fields": {
+              "strip": 1,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            }
+          },
+          "held": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
         "reason": "hand_not_empty",
         "says": "empty_hands"
       }
