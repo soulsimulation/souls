@@ -33,7 +33,9 @@
   },
   "points": {
     "vendor": { "role": "stand", "at_mm": [0, 0, -900], "yaw_mdeg": 0 },
-    "customer": { "role": "stand", "at_mm": [0, 0, 1000], "yaw_mdeg": 180000 }
+    "customer": { "role": "stand", "at_mm": [0, 0, 1000], "yaw_mdeg": 180000 },
+    "apple_side": { "role": "stand", "at_mm": [-550, 0, 950], "yaw_mdeg": 180000 },
+    "fruit": { "role": "contact", "at_mm": [-550, 1100, 120] }
   },
   "geometry": { "bounds_mm": [2400, 2359, 1401] },
   "forms": {
@@ -41,7 +43,7 @@
       "who": "anyone",
       "starts": "act",
       "needs": [{ "need": "state", "field": "apples", "at_least": 1 }, { "need": "hand", "free": true }],
-      "steps": [{ "step": "walk_to", "point": "customer" }, { "step": "take" }],
+      "steps": [{ "step": "walk_to", "point": "apple_side" }, { "step": "move", "move": "slide", "at": "fruit" }],
       "effects": [{ "change": "create", "kind": "eden:apple", "into": "actor_hand", "event": "apple_taken" }]
     },
     "queue": {

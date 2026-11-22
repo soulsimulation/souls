@@ -747,8 +747,23 @@ fn walk_across_and_build(entries: &str, pause: i64, tag: &str) -> (i64, i64, i64
     let facts = facts_path();
     let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
     let blocks = im.nodes["e_1b5f1fe9"];
-    let (served, mut soul, dir, _) =
-        serve_entries(&facts, entries, "74.0,-1.0", tag, im.nodes["world"].scope());
+    // Eden seeds the blocks built, and `build` needs them knocked down (the world decides a form's needs at commit,
+    // #3888): served with them seeded knocked down.
+    let down = std::env::temp_dir().join(format!("eden-{tag}-down-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&down);
+    copy_dir(Path::new(entries), &down);
+    let file = down.join("play/toy_blocks.json");
+    let text = std::fs::read_to_string(&file).unwrap();
+    let knocked = text.replacen(r#""default": true"#, r#""default": false"#, 1);
+    assert_ne!(text, knocked, "the blocks seeded built");
+    std::fs::write(&file, knocked).unwrap();
+    let (served, mut soul, dir, _) = serve_entries(
+        &facts,
+        down.to_str().unwrap(),
+        "74.0,-1.0",
+        tag,
+        im.nodes["world"].scope(),
+    );
     soul.0
         .set_read_timeout(Some(Duration::from_secs(300)))
         .unwrap();
@@ -761,6 +776,7 @@ fn walk_across_and_build(entries: &str, pause: i64, tag: &str) -> (i64, i64, i64
     let entries = receipt_entries(&dir, built.as_deref().unwrap_or(&[]));
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&down);
     built.expect("walked across and built, done");
     for (at, names, due) in &entries {
         println!("  {at} µs: {names:?} {due:?}");
@@ -1401,6 +1417,30 @@ fn a_walk_before_a_sit_goes_to_the_seats_own_stand_point() {
     act_at("132.5,-21.7", "e_13a2e4cf", "eden:ride", "c22seat").expect("walked and seated, done");
 }
 
+/// C22 sweep follow-up: Eden's land features are drawn in the world's frame, each placed at the world's origin, so an
+/// entry's points were laid round the origin; now they are laid on the thing's own line or outline. Each from a Soul
+/// born a few metres off it: a channel walked along (today's e_c3bd69c8), a wood's glade (e_062ad11b), a flower
+/// garden wandered (e_71c560a7) and a hedge hidden behind (e_0b36856a). Each ends `done`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn land_features_are_walked_to_on_their_own_shapes() {
+    let ends = [
+        (
+            "-14.0,-296.0",
+            "e_c3bd69c8",
+            "eden:walk_along",
+            "c22channel",
+        ),
+        ("335.0,110.0", "e_062ad11b", "eden:go_to_glade", "c22wood"),
+        ("-190.0,55.0", "e_71c560a7", "eden:wander", "c22garden"),
+        ("45.0,-78.0", "e_0b36856a", "eden:hide_behind", "c22hedge"),
+    ]
+    .map(|(at, id, verb, tag)| (verb, act_at(at, id, verb, tag)));
+    for (verb, end) in ends {
+        end.unwrap_or_else(|e| panic!("{verb}: {e}"));
+    }
+}
+
 /// How one form of a sweep ended ([`sweep`]): `done`, `refused <name>` at its start, `failed <name>` by its run's
 /// ending, or `never-ended` past its deadline.
 fn ending(r: Result<String, String>) -> String {
@@ -1550,9 +1590,14 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
                         None => p,
                     }
                 });
-            let at = walk
-                .or_else(|| first_stand.clone())
-                .and_then(|p| point(&p))
+            let named = walk.or_else(|| first_stand.clone());
+            // A land feature drawn in the world's frame: the point laid on its own shape, as the world walks to it.
+            let drawn = named.as_deref().and_then(|p| {
+                let n = tree.node(tree.handle(thing)?)?;
+                worldd::acts::on_drawn_shape(&n, entry, p)
+            });
+            let at = drawn
+                .or_else(|| named.as_deref().and_then(point))
                 .unwrap_or(Vec3::ZERO);
             let view = bodies.town.view();
             let Some((floor, at, _)) = view.on_floor(thing, at) else {
@@ -1866,7 +1911,7 @@ fn c25_a2_a3_a_slot_walked_to_rise_settle_and_use_held_on_eden() {
     let _ = std::fs::remove_file(&facts);
     assert!(out[0].is_ok(), "rises_3 done: {:?}", out[0]);
     assert!(out[1].is_ok(), "meditate done: {:?}", out[1]);
-    assert_eq!(out[2], Err("not-held".to_owned()), "juggle: not held");
+    assert_eq!(out[2], Err("not_held".to_owned()), "juggle: not held");
 }
 
 /// C28 (#3541) A2: from C21's original house court, the same-ground form walk keeps its door crossings and reaches
@@ -3241,6 +3286,8 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
         "74.0,-1.0",
         "c25lib",
         &[
+            ("e_89d82b59", "knock", "field_differs"),
+            ("e_89d82b59", "close", "done"),
             ("e_89d82b59", "knock", "done"),
             ("e_89d82b59", "open", "done"),
             ("e_89d82b59", "close", "done"),
@@ -3259,6 +3306,8 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
         "96.5,25.0",
         "c25cafe",
         &[
+            ("e_61537992", "open", "field_differs"),
+            ("e_61537992", "close", "done"),
             ("e_61537992", "open", "done"),
             ("e_63d14e62", "light", "done"),
             ("e_63d14e62", "put_out", "done"),
@@ -3290,11 +3339,13 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
 }
 
 /// C25 (#3688) A1: a cottage's inner door, its bedroom's, on a served full Eden. Born outside the cottage, the Soul
-/// walks in to the bedroom's rug, then opens and closes the door from there: each form first walks to the door's
-/// point, as today's game walks to the hand's point. Left open (#3688): from outside, a form's approach walks in
-/// through the front door and approaches again from the cottage's floor, but its walk on the ground ends
-/// `walk.blocked` on the way there (the route lane's); a knock from the bedroom ends `out-of-reach`, as no place a
-/// body may stand on the bedroom's side is within an arm of the door's panel.
+/// walks in to the bedroom's rug, then closes, knocks on, opens and closes the door from there: each form first walks
+/// to the door's point, as today's game walks to the hand's point. Eden's cottage doors are seeded open (the facts'
+/// `door.open`), so the world, deciding a form's needs at commit (#3888), refuses an `open` first by its need
+/// `field_differs`. The knock's walk may end in the door's own doorway, as no place out of it on the bedroom's side is
+/// within an arm of the door's panel. Left open (#3688): from outside, a form's approach walks in through the front
+/// door and approaches again from the cottage's floor, but its walk on the ground ends `walk.blocked` on the way there
+/// (the route lane's).
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c25_a_cottages_inner_door_from_its_bedroom() {
@@ -3303,10 +3354,121 @@ fn c25_a_cottages_inner_door_from_its_bedroom() {
         "c25cottage",
         &[
             ("e_7ff72484", "walk", "done"),
+            ("e_00385aae", "open", "field_differs"),
+            ("e_00385aae", "close", "done"),
+            ("e_00385aae", "knock", "done"),
             ("e_00385aae", "open", "done"),
             ("e_00385aae", "close", "done"),
         ],
     );
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// A step of [`served_steps`]: today's id, the form, its thing arguments by today's id, the ending wanted.
+type Step<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)], &'a str);
+
+/// 0.131 parity L46 (#3715): one Soul, born at `at` (`x,z` m), does each `(today's id, form, thing arguments by
+/// today's id, ending)` in turn on a served full Eden, from wherever the one before left it. Printed; each ending that
+/// differs from the one wanted is returned.
+fn served_steps(at: &str, tag: &str, cases: &[Step]) -> Vec<String> {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (served, mut soul, dir) = serve(&facts, at, tag, im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .unwrap();
+    let mut wrong = Vec::new();
+    for (today, form, things, want) in cases {
+        let a: Vec<(&str, Value)> = things
+            .iter()
+            .map(|(k, t)| (*k, im.nodes[*t].to_value()))
+            .collect();
+        let params = if a.is_empty() {
+            BTreeMap::new()
+        } else {
+            args(&a)
+        };
+        let ended = match soul.act(&format!("eden:{form}"), Some(im.nodes[*today]), params) {
+            Ok(_) => "done".to_owned(),
+            Err(name) => name,
+        };
+        let body = track(&dir).last().map(|b| (b.2, b.3));
+        println!("{tag}: {form} at {today}: {ended} (the body at {body:?})");
+        if ended != *want {
+            wrong.push(format!("{tag} {form} at {today}: {ended}, not {want}"));
+        }
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    wrong
+}
+
+/// L46 (#3715) A1: tea, coffee and eating on a served full Eden. In a cottage's kitchen a Soul takes a bowl from the
+/// table and eats from it, turns the sink's tap on, washes the bowl and turns it off, and switches the stove on and
+/// off. At the café it takes the kettle; there is no sink in the café to fill it at, as today's game finds no tap near
+/// it, so the fill has nothing to fill from (refused `thing.none-selected`, #3914). Carried to the cottage's kitchen,
+/// the kettle fills at the sink, the fill choosing the nearest sink in the building itself, and switches on. Eden has
+/// no cup to pour it into (left open; refused `thing.none-selected`).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn l46_tea_coffee_and_eating() {
+    let mut wrong = served_steps(
+        "180.0,38.0",
+        "l46cottage",
+        &[
+            ("e_645e8b7a", "walk", &[], "done"),
+            ("e_928f6cbe", "walk", &[], "done"),
+            ("e_5348e9f1", "take", &[], "done"),
+            ("e_5348e9f1", "eat", &[], "done"),
+            ("e_95a50ab8", "turn_on", &[], "done"),
+            ("e_95a50ab8", "wash", &[("thing", "e_5348e9f1")], "done"),
+            ("e_95a50ab8", "turn_off", &[], "done"),
+            ("e_9c8ca409", "switch_on", &[], "done"),
+            ("e_9c8ca409", "switch_off", &[], "done"),
+        ],
+    );
+    wrong.extend(served_steps(
+        "96.5,25.0",
+        "l46cafe",
+        &[
+            ("e_d77094d8", "walk", &[], "done"),
+            ("e_d77094d8", "take", &[], "done"),
+            ("e_d77094d8", "fill", &[], "thing.none-selected"),
+            ("e_645e8b7a", "walk", &[], "done"),
+            ("e_d77094d8", "fill", &[], "done"),
+            ("e_d77094d8", "switch_on", &[], "done"),
+            ("e_d77094d8", "pour", &[], "thing.none-selected"),
+        ],
+    ));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// 0.131 parity L42 (#3710) A1: water and the garden on a served full Eden, from outside. At the street's firewood a
+/// Soul takes a log; it walks to a watering can on the street and takes it; at the park it turns the drinking fountain
+/// on, drinks, and turns it off. Left open (#3710): stacking the log back (`arg-missing`), watering the library's
+/// potted plant from the street and the greenhouse's vent (`walk.blocked`), and a cottage's bathroom upstairs (the
+/// bath, the basin: `out-of-reach`, the approach ends on the floor below).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn l42_water_and_the_garden_from_outside() {
+    let mut wrong = served_steps(
+        "84.0,44.0",
+        "l42street",
+        &[
+            ("e_7e4e5663", "take_log", &[], "done"),
+            ("e_5bf741bc", "walk", &[], "done"),
+            ("e_5bf741bc", "take", &[], "done"),
+        ],
+    );
+    wrong.extend(served_steps(
+        "19.0,96.0",
+        "l42park",
+        &[
+            ("e_b729d948", "turn_on", &[], "done"),
+            ("e_b729d948", "drink", &[], "done"),
+            ("e_b729d948", "turn_off", &[], "done"),
+        ],
+    ));
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 

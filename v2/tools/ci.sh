@@ -104,6 +104,8 @@ step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit
 }
 web_steps() {
 step web-deps npm ci --prefix web --no-audit --no-fund
+# #3871: every content kind's entry draws (web/kind-entries.test.ts, beside src/, so web-unit does not find it).
+step web-kind-entries node --test web/kind-entries.test.ts
 # B15: acquire only the released inputs and exercise the actual prepared artifact, after the locked page dependencies.
 step body-presets bash -c 'node tools/import-body/prepare.mjs --out .local/ci-body-assets --test'
 # Every page unit test, found by name (web/src/**/*.test.ts and *.test.mjs), so a new one runs here with no edit. A
@@ -183,7 +185,7 @@ step client-clock bash -c 'cargo build -p gatewayd -p worldd -p testworld --lock
 step client-command bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet &&
   node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs client/src/shoot/*.test.mjs client/src/view/*.test.mjs client/src/home/*.test.mjs'
 # The creator's command (G7, #2796): a creator's daemon checks batches on its copy with no frame sent, and edits.
-step client-creator bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/creator/*.test.mjs'
+step client-creator bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/creator/*.test.mjs'
 # The client's trace and stats (R10, #2702): per achieved intent, local only, with the network refused.
 step client-stats node --test client/src/stats/*.test.mjs
 # The local check (R8, #2703): R2's rules on the copy, at `can` and again at send time (the daemon's side is above).

@@ -138,6 +138,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
             node: ground,
             at: goal,
             reach: 0,
+            door: None,
         },
     };
     let line = FormQuestion {
@@ -175,6 +176,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         walks: BTreeMap::new(),
         approaches: Default::default(),
         sit_walks: BTreeMap::new(),
+        goals: BTreeSet::new(),
         planning: &planning,
         map: Arc::clone(&map),
     };
@@ -260,6 +262,7 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
         node: ground,
         at,
         reach: 0,
+        door: None,
     };
     planning.ask(key, body, question(Vec3::ZERO), &map);
     let old = FormAnswer {
@@ -365,6 +368,7 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         walks: BTreeMap::from([(id, (2, building, Name::new(point).unwrap()))]),
         approaches: Default::default(),
         sit_walks: BTreeMap::new(),
+        goals: BTreeSet::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };
@@ -398,5 +402,306 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         sight("r1a").area_floor(id, 3, ground, at),
         None,
         "another step: as before"
+    );
+}
+
+/// A skill that holds its body and does nothing: what a gateway walk's runner reads as running.
+struct Holds;
+
+impl replica::host::Skill for Holds {
+    fn shape(&self) -> replica::bodies::SkillShape {
+        replica::bodies::SkillShape {
+            name: Name::new("test:holds").unwrap(),
+            claims: Vec::new(),
+            blocks: Vec::new(),
+            cancelled_by: Vec::new(),
+        }
+    }
+
+    fn step(&mut self, _: &mut dyn replica::host::Host) -> replica::host::Progress {
+        replica::host::Progress::Going
+    }
+}
+
+/// #1960 cause 1: the gateway walk's stall watch measures against its line's leg's end, never the walk's granted
+/// place, which on a route with crossings lies past the leg's end. Here the granted place lies 20 m west and the
+/// line goes east round N2's hall to its leg's end: walking it at 1.4 m/s, the walk is never found stalled. Measured
+/// against the granted place (or its corner alone), its least way left stops shrinking at the hall's first corner
+/// and the backstop ends it there 30 s on.
+#[test]
+fn a_gateway_walk_is_watched_against_its_legs_end_not_its_granted_place() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let ground = imported.nodes["ground"];
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let town =
+        Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).expect("the town");
+    let id = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let place = |town: &Town, at: Vec3| {
+        town.surfaces[&ground]
+            .place(id, frame, at, Quat::IDENTITY)
+            .unwrap()
+    };
+    let start = place(&town, Vec3::new(-20_000_000, 0, 50_000_000));
+    let mut b = Bodies::new(town, 50_000).unwrap();
+    let legs = |n: &str| replica::bodies::Resource {
+        name: Name::new(n).unwrap(),
+        class: replica::bodies::Class::Locomotion,
+        slot: None,
+    };
+    let family = replica::bodies::Family {
+        name: Name::new("souls:humanoid").unwrap(),
+        resources: vec![legs("souls:leg-left"), legs("souls:leg-right")],
+    };
+    b.add_body(family.clone(), start).unwrap();
+    b.runner.start(id, Box::new(Holds)).unwrap();
+    b.runner
+        .granted
+        .insert(id, Vec3::new(-40_000_000, 0, 50_000_000));
+    let leg_end = Vec3::new(20_000_000, 0, 50_000_000);
+    let mut walk = Walk::new(id, Id::new(Scope([0xc9; 16]), 2).unwrap(), 0);
+    let mut corners = BTreeSet::new();
+    for t in 0..2_000i64 {
+        let me = *b.runner.controller.body(id).unwrap();
+        let p = me.pose.position;
+        if (p.x - leg_end.x).abs() + (p.z - leg_end.z).abs() < 100_000 {
+            assert!(corners.len() >= 2, "it went round the hall: {corners:?}");
+            println!("walked to the leg's end in {} ticks round {corners:?}", t);
+            return;
+        }
+        let c = b.town.view().corner(&me, leg_end).unwrap();
+        corners.insert(c);
+        let (_, stalled) = walk.step(&mut b, t * 50_000);
+        assert!(!stalled, "found stalled at tick {t}, at {p:?}");
+        // On 70 mm toward its corner.
+        let d =
+            i64::try_from((i128::from(c[0] - p.x).pow(2) + i128::from(c[1] - p.z).pow(2)).isqrt())
+                .unwrap();
+        let go = d.min(70_000);
+        let next = Vec3::new(
+            p.x + (c[0] - p.x) * go / d.max(1),
+            0,
+            p.z + (c[1] - p.z) * go / d.max(1),
+        );
+        // Stood there by hand: the test is the watch's, not the mover's.
+        let moved = place(&b.town, next);
+        b.runner.controller.remove(id);
+        b.runner.controller.add(family.clone(), moved).unwrap();
+    }
+    panic!("it never reached its leg's end");
+}
+
+/// C22 sweep: a land feature drawn in the world's frame (placed at its parent's origin) has its entry's points laid on
+/// its own line or outline: a bridge's ends at its path's ends, a pond's shore round its own water, not round the
+/// world's origin.
+#[test]
+fn an_entrys_points_are_laid_on_a_world_drawn_line_or_outline() {
+    let m = 1_000_000;
+    let bounds = Vec3::new(10 * m, 3 * m, 4 * m);
+    // A line 20 m along x from (100, 50) m: the entry's ends at ±5 m reach its ends; 1 m across is 1 m to its left.
+    let line = [[100 * m, 50 * m], [120 * m, 50 * m]];
+    assert_eq!(
+        on_line(Vec3::new(-5 * m, 0, 0), bounds, &line),
+        Some(Vec3::new(100 * m, 0, 50 * m))
+    );
+    assert_eq!(
+        on_line(Vec3::new(5 * m, 1_400_000, m), bounds, &line),
+        Some(Vec3::new(120 * m, 1_400_000, 51 * m))
+    );
+    // Turned a quarter: along z.
+    let up = [[0, 0], [0, 20 * m]];
+    assert_eq!(
+        on_line(Vec3::new(5 * m, 0, m), bounds, &up),
+        Some(Vec3::new(-m, 0, 20 * m))
+    );
+    assert_eq!(on_line(Vec3::ZERO, bounds, &[[m, m], [m, m]]), None);
+    // An outline 20 m by 8 m round (-6, 112) m: a pond's shore point 19 m out of its 36 m bounds lands just past its
+    // own bank, 10.56 m from its middle.
+    let pond = Vec3::new(36 * m, 6 * m, 36 * m);
+    let outline = [
+        [-16 * m, 108 * m],
+        [4 * m, 108 * m],
+        [4 * m, 116 * m],
+        [-16 * m, 116 * m],
+    ];
+    assert_eq!(
+        on_outline(Vec3::new(19 * m, 0, 0), pond, &outline),
+        Some(Vec3::new(-6 * m + 10_555_555, 0, 112 * m))
+    );
+    assert_eq!(
+        on_outline(Vec3::new(0, 0, -19 * m), pond, &outline),
+        Some(Vec3::new(-6 * m, 0, 112 * m - 4_222_222))
+    );
+}
+
+/// The same through the world's walk: the test world's square (an area drawn in the world's frame) has a walk to its
+/// entry's point laid on its outline; another step, or a thing not drawn in the world's frame, is planned as before.
+#[test]
+fn a_walk_to_a_world_drawn_things_point_is_laid_on_its_outline() {
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let ground = imported.nodes["ground"];
+    let square = imported.nodes["square"];
+    let tree = &imported.tree;
+    let n = tree.node(tree.handle(square).unwrap()).unwrap();
+    let kind = plain(n.kind()).to_owned();
+    let Some(replica::encode::Value::Array(rows)) = n.fields().get(&import_eden::F_OUTLINE) else {
+        panic!("the square's outline");
+    };
+    let xs: Vec<i64> = rows
+        .iter()
+        .filter_map(|r| match r {
+            replica::encode::Value::Array(c) => int_of(&c[0]),
+            _ => None,
+        })
+        .collect();
+    let (x0, x1) = (*xs.iter().min().unwrap(), *xs.iter().max().unwrap());
+    let kinds = replica::rules::json::parse(&format!(
+        r#"{{ "{kind}": {{ "geometry": {{ "bounds_mm": [10000, 100, 10000] }},
+          "areas": {{ "east": {{ "at_mm": [5000, 0, 0] }} }} }} }}"#
+    ))
+    .unwrap();
+    let id = Id::new(Scope([0xca; 16]), 1).unwrap();
+    let toward = BTreeMap::new();
+    let planning = RefCell::new(Planning::default());
+    let sight = |thing: Id, point: &str| Sight {
+        bodies: BTreeMap::new(),
+        carrying: BTreeSet::new(),
+        tree,
+        split: None,
+        builds: BTreeMap::new(),
+        kind: Name::new("souls:body").unwrap(),
+        kinds: &kinds,
+        toward: &toward,
+        asked: RefCell::new(BTreeMap::new()),
+        context: BTreeMap::new(),
+        walks: BTreeMap::from([(id, (0, thing, Name::new(point).unwrap()))]),
+        sit_walks: BTreeMap::new(),
+        approaches: Default::default(),
+        goals: BTreeSet::new(),
+        planning: &planning,
+        map: Arc::new(Versions::default()),
+    };
+    let on = sight(square, "east")
+        .on_shape(id, 0, ground)
+        .expect("laid on the outline");
+    assert_eq!(
+        on.x,
+        x1 * 1000,
+        "the east area at the outline's east edge ({x0}..{x1} mm)"
+    );
+    assert_eq!(
+        sight(square, "east").on_shape(id, 1, ground),
+        None,
+        "another step"
+    );
+    assert_eq!(
+        sight(square, "west").on_shape(id, 0, ground),
+        None,
+        "no such point"
+    );
+    assert_eq!(
+        sight(imported.nodes["ring"], "east").on_shape(id, 0, ground),
+        None,
+        "placed off the origin"
+    );
+}
+
+#[test]
+/// #3914: a thing argument left out is bound by its selector: the nearest (or furthest) of the set, never the act's
+/// node itself; a kind no thing has finds nothing; a selector off the closed list is not read.
+fn a_thing_selector_binds_the_nearest_of_its_set() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let tree = &imported.tree;
+    let ground = imported.nodes["ground"];
+    let kids: Vec<Id> = tree
+        .children(tree.handle(ground).unwrap())
+        .unwrap()
+        .iter()
+        .filter_map(|&h| tree.node(h))
+        .filter(|n| n.place().is_some())
+        .map(|n| n.id())
+        .collect();
+    assert!(kids.len() >= 3, "things on the ground");
+    let this = kids[0];
+    let nobody = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let sel = |order: &str, rank: Json, kind: Option<&str>| {
+        let mut o = vec![
+            ("of".into(), Json::Str("things".into())),
+            ("in".into(), Json::Str("parent".into())),
+            ("anchor".into(), Json::Str("this".into())),
+            ("order".into(), Json::Str(order.into())),
+            ("rank".into(), rank),
+        ];
+        if let Some(k) = kind {
+            o.push(("kind".into(), Json::Str(k.into())));
+        }
+        Json::Obj(o)
+    };
+    let at = |id: Id| world_at(tree, id).unwrap();
+    let d2 = |id: Id| {
+        let (a, p) = (at(this), at(id));
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        (d(a.x, p.x) + d(a.y, p.y) + d(a.z, p.z), id)
+    };
+    let mut by: Vec<(i128, Id)> = tree
+        .children(tree.handle(ground).unwrap())
+        .unwrap()
+        .iter()
+        .filter_map(|&h| tree.node(h))
+        .map(|n| n.id())
+        .filter(|&id| id != this && world_at(tree, id).is_some())
+        .map(d2)
+        .collect();
+    by.sort();
+    let nearest = select_thing(
+        tree,
+        &Json::Null,
+        &sel("nearest", Json::Int(1), None),
+        this,
+        nobody,
+        None,
+    );
+    assert_eq!(nearest, Ok(Some(by[0].1)), "the nearest other thing");
+    assert_ne!(nearest, Ok(Some(this)), "never the act's own node");
+    let last = select_thing(
+        tree,
+        &Json::Null,
+        &sel("nearest", Json::Str("last".into()), None),
+        this,
+        nobody,
+        None,
+    );
+    let furthest = select_thing(
+        tree,
+        &Json::Null,
+        &sel("furthest", Json::Int(1), None),
+        this,
+        nobody,
+        None,
+    );
+    assert_eq!(last, furthest, "the last nearest is the first furthest");
+    assert_eq!(
+        select_thing(
+            tree,
+            &Json::Null,
+            &sel("nearest", Json::Int(1), Some("test:no_such_kind")),
+            this,
+            nobody,
+            None
+        ),
+        Ok(None),
+        "nothing of the kind: nothing selected"
+    );
+    let off = Json::Obj(vec![("of".into(), Json::Str("free_slots".into()))]);
+    assert_eq!(
+        select_thing(tree, &Json::Null, &off, this, nobody, None),
+        Err(()),
+        "not a thing selector"
     );
 }
