@@ -752,14 +752,16 @@
           "roll": 0
         },
         {
-          "kind": "sphere",
+          "kind": "cyl",
           "at": [
             -180,
-            1750,
-            80
+            1680,
+            10
           ],
           "r": 18,
-          "segments": 10,
+          "h": 140,
+          "pitch": 90000,
+          "segments": 12,
           "tint": "A"
         },
         {
@@ -898,14 +900,16 @@
           "roll": 0
         },
         {
-          "kind": "sphere",
+          "kind": "cyl",
           "at": [
             0,
-            1750,
-            80
+            1680,
+            10
           ],
           "r": 18,
-          "segments": 10,
+          "h": 140,
+          "pitch": 90000,
+          "segments": 12,
           "tint": "B"
         },
         {
@@ -1029,14 +1033,16 @@
           "roll": -38660
         },
         {
-          "kind": "sphere",
+          "kind": "cyl",
           "at": [
             180,
-            1750,
-            80
+            1680,
+            10
           ],
           "r": 18,
-          "segments": 10,
+          "h": 140,
+          "pitch": 90000,
+          "segments": 12,
           "tint": "C"
         },
         {
