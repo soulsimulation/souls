@@ -52,10 +52,11 @@ const PLANK: &str = "test:plank";
 const PAIR: &str = "test:pair";
 const CARRY: &str = "test:carry";
 const COURT: &str = "test:court";
+const CAN: &str = "test:can";
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
-    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT]
+    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT, CAN]
         .iter()
         .enumerate()
         .map(|(i, k)| (*k, full(k, i as u8 + 1)))
@@ -136,6 +137,20 @@ fn plank() -> Id {
 fn court() -> Id {
     id(6)
 }
+/// #4086: three watering cans south of the first walker, 100 m, 2.2 m and 1.5 m away (a can's reach from a body is
+/// its half size, 0.38 m, and 1.5 m).
+fn far_can() -> Id {
+    id(7)
+}
+fn beyond_can() -> Id {
+    id(8)
+}
+fn near_can() -> Id {
+    id(9)
+}
+fn south(by: i64) -> Vec3 {
+    Vec3::new(at1().x, 0, at1().z - by)
+}
 
 /// Where the bodies stand on the test world's open ground, west of the square, µm.
 fn at1() -> Vec3 {
@@ -194,6 +209,7 @@ fn tree_rules() -> TreeRules {
             (fullname(PAIR), k("activity", &[], &[], None)),
             (fullname(CARRY), k("activity", &[], &[1], None)),
             (fullname(COURT), k("thing", &[], &[], None)),
+            (fullname(CAN), k("thing", &[], &[], Some(1))),
         ]),
         souls: [w1(), w2()].into(),
         audiences: BTreeMap::new(),
@@ -270,10 +286,23 @@ fn entries() -> Json {
           "steps": [], "effects": [{ "change": "set", "field": "disc", "to": "end_b", "event": "threw" }] } } }"#,
     )
     .unwrap();
+    // The watering can's own take (`content/kinds/garden/watering_can.json`): no move and no walk before its hand
+    // step, and a free hand its one need (#4086).
+    let can = parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:can", "owner": "thing",
+      "points": { "grip": { "role": "grip", "at_mm": [0, 305, 0] } },
+      "geometry": { "bounds_mm": [760, 360, 240] },
+      "forms": { "take": { "who": "anyone", "starts": "act", "needs": [{ "need": "hand", "free": true }],
+        "steps": [{ "step": "take" }],
+        "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }] } },
+      "motion": { "how": "one_hand" }, "loose": { "ever": true } }"#,
+    )
+    .unwrap();
     Json::Obj(vec![
         (VESSEL.into(), vessel),
         (RACK.into(), rack),
         (COURT.into(), court),
+        (CAN.into(), can),
     ])
 }
 
@@ -320,6 +349,9 @@ fn world() -> Replica {
             g,
             Vec3::new(at1().x, 0, at1().z - 2_000_000),
         ),
+        create(far_can(), CAN, g, south(100_000_000)),
+        create(beyond_can(), CAN, g, south(2_200_000)),
+        create(near_can(), CAN, g, south(1_500_000)),
     ];
     let effects: Vec<Value> = changes
         .into_iter()
@@ -879,5 +911,49 @@ fn i3888_a_forms_needs_are_the_worlds_at_commit() {
     // The disc is at end b now: a's throw from end a is refused by the state need (need 0).
     let again = a.act("test:throw_from_end_a_to_end_b", Some(court()), none());
     assert_eq!(again, Err("field_differs".to_owned()));
+    run.stop();
+}
+
+/// Where node `n` is in its frame, as the world's records have it.
+fn at(r: &Replica, n: Id) -> Vec3 {
+    let t = r.tree();
+    t.node(t.handle(n).expect("the node"))
+        .expect("the node")
+        .place()
+        .expect("a place")
+        .position
+}
+
+/// #4086: no take at a distance. A watering can's `take` has no walk and no move before its hand step (the can's own
+/// form, as Eden and Mars serve it). Before this change a body 100 m away was handed the can at once, never moving
+/// (A1). Now the world measures the reach at commit: the can 100 m away and one just beyond a form's reach (2.2 m)
+/// are refused `out_of_reach`, naming the walk that would work, with nothing changed; one within it (1.5 m) is taken.
+/// The body's place and the cans' parents are read from the world's records.
+#[test]
+fn w10_a_take_with_no_walk_needs_the_thing_in_reach() {
+    let (run, mut a, _) = serve("w10");
+    let none = BTreeMap::new;
+    let before = at(&run.replay(), w1());
+    let far = a.act("test:take", Some(far_can()), none());
+    let r = run.replay();
+    println!(
+        "W10 take 100 m: {far:?}; body {before:?} then {:?}; can at {:?}, parent {:?}",
+        at(&r, w1()),
+        at(&r, far_can()),
+        parent(&r, far_can())
+    );
+    assert_eq!(far, Err("out_of_reach".to_owned()), "refused by name");
+    assert_eq!(at(&r, w1()), before, "the body has not moved");
+    assert_eq!(parent(&r, far_can()), (Some(ground()), None), "the can lies where it lay");
+    let beyond = a.act("test:take", Some(beyond_can()), none());
+    println!("W10 take 2.2 m: {beyond:?}");
+    assert_eq!(beyond, Err("out_of_reach".to_owned()));
+    assert_eq!(parent(&run.replay(), beyond_can()), (Some(ground()), None));
+    let near = a.act("test:take", Some(near_can()), none());
+    let r = run.replay();
+    println!("W10 take 1.5 m: {near:?}; parent {:?}", parent(&r, near_can()));
+    assert!(!near.expect("within reach: taken").is_empty());
+    assert_eq!(parent(&r, near_can()).0, Some(w1()), "in the body's hand");
+    assert_eq!(at(&r, w1()), before, "taken where the body stands");
     run.stop();
 }

@@ -20,6 +20,11 @@
 //! move at its start, from the body's edge (C22, `out-of-reach` by name). The other needs are decided as the form
 //! states them, by their own index.
 //!
+//! **A hand step with no way there** ([`hand_reach`], #4086): a form whose hand step (a `take` or a `put` that names
+//! no move, [`Step::Hand`]) has no walk and no move before it is done where the body stands, and nothing after commit
+//! measures a reach. So the world measures it at commit, for every such form: a thing beyond the body's reach (a
+//! form's reach, `crate::acts::within_reach`) is refused `out_of_reach`, the walk to it named as what would work.
+//!
 //! Deterministic: ordered maps only, no clock but the world's `now`, no float.
 
 use std::collections::BTreeMap;
@@ -29,9 +34,10 @@ use replica::encode::Value as Cbor;
 use replica::ids::Id;
 use replica::rules::json::Value;
 use replica::rules::{REASONS, decide_parts};
+use replica::pose::Vec3;
 use replica::time::Micros;
 use replica::tree::Tree;
-use skills::form_runner::{Arg, Args};
+use skills::form_runner::{Arg, Args, Step};
 
 use crate::bodies::Bodies;
 
@@ -462,4 +468,51 @@ pub fn check(
         detail.push_str(&d.to_json());
     }
     Err(Refusal { name, detail })
+}
+
+/// Whether bound steps do their hand step where the body stands: a [`Step::Hand`] with no walk, move or seat before
+/// it, which would bring the body to the thing or measure its reach.
+fn by_hand_here(steps: &[Step]) -> bool {
+    for s in steps {
+        match s {
+            Step::Hand => return true,
+            Step::WalkTo { .. } | Step::Move { .. } | Step::Sit { .. } => return false,
+            Step::Wait(_) | Step::Rise | Step::Settle { .. } | Step::UseHeld => {}
+        }
+    }
+    false
+}
+
+/// Whether `body` may do form `form` of `entry` on `node` (with the act's complete arguments `args`) from where it
+/// stands (see the module doc, #4086): `Ok` for a form that walks or moves before its hand step, or has none, and for
+/// a thing within the body's reach; else `out_of_reach`, with the walk to the thing that would work. A body or a thing
+/// whose place the world cannot read is not refused here (unknown is not no).
+#[allow(clippy::too_many_arguments)]
+pub fn hand_reach(
+    tree: &Tree,
+    entry: &Value,
+    form: &str,
+    args: &Args,
+    body: Id,
+    body_at: Option<Vec3>,
+    node: Id,
+) -> Result<(), Refusal> {
+    let Ok(steps) = skills::form_runner::bind_with(entry, form, args) else {
+        return Ok(());
+    };
+    if !by_hand_here(&steps)
+        || crate::acts::world_at(tree, body).or(body_at).is_none()
+        || crate::acts::world_at(tree, node).is_none()
+        || crate::acts::within_reach(tree, entry, body, body_at, node)
+    {
+        return Ok(());
+    }
+    Err(Refusal {
+        name: "out_of_reach",
+        detail: format!(
+            "the form's hand step is done where the body stands, and {} is beyond its reach: walk to it first {}",
+            replica::world_model::show(node),
+            Value::object([("step", Value::s("walk_to")), ("thing", Value::Str(key(node)))]).to_json()
+        ),
+    })
 }
