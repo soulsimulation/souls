@@ -368,12 +368,15 @@
     "let_settle": "Let the released picture disc settle before winding or releasing again.",
     "fully_wound": "The strings have three twists; release the disc or unwind a twist.",
     "not_wound": "Wind the strings before releasing or unwinding the disc.",
-    "howto_play": "Wind one to three twists into the strings, release the picture disc, and let it settle before winding again."
+    "howto_play": "Wind one to three twists into the strings, release the picture disc, and let it settle before winding again.",
+    "toy": "optical toy"
   },
   "card": {
     "text": "card",
     "category": "optical",
-    "synonyms": []
+    "synonyms": [
+      "toy"
+    ]
   },
   "howtos": {
     "play": {

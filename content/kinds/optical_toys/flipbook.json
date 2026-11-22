@@ -466,12 +466,15 @@
     "open_first": "Open the picture book before closing, riffling or rewinding it.",
     "last_page": "This is the last picture page; rewind to play it again.",
     "first_page": "The picture sequence is already at its first page.",
-    "howto_play": "Open the book, riffle through its eight pages, rewind to the first picture, and close the cover."
+    "howto_play": "Open the book, riffle through its eight pages, rewind to the first picture, and close the cover.",
+    "toy": "optical toy"
   },
   "card": {
     "text": "card",
     "category": "optical",
-    "synonyms": []
+    "synonyms": [
+      "toy"
+    ]
   },
   "howtos": {
     "play": {

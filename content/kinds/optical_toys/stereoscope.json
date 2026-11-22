@@ -375,12 +375,15 @@
     "no_card": "Fit a paired picture card before moving its focus or removing it.",
     "near_stop": "The focus rail is at its near stop; slide it farther.",
     "far_stop": "The focus rail is at its far stop; slide it nearer.",
-    "howto_play": "Fit a mountain or garden picture card, slide the focus nearer and farther, then remove the card."
+    "howto_play": "Fit a mountain or garden picture card, slide the focus nearer and farther, then remove the card.",
+    "toy": "optical toy"
   },
   "card": {
     "text": "card",
     "category": "optical",
-    "synonyms": []
+    "synonyms": [
+      "toy"
+    ]
   },
   "howtos": {
     "play": {

@@ -371,12 +371,15 @@
     "remove_first": "Remove the fitted strip before choosing another.",
     "no_strip": "Fit a picture strip in the stopped drum first.",
     "already_stopped": "The picture drum is already stopped.",
-    "howto_play": "Fit a horse or bouncing-ball strip, spin the drum, brake it, and remove the strip."
+    "howto_play": "Fit a horse or bouncing-ball strip, spin the drum, brake it, and remove the strip.",
+    "toy": "optical toy"
   },
   "card": {
     "text": "card",
     "category": "optical",
-    "synonyms": []
+    "synonyms": [
+      "toy"
+    ]
   },
   "howtos": {
     "play": {

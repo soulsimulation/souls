@@ -408,12 +408,15 @@
     "different_pattern": "The chamber already shows that pattern; choose another detent.",
     "already_closed": "The eyepiece is already closed.",
     "already_open": "The eyepiece is already open.",
-    "howto_play": "Open the eyepiece, choose a different chamber pattern, then close the eyepiece."
+    "howto_play": "Open the eyepiece, choose a different chamber pattern, then close the eyepiece.",
+    "toy": "optical toy"
   },
   "card": {
     "text": "card",
     "category": "optical",
-    "synonyms": []
+    "synonyms": [
+      "toy"
+    ]
   },
   "howtos": {
     "play": {
