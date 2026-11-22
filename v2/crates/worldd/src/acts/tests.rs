@@ -377,27 +377,28 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         .plus(place.orientation.rotate(local).unwrap())
         .unwrap();
     let (floor, on) = sight("r1a")
-        .area_floor(id, 2, ground, at)
-        .expect("an area of a building")
-        .expect("its room's floor");
+        .area_floor(id, 2, ground, at, skills::form_runner::REACH)
+        .expect("a room of a building, on its room's floor");
     assert_eq!(floor, floor1, "the upstairs room's floor");
     assert_eq!(on.y, room_y, "at the room's height, not the point's");
     assert!(
         (on.x - local.x).abs() <= 2 && on.z.abs() <= 2,
         "the point in the building's frame: {on:?}"
     );
+    // C22 sweep (#1960): an area that is no room, and that no floor stands a body near (none here: no walk map), is
+    // planned as any other point, on the ground under it, as today's game walks to an area.
     assert_eq!(
-        sight("attic").area_floor(id, 2, ground, at),
-        Some(None),
-        "no room or only floor: no way"
+        sight("attic").area_floor(id, 2, ground, at, skills::form_runner::REACH),
+        None,
+        "no room, no floor standing a body near it: as any other point"
     );
     assert_eq!(
-        sight("door").area_floor(id, 2, ground, at),
+        sight("door").area_floor(id, 2, ground, at, skills::form_runner::REACH),
         None,
         "not an area: as before"
     );
     assert_eq!(
-        sight("r1a").area_floor(id, 3, ground, at),
+        sight("r1a").area_floor(id, 3, ground, at, skills::form_runner::REACH),
         None,
         "another step: as before"
     );
