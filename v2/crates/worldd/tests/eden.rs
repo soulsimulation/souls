@@ -3754,12 +3754,3 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
     let h = out.expect("and out of it");
     assert_eq!(h.pose.frame.node, im.nodes["ground"], "out onto the ground");
 }
-
-#[test]
-#[ignore = "tmp"]
-fn tmp_bikes() {
-    let a = act_at("52.4,1.6", "e_a23bb167", "eden:ride", "tmpb1");
-    let b = act_at("100.6,12.0", "e_0a888a23", "eden:ride", "tmpb6");
-    let c = act_at("93.0,34.5", "e_7c88b724", "eden:ride", "tmpb8");
-    println!("TMPBIKES {a:?} | {b:?} | {c:?}");
-}

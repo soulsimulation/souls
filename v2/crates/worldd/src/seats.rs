@@ -12,7 +12,8 @@ use sim::walk::town::Town;
 /// body stands on: its point and facing there, and its stand point in the slot's frame. A stand point a body cannot
 /// stand on (under a table, against a wall) is moved to the nearest place within a form's reach of it where a body
 /// can (C15's rule, `skills::form_runner::REACH`), so a rise always sets the body down on clear ground; one in a
-/// doorway's clearance is moved out of it ([`out_of_passage`]), so the gateway's walk to the seat ends at it. Returns the
+/// doorway's clearance is moved out of it ([`out_of_passage`]), so the gateway's walk to the seat ends at it. One with
+/// no such place whose slot has a boarding reach (a boat afloat) is boarded from clear ground ([`board_from`]). Returns the
 /// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
 /// floor above the thing) and the stand points moved.
 pub fn places(
