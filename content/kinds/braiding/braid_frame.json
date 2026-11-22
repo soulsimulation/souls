@@ -1,0 +1,2409 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:braid_frame",
+  "owner": "thing",
+  "state": {
+    "stage": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 6,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        480,
+        0,
+        750
+      ],
+      "yaw_mdeg": 180000
+    },
+    "practice": {
+      "role": "contact",
+      "at_mm": [
+        480,
+        1100,
+        220
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1400,
+      2150,
+      450
+    ]
+  },
+  "forms": {
+    "left_over_0": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 0,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "practice"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "practice"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 1,
+          "event": "crossing_changed"
+        }
+      ]
+    },
+    "right_over_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 1,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "practice"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "practice"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 2,
+          "event": "crossing_changed"
+        }
+      ]
+    },
+    "left_over_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 2,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "practice"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "practice"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 3,
+          "event": "crossing_changed"
+        }
+      ]
+    },
+    "right_over_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 3,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "practice"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "practice"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 4,
+          "event": "crossing_changed"
+        }
+      ]
+    },
+    "left_over_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 4,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "practice"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "practice"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 5,
+          "event": "crossing_changed"
+        }
+      ]
+    },
+    "right_over_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 5,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "practice"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "practice"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 6,
+          "event": "crossing_changed"
+        }
+      ]
+    },
+    "undo_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 1,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "practice"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "practice"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 0,
+          "event": "crossing_changed"
+        }
+      ]
+    },
+    "undo_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 2,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "practice"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "practice"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 1,
+          "event": "crossing_changed"
+        }
+      ]
+    },
+    "undo_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 3,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "practice"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "practice"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 2,
+          "event": "crossing_changed"
+        }
+      ]
+    },
+    "undo_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 4,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "practice"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "practice"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 3,
+          "event": "crossing_changed"
+        }
+      ]
+    },
+    "undo_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 5,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "practice"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "practice"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 4,
+          "event": "crossing_changed"
+        }
+      ]
+    },
+    "undo_6": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 6,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "practice"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "practice"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 5,
+          "event": "crossing_changed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:braid_frame",
+    "table": [
+      {
+        "part": "cross_1",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 1,
+          "3": 1,
+          "4": 1,
+          "5": 1,
+          "6": 1
+        }
+      },
+      {
+        "part": "cross_2",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 1,
+          "4": 1,
+          "5": 1,
+          "6": 1
+        }
+      },
+      {
+        "part": "cross_3",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 1,
+          "5": 1,
+          "6": 1
+        }
+      },
+      {
+        "part": "cross_4",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 1,
+          "5": 1,
+          "6": 1
+        }
+      },
+      {
+        "part": "cross_5",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 1,
+          "6": 1
+        }
+      },
+      {
+        "part": "cross_6",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 1
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            40,
+            0
+          ],
+          "size": [
+            1400,
+            80,
+            450
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -640,
+            1080,
+            0
+          ],
+          "size": [
+            70,
+            2000,
+            80
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            640,
+            1080,
+            0
+          ],
+          "size": [
+            70,
+            2000,
+            80
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1300,
+            -60
+          ],
+          "size": [
+            1200,
+            1500,
+            40
+          ],
+          "tint": "back"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -195,
+            1850,
+            50
+          ],
+          "size": [
+            101,
+            12,
+            10
+          ],
+          "tint": "A",
+          "roll": 72646
+        },
+        {
+          "kind": "box",
+          "at": [
+            -165,
+            1850,
+            50
+          ],
+          "size": [
+            101,
+            12,
+            10
+          ],
+          "tint": "A",
+          "roll": -72646
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            1850,
+            50
+          ],
+          "size": [
+            36,
+            12,
+            10
+          ],
+          "tint": "A",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            -210,
+            1990,
+            50
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            1942,
+            50
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            -180,
+            1750,
+            80
+          ],
+          "r": 18,
+          "segments": 10,
+          "tint": "A"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -30,
+            1850,
+            50
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "B",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -4,
+            1898,
+            50
+          ],
+          "size": [
+            51,
+            12,
+            10
+          ],
+          "tint": "B",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1850,
+            50
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "B",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1802,
+            50
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "B",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            21,
+            1874,
+            50
+          ],
+          "size": [
+            48,
+            12,
+            10
+          ],
+          "tint": "B",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            30,
+            1826,
+            50
+          ],
+          "size": [
+            48,
+            12,
+            10
+          ],
+          "tint": "B",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            2038,
+            50
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -30,
+            1990,
+            50
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1942,
+            50
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            0,
+            1750,
+            80
+          ],
+          "r": 18,
+          "segments": 10,
+          "tint": "B"
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            1898,
+            50
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "C",
+          "roll": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            150,
+            1850,
+            50
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "C",
+          "roll": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            1802,
+            50
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "C",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            150,
+            1990,
+            50
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            2038,
+            50
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            210,
+            2014,
+            50
+          ],
+          "size": [
+            48,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            1990,
+            50
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            1966,
+            50
+          ],
+          "size": [
+            77,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -38660
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            180,
+            1750,
+            80
+          ],
+          "r": 18,
+          "segments": 10,
+          "tint": "C"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            480,
+            1100,
+            160
+          ],
+          "r": 40,
+          "h": 80,
+          "pitch": 90000,
+          "segments": 12,
+          "tint": "control"
+        },
+        {
+          "kind": "box",
+          "at": [
+            480,
+            1100,
+            210
+          ],
+          "size": [
+            38,
+            38,
+            20
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -158,
+            1664,
+            100
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": -50906,
+          "roll": 41125,
+          "tint": "A",
+          "role": "cross_1",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -90,
+            1615,
+            120
+          ],
+          "r": 9,
+          "h": 111,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 54162,
+          "tint": "A",
+          "role": "cross_1",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -22,
+            1566,
+            100
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": 50906,
+          "roll": 41125,
+          "tint": "A",
+          "role": "cross_1",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -22,
+            1664,
+            60
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": 50906,
+          "roll": -41125,
+          "tint": "B",
+          "role": "cross_1",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -90,
+            1615,
+            40
+          ],
+          "r": 9,
+          "h": 111,
+          "segments": 8,
+          "pitch": 0,
+          "roll": -54162,
+          "tint": "B",
+          "role": "cross_1",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -158,
+            1566,
+            60
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": -50906,
+          "roll": -41125,
+          "tint": "B",
+          "role": "cross_1",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            180,
+            1615,
+            80
+          ],
+          "r": 9,
+          "h": 130,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "C",
+          "role": "cross_1",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -180,
+            1485,
+            80
+          ],
+          "r": 9,
+          "h": 130,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "B",
+          "role": "cross_2",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            22,
+            1534,
+            60
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": 50906,
+          "roll": 41125,
+          "tint": "A",
+          "role": "cross_2",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            90,
+            1485,
+            40
+          ],
+          "r": 9,
+          "h": 111,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 54162,
+          "tint": "A",
+          "role": "cross_2",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            158,
+            1436,
+            60
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": -50906,
+          "roll": 41125,
+          "tint": "A",
+          "role": "cross_2",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            158,
+            1534,
+            100
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": -50906,
+          "roll": -41125,
+          "tint": "C",
+          "role": "cross_2",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            90,
+            1485,
+            120
+          ],
+          "r": 9,
+          "h": 111,
+          "segments": 8,
+          "pitch": 0,
+          "roll": -54162,
+          "tint": "C",
+          "role": "cross_2",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            22,
+            1436,
+            100
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": 50906,
+          "roll": -41125,
+          "tint": "C",
+          "role": "cross_2",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -158,
+            1404,
+            100
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": -50906,
+          "roll": 41125,
+          "tint": "B",
+          "role": "cross_3",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -90,
+            1355,
+            120
+          ],
+          "r": 9,
+          "h": 111,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 54162,
+          "tint": "B",
+          "role": "cross_3",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -22,
+            1306,
+            100
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": 50906,
+          "roll": 41125,
+          "tint": "B",
+          "role": "cross_3",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -22,
+            1404,
+            60
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": 50906,
+          "roll": -41125,
+          "tint": "C",
+          "role": "cross_3",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -90,
+            1355,
+            40
+          ],
+          "r": 9,
+          "h": 111,
+          "segments": 8,
+          "pitch": 0,
+          "roll": -54162,
+          "tint": "C",
+          "role": "cross_3",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -158,
+            1306,
+            60
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": -50906,
+          "roll": -41125,
+          "tint": "C",
+          "role": "cross_3",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            180,
+            1355,
+            80
+          ],
+          "r": 9,
+          "h": 130,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "A",
+          "role": "cross_3",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -180,
+            1225,
+            80
+          ],
+          "r": 9,
+          "h": 130,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "C",
+          "role": "cross_4",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            22,
+            1274,
+            60
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": 50906,
+          "roll": 41125,
+          "tint": "B",
+          "role": "cross_4",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            90,
+            1225,
+            40
+          ],
+          "r": 9,
+          "h": 111,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 54162,
+          "tint": "B",
+          "role": "cross_4",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            158,
+            1176,
+            60
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": -50906,
+          "roll": 41125,
+          "tint": "B",
+          "role": "cross_4",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            158,
+            1274,
+            100
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": -50906,
+          "roll": -41125,
+          "tint": "A",
+          "role": "cross_4",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            90,
+            1225,
+            120
+          ],
+          "r": 9,
+          "h": 111,
+          "segments": 8,
+          "pitch": 0,
+          "roll": -54162,
+          "tint": "A",
+          "role": "cross_4",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            22,
+            1176,
+            100
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": 50906,
+          "roll": -41125,
+          "tint": "A",
+          "role": "cross_4",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -158,
+            1144,
+            100
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": -50906,
+          "roll": 41125,
+          "tint": "C",
+          "role": "cross_5",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -90,
+            1095,
+            120
+          ],
+          "r": 9,
+          "h": 111,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 54162,
+          "tint": "C",
+          "role": "cross_5",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -22,
+            1046,
+            100
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": 50906,
+          "roll": 41125,
+          "tint": "C",
+          "role": "cross_5",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -22,
+            1144,
+            60
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": 50906,
+          "roll": -41125,
+          "tint": "A",
+          "role": "cross_5",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -90,
+            1095,
+            40
+          ],
+          "r": 9,
+          "h": 111,
+          "segments": 8,
+          "pitch": 0,
+          "roll": -54162,
+          "tint": "A",
+          "role": "cross_5",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -158,
+            1046,
+            60
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": -50906,
+          "roll": -41125,
+          "tint": "A",
+          "role": "cross_5",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            180,
+            1095,
+            80
+          ],
+          "r": 9,
+          "h": 130,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "B",
+          "role": "cross_5",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -180,
+            965,
+            80
+          ],
+          "r": 9,
+          "h": 130,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "A",
+          "role": "cross_6",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            22,
+            1014,
+            60
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": 50906,
+          "roll": 41125,
+          "tint": "C",
+          "role": "cross_6",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            90,
+            965,
+            40
+          ],
+          "r": 9,
+          "h": 111,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 54162,
+          "tint": "C",
+          "role": "cross_6",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            158,
+            916,
+            60
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": -50906,
+          "roll": 41125,
+          "tint": "C",
+          "role": "cross_6",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            158,
+            1014,
+            100
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": -50906,
+          "roll": -41125,
+          "tint": "B",
+          "role": "cross_6",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            90,
+            965,
+            120
+          ],
+          "r": 9,
+          "h": 111,
+          "segments": 8,
+          "pitch": 0,
+          "roll": -54162,
+          "tint": "B",
+          "role": "cross_6",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            22,
+            916,
+            100
+          ],
+          "r": 9,
+          "h": 68,
+          "segments": 8,
+          "pitch": 50906,
+          "roll": -41125,
+          "tint": "B",
+          "role": "cross_6",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -180,
+            1230,
+            80
+          ],
+          "r": 9,
+          "h": 900,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "A",
+          "role": "tail_a",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=0"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            0,
+            1230,
+            80
+          ],
+          "r": 9,
+          "h": 900,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "B",
+          "role": "tail_b",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=0"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            180,
+            1230,
+            80
+          ],
+          "r": 9,
+          "h": 900,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "C",
+          "role": "tail_c",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=0"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -180,
+            1160,
+            80
+          ],
+          "r": 9,
+          "h": 780,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "B",
+          "role": "tail_b",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=1"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            0,
+            1160,
+            80
+          ],
+          "r": 9,
+          "h": 780,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "A",
+          "role": "tail_a",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=1"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            180,
+            1160,
+            80
+          ],
+          "r": 9,
+          "h": 780,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "C",
+          "role": "tail_c",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=1"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -180,
+            1090,
+            80
+          ],
+          "r": 9,
+          "h": 660,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "B",
+          "role": "tail_b",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=2"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            0,
+            1090,
+            80
+          ],
+          "r": 9,
+          "h": 660,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "C",
+          "role": "tail_c",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=2"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            180,
+            1090,
+            80
+          ],
+          "r": 9,
+          "h": 660,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "A",
+          "role": "tail_a",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=2"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -180,
+            1020,
+            80
+          ],
+          "r": 9,
+          "h": 540,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "C",
+          "role": "tail_c",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=3"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            0,
+            1020,
+            80
+          ],
+          "r": 9,
+          "h": 540,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "B",
+          "role": "tail_b",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=3"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            180,
+            1020,
+            80
+          ],
+          "r": 9,
+          "h": 540,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "A",
+          "role": "tail_a",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=3"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -180,
+            950,
+            80
+          ],
+          "r": 9,
+          "h": 420,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "C",
+          "role": "tail_c",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=4"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            0,
+            950,
+            80
+          ],
+          "r": 9,
+          "h": 420,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "A",
+          "role": "tail_a",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=4"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            180,
+            950,
+            80
+          ],
+          "r": 9,
+          "h": 420,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "B",
+          "role": "tail_b",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=4"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -180,
+            880,
+            80
+          ],
+          "r": 9,
+          "h": 300,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "A",
+          "role": "tail_a",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=5"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            0,
+            880,
+            80
+          ],
+          "r": 9,
+          "h": 300,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "C",
+          "role": "tail_c",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=5"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            180,
+            880,
+            80
+          ],
+          "r": 9,
+          "h": 300,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "B",
+          "role": "tail_b",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=5"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            -180,
+            810,
+            80
+          ],
+          "r": 9,
+          "h": 180,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "A",
+          "role": "tail_a",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=6"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            0,
+            810,
+            80
+          ],
+          "r": 9,
+          "h": 180,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "B",
+          "role": "tail_b",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=6"
+        },
+        {
+          "kind": "capsule",
+          "at": [
+            180,
+            810,
+            80
+          ],
+          "r": 9,
+          "h": 180,
+          "segments": 8,
+          "pitch": 0,
+          "roll": 0,
+          "tint": "C",
+          "role": "tail_c",
+          "pivot": [
+            0,
+            0,
+            0
+          ],
+          "when": "@stage=6"
+        }
+      ],
+      "palette": {
+        "frame": "#665247",
+        "back": "#182a35",
+        "label": "#eeeac8",
+        "A": "#e96258",
+        "B": "#65c7e9",
+        "C": "#f1c24f",
+        "control": "#96c9a8"
+      },
+      "tags": [
+        "tool",
+        "braid",
+        "exhibit"
+      ]
+    }
+  },
+  "text": {
+    "work": "work",
+    "card": "Practice a three-strand braid, crossing and undoing one step.",
+    "braid": "braid practice",
+    "cord": "three colored strands",
+    "wrong_stage": "Use the crossing or undo offer for the current braid stage.",
+    "free_hand": "Put down an object so a hand is free for the practice control.",
+    "howto_braid": "Use the fixed practice control to advance the attached indexed depiction one whole crossing, or undo only its last crossing. Fixed L C R letters name left, center and right. Fixed colored A B C references name the original red, blue and gold strands. Starting order ABC changes through BAC, BCA, CBA, CAB, ACB and ABC. At even stages0,2,4 choose left-over-center; at1,3,5 choose right-over-center. The front strand goes over with a nonzero depth gap. Each stage retains all previous crossing rows and moves the remaining loose ends; stage6 keeps six crossings although its order matches stage0. Undo removes just the lowest crossing. This attached instructional model uses connected segmented capsules and approximate indexed poses; it does not conserve quantitative rope length, simulate continuous rope motion or tension, secure knots, consume stock, detach an output or create anything to pick up or carry. The hand touches a practice control, without an anatomical braid-working/contact guarantee."
+  },
+  "card": {
+    "text": "card",
+    "category": "work",
+    "synonyms": [
+      "braid",
+      "cord"
+    ]
+  },
+  "howtos": {
+    "braid": {
+      "text": "howto_braid",
+      "steps": [
+        {
+          "form": "left_over_0"
+        },
+        {
+          "form": "right_over_1"
+        },
+        {
+          "form": "left_over_2"
+        },
+        {
+          "form": "right_over_3"
+        },
+        {
+          "form": "left_over_4"
+        },
+        {
+          "form": "right_over_5"
+        }
+      ]
+    }
+  }
+}
