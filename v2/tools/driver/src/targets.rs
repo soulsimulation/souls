@@ -12,7 +12,7 @@
 //!   offers, on the things of that kind, or on the Soul's own body (its `souls:body-of` link) when its body's kind
 //!   has an entry with the form. A shape kind no entry offers goes as a walk and is counted (`standIns`).
 //!
-//! [`Choice`] then turns each act into an intent the way an agent would: a Soul seated by its last sit rises first
+//! [`Choice`] then turns each act into an intent the way an agent would: a Soul its last sit seated rises first
 //! (a walk or a sit while seated is refused, `resource-held`), and says are withheld unless `--speech` opts in, so a
 //! run on a world people visit says nothing out loud.
 
@@ -181,8 +181,8 @@ pub struct Chosen {
     pub stand_in: Option<String>,
 }
 
-/// One agent's state across its acts: seated by its last sit (cleared by the agent's socket when that sit is
-/// refused), and how many acts it has sent.
+/// One agent's state across its acts: seated (set by the agent's socket when a sit's receipt comes, cleared by a
+/// rise), and how many acts it has sent.
 #[derive(Default, Clone)]
 pub struct Choice {
     pub seated: Arc<AtomicBool>,
@@ -226,10 +226,9 @@ impl Choice {
                 plain(format!("{ns}:rise"), None)
             }
             "walk" => plain(format!("{ns}:walk"), pick(&t.walk, a * 7 + n)),
-            "sit" if !t.sit.is_empty() => {
-                sit(true);
-                plain(format!("{ns}:sit"), pick(&t.sit, a))
-            }
+            // Seated once the sit's receipt comes (the agent's socket sets it): a sit still on its way is replaced by
+            // the next walk, as the world does, and needs no rise.
+            "sit" if !t.sit.is_empty() => plain(format!("{ns}:sit"), pick(&t.sit, a)),
             k => match t.forms.get(k) {
                 Some((v, on)) if on.is_empty() && t.bodies.contains_key(&soul) => {
                     plain(v.clone(), t.bodies.get(&soul).copied())
@@ -481,6 +480,7 @@ mod tests {
         };
         assert_eq!(verb(&mut c, "say"), None);
         assert_eq!(verb(&mut c, "sit"), Some(("eden:sit".into(), Some(id(1)))));
+        c.seated.store(true, Ordering::Relaxed); // the sit's receipt
         assert_eq!(verb(&mut c, "walk"), Some(("eden:rise".into(), None)));
         assert_eq!(
             verb(&mut c, "walk"),
@@ -502,11 +502,10 @@ mod tests {
             "a body not in the copy"
         );
         c.next(&t, "sit", "eden:sit", 0, me, false);
-        c.seated.store(false, Ordering::Relaxed);
         let walk = c.next(&t, "walk", "eden:walk", 0, me, false).unwrap();
         assert_eq!(
             walk.verb, "eden:walk",
-            "a refused sit leaves the Soul standing"
+            "a sit with no receipt leaves the Soul standing"
         );
         let say = c.next(&t, "say", "eden:say", 0, me, true).unwrap();
         assert!(say.words && say.verb == "eden:say");

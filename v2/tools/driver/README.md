@@ -71,8 +71,8 @@ kind entries (`GET /v2/entries`, which gatewayd serves with `--entries`, as ever
 
 - **walk**: `<ns>:walk` to a thing of the copy with a seat (its stand point), spread over them by agent and act;
 - **sit**: `<ns>:sit` on a thing with a seat of posture `sit`, agent k on the k-th (mod their count), so Souls spread
-  over the seats; a Soul seated by its last sit sends `<ns>:rise` instead of its next walk or sit, as an agent would
-  (a walk while seated is refused, `resource-held`), and a sit refused leaves it standing;
+  over the seats; once a sit's receipt has come, the Soul's next walk or sit goes as `<ns>:rise`, as an agent would
+  (a walk while seated is refused, `resource-held`), while a sit still on its way is replaced by the next walk;
 - **gesture, sit-ground, read, eat, play-music**: the first form of `FORMS` an entry offers (`wave`; `sit_down`;
   `read`; `eat`, `bite` or `drink`; `play_music` or `play`), on the things of that kind, or on the Soul's own body
   (its `souls:body-of` link in the copy) when the body's kind has an entry with the form. A form that needs the thing held first (a

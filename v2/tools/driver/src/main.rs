@@ -494,6 +494,10 @@ async fn agent(
                     let s0 = start.unwrap_or(now);
                     match heard(&b) {
                         Heard::Receipt(s) if pending.contains_key(&s) => {
+                            // A sit's receipt seats the Soul: its next walk or sit goes as a rise first.
+                            if verb_of.remove(&s).is_some_and(|v| v.as_str().ends_with(":sit")) {
+                                seated.store(true, Ordering::Relaxed);
+                            }
                             let m = out.minute(s0, now);
                             m.receipts += 1;
                             m.latency_us.push(now.duration_since(pending[&s]).as_micros() as u64);
@@ -502,10 +506,6 @@ async fn agent(
                         }
                         Heard::Refused(s, reason) if pending.contains_key(&s) => {
                             let verb = verb_of.remove(&s).map_or("?".into(), |v| v.as_str().to_owned());
-                            // A sit refused leaves the Soul standing: its next walk needs no rise.
-                            if verb.ends_with(":sit") {
-                                seated.store(false, Ordering::Relaxed);
-                            }
                             *out.refused_by.entry(format!("{verb} {reason}")).or_default() += 1;
                             let m = out.minute(s0, now);
                             *m.refusals.entry(reason).or_default() += 1;
