@@ -242,8 +242,33 @@ test('a5: the page, the roll-up and the history wake no sleeping world; the page
     const keys = new Set();
     const walk = (v) => { if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) { if (!Array.isArray(v)) keys.add(k); walk(x); } };
     walk(JSON.parse(body));
-    assert.deepEqual([...keys].sort(), ['at', 'awake', 'budget_ms', 'cost', 'failures', 'health_age_s', 'in_5_min', 'lag_ms', 'last_exit', 'next_try',
-      'not_metered', 'over_budget', 'p99_ms', 'restarts', 'state', 'tick', 'wake_at', 'watcher', 'where', 'world', 'worlds']);
+    assert.deepEqual([...keys].sort(), ['acts', 'at', 'awake', 'budget_ms', 'client', 'clients', 'cost', 'failures', 'health_age_s', 'in_5_min', 'lag_ms', 'last_exit', 'next_try',
+      'not_metered', 'over_budget', 'p99_ms', 'restarts', 'souls', 'state', 'tick', 'wake_at', 'watcher', 'where', 'world', 'worlds']);
   } finally { p.close(); dir.close(); }
 });
 
+
+test('N-O1: the site owner sees the Soul client versions in use as counts; nobody else does; no id or token comes with them', async () => {
+  const root = machine(), dir = await directory(), p = await page(root, dir);
+  try {
+    const day = new Date().toISOString().slice(0, 10), now = Date.now();
+    const line = (soul, client, t = now) => `${JSON.stringify({ t, soul, account: 'acct-secret', outcome: 'receipt', client })}\n`;
+    const file = join(root, 'worlds', W2, 'receipts', `${day}.jsonl`);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, line('s1', 'souls-client/1.4.0') + line('s1', 'souls-client/1.4.0') + line('s2', 'souls-client/1.4.0') +
+      line('s3', 'souls-client/1.3.0') + line('s4', 'souls-client/0.9.0', now - 3 * 86_400_000) + 'torn{');
+    const owner = await p.get('?json=1', { authorization: 'Bearer owner-token' });
+    const d = JSON.parse(owner.text);
+    assert.deepEqual(d.clients, [
+      { client: 'souls-client/1.4.0', souls: 2, acts: 3 }, { client: 'souls-client/1.3.0', souls: 1, acts: 1 }, { client: 'unknown', souls: 1, acts: 1 },
+    ]);
+    for (const secret of ['s1', 's2', 'acct-secret', 'owner-token', SOUL]) assert.ok(!owner.text.includes(secret), `the answer holds ${secret}`);
+    for (const [headers, status] of [[{}, 401], [{ authorization: 'Bearer forged' }, 401], [{ authorization: 'Bearer other-token' }, 403]]) {
+      const r = await p.get('?json=1', headers);
+      assert.equal(r.status, status);
+      assert.ok(!r.text.includes('souls-client'), 'no client versions for a refused request');
+    }
+    const shell = (await p.get()).text;
+    assert.ok(!shell.includes('souls-client') && shell.includes('Soul clients'));
+  } finally { p.close(); dir.close(); }
+});
