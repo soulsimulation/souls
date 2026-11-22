@@ -1491,10 +1491,20 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
     // The seats, as `worldd serve` registers them (`worldd::seats::places`).
     let (seats, ..) = worldd::seats::places(&mut bodies.town, &found);
     for place in seats {
-        if std::env::var("SEAT_DIAG").is_ok() && [8866u64, 9098, 9879].iter().any(|c| show(place.thing).contains(&format!("cd:{c}"))) {
+        if std::env::var("SEAT_DIAG").is_ok()
+            && [8866u64, 9098, 9879]
+                .iter()
+                .any(|c| show(place.thing).contains(&format!("cd:{c}")))
+        {
             let stand = place.stand().unwrap();
             let gap = sim::spots::flat(stand, place.point);
-            println!("SEAT {} slot {} stand {:?} -> {} um from the slot", show(place.thing), place.place.slot, place.place.stand, gap);
+            println!(
+                "SEAT {} slot {} stand {:?} -> {} um from the slot",
+                show(place.thing),
+                place.place.slot,
+                place.place.stand,
+                gap
+            );
         }
         let _ = bodies.add_place(place);
     }

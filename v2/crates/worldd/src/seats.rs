@@ -1,6 +1,7 @@
 //! The seats a served world registers at start-up (C17, #3453): each body slot its entries declare, placed on the floor
 //! a body stands on, with a stand point a body can stand on. `worldd serve` and the C22 sweep both register them here.
 
+use replica::ids::Id;
 use replica::pose::{Quat, Vec3};
 use replica::rules::json::Value as Json;
 use sim::ground::scene::Solid;
@@ -14,7 +15,10 @@ use sim::walk::town::Town;
 /// doorway's clearance is moved out of it ([`out_of_passage`]), so the gateway's walk to the seat ends at it. Returns the
 /// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
 /// floor above the thing) and the stand points moved.
-pub fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize, usize) {
+pub fn places(
+    town: &mut Town,
+    kinds: &[(String, Json)],
+) -> (Vec<PlaceAt>, usize, usize, usize, usize) {
     let (found, all) = import_eden::body_slots(&town.tree, kinds);
     let (buildings, ground) = (town.buildings.clone(), town.ground);
     let view = town.view();
@@ -152,7 +156,7 @@ const BOARD_STEP: i64 = 50_000;
 /// entry's stand point wins, so a boat is boarded from the side its entry names; ties by place. `None` when none is.
 fn board_from(
     view: &sim::walk::town::View<'_>,
-    floor: replica::ids::Id,
+    floor: Id,
     slot: Vec3,
     stand: Vec3,
     board: i64,
@@ -181,9 +185,12 @@ fn board_from(
             else {
                 continue;
             };
-            let Some(p) =
-                view.stand_near(floor, Vec3::new(slot.x + off.x, slot.y, slot.z + off.z), 1, None)
-            else {
+            let Some(p) = view.stand_near(
+                floor,
+                Vec3::new(slot.x + off.x, slot.y, slot.z + off.z),
+                1,
+                None,
+            ) else {
                 continue;
             };
             let gap = sim::spots::flat(p, stand);

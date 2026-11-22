@@ -2454,9 +2454,7 @@ impl<'a> View<'a> {
     /// Whether `at` (µm, `node`'s frame) is on any ground of the map: dry, wading or swimming ground, so out of every
     /// solid. What a seat's boarding step may cross ([`crate::slots`]'s stand points moved to clear ground).
     pub fn on_any_ground(&self, node: Id, at: Vec3) -> bool {
-        self.map
-            .spot_for(node, at, crate::routes::ALL)
-            .is_some()
+        self.map.spot_for(node, at, crate::routes::ALL).is_some()
     }
 
     /// [`View::stand_near`] for a move at thing `door`: when it is a doorway's door, a place in that doorway counts
