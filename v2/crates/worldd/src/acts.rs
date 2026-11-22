@@ -771,22 +771,11 @@ impl Sight<'_> {
         node: Id,
         reach: i64,
     ) -> Option<(Id, [Vec3; 4], Vec3, bool, i64)> {
-        let dbg = |s: &str| eprintln!("FPDBG {s}");
-        dbg(&format!(
-            "walks {:?} step {step} node {node:?}",
-            self.walks.get(&body)
-        ));
         let &(at_step, thing, ref point) = self.walks.get(&body)?;
         if at_step != step || self.bodies.contains_key(&thing) {
             return None;
         }
         let n = self.tree.node(self.tree.handle(thing)?)?;
-        dbg(&format!(
-            "parent {:?} entry {} has {}",
-            n.parent(),
-            entry_of(&n),
-            self.kinds.get(entry_of(&n)).is_some()
-        ));
         if n.parent() != Some(node) {
             return None;
         }
@@ -806,12 +795,10 @@ impl Sight<'_> {
             }
             None => reach,
         };
-        dbg(&format!("footprint {corners:?} on {on} reach {reach}"));
         let place = n.place()?;
         let (floor, ring, middle) = self.with_view(body, |v| {
             v.footprint_on_floor(node, place.position, place.orientation, &corners)
         })??;
-        dbg(&format!("floor {floor:?} ring {ring:?}"));
         Some((floor, ring, middle, on, reach))
     }
 }
@@ -1232,6 +1219,13 @@ impl Sight<'_> {
                     .position
                     .plus(place.orientation.rotate(p).ok()?)
                     .ok()?;
+                // A loose thing the view's tree does not hold (a bench a world placed, #4072): carried from its parent.
+                if let Some(on) = view
+                    .on_floor(n.parent()?, up)
+                    .filter(|(f, ..)| self.same_frame(*f, floor))
+                {
+                    return Some(on.1);
+                }
                 self.floor_of(n.parent()?, up)
                     .filter(|(f, _)| self.same_frame(*f, floor))
                     .map(|(_, p)| p)
