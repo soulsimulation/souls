@@ -12,7 +12,7 @@
 //     {"op":"act","verb":"...","target":"<scope hex>-<counter>"}  builds the next intent (the target optional) and
 //                                sends it once (now, or at the next sign-in)
 //     {"op":"read"}              gives and clears what happened since the last read (it never wakes the model)
-//     {"op":"stop"}              ends the process (the thin command's `quit`)
+//     {"op":"stop"}              ends the process (the thin command's `quit`); answered once nothing more is written
 //     {"op":"query","questions":[..],"budget":n}   #3704: several reads of the copy, each answered in turn (reads.mjs)
 //     {"op":"catalog"} | {"op":"context","words":"..","cursor":n}   #3704: the kinds in the copy; its named targets
 //     {"op":"batch","reads":[{"op":..},..]}       #3704: several read ops in one call, each answered as alone
@@ -174,7 +174,10 @@ if (!home || !soul || !pkg) {
 }
 
 const rt = runtimeOf(home, soul);
-const log = (line) => appendFileSync(rt.log, `${new Date().toISOString()} ${line}\n`, { mode: 0o600 });
+// Set by `stop` once its last write is done: nothing writes into the Soul's home after it, so `stop`'s answer means
+// the home can be removed at once (`souls retire`, a test's teardown). Every writer below checks it.
+let ended = false;
+const log = (line) => ended || appendFileSync(rt.log, `${new Date().toISOString()} ${line}\n`, { mode: 0o600 });
 
 // --- One per Soul ---------------------------------------------------------------------------------------------
 function alive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
@@ -222,7 +225,7 @@ const scope = unhex(seat.grant.scope);
 
 // --- State on disk: the cursor and the sequences ------------------------------------------------------------------
 const state = { cursor: null, sequence: 0, unanswered: [], ...(existsSync(rt.state) ? JSON.parse(readFileSync(rt.state, 'utf8')) : {}) };
-const save = () => { writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\n', { mode: 0o600 }); renameSync(`${rt.state}.tmp`, rt.state); };
+const save = () => { if (ended) return; writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\n', { mode: 0o600 }); renameSync(`${rt.state}.tmp`, rt.state); };
 const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
 const heardSince = []; // what this Soul heard since its last turn (a look or a wait), for the brief (C6)
@@ -285,7 +288,8 @@ let stopped = 0; // acts stopped locally, for the trace
 // (and why) it has not been known current; null while it is.
 const startedAt = performance.now();
 let confirmedAt = null, changedAt = null, cutAt = startedAt, cutWhy = 'not-connected';
-const trace = openTrace(rt.dir);
+const traceFile = openTrace(rt.dir);
+const trace = { ...traceFile, write: (record) => ended || traceFile.write(record) };
 const rankedOf = new Map(); // sequence → how many verbs it ranked, until answered
 const editsWaiting = new Map(); // G7: an edit's sequence → what its answer is handed to
 const movesOf = new Map(); // sequence → its move's form (C14), until answered: a receipt says whether the body sits
@@ -669,6 +673,7 @@ function fire(event) {
 let feeder = null;
 const heardWords = new Map(); // a heard utterance's words, by the reference the feeder is given
 function remember(entries) {
+  if (ended) return;
   try {
     feeder ??= feederFor(home, soul, { world: seat.world, textOf: (ref) => heardWords.get(ref) ?? null });
     feeder.feed(entries);
@@ -1359,7 +1364,7 @@ async function answer(req) {
       const scheduled = scheduleEvent(e);
       return { ok: true, fired, ...(scheduled.length ? { scheduled } : {}) };
     }
-    case 'stop': setImmediate(stop); return { ok: true };
+    case 'stop': return { ok: true }; // answered by stop() itself, once its last write is done
     case 'halt': {
       // #3705 (today's `stop`): ends this Soul's own act where it stands: a walk stops now, a sit, a lie or a rise
       // finishes, a standing order ends. A `souls:cancel` naming it; the world answers both.
@@ -1590,7 +1595,8 @@ const server = createServer((c) => {
           // Every answer carries its age (R10); each but stats's is traced with the bytes it prints.
           const said = JSON.stringify('age' in out ? out : { ...out, ...ageNow() }) + '\n';
           if (op !== 'stats' && !check) trace.write({ k: 'cmd', op, bytes: Buffer.byteLength(said) });
-          if (!c.destroyed) c.write(said);
+          if (op === 'stop') stop(c, said);
+          else if (!c.destroyed) c.write(said);
         });
     }
   });
@@ -1755,16 +1761,26 @@ function scheduleEvent(event) {
   return hit.map((e) => e.id);
 }
 
-function stop() {
-  stopping = true;
-  log('stopping');
-  ws?.close();
-  server.close();
-  releaseLock();
-  process.exit(0);
+/**
+ * Ends the daemon. Its last writes (the log line, the lock and socket released) come first; then nothing writes into
+ * the home again, and only then does a `stop` command (`c`) get its answer `said`; the process ends once it is sent.
+ */
+function stop(c, said) {
+  if (!ended) {
+    stopping = true;
+    log('stopping');
+    clearInterval(beating);
+    ws?.close();
+    server.close();
+    releaseLock();
+    ended = true;
+  }
+  if (!c || c.destroyed) process.exit(0);
+  setTimeout(() => process.exit(0), 1000).unref(); // a caller gone before its answer is not waited for
+  c.end(said, () => process.exit(0));
 }
-process.on('SIGTERM', stop);
-process.on('SIGINT', stop);
+process.on('SIGTERM', () => stop());
+process.on('SIGINT', () => stop());
 process.on('SIGHUP', () => {}); // the terminal that started it closing is not a reason to stop
 
 server.on('error', (e) => {
@@ -1774,6 +1790,6 @@ server.on('error', (e) => {
 });
 rmSync(rt.socket, { force: true });
 beat(); // before the first answer, so it lists what was missed while off
-setInterval(beat, BEAT_MS);
+const beating = setInterval(beat, BEAT_MS);
 atSocket(rt.socket, (path) => server.listen(path, () => log(`listening for ${soul}, pid ${process.pid}`)));
 connect();
