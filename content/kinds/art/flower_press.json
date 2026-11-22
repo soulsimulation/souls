@@ -1,0 +1,519 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:flower_press",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 28,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "pressed": {
+      "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        700
+      ],
+      "yaw_mdeg": 180000
+    },
+    "handle": {
+      "role": "contact",
+      "at_mm": [
+        210,
+        1050,
+        80
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      660,
+      1400,
+      400
+    ]
+  },
+  "forms": {
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "handle"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "closed"
+        },
+        {
+          "change": "set",
+          "field": "pressed",
+          "to": true,
+          "event": "pressed"
+        }
+      ]
+    },
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "tug",
+          "at": "handle"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "opened"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:flower_press",
+    "table": [
+      {
+        "part": "door",
+        "field": "open",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "true": -100000,
+          "false": 0
+        },
+        "over_us": 700000
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            35,
+            0
+          ],
+          "size": [
+            660,
+            70,
+            400
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -280,
+            700,
+            0
+          ],
+          "size": [
+            55,
+            1400,
+            100
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            280,
+            700,
+            0
+          ],
+          "size": [
+            55,
+            1400,
+            100
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            620,
+            0
+          ],
+          "size": [
+            550,
+            80,
+            40
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            620,
+            25
+          ],
+          "size": [
+            300,
+            60,
+            8
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1050,
+            -25
+          ],
+          "size": [
+            510,
+            640,
+            40
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1050,
+            0
+          ],
+          "size": [
+            460,
+            570,
+            8
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1050,
+            38
+          ],
+          "size": [
+            500,
+            630,
+            35
+          ],
+          "tint": "cover",
+          "role": "door",
+          "pivot": [
+            -250,
+            0,
+            38
+          ]
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            210,
+            1050,
+            80
+          ],
+          "r": 24,
+          "segments": 6,
+          "tint": "brass",
+          "role": "door",
+          "pivot": [
+            -250,
+            0,
+            38
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            980,
+            26
+          ],
+          "size": [
+            12,
+            320,
+            25
+          ],
+          "tint": "stem",
+          "when": "!@pressed"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            980,
+            10
+          ],
+          "size": [
+            12,
+            320,
+            6
+          ],
+          "tint": "stem",
+          "when": "@pressed"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1225,
+            35
+          ],
+          "r": 55,
+          "h": 40,
+          "pitch": 90000,
+          "segments": 5,
+          "tint": "petal",
+          "when": "!@pressed"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1235,
+            12
+          ],
+          "r": 60,
+          "h": 4,
+          "pitch": 90000,
+          "segments": 5,
+          "tint": "petal",
+          "when": "@pressed"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            62,
+            1180,
+            35
+          ],
+          "r": 55,
+          "h": 40,
+          "pitch": 90000,
+          "segments": 5,
+          "tint": "petal",
+          "when": "!@pressed"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            71,
+            1183,
+            12
+          ],
+          "r": 60,
+          "h": 4,
+          "pitch": 90000,
+          "segments": 5,
+          "tint": "petal",
+          "when": "@pressed"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            38,
+            1107,
+            35
+          ],
+          "r": 55,
+          "h": 40,
+          "pitch": 90000,
+          "segments": 5,
+          "tint": "petal",
+          "when": "!@pressed"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            44,
+            1099,
+            12
+          ],
+          "r": 60,
+          "h": 4,
+          "pitch": 90000,
+          "segments": 5,
+          "tint": "petal",
+          "when": "@pressed"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -38,
+            1107,
+            35
+          ],
+          "r": 55,
+          "h": 40,
+          "pitch": 90000,
+          "segments": 5,
+          "tint": "petal",
+          "when": "!@pressed"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -44,
+            1099,
+            12
+          ],
+          "r": 60,
+          "h": 4,
+          "pitch": 90000,
+          "segments": 5,
+          "tint": "petal",
+          "when": "@pressed"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -62,
+            1180,
+            35
+          ],
+          "r": 55,
+          "h": 40,
+          "pitch": 90000,
+          "segments": 5,
+          "tint": "petal",
+          "when": "!@pressed"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -71,
+            1183,
+            12
+          ],
+          "r": 60,
+          "h": 4,
+          "pitch": 90000,
+          "segments": 5,
+          "tint": "petal",
+          "when": "@pressed"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1160,
+            50
+          ],
+          "r": 35,
+          "h": 40,
+          "pitch": 90000,
+          "segments": 5,
+          "tint": "eye",
+          "when": "!@pressed"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1160,
+            17
+          ],
+          "r": 38,
+          "h": 4,
+          "pitch": 90000,
+          "segments": 5,
+          "tint": "eye",
+          "when": "@pressed"
+        }
+      ],
+      "palette": {
+        "wood": "#8c6849",
+        "cover": "#a37b54",
+        "paper": "#f2e5ca",
+        "stem": "#507645",
+        "petal": "#a566a0",
+        "eye": "#d4ad49",
+        "brass": "#b49a56"
+      },
+      "tags": [
+        "art",
+        "botanical-press",
+        "hand-operated"
+      ]
+    }
+  },
+  "text": {
+    "card": "A flower press: close the leaf to press its flower for good, open it to look.",
+    "art": "art",
+    "botanical_press": "botanical press",
+    "pressed_flower": "pressed flower artwork",
+    "howto_press": "Close the press to press the flower, then open it to see it."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "botanical_press",
+      "pressed_flower"
+    ]
+  },
+  "howtos": {
+    "press": {
+      "text": "howto_press",
+      "steps": [
+        {
+          "form": "close"
+        },
+        {
+          "form": "open"
+        }
+      ]
+    }
+  }
+}

@@ -30,6 +30,10 @@ fn not<T>(what: &str) -> R<T> {
 /// The most bytes a first frame may have, checked the same way (rule 12).
 pub const HELLO_MOST: u64 = 256;
 pub const INTENT_MOST: u64 = 4096;
+/// The most bytes a creator's bulk edit may have (#3695): a landform's ground tiles, an imported world's part. Only a
+/// creator's edit is read over [`INTENT_MOST`]; it reaches the world by the gateway's creator route alone, as the
+/// agents' socket takes no message over the frame limit.
+pub const BULK_MOST: u64 = 8 << 20;
 /// The most fallbacks an intent may rank (rule 6).
 pub const FALLBACKS_MOST: u64 = 4;
 /// This protocol's version (rule 12). A change to any frame after the first raises it: 2 added field 12, the reflex
@@ -282,14 +286,34 @@ impl Intent {
     /// `fallback-not-an-act`, `fallbacks-not-on-an-act`), each kind's shape (`order-without-target`,
     /// `cancel-without-replaces`, `cancel-not-bare`, `edit-not-bare`, `edit-not-a-batch`) and the driven body
     /// (`creator-without-body`, `body-not-a-creators`; an edit drives none).
+    /// Over [`INTENT_MOST`] bytes, only a creator's edit of at most [`BULK_MOST`] is read (#3695); anything else is
+    /// `intent-too-large`, whatever else is wrong with it.
     pub fn read(bytes: &[u8]) -> R<Intent> {
         let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-        if size > INTENT_MOST {
-            return refuse(
-                "intent-too-large",
-                format!("{size} bytes; at most {INTENT_MOST}"),
-            );
+        if size <= INTENT_MOST {
+            return Intent::parse(bytes);
         }
+        let too = || {
+            refuse(
+                "intent-too-large",
+                format!("{size} bytes; at most {INTENT_MOST}, or {BULK_MOST} for a creator's edit"),
+            )
+        };
+        if size > BULK_MOST {
+            return too();
+        }
+        match Intent::parse(bytes) {
+            Ok(i)
+                if matches!(i.actor, Actor::Creator(_))
+                    && i.verb.as_str() == crate::edit::wire::VERB =>
+            {
+                Ok(i)
+            }
+            _ => too(),
+        }
+    }
+
+    fn parse(bytes: &[u8]) -> R<Intent> {
         let v = decode(bytes)
             .or_else(|e| refuse("encoding", e.to_string()))?
             .value;
@@ -372,7 +396,7 @@ impl Intent {
             {
                 return refuse("edit-not-bare", "an edit carries only its batch");
             }
-            crate::edit::wire::read(&intent.parameters)
+            crate::edit::wire::asked(&intent.parameters)
                 .or_else(|why| refuse("edit-not-a-batch", why))?;
         }
         match (intent.actor, intent.body) {

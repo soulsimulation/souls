@@ -44,6 +44,10 @@ pub const F_PALETTE: u64 = 89;
 /// The morning mist: `[peak, half-width, strength]`, the peak and half-width in µs after local midnight and the
 /// strength 0 to 100 (today's `morningMist`: 06:30, 2.5 h, 100).
 pub const F_MIST: u64 = 90;
+/// A creator's staged hour (`souls-god time HH:MM`): the local time of day, µs after local midnight, a page draws the
+/// sky and its light at, for a staged scene; the text `souls:live` (or no field) draws the world's own time. Display
+/// only, like 88 to 90: no rule reads it, and world time, a Soul's clock and the calendar never change for it.
+pub const F_SKY_HOUR: u64 = 91;
 /// The creator's last lightning strike (#3695, today's `strike`): `[x, z, at]`, the point in mm on the world's open
 /// ground and the world time it struck. A page draws the bolt and plays the thunder once, near `at`; nothing reads it.
 pub const F_STRIKE: u64 = 69;

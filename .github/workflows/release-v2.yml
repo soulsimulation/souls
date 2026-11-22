@@ -140,6 +140,8 @@ jobs:
           V2_CHANGELOG_FILE="$RUNNER_TEMP/CHANGELOG.md" V2_BODY_ASSETS="$RUNNER_TEMP/body-assets" npm --prefix v2/web run build
       - name: Bundle and its manifest
         run: |
+          # The land verbs' ground model (packages/ground) rides in the served client with its one dependency (#3695).
+          npm install --no-save --no-package-lock --no-audit --no-fund --prefix packages/ground zod@4.6.7
           bash v2/tools/ops/release/release.sh bundle "$RUNNER_TEMP/bundle" "$SHA" "$VERSION" v2/target/release v2/web/dist v2/client | tee -a "$GITHUB_STEP_SUMMARY"
           cp "$RUNNER_TEMP/bundle/manifest.json" "$RUNNER_TEMP/manifest.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

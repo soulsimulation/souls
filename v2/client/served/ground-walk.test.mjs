@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import { createConnection, createServer } from 'node:net';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { request } from '../src/daemon/client.mjs';
 import { runtimeOf } from '../src/home/home.mjs';
 import { decode, idText, sequenceOf } from '../src/brief/copy.mjs';
@@ -145,7 +146,18 @@ test('served ground walk: current planner result moves the ordinarily joined bod
       for(const socket of[down,up]){socket.on('error',()=>{if(!closed)fail(Error('owned transport error'));});socket.on('close',()=>{sockets.delete(socket);if(!closed)fail(Error('owned transport closed'));});}
     }));
     await new Promise((ok,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',ok);});
-    const o={items,references,gateway:`ws://127.0.0.1:${server.address().port}/v2/ws`,async snapshot(){if(failure)throw failure;const status=await request(s.rt.socket,{op:'status'});assert.equal(status.syncing,false);assert.equal(active,false);assert.deepEqual(JSON.parse(copy.roots()),status.roots,'mirror is the actual daemon canonical copy');return copy;},async close(){closed=true;for(const socket of sockets)socket.destroy();await new Promise((ok,fail)=>{const timer=setTimeout(()=>fail(Error('relay-close-timeout')),2000);server.close(e=>{clearTimeout(timer);e?fail(e):ok();});});copy.free();}};
+    const o={items,references,gateway:`ws://127.0.0.1:${server.address().port}/v2/ws`,async snapshot(){
+      // A follow sync may start after any entry near the body (the walk's own entries included): read the mirror at a
+      // moment the daemon is between syncs and the relay has seen every answer, never mid-sync.
+      const end=performance.now()+10_000;
+      for(;;){
+        if(failure)throw failure;healthy();
+        const status=await request(s.rt.socket,{op:'status'});
+        if(!status.syncing&&!active&&isDeepStrictEqual(JSON.parse(copy.roots()),status.roots))return copy;
+        if(performance.now()>=end){assert.equal(status.syncing,false);assert.equal(active,false);assert.deepEqual(JSON.parse(copy.roots()),status.roots,'mirror is the actual daemon canonical copy');}
+        await pause(50);
+      }
+    },async close(){closed=true;for(const socket of sockets)socket.destroy();await new Promise((ok,fail)=>{const timer=setTimeout(()=>fail(Error('relay-close-timeout')),2000);server.close(e=>{clearTimeout(timer);e?fail(e):ok();});});copy.free();}};
     observers.push(o);return o;
   };
   for(const s of seats){
