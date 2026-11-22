@@ -873,9 +873,7 @@ pub fn follow(
 // A stream observer has its own durable publication cursor. The canonical source copy validates WHOLE parts
 // before any projection is exposed; the public copy never receives the source's private ledger.
 use directoryd::directory::store::{Store as ObjectStore, When};
-use replica::stream::public::{
-    PublicPlayer, context as public_context, digest, project,
-};
+use replica::stream::public::{PublicPlayer, context as public_context, digest, project};
 use replica::views::{Redactions, View};
 
 use crate::closed::{Closed, Inside};
@@ -1807,7 +1805,11 @@ impl<S: ObjectStore> PublicWriter<S> {
         // with them left out, and, when that differs from the last state, it has no hand-off.
         let switch = !self.hides;
         let (baseline, state) = if switch {
-            let state = shown(&self.header, Some(&self.closed_kinds), self.canonical.tree())?;
+            let state = shown(
+                &self.header,
+                Some(&self.closed_kinds),
+                self.canonical.tree(),
+            )?;
             let baseline = replica::stream::public::baseline_from_projection(
                 &self.header,
                 state.clone(),
@@ -1835,8 +1837,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         let handoff = self.handoff_now()?;
         let crosses = PublicPlayer::start(self.header.stored(), &baseline)?.hash()? == handoff.3;
         self.hides = true;
-        let seed =
-            self.generation_seed(&baseline, &text, crosses.then_some(&handoff), &record)?;
+        let seed = self.generation_seed(&baseline, &text, crosses.then_some(&handoff), &record)?;
         let seed_hash = self.put(&seed)?;
         let manifest = wire(Value::Map(BTreeMap::from([
             (1, Value::Bytes(seed_hash.clone())),
@@ -2359,8 +2360,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             self.legacy = Some((*v, *n, hash.clone()));
             self.migration_cut = Some(*v);
             if self.canonical.version() == *v {
-                self.migration_state =
-                    Some(self.shown(self.canonical.tree())?);
+                self.migration_state = Some(self.shown(self.canonical.tree())?);
             }
         }
         if let Some(Value::Array(bootstrap)) = seed.get(&5) {
@@ -2450,9 +2450,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         // state the parts make together, before any file is written again (#3833): a whole digest and a whole
         // projection of a large world per part made a restart's time grow with the parts it reads.
         self.player.verify()?;
-        if played
-            && self.shown(self.canonical.tree())? != *self.player.state()
-        {
+        if played && self.shown(self.canonical.tree())? != *self.player.state() {
             return Err(fault("stream-recovery", "canonical projection differs"));
         }
         for (name, bytes) in files {
@@ -2793,12 +2791,12 @@ impl<S: ObjectStore> PublicWriter<S> {
                             *id,
                             (owner.audience == Audience::Everyone && !self.hidden(tree, t.node))
                                 .then(|| {
-                                Value::Map(BTreeMap::from([
-                                    (1, t.node.to_value()),
-                                    (2, int(t.due)),
-                                    (3, Value::Text(t.name.clone())),
-                                ]))
-                            }),
+                                    Value::Map(BTreeMap::from([
+                                        (1, t.node.to_value()),
+                                        (2, int(t.due)),
+                                        (3, Value::Text(t.name.clone())),
+                                    ]))
+                                }),
                         ))
                     }
                 })
