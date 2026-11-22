@@ -129,7 +129,7 @@ export class CameraDirector {
     });
     touchHints();
     cam.controls.addEventListener('start', () => ((this.panned = 0), this.follow?.touched()));
-    addEventListener('keydown', (e) => /^(Key[WASD]|Arrow)/.test(e.code) && take());
+    window.addEventListener('keydown', (e) => /^(Key[WASD]|Arrow)/.test(e.code) && take());
     this.find = this.findBox();
     this.places = new PlacesPanel({
       nodes: () => this.world.nodes.values(),

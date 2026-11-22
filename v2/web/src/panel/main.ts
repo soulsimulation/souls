@@ -200,7 +200,7 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => drag.move(pointer(e)));
 canvas.addEventListener('pointerup', () => drag.up());
 canvas.addEventListener('pointercancel', () => drag.cancel());
-addEventListener('keydown', (e) => e.key === 'Escape' && drag.cancel());
+window.addEventListener('keydown', (e) => e.key === 'Escape' && drag.cancel());
 $<HTMLButtonElement>('place').addEventListener('click', (e) => {
   placing = !placing;
   (e.currentTarget as HTMLElement).classList.toggle('on', placing);

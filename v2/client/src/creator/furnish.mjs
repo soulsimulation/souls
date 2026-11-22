@@ -210,3 +210,26 @@ export function furnishOps(nodes, ref, { style, kinds = {}, entries = {} } = {})
   const rooms = new Set(placed.map((p) => p.room)).size;
   return { ops, placed, dropped, notes, says: `furnish ${building.id} (${st}, front ${front}): ${placed.length} pieces in ${rooms} rooms, ${dropped.length} dropped` };
 }
+
+/** The claims refusals (#3701): the world's claims judge answers for the whole edit, never for one piece. */
+const CLAIM_REFUSALS = new Set(['edit.claimed', 'edit.outside-claim', 'edit.claim-unknown']);
+
+/** `furnishOps`' answer checked as the edit it makes: `check(ops)` is the world's own edit check on the copy, under the
+ *  edit's claim. A piece it refuses (its admission, its slot) is dropped with the refusal's name, with what goes on
+ *  it, and the rest checked again, as today drops a piece that does not fit; a claims refusal is the furnish's own. */
+export function checkedFurnish(out, check) {
+  let { ops } = out;
+  for (let k = 0; k < 64 && ops.length; k++) {
+    const v = check(ops);
+    if (CLAIM_REFUSALS.has(v.code)) return { ...v, ok: false };
+    if (v.ok || v.op === undefined || !ops[v.op]) break;
+    const gone = new Set([ops[v.op].name]);
+    for (const o of ops) if (gone.has(o.in)) gone.add(o.name);
+    out.dropped.push(...out.placed.filter((_, i) => gone.has(ops[i]?.name)).map((p) => ({ name: p.name, why: v.code })));
+    out.placed = out.placed.filter((_, i) => !gone.has(ops[i]?.name));
+    ops = ops.filter((o) => !gone.has(o.name));
+  }
+  if (!ops.length) return no('furnish.nothing', `nothing to furnish: ${out.notes.concat(out.dropped.map((d) => `${d.name} (${d.why})`)).slice(0, 8).join('; ')}`);
+  const why = out.dropped.slice(0, 8).map((d) => `${d.name} (${d.why})`);
+  return { ops, says: `${out.says.replace(/\d+ pieces/, `${ops.length} pieces`).replace(/\d+ dropped/, `${out.dropped.length} dropped`)}${why.length ? `; dropped: ${why.join(', ')}` : ''}` };
+}

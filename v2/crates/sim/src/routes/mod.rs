@@ -556,7 +556,7 @@ impl Map {
         buildings.push((gates, HashMap::new()));
         // Steps from one thing's floor onto another's (#3227), and every floor's first piece and piece count.
         for (i, l) in floor_joins(&buildings.iter().map(|(b, _)| b).collect::<Vec<_>>()) {
-            buildings[i].0.links.push(l);
+            buildings[i].0.join(l);
         }
         let all: HashMap<Id, (u32, u32)> = buildings
             .iter()

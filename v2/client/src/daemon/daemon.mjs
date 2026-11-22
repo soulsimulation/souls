@@ -12,7 +12,7 @@
 //     {"op":"act","verb":"...","target":"<scope hex>-<counter>"}  builds the next intent (the target optional) and
 //                                sends it once (now, or at the next sign-in)
 //     {"op":"read"}              gives and clears what happened since the last read (it never wakes the model)
-//     {"op":"stop"}              ends the process (the thin command's `quit`)
+//     {"op":"stop"}              ends the process (the thin command's `quit`); answered once nothing more is written
 //     {"op":"query","questions":[..],"budget":n}   #3704: several reads of the copy, each answered in turn (reads.mjs)
 //     {"op":"catalog"} | {"op":"context","words":"..","cursor":n}   #3704: the kinds in the copy; its named targets
 //     {"op":"batch","reads":[{"op":..},..]}       #3704: several read ops in one call, each answered as alone
@@ -155,7 +155,8 @@ import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { clockOf, worldNow } from '../clock/clock.mjs';
 import { worldOps } from '../creator/world.mjs';
 import { exportOf, importOf } from '../creator/genesis.mjs';
-import { furnishOps } from '../creator/furnish.mjs';
+import { checkedFurnish, furnishOps } from '../creator/furnish.mjs';
+import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
@@ -176,7 +177,10 @@ if (!home || !soul || !pkg) {
 }
 
 const rt = runtimeOf(home, soul);
-const log = (line) => appendFileSync(rt.log, `${new Date().toISOString()} ${line}\n`, { mode: 0o600 });
+// Set by `stop` once its last write is done: nothing writes into the Soul's home after it, so `stop`'s answer means
+// the home can be removed at once (`souls retire`, a test's teardown). Every writer below checks it.
+let ended = false;
+const log = (line) => ended || appendFileSync(rt.log, `${new Date().toISOString()} ${line}\n`, { mode: 0o600 });
 
 // --- One per Soul ---------------------------------------------------------------------------------------------
 function alive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
@@ -224,7 +228,7 @@ const scope = unhex(seat.grant.scope);
 
 // --- State on disk: the cursor and the sequences ------------------------------------------------------------------
 const state = { cursor: null, sequence: 0, unanswered: [], ...(existsSync(rt.state) ? JSON.parse(readFileSync(rt.state, 'utf8')) : {}) };
-const save = () => { writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\n', { mode: 0o600 }); renameSync(`${rt.state}.tmp`, rt.state); };
+const save = () => { if (ended) return; writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\n', { mode: 0o600 }); renameSync(`${rt.state}.tmp`, rt.state); };
 const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
 const heardSince = []; // what this Soul heard since its last turn (a look or a wait), for the brief (C6)
@@ -287,7 +291,11 @@ let stopped = 0; // acts stopped locally, for the trace
 // (and why) it has not been known current; null while it is.
 const startedAt = performance.now();
 let confirmedAt = null, changedAt = null, cutAt = startedAt, cutWhy = 'not-connected';
-const trace = openTrace(rt.dir);
+const traceFile = openTrace(rt.dir);
+const trace = { ...traceFile, write: (record) => ended || traceFile.write(record) };
+// A creator's recent commands, refused or not (`souls-god trace`): kept on disk beside the state, so a restart keeps them.
+const creatorTrace = seat.grant.actor === 'creator' ? openCreatorTrace(rt.dir) : null;
+const UNTRACED = new Set(['trace', 'stats', 'pending', 'status', 'stop']);
 const rankedOf = new Map(); // sequence → how many verbs it ranked, until answered
 const editsWaiting = new Map(); // G7: an edit's sequence → what its answer is handed to
 const movesOf = new Map(); // sequence → its move's form (C14), until answered: a receipt says whether the body sits
@@ -671,6 +679,7 @@ function fire(event) {
 let feeder = null;
 const heardWords = new Map(); // a heard utterance's words, by the reference the feeder is given
 function remember(entries) {
+  if (ended) return;
   try {
     feeder ??= feederFor(home, soul, { world: seat.world, textOf: (ref) => heardWords.get(ref) ?? null });
     feeder.feed(entries);
@@ -783,6 +792,7 @@ const OPS = new Set([
   'stats',
   'status',
   'stop',
+  'trace',
   'undo',
   'wait',
   'wake',
@@ -1053,25 +1063,12 @@ function keyAnswered(a) {
  *  (`worldd::answers::now`). For the creator's weather end and strike time (#3695). */
 const worldNowOrReal = () => worldNow(clockOf(copy)) ?? Date.now() * 1000;
 
-/** #3728: today's furnish recipes on the copy (`creator/furnish.mjs`), as one edit. A piece the world's own check
- *  refuses (its admission, its slot) is dropped with the refusal's name and the rest checked again, as today drops a
- *  piece that does not fit. */
-function furnishBatch(w) {
+/** #3728: today's furnish recipes on the copy (`creator/furnish.mjs`), as one edit, checked on the copy under the
+ *  edit's claim (#3701). */
+function furnishBatch(w, claim) {
   const out = furnishOps(exportOf(copy).nodes, w.ref, { style: w.style, kinds: pinned(), entries: kindsIn(join(home, 'kinds')) });
   if (out.ok === false) return out;
-  let { ops } = out;
-  for (let k = 0; k < 64 && ops.length; k++) {
-    const v = JSON.parse(wire.editCheck(copy, batchOf(ops), kindsText()));
-    if (v.ok || v.op === undefined || !ops[v.op]) break;
-    const gone = new Set([ops[v.op].name]);
-    for (const o of ops) if (gone.has(o.in)) gone.add(o.name);
-    out.dropped.push(...out.placed.filter((_, i) => gone.has(ops[i]?.name)).map((p) => ({ name: p.name, why: v.code })));
-    out.placed = out.placed.filter((_, i) => !gone.has(ops[i]?.name));
-    ops = ops.filter((o) => !gone.has(o.name));
-  }
-  if (!ops.length) return { ok: false, code: 'furnish.nothing', detail: `nothing to furnish: ${out.notes.concat(out.dropped.map((d) => `${d.name} (${d.why})`)).slice(0, 8).join('; ')}` };
-  const why = out.dropped.slice(0, 8).map((d) => `${d.name} (${d.why})`);
-  return { ops, says: `${out.says.replace(/\d+ pieces/, `${ops.length} pieces`).replace(/\d+ dropped/, `${out.dropped.length} dropped`)}${why.length ? `; dropped: ${why.join(', ')}` : ''}` };
+  return checkedFurnish(out, (ops) => JSON.parse(wire.editCheck(copy, batchOf(ops, claim), kindsText())));
 }
 
 /** The batch an edit or a check carries: its own ops, or a world verb's (#3695) made from the copy now. The land
@@ -1085,7 +1082,7 @@ async function worldBatch(req) {
     }
     return land.landOps(copy, req.world);
   }
-  if (req.world.verb === 'furnish') return furnishBatch(req.world);
+  if (req.world.verb === 'furnish') return furnishBatch(req.world, req.claim);
   return worldOps(copy, req.world, worldNowOrReal());
 }
 
@@ -1297,6 +1294,12 @@ async function answer(req) {
       }
       return answer({ op: 'act', acts: actWords(offer, req.args ?? []), ...(req.for !== undefined ? { for: req.for } : {}) });
     }
+    case 'trace': {
+      if (!creatorTrace) return { ok: false, code: 'trace.not-a-creator', detail: 'trace lists a creator\'s commands' };
+      const n = Math.max(1, Math.min(TRACE_MOST, Number(req.n ?? 20) || 20));
+      const rows = creatorTrace.last(n);
+      return { ok: true, kept: creatorTrace.size, most: TRACE_MOST, refused: rows.filter((r) => !r.ok).length, rows };
+    }
     case 'describe': return closing({ ok: true }, (rows) => {
       // Where each stands in its parent, mm, for placing by relation (#3694).
       const poses = posesOf(copy);
@@ -1423,7 +1426,7 @@ async function answer(req) {
       const scheduled = scheduleEvent(e);
       return { ok: true, fired, ...(scheduled.length ? { scheduled } : {}) };
     }
-    case 'stop': setImmediate(stop); return { ok: true };
+    case 'stop': return { ok: true }; // answered by stop() itself, once its last write is done
     case 'halt': {
       // #3705 (today's `stop`): ends this Soul's own act where it stands: a walk stops now, a sit, a lie or a rise
       // finishes, a standing order ends. A `souls:cancel` naming it; the world answers both.
@@ -1633,9 +1636,10 @@ const server = createServer((c) => {
     for (let k; (k = buf.indexOf('\n')) >= 0;) {
       const line = buf.slice(0, k);
       buf = buf.slice(k + 1);
-      let op = 'unread';
+      let op = 'unread', asked = null;
       Promise.resolve().then(() => {
         const req = JSON.parse(line);
+        asked = req;
         op = !OPS.has(req.op) ? 'unknown' : req.op === 'pending' && req.list ? 'pending-list' : req.op; // a listing is the agent's
         return answer(req);
       })
@@ -1654,7 +1658,9 @@ const server = createServer((c) => {
           // Every answer carries its age (R10); each but stats's is traced with the bytes it prints.
           const said = JSON.stringify('age' in out ? out : { ...out, ...ageNow() }) + '\n';
           if (op !== 'stats' && !check) trace.write({ k: 'cmd', op, bytes: Buffer.byteLength(said) });
-          if (!c.destroyed) c.write(said);
+          if (creatorTrace && asked && !UNTRACED.has(asked.op)) creatorTrace.add(rowOf(asked, out));
+          if (op === 'stop') stop(c, said);
+          else if (!c.destroyed) c.write(said);
         });
     }
   });
@@ -1819,16 +1825,26 @@ function scheduleEvent(event) {
   return hit.map((e) => e.id);
 }
 
-function stop() {
-  stopping = true;
-  log('stopping');
-  ws?.close();
-  server.close();
-  releaseLock();
-  process.exit(0);
+/**
+ * Ends the daemon. Its last writes (the log line, the lock and socket released) come first; then nothing writes into
+ * the home again, and only then does a `stop` command (`c`) get its answer `said`; the process ends once it is sent.
+ */
+function stop(c, said) {
+  if (!ended) {
+    stopping = true;
+    log('stopping');
+    clearInterval(beating);
+    ws?.close();
+    server.close();
+    releaseLock();
+    ended = true;
+  }
+  if (!c || c.destroyed) process.exit(0);
+  setTimeout(() => process.exit(0), 1000).unref(); // a caller gone before its answer is not waited for
+  c.end(said, () => process.exit(0));
 }
-process.on('SIGTERM', stop);
-process.on('SIGINT', stop);
+process.on('SIGTERM', () => stop());
+process.on('SIGINT', () => stop());
 process.on('SIGHUP', () => {}); // the terminal that started it closing is not a reason to stop
 
 server.on('error', (e) => {
@@ -1838,6 +1854,6 @@ server.on('error', (e) => {
 });
 rmSync(rt.socket, { force: true });
 beat(); // before the first answer, so it lists what was missed while off
-setInterval(beat, BEAT_MS);
+const beating = setInterval(beat, BEAT_MS);
 atSocket(rt.socket, (path) => server.listen(path, () => log(`listening for ${soul}, pid ${process.pid}`)));
 connect();
