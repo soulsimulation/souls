@@ -4,6 +4,7 @@
 // rule's name, or the check itself is broken. Then the tree. Rules and what they do not prove: README.md.
 //
 //   node v2/tools/arch/check.mjs          (from anywhere; exit 1 on a broken rule)
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -189,4 +190,4 @@ async function main() {
   return problems.length ? 1 : 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await main();
+if (isMain(import.meta.url)) process.exitCode = await main();

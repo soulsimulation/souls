@@ -5,8 +5,8 @@
 // a POST. /sign-in with a valid return answers 200 with the Clerk primary bridge (no-store, its own CSP), never a
 // redirect. The canonical site serves the redirected world pages. Prints PASS or FAIL with each problem; exit 0 on PASS.
 // Read-only: GET and HEAD, plus one POST to an unknown path that is redirected before anything reads it.
-import { fileURLToPath } from 'node:url';
 
+import { isMain } from '../../../lib/is-main.mjs';
 export const SAMPLES = ['/', '/w/eden/', '/w/mars-college-2026/?view=map', '/worlds/', '/worlds/w/eden-2026/', '/changelog', '/__sim/healthz', '/blobs/assets/00/x.glb'];
 export const PAGES = ['/w/eden/', '/'];
 
@@ -43,7 +43,7 @@ export async function checkRedirect({ origin = 'https://sim.eden.art', canonical
   return { pass: problems.length === 0, problems, seen };
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2), opt = (k, d) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : d; };
   const r = await checkRedirect({ origin: opt('--origin', 'https://sim.eden.art').replace(/\/$/, ''), canonical: opt('--canonical', 'https://soul.game').replace(/\/$/, '') });
   for (const s of r.seen) console.log(`  ${s}`);

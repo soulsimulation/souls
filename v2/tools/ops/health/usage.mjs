@@ -11,10 +11,10 @@
 //
 //   node usage.mjs rollup --root <worlds root> --store <usage.sqlite> [--day YYYY-MM-DD]   (default: yesterday)
 //   node usage.mjs report --store <usage.sqlite> [--days 7] [--json]
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { fileURLToPath } from 'node:url';
 
 const DAY_MS = 86_400_000;
 export const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -104,7 +104,7 @@ export function text(r) {
   return lines.join('\n');
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; };
   if (argv[0] === 'rollup') {
     const r = rollupDay(opt('store'), opt('root', process.env.WORLDS_ROOT ?? '/var/lib/souls/worlds'), opt('day', dayOf(Date.now() - DAY_MS)));

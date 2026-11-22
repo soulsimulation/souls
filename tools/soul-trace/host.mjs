@@ -11,10 +11,10 @@
 // Ids are opaque refs the host chooses; nothing else is recorded: no prompt, command text, paths
 // or tool output. Writes are small synchronous appends to a regular file (or, with `queued`, the
 // bounded async queue in sink.mjs); a failing or refused sink disables the recorder and never throws into the host.
+import { isMain } from '../lib/is-main.mjs';
 import {performance} from 'node:perf_hooks';
 import {randomBytes} from 'node:crypto';
 import {appendFile, appendFileSync, lstatSync} from 'node:fs';
-import {pathToFileURL} from 'node:url';
 import {basename, resolve} from 'node:path';
 import {createSink} from './sink.mjs';
 // Not imported from tap.mjs: importing the tap installs it when SOUL_TRACE_FILE is set (host.test.mjs checks they agree).
@@ -63,7 +63,7 @@ export function hostRecorder({file, now = Date.now, mono = () => performance.now
 }
 
 // The name as well as the url: bundled into the managed runtime, import.meta.url is the bundle's, so the url alone would run this there.
-if (process.argv[1] && basename(process.argv[1]) === 'host.mjs' && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && basename(process.argv[1]) === 'host.mjs' && isMain(import.meta.url)) {
   const a = process.argv.slice(2), opt = k => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : undefined; };
   const [what, p] = a, h = hostRecorder({file: process.env.SOUL_TRACE_FILE});
   const ids = {turn: opt('--turn'), tool: opt('--tool'), for: opt('--for'), exitCode: opt('--exit') === undefined ? undefined : Number(opt('--exit'))};

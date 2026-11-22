@@ -27,5 +27,9 @@ test('a public destination is rejected before a request and command has no crede
   assert.equal(calls, 0);
   const source = await readFile(new URL('./test-soul', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /node:fs|credentials|readFile|createReadStream/);
-  assert.deepEqual([...source.matchAll(/^import .* from '([^']+)'/gm)].map((m) => m[1]), ['node:url']);
+  assert.deepEqual([...source.matchAll(/^import .* from '([^']+)'/gm)].map((m) => m[1]), ['../../../tools/lib/is-main.mjs']);
+  // The entry check resolves paths only (realpathSync on its own path and argv[1]); it reads no file's contents.
+  const entry = await readFile(new URL('../../../tools/lib/is-main.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(entry, /credentials|readFile|createReadStream|openSync/);
+  assert.deepEqual([...entry.matchAll(/^import (.*) from '([^']+)'/gm)].map((m) => `${m[1]} ${m[2]}`), ['{ realpathSync } node:fs', '{ fileURLToPath } node:url']);
 });

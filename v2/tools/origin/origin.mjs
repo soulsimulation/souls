@@ -14,11 +14,11 @@
 // the page's files and the release's news (SOULS_WEB, SOULS_DATA); every other path is a stream file as above.
 // Usage: node origin.mjs <dir> [port] [host]. Prints `origin <port>`; on SIGTERM or SIGINT prints `stats {json}`
 // (requests by kind, requests per part path, processor seconds) and exits.
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, normalize, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { noPage, siteRoutes, wantsPage } from './site.mjs';
 import { worldRoutes } from './world-routes.mjs';
 
@@ -90,7 +90,7 @@ export function createOrigin(dir, site = {}) {
   return { server, stats };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const [dir, port = '0', host = '127.0.0.1'] = process.argv.slice(2);
   if (!dir) throw new Error('usage: node origin.mjs <dir> [port] [host]');
   const { server, stats } = createOrigin(dir);

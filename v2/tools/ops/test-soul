@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // O24: approve a waiting test-Soul pairing from the directory's own machine. No file access or bearer token.
-import { pathToFileURL } from 'node:url';
+import { isMain } from '../../../tools/lib/is-main.mjs';
 
 export async function run(args, request = fetch) {
   const flag = args.indexOf('--directory');
@@ -27,7 +27,7 @@ export async function run(args, request = fetch) {
   return result;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   run(process.argv.slice(2)).then((v) => console.log(JSON.stringify(v))).catch((e) => {
     console.error(JSON.stringify({ refused: e.message }));
     process.exitCode = 1;

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Small outer process owner: recover a killed controller, never restart explicit
 // configuration/auth failures. Machine sleep/reboot is outside this process.
+import { isMain } from '../lib/is-main.mjs';
 import {spawn} from 'node:child_process';
-import {fileURLToPath,pathToFileURL} from 'node:url';
+import { fileURLToPath } from 'node:url';
 import {resolve,join} from 'node:path';
 import {createControllerOwner} from './controller-ownership.mjs';
 import {abortableSleep} from './receiver.mjs';
@@ -38,4 +39,4 @@ export async function main(argv=process.argv.slice(2)){
  try{await superviseProcess({args,seconds,ownershipDirectory,signal:stop.signal,onState:s=>console.log(JSON.stringify({at:new Date().toISOString(),...s}))});}
  finally{process.removeListener('SIGINT',quit);process.removeListener('SIGTERM',quit);}
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)main().catch(e=>{console.error(JSON.stringify({state:'blocked',code:e.code??'launcher.failure',reason:e.message}));process.exitCode=1;});
+if(isMain(import.meta.url))main().catch(e=>{console.error(JSON.stringify({state:'blocked',code:e.code??'launcher.failure',reason:e.message}));process.exitCode=1;});

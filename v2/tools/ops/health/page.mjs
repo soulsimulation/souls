@@ -10,6 +10,7 @@
 //
 //   node page.mjs --root <worlds root> --directory <directoryd URL> --owners <site-owners.json> [--port 8090] [--host 127.0.0.1]
 // site-owners.json: {"owners": ["<account id>", ...]}, the account ids W1 issues.
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -91,7 +92,7 @@ export function serve(opts) {
   });
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; };
   const root = opt('root', process.env.WORLDS_ROOT ?? '/var/lib/souls/worlds');
   const owners = JSON.parse(readFileSync(opt('owners'), 'utf8')).owners ?? [];

@@ -8,10 +8,10 @@
 //   node v2/client/served/serve.mjs <served dir> [--port <n>] [--upstream <origin>]
 //     a local stand-in: anything else is passed to --upstream (a directory, say), else 404. Prints `listening <url>`.
 
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const TYPES = {
   'eden.mjs': 'text/javascript; charset=utf-8', 'replica.js': 'text/javascript; charset=utf-8',
@@ -33,7 +33,7 @@ export function answer(dir, path) {
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2), dir = args[0];
   const opt = (n) => { const k = args.indexOf(n); return k >= 0 ? args[k + 1] : undefined; };
   const upstream = opt('--upstream');

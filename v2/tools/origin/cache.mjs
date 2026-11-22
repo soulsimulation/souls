@@ -4,8 +4,8 @@
 // not for production; the owner's alternative to a CDN is nginx itself (v2/docs/viewer-cache.md).
 // Usage: node cache.mjs <upstream origin, e.g. http://127.0.0.1:8080> [port] [host]. Prints `cache <port>`; on
 // SIGTERM or SIGINT prints `stats {json}` (hits, misses, collapsed, upstream requests) and exits.
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { Agent, createServer, request } from 'node:http';
-import { fileURLToPath } from 'node:url';
 
 /** Seconds a response may be kept, or 0: only a 200 with `max-age` and no `no-store`/`private`/`no-cache`. */
 export function keepFor(status, cacheControl = '') {
@@ -77,7 +77,7 @@ export function createCache(upstream) {
   return { server, stats };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const [upstream, port = '0', host = '127.0.0.1'] = process.argv.slice(2);
   if (!upstream) throw new Error('usage: node cache.mjs <upstream> [port] [host]');
   const { server, stats } = createCache(upstream);

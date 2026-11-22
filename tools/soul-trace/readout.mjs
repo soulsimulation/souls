@@ -3,9 +3,8 @@
 // was captured, never a replay. Links are made only by recorded identities (owner
 // message id, `for`, receipt id, idempotency key); nothing is joined by nearby time.
 // Intervals across clock domains are labelled approximate.
+import { isMain } from '../lib/is-main.mjs';
 import {readFileSync} from 'node:fs';
-import {pathToFileURL} from 'node:url';
-import {resolve} from 'node:path';
 import {SCHEMA} from './tap.mjs';
 
 const TERMINAL = new Set(['completed', 'failed', 'replaced', 'interrupted', 'cancelled', 'refused']);
@@ -244,7 +243,7 @@ export function render(t) {
   return out.join('\n') + '\n';
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2), json = args.includes('--json'), file = args.find(a => a !== '--json');
   if (!file) { process.stderr.write('usage: node tools/soul-trace/readout.mjs <trace.jsonl> [--json]\n'); process.exit(2); }
   const t = reconstruct(readFileSync(file, 'utf8'));

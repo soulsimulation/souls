@@ -10,6 +10,7 @@
 // (frame.mjs: north −z, east +x). Headings of video frames are not logged: each view states the one fitted by eye.
 // Pitch comes from the horizon row of the drone picture (vertical fov 45° = the viewer's camera; the DJI video's 16:9
 // field is ≈ 73° wide, the same as the viewer's at 16:9).
+import { isMain } from '../../../lib/is-main.mjs';
 import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -56,7 +57,7 @@ export function pose(v) {
   return { eye, at, rel, h, pitchDeg: pitch * 180 / Math.PI };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2), flag = (k, d) => { const i = args.indexOf(`--${k}`); return i >= 0 ? args.splice(i, 2)[1] : d; };
   const dpr = Number(flag('dpr', 1)), out = flag('out', join(LANES, 'marsland-shots/compare')), extra = flag('q', '');
   const [url, ...names] = args; mkdirSync(out, { recursive: true });
