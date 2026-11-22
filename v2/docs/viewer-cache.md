@@ -11,6 +11,9 @@ price are the owner's (C4 on #2636).
 1. **A plain file server over the stream writer's directory**, apart from the world process: `node
    v2/tools/origin/origin.mjs <dir> [port] [host]`. The world writes files (whole, then renamed); the origin only reads
    them. A world that stops or restarts never stops the origin, and an origin under load never slows the world.
+   Every request for one immutable file shares one buffer of it (the newest 64 MB stay held, `ORIGIN_CACHE_MB`), so
+   a join wave all asking for a 9 MB baseline costs the origin one copy, not one per request (#4018). Each request
+   still checks the file on disk; the pointer is read afresh every time.
 2. **Three kinds of answer, and nothing else:**
 
    | Request | Status | `Cache-Control` |
