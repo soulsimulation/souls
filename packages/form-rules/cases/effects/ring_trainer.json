@@ -1,0 +1,2938 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Own-ring literal effect only, both higher-state extremes, full21move solution and reverse. Saved fixtures are not native restart or cancellation evidence.",
+  "cases": [
+    {
+      "name": "engage_ring1_higher_true",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring1"
+          },
+          "receipt": "engage_ring1True",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": 1,
+            "ring2": true,
+            "ring3": true,
+            "ring4": true,
+            "ring5": true
+          }
+        }
+      }
+    },
+    {
+      "name": "engage_ring1_higher_false",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring1"
+          },
+          "receipt": "engage_ring1False",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": 1,
+            "ring2": false,
+            "ring3": false,
+            "ring4": false,
+            "ring5": false
+          }
+        }
+      }
+    },
+    {
+      "name": "disengage_ring1_higher_true",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring1"
+          },
+          "receipt": "disengage_ring1True",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": 0,
+            "ring2": true,
+            "ring3": true,
+            "ring4": true,
+            "ring5": true
+          }
+        }
+      }
+    },
+    {
+      "name": "disengage_ring1_higher_false",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": false,
+              "ring3": false,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring1"
+          },
+          "receipt": "disengage_ring1False",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": 0,
+            "ring2": false,
+            "ring3": false,
+            "ring4": false,
+            "ring5": false
+          }
+        }
+      }
+    },
+    {
+      "name": "engage_ring2_higher_true",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring2"
+          },
+          "receipt": "engage_ring2True",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": true,
+            "ring2": 1,
+            "ring3": true,
+            "ring4": true,
+            "ring5": true
+          }
+        }
+      }
+    },
+    {
+      "name": "engage_ring2_higher_false",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": false,
+              "ring3": false,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring2"
+          },
+          "receipt": "engage_ring2False",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": true,
+            "ring2": 1,
+            "ring3": false,
+            "ring4": false,
+            "ring5": false
+          }
+        }
+      }
+    },
+    {
+      "name": "disengage_ring2_higher_true",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring2"
+          },
+          "receipt": "disengage_ring2True",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": true,
+            "ring2": 0,
+            "ring3": true,
+            "ring4": true,
+            "ring5": true
+          }
+        }
+      }
+    },
+    {
+      "name": "disengage_ring2_higher_false",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": false,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring2"
+          },
+          "receipt": "disengage_ring2False",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": true,
+            "ring2": 0,
+            "ring3": false,
+            "ring4": false,
+            "ring5": false
+          }
+        }
+      }
+    },
+    {
+      "name": "engage_ring3_higher_true",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring3"
+          },
+          "receipt": "engage_ring3True",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": false,
+            "ring2": true,
+            "ring3": 1,
+            "ring4": true,
+            "ring5": true
+          }
+        }
+      }
+    },
+    {
+      "name": "engage_ring3_higher_false",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": false,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring3"
+          },
+          "receipt": "engage_ring3False",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": false,
+            "ring2": true,
+            "ring3": 1,
+            "ring4": false,
+            "ring5": false
+          }
+        }
+      }
+    },
+    {
+      "name": "disengage_ring3_higher_true",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring3"
+          },
+          "receipt": "disengage_ring3True",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": false,
+            "ring2": true,
+            "ring3": 0,
+            "ring4": true,
+            "ring5": true
+          }
+        }
+      }
+    },
+    {
+      "name": "disengage_ring3_higher_false",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring3"
+          },
+          "receipt": "disengage_ring3False",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": false,
+            "ring2": true,
+            "ring3": 0,
+            "ring4": false,
+            "ring5": false
+          }
+        }
+      }
+    },
+    {
+      "name": "engage_ring4_higher_true",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": false,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring4"
+          },
+          "receipt": "engage_ring4True",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring4",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": false,
+            "ring2": false,
+            "ring3": true,
+            "ring4": 1,
+            "ring5": true
+          }
+        }
+      }
+    },
+    {
+      "name": "engage_ring4_higher_false",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring4"
+          },
+          "receipt": "engage_ring4False",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring4",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": false,
+            "ring2": false,
+            "ring3": true,
+            "ring4": 1,
+            "ring5": false
+          }
+        }
+      }
+    },
+    {
+      "name": "disengage_ring4_higher_true",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring4"
+          },
+          "receipt": "disengage_ring4True",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring4",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": false,
+            "ring2": false,
+            "ring3": true,
+            "ring4": 0,
+            "ring5": true
+          }
+        }
+      }
+    },
+    {
+      "name": "disengage_ring4_higher_false",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring4"
+          },
+          "receipt": "disengage_ring4False",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring4",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": false,
+            "ring2": false,
+            "ring3": true,
+            "ring4": 0,
+            "ring5": false
+          }
+        }
+      }
+    },
+    {
+      "name": "engage_ring5_higher_true",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring5"
+          },
+          "receipt": "engage_ring5True",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring5",
+                "n": 32,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": false,
+            "ring2": false,
+            "ring3": false,
+            "ring4": true,
+            "ring5": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "engage_ring5_higher_false",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring5"
+          },
+          "receipt": "engage_ring5False",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring5",
+                "n": 32,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": false,
+            "ring2": false,
+            "ring3": false,
+            "ring4": true,
+            "ring5": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "disengage_ring5_higher_true",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring5"
+          },
+          "receipt": "disengage_ring5True",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring5",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": false,
+            "ring2": false,
+            "ring3": false,
+            "ring4": true,
+            "ring5": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "disengage_ring5_higher_false",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring5"
+          },
+          "receipt": "disengage_ring5False",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring5",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": false,
+            "ring2": false,
+            "ring3": false,
+            "ring4": true,
+            "ring5": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "all21_solution_moves_and_legal_reverse_restoration",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring1"
+          },
+          "receipt": "journey0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring3"
+          },
+          "receipt": "journey1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring1"
+          },
+          "receipt": "journey2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring2"
+          },
+          "receipt": "journey3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring1"
+          },
+          "receipt": "journey4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring5"
+          },
+          "receipt": "journey5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring5",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring1"
+          },
+          "receipt": "journey6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring2"
+          },
+          "receipt": "journey7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring1"
+          },
+          "receipt": "journey8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring3"
+          },
+          "receipt": "journey9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring1"
+          },
+          "receipt": "journey10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring2"
+          },
+          "receipt": "journey11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring1"
+          },
+          "receipt": "journey12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring4"
+          },
+          "receipt": "journey13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring4",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring1"
+          },
+          "receipt": "journey14",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring2"
+          },
+          "receipt": "journey15",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring1"
+          },
+          "receipt": "journey16",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring3"
+          },
+          "receipt": "journey17",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring1"
+          },
+          "receipt": "journey18",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring2"
+          },
+          "receipt": "journey19",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring1"
+          },
+          "receipt": "journey20",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring1"
+          },
+          "receipt": "journey21",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring2"
+          },
+          "receipt": "journey22",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring1"
+          },
+          "receipt": "journey23",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring3"
+          },
+          "receipt": "journey24",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring1"
+          },
+          "receipt": "journey25",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring2"
+          },
+          "receipt": "journey26",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring1"
+          },
+          "receipt": "journey27",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring4"
+          },
+          "receipt": "journey28",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring4",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring1"
+          },
+          "receipt": "journey29",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring2"
+          },
+          "receipt": "journey30",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring1"
+          },
+          "receipt": "journey31",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring3"
+          },
+          "receipt": "journey32",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring1"
+          },
+          "receipt": "journey33",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring2"
+          },
+          "receipt": "journey34",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring1"
+          },
+          "receipt": "journey35",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring5"
+          },
+          "receipt": "journey36",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring5",
+                "n": 32,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring1"
+          },
+          "receipt": "journey37",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring2"
+          },
+          "receipt": "journey38",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "disengage_ring1"
+          },
+          "receipt": "journey39",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring3"
+          },
+          "receipt": "journey40",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "engage_ring1"
+          },
+          "receipt": "journey41",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ring1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:ring_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:ring_trainer",
+          "fields": {
+            "ring1": 1,
+            "ring2": 1,
+            "ring3": 1,
+            "ring4": 1,
+            "ring5": 1
+          }
+        }
+      }
+    }
+  ]
+}

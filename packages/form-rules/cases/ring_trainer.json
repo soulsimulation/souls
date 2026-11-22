@@ -1,0 +1,3606 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "All10 forms and every prior/lower/hand/reach guard; higher-state independence. Reach cases are evaluator-level.",
+  "cases": [
+    {
+      "name": "engage_ring1_ready_higher_engaged",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "engage_ring1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "engage_ring1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "engage_ring1_ready_higher_disengaged",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "disengage_ring1_ready_higher_engaged",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "disengage_ring1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "disengage_ring1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "disengage_ring1_ready_higher_disengaged",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": false,
+              "ring3": false,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "engage_ring2_ready_higher_engaged",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "engage_ring2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "engage_ring2_need_3",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "engage_ring2_ready_higher_disengaged",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": false,
+              "ring3": false,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "disengage_ring2_ready_higher_engaged",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "disengage_ring2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "disengage_ring2_need_3",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "disengage_ring2_ready_higher_disengaged",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": false,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "engage_ring3_ready_higher_engaged",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "engage_ring3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring3_need_3",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "engage_ring3_need_4",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 4,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "engage_ring3_ready_higher_disengaged",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": false,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "disengage_ring3_ready_higher_engaged",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "disengage_ring3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring3_need_3",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "disengage_ring3_need_4",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 4,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "disengage_ring3_ready_higher_disengaged",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "engage_ring4_ready_higher_engaged",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": false,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "engage_ring4_need_0",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring4_need_1",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": false,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring4_need_2",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": false,
+              "ring3": true,
+              "ring4": false,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring4_need_3",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": false,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring4_need_4",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": false,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 4,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "engage_ring4_need_5",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": false,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 5,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "engage_ring4_ready_higher_disengaged",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "disengage_ring4_ready_higher_engaged",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "disengage_ring4_need_0",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": false,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring4_need_1",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring4_need_2",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring4_need_3",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring4_need_4",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 4,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "disengage_ring4_need_5",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 5,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "disengage_ring4_ready_higher_disengaged",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "engage_ring5_ready_higher_engaged",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "engage_ring5_need_0",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring5_need_1",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": false,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring5_need_2",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring5_need_3",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": false,
+              "ring4": true,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring5_need_4",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 4,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "engage_ring5_need_5",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 5,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "engage_ring5_need_6",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 6,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "engage_ring5_ready_higher_disengaged",
+      "act": {
+        "this": "p1",
+        "form": "engage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "disengage_ring5_ready_higher_engaged",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "disengage_ring5_need_0",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring5_need_1",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": false,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring5_need_2",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": true,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring5_need_3",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": true,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring5_need_4",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": true,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 4,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "disengage_ring5_need_5",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 5,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "disengage_ring5_need_6",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 6,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "disengage_ring5_ready_higher_disengaged",
+      "act": {
+        "this": "p1",
+        "form": "disengage_ring5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:ring_trainer",
+            "fields": {
+              "ring1": false,
+              "ring2": false,
+              "ring3": false,
+              "ring4": true,
+              "ring5": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    }
+  ]
+}

@@ -1,0 +1,1563 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:ring_trainer",
+  "owner": "thing",
+  "state": {
+    "ring1": {
+      "n": 28,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "ring2": {
+      "n": 29,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "ring3": {
+      "n": 30,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "ring4": {
+      "n": 31,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "ring5": {
+      "n": 32,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1020
+      ],
+      "yaw_mdeg": 180000
+    },
+    "board": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        850,
+        470
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1780,
+      900,
+      1100
+    ]
+  },
+  "forms": {
+    "engage_ring1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "ring1",
+          "is": false,
+          "says": "already_engaged"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "ring1",
+          "to": true,
+          "event": "ring_indexed"
+        }
+      ]
+    },
+    "disengage_ring1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "ring1",
+          "is": true,
+          "says": "already_disengaged"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "ring1",
+          "to": false,
+          "event": "ring_indexed"
+        }
+      ]
+    },
+    "engage_ring2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "ring2",
+          "is": false,
+          "says": "already_engaged"
+        },
+        {
+          "need": "state",
+          "field": "ring1",
+          "is": true,
+          "says": "predecessor_off"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "ring2",
+          "to": true,
+          "event": "ring_indexed"
+        }
+      ]
+    },
+    "disengage_ring2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "ring2",
+          "is": true,
+          "says": "already_disengaged"
+        },
+        {
+          "need": "state",
+          "field": "ring1",
+          "is": true,
+          "says": "predecessor_off"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "ring2",
+          "to": false,
+          "event": "ring_indexed"
+        }
+      ]
+    },
+    "engage_ring3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "ring3",
+          "is": false,
+          "says": "already_engaged"
+        },
+        {
+          "need": "state",
+          "field": "ring2",
+          "is": true,
+          "says": "predecessor_off"
+        },
+        {
+          "need": "state",
+          "field": "ring1",
+          "is": false,
+          "says": "lower_ring_on"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "ring3",
+          "to": true,
+          "event": "ring_indexed"
+        }
+      ]
+    },
+    "disengage_ring3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "ring3",
+          "is": true,
+          "says": "already_disengaged"
+        },
+        {
+          "need": "state",
+          "field": "ring2",
+          "is": true,
+          "says": "predecessor_off"
+        },
+        {
+          "need": "state",
+          "field": "ring1",
+          "is": false,
+          "says": "lower_ring_on"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "ring3",
+          "to": false,
+          "event": "ring_indexed"
+        }
+      ]
+    },
+    "engage_ring4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "ring4",
+          "is": false,
+          "says": "already_engaged"
+        },
+        {
+          "need": "state",
+          "field": "ring3",
+          "is": true,
+          "says": "predecessor_off"
+        },
+        {
+          "need": "state",
+          "field": "ring1",
+          "is": false,
+          "says": "lower_ring_on"
+        },
+        {
+          "need": "state",
+          "field": "ring2",
+          "is": false,
+          "says": "lower_ring_on"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "ring4",
+          "to": true,
+          "event": "ring_indexed"
+        }
+      ]
+    },
+    "disengage_ring4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "ring4",
+          "is": true,
+          "says": "already_disengaged"
+        },
+        {
+          "need": "state",
+          "field": "ring3",
+          "is": true,
+          "says": "predecessor_off"
+        },
+        {
+          "need": "state",
+          "field": "ring1",
+          "is": false,
+          "says": "lower_ring_on"
+        },
+        {
+          "need": "state",
+          "field": "ring2",
+          "is": false,
+          "says": "lower_ring_on"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "ring4",
+          "to": false,
+          "event": "ring_indexed"
+        }
+      ]
+    },
+    "engage_ring5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "ring5",
+          "is": false,
+          "says": "already_engaged"
+        },
+        {
+          "need": "state",
+          "field": "ring4",
+          "is": true,
+          "says": "predecessor_off"
+        },
+        {
+          "need": "state",
+          "field": "ring1",
+          "is": false,
+          "says": "lower_ring_on"
+        },
+        {
+          "need": "state",
+          "field": "ring2",
+          "is": false,
+          "says": "lower_ring_on"
+        },
+        {
+          "need": "state",
+          "field": "ring3",
+          "is": false,
+          "says": "lower_ring_on"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "ring5",
+          "to": true,
+          "event": "ring_indexed"
+        }
+      ]
+    },
+    "disengage_ring5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "ring5",
+          "is": true,
+          "says": "already_disengaged"
+        },
+        {
+          "need": "state",
+          "field": "ring4",
+          "is": true,
+          "says": "predecessor_off"
+        },
+        {
+          "need": "state",
+          "field": "ring1",
+          "is": false,
+          "says": "lower_ring_on"
+        },
+        {
+          "need": "state",
+          "field": "ring2",
+          "is": false,
+          "says": "lower_ring_on"
+        },
+        {
+          "need": "state",
+          "field": "ring3",
+          "is": false,
+          "says": "lower_ring_on"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "ring5",
+          "to": false,
+          "event": "ring_indexed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:ring_trainer",
+    "table": [
+      {
+        "part": "ring1",
+        "field": "ring1",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "false": 180,
+          "true": -180
+        }
+      },
+      {
+        "part": "ring2",
+        "field": "ring2",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "false": 180,
+          "true": -180
+        }
+      },
+      {
+        "part": "ring3",
+        "field": "ring3",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "false": 180,
+          "true": -180
+        }
+      },
+      {
+        "part": "ring4",
+        "field": "ring4",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "false": 180,
+          "true": -180
+        }
+      },
+      {
+        "part": "ring5",
+        "field": "ring5",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "false": 180,
+          "true": -180
+        }
+      }
+    ],
+    "shape": {
+      "round": 2,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            790,
+            0
+          ],
+          "size": [
+            1760,
+            40,
+            1080
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -810,
+            385,
+            -470
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -810,
+            385,
+            470
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            810,
+            385,
+            -470
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            810,
+            385,
+            470
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            817,
+            0
+          ],
+          "size": [
+            1710,
+            14,
+            1030
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            50,
+            833,
+            -180
+          ],
+          "size": [
+            1460,
+            8,
+            12
+          ],
+          "tint": "engaged"
+        },
+        {
+          "kind": "box",
+          "at": [
+            50,
+            833,
+            180
+          ],
+          "size": [
+            1460,
+            8,
+            12
+          ],
+          "tint": "disengaged"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -800,
+            844,
+            -180
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -780,
+            844,
+            -208
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -784,
+            844,
+            -180
+          ],
+          "size": [
+            8,
+            6,
+            32
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -780,
+            844,
+            -152
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -800,
+            844,
+            180
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -788,
+            844,
+            152
+          ],
+          "size": [
+            8,
+            6,
+            24
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -768,
+            844,
+            160
+          ],
+          "size": [
+            8,
+            6,
+            23
+          ],
+          "tint": "ink",
+          "yaw": 45000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -760,
+            844,
+            180
+          ],
+          "size": [
+            8,
+            6,
+            24
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -768,
+            844,
+            200
+          ],
+          "size": [
+            8,
+            6,
+            23
+          ],
+          "tint": "ink",
+          "yaw": -45000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -788,
+            844,
+            208
+          ],
+          "size": [
+            8,
+            6,
+            24
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -600,
+            844,
+            420
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -600,
+            835,
+            0
+          ],
+          "size": [
+            6,
+            8,
+            700
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -600,
+            840,
+            -180
+          ],
+          "size": [
+            24,
+            10,
+            24
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -600,
+            840,
+            180
+          ],
+          "size": [
+            24,
+            10,
+            24
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "ring",
+          "at": [
+            -600,
+            855,
+            0
+          ],
+          "r": 90,
+          "r2": 12,
+          "segments": 16,
+          "tint": "hoop",
+          "role": "ring1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            844,
+            392
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -280,
+            844,
+            406
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            844,
+            420
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -320,
+            844,
+            434
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            844,
+            448
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            835,
+            0
+          ],
+          "size": [
+            6,
+            8,
+            700
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            840,
+            -180
+          ],
+          "size": [
+            24,
+            10,
+            24
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            840,
+            180
+          ],
+          "size": [
+            24,
+            10,
+            24
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "ring",
+          "at": [
+            -300,
+            855,
+            0
+          ],
+          "r": 90,
+          "r2": 12,
+          "segments": 16,
+          "tint": "hoop",
+          "role": "ring2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            844,
+            392
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            20,
+            844,
+            420
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            844,
+            420
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            844,
+            448
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            0
+          ],
+          "size": [
+            6,
+            8,
+            700
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            840,
+            -180
+          ],
+          "size": [
+            24,
+            10,
+            24
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            840,
+            180
+          ],
+          "size": [
+            24,
+            10,
+            24
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "ring",
+          "at": [
+            0,
+            855,
+            0
+          ],
+          "r": 90,
+          "r2": 12,
+          "segments": 16,
+          "tint": "hoop",
+          "role": "ring3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            280,
+            844,
+            406
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            844,
+            420
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            320,
+            844,
+            420
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            835,
+            0
+          ],
+          "size": [
+            6,
+            8,
+            700
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            840,
+            -180
+          ],
+          "size": [
+            24,
+            10,
+            24
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            840,
+            180
+          ],
+          "size": [
+            24,
+            10,
+            24
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "ring",
+          "at": [
+            300,
+            855,
+            0
+          ],
+          "r": 90,
+          "r2": 12,
+          "segments": 16,
+          "tint": "hoop",
+          "role": "ring4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            600,
+            844,
+            392
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            580,
+            844,
+            406
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            600,
+            844,
+            420
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            620,
+            844,
+            434
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            600,
+            844,
+            448
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            600,
+            835,
+            0
+          ],
+          "size": [
+            6,
+            8,
+            700
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            600,
+            840,
+            -180
+          ],
+          "size": [
+            24,
+            10,
+            24
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            600,
+            840,
+            180
+          ],
+          "size": [
+            24,
+            10,
+            24
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "ring",
+          "at": [
+            600,
+            855,
+            0
+          ],
+          "r": 90,
+          "r2": 12,
+          "segments": 16,
+          "tint": "hoop",
+          "role": "ring5"
+        }
+      ],
+      "palette": {
+        "wood": "#75543b",
+        "paper": "#eee2c3",
+        "ink": "#142833",
+        "reference": "#849299",
+        "engaged": "#3580a8",
+        "disengaged": "#87624b",
+        "hoop": "#b24428"
+      },
+      "tags": [
+        "puzzle",
+        "rings",
+        "trainer",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "puzzle": "puzzle",
+    "card": "Train the linked-ring rules by disengaging five numbered indexed hoops.",
+    "ring": "five-ring rules trainer",
+    "baguenaudier": "Chinese rings rules trainer",
+    "already_engaged": "That ring is already engaged on the rear E row.",
+    "already_disengaged": "That ring is already disengaged on the front D row.",
+    "predecessor_off": "Engage the immediately preceding numbered ring before changing this one.",
+    "lower_ring_on": "Disengage every ring below the immediate predecessor before changing this ring. Higher rings do not affect the rule.",
+    "hands_empty": "Put down what you hold before changing a ring index.",
+    "start": "This five-ring Chinese-rings rules trainer starts with every hoop engaged. Fixed numbers 1 to 5 run left to right from the front contact side. Each hoop stays in its numbered column: rear blue E means engaged; front brown D means disengaged. Ring 1 may change at any time. To change ring i above 1, ring i\u22121 must be engaged and all rings numbered 1 through i\u22122 must be disengaged. Higher rings are irrelevant. Each action changes exactly one ring. Start by disengaging ring 1, disengaging ring 3, engaging ring 1, disengaging ring 2, then disengaging ring 1: the first three are off while rings 4 and 5 remain on.",
+    "finish": "The goal is all five hoops on the front D row. Continue applying the exact lower-ring rule; higher rings may be in either state. Restore the initial all-engaged arrangement using legal reverse moves; there is no reset or success counter. This is an indexed rules-training depiction, not a loose-ring or wire model. Hoops change between two fixed poses when the native hand-contact effect commits. No threading, tension, mechanical force, continuous collision-free path, ring custody, exact individual-ring contact, automatic solver or variable puzzle is claimed."
+  },
+  "card": {
+    "text": "card",
+    "category": "puzzle",
+    "synonyms": [
+      "ring",
+      "baguenaudier"
+    ]
+  },
+  "howtos": {
+    "begin": {
+      "text": "start",
+      "steps": [
+        {
+          "form": "disengage_ring1"
+        },
+        {
+          "form": "disengage_ring3"
+        },
+        {
+          "form": "engage_ring1"
+        },
+        {
+          "form": "disengage_ring2"
+        },
+        {
+          "form": "disengage_ring1"
+        }
+      ]
+    },
+    "restore": {
+      "text": "finish",
+      "steps": [
+        {
+          "form": "engage_ring1"
+        }
+      ]
+    }
+  }
+}
