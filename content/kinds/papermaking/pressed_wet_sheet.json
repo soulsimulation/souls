@@ -34,6 +34,15 @@
         8,
         180
       ]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        450
+      ],
+      "yaw_mdeg": 180000
     }
   },
   "geometry": {
@@ -51,11 +60,21 @@
         {
           "need": "hand",
           "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "grip"
         }
       ],
       "steps": [
         {
-          "step": "take"
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "grip"
         }
       ],
       "effects": [
@@ -126,7 +145,7 @@
     "card": "A pressed wet sheet retaining 10 g fibre and 20 g water; carry it by hand.",
     "paper": "paper",
     "wet_sheet": "wet sheet",
-    "howto": "Take the wet sheet from its shelf with a free hand, then set it down. It remains wet: this kind has no drying or writing form."
+    "howto": "With a free hand, approach the wet sheet and touch its grip to take it, then set it down. It remains wet: this kind has no drying or writing form."
   },
   "card": {
     "text": "card",

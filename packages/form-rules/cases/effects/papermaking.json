@@ -658,18 +658,31 @@
             "hands": {
               "left": null,
               "right": null
-            }
+            },
+            "effector_mm": [
+              0,
+              8,
+              180
+            ]
           },
           "collector1": {
             "hands": {
               "left": null,
               "right": null
-            }
+            },
+            "effector_mm": [
+              0,
+              8,
+              180
+            ]
           }
         },
         "moves": {
           "press": {
             "reach_mm": 2000
+          },
+          "touch": {
+            "reach_mm": 500
           }
         }
       },
@@ -1726,12 +1739,20 @@
             "hands": {
               "left": null,
               "right": null
-            }
+            },
+            "effector_mm": [
+              0,
+              8,
+              180
+            ]
           }
         },
         "moves": {
           "press": {
             "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 500
           }
         }
       },
@@ -2753,6 +2774,75 @@
               "resume4s4.0"
             ]
           }
+        }
+      }
+    },
+    {
+      "name": "wet_sheet_point_take_out_of_reach_retains_custody",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "sheet"
+            ]
+          },
+          "sheet": {
+            "kind": "eden:pressed_wet_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              8,
+              180
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 500
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "sheet",
+            "form": "take"
+          },
+          "receipt": "far",
+          "expect": {
+            "verdict": "no",
+            "reason": "out_of_reach",
+            "need": 1
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1",
+            "sheet"
+          ]
+        },
+        "sheet": {
+          "kind": "eden:pressed_wet_sheet"
+        },
+        "b1": {
+          "hands": {
+            "left": null,
+            "right": null
+          },
+          "effector_mm": [
+            3000,
+            8,
+            180
+          ]
         }
       }
     }

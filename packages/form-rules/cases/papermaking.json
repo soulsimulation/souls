@@ -1998,7 +1998,17 @@
             "hands": {
               "left": null,
               "right": "x2"
-            }
+            },
+            "effector_mm": [
+              0,
+              8,
+              180
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 500
           }
         }
       },
@@ -2025,7 +2035,17 @@
             "hands": {
               "left": "x1",
               "right": "x2"
-            }
+            },
+            "effector_mm": [
+              0,
+              8,
+              180
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 500
           }
         }
       },
@@ -2036,6 +2056,45 @@
         "verdict": "no",
         "reason": "no_free_hand",
         "need": 0
+      }
+    },
+    {
+      "name": "wet_sheet_take_grip_out_of_reach",
+      "act": {
+        "this": "s1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:pressed_wet_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "x2"
+            },
+            "effector_mm": [
+              3000,
+              8,
+              180
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 500
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 1
       }
     }
   ]
