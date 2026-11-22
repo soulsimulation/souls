@@ -142,10 +142,11 @@ const EPOCH: u64 = 1;
 /// `seed` and template checks print nothing.
 static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
-/// One start-up stage's elapsed-time stamp (#3672), only while `serve` starts.
+/// One start-up stage's elapsed-time stamp (#3672), only while `serve` starts; each is progress (#4013).
 fn stamp(stage: &str) {
     if let Some(t) = STARTED.get() {
         println!("start-up: {stage} at {} ms", t.elapsed().as_millis());
+        crate::progress();
     }
 }
 /// K5's checkpoint interval: one each 8 MiB of log (the bench constant, as `worldd fork`).
@@ -674,6 +675,7 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
 fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(Town, Town)> {
     let mut live = initial.frozen();
     for bytes in records {
+        crate::progress();
         if !recorder::is_input(bytes) {
             let part = replica::effects::Part::read(bytes).map_err(refusal)?;
             live.apply(&part).map_err(refusal)?;
@@ -1974,6 +1976,13 @@ pub fn run(args: &[String]) -> i32 {
 fn serve(args: &[String]) -> R<()> {
     let _ = STARTED.set(std::time::Instant::now());
     stamp("launch");
+    // A test's long load (#4013's A2): `$WORLDD_HOLD_LOAD_S` seconds of progress first. Only in a build with the
+    // `hold-load` feature (v2/tools/ops/x5-start-progress.sh); a release build has no hold.
+    #[cfg(feature = "hold-load")]
+    for _ in 0..std::env::var("WORLDD_HOLD_LOAD_S").map_or(0, |s| s.parse::<u64>().unwrap_or(0)) {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        stamp("held");
+    }
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
         "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] \
          [--compact-after <bytes>] [--store <store>] [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
@@ -2088,6 +2097,7 @@ fn serve(args: &[String]) -> R<()> {
         let mut observer = None;
         let observed_real = answers::now();
         for (offset, bytes) in found.after(record).iter().enumerate() {
+            crate::progress();
             if !recorder::is_input(bytes) {
                 let part = replica::effects::Part::read(bytes).map_err(refusal)?;
                 live.apply(&part).map_err(refusal)?;
@@ -2255,6 +2265,7 @@ fn serve(args: &[String]) -> R<()> {
     hub.seed(resumed.as_ref().map_or(initial.tree(), |(at, _)| at.tree()));
     let feed = worldd::views::served::start_with(hub).map_err(refusal)?;
     for bytes in found.after(base_record) {
+        crate::progress();
         if !recorder::is_input(bytes) {
             feed.record(bytes.clone());
         }
