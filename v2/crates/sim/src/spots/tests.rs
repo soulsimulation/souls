@@ -191,6 +191,76 @@ fn a_walker_sent_to_a_point_in_a_pocket_is_granted_the_nearest_place_beside_it()
     }
 }
 
+/// Standable everywhere, but an island within 8 m of the origin no walk from outside reaches (a floor with no way up),
+/// counting the walks that find no way: each would be a route search over the asker's whole part. With `knows`, it
+/// tells a place cut off without a walk ([`Ground::may_reach`], as the town's map parts do).
+struct Island {
+    knows: bool,
+    misses: usize,
+}
+
+fn on_island(p: Vec3) -> bool {
+    flat(p, Vec3::ZERO) < 8_000_000
+}
+
+impl Ground for Island {
+    fn stand(&self, _: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        Some((p, p))
+    }
+    fn passage(&self, _: Id, _: Vec3) -> bool {
+        false
+    }
+    fn walk(&mut self, _: Id, a: Vec3, _: Id, b: Vec3) -> Option<i64> {
+        let w = (on_island(a) == on_island(b)).then(|| flat(a, b));
+        self.misses += usize::from(w.is_none());
+        w
+    }
+    fn may_reach(&self, _: Id, a: Vec3, _: Id, b: Vec3) -> bool {
+        !self.knows || on_island(a) == on_island(b)
+    }
+}
+
+/// #4072's review: a standable target the asker's walk does not reach costs a bounded number of failed walks, not one
+/// per place round it (about 570 within reach, 345 in a table): none past the first when the ground can tell, at most
+/// [`MISSES_MOST`] per pass when it cannot. It answers as before: the point itself for a form's walk,
+/// `spot-none-free` for a plain one.
+#[test]
+fn a_target_cut_off_from_the_asker_answers_after_a_bounded_number_of_walks() {
+    let from = Vec3::new(20_000_000, 0, 0);
+    let t = target(0);
+    let id = |n| Id::new(replica::ids::Scope([0x67; 16]), n).unwrap();
+    for (knows, most_within, most_grant) in
+        [(false, MISSES_MOST + 1, 2 * MISSES_MOST + 1), (true, 1, 1)]
+    {
+        let mut g = Island { knows, misses: 0 };
+        assert_eq!(
+            within(&mut g, t, REACH, Some((node(), from))),
+            Some(t.point())
+        );
+        assert!(
+            g.misses <= most_within,
+            "within ({knows}): {} walks found no way",
+            g.misses
+        );
+        let mut g = Island { knows, misses: 0 };
+        let ask = Ask {
+            who: id(1),
+            order: id(2),
+            node: node(),
+            from,
+            target: t,
+        };
+        let mut spots = Spots::new();
+        spots.write(&mut g, &[ask], 0).unwrap();
+        assert_eq!(spots.of(ask.who, &t), Some(Err("spot-none-free")));
+        assert!(
+            g.misses <= most_grant,
+            "a grant ({knows}): {} walks found no way",
+            g.misses
+        );
+    }
+}
+
 /// A 4 m bench (#4072 follow-up) against a wall: no standing behind it (z below -0.6 m), on it or within 0.2 m of it
 /// (|x| up to 2.2 m, |z| up to 0.6 m), nor in front of its middle, where a row of stools stands (|x| below 1.5 m, z
 /// up to 2 m). Every walk is straight.
@@ -319,128 +389,62 @@ struct Counting(std::cell::Cell<u64>);
 impl Ground for Counting {
     fn stand(&self, _: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
         self.0.set(self.0.get() + 1);
-
-        /// Standable everywhere, but an island within 8 m of the origin no walk from outside reaches (a floor with no way up),
-        /// counting the walks that find no way: each would be a route search over the asker's whole part. With `knows`, it
-        /// tells a place cut off without a walk ([`Ground::may_reach`], as the town's map parts do).
-        struct Island {
-            knows: bool,
-            misses: usize,
-        }
-
-        fn on_island(p: Vec3) -> bool {
-            flat(p, Vec3::ZERO) < 8_000_000
-        }
-
-        impl Ground for Island {
-            fn stand(&self, _: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
-                Some((p, p))
-            }
-            fn passage(&self, _: Id, _: Vec3) -> bool {
-                false
-            }
-            fn walk(&mut self, _: Id, a: Vec3, _: Id, b: Vec3) -> Option<i64> {
-                Some(flat(a, b))
-            }
-        }
-
-        #[test]
-        fn the_places_tried_round_an_outline_do_not_grow_with_its_size() {
-            let bands = REACH / REACH_PITCH + 1;
-            for half in [400_000, 18_000_000, 100_000_000] {
-                for on in [false, true] {
-                    let mut g = Counting(std::cell::Cell::new(0));
-                    let ring = box_ring(half, half / 2);
-                    let from = Some((node(), Vec3::new(half + 5_000_000, 0, 0)));
-                    let p = within_footprint(&mut g, target(0), &ring, on, REACH, from)
-                        .expect("a place");
-                    // The asker's own place, then at most a band's places (and one per edge for the ends) on each band.
-                    let most = 1 + 2 * bands * (BAND_PLACES + 4);
-                    assert!(
-                        g.0.get() <= most as u64,
-                        "{half} µm: {} places tried",
-                        g.0.get()
-                    );
-                    assert!(p.x > 0, "on the asker's side: {p:?}");
-                }
-            }
-        }
-
-        #[test]
-        fn a_thing_is_walkable_when_its_entry_is_a_place_an_area_or_has_a_standing_slot() {
-            let j = |t: &str| replica::rules::json::parse(t).expect("json");
-            assert!(walkable(&j(r#"{"owner": "place"}"#)), "a deck");
-            assert!(
-                walkable(&j(r#"{"owner": "thing", "areas": {"top": {}}}"#)),
-                "a rug"
-            );
-            assert!(
-                walkable(&j(
-                    r#"{"owner": "thing", "slots": {"spot_1": {"admits": "body"}}}"#
-                )),
-                "a stage"
-            );
-            assert!(
-                !walkable(&j(
-                    r#"{"owner": "thing", "slots": {"seat": {"admits": "body", "posture": "sit"}}}"#
-                )),
-                "a chair"
-            );
-            assert!(
-                !walkable(&j(
-                    r#"{"owner": "thing", "slots": {"top": {"admits": "thing"}}}"#
-                )),
-                "a desk"
-            );
-            assert!(!walkable(&j(r#"{"owner": "thing"}"#)), "a workbench");
-        }
-
-        let w = (on_island(a) == on_island(b)).then(|| flat(a, b));
-        self.misses += usize::from(w.is_none());
-        w
+        Some((p, p))
     }
-    fn may_reach(&self, _: Id, a: Vec3, _: Id, b: Vec3) -> bool {
-        !self.knows || on_island(a) == on_island(b)
+    fn passage(&self, _: Id, _: Vec3) -> bool {
+        false
+    }
+    fn walk(&mut self, _: Id, a: Vec3, _: Id, b: Vec3) -> Option<i64> {
+        Some(flat(a, b))
     }
 }
 
-/// #4072's review: a standable target the asker's walk does not reach costs a bounded number of failed walks, not one
-/// per place round it (about 570 within reach, 345 in a table): none past the first when the ground can tell, at most
-/// [`MISSES_MOST`] per pass when it cannot. It answers as before: the point itself for a form's walk,
-/// `spot-none-free` for a plain one.
 #[test]
-fn a_target_cut_off_from_the_asker_answers_after_a_bounded_number_of_walks() {
-    let from = Vec3::new(20_000_000, 0, 0);
-    let t = target(0);
-    let id = |n| Id::new(replica::ids::Scope([0x67; 16]), n).unwrap();
-    for (knows, most_within, most_grant) in
-        [(false, MISSES_MOST + 1, 2 * MISSES_MOST + 1), (true, 1, 1)]
-    {
-        let mut g = Island { knows, misses: 0 };
-        assert_eq!(
-            within(&mut g, t, REACH, Some((node(), from))),
-            Some(t.point())
-        );
-        assert!(
-            g.misses <= most_within,
-            "within ({knows}): {} walks found no way",
-            g.misses
-        );
-        let mut g = Island { knows, misses: 0 };
-        let ask = Ask {
-            who: id(1),
-            order: id(2),
-            node: node(),
-            from,
-            target: t,
-        };
-        let mut spots = Spots::new();
-        spots.write(&mut g, &[ask], 0).unwrap();
-        assert_eq!(spots.of(ask.who, &t), Some(Err("spot-none-free")));
-        assert!(
-            g.misses <= most_grant,
-            "a grant ({knows}): {} walks found no way",
-            g.misses
-        );
+fn the_places_tried_round_an_outline_do_not_grow_with_its_size() {
+    let bands = REACH / REACH_PITCH + 1;
+    for half in [400_000, 18_000_000, 100_000_000] {
+        for on in [false, true] {
+            let mut g = Counting(std::cell::Cell::new(0));
+            let ring = box_ring(half, half / 2);
+            let from = Some((node(), Vec3::new(half + 5_000_000, 0, 0)));
+            let p = within_footprint(&mut g, target(0), &ring, on, REACH, from).expect("a place");
+            // The asker's own place, then at most a band's places (and one per edge for the ends) on each band.
+            let most = 1 + 2 * bands * (BAND_PLACES + 4);
+            assert!(
+                g.0.get() <= most as u64,
+                "{half} µm: {} places tried",
+                g.0.get()
+            );
+            assert!(p.x > 0, "on the asker's side: {p:?}");
+        }
     }
+}
+
+#[test]
+fn a_thing_is_walkable_when_its_entry_is_a_place_an_area_or_has_a_standing_slot() {
+    let j = |t: &str| replica::rules::json::parse(t).expect("json");
+    assert!(walkable(&j(r#"{"owner": "place"}"#)), "a deck");
+    assert!(
+        walkable(&j(r#"{"owner": "thing", "areas": {"top": {}}}"#)),
+        "a rug"
+    );
+    assert!(
+        walkable(&j(
+            r#"{"owner": "thing", "slots": {"spot_1": {"admits": "body"}}}"#
+        )),
+        "a stage"
+    );
+    assert!(
+        !walkable(&j(
+            r#"{"owner": "thing", "slots": {"seat": {"admits": "body", "posture": "sit"}}}"#
+        )),
+        "a chair"
+    );
+    assert!(
+        !walkable(&j(
+            r#"{"owner": "thing", "slots": {"top": {"admits": "thing"}}}"#
+        )),
+        "a desk"
+    );
+    assert!(!walkable(&j(r#"{"owner": "thing"}"#)), "a workbench");
 }
