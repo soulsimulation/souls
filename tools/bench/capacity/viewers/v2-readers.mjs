@@ -5,7 +5,7 @@
 // the pointer every 250 ms and each new part. A handoff to the next generation is drained and crossed with no new
 // baseline; a viewer whose generation is gone starts again from the newest baseline (counted). One keep-alive agent
 // of two sockets per viewer. Slow readers ask for the baseline and never read.
-// Messages from v2.mjs: {init: {base, stream, pkg}}, {add: n, overMs}, {slow: n}, {unslow: true}, {take: true}
+// Messages from v2.mjs: {init: {base, stream, pkg, pollMs}} (pollMs: the pointer's period, default the page's 250), {add: n, overMs}, {slow: n}, {unslow: true}, {take: true}
 // (answers with the counters since the last take, and resets them), {stop: true}.
 import { Agent, request } from 'node:http';
 import { connect } from 'node:net';
@@ -15,7 +15,8 @@ import { pathToFileURL } from 'node:url';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { fileType, record } from './v2-stats.mjs';
 
-const AHEAD = 16, POLL_MS = 250, TIMEOUT_MS = 10_000;
+const AHEAD = 16, TIMEOUT_MS = 10_000;
+let POLL_MS = 250; // the page's (v2/web/src/source/worker.ts); --poll-ms measures another
 const PERIOD_US = 500_000, BEHIND_US = 4 * PERIOD_US, CUT_US = 20_000_000; // v2/web/src/clock/clock.ts
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 let cfg, readPointer;
@@ -147,6 +148,7 @@ process.on('unhandledRejection', (e) => fail(`unhandled ${e?.code ?? e?.message 
 process.on('message', async (m) => {
   if (m.init) {
     cfg = m.init;
+    if (cfg.pollMs) POLL_MS = cfg.pollMs;
     const r = await import(pathToFileURL(join(cfg.pkg, 'replica.js')).href);
     r.initSync({ module: readFileSync(join(cfg.pkg, 'replica_bg.wasm')) });
     readPointer = r.readPointer;

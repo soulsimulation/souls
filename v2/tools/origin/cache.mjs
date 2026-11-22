@@ -3,7 +3,8 @@
 // concurrent misses for one key into one request upstream, as nginx's `proxy_cache_lock` does. It is not a CDN and
 // not for production; the owner's alternative to a CDN is nginx itself (v2/docs/viewer-cache.md).
 // Usage: node cache.mjs <upstream origin, e.g. http://127.0.0.1:8080> [port] [host]. Prints `cache <port>`; on
-// SIGTERM or SIGINT prints `stats {json}` (hits, misses, collapsed, upstream requests) and exits.
+// SIGTERM or SIGINT prints `stats {json}` (hits, misses, collapsed, upstream requests, upstream and served body bytes)
+// and exits. Forked with an IPC channel, it answers a `{take: true}` message with `{stats}` (the viewers bench, #4159).
 import { Agent, createServer, request } from 'node:http';
 import { fileURLToPath } from 'node:url';
 
@@ -22,7 +23,7 @@ export function createCache(upstream) {
   const agent = new Agent({ keepAlive: true, maxSockets: 64 });
   const store = new Map();
   const inflight = new Map();
-  const stats = { hits: 0, misses: 0, collapsed: 0, upstream: 0 };
+  const stats = { hits: 0, misses: 0, collapsed: 0, upstream: 0, upstreamBytes: 0, servedBytes: 0 };
 
   const fetchUpstream = (url) => new Promise((ok, fail) => {
     stats.upstream++;
@@ -33,7 +34,9 @@ export function createCache(upstream) {
         const headers = { ...res.headers };
         delete headers.connection;
         delete headers['keep-alive'];
-        ok({ status: res.statusCode, headers, body: Buffer.concat(chunks) });
+        const body = Buffer.concat(chunks);
+        stats.upstreamBytes += body.length;
+        ok({ status: res.statusCode, headers, body });
       });
       res.on('error', fail);
     });
@@ -45,6 +48,7 @@ export function createCache(upstream) {
     const key = req.url;
     const send = (e, how) => {
       res.writeHead(e.status, { ...e.headers, 'x-cache': how });
+      if (req.method !== 'HEAD') stats.servedBytes += e.body.length;
       res.end(req.method === 'HEAD' ? undefined : e.body);
     };
     const now = Date.now();
@@ -88,4 +92,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   };
   process.on('SIGTERM', end);
   process.on('SIGINT', end);
+  process.on('message', (m) => m?.take && process.send({ stats }));
 }

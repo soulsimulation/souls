@@ -16,7 +16,11 @@
 //   node tools/bench/capacity/viewers/v2.mjs --facts <eden facts.json> [--bin <dir with worldd, gatewayd>]
 //        [--pkg <replica wasm-bindgen pkg>] [--steps 100,250,500,1000,2000,5000] [--souls 20] [--window-sec 60]
 //        [--wave-sec 5] [--settle-sec 10] [--slow-share 0.02] [--drivers 8] [--repeats 1] [--origin-memory-mb 256]
-//        [--out <dir>]
+//        [--cache-nodes 0] [--poll-ms 250] [--out <dir>]
+// --cache-nodes K (#4159) puts K caching nodes (v2/tools/origin/cache.mjs: keeps what the origin's headers allow,
+// collapses concurrent misses) between the viewers and the origin, driver i reading through node i mod K, as edge
+// locations split a CDN's viewers: a SIMULATION of a CDN, not one. Each window then reports the nodes' hit ratio and
+// the origin's requests and body bytes a second. --poll-ms sets the viewers' pointer period (the page's is 250 ms).
 // The origin runs as its unit does: killed past --origin-memory-mb resident (its MemoryMax; 0 for no cap) and
 // restarted a second after it ends. A window with no viewers follows the ladder too: the tick bar
 // (B6) is judged against the mean of the two.
@@ -42,7 +46,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] ${a.join(' ')}`; console.log(s); appendFileSync(join(OUT, 'bench.log'), s + '\n'); };
 const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
 wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
-const ORIGIN_MB = Number(opt('origin-memory-mb', 256));
+const ORIGIN_MB = Number(opt('origin-memory-mb', 256)), CACHE_NODES = Number(opt('cache-nodes', 0)), POLL_MS = Number(opt('poll-ms', 250));
 const FD_LIMIT = Number(execFileSync('sh', ['-c', 'ulimit -n'], { encoding: 'utf8' }).trim());
 const PEAK = Math.max(...STEPS) * (1 + SLOW_SHARE) + 5;
 if (Number.isFinite(FD_LIMIT) && FD_LIMIT < 2 * PEAK + 1024) throw new Error(`open-file limit ${FD_LIMIT} is below ${Math.ceil(2 * PEAK + 1024)}: the origin holds up to two sockets a viewer; raise it (ulimit -n)`);
@@ -80,7 +84,27 @@ async function serve(dir) {
     return o.m[1];
   };
   s.base = `http://127.0.0.1:${await port(0)}/`;
+  s.caches = await Promise.all(Array.from({ length: CACHE_NODES }, (_, i) => new Promise((ok, fail) => {
+    const p = fork(join(V2, 'tools/origin/cache.mjs'), [s.base, '0', '127.0.0.1'], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    procs.push(p);
+    let out = '';
+    p.stdout.on('data', (d) => { appendFileSync(join(dir, `cache${i}.log`), d); out += d; const m = /cache (\d+)\n/.exec(out); if (m) ok({ p, base: `http://127.0.0.1:${m[1]}/` }); });
+    p.stderr.on('data', (d) => appendFileSync(join(dir, `cache${i}.log`), d));
+    p.on('exit', (c) => { if (!stopping) log(`cache node ${i} ended (${c})`); fail(new Error(`cache node ${i} ended`)); });
+  })));
   return s;
+}
+/** The cache nodes' counters, summed (each answers {stats}), and their processor seconds. */
+async function cacheStats(s) {
+  const all = await Promise.all(s.caches.map(({ p }) => new Promise((ok) => {
+    const t = setTimeout(() => ok(null), 10_000);
+    p.once('message', (m) => { clearTimeout(t); ok(m.stats); });
+    p.send({ take: true });
+  })));
+  const o = { hits: 0, misses: 0, collapsed: 0, upstream: 0, upstreamBytes: 0, servedBytes: 0, cpu: 0 };
+  for (const x of all.filter(Boolean)) for (const k of Object.keys(x)) o[k] += x[k];
+  for (const { p } of s.caches) o.cpu += proc(p.pid)?.cpu ?? 0;
+  return o;
 }
 let stopping = false;
 
@@ -117,10 +141,11 @@ function walkers(s, targets) {
 
 // ------------------------------------------------------------------ the viewers' drivers
 async function drivers(s) {
+  let kids0 = 0;
   const kids = await Promise.all(Array.from({ length: DRIVERS }, () => new Promise((ok) => {
     const k = fork(new URL('./v2-readers.mjs', import.meta.url).pathname, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
     k.once('message', () => ok(k));
-    k.send({ init: { base: s.base, stream: s.stream, pkg: PKG } });
+    k.send({ init: { base: s.caches.length ? s.caches[kids0++ % s.caches.length].base : s.base, stream: s.stream, pkg: PKG, pollMs: POLL_MS } });
   })));
   // A driver that ended answers nothing: its take is left out (and logged), so the ladder never waits on it.
   kids.forEach((k, i) => k.on('exit', (c) => { k.dead = true; log(`driver ${i} ended (${c})`); }));
@@ -164,6 +189,7 @@ const health = (w) => { try { return JSON.parse(readFileSync(join(w, 'health.jso
 
 /** Samples the three processes and the world's health each second for `ms`; `mid` runs at half-time. */
 async function measure(s, ms, mid) {
+  const c0 = s.caches.length ? await cacheStats(s) : null;
   const t0 = Date.now(), first = { origin: proc(s.origin.pid), world: proc(s.world.pid), gateway: proc(s.gateway.pid), health: health(s.w) };
   const rss = { origin: [], world: [], gateway: [] }, lastTick = [];
   let midDone = false;
@@ -175,13 +201,19 @@ async function measure(s, ms, mid) {
     if (mid && !midDone && Date.now() - t0 >= ms / 2) { midDone = true; await mid(); }
   }
   const secs = (Date.now() - t0) / 1000, last = { origin: proc(s.origin.pid), world: proc(s.world.pid), gateway: proc(s.gateway.pid), health: health(s.w) };
+  let cache = null;
+  if (c0) {
+    const c1 = await cacheStats(s), d = Object.fromEntries(Object.keys(c1).map((k) => [k, c1[k] - c0[k]])), asked = d.hits + d.misses + d.collapsed;
+    cache = { requests: asked, hitRatio: asked ? +(1 - d.upstream / asked).toFixed(4) : null, originRequestsPerS: Math.round(d.upstream / secs), originBytesPerS: Math.round(d.upstreamBytes / secs),
+      servedBytesPerS: Math.round(d.servedBytes / secs), collapsed: d.collapsed, nodeCores: +(d.cpu / secs).toFixed(2) };
+  }
   const cores = (k) => (first[k] && last[k] ? +((last[k].cpu - first[k].cpu) / secs).toFixed(3) : null);
   const t1 = first.health?.ticks, t2 = last.health?.ticks, n = t1 && t2 ? t2.count - t1.count : 0;
   return {
     secs, originCores: cores('origin'), worldCores: cores('world'), gatewayCores: cores('gateway'),
     originRssMaxMb: Math.round(Math.max(...rss.origin, 0)), worldRssMaxMb: Math.round(Math.max(...rss.world, 0)), gatewayRssMaxMb: Math.round(Math.max(...rss.gateway, 0)),
     ticks: n, tickMeanUs: n > 0 ? Math.round((t2.mean_us * t2.count - t1.mean_us * t1.count) / n) : null,
-    tickSampledP99Us: quantile(lastTick, 0.99), overBudget: last.health && first.health ? last.health.over_budget - first.health.over_budget : null,
+    tickSampledP99Us: quantile(lastTick, 0.99), overBudget: last.health && first.health ? last.health.over_budget - first.health.over_budget : null, cache,
   };
 }
 
@@ -199,6 +231,8 @@ function row(step, viewers, wave, win) {
     errors, errorKinds: merge({ ...wave.errors }, win.d.errors), reinstalls: wave.reinstalls + win.d.reinstalls, behind: wave.behind + win.d.behind, recovered: wave.recovered + win.d.recovered, crossed: win.d.crossed, waitingAtEnd: win.d.waiting,
     bytesPerViewerS, totalBytesPerViewerS: Object.values(bytesPerViewerS).reduce((a, b) => a + b, 0), headerBytesPerViewerS: Math.round(win.d.headerBytes / vs),
     requestsPerViewerS: +(Object.values(win.d.requests).reduce((a, b) => a + b, 0) / vs).toFixed(2), joinBytes,
+    requestsPerViewerSByType: Object.fromEntries(Object.entries(win.d.requests).map(([t, n]) => [t, +(n / vs).toFixed(2)])), headerBytesPerResponse: Math.round(win.d.headerBytes / Math.max(1, Object.values(win.d.requests).reduce((a, b) => a + b, 0))),
+    viewerRequestsPerS: Math.round(Object.values(win.d.requests).reduce((a, b) => a + b, 0) / win.secs), viewerBytesPerS: Math.round(Object.values(win.d.bytes).reduce((a, b) => a + b, 0) / win.secs),
     originRssWaveMb: wave.originRssMaxMb, ...win.p, originRssMaxMb: Math.max(win.p.originRssMaxMb, wave.originRssMaxMb ?? 0),
     driverCores: +(win.d.cpuSeconds / win.secs).toFixed(2), driverLoopP99Ms: +win.d.loopP99Ms.toFixed(1), driverLoopMaxMs: +win.d.loopMaxMs.toFixed(1),
   };
@@ -246,6 +280,8 @@ async function repeat(r) {
     const x = row(step, dsum.viewers, wave, { secs: p.secs, d: dsum, p, slowHeld: slowN });
     x.walks = { ...walk.counts, answers: { ...walk.counts.answers } };
     x.originRestarts = s.originRestarts - restarts0;
+    x.cacheWave = waveP.cache;
+    x.waveViewerBytesPerS = Math.round(Object.values(wave.bytes).reduce((a, b) => a + b, 0) / waveP.secs);
     x.driverBound = x.driverLoopP99Ms > 100; // the drivers, not the origin, were the limit: the step is not judged
     x.bars = bars(x, zero.tickMeanUs);
     rows.push(x);
@@ -268,7 +304,7 @@ async function repeat(r) {
   return { baselineBytes: baseline.length, walkTargets: targets.length, originCapMb: ORIGIN_MB, rows };
 }
 
-const results = { started: new Date().toISOString(), machine: { cpus: (await import('node:os')).cpus().length, platform: process.platform }, config: { steps: STEPS, souls: SOULS, windowSec: WINDOW_MS / 1000, waveSec: WAVE_MS / 1000, settleSec: SETTLE_MS / 1000, slowShare: SLOW_SHARE, drivers: DRIVERS, repeats: REPEATS }, repeats: [] };
+const results = { started: new Date().toISOString(), machine: { cpus: (await import('node:os')).cpus().length, platform: process.platform }, config: { steps: STEPS, souls: SOULS, windowSec: WINDOW_MS / 1000, waveSec: WAVE_MS / 1000, settleSec: SETTLE_MS / 1000, slowShare: SLOW_SHARE, drivers: DRIVERS, repeats: REPEATS, cacheNodes: CACHE_NODES, pollMs: POLL_MS }, repeats: [] };
 try {
   for (let r = 1; r <= REPEATS; r++) results.repeats.push(await repeat(r));
 } finally {
@@ -279,6 +315,11 @@ const md = ['| repeat | viewers | first picture p50 / p95 ms (baseline drawn p95
 results.repeats.forEach((rep, i) => rep.rows.forEach((x) => md.push(x.step === 0
   ? `| ${i + 1} | 0${x.after ? ' (after)' : ''} | - | - | - | - | - | ${x.originCores}, ${x.originRssMaxMb}, - | ${x.worldCores}, ${x.worldRssMaxMb}, ${x.tickMeanUs} | ${x.gatewayCores}, ${x.gatewayRssMaxMb} | - | - |`
   : `| ${i + 1} | ${x.step} | ${x.firstPictureP50} / ${x.firstPictureP95} (${x.installedP95}; ${x.waitingAtEnd}) | ${x.latencyP50} / ${x.latencyP99} | ${x.errors} / ${x.reinstalls} / ${x.behind} | ${x.totalBytesPerViewerS} (${x.bytesPerViewerS.pointer}, ${x.bytesPerViewerS.part}, ${x.bytesPerViewerS['part.text']}) | ${Math.round(x.joinBytes.baseline / 1024)}, ${Math.round((x.joinBytes.part + x.joinBytes['part.text']) / 1024)} | ${x.originCores}, ${x.originRssMaxMb}, ${x.originRestarts} | ${x.worldCores}, ${x.worldRssMaxMb}, ${x.tickMeanUs} | ${x.gatewayCores}, ${x.gatewayRssMaxMb} | ${x.driverLoopP99Ms} | ${x.driverBound ? 'driver-bound' : x.bars.find((b) => b.met === false)?.bar ?? 'none'} |`)));
+const MB = (b) => (b / 2 ** 20).toFixed(1);
+md.push('', '| repeat | viewers | requests a viewer-s by type | viewer requests/s, MB/s (window) | ' + (CACHE_NODES ? 'nodes\' hit ratio, origin requests/s, origin MB/s: wave / window | node cores (window) |' : 'origin requests/s = viewer requests/s |'), CACHE_NODES ? '|---|---|---|---|---|---|' : '|---|---|---|---|---|');
+results.repeats.forEach((rep, i) => rep.rows.filter((x) => x.step).forEach((x) => md.push(`| ${i + 1} | ${x.step} | ${JSON.stringify(x.requestsPerViewerSByType)} | ${x.viewerRequestsPerS}, ${MB(x.viewerBytesPerS)} | ` + (CACHE_NODES
+  ? `${x.cacheWave?.hitRatio} / ${x.cache?.hitRatio}, ${x.cacheWave?.originRequestsPerS} / ${x.cache?.originRequestsPerS}, ${MB(x.cacheWave?.originBytesPerS ?? 0)} / ${MB(x.cache?.originBytesPerS ?? 0)} | ${x.cache?.nodeCores} |`
+  : `${x.viewerRequestsPerS} |`))));
 writeFileSync(join(OUT, 'REPORT.md'), md.join('\n') + '\n');
 console.log(md.join('\n'));
 process.exit(0);
