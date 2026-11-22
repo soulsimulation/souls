@@ -750,6 +750,30 @@ impl Sight<'_> {
         );
         nearest_on_drawn_shape(&n, [frame.x + p.x - parent.x, frame.z + p.z - parent.z])
     }
+
+    /// The footprint of the thing argument a body walks to at step `step` (#4072), when the thing is a child of `node`,
+    /// not a body, names no point of its entry (a base form's `go_to`, `wait_by`, `touch`, `lean_on`) and its entry
+    /// gives bounds ([`sim::spots::footprint`], the rule [`Sight::to_thing`] judges reach by): the floor it stands
+    /// over, its corners and its middle carried onto that floor. The walk then ends within reach of its outline.
+    fn footprint_walk(&self, body: Id, step: usize, node: Id) -> Option<(Id, [Vec3; 4], Vec3)> {
+        let &(at_step, thing, ref point) = self.walks.get(&body)?;
+        if at_step != step || self.bodies.contains_key(&thing) {
+            return None;
+        }
+        let n = self.tree.node(self.tree.handle(thing)?)?;
+        if n.parent() != Some(node) {
+            return None;
+        }
+        let entry = self.kinds.get(entry_of(&n))?;
+        let named = ["points", "slots", "areas"]
+            .iter()
+            .any(|s| entry.get(s).and_then(|x| x.get(point.as_str())).is_some());
+        if named {
+            return None;
+        }
+        let (corners, _) = sim::spots::footprint(entry)?;
+        self.with_view(body, |v| v.footprint_on_floor(thing, &corners))?
+    }
 }
 
 /// Point `point` of entry `entry` laid on thing `n`'s own shape, when `n` is drawn in its parent's frame (placed at its
@@ -963,10 +987,21 @@ impl Geometry for Sight<'_> {
         let Some(me) = self.bodies.get(&body) else {
             return WalkPlan::Legs(Vec::new());
         };
-        let at = self.on_shape(body, step, node).unwrap_or(at);
+        let shape = self.on_shape(body, step, node);
+        // A thing argument with a footprint and no drawn shape (#4072): the walk ends within reach of its outline.
+        let foot = shape
+            .is_none()
+            .then(|| self.footprint_walk(body, step, node))
+            .flatten();
+        let at = shape.unwrap_or(at);
+        let (node, at, ring) = match foot {
+            Some((floor, ring, middle)) => (floor, middle, Some(ring)),
+            None => (node, at, None),
+        };
         // A walk to be in an area ends within reach of the area's circle, not of its middle.
         let reach = reach.saturating_add(self.area_radius(body, step).unwrap_or(0));
         // A walk before a sit goes to the seat's own stand point, the one its sit is measured from.
+        let sat = matches!(self.sit_walks.get(&body), Some(&(at_step, ..)) if at_step == step);
         let (node, at) = match self.sit_walks.get(&body) {
             Some(&(at_step, floor, stand)) if at_step == step => (floor, stand),
             _ => (node, at),
@@ -1011,6 +1046,7 @@ impl Geometry for Sight<'_> {
             at,
             reach,
             door,
+            ring: ring.filter(|_| !self.approaches.contains(&body) && !sat),
         };
         match planning.ask(key, *me, query, &self.map) {
             Some(FormResult::Walk(legs)) => {
@@ -1172,16 +1208,14 @@ impl Sight<'_> {
                 .and_then(|p| p.get("at_mm")))
             .and_then(on)
             .map(|p| gap(flat(q, [p.x, p.z]), p.y, p.y));
-            let surface =
-                um(entry.get("geometry").and_then(|g| g.get("bounds_mm"))).and_then(|b| {
-                    let (x, z) = (b.x / 2, b.z / 2);
-                    let c = |u: i64, v: i64| on(Vec3::new(u, 0, v));
-                    let corners = [c(-x, -z)?, c(x, -z)?, c(x, z)?, c(-x, z)?];
-                    let ring = corners.map(|p| [p.x, p.z]);
-                    let lo = corners.iter().map(|p| p.y).min()?;
-                    let hi = corners.iter().map(|p| p.y).max()? + b.y.max(0);
-                    Some(gap(to_ring(q, &ring), lo, hi))
-                });
+            let surface = sim::spots::footprint(entry).and_then(|(corners, height)| {
+                let [a, b, c, d] = corners;
+                let corners = [on(a)?, on(b)?, on(c)?, on(d)?];
+                let ring = corners.map(|p| [p.x, p.z]);
+                let lo = corners.iter().map(|p| p.y).min()?;
+                let hi = corners.iter().map(|p| p.y).max()? + height.max(0);
+                Some(gap(to_ring(q, &ring), lo, hi))
+            });
             match (named, surface) {
                 (Some(a), Some(b)) => Some(a.min(b)),
                 (a, b) => a.or(b),

@@ -139,6 +139,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
             at: goal,
             reach: 0,
             door: None,
+            ring: None,
         },
     };
     let line = FormQuestion {
@@ -263,6 +264,7 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
         at,
         reach: 0,
         door: None,
+        ring: None,
     };
     planning.ask(key, body, question(Vec3::ZERO), &map);
     let old = FormAnswer {

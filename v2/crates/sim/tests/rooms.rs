@@ -5,6 +5,11 @@
 //! its legs and the chairs round it) was its own place: a form's walk to it ended `souls:no-way` and a plain walk
 //! `spot-none-free`. Prints the counts by building and by kind; every school desk must now be reached both ways.
 //!
+//! A form's walk to a thing (a base form's `go_to`, `wait_by`, `touch`, `lean_on`) ends within reach of the thing's
+//! footprint (#4072 follow-up: its entry's bounds, `spots::footprint`, carried onto its floor), not of its middle
+//! (`spots::within_footprint`, as worldd plans it). Counted both ways: by the middle ("form at middle", the rule before)
+//! and by the footprint ("form at footprint"). Workbenches, floor lamps and bookshelves are all reached by the footprint.
+//!
 //! Needs the exported Eden facts file: `cargo test -p sim --release --test rooms -- --ignored --nocapture`.
 
 mod common;
@@ -12,9 +17,10 @@ mod common;
 use replica::encode::Value;
 use replica::ids::{Id, Scope};
 use replica::pose::Vec3;
+use replica::rules::json::{self, Value as Json};
 use replica::world_model::show;
 use sim::routes::Map;
-use sim::spots::{Ask, Spots, Target, within};
+use sim::spots::{Ask, Spots, Target, flat, footprint, to_outline, within, within_footprint};
 use std::collections::BTreeMap;
 
 fn text() -> String {
@@ -23,6 +29,26 @@ fn text() -> String {
         "/../../../.local/import-eden/eden-2026.facts.json"
     );
     std::fs::read_to_string(path).expect("run v2/tools/import-eden/export/export.ts first")
+}
+
+/// The world's entries by kind, as `worldd serve` loads `content/kinds`.
+fn entries(dir: &std::path::Path, out: &mut BTreeMap<String, Json>) {
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
+        .expect("content/kinds")
+        .filter_map(|e| Some(e.ok()?.path()))
+        .collect();
+    paths.sort();
+    for p in paths {
+        if p.is_dir() {
+            entries(&p, out);
+        } else if p.extension().is_some_and(|x| x == "json")
+            && let Ok(v) = json::parse(&std::fs::read_to_string(&p).expect("an entry"))
+            && v.get("format").and_then(Json::str) == Some("souls-entry/1")
+            && let Some(kind) = v.get("kind").and_then(Json::str)
+        {
+            out.insert(kind.to_owned(), v.clone());
+        }
+    }
 }
 
 fn field(tree: &replica::tree::Tree, id: Id, f: u64) -> String {
@@ -40,13 +66,15 @@ fn parent(tree: &replica::tree::Tree, id: Id) -> Option<Id> {
     tree.handle(id).and_then(|h| tree.node(h))?.parent()
 }
 
-/// What one building's things came to: things, pocket targets (a form's walk ended `souls:no-way` before), and after
-/// the fix, those a form's walk and a plain walk still do not reach.
+/// What one building's things came to: things, pocket targets (a form's walk ended `souls:no-way` before), and those
+/// a form's walk does not reach within reach of their middle, nor within reach of their footprint, and a plain walk
+/// does not reach.
 #[derive(Default)]
 struct Count {
     things: usize,
     pocket: usize,
     form: usize,
+    foot: usize,
     walk: usize,
 }
 
@@ -82,6 +110,18 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
         b"souls/rooms-test/1",
     );
     let reach = replica::moves::REACH_MOST + 600_000;
+    let mut kinds_by = BTreeMap::new();
+    entries(
+        std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../content/kinds"
+        )),
+        &mut kinds_by,
+    );
+    // Things a form's walk to the footprint still does not reach, by kind: how far from the footprint (µm) the nearest
+    // place a body may stand lies, reached or not, within 3 m (none: farther). And what a refused plain walk was told.
+    let mut far: BTreeMap<String, Vec<Option<i64>>> = BTreeMap::new();
+    let mut refusals = Vec::new();
     let walker = Id::new(Scope([0xc1; 16]), 1).unwrap();
     let order = Id::new(Scope([0xc1; 16]), 2).unwrap();
     let mut by: BTreeMap<String, Count> = BTreeMap::new();
@@ -106,11 +146,34 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             continue;
         };
         let target = Target::new(floor, at);
-        let (pocket, form, walk) = town.with_ground(|_, g| {
+        let entry = tree
+            .handle(id)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| kinds_by.get(import_eden::entry_name(n.kind().as_str(), n.fields())));
+        let shape = entry
+            .and_then(footprint)
+            .and_then(|(corners, _)| town.view().footprint_on_floor(id, &corners))
+            .filter(|(f, ..)| *f == floor);
+        let (pocket, form, foot, walk, diag) = town.with_ground(|_, g| {
             let pocket =
                 g.stand(floor, at).is_some() && g.walk(ground, from, floor, at).is_none();
             let form = within(g, target, reach, Some((ground, from)))
                 .is_some_and(|p| g.walk(ground, from, floor, p).is_some());
+            // As worldd plans a form's walk to a thing argument: by its footprint when its entry gives one.
+            let foot = match &shape {
+                Some((_, ring, middle)) => {
+                    within_footprint(g, Target::new(floor, *middle), ring, reach, Some((ground, from)))
+                        .is_some_and(|p| g.walk(ground, from, floor, p).is_some())
+                }
+                None => form,
+            };
+            let near = (!foot).then(|| match &shape {
+                Some((_, ring, middle)) => {
+                    within_footprint(g, Target::new(floor, *middle), ring, 3_000_000, None)
+                        .map(|p| to_outline(p, ring))
+                }
+                None => within(g, target, 3_000_000, None).map(|p| flat(p, at)),
+            });
             let mut spots = Spots::new();
             let ask = Ask {
                 who: walker,
@@ -121,7 +184,12 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             };
             let walk = spots.write(g, &[ask], 0).is_ok()
                 && matches!(spots.of(walker, &target), Some(Ok(p)) if g.walk(ground, from, floor, p).is_some());
-            (pocket, form, walk)
+            let refused = match spots.of(walker, &target) {
+                Some(Err(name)) => name,
+                Some(Ok(_)) => "granted",
+                None => "none",
+            };
+            (pocket, form, foot, walk, (near, refused))
         });
         // A thing with no def (a door, a window, a room) by what its origin names.
         let kind = match field(tree, id, import_eden::F_DEF) {
@@ -135,6 +203,17 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             }
             d => d,
         };
+        if let Some(d) = diag.0 {
+            far.entry(kind.clone()).or_default().push(d);
+        }
+        if !walk {
+            refusals.push(format!(
+                "{kind} {} on {}: {}",
+                field(tree, id, import_eden::F_ORIGIN),
+                field(tree, floor, import_eden::F_ORIGIN),
+                diag.1,
+            ));
+        }
         fixed.0 += usize::from(pocket && form);
         fixed.1 += usize::from(pocket && walk);
         let building = format!(
@@ -149,6 +228,7 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             c.things += 1;
             c.pocket += usize::from(pocket);
             c.form += usize::from(!form);
+            c.foot += usize::from(!foot);
             c.walk += usize::from(!walk);
         }
         if kind.starts_with("core-school-desk") {
@@ -160,15 +240,16 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             things: a.things + c.things,
             pocket: a.pocket + c.pocket,
             form: a.form + c.form,
+            foot: a.foot + c.foot,
             walk: a.walk + c.walk,
         })
     };
     let all = sum(&by);
-    let left = by.values().filter(|c| c.form + c.walk > 0).count();
+    let left = by.values().filter(|c| c.foot + c.walk > 0).count();
     println!(
         "things on building floors: {} in {} buildings ({no_door} more in buildings with no doorway onto the ground); \
          pocket targets (a form's walk ended souls:no-way before): {}, of them now reached by a form's walk {} and \
-         by a plain walk {}; after: a form's walk does not reach {}, a plain \
+         by a plain walk {}; a form's walk does not reach within reach of the middle {}, of the footprint {}; a plain \
          walk does not reach {}, in {left} buildings",
         all.things,
         by.len(),
@@ -176,25 +257,53 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
         fixed.0,
         fixed.1,
         all.form,
+        all.foot,
         all.walk
     );
-    println!("by building (pocket / form unreached / walk unreached of things):");
+    println!(
+        "by building (pocket / form at middle unreached / form at footprint unreached / walk unreached of things):"
+    );
     for (b, c) in &by {
-        if c.pocket + c.form + c.walk > 0 {
+        if c.pocket + c.form + c.foot + c.walk > 0 {
             println!(
-                "  {b}: {} / {} / {} of {}",
-                c.pocket, c.form, c.walk, c.things
+                "  {b}: {} / {} / {} / {} of {}",
+                c.pocket, c.form, c.foot, c.walk, c.things
             );
         }
     }
     println!("by kind:");
     for (k, c) in &kinds {
-        if c.pocket + c.form + c.walk > 0 {
+        if c.pocket + c.form + c.foot + c.walk > 0 {
             println!(
-                "  {k}: {} / {} / {} of {}",
-                c.pocket, c.form, c.walk, c.things
+                "  {k}: {} / {} / {} / {} of {}",
+                c.pocket, c.form, c.foot, c.walk, c.things
             );
         }
+    }
+    println!(
+        "not reached at the footprint: the nearest place a body may stand, reached or not, mm from it (- none within \
+         3 m), by kind:"
+    );
+    for (k, ds) in &far {
+        let ds: Vec<String> = ds
+            .iter()
+            .map(|d| d.map_or("-".to_owned(), |d| (d / 1000).to_string()))
+            .collect();
+        println!("  {k}: {}", ds.join(" "));
+    }
+    println!("plain walk not reached:");
+    for p in &refusals {
+        println!("  {p}");
+    }
+    let unreached = |k: &str| {
+        kinds
+            .iter()
+            .filter(|(n, _)| n.starts_with(k))
+            .map(|(_, c)| c.foot)
+            .sum::<usize>()
+    };
+    for k in ["core-workbench", "core-floor-lamp", "core-bookshelf"] {
+        println!("{k}: {} not reached at the footprint", unreached(k));
     }
     println!("school desks (pocket, form reached, walk reached):");
     for d in &desks {
@@ -204,5 +313,10 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
     assert!(
         desks.iter().all(|d| d.2 && d.3),
         "every school desk is reached by a form's walk and a plain walk"
+    );
+    assert_eq!(
+        unreached("core-workbench"),
+        0,
+        "every workbench is reached at its footprint"
     );
 }

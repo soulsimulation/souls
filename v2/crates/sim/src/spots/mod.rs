@@ -23,7 +23,9 @@
 //!
 //! - **A place to act from** (C15, #3447, [`within`]). A form's walk to a point a body cannot stand on goes to the
 //!   nearest place within the body's reach of it, by the same rule on finer rings ([`REACH_PITCH`]), held by no one:
-//!   the act is brief, and the walk keeps bodies apart.
+//!   the act is brief, and the walk keeps bodies apart. A form's walk to a thing with a footprint (its entry's
+//!   bounds, [`footprint`]: a workbench, a shelf against a wall, a window in one) goes to the nearest place within
+//!   that reach of its outline, not of its middle ([`within_footprint`], #4072).
 //!
 //! Refusals: `spot-none-near` (no walkable place on the rings), `spot-none-free` (every place held or out of reach).
 //! Not here: seats (B3), facing (B11), formations and conversation circles, spots described in words (E2), perches
@@ -367,6 +369,140 @@ pub fn within(
         return Some(t);
     }
     found
+}
+
+/// A thing's footprint by its entry (#4072): the box its `geometry.bounds_mm` (whole mm `[x, y, z]`) gives, centred on
+/// the thing's origin, as its four corners in the thing's own frame (µm, y 0, in order round it), and its height (µm).
+/// The one rule for a thing's footprint: the reach a move at the thing is judged by and the place a form's walk to it
+/// goes to ([`within_footprint`]) both read it. `None` when the entry gives no bounds.
+pub fn footprint(entry: &replica::rules::json::Value) -> Option<([Vec3; 4], i64)> {
+    let mm = |v: &replica::rules::json::Value| match v {
+        replica::rules::json::Value::Int(n) => i64::try_from(*n).ok()?.checked_mul(1000),
+        _ => None,
+    };
+    let [x, y, z] = entry.get("geometry")?.get("bounds_mm")?.arr()? else {
+        return None;
+    };
+    let (x, y, z) = (mm(x)? / 2, mm(y)?, mm(z)? / 2);
+    let c = |u: i64, v: i64| Vec3::new(u, 0, v);
+    Some(([c(-x, -z), c(x, -z), c(x, z), c(-x, z)], y))
+}
+
+/// How far `p` is from the closed outline `ring` (its corners in order) across x and z, µm: 0 inside it.
+pub fn to_outline(p: Vec3, ring: &[Vec3]) -> i64 {
+    let k = ring.len();
+    let mut odd = false;
+    for i in 0..k {
+        let (a, b) = (ring[i], ring[(i + 1) % k]);
+        if (a.z > p.z) != (b.z > p.z) {
+            let x = i128::from(a.x)
+                + i128::from(b.x - a.x) * i128::from(p.z - a.z) / i128::from(b.z - a.z);
+            if i128::from(p.x) < x {
+                odd = !odd;
+            }
+        }
+    }
+    if odd {
+        return 0;
+    }
+    (0..k)
+        .map(|i| to_segment(p, ring[i], ring[(i + 1) % k]))
+        .min()
+        .unwrap_or(i64::MAX)
+}
+
+/// Where a body may stand to act at a thing whose footprint is `ring` (#4072: its corners in `target`'s node's frame,
+/// in order round it; `target` its middle): the nearest place within `reach` of the footprint's outline, not of its
+/// middle, so a long workbench, a shelf against a wall or a window in one is reached from wherever beside it the
+/// asker's walk gets to. The places lie on the outline's edges moved out by 0, [`REACH_PITCH`], … `reach`, each edge's
+/// line run on that far past both its corners, a pitch apart along it; kept, as [`within`]'s rings are, on walkable
+/// ground, out of doorways and off stairs, and within `reach` of the outline. Nearest as [`within`]'s: the least walk
+/// from `from` plus [`WEIGHT`] times the place's gap to the outline (0 inside it), ties by (band, edge, place); with no
+/// `from`, by the gap alone. With no such place, [`within`] at the middle, so a thing reached before still is.
+pub fn within_footprint(
+    g: &mut dyn Ground,
+    target: Target,
+    ring: &[Vec3],
+    reach: i64,
+    from: Option<(Id, Vec3)>,
+) -> Option<Vec3> {
+    let t = target.point();
+    let k = ring.len();
+    let walker = from.and_then(|(node, p)| Some((node, p, g.stand(node, p)?.1)));
+    // Twice the outline's signed area: its sign says which side of each edge is outside.
+    let area: i128 = (0..k)
+        .map(|i| {
+            let (a, b) = (ring[i], ring[(i + 1) % k]);
+            i128::from(a.x) * i128::from(b.z) - i128::from(b.x) * i128::from(a.z)
+        })
+        .sum();
+    let out = if area > 0 { 1 } else { -1 };
+    let mut seen = BTreeSet::new();
+    // Places by a bound below their cost: the straight way there plus the weighted gap.
+    let mut order: Vec<(i64, (i64, usize, i64), Vec3)> = Vec::new();
+    for band in 0..=reach / REACH_PITCH {
+        let d = band * REACH_PITCH;
+        for i in 0..k {
+            let (a, b) = (ring[i], ring[(i + 1) % k]);
+            let len = flat(a, b);
+            if len == 0 {
+                continue;
+            }
+            // The edge's line moved out by `d`, at `s` µm along it from `a`.
+            let scale = |e: i64, by: i64| {
+                i64::try_from(i128::from(e) * i128::from(by) / i128::from(len)).unwrap_or(0)
+            };
+            let at = |s: i64| {
+                let along = |u: i64, v: i64| u + scale(v - u, s);
+                let n = |e: i64| scale(e, d);
+                Vec3::new(
+                    along(a.x, b.x) + out * n(b.z - a.z),
+                    t.y,
+                    along(a.z, b.z) - out * n(b.x - a.x),
+                )
+            };
+            for j in 0..=(len + 2 * d) / REACH_PITCH {
+                let p = at(j * REACH_PITCH - d);
+                let gap = to_outline(p, ring);
+                if gap > reach {
+                    continue;
+                }
+                let Some((at, world)) = g.stand(target.node, p) else {
+                    continue;
+                };
+                if !seen.insert([at.x, at.y, at.z]) || g.passage(target.node, at) {
+                    continue;
+                }
+                let gap = WEIGHT * to_outline(at, ring);
+                order.push((
+                    gap + walker.map_or(0, |(_, _, w)| flat(world, w)),
+                    (band, i, j),
+                    at,
+                ));
+            }
+        }
+    }
+    order.sort_unstable_by_key(|&(bound, key, _)| (bound, key));
+    let best = match walker {
+        None => order.first().map(|o| o.2),
+        Some((node, p, _)) => {
+            let mut best: Option<(i64, (i64, usize, i64), Vec3)> = None;
+            for (bound, key, at) in order {
+                if best.is_some_and(|b| bound > b.0) {
+                    break;
+                }
+                let Some(walk) = g.walk(node, p, target.node, at) else {
+                    continue;
+                };
+                let cost = walk + WEIGHT * to_outline(at, ring);
+                if best.is_none_or(|b| (cost, key) < (b.0, b.1)) {
+                    best = Some((cost, key, at));
+                }
+            }
+            best.map(|b| b.2)
+        }
+    };
+    best.or_else(|| within(g, target, reach, from))
 }
 
 /// [`within`]'s rings: the place within `reach` of `target` nearest by the asker's walk, or by the gap alone.

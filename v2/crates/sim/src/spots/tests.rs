@@ -190,3 +190,103 @@ fn a_walker_sent_to_a_point_in_a_pocket_is_granted_the_nearest_place_beside_it()
         assert!(flat(p, Vec3::ZERO) <= 2 * PITCH, "beside the point: {p:?}");
     }
 }
+
+/// A 4 m bench (#4072 follow-up) against a wall: no standing behind it (z below -0.6 m), on it or within 0.2 m of it
+/// (|x| up to 2.2 m, |z| up to 0.6 m), nor in front of its middle, where a row of stools stands (|x| below 1.5 m, z
+/// up to 2 m). Every walk is straight.
+struct Bench;
+
+impl Ground for Bench {
+    fn stand(&self, _: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        let behind = p.z < -600_000;
+        let on = p.x.abs() <= 2_200_000 && p.z.abs() <= 600_000;
+        let stools = p.x.abs() < 1_500_000 && p.z <= 2_000_000;
+        (!behind && !on && !stools).then_some((p, p))
+    }
+    fn passage(&self, _: Id, _: Vec3) -> bool {
+        false
+    }
+    fn walk(&mut self, _: Id, a: Vec3, _: Id, b: Vec3) -> Option<i64> {
+        Some(flat(a, b))
+    }
+}
+
+/// The footprint of a box `x` by `z` µm round the origin.
+fn box_ring(x: i64, z: i64) -> [Vec3; 4] {
+    let c = |u: i64, v: i64| Vec3::new(u, 0, v);
+    [c(-x, -z), c(x, -z), c(x, z), c(-x, z)]
+}
+
+#[test]
+fn a_long_thing_whose_middle_is_out_of_reach_is_acted_at_from_beside_its_outline() {
+    let mut g = Bench;
+    let ring = box_ring(2_000_000, 400_000);
+    let t = target(0);
+    for side in [1, -1] {
+        let from = Some((node(), Vec3::new(side * 8_000_000, 0, 3_000_000)));
+        // By its middle, nothing is within reach: the stools stand before it and the wall behind it.
+        assert_eq!(within(&mut g, t, REACH, from), None);
+        let p = within_footprint(&mut g, t, &ring, REACH, from).expect("a place by its outline");
+        assert!(g.stand(node(), p).is_some(), "a body stands there: {p:?}");
+        assert!(
+            to_outline(p, &ring) <= 300_000,
+            "close by the outline: {p:?}"
+        );
+        assert!(p.x * side >= 1_500_000, "at the asker's end: {p:?}");
+        assert_eq!(
+            within_footprint(&mut g, t, &ring, REACH, from),
+            Some(p),
+            "the same every time"
+        );
+    }
+}
+
+#[test]
+fn a_thing_is_acted_at_from_the_place_by_its_outline_on_the_askers_side() {
+    let mut g = Block { half: 1_000_000 };
+    let ring = box_ring(1_000_000, 1_000_000);
+    for side in [1, -1] {
+        let from = Some((node(), Vec3::new(side * 5_000_000, 0, 0)));
+        let p = within_footprint(&mut g, target(0), &ring, REACH, from).expect("a place");
+        assert!(p.x * side > 1_000_000, "on the asker's side: {p:?}");
+        assert_eq!(
+            to_outline(p, &ring),
+            REACH_PITCH,
+            "a pitch out from it: {p:?}"
+        );
+    }
+    // With no asker, by the gap alone: a place a pitch out from the outline.
+    let p = within_footprint(&mut g, target(0), &ring, REACH, None).expect("a place");
+    assert_eq!(to_outline(p, &ring), REACH_PITCH, "{p:?}");
+}
+
+#[test]
+fn a_thing_with_no_place_within_reach_of_its_outline_has_none() {
+    let mut g = Block { half: 1_400_000 };
+    let ring = box_ring(50_000, 50_000);
+    let from = Some((node(), Vec3::new(5_000_000, 0, 0)));
+    assert_eq!(
+        within_footprint(&mut g, target(0), &ring, REACH, from),
+        None
+    );
+    assert_eq!(
+        within_footprint(&mut g, target(0), &ring, REACH, None),
+        None
+    );
+}
+
+#[test]
+fn a_footprint_is_the_box_of_its_entrys_bounds_round_its_origin() {
+    let entry = replica::rules::json::parse(r#"{"geometry": {"bounds_mm": [1770, 1500, 795]}}"#)
+        .expect("json");
+    let (corners, height) = footprint(&entry).expect("a footprint");
+    assert_eq!(corners, box_ring(885_000, 397_500));
+    assert_eq!(height, 1_500_000);
+    let none = replica::rules::json::parse(r#"{"geometry": {}}"#).expect("json");
+    assert_eq!(footprint(&none), None);
+    // Inside the outline is no gap; outside, the gap to its nearest edge or corner.
+    let ring = box_ring(1_000_000, 500_000);
+    assert_eq!(to_outline(Vec3::new(300_000, 0, -200_000), &ring), 0);
+    assert_eq!(to_outline(Vec3::new(1_300_000, 0, 0), &ring), 300_000);
+    assert_eq!(to_outline(Vec3::new(1_300_000, 0, 900_000), &ring), 500_000);
+}
