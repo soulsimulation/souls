@@ -997,7 +997,7 @@ fn a3727_a_helper_builds_only_under_its_own_claim_and_an_undo_stays_out_of_claim
 }
 
 #[test]
-fn a3728_a_link_is_judged_at_its_owning_end_and_its_door() {
+fn a3728_a_link_is_judged_at_both_ends_and_its_door() {
     use replica::edit::claims::{F_CLAIMS, judge_effects};
     use replica::world_model::End;
     let mut w = W::new();
@@ -1033,6 +1033,10 @@ fn a3728_a_link_is_judged_at_its_owning_end_and_its_door() {
     let lead = w
         .edit(w.creator(), v, vec![link(1, [a, c], End::First, None)])
         .expect("the lead's link, before the claim");
+    let v = w.live.version();
+    let far = w
+        .edit(w.creator(), v, vec![link(1, [d, b], End::First, None)])
+        .expect("the lead's link owned outside the claim to come, before it");
     let mut row = match claim_row("c:house", "part:house", [0, -10, 10, 10]) {
         Value::Array(r) => r,
         _ => unreachable!(),
@@ -1055,7 +1059,8 @@ fn a3728_a_link_is_judged_at_its_owning_end_and_its_door() {
     .expect("claimed with a helper");
     let v = w.live.version();
     let log = w.log_hash();
-    // Under no claim: a link owned inside the claim, or whose door is inside it, is refused; one outside it is not.
+    // Under no claim: a link owned inside the claim, whose far end is inside it, or whose door is inside it, is
+    // refused; one outside it is not.
     let r = w
         .edit(w.creator(), v, vec![link(1, [a, c], End::First, None)])
         .expect_err("owned inside the claim");
@@ -1064,6 +1069,10 @@ fn a3728_a_link_is_judged_at_its_owning_end_and_its_door() {
         .edit(w.creator(), v, vec![link(1, [c, a], End::Second, None)])
         .expect_err("owned by its second end, inside the claim");
     assert_eq!(r.name, "edit.claimed", "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![link(1, [c, a], End::First, None)])
+        .expect_err("owned outside the claim, its far end inside it");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
     let r = w
         .edit(w.creator(), v, vec![link(1, [c, d], End::First, Some(b))])
         .expect_err("its door inside the claim");
@@ -1083,11 +1092,38 @@ fn a3728_a_link_is_judged_at_its_owning_end_and_its_door() {
         .edit_under(
             as_helper,
             v,
+            vec![link(1, [a, c], End::First, None)],
+            Some("c:house"),
+        )
+        .expect_err("owned inside the claim, its far end outside it");
+    assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
+    let r = w
+        .edit_under(
+            as_helper,
+            v,
             vec![link(1, [a, b], End::First, Some(e))],
             Some("c:house"),
         )
         .expect_err("its door outside the claim");
     assert_eq!(r.name, "edit.outside-claim", "{r:?}");
+    // A doorway link, or a link with a door, owned by its second end is refused: its row is read at its first end.
+    let doorway = Op::Link {
+        name: 1,
+        ty: Name::new("eden:doorway").expect("a name"),
+        ends: [c, d].map(Ref::Node),
+        owner: End::Second,
+        field: 22,
+        row: vec![Value::Uint(1)],
+        door: None,
+    };
+    let r = w
+        .edit(w.creator(), v, vec![doorway])
+        .expect_err("a doorway owned by its second end");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![link(1, [c, d], End::Second, Some(e))])
+        .expect_err("a link with a door, owned by its second end");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
     assert_eq!(w.log_hash(), log, "refusals write nothing");
     // The lead links outside every claim, and the helper inside its own.
     w.edit(w.creator(), v, vec![link(1, [c, d], End::First, Some(e))])
@@ -1102,6 +1138,9 @@ fn a3728_a_link_is_judged_at_its_owning_end_and_its_door() {
     .expect("the helper links inside its claim");
     // The lead's link written again (a redo) now lands inside the claim: refused, as an undo's would be.
     let r = judge_effects(&w.live, &lead.part.effects).expect_err("inside a claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    // So is one owned outside it whose far end is inside it.
+    let r = judge_effects(&w.live, &far.part.effects).expect_err("its far end inside a claim");
     assert_eq!(r.name, "edit.claimed", "{r:?}");
     w.close();
 }

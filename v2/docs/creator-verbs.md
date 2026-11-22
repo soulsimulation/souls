@@ -5,7 +5,7 @@ creator command (`v2/client/src/creator/souls-god.mjs`). 0.131 ships when every 
 reason (#3729, parity row N-C23). A **gap** names the task that closes it.
 
 souls-god today: `pair`, `describe`, `place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v]`, `move <id> --at`,
-`set <id> <field> <value>`, `remove`, `batch`, `check`, `status`, `stop`. Every edit goes through the world's safety
+`set <id> <field> <value>`, `remove`, `batch`, `weather`, `sky`, `strike`, `land`, `time`, `check`, `status`, `stop`, `trace`. Every edit goes through the world's safety
 rule (BUILDSAFE, G2): an edit that would cut off or bury a Soul is refused by name, never repaired after the fact.
 
 ## Seat and session
@@ -16,7 +16,8 @@ rule (BUILDSAFE, G2): an edit that would cut off or bury a Soul is refused by na
 | `status` | `status` (the daemon: connected, copy version) | done |
 | `doctor [--fix]` | `status`, `stop`; the daemon holds the token and the copy, so there is no lock file to repair | retired: no locks |
 | `help`, `schema [--md]` | no arguments prints the usage; `describe` lists each kind and what it admits | done |
-| `trace`, `request <clientRef>` | each edit is answered once with its `sequence` and, on a refusal, its code, op and fix | retired: one answer per edit |
+| `trace` | `trace [n]`: the creator's last commands (the daemon keeps 200, across restarts), each with its time, verb, result and refusal | done |
+| `request <clientRef>` | each edit is answered once with its `sequence` and, on a refusal, its code, op and fix | retired: one answer per edit |
 | `listen`, `ack` | none for a creator | gap: no task (page messages to the creator) |
 | `prayers`, `answer` | daemon ops exist; CLI verbs in open PR #3557 (G11, #3335) | gap: #3335 |
 | `flags`, `flag` | gated off on soul.game (`godFeature("flags")`) | retired: not offered today |
@@ -57,7 +58,7 @@ rule (BUILDSAFE, G2): an edit that would cut off or bury a Soul is refused by na
 |---|---|---|
 | `land raise/lower/.../water/extend` | engine and expansion exist (G5); no verb | gap: #3695 |
 | `weather`, `sky`, `strike` | engine weather exists (G5), not on the wire; no sky palette or strike | gap: #3695 |
-| `time [--speed/--pause]` | world time never stops | retired: parity row 97 |
+| `time [--speed/--pause]` | `time <HH:MM \| live>`: the hour the page shows the sky at (field 91 on the world node, display only); world time never stops or changes speed | done (speed and pause retired: parity row 97) |
 | `expand`, `furnish`, `export`, `import` | `v2/tools/import-world` for operators only | gap: #3728 |
 | `define`, `define-kit`, `upload` | upload check and hold point exist (G6); no verb | gap: #3697 |
 | hide an upload; hide a world | world `unlisted` setting exists (W9) | gap: #3698 |

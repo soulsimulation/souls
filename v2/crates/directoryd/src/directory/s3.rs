@@ -88,11 +88,17 @@ impl S3 {
     /// (the region defaults to `auto`, R2's, and the prefix to none); `None` when neither `DIRECTORY_STORE_URL` nor
     /// `DIRECTORY_STORE_ENDPOINT` is set.
     pub fn from_env() -> Option<R<S3>> {
-        let var = |k: &str| std::env::var(k).unwrap_or_default();
-        if let Some(url) = std::env::var(URL_ENV).ok().filter(|u| !u.trim().is_empty()) {
+        S3::from_vars(|k| std::env::var(k).ok())
+    }
+
+    /// [`S3::from_env`] over settings read through `get` (`register-world`'s settings files, #1960 B3), so an operator
+    /// command picks the store the directory's own environment picks.
+    pub fn from_vars(get: impl Fn(&str) -> Option<String>) -> Option<R<S3>> {
+        let var = |k: &str| get(k).unwrap_or_default();
+        if let Some(url) = get(URL_ENV).filter(|u| !u.trim().is_empty()) {
             return Some(S3::from_url(url.trim(), var));
         }
-        let endpoint = std::env::var(ENV[0]).ok()?;
+        let endpoint = get(ENV[0])?;
         let region = Some(var(ENV[2])).filter(|r| !r.is_empty());
         Some(S3::new(
             &endpoint,

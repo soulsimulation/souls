@@ -47,7 +47,7 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `move <id> --at x,y,z [--slot n]` | to another spot in the same parent |
 | `move <id> [<id> ...] --by dx,dz [--yaw r]` | each that far over (metres), what is in it riding along; on the open ground it keeps its height over the ground |
 | `select [--kind k] [--name words] [--in id] [--area x0,z0,x1,z1] [--near x,z --radius m]` | what matches (id, kind, name, spot in metres); add `--remove` or `--by dx,dz [--yaw r]` to remove or move all of it in one edit |
-| `clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]` | copies of it and everything in it (its doorways and stairs too), the first one step away unless `--at` (metres) |
+| `clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]` | copies of it and everything in it (its doorways and stairs too), the first one step away unless `--at` (metres); with `--claim`, each of its edits goes under that claim |
 | `set <id> <field> <value>` | one numbered field: an integer, `true`, `false` or a name |
 | `remove <id>` | it and everything in it |
 | `about <id> --title '<t>' [--alias '<a>' ...]` | a place's title and aliases, kept as words for everyone; Souls' `find` matches either. `--set '{"title":"..","aliases":[".."]}'` sets both, `--clear` clears both |
@@ -69,6 +69,8 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `look <name or id> [--out f.png] [--eyes]` | a picture of a place, thing or Soul, drawn on this machine from the public stream; open the file it names. With no browser here it answers in words |
 | `where <x,z or name>` · `clear <x,z or name> --size WxD` · `free WxD --near <x,z or name>` | the room, areas and nearest things at a spot; whether a footprint there is free; the nearest free one. World metres, read from the page drawn here |
 | `event <room or ground id> '<words>' --when HH:MM [--for <minutes>] [--at x,y,z]` | an event on the world's calendar there, beside its notice board (not under it): its words are kept for everyone, and `whatson` lists it. HH:MM is its next one in world time |
+| `time <HH:MM \| live>` | the hour the page shows the sky at, for a staged scene (`time 18:30` for a sunset); `live` shows the world's own time. Display only: world time never stops or changes speed, and Souls' clocks and calendars are unchanged |
+| `trace [n]` | your last `n` commands here (20, at most 200), newest first: time, verb, result and refusal. If you see the same refusal again and again, stop and read its `fix` |
 | `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
 | `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
 | `listen [<seconds>] [--follow]` | waits for your owner's messages from the web page; `--follow` prints a line each time one arrives |

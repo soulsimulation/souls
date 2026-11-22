@@ -82,6 +82,51 @@ export async function command(program, args, env = process.env) {
   finally { clearTimeout(timer); }
 }
 const pause = ms => new Promise(yes => setTimeout(yes, ms));
+
+// The directory's store (#1960 B7): the bucket DIRECTORY_STORE_URL (or DIRECTORY_STORE_ENDPOINT) names in the
+// directory's secrets file, else the folder <worldsRoot>/directory (the unit's DIRECTORYD_WORLD_STORE). The rule is
+// directoryd's own (S3::from_env, then the folder); a bucket is read through the installed supervisor, which applies
+// it with these settings, so placement, archive and the directory never read two stores.
+export const SECRETS = '/etc/souls/secrets.env';
+export const STORE_KEYS = ['DIRECTORY_STORE_URL','DIRECTORY_STORE_ENDPOINT','DIRECTORY_STORE_BUCKET','DIRECTORY_STORE_REGION',
+  'DIRECTORY_STORE_ACCESS_KEY_ID','DIRECTORY_STORE_SECRET_ACCESS_KEY','DIRECTORY_STORE_PREFIX','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','AWS_DEFAULT_REGION'];
+/** The store's settings from KEY=value lines (systemd's EnvironmentFile form, as register-world reads it); only these. */
+export function storeSettings(text) {
+  const out = {};
+  for (let line of text.split('\n')) {
+    line = line.trim(); if (line.startsWith('export ')) line = line.slice(7);
+    const at = line.indexOf('='); if (line.startsWith('#') || at < 1) continue;
+    const key = line.slice(0, at).trim(); let value = line.slice(at + 1).trim();
+    if (value.length > 1 && (value[0] === '"' || value[0] === "'") && value.at(-1) === value[0]) value = value.slice(1, -1);
+    if (STORE_KEYS.includes(key)) out[key] = value;
+  }
+  return out;
+}
+export async function readStoreSettings(file = SECRETS) {
+  try { return storeSettings((await data(file)).toString('utf8')); } catch (error) { if (error.code === 'ENOENT') return {}; throw error; }
+}
+export const bucketNamed = settings => Boolean(settings.DIRECTORY_STORE_URL?.trim()) || settings.DIRECTORY_STORE_ENDPOINT !== undefined;
+const KEY = /^[a-z0-9-]+(?:\/[a-z0-9-]+)*$/;
+async function supervisorGet(config, key, settings) {
+  const child = spawn(join(config.library, 'supervisor'), ['directory-get', key],
+    { env: { PATH:'/usr/bin:/bin', WORLDS_ROOT:config.worldsRoot, ...settings }, stdio: ['ignore', 'pipe', 'ignore'] });
+  const chunks = []; let size = 0;
+  child.stdout.on('data', chunk => { size += chunk.length; if (size > 1 << 20) child.kill('SIGTERM'); else chunks.push(chunk); });
+  const timer = setTimeout(() => child.kill('SIGTERM'), 30_000);
+  const code = await new Promise((yes, no) => { child.once('error', no); child.once('close', yes); }).finally(() => clearTimeout(timer));
+  if (code === 3) throw Object.assign(Error('placement-store-absent'), { code: 'ENOENT' });
+  if (code !== 0 || size > 1 << 20) fail('placement-store-unreachable');
+  return Buffer.concat(chunks);
+}
+/** The directory's store as `{ kind, get(key) }`; `get` throws an ENOENT error when there is no object. */
+export function directoryStore(config, settings = {}, { read = supervisorGet } = {}) {
+  const root = resolve(config.worldsRoot);
+  const get = async key => {
+    if (!KEY.test(key)) fail('placement-store-key-invalid');
+    return bucketNamed(settings) ? read(config, key, settings) : data(await beneath(root, join(root, 'directory', key)));
+  };
+  return { kind: bucketNamed(settings) ? 'bucket' : 'folder', settings, get };
+}
 // Same safe segment contract as the origin's public stream paths, relative to this world's export.
 export const streamPath = value => typeof value === 'string' && /^views\/(?:[A-Za-z0-9._-]+\/)+$/.test(value) && !value.split('/').some(segment => segment === '.' || segment === '..');
 export function checkedConfig(config) {
@@ -148,21 +193,22 @@ export async function publishData(config, phase) {
     authority:JSON.parse(await data(join(config.placement,'authority.json'))) });
 }
 
-export async function placeRequest(config, request, { run = command, asSouls: underSouls = asSouls } = {}) {
+export async function placeRequest(config, request, { run = command, asSouls: underSouls = asSouls, store } = {}) {
   checkedConfig(config); if (!REQUEST.test(request)) fail('placement-request-invalid');
-  const root = resolve(config.worldsRoot), store = join(root,'directory');
-  const intent = JSON.parse(await data(await beneath(root, join(store,'world-create',request))));
+  const root = resolve(config.worldsRoot);
+  store ??= directoryStore(config, await readStoreSettings());
+  const intent = JSON.parse(await store.get(`world-create/${request}`));
   const row = intent.row, ask = intent.ask;
   if (intent.request !== request || !row || !ask || !SLUG.test(row.name) || !SLUG.test(row.template)
       || !PRINCIPAL.test(row.creator) || !/^[a-f0-9]{32}$/.test(row.lineage) || !PRINCIPAL.test(row.zone)
       || row.name !== ask.name || row.template !== ask.template || row.creator !== ask.creator || row.label !== ask.label) fail('placement-intent-invalid');
-  const named = record(await data(await beneath(root,join(store,'world-name',row.name))));
+  const named = record(await store.get(`world-name/${row.name}`));
   if (!(named instanceof Map) || named.size !== 5 || !Buffer.isBuffer(named.get(1)) || named.get(1).toString('utf8') !== row.name
       || !Buffer.isBuffer(named.get(2)) || named.get(2).toString('hex') !== row.lineage || id(named.get(3)) !== row.zone || id(named.get(4)) !== row.creator) fail('placement-owner-mismatch');
   const template = await beneath(config.templates,join(config.templates,row.template));
   const manifest = record(await data(join(template,'template')));
   if (!(manifest instanceof Map) || !Buffer.isBuffer(manifest.get(2)) || !Buffer.isBuffer(named.get(5)) || !named.get(5).equals(manifest.get(2)) || id(manifest.get(3)) !== row.zone) fail('placement-template-mismatch');
-  const list = JSON.parse(await data(await beneath(root,join(store,'world-list'))));
+  const list = JSON.parse(await store.get('world-list'));
   if (!list.worlds?.some(r => r.name === row.name && r.lineage === row.lineage && r.zone === row.zone && r.creator === row.creator)) fail('placement-row-mismatch');
   const instance = `${row.lineage}-${row.zone.replace(':','-')}`; if (!INSTANCE.test(instance)) fail('placement-identity-invalid');
   const statusPath = await beneath(config.placement,join(config.placement,'status',request),{missing:true});
@@ -195,7 +241,9 @@ export async function placeRequest(config, request, { run = command, asSouls: un
   phase.port = port; await atomic(statusPath,phase);
   await underSouls('prepare',request);
   await run('/bin/bash',[join(config.library,'ops/place-world.sh'),'--configuration-only','--instance',instance,'--creator',row.creator.replace(':','-'),
-    '--port',String(port),'--build',config.build,'--resume','--directory',new URL(config.directory).host,'--start']);
+    '--port',String(port),'--build',config.build,'--resume','--directory',new URL(config.directory).host,
+    // On a bucket the world reads it as the directory does (the install drop-in's secrets file); on a folder, named.
+    ...(store.kind === 'folder' ? ['--folder-store'] : []),'--start']);
   await underSouls('probe',request);
   const entry = {instance,creator:row.creator,lineage:row.lineage,zone:row.zone,port};
   if (registry.worlds[row.name] && JSON.stringify(registry.worlds[row.name]) !== JSON.stringify(entry)) fail('placement-authority-conflict');
