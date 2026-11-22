@@ -704,12 +704,30 @@ fn c17_a3_a_soul_walks_into_the_library_and_uses_a_thing_there_by_its_own_entry(
     let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
     // The library's west rug (today's e_7cefb7c4, at (71.5, -6.3) m); the library's door at (74.0, -2.91) m.
     let rug = im.nodes["e_7cefb7c4"];
-    let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "c17a3", im.nodes["world"].scope());
+    // Eden seeds its rugs unrolled, and `unroll` needs the rug rolled (the world decides a form's needs at commit,
+    // #3888): served with the rugs seeded rolled, as C20 seeds the blocks knocked down.
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let rolled = std::env::temp_dir().join(format!("eden-c17a3-rolled-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&rolled);
+    copy_dir(Path::new(&format!("{root}/content/kinds")), &rolled);
+    let file = rolled.join("floors/rug.json");
+    let text = std::fs::read_to_string(&file).unwrap();
+    let seeded = text.replacen(r#""default":false"#, r#""default":true"#, 1);
+    assert_ne!(text, seeded, "the rugs seeded unrolled");
+    std::fs::write(&file, seeded).unwrap();
+    let (served, mut soul, dir, _) = serve_entries(
+        &facts,
+        rolled.to_str().unwrap(),
+        "74.0,-1.0",
+        "c17a3",
+        im.nodes["world"].scope(),
+    );
     // `unroll`, a walk in and a 3 s pause (C20 gives `roll_up`'s 5 s pause after the walk its own time too).
     let unrolled = soul.act("eden:unroll", Some(rug), BTreeMap::new());
     println!("from outside, unroll the library's west rug: {unrolled:?}");
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&rolled);
     unrolled.expect("walked indoors and used the rug through its own entry");
 }
 
