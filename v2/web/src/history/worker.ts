@@ -7,6 +7,7 @@ import { decode, encode } from 'cborg';
 import type { NodeRec, SampleRec } from '../source/source.ts';
 import { happenedInBundle, type Happened } from '../sound/record.ts';
 import { skyFields } from '../sky/record.ts';
+import { LOOK_FIELD, lookOf } from '../crowd/humanoid/field.ts';
 
 /** What one seek gives the page. */
 export type Seeked = {
@@ -65,6 +66,8 @@ export function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(25)) rec.tiles = (f.get(25) as unknown[][]).map((t) => [num(t[0]), num(t[1]), t[2] as Uint8Array, t[3] as Uint8Array]);
   if (f.has(COURSE)) rec.course = encode(f.get(COURSE)); // #3603: re-encoded canonically, as the record holds it
   if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array);
+  const look = lookOf(f.get(LOOK_FIELD));
+  if (look !== undefined) rec.look = look;
   const sky = skyFields(f); // V19: the world node's day, night and weather
   if (sky) rec.sky = sky;
   return rec;

@@ -12,6 +12,7 @@ import { readChanged } from './changed.ts';
 import { skyFields } from '../sky/record.ts';
 import { BEHIND_US, CUT_US } from '../clock/clock.ts';
 import { fieldsOf } from '../kinds/state.ts';
+import { LOOK_FIELD, lookOf } from '../crowd/humanoid/field.ts';
 
 /** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
 const AHEAD = 16;
@@ -81,6 +82,8 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(DESCRIPTION)) rec.description = refOf(f.get(DESCRIPTION));
   if (f.has(COURSE)) rec.course = encode(f.get(COURSE)); // #3603: re-encoded canonically, as the record holds it
   if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array);
+  const look = lookOf(f.get(LOOK_FIELD));
+  if (look !== undefined) rec.look = look;
   const placeName = f.get(PLACE_NAME);
   if (placeName instanceof Uint8Array && placeName.length === 32) rec.placeName = nameKey(placeName);
   const fields = fieldsOf(f); // #3871: its kind's state, by field number

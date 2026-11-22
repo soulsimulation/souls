@@ -7,6 +7,8 @@ import { bakeBytes, decodeBaked, loadModel } from './bake.ts';
 import type { BodyMotion } from './creature/motion.ts';
 import { Crowd } from './crowd.ts';
 import { ArrivalLights } from './arrival.ts';
+import { HumanoidKit } from './humanoid/compose.ts';
+import { LOOK_PREFIX } from './humanoid/field.ts';
 
 /** The body files of today's people (character-wire.ts's names) and the clips baked for each. */
 export const BODIES: [string, string, string][] = [
@@ -20,8 +22,9 @@ export const WALK_STRIDE = 1.3;
 /** Speed (m/s) at which a body is all walk. */
 const FULL_WALK = 0.9;
 
-/** The crowd with the three body files from `base` (a directory URL). */
-export async function loadCrowd(base: string, capacity = 1024): Promise<Crowd> {
+/** The crowd with the three body files from `base` (a directory URL); humanoid looks (#3998) compose from the kit at
+ *  `kit`. */
+export async function loadCrowd(base: string, capacity = 1024, kit = new HumanoidKit(base + 'humanoid/')): Promise<Crowd> {
   const crowd = new Crowd(await Promise.all(BODIES.map(([name, mesh, clips]) => loadModel(name, base + mesh, base + clips, CLIPS))), capacity);
   const response = await fetch(base + 'bodies.json');
   if (!response.ok) throw new Error('body.catalogue-unavailable');
@@ -37,7 +40,8 @@ export async function loadCrowd(base: string, capacity = 1024): Promise<Crowd> {
     let promise = pending.get(hash);
     if (!promise) {
       const entry = entries.get(hash);
-      promise = entry ? verifiedKind(base, entry.file, hash, entry.hash) : Promise.reject(new Error('body.unknown-hash'));
+      promise = hash.startsWith(LOOK_PREFIX) ? Promise.resolve().then(() => kit.model(JSON.parse(hash.slice(LOOK_PREFIX.length)), CLIPS))
+        : entry ? verifiedKind(base, entry.file, hash, entry.hash) : Promise.reject(new Error('body.unknown-hash'));
       pending.set(hash, promise);
     }
     return promise;
@@ -141,7 +145,8 @@ export class CrowdBodies {
           (error: unknown) => { state.state = 'unavailable'; state.reason = error instanceof Error ? error.message : 'body.load-failed'; },
         );
       }
-      c.ready[i] = loaded.state === 'ready' ? 1 : 0;
+      // A look is a costume over the default body: that body stands in while it loads or if it cannot be drawn.
+      c.ready[i] = loaded.state === 'ready' || body.startsWith(LOOK_PREFIX) ? 1 : 0;
       if (loaded.model !== undefined && c.model[i] !== loaded.model) this.select(i, loaded.model);
     }
     const dx = x - c.x[i], dz = z - c.z[i], d = Math.hypot(dx, dz);

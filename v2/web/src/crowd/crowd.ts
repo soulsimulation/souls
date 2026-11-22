@@ -73,6 +73,10 @@ export class Crowd {
         const geo = g.clone(); geo.clearGroups(); geo.setDrawRange(group.start, group.count);
         geo.setAttribute('aAnim', anim); geo.setAttribute('aMix', mix);
         const material = source?.clone() ?? new THREE.MeshLambertMaterial();
+        // A clone drops a material's own shader patch (a humanoid look's palette, #3998): carry it over.
+        if (source && source.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile) {
+          material.onBeforeCompile = source.onBeforeCompile; material.customProgramCacheKey = source.customProgramCacheKey;
+        }
         if ('vertexColors' in material) material.vertexColors = true;
         const skin = source as THREE.MeshStandardMaterial | undefined;
         const depth = crowdMaterial(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: skin?.map, alphaMap: skin?.alphaMap, alphaTest: source?.alphaTest ?? 0, side: source?.side ?? THREE.FrontSide }), uniforms, true);

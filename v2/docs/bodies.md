@@ -238,6 +238,13 @@ the previous body. Both live and history workers carry that field to the same cr
 selects the default person. A requested model is hidden while loading, then becomes ready or named unavailable;
 it never substitutes another preset. Materials, maps and UV seams remain model-specific instanced batches.
 
+A humanoid look made in today's editor (core/humanoid@2 params: hair, skin, top, ...) rides on the default body as
+the body node's field 33, the params as UTF-8 JSON (at most 2 KiB; #3998). Both workers carry it; while field32 is
+absent the page composes the look from the humanoid kit (`crowd/humanoid/`, today's composition ported, every kit file
+checked against `kit.json`'s hash) and bakes it into the crowd as one model per distinct look. It is a costume: the
+default person stands in while it loads or if it cannot be drawn, and a worn hash always wins. Nothing writes field
+33 yet; the migration from `legacy_looks_v1` is the next slice.
+
 The page build accepts the explicit prepared directory as `V2_BODY_ASSETS`. Its fixed manifest validates regular
 files, source pins and the complete catalogue/model/default/decoder closure before publishing `assets/bodies/`.
 Install and release callers prepare that input through the existing verified asset pull. No runtime model fetch

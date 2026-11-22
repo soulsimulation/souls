@@ -53,7 +53,11 @@ export type CrowdUniforms = {
 
 /** Patches `material` to skin from the bake; `depth` for a shadow's depth material (it has no normals). */
 export function crowdMaterial<M extends THREE.Material>(material: M, uniforms: CrowdUniforms, depth = false): M {
-  material.onBeforeCompile = (s) => {
+  // A material's own patch (a humanoid look's palette, #3998) runs first, and its program key is kept apart.
+  const own = material.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile ? material.onBeforeCompile : null;
+  const ownKey = own ? material.customProgramCacheKey() : '';
+  material.onBeforeCompile = (s, renderer) => {
+    own?.call(material, s, renderer);
     Object.assign(s.uniforms, uniforms);
     s.vertexShader = s.vertexShader.replace('#include <common>', `#include <common>\n${PARS}`);
     if (depth) {
@@ -64,6 +68,6 @@ export function crowdMaterial<M extends THREE.Material>(material: M, uniforms: C
         .replace('#include <begin_vertex>', 'vec3 transformed = (crowdSk * vec4(position, 1.0)).xyz;');
     }
   };
-  material.customProgramCacheKey = () => (depth ? 'crowd-depth' : 'crowd');
+  material.customProgramCacheKey = () => (depth ? 'crowd-depth' : 'crowd') + (own ? ':' + ownKey : '');
   return material;
 }

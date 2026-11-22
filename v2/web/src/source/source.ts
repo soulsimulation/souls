@@ -42,6 +42,8 @@ export type NodeRec = {
   description?: string | null;
   /** Exact recorded body-kind hash (field32); absent is the stated default. */
   body?: string;
+  /** A humanoid look's params as JSON (field 33, `crowd/humanoid/field.ts`), drawn while `body` is absent. */
+  look?: string;
   /** A named place's (or room's, or thing's) public name: import-eden's field 4, by its hash, with the words from the
    *  text files' `[hash, words]` rows (#3574); null while unknown. */
   placeName?: string | null;
