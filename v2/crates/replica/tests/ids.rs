@@ -409,3 +409,105 @@ fn sha256_in_pieces_is_the_one_shot_digest() {
         }
     }
 }
+
+/// #1960 (follow-up of #4080): the native build's SHA-256 (the processor's SHA instructions where it has them) gives
+/// FIPS 180-4's digests, and the same digests as the SHA-256 written out in `ids.rs` (the WASM build's), for every
+/// length across the padding and block edges, for large inputs, in pieces, and carried on from a clone (a kept head).
+#[test]
+fn sha256_fast_and_written_out_give_the_same_digests() {
+    use replica::ids::{PortableSha256, Sha256, sha256};
+    #[cfg(target_arch = "x86_64")]
+    println!(
+        "x86-64 SHA instructions on this machine: {}",
+        std::arch::is_x86_feature_detected!("sha")
+    );
+    #[cfg(target_arch = "aarch64")]
+    println!(
+        "aarch64 SHA2 instructions on this machine: {}",
+        std::arch::is_aarch64_feature_detected!("sha2")
+    );
+    let portable = |pieces: &[&[u8]]| {
+        let mut h = PortableSha256::new();
+        pieces.iter().for_each(|p| h.update(p));
+        h.finish()
+    };
+    let fast = |pieces: &[&[u8]]| {
+        let mut h = Sha256::new();
+        pieces.iter().for_each(|p| h.update(p));
+        h.finish()
+    };
+
+    // FIPS 180-4's examples (NIST's SHA-256 example values): the empty message, one block, two blocks of 448 and 896
+    // bits, and a million times "a".
+    let million = vec![b'a'; 1_000_000];
+    let known: [(&[u8], &str); 5] = [
+        (b"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+        (b"abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+        (
+            b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+        ),
+        (
+            b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu",
+            "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1",
+        ),
+        (&million, "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"),
+    ];
+    for (message, digest) in known {
+        assert_eq!(to_hex(&sha256(message)), digest, "{} bytes", message.len());
+        assert_eq!(to_hex(&fast(&[message])), digest, "{} bytes", message.len());
+        assert_eq!(
+            to_hex(&portable(&[message])),
+            digest,
+            "{} bytes",
+            message.len()
+        );
+    }
+
+    // Every length from 0 through four blocks (0, 55, 56, 63, 64 and each block edge among them), then large ones.
+    let message: Vec<u8> = (0..1_100_000u32)
+        .map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8)
+        .collect();
+    let large = [
+        511, 512, 513, 4095, 4096, 4097, 65_535, 65_536, 90_000, 1_048_576, 1_100_000,
+    ];
+    for n in (0..=257).chain(large) {
+        let m = &message[..n];
+        let want = portable(&[m]);
+        assert_eq!(sha256(m), want, "{n} bytes");
+        // In two pieces, split inside a block, on a block edge and at the ends.
+        for split in [0, 1, 55, 56, 63, 64, 65, n / 2, n.saturating_sub(1), n] {
+            let (a, b) = m.split_at(split.min(n));
+            assert_eq!(fast(&[a, b]), want, "{n} bytes split at {split}");
+            assert_eq!(portable(&[a, b]), want, "{n} bytes split at {split}");
+        }
+    }
+
+    // A clone carries on from what was taken (the kept head of #4080): one head, taken once, then two different
+    // tails from clones of it, each the digest of the head and that tail in one piece. The head's lengths leave the
+    // state on a block edge, inside a block and across the padding's edge.
+    for head in [0, 1, 55, 56, 63, 64, 65, 4096, 5000, 70_001] {
+        let mut kept = Sha256::new();
+        kept.update(&message[..head]);
+        let mut kept_portable = PortableSha256::new();
+        kept_portable.update(&message[..head]);
+        for (from, len) in [
+            (200_000, 0),
+            (200_000, 1),
+            (300_000, 63),
+            (400_000, 64),
+            (500_000, 85_000),
+        ] {
+            let tail = &message[from..from + len];
+            let want = portable(&[&message[..head], tail]);
+            let mut h = kept.clone();
+            h.update(tail);
+            assert_eq!(h.finish(), want, "head {head}, tail {len}");
+            let mut h = kept_portable.clone();
+            h.update(tail);
+            assert_eq!(h.finish(), want, "head {head}, tail {len}");
+        }
+        // The kept state itself is not moved by its clones.
+        assert_eq!(kept.finish(), portable(&[&message[..head]]), "head {head}");
+    }
+}
