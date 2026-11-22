@@ -794,7 +794,13 @@ fn meets(
         // segments are then put on the floor's edge nearest the face. Only a floor is measured (`within` is a square
         // of the open ground, which the grown wall itself cuts), and only when no piece of the side comes within
         // [`MEET_SHORT`] of the face along its own segment's middle.
-        let face = |side: i8| if side > 0 { door.n1 + g.d } else { door.n0 - g.d };
+        let face = |side: i8| {
+            if side > 0 {
+                door.n1 + g.d
+            } else {
+                door.n0 - g.d
+            }
+        };
         let line = [1i8, -1].map(|side| {
             let f = face(side);
             if within.is_some() {

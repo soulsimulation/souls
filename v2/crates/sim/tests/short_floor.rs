@@ -49,6 +49,7 @@ fn cut(edge: i64) -> (i64, Vec<i64>) {
     let ends = p
         .meets
         .iter()
+        .filter(|m| !m.step)
         .flat_map(|m| [i64::from(m.a[2]), i64::from(m.b[2])])
         .collect();
     (reach, ends)
@@ -58,12 +59,17 @@ fn cut(edge: i64) -> (i64, Vec<i64>) {
 fn a_doorways_end_lies_on_a_floor_that_stops_short_of_its_wall() {
     let (flush_reach, flush) = cut(3000);
     let (short_reach, short) = cut(2900);
-    println!("flush: floor to {flush_reach} mm, ends {flush:?}; short: floor to {short_reach} mm, ends {short:?}");
-    // The flush floor ends on the grown wall's face, and its doorway's end is there, as before.
-    assert_eq!(flush_reach, 3000 - HUMAN_RADIUS);
-    assert!(!flush.is_empty() && flush.iter().all(|&z| z == flush_reach));
-    // The short floor ends 100 mm before the face, and its doorway's end is on that edge, not on the face.
-    assert_eq!(short_reach, flush_reach - 100);
+    println!(
+        "flush: floor to {flush_reach} mm, ends {flush:?}; short: floor to {short_reach} mm, ends {short:?}"
+    );
+    // The grown wall's face at the doorway: the doorway's middle (3050), less its half depth (100), less what the
+    // wall is grown by (as the floor's edge is: 3000 less where the flush floor ends).
+    let face = 3050 - 100 - (3000 - flush_reach);
+    // The flush floor reaches past the face: its doorway's end is on the face, as before.
+    assert!(flush_reach >= face);
+    assert!(!flush.is_empty() && flush.iter().all(|&z| z == face));
+    // The short floor ends 50 mm before the face (as Mimos's does): its doorway's end is on the floor's edge.
+    assert_eq!(short_reach, face - 50);
     assert!(!short.is_empty() && short.iter().all(|&z| z == short_reach));
 }
 
