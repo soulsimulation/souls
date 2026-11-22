@@ -559,3 +559,82 @@ async fn v13b_a3_a_renewed_view_carries_on_and_an_unrenewed_one_expires() {
         "V13b A3: {count} items across the old token's expiry, the longest gap {gap:?}; the unrenewed socket expired"
     );
 }
+
+/// #4078 A1, A2, A4: a view socket that stops reading falls behind its stream; once its probe has gone unanswered for
+/// `VIEW_BEHIND_MOST` it is let go, told `view.behind`, and rejoins from the start as a new viewer. A view socket that
+/// keeps reading, on the same stream, is unaffected.
+#[tokio::test]
+async fn x10_f1_a_view_socket_that_falls_behind_is_let_go_and_rejoins() {
+    let r = start("x10-f1", Receipts::off()).await;
+    let _ = r.gw.view_key.set(ViewKey::new(KEY));
+    let key = ViewKey::new(KEY);
+    let (hall, me) = (node(1), node(10));
+    let mut w = W { seq: 0, at: 0 };
+    let e = [w.body(me, hall, 0)];
+    r.feed.record(w.record(&e));
+    let later = gatewayd::unix_now() + 120;
+    let token = view_token(&key, &[soul(1)], later);
+    let (mut fast, _) = sign_in_as(&r.url, &token).await;
+    let (mut slow, _) = sign_in_as(&r.url, &token).await;
+    let start = tokio::time::Instant::now();
+    put(&mut fast, subscribe(me, 1, 100_000)).await;
+    put(&mut slow, subscribe(me, 1, 100_000)).await;
+    first_item(&mut fast, &mut w, &r.feed, me, hall).await;
+    assert_eq!(r.gw.views.held(), 2);
+    // The world walks the body every 50 ms; the fast socket reads all of it, the slow one nothing.
+    let feed = r.feed.clone();
+    tokio::spawn(async move {
+        for x in 0..500 {
+            let e = w.walk(me, hall, x * 1_000);
+            feed.record(w.record(&[e]));
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    });
+    let bound = socket::VIEW_BEHIND_MOST;
+    let (mut gap, mut last, mut count) = (Duration::ZERO, tokio::time::Instant::now(), 0);
+    let mut let_go = None;
+    while start.elapsed() < bound + Duration::from_secs(6) {
+        next(&mut fast, Duration::from_secs(1))
+            .await
+            .expect("the fast socket stays open");
+        let now = tokio::time::Instant::now();
+        gap = gap.max(now - last);
+        (last, count) = (now, count + 1);
+        if let_go.is_none() && r.gw.views.held() == 1 {
+            let_go = Some(start.elapsed());
+        }
+    }
+    let let_go = let_go.expect("the slow socket was let go");
+    assert!(
+        let_go >= bound && let_go <= bound + Duration::from_secs(4),
+        "let go {let_go:?} after it subscribed, against a bound of {bound:?} and a probe every 2 s"
+    );
+    assert!(
+        gap < Duration::from_millis(500),
+        "the fast socket's longest gap {gap:?}"
+    );
+    // What the slow socket had not read, then its reason and the close.
+    let mut told = false;
+    while let Some(v) = next(&mut slow, Duration::from_secs(2)).await {
+        told |= outcome_name(&v).as_deref() == Some(socket::VIEW_BEHIND);
+    }
+    assert!(told, "the slow socket is told it fell behind");
+    // It rejoins from the start like any new viewer: a new socket, a new subscription, the grant item first.
+    let (mut again, outcome) = sign_in_as(&r.url, &token).await;
+    assert_eq!(outcome, socket::VIEW_STARTED);
+    put(&mut again, subscribe(me, 1, 100_000)).await;
+    let first = item(
+        &next(&mut again, Duration::from_secs(2))
+            .await
+            .expect("an item"),
+    )
+    .expect("an item");
+    assert!(
+        matches!(decode(&first).unwrap().value, Value::Map(m) if m.get(&1) == Some(&Value::Uint(5))),
+        "a grant item opens the rejoined stream"
+    );
+    println!(
+        "#4078: the slow socket let go {let_go:?} after it subscribed (bound {bound:?}); the fast one read {count} items, \
+         its longest gap {gap:?}; the slow one rejoined"
+    );
+}
