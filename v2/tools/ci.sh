@@ -230,6 +230,29 @@ step client-mcp bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && n
 step creator-terrain bash -c 'npm install --no-save --no-package-lock --no-audit --no-fund --prefix ../packages/ground zod@4.6.7 &&
   node --test tools/terrain/*.test.ts client/src/creator/terrain/*.test.mjs'
 }
+driver_served() {
+# The driver on a served world (X7, #4015): N2's test world seeded with ten Souls (`worldd seed`), run by `worldd serve`
+# behind its own gatewayd; the driver starts nothing and signs in the seeded Souls' tokens (`--remote`, `--tokens`) for
+# a 60 s ladder-10-uneven, its says sent (`--speech`). Passes when every act is sent and answered (a receipt or a
+# refusal by name), the says with receipts, with no error and no socket closed; the report's minutes are printed.
+step driver-served bash -c 'set -euo pipefail
+  cargo build -p gatewayd -p worldd -p testworld -p driver --locked --quiet
+  t=${CARGO_TARGET_DIR:-target}/debug d=$(mktemp -d); trap "kill \$(jobs -p) 2>/dev/null; rm -rf $d" EXIT
+  "$t"/testworld --out "$d" >/dev/null
+  "$t"/worldd seed --facts "$d/testworld-s1-t0.facts.json" --dir "$d/w" --souls 10 --at -40,30 >/dev/null
+  "$t"/worldd serve --dir "$d/w" --socket "$d/w.sock" >"$d/worldd.log" 2>&1 &
+  for _ in $(seq 300); do grep -q "listening " "$d/worldd.log" && break; sleep 0.1; done
+  "$t"/gatewayd --listen 127.0.0.1:0 --world "$d/w.sock" --tokens "$d/w/tokens" --build 1220 >"$d/g.out" 2>"$d/g.log" &
+  for _ in $(seq 100); do grep -q "^listening " "$d/g.out" && break; sleep 0.1; done
+  node tools/driver/loads.mjs ladder-10-uneven --seconds 60 --out "$d/schedule.txt"
+  "$t"/driver --schedule "$d/schedule.txt" --dir "$d/run" --tokens "$d/w/souls.tokens" --speech \
+    --remote "ws://$(sed -n "s/^listening //p" "$d/g.out")"
+  node -e "const r = JSON.parse(require(\"fs\").readFileSync(process.argv[1], \"utf8\")), m = r.perMinute;
+    const sum = (f) => m.reduce((s, x) => s + f(x), 0), n = (o) => Object.values(o).reduce((s, v) => s + v, 0);
+    const answered = sum((x) => x.answered), receipts = sum((x) => x.receipts), errors = sum((x) => n(x.errors)), sent = r.all.sent;
+    console.log(\`driver-served: \${sent} of \${r.intendedActs} acts sent, \${answered} answered (\${receipts} receipts), \${errors} errors, \${r.socketsClosed} sockets closed\`);
+    if (r.world !== \"remote\" || sent !== r.intendedActs || !sent || answered !== sent || !receipts || errors || r.socketsClosed) process.exit(1);" "$d/run/report.json"'
+}
 replica_equal() {
 # The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
 # same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
@@ -320,6 +343,6 @@ if on client; then
   # import-accounts: the pairing tests (client/src/pair/former.test.mjs) start target/debug/import-accounts, which the
   # whole-workspace `cargo test` used to leave there.
   step client-bins cargo build -p import-accounts --locked --quiet
-  wasm_pkg; ops_health; web_steps; client_steps
+  wasm_pkg; ops_health; web_steps; client_steps; driver_served
   [[ -z $full ]] || speed_bars
 fi
