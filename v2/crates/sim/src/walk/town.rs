@@ -2496,12 +2496,13 @@ impl<'a> View<'a> {
     }
 
     /// [`View::stand_near_door`] for a thing whose footprint is `ring` (#4072: its corners in `node`'s frame, `at`
-    /// its middle): within `reach` of its outline ([`crate::spots::within_footprint`]); with no ring, of `at`.
+    /// its middle, and whether the walk ends on it): within `reach` of its outline, or on it
+    /// ([`crate::spots::within_footprint`]); with no ring, of `at`.
     pub fn stand_near_shape(
         &self,
         node: Id,
         at: Vec3,
-        ring: Option<&[Vec3]>,
+        ring: Option<(&[Vec3], bool)>,
         reach: i64,
         from: Option<&Body>,
         door: Option<Id>,
@@ -2520,8 +2521,8 @@ impl<'a> View<'a> {
             door,
         };
         match ring {
-            Some(ring) => {
-                crate::spots::within_footprint(&mut g, Target::new(node, at), ring, reach, from)
+            Some((ring, on)) => {
+                crate::spots::within_footprint(&mut g, Target::new(node, at), ring, on, reach, from)
             }
             None => crate::spots::within(&mut g, Target::new(node, at), reach, from),
         }

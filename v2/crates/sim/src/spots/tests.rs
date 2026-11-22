@@ -226,7 +226,8 @@ fn a_long_thing_whose_middle_is_out_of_reach_is_acted_at_from_beside_its_outline
         let from = Some((node(), Vec3::new(side * 8_000_000, 0, 3_000_000)));
         // By its middle, nothing is within reach: the stools stand before it and the wall behind it.
         assert_eq!(within(&mut g, t, REACH, from), None);
-        let p = within_footprint(&mut g, t, &ring, REACH, from).expect("a place by its outline");
+        let p =
+            within_footprint(&mut g, t, &ring, false, REACH, from).expect("a place by its outline");
         assert!(g.stand(node(), p).is_some(), "a body stands there: {p:?}");
         assert!(
             to_outline(p, &ring) <= 300_000,
@@ -234,7 +235,7 @@ fn a_long_thing_whose_middle_is_out_of_reach_is_acted_at_from_beside_its_outline
         );
         assert!(p.x * side >= 1_500_000, "at the asker's end: {p:?}");
         assert_eq!(
-            within_footprint(&mut g, t, &ring, REACH, from),
+            within_footprint(&mut g, t, &ring, false, REACH, from),
             Some(p),
             "the same every time"
         );
@@ -247,7 +248,7 @@ fn a_thing_is_acted_at_from_the_place_by_its_outline_on_the_askers_side() {
     let ring = box_ring(1_000_000, 1_000_000);
     for side in [1, -1] {
         let from = Some((node(), Vec3::new(side * 5_000_000, 0, 0)));
-        let p = within_footprint(&mut g, target(0), &ring, REACH, from).expect("a place");
+        let p = within_footprint(&mut g, target(0), &ring, false, REACH, from).expect("a place");
         assert!(p.x * side > 1_000_000, "on the asker's side: {p:?}");
         assert_eq!(
             to_outline(p, &ring),
@@ -256,7 +257,7 @@ fn a_thing_is_acted_at_from_the_place_by_its_outline_on_the_askers_side() {
         );
     }
     // With no asker, by the gap alone: a place a pitch out from the outline.
-    let p = within_footprint(&mut g, target(0), &ring, REACH, None).expect("a place");
+    let p = within_footprint(&mut g, target(0), &ring, false, REACH, None).expect("a place");
     assert_eq!(to_outline(p, &ring), REACH_PITCH, "{p:?}");
 }
 
@@ -266,11 +267,11 @@ fn a_thing_with_no_place_within_reach_of_its_outline_has_none() {
     let ring = box_ring(50_000, 50_000);
     let from = Some((node(), Vec3::new(5_000_000, 0, 0)));
     assert_eq!(
-        within_footprint(&mut g, target(0), &ring, REACH, from),
+        within_footprint(&mut g, target(0), &ring, false, REACH, from),
         None
     );
     assert_eq!(
-        within_footprint(&mut g, target(0), &ring, REACH, None),
+        within_footprint(&mut g, target(0), &ring, false, REACH, None),
         None
     );
 }
@@ -289,4 +290,91 @@ fn a_footprint_is_the_box_of_its_entrys_bounds_round_its_origin() {
     assert_eq!(to_outline(Vec3::new(300_000, 0, -200_000), &ring), 0);
     assert_eq!(to_outline(Vec3::new(1_300_000, 0, 0), &ring), 300_000);
     assert_eq!(to_outline(Vec3::new(1_300_000, 0, 900_000), &ring), 500_000);
+}
+
+#[test]
+fn a_walk_to_be_at_a_walkable_thing_ends_on_it_near_the_asker_and_others_beside_it() {
+    // Open ground everywhere: a rug 3 m by 2 m round the origin, the asker 5 m east.
+    let mut g = Block { half: -1 };
+    let ring = box_ring(1_500_000, 1_000_000);
+    let from = Some((node(), Vec3::new(5_000_000, 0, 0)));
+    let on = within_footprint(&mut g, target(0), &ring, true, REACH, from).expect("on it");
+    assert_eq!(to_outline(on, &ring), 0, "inside its outline: {on:?}");
+    let depth = ring
+        .iter()
+        .zip(ring.iter().cycle().skip(1))
+        .map(|(a, b)| to_segment(on, *a, *b))
+        .min()
+        .unwrap();
+    assert!(depth >= ON_DEPTH, "a body's width in from its edge: {on:?}");
+    assert!(on.x > 0, "on the asker's side: {on:?}");
+    // Not walkable: by its near edge, not on it.
+    let by = within_footprint(&mut g, target(0), &ring, false, REACH, from).expect("by it");
+    assert_eq!(by.x, 1_500_000, "on its east edge: {by:?}");
+}
+
+/// Open ground that counts the places it is asked about.
+struct Counting(std::cell::Cell<u64>);
+
+impl Ground for Counting {
+    fn stand(&self, _: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.0.set(self.0.get() + 1);
+        Some((p, p))
+    }
+    fn passage(&self, _: Id, _: Vec3) -> bool {
+        false
+    }
+    fn walk(&mut self, _: Id, a: Vec3, _: Id, b: Vec3) -> Option<i64> {
+        Some(flat(a, b))
+    }
+}
+
+#[test]
+fn the_places_tried_round_an_outline_do_not_grow_with_its_size() {
+    let bands = REACH / REACH_PITCH + 1;
+    for half in [400_000, 18_000_000, 100_000_000] {
+        for on in [false, true] {
+            let mut g = Counting(std::cell::Cell::new(0));
+            let ring = box_ring(half, half / 2);
+            let from = Some((node(), Vec3::new(half + 5_000_000, 0, 0)));
+            let p = within_footprint(&mut g, target(0), &ring, on, REACH, from).expect("a place");
+            // The asker's own place, then at most a band's places (and one per edge for the ends) on each band.
+            let most = 1 + 2 * bands * (BAND_PLACES + 4);
+            assert!(
+                g.0.get() <= most as u64,
+                "{half} µm: {} places tried",
+                g.0.get()
+            );
+            assert!(p.x > 0, "on the asker's side: {p:?}");
+        }
+    }
+}
+
+#[test]
+fn a_thing_is_walkable_when_its_entry_is_a_place_an_area_or_has_a_standing_slot() {
+    let j = |t: &str| replica::rules::json::parse(t).expect("json");
+    assert!(walkable(&j(r#"{"owner": "place"}"#)), "a deck");
+    assert!(
+        walkable(&j(r#"{"owner": "thing", "areas": {"top": {}}}"#)),
+        "a rug"
+    );
+    assert!(
+        walkable(&j(
+            r#"{"owner": "thing", "slots": {"spot_1": {"admits": "body"}}}"#
+        )),
+        "a stage"
+    );
+    assert!(
+        !walkable(&j(
+            r#"{"owner": "thing", "slots": {"seat": {"admits": "body", "posture": "sit"}}}"#
+        )),
+        "a chair"
+    );
+    assert!(
+        !walkable(&j(
+            r#"{"owner": "thing", "slots": {"top": {"admits": "thing"}}}"#
+        )),
+        "a desk"
+    );
+    assert!(!walkable(&j(r#"{"owner": "thing"}"#)), "a workbench");
 }

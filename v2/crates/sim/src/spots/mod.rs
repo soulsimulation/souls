@@ -25,7 +25,8 @@
 //!   nearest place within the body's reach of it, by the same rule on finer rings ([`REACH_PITCH`]), held by no one:
 //!   the act is brief, and the walk keeps bodies apart. A form's walk to a thing with a footprint (its entry's
 //!   bounds, [`footprint`]: a workbench, a shelf against a wall, a window in one) goes to the nearest place within
-//!   that reach of its outline, not of its middle ([`within_footprint`], #4072).
+//!   that reach of its outline, not of its middle; a walk to be at a walkable one ([`walkable`]: a stage, a rug, a
+//!   deck) ends on it ([`within_footprint`], #4072).
 //!
 //! Refusals: `spot-none-near` (no walkable place on the rings), `spot-none-free` (every place held or out of reach).
 //! Not here: seats (B3), facing (B11), formations and conversation circles, spots described in words (E2), perches
@@ -411,18 +412,35 @@ pub fn to_outline(p: Vec3, ring: &[Vec3]) -> i64 {
         .unwrap_or(i64::MAX)
 }
 
-/// Where a body may stand to act at a thing whose footprint is `ring` (#4072: its corners in `target`'s node's frame,
-/// in order round it; `target` its middle): the nearest place within `reach` of the footprint's outline, not of its
-/// middle, so a long workbench, a shelf against a wall or a window in one is reached from wherever beside it the
-/// asker's walk gets to. The places lie on the outline's edges moved out by 0, [`REACH_PITCH`], … `reach`, each edge's
-/// line run on that far past both its corners, a pitch apart along it; kept, as [`within`]'s rings are, on walkable
-/// ground, out of doorways and off stairs, and within `reach` of the outline. Nearest as [`within`]'s: the least walk
-/// from `from` plus [`WEIGHT`] times the place's gap to the outline (0 inside it), ties by (band, edge, place); with no
-/// `from`, by the gap alone. With no such place, [`within`] at the middle, so a thing reached before still is.
+/// The most places [`within_footprint`] tries on one band round an outline: on a long one they are spread out, so
+/// the work does not grow with its size (a court's, a hill's).
+pub const BAND_PLACES: i64 = 48;
+
+/// How far inside a walkable thing's outline a walk onto it ends at the least ([`within_footprint`] with `on`), µm: a
+/// body's width, so the body stands on it, not on its edge.
+pub const ON_DEPTH: i64 = 400_000;
+
+/// Where a body may stand to be at, or act at, a thing whose footprint is `ring` (#4072: its corners in `target`'s
+/// node's frame, in order round it; `target` its middle).
+///
+/// - **Beside it** (`on` false): the nearest place within `reach` of its outline, not of its middle, so a long
+///   workbench, a shelf against a wall or a window in one is reached from wherever beside it the asker's walk gets
+///   to. The places lie on bands round the outline, its edges moved out by 0, [`REACH_PITCH`], … `reach`, each edge's
+///   line run on that far past both its corners.
+/// - **On it** (`on`, a walkable thing a body goes to: a stage, a rug, a deck, a court): the nearest place inside its
+///   outline, on bands moved in by [`ON_DEPTH`], then a pitch more each, to `reach`; with none reached, beside it as
+///   above.
+///
+/// On each band at most [`BAND_PLACES`] places, a pitch apart or spread evenly round a longer band. Kept, as
+/// [`within`]'s rings are, on walkable ground, out of doorways and off stairs. Nearest as [`within`]'s: the least walk
+/// from `from` plus [`WEIGHT`] times the place's gap to the outline (0 inside it; a place beside a walkable thing
+/// counts `reach` more), ties by (band, edge, place); with no `from`, by the gap alone. With no such place, the middle
+/// when a body may stand there, as [`within`] keeps it, else `None`.
 pub fn within_footprint(
     g: &mut dyn Ground,
     target: Target,
     ring: &[Vec3],
+    on: bool,
     reach: i64,
     from: Option<(Id, Vec3)>,
 ) -> Option<Vec3> {
@@ -437,15 +455,34 @@ pub fn within_footprint(
         })
         .sum();
     let out = if area > 0 { 1 } else { -1 };
+    let lens: Vec<i64> = (0..k).map(|i| flat(ring[i], ring[(i + 1) % k])).collect();
+    // The bands, by how far out each lies (in when below 0).
+    let mut bands: Vec<i64> = Vec::new();
+    if on {
+        bands.extend(
+            (0..)
+                .map(|n| -ON_DEPTH - n * REACH_PITCH)
+                .take_while(|d| -d <= reach),
+        );
+    }
+    bands.extend((0..=reach / REACH_PITCH).map(|n| n * REACH_PITCH));
+    // What a place's gap to the outline counts: beside a walkable thing, more than any place on it.
+    let cost = |gap: i64| {
+        if on && gap > 0 {
+            WEIGHT * (gap + reach)
+        } else {
+            WEIGHT * gap
+        }
+    };
     let mut seen = BTreeSet::new();
     // Places by a bound below their cost: the straight way there plus the weighted gap.
-    let mut order: Vec<(i64, (i64, usize, i64), Vec3)> = Vec::new();
-    for band in 0..=reach / REACH_PITCH {
-        let d = band * REACH_PITCH;
+    let mut order: Vec<(i64, (usize, usize, i64), Vec3)> = Vec::new();
+    for (band, &d) in bands.iter().enumerate() {
+        let whole: i64 = lens.iter().map(|l| (l + 2 * d).max(0)).sum();
+        let step = REACH_PITCH.max((whole + BAND_PLACES - 1) / BAND_PLACES);
         for i in 0..k {
-            let (a, b) = (ring[i], ring[(i + 1) % k]);
-            let len = flat(a, b);
-            if len == 0 {
+            let (a, b, len) = (ring[i], ring[(i + 1) % k], lens[i]);
+            if len == 0 || len + 2 * d < 0 {
                 continue;
             }
             // The edge's line moved out by `d`, at `s` µm along it from `a`.
@@ -461,10 +498,9 @@ pub fn within_footprint(
                     along(a.z, b.z) - out * n(b.x - a.x),
                 )
             };
-            for j in 0..=(len + 2 * d) / REACH_PITCH {
-                let p = at(j * REACH_PITCH - d);
-                let gap = to_outline(p, ring);
-                if gap > reach {
+            for j in 0..=(len + 2 * d) / step {
+                let p = at(j * step - d);
+                if to_outline(p, ring) > reach {
                     continue;
                 }
                 let Some((at, world)) = g.stand(target.node, p) else {
@@ -473,9 +509,8 @@ pub fn within_footprint(
                 if !seen.insert([at.x, at.y, at.z]) || g.passage(target.node, at) {
                     continue;
                 }
-                let gap = WEIGHT * to_outline(at, ring);
                 order.push((
-                    gap + walker.map_or(0, |(_, _, w)| flat(world, w)),
+                    cost(to_outline(at, ring)) + walker.map_or(0, |(_, _, w)| flat(world, w)),
                     (band, i, j),
                     at,
                 ));
@@ -486,7 +521,7 @@ pub fn within_footprint(
     let best = match walker {
         None => order.first().map(|o| o.2),
         Some((node, p, _)) => {
-            let mut best: Option<(i64, (i64, usize, i64), Vec3)> = None;
+            let mut best: Option<(i64, (usize, usize, i64), Vec3)> = None;
             for (bound, key, at) in order {
                 if best.is_some_and(|b| bound > b.0) {
                     break;
@@ -494,15 +529,32 @@ pub fn within_footprint(
                 let Some(walk) = g.walk(node, p, target.node, at) else {
                     continue;
                 };
-                let cost = walk + WEIGHT * to_outline(at, ring);
-                if best.is_none_or(|b| (cost, key) < (b.0, b.1)) {
-                    best = Some((cost, key, at));
+                let c = walk + cost(to_outline(at, ring));
+                if best.is_none_or(|b| (c, key) < (b.0, b.1)) {
+                    best = Some((c, key, at));
                 }
             }
             best.map(|b| b.2)
         }
     };
-    best.or_else(|| within(g, target, reach, from))
+    best.or_else(|| g.stand(target.node, t).map(|_| t))
+}
+
+/// Whether a body goes onto a thing to be at it (#4072): its entry is a place (`owner: place`: a deck, a pier, a
+/// terrace), declares an area to be in (a rug's, a mat's `top`), or a slot a body stands in (one that admits a body
+/// with no posture: a stage's spots, a court's sides). A walk to be at such a thing ends on it ([`within_footprint`]
+/// with `on`).
+pub fn walkable(entry: &replica::rules::json::Value) -> bool {
+    use replica::rules::json::Value as J;
+    let place = entry.get("owner").and_then(J::str) == Some("place");
+    let area = matches!(entry.get("areas"), Some(J::Obj(a)) if !a.is_empty());
+    let standing = match entry.get("slots") {
+        Some(J::Obj(slots)) => slots.iter().any(|(_, s)| {
+            s.get("admits").and_then(J::str) == Some("body") && s.get("posture").is_none()
+        }),
+        _ => false,
+    };
+    place || area || standing
 }
 
 /// [`within`]'s rings: the place within `reach` of `target` nearest by the asker's walk, or by the gap alone.

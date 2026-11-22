@@ -178,6 +178,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         approaches: Default::default(),
         sit_walks: BTreeMap::new(),
         goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
         planning: &planning,
         map: Arc::clone(&map),
     };
@@ -371,6 +372,7 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         approaches: Default::default(),
         sit_walks: BTreeMap::new(),
         goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };
@@ -446,6 +448,7 @@ fn a_point_upstairs_is_on_the_upper_floor() {
         walks: BTreeMap::new(),
         approaches: Default::default(),
         goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
         sit_walks: BTreeMap::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
@@ -636,6 +639,7 @@ fn a_walk_to_a_world_drawn_things_point_is_laid_on_its_outline() {
         sit_walks: BTreeMap::new(),
         approaches: Default::default(),
         goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };
@@ -875,6 +879,7 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
         sit_walks: BTreeMap::new(),
         approaches: Default::default(),
         goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };

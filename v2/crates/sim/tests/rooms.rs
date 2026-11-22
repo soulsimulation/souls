@@ -8,7 +8,8 @@
 //! A form's walk to a thing (a base form's `go_to`, `wait_by`, `touch`, `lean_on`) ends within reach of the thing's
 //! footprint (#4072 follow-up: its entry's bounds, `spots::footprint`, carried onto its floor), not of its middle
 //! (`spots::within_footprint`, as worldd plans it). Counted both ways: by the middle ("form at middle", the rule before)
-//! and by the footprint ("form at footprint"). Workbenches, floor lamps and bookshelves are all reached by the footprint.
+//! and by the footprint ("form at footprint"; a walkable thing, `spots::walkable`, on it, as a `go_to` ends). Every
+//! workbench is reached by the footprint, and no thing reached by its middle is lost by it ("lost").
 //!
 //! Needs the exported Eden facts file: `cargo test -p sim --release --test rooms -- --ignored --nocapture`.
 
@@ -20,7 +21,9 @@ use replica::pose::Vec3;
 use replica::rules::json::{self, Value as Json};
 use replica::world_model::show;
 use sim::routes::Map;
-use sim::spots::{Ask, Spots, Target, flat, footprint, to_outline, within, within_footprint};
+use sim::spots::{
+    Ask, Spots, Target, flat, footprint, to_outline, walkable, within, within_footprint,
+};
 use std::collections::BTreeMap;
 
 fn text() -> String {
@@ -75,6 +78,7 @@ struct Count {
     pocket: usize,
     form: usize,
     foot: usize,
+    lost: usize,
     walk: usize,
 }
 
@@ -150,6 +154,7 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             .handle(id)
             .and_then(|h| tree.node(h))
             .and_then(|n| kinds_by.get(import_eden::entry_name(n.kind().as_str(), n.fields())));
+        let on = entry.is_some_and(walkable);
         let shape = entry
             .and_then(footprint)
             .and_then(|(corners, _)| town.view().footprint_on_floor(id, &corners))
@@ -162,14 +167,14 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             // As worldd plans a form's walk to a thing argument: by its footprint when its entry gives one.
             let foot = match &shape {
                 Some((_, ring, middle)) => {
-                    within_footprint(g, Target::new(floor, *middle), ring, reach, Some((ground, from)))
+                    within_footprint(g, Target::new(floor, *middle), ring, on, reach, Some((ground, from)))
                         .is_some_and(|p| g.walk(ground, from, floor, p).is_some())
                 }
                 None => form,
             };
             let near = (!foot).then(|| match &shape {
                 Some((_, ring, middle)) => {
-                    within_footprint(g, Target::new(floor, *middle), ring, 3_000_000, None)
+                    within_footprint(g, Target::new(floor, *middle), ring, false, 3_000_000, None)
                         .map(|p| to_outline(p, ring))
                 }
                 None => within(g, target, 3_000_000, None).map(|p| flat(p, at)),
@@ -229,6 +234,7 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             c.pocket += usize::from(pocket);
             c.form += usize::from(!form);
             c.foot += usize::from(!foot);
+            c.lost += usize::from(form && !foot);
             c.walk += usize::from(!walk);
         }
         if kind.starts_with("core-school-desk") {
@@ -241,6 +247,7 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             pocket: a.pocket + c.pocket,
             form: a.form + c.form,
             foot: a.foot + c.foot,
+            lost: a.lost + c.lost,
             walk: a.walk + c.walk,
         })
     };
@@ -250,7 +257,7 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
         "things on building floors: {} in {} buildings ({no_door} more in buildings with no doorway onto the ground); \
          pocket targets (a form's walk ended souls:no-way before): {}, of them now reached by a form's walk {} and \
          by a plain walk {}; a form's walk does not reach within reach of the middle {}, of the footprint {}; a plain \
-         walk does not reach {}, in {left} buildings",
+         walk does not reach {}, in {left} buildings; reached by the middle but not by the footprint (lost): {}",
         all.things,
         by.len(),
         all.pocket,
@@ -258,7 +265,8 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
         fixed.1,
         all.form,
         all.foot,
-        all.walk
+        all.walk,
+        all.lost
     );
     println!(
         "by building (pocket / form at middle unreached / form at footprint unreached / walk unreached of things):"
@@ -313,6 +321,10 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
     assert!(
         desks.iter().all(|d| d.2 && d.3),
         "every school desk is reached by a form's walk and a plain walk"
+    );
+    assert_eq!(
+        all.lost, 0,
+        "no thing reached by its middle is lost by its footprint"
     );
     assert_eq!(
         unreached("core-workbench"),

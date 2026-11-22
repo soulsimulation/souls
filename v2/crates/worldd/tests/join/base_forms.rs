@@ -7,6 +7,8 @@
 //!   from a seated body is refused by its need.
 //! - A3: a walk to a thing drawn at its frame's origin (a footpath's line) ends within reach of its line, not at the
 //!   origin.
+//! - #4072 follow-up: a walk to a thing whose entry gives bounds (a 6 m bench) ends by its outline, not at its middle;
+//!   a `touch` after one is in reach; a `go_to` on a walkable thing (a mat, its entry an area) ends on it.
 use super::*;
 
 const HUMANOID: &str = include_str!("../../../../../content/kinds/body/humanoid.json");
@@ -31,13 +33,48 @@ fn path_x() -> [i64; 2] {
     [s.x - 5_000_000, s.x + 5_000_000]
 }
 
-/// The entries: the family's and a card for the things (the rack's kind), the body given the family's by the rule.
+/// A bench 6 m long along x and 0.9 m deep, its entry's bounds (`test:bench`, by its field 27), 12 m east and 10 m
+/// south of the first birth's spot: no form's walk from there ends near its middle by its outline.
+fn bench() -> Id {
+    id(22)
+}
+fn bench_at() -> Vec3 {
+    let s = first_spot();
+    Vec3::new(s.x + 12_000_000, 0, s.z + 10_000_000)
+}
+fn bench_ring() -> [Vec3; 4] {
+    let (m, x, z) = (bench_at(), 3_000_000, 450_000);
+    [(-x, -z), (x, -z), (x, z), (-x, z)].map(|(u, v)| Vec3::new(m.x + u, 0, m.z + v))
+}
+/// A mat 3 m by 2 m (`test:mat`: an area, so walkable), 10 m west and 10 m south of the first birth's spot.
+fn mat() -> Id {
+    id(23)
+}
+fn mat_at() -> Vec3 {
+    let s = first_spot();
+    Vec3::new(s.x - 10_000_000, 0, s.z + 10_000_000)
+}
+fn mat_ring() -> [Vec3; 4] {
+    let (m, x, z) = (mat_at(), 1_500_000, 1_000_000);
+    [(-x, -z), (x, -z), (x, z), (-x, z)].map(|(u, v)| Vec3::new(m.x + u, 0, m.z + v))
+}
+
+/// The entries: the family's, a card for the things (the rack's kind), the bench's and the mat's, the body given the
+/// family's by the rule.
 fn base_entries() -> Json {
     let card = r#"{ "format": "souls-entry/1", "kind": "test:rack", "owner": "thing",
       "text": { "card": "A thing with a card and no forms of its own." }, "card": { "text": "card" } }"#;
+    let bench = r#"{ "format": "souls-entry/1", "kind": "test:bench", "owner": "thing",
+      "geometry": { "bounds_mm": [6000, 800, 900] },
+      "text": { "card": "A long bench." }, "card": { "text": "card" } }"#;
+    let mat = r#"{ "format": "souls-entry/1", "kind": "test:mat", "owner": "thing",
+      "geometry": { "bounds_mm": [3000, 20, 2000] }, "areas": { "top": { "allows": { "sit": "on" } } },
+      "text": { "card": "A mat to stand on." }, "card": { "text": "card" } }"#;
     let mut kinds = vec![
         ("eden:humanoid".to_owned(), parse(HUMANOID).unwrap()),
         (RACK.to_owned(), parse(card).unwrap()),
+        ("test:bench".to_owned(), parse(bench).unwrap()),
+        ("test:mat".to_owned(), parse(mat).unwrap()),
     ];
     assert!(replica::kinds::entry::family_forms(&mut kinds, BODY));
     Json::Obj(kinds)
@@ -81,7 +118,12 @@ fn create_with(sequence: u64, node: Id, at: Vec3, fields: BTreeMap<u64, Value>) 
     .to_value()
 }
 
-/// The world as built, with the base thing and the footpath.
+/// A thing's entry by its field 27, as a world's map names one (`import_eden::entry_name`).
+fn entry_field(entry: &str) -> BTreeMap<u64, Value> {
+    BTreeMap::from([(import_eden::F_ENTRY, Value::Text(name(entry)))])
+}
+
+/// The world as built, with the base thing, the footpath, the bench and the mat.
 fn base_world() -> Replica {
     let mut r = world();
     let mm = |v: i64| {
@@ -107,6 +149,8 @@ fn base_world() -> Replica {
             Vec3::ZERO,
             BTreeMap::from([(import_eden::F_LINE, line)]),
         ),
+        create_with(4, bench(), bench_at(), entry_field("test:bench")),
+        create_with(5, mat(), mat_at(), entry_field("test:mat")),
     ];
     let part = encode(&Value::Map(BTreeMap::from([
         (1, Value::Bytes(header(ground()).hash().to_bytes())),
@@ -285,5 +329,44 @@ fn e1b_a2_a3_base_forms_run_on_a_thing_with_a_card_and_no_forms() {
         Err("field_differs".to_owned()),
         "refused by its need"
     );
+    run.stop();
+}
+
+#[test]
+fn a_walk_to_a_bounded_thing_ends_by_its_outline_and_on_a_walkable_one() {
+    use sim::spots::to_outline;
+    let (run, mut a) = serve_base("fp");
+    a.act(JOIN, None, BTreeMap::new()).expect("Ada joins");
+    let body = body_of(&run, ada()).expect("born");
+    // How near a walk comes to its end.
+    let slack = skills::route::AT_GOAL + 100_000;
+    let go = |a: &mut Client, form: &str, arg: &str, t: Id| {
+        let r = a.act(&format!("eden:{form}"), Some(body), thing(arg, t));
+        let at = last_at(&run, body);
+        println!("footprint {form}: {r:?}, at {at:?}");
+        assert!(!r.expect("accepted and done").is_empty(), "{form}");
+        at
+    };
+    // go_to: by the bench's outline, at its near end, not its middle (where the walk went before).
+    let at = go(&mut a, "go_to", "place", bench());
+    let (gap, mid) = (to_outline(at, &bench_ring()), flat(at, bench_at()));
+    println!("  go_to bench: {gap} µm from its outline, {mid} µm from its middle");
+    assert!(gap <= slack, "by its outline: {at:?}");
+    assert!(mid >= 2_000_000, "not at its middle: {at:?}");
+    // touch, from away: the walk ends within the touch's own reach, so the touch is done.
+    go(&mut a, "go_to", "place", path());
+    let at = go(&mut a, "touch", "target", bench());
+    let gap = to_outline(at, &bench_ring());
+    println!("  touch bench: {gap} µm from its outline");
+    assert!(gap <= 600_000 + slack, "within a touch of it: {at:?}");
+    go(&mut a, "go_to", "place", path());
+    go(&mut a, "lean_on", "support", bench());
+    // go_to the mat: on it.
+    let at = go(&mut a, "go_to", "place", mat());
+    println!(
+        "  go_to mat: {} µm from its outline",
+        to_outline(at, &mat_ring())
+    );
+    assert_eq!(to_outline(at, &mat_ring()), 0, "on the mat: {at:?}");
     run.stop();
 }

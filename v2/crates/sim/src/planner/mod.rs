@@ -66,9 +66,10 @@ pub enum FormQuery {
         reach: i64,
         /// The thing the walk's move acts on, when its own doorway may be stood in (a door's knock, #3688).
         door: Option<replica::ids::Id>,
-        /// The footprint of the thing a form's walk goes to, its corners in `node`'s frame (`at` its middle): the walk
-        /// ends within `reach` of its outline, not of `at` (#4072, [`crate::spots::within_footprint`]).
-        ring: Option<[Vec3; 4]>,
+        /// The footprint of the thing a form's walk goes to, its corners in `node`'s frame (`at` its middle), and
+        /// whether the walk ends on it: the walk ends within `reach` of its outline, not of `at`, or on it (#4072,
+        /// [`crate::spots::within_footprint`]).
+        ring: Option<([Vec3; 4], bool)>,
     },
     Line {
         to: Vec3,
@@ -267,7 +268,7 @@ impl Planner {
                                     .stand_near_shape(
                                         floor,
                                         at,
-                                        ring.map(|r| &r[..]),
+                                        ring.map(|(r, on)| (&r[..], *on)),
                                         reach,
                                         Some(&q.body),
                                         door,

@@ -343,6 +343,8 @@ struct Sight<'a> {
     sit_walks: BTreeMap<Id, (usize, Id, Vec3)>,
     /// The bodies whose walk in progress is to be there, not to act from there ([`Forms::goal_walks`]).
     goals: BTreeSet<Id>,
+    /// The reach of the move each walk in progress comes right before ([`Forms::walk_moves`]), µm.
+    walk_moves: BTreeMap<Id, i64>,
     planning: &'a RefCell<Planning>,
     map: Arc<Versions>,
 }
@@ -754,8 +756,21 @@ impl Sight<'_> {
     /// The footprint of the thing argument a body walks to at step `step` (#4072), when the thing is a child of `node`,
     /// not a body, names no point of its entry (a base form's `go_to`, `wait_by`, `touch`, `lean_on`) and its entry
     /// gives bounds ([`sim::spots::footprint`], the rule [`Sight::to_thing`] judges reach by): the floor it stands
-    /// over, its corners and its middle carried onto that floor. The walk then ends within reach of its outline.
-    fn footprint_walk(&self, body: Id, step: usize, node: Id) -> Option<(Id, [Vec3; 4], Vec3)> {
+    /// over, its corners and its middle carried onto that floor, whether the walk ends on it, and how near its outline
+    /// it ends.
+    ///
+    /// - A walk to be at a walkable thing ([`sim::spots::walkable`]: a stage, a rug, a deck, a court) ends on it.
+    /// - A walk right before a move ends within that move's own reach of the outline, as [`Sight::to_thing`] measures
+    ///   it from the body's edge, less how near a walk comes to its end ([`skills::route::AT_GOAL`]): so a `touch`
+    ///   after it is in reach.
+    /// - Any other walk ends within `reach` (the form's) of the outline.
+    fn footprint_walk(
+        &self,
+        body: Id,
+        step: usize,
+        node: Id,
+        reach: i64,
+    ) -> Option<(Id, [Vec3; 4], Vec3, bool, i64)> {
         let &(at_step, thing, ref point) = self.walks.get(&body)?;
         if at_step != step || self.bodies.contains_key(&thing) {
             return None;
@@ -772,7 +787,17 @@ impl Sight<'_> {
             return None;
         }
         let (corners, _) = sim::spots::footprint(entry)?;
-        self.with_view(body, |v| v.footprint_on_floor(thing, &corners))?
+        let on = self.goals.contains(&body) && sim::spots::walkable(entry);
+        let reach = match self.walk_moves.get(&body) {
+            Some(&r) => {
+                let radius = self.builds.get(&body)?.size.radius_mm() * 1000;
+                (r + radius - skills::route::AT_GOAL).clamp(sim::spots::REACH_PITCH, reach)
+            }
+            None => reach,
+        };
+        let (floor, ring, middle) =
+            self.with_view(body, |v| v.footprint_on_floor(thing, &corners))??;
+        Some((floor, ring, middle, on, reach))
     }
 }
 
@@ -988,15 +1013,16 @@ impl Geometry for Sight<'_> {
             return WalkPlan::Legs(Vec::new());
         };
         let shape = self.on_shape(body, step, node);
-        // A thing argument with a footprint and no drawn shape (#4072): the walk ends within reach of its outline.
+        // A thing argument with a footprint and no drawn shape (#4072): the walk ends within reach of its outline, or
+        // on it.
         let foot = shape
             .is_none()
-            .then(|| self.footprint_walk(body, step, node))
+            .then(|| self.footprint_walk(body, step, node, reach))
             .flatten();
         let at = shape.unwrap_or(at);
-        let (node, at, ring) = match foot {
-            Some((floor, ring, middle)) => (floor, middle, Some(ring)),
-            None => (node, at, None),
+        let (node, at, ring, reach) = match foot {
+            Some((floor, ring, middle, on, near)) => (floor, middle, Some((ring, on)), near),
+            None => (node, at, None, reach),
         };
         // A walk to be in an area ends within reach of the area's circle, not of its middle.
         let reach = reach.saturating_add(self.area_radius(body, step).unwrap_or(0));
@@ -1895,6 +1921,12 @@ impl Acts {
             approaches,
             sit_walks,
             goals: self.forms.goal_walks(),
+            walk_moves: self
+                .forms
+                .walk_moves()
+                .into_iter()
+                .filter_map(|(b, mv)| Some((b, self.library.iter().find(|m| m.name == mv)?.reach)))
+                .collect(),
             planning: &self.planning,
             map,
         };
