@@ -154,6 +154,7 @@ import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { clockOf, worldNow } from '../clock/clock.mjs';
 import { worldOps } from '../creator/world.mjs';
+import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
@@ -286,6 +287,9 @@ let stopped = 0; // acts stopped locally, for the trace
 const startedAt = performance.now();
 let confirmedAt = null, changedAt = null, cutAt = startedAt, cutWhy = 'not-connected';
 const trace = openTrace(rt.dir);
+// A creator's recent commands, refused or not (`souls-god trace`): kept on disk beside the state, so a restart keeps them.
+const creatorTrace = seat.grant.actor === 'creator' ? openCreatorTrace(rt.dir) : null;
+const UNTRACED = new Set(['trace', 'stats', 'pending', 'status', 'stop']);
 const rankedOf = new Map(); // sequence → how many verbs it ranked, until answered
 const editsWaiting = new Map(); // G7: an edit's sequence → what its answer is handed to
 const movesOf = new Map(); // sequence → its move's form (C14), until answered: a receipt says whether the body sits
@@ -779,6 +783,7 @@ const OPS = new Set([
   'stats',
   'status',
   'stop',
+  'trace',
   'undo',
   'wait',
   'wake',
@@ -1263,6 +1268,12 @@ async function answer(req) {
       }
       return answer({ op: 'act', acts: actWords(offer, req.args ?? []), ...(req.for !== undefined ? { for: req.for } : {}) });
     }
+    case 'trace': {
+      if (!creatorTrace) return { ok: false, code: 'trace.not-a-creator', detail: 'trace lists a creator\'s commands' };
+      const n = Math.max(1, Math.min(TRACE_MOST, Number(req.n ?? 20) || 20));
+      const rows = creatorTrace.last(n);
+      return { ok: true, kept: creatorTrace.size, most: TRACE_MOST, refused: rows.filter((r) => !r.ok).length, rows };
+    }
     case 'describe': return closing({ ok: true }, (rows) => {
       // Where each stands in its parent, mm, for placing by relation (#3694).
       const poses = posesOf(copy);
@@ -1569,9 +1580,10 @@ const server = createServer((c) => {
     for (let k; (k = buf.indexOf('\n')) >= 0;) {
       const line = buf.slice(0, k);
       buf = buf.slice(k + 1);
-      let op = 'unread';
+      let op = 'unread', asked = null;
       Promise.resolve().then(() => {
         const req = JSON.parse(line);
+        asked = req;
         op = !OPS.has(req.op) ? 'unknown' : req.op === 'pending' && req.list ? 'pending-list' : req.op; // a listing is the agent's
         return answer(req);
       })
@@ -1590,6 +1602,7 @@ const server = createServer((c) => {
           // Every answer carries its age (R10); each but stats's is traced with the bytes it prints.
           const said = JSON.stringify('age' in out ? out : { ...out, ...ageNow() }) + '\n';
           if (op !== 'stats' && !check) trace.write({ k: 'cmd', op, bytes: Buffer.byteLength(said) });
+          if (creatorTrace && asked && !UNTRACED.has(asked.op)) creatorTrace.add(rowOf(asked, out));
           if (!c.destroyed) c.write(said);
         });
     }

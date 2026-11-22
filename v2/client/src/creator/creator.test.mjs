@@ -93,7 +93,7 @@ before(async () => {
   const tokens = join(dir, 'tokens.txt');
   writeFileSync(tokens, `${grant} ${createHash('sha256').update(token).digest('hex')}\n`);
   const lineage = randomBytes(16).toString('hex');
-  procs.push(spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', lineage, '--epoch', '1', '--rooms', '1', '--bodies', '1', '--creator', `${creatorScope}-1`, '--sky', String(Date.UTC(2026, 10, 21) * 1000), '3695', '--no-measures'], { stdio: 'ignore' }));
+  procs.push(spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', lineage, '--epoch', '1', '--rooms', '1', '--bodies', '1', '--creator', `${creatorScope}-1`, '--sky', String(Date.UTC(2026, 10, 21) * 1000), '3695', '--no-measures', '--www', join(dir, 'www')], { stdio: 'ignore' }));
   for (const until = Date.now() + 10_000; ;) {
     try { if (statSync(world).isSocket()) break; } catch { /* not yet */ }
     if (Date.now() > until) throw new Error('no world socket');
@@ -172,6 +172,83 @@ test('#3695: a creator sets the weather and the sky palette and strikes lightnin
   const strike = await god('strike', '12,-4');
   assert.equal(strike.ok, true, JSON.stringify(strike));
   assert.equal((await god('strike', 'nowhere')).code, 'strike.where');
+});
+
+/** The world node's fields as the page's stream source reads them: the world's public stream (`--www`) played on
+ *  replica's StreamPlayer and its changed nodes read, as `web/src/source/worker.ts` does. */
+let wasm = null;
+async function pageWorld() {
+  const wire = wasm ??= await import(pathToFileURL(join(PKG, 'replica.js')).href).then((w) => (w.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) }), w));
+  const { decode } = await import('../brief/copy.mjs'), { encode } = await import('../history/day.mjs');
+  const pointers = (f) => readdirSync(f, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? pointers(join(f, d.name)) : d.name === 'pointer' && f.endsWith('/everyone') ? [f] : []));
+  for (const stream of pointers(join(dir, 'www'))) {
+    const pointer = decode(readFileSync(join(stream, 'pointer')));
+    if (!pointer.has(1)) continue;
+    const header = readFileSync(resolve(stream, '../../../headers', Buffer.from(pointer.get(3)).toString('hex')));
+    const generation = pointer.get(8);
+    const parts = generation === undefined ? stream : join(stream, 'g', Buffer.from(generation).toString('hex'));
+    const player = generation === undefined ? new wire.StreamPlayer(header) : wire.StreamPlayer.fromBaseline(header, readFileSync(join(parts, 'baseline')));
+    try {
+      // As the worker plays a part (`playOne`): the nodes changed since version 0 (query 5), each read by its id
+      // (query 1), and the world node's fields read by `skyFields`.
+      for (let n = Number(player.next()); n <= pointer.get(1); n++) player.play(readFileSync(join(parts, String(n))));
+      const q = (m) => decode(player.query(encode(m)));
+      for (const [id] of q(new Map([[1, 5], [2, 0]]))) {
+        const f = q(new Map([[1, 1], [2, id]])).get(6);
+        if (f instanceof Map && f.has(60)) return { fields: f };
+      }
+    } finally { player.free(); }
+  }
+  return null;
+}
+
+test('time stages the hour the page shows; the page source reads it; the world clock and calendar are unchanged; trace lists each command', async () => {
+  await connected();
+  const { readSky, skyFields } = await import('../../../web/src/sky/record.ts');
+  const CLOCK = [60, 61, 62, 66, 67, 68]; // the calendar and the clock's mapping (`replica::sky`, `replica::time`)
+  const clockOf = (f) => JSON.stringify(CLOCK.map((k) => f.get(k)), (_, v) => (typeof v === 'bigint' ? String(v) : v));
+  const settled = async (want) => {
+    for (const until = Date.now() + 15_000; Date.now() < until;) {
+      const w = await pageWorld();
+      if (w && want(readSky(skyFields(w.fields)))) return w;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error('the page source never read it');
+  };
+  const before = await settled((r) => r !== null);
+  assert.equal(readSky(skyFields(before.fields)).skyHour, null, 'no staged hour: the world\'s own time');
+
+  const dry = await god('check', 'time', '18:30');
+  assert.equal(dry.ok, true, JSON.stringify(dry));
+  assert.deepEqual(dry.ops.map((o) => [o.field, o.value]), [[91, 18.5 * 3_600_000_000]]);
+  const staged = await god('time', '18:30');
+  assert.equal(staged.ok, true, JSON.stringify(staged));
+  const shown = await settled((r) => r?.skyHour === 18.5 * 3_600_000_000);
+  assert.equal(clockOf(shown.fields), clockOf(before.fields), 'the calendar and the world clock\'s mapping are unchanged');
+  for (const [args, code] of [[['time', '25:00'], 'time.form'], [['time'], 'time.form'], [['time', '--speed', '2'], 'time.never-stops'], [['time', '--pause'], 'time.never-stops']]) {
+    const r = await god(...args);
+    assert.equal(r.code, code, JSON.stringify(r));
+    assert.ok(r.fix, 'a refusal says what to do');
+  }
+  assert.equal((await god('time', 'live')).ok, true);
+  const live = await settled((r) => r !== null && r.skyHour === null);
+  assert.equal(clockOf(live.fields), clockOf(before.fields));
+
+  // trace: the commands above, newest first, each with its time, verb, result and refusal; reads are not in it.
+  const t = await god('trace', '7');
+  assert.equal(t.ok, true, JSON.stringify(t));
+  assert.deepEqual(t.rows.map((r) => [r.verb, r.ok, r.code ?? null]), [
+    ['time', true, null], ['time', false, 'time.never-stops'], ['time', false, 'time.never-stops'], ['time', false, 'time.form'],
+    ['time', false, 'time.form'], ['time', true, null], ['check time', true, null],
+  ]);
+  assert.ok(t.rows.every((r) => !Number.isNaN(Date.parse(r.at))), 'each row has its time');
+  assert.match(t.rows[3].detail, /time <HH:MM \| live>/, 'a refusal keeps its reason');
+  assert.equal(t.most, 200);
+  // The ring is on disk beside the daemon's state: a restart keeps it.
+  await god('stop');
+  await connected();
+  const again = await god('trace', '7');
+  assert.deepEqual(again.rows, t.rows);
 });
 
 test('a creator describes, checks on its copy alone, and builds a room with a thing in it', async () => {
