@@ -27,8 +27,9 @@ export const MIX = Object.freeze({
   say: 22, walk: 14, gesture: 10, take: 10, go_to: 8, sit: 8, look_at: 7, point: 6, touch: 6, lean_on: 5, wait_by: 4,
 });
 
-/** The mix's rate arms: every agent acting every 4 s (125 acts a second at 500), and a burst at 2.7 times that. */
-export const RATES = Object.freeze({ every4: 4, burst: 1.5 });
+/** The mix's rate arms: every agent acting every 4 s (125 acts a second at 500), a burst at 2.7 times that, and
+ *  Gene's stated rate, about 1,000 acts a minute at 500 agents (each every 29.4 s, about 17 a second). */
+export const RATES = Object.freeze({ every4: 4, burst: 1.5, gene17: 29.4 });
 
 /** FNV-1a of a text, as a share of 1. */
 const share = (t) => { let h = 2166136261; for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 16777619); return (h >>> 0) / 2 ** 32; };
@@ -103,6 +104,14 @@ export const LOADS = Object.freeze({
   ...Object.assign({}, ...LADDER.map(ladder)),
   ...Object.fromEntries(LADDER.flatMap((n) => ['even', 'uneven'].flatMap((arm) => Object.keys(RATES)
     .map((rate) => [`mix-${n}-${arm}-${rate}`, mixLoad(n, arm, rate)])))),
+  // What an idle body costs (#4154): 5,000 Souls present, 500 of them acting (every tenth, the last agent among
+  // them so all 5,000 sign in and are borne), as the 500's `mix` load.
+  ...Object.fromEntries(['even', 'uneven'].flatMap((arm) => Object.keys(RATES).map((rate) => [`mix-5000x500-${arm}-${rate}`, (_, s, seed) => {
+    const few = mixLoad(500, arm, rate)(500, s, seed);
+    const by = new Map(few.agents.map((a) => [a.i * 10 + 9, a]));
+    const agents = Array.from({ length: 5000 }, (_, i) => ({ ...(by.get(i) ?? { stays: [[0, s]], acts: [] }), i }));
+    return { ...few, n: 5000, agents, summary: summarize(agents, s) };
+  }]))),
 });
 
 /** The driver's file: the describe line, then `<due ms> <agent> <kind> <verb>` a line, by due time then agent. */

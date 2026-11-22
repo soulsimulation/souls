@@ -269,11 +269,18 @@ fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
     let q = |v: &[u64], s: f64| at_share(v, s) as f64;
     let (mut all, mut accepted) = (Vec::new(), Vec::new());
     let mut by_verb: BTreeMap<&str, (u64, Vec<u64>)> = BTreeMap::new();
+    // #4154: whether a move shows on the public stream before the world's answer (sent once its tick is durable),
+    // and by how much after it: the visible arrival less the answer's, signed.
+    let (mut before, mut after) = (0u64, Vec::new());
     for (id, sent_ms, answered_ms, verb) in agents.iter().flat_map(|a| a.taken.iter()) {
         accepted.push(answered_ms.saturating_sub(*sent_ms));
         let e = by_verb.entry(verb.as_str()).or_default();
         e.0 += 1;
         if let Some(at) = seen.first.get(id) {
+            if at < answered_ms {
+                before += 1;
+            }
+            after.push(at.saturating_sub(*answered_ms));
             let w = at.saturating_sub(*sent_ms);
             all.push(w);
             e.1.push(w);
@@ -281,6 +288,7 @@ fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
     }
     all.sort_unstable();
     accepted.sort_unstable();
+    after.sort_unstable();
     let taken: u64 = by_verb.values().map(|v| v.0).sum();
     let verbs: Vec<String> = by_verb
         .iter_mut()
@@ -317,6 +325,9 @@ fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
         .n("acceptedP50Ms", q(&accepted, 0.5))
         .n("acceptedP95Ms", q(&accepted, 0.95))
         .n("acceptedP99Ms", q(&accepted, 0.99))
+        .n("visibleBeforeAnswerShare", ratio(before, all.len() as u64))
+        .n("visibleAfterAnswerP50Ms", q(&after, 0.5))
+        .n("visibleAfterAnswerP95Ms", q(&after, 0.95))
         .n("p50Ms", q(&all, 0.5))
         .n("p95Ms", q(&all, 0.95))
         .n("p99Ms", q(&all, 0.99))

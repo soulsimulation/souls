@@ -29,10 +29,20 @@ pin() { if [ "$CPUS" = all ]; then exec "$@"; else exec taskset -c "$CPUS" "$@";
 cat /proc/loadavg > "$D/loadavg.before"
 echo "world folder: ${WORLD_ROOT:-run folder}" > "$D/world-root.txt"
 
-"$B/worldd" seed --facts "$FACTS" --dir "$W" --entries "$E" --souls "$N" > "$D/seed.log" 2>&1 \
+"$B/worldd" seed --facts "$FACTS" --dir "$W" --entries "$E" --souls "${N%%x*}" > "$D/seed.log" 2>&1 \
   || { echo "seed failed"; tail "$D/seed.log"; exit 1; }
-pin "$B/worldd" serve --dir "$W" --socket "$W.sock" > "$D/worldd.log" 2>&1 &
-WP=$!
+# SYNC_TRACE=1: the world under strace, every fsync and fdatasync of every thread written with its time
+# (syncs.txt), to count disk syncs a second against acts a second. strace is the world's parent then, so the
+# sampler and the stop find worldd as its child.
+if [ "${SYNC_TRACE:-0}" = 1 ]; then
+  pin strace -f -qq --seccomp-bpf -e trace=fsync,fdatasync,sync_file_range,syncfs -ttt -o "$D/syncs.txt" \
+    "$B/worldd" serve --dir "$W" --socket "$W.sock" > "$D/worldd.log" 2>&1 &
+  TP=$!
+  for _ in $(seq 1 50); do WP=$(pgrep -P "$TP" -n) && break; sleep 0.1; done
+else
+  pin "$B/worldd" serve --dir "$W" --socket "$W.sock" > "$D/worldd.log" 2>&1 &
+  WP=$! TP=
+fi
 for _ in $(seq 1 120); do [ -S "$W.sock" ] && [ -f "$W/views/world.json" ] && break; sleep 1; done
 sleep 2
 pin "$B/gatewayd" --listen 127.0.0.1:0 --world "$W.sock" --tokens "$W/tokens" --build 1220 \
@@ -76,6 +86,6 @@ sleep 5
 kill "$SP" 2> /dev/null
 cp "$W/health.json" "$D/health.final.json" 2> /dev/null
 kill "$GP" "$OP" "$WP" 2> /dev/null
-wait "$GP" "$OP" "$WP" 2> /dev/null
+wait "$GP" "$OP" $TP 2> /dev/null; while kill -0 "$WP" 2> /dev/null; do sleep 0.2; done
 [ -n "${WORLD_ROOT:-}" ] && du -sh "$W" > "$D/world-size.txt" 2>&1 && rm -rf "$(dirname "$W")"
 node "$V2/tools/bench/stage2a/analyze.mjs" "$D"

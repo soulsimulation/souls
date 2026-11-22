@@ -36,12 +36,19 @@ export function analyze(D) {
     rung: D.split('/').pop(), agents: rep.agents, describe: rep.describe,
     acts: { intended: rep.intendedActs, achievedShare: rep.achievedShare, perS: +(rep.all.sent / Math.max(1, secs)).toFixed(1), lateP99Ms: rep.all.lateP99Ms, byVerb: rep.byVerb, standIns: rep.standIns, withheld: rep.withheld },
     accepted: { p50Ms: v.acceptedP50Ms, p95Ms: v.acceptedP95Ms, p99Ms: v.acceptedP99Ms },
-    wait: { taken: v.taken, seen: v.seen, seenShare: v.seenShare, p50Ms: v.p50Ms, p95Ms: v.p95Ms, p99Ms: v.p99Ms, maxMs: v.maxMs, within100: v.within100Ms, within300: v.within300Ms, streamLagP50Ms: v.streamLagP50Ms, streamLagP95Ms: v.streamLagP95Ms, writerLagP50Ms: v.writerLagP50Ms, writerLagP95Ms: v.writerLagP95Ms, byVerb: v.byVerb },
+    wait: { taken: v.taken, seen: v.seen, seenShare: v.seenShare, p50Ms: v.p50Ms, p95Ms: v.p95Ms, p99Ms: v.p99Ms, maxMs: v.maxMs, within100: v.within100Ms, within300: v.within300Ms, streamLagP50Ms: v.streamLagP50Ms, streamLagP95Ms: v.streamLagP95Ms, writerLagP50Ms: v.writerLagP50Ms, writerLagP95Ms: v.writerLagP95Ms, visibleBeforeAnswerShare: v.visibleBeforeAnswerShare, visibleAfterAnswerP50Ms: v.visibleAfterAnswerP50Ms, visibleAfterAnswerP95Ms: v.visibleAfterAnswerP95Ms, byVerb: v.byVerb },
     answer: rep.perMinute.map((m) => ({ p50: m.latencyP50Ms, p95: m.latencyP95Ms, p99: m.latencyP99Ms })),
     tick: { p50Us: w2.h.ticks.p50_us, p99Us: w2.h.ticks.p99_us, maxUs: w2.h.ticks.max_us, meanUs: Math.round(meanWin(w1.h.ticks, w2.h.ticks) ?? 0), count: dCount, over: dOver, onTimeShare: dCount ? +(1 - dOver / dCount).toFixed(4) : null },
     phases, stuck: rep.stuck, refusals, errors: rep.perMinute.reduce((e, m) => { for (const [k, x] of Object.entries(m.errors)) e[k] = (e[k] ?? 0) + x; return e; }, {}),
     cpu: { world: cores('wcpu'), gateway: cores('gcpu'), origin: cores('ocpu'), worldMb: mb('wrss'), gatewayMb: mb('grss'), originMb: mb('orss') },
     threads: Object.fromEntries(['wthreads', 'gthreads'].map((k) => [k === 'wthreads' ? 'world' : 'gateway', Object.entries(w2[k] ?? {}).map(([n, c]) => [n, +((c - (w1[k]?.[n] ?? 0)) / dt).toFixed(2)]).filter(([, c]) => c >= 0.05).sort((a, b) => b[1] - a[1]).slice(0, 8)])),
+    syncs: (() => {
+      if (!fs.existsSync(`${D}/syncs.txt`)) return null;
+      const lines = fs.readFileSync(`${D}/syncs.txt`, 'utf8').split('\n').map((l) => l.split(' ')).filter((f) => +f[1] >= beginS && +f[1] <= endS && /^f?(data)?sync|sync_file_range/.test(f[2] ?? ''));
+      const byPid = {}; for (const f of lines) byPid[f[0]] = (byPid[f[0]] ?? 0) + 1;
+      const span = endS - beginS;
+      return { perS: +(lines.length / span).toFixed(1), takenPerS: +((v.taken ?? 0) / span).toFixed(1), threads: Object.keys(byPid).length, busiestThreadPerS: +(Math.max(0, ...Object.values(byPid)) / span).toFixed(1) };
+    })(),
     driverCores: rep.driverCores, loadavgBefore: fs.existsSync(`${D}/loadavg.before`) ? fs.readFileSync(`${D}/loadavg.before`, 'utf8').trim() : null,
   };
   out.bar = {
@@ -63,8 +70,12 @@ export function tables(rows, label = '') {
     t.push(`| ${r.rung} | ${r.acts.perS} | ${r.accepted.p50Ms ?? '-'} / ${r.accepted.p95Ms ?? '-'} | ${r.wait.p50Ms} / ${r.wait.p95Ms} / ${r.wait.p99Ms} (${r.wait.seenShare}) | ${ms(r.tick.p50Us)} / ${ms(r.tick.p99Us)} / ${ms(r.tick.maxUs)} | ${r.tick.onTimeShare == null ? '-' : (100 * r.tick.onTimeShare).toFixed(2) + ' %'} | ${r.stuck?.stuck ?? '-'} (${r.stuck?.refusedOnly ?? '-'}) | ${r.cpu.world} / ${r.cpu.gateway} / ${r.cpu.origin} | ${r.cpu.worldMb} / ${r.cpu.gatewayMb} | ${yes(r.bar.met)} |`);
   }
   t.push('', '**Where the wait to the first visible move goes** (ms, p50 / p95): the world takes the act (accepted), the stream writer cuts and writes the part (writer lag: the newest part\'s end against the wall when the pointer is read), the reader fetches it (stream lag: a part\'s arrival against its end).', '');
-  t.push('| Rung | send → accepted | writer lag | stream lag at the reader | send → first visible move |', '|---|---|---|---|---|');
-  for (const r of rows) t.push(`| ${r.rung} | ${r.accepted.p50Ms ?? '-'} / ${r.accepted.p95Ms ?? '-'} | ${r.wait.writerLagP50Ms ?? '-'} / ${r.wait.writerLagP95Ms ?? '-'} | ${r.wait.streamLagP50Ms} / ${r.wait.streamLagP95Ms} | ${r.wait.p50Ms} / ${r.wait.p95Ms} |`);
+  t.push('| Rung | send → accepted (durable answer) | writer lag | stream lag at the reader | send → first visible move | visible after the answer | visible before the answer (share) | disk syncs/s against acts taken/s |', '|---|---|---|---|---|---|---|---|');
+  for (const r of rows) t.push(`| ${r.rung} | ${r.accepted.p50Ms ?? '-'} / ${r.accepted.p95Ms ?? '-'} | ${r.wait.writerLagP50Ms ?? '-'} / ${r.wait.writerLagP95Ms ?? '-'} | ${r.wait.streamLagP50Ms} / ${r.wait.streamLagP95Ms} | ${r.wait.p50Ms} / ${r.wait.p95Ms} | ${r.wait.visibleAfterAnswerP50Ms ?? '-'} / ${r.wait.visibleAfterAnswerP95Ms ?? '-'} | ${r.wait.visibleBeforeAnswerShare ?? '-'} | ${r.syncs ? `${r.syncs.perS} / ${r.syncs.takenPerS} (${r.syncs.threads} threads)` : '-'} |`);
+  t.push('', '**Send → first visible move by action** (ms, p50 / p95, acts seen; Gene\'s responsiveness measure):', '');
+  const verbs = [...new Set(rows.flatMap((r) => Object.keys(r.wait.byVerb ?? {})))].sort();
+  t.push(`| Rung | ${verbs.map((x) => x.replace(/^eden:/, '')).join(' | ')} |`, `|---|${verbs.map(() => '---').join('|')}|`);
+  for (const r of rows) t.push(`| ${r.rung} | ${verbs.map((x) => { const b = r.wait.byVerb?.[x]; return b ? `${b.p50Ms} / ${b.p95Ms} (${b.seen})` : '-'; }).join(' | ')} |`);
   t.push('', '**Phase profile** (mean µs per tick over the load window; p99 µs in brackets):', '');
   const keys = [...new Set(rows.flatMap((r) => Object.keys(r.phases)))];
   t.push(`| Rung | ${keys.join(' | ')} |`, `|---|${keys.map(() => '---').join('|')}|`);
