@@ -421,30 +421,59 @@ fn the_places_tried_round_an_outline_do_not_grow_with_its_size() {
 }
 
 #[test]
-fn a_thing_is_walkable_when_its_entry_is_a_place_an_area_or_has_a_standing_slot() {
+fn a_thing_is_walkable_when_a_place_a_floor_to_stand_on_a_step_high_or_stood_on_inside() {
     let j = |t: &str| replica::rules::json::parse(t).expect("json");
     assert!(walkable(&j(r#"{"owner": "place"}"#)), "a deck");
-    assert!(
-        walkable(&j(r#"{"owner": "thing", "areas": {"top": {}}}"#)),
-        "a rug"
-    );
+    // A mat: no taller than a step.
     assert!(
         walkable(&j(
-            r#"{"owner": "thing", "slots": {"spot_1": {"admits": "body"}}}"#
+            r#"{"owner": "thing", "geometry": {"bounds_mm": [3000, 20, 2000]}}"#
+        )),
+        "a mat"
+    );
+    // A dance floor's area allows standing.
+    assert!(
+        walkable(&j(
+            r#"{"owner": "thing", "geometry": {"bounds_mm": [4000, 400, 4000]},
+                "areas": {"top": {"allows": {"stand": "on"}}}}"#
+        )),
+        "an area to stand on"
+    );
+    // A stage: its spots stand inside its outline.
+    assert!(
+        walkable(&j(
+            r#"{"owner": "thing", "geometry": {"bounds_mm": [8040, 4940, 5640]},
+                "slots": {"spot_1": {"admits": "body", "at_mm": [-3150, 940, 1800]}}}"#
         )),
         "a stage"
     );
+    // A bed: its mattress allows lying and sitting only, and it is taller than a step.
     assert!(
         !walkable(&j(
-            r#"{"owner": "thing", "slots": {"seat": {"admits": "body", "posture": "sit"}}}"#
+            r#"{"owner": "thing", "geometry": {"bounds_mm": [1000, 600, 2100]},
+                "areas": {"mattress": {"allows": {"lie": "on", "sit": "edge"}}}}"#
+        )),
+        "a bed"
+    );
+    // A pool table: its players' standing slots lie outside its outline.
+    assert!(
+        !walkable(&j(
+            r#"{"owner": "thing", "geometry": {"bounds_mm": [2700, 800, 1500]},
+                "slots": {"player_1": {"admits": "body", "at_mm": [0, 0, 1200]}}}"#
+        )),
+        "a pool table"
+    );
+    assert!(
+        !walkable(&j(
+            r#"{"owner": "thing", "geometry": {"bounds_mm": [600, 900, 600]},
+                "slots": {"seat": {"admits": "body", "posture": "sit", "at_mm": [0, 450, 0]}}}"#
         )),
         "a chair"
     );
     assert!(
         !walkable(&j(
-            r#"{"owner": "thing", "slots": {"top": {"admits": "thing"}}}"#
+            r#"{"owner": "thing", "geometry": {"bounds_mm": [1770, 1500, 795]}}"#
         )),
-        "a desk"
+        "a workbench"
     );
-    assert!(!walkable(&j(r#"{"owner": "thing"}"#)), "a workbench");
 }

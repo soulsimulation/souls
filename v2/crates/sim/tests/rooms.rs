@@ -142,6 +142,8 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
     let mut calls: Vec<(Duration, Duration)> = Vec::new();
     // Each footprint walk's search time, and whether it reached the thing.
     let mut foot_calls: Vec<(Duration, bool)> = Vec::new();
+    // Things a walk to be at ends on (`spots::walkable`), and things walked to, by kind.
+    let mut onto: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     // The map's parts are found on the first walk: not timed with the first target.
     town.with_ground(|_, g| g.walk(ground, Vec3::ZERO, ground, Vec3::new(1_000_000, 0, 0)));
     let ids: Vec<Id> = im.nodes.values().copied().collect();
@@ -272,6 +274,9 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             c.lost += usize::from(form && !foot);
             c.walk += usize::from(!walk);
         }
+        let o = onto.entry(kind.clone()).or_default();
+        o.0 += usize::from(on && shape.is_some());
+        o.1 += 1;
         if kind.starts_with("core-school-desk") {
             desks.push((field(tree, id, import_eden::F_ORIGIN), pocket, form, walk));
         }
@@ -387,6 +392,28 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
         missed.len(),
         mid(&missed),
         top(&missed)
+    );
+    println!("walked onto (walkable) of things, by kind:");
+    for (k, (n, of)) in &onto {
+        if *n > 0 || k.contains("bed") || k.contains("pool-table") {
+            println!("  {k}: {n} of {of}");
+        }
+    }
+    let onto_of = |k: &str| {
+        onto.iter()
+            .filter(|(n, _)| n.starts_with(k))
+            .map(|(_, c)| c.0)
+            .sum::<usize>()
+    };
+    assert_eq!(
+        onto_of("core-bed"),
+        0,
+        "a bed is walked to its edge, not onto"
+    );
+    assert_eq!(
+        onto_of("core-pool-table"),
+        0,
+        "a pool table is walked to its edge, not onto"
     );
     println!("school desks (pocket, form reached, walk reached):");
     for d in &desks {

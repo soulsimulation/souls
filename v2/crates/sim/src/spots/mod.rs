@@ -584,21 +584,47 @@ pub fn within_footprint(
     best.or_else(|| within(g, target, reach, from))
 }
 
-/// Whether a body goes onto a thing to be at it (#4072): its entry is a place (`owner: place`: a deck, a pier, a
-/// terrace), declares an area to be in (a rug's, a mat's `top`), or a slot a body stands in (one that admits a body
-/// with no posture: a stage's spots, a court's sides). A walk to be at such a thing ends on it ([`within_footprint`]
-/// with `on`).
+/// Whether a body goes onto a thing to be at it (#4072), by its entry: it is a place (`owner: place`: a deck, a pier, a
+/// terrace); it has an area that allows `stand`; it is no taller than a step ([`crate::ground::STEP`]: a rug, a mat);
+/// or a slot a body stands in (one that admits a body with no posture) lies inside its footprint (a stage's spots, a
+/// court's sides). A bed (its mattress allows only `lie` and `sit`) and a pool table (its players' slots stand round
+/// it) are not. A walk to be at a walkable thing ends on it ([`within_footprint`] with `on`).
 pub fn walkable(entry: &replica::rules::json::Value) -> bool {
     use replica::rules::json::Value as J;
+    let mm = |v: &J| match v {
+        J::Int(n) => i64::try_from(*n).ok(),
+        _ => None,
+    };
     let place = entry.get("owner").and_then(J::str) == Some("place");
-    let area = matches!(entry.get("areas"), Some(J::Obj(a)) if !a.is_empty());
-    let standing = match entry.get("slots") {
-        Some(J::Obj(slots)) => slots.iter().any(|(_, s)| {
-            s.get("admits").and_then(J::str) == Some("body") && s.get("posture").is_none()
+    let stand = match entry.get("areas") {
+        Some(J::Obj(areas)) => areas
+            .iter()
+            .any(|(_, a)| a.get("allows").and_then(|x| x.get("stand")).is_some()),
+        _ => false,
+    };
+    let bounds = entry
+        .get("geometry")
+        .and_then(|g| g.get("bounds_mm"))
+        .and_then(J::arr)
+        .and_then(|b| match b {
+            [x, y, z] => Some([mm(x)?, mm(y)?, mm(z)?]),
+            _ => None,
+        });
+    let low = bounds.is_some_and(|[_, y, _]| y <= crate::ground::STEP);
+    let standing = match (entry.get("slots"), bounds) {
+        (Some(J::Obj(slots)), Some([x, _, z])) => slots.iter().any(|(_, s)| {
+            let inside = match s.get("at_mm").and_then(J::arr) {
+                Some([sx, _, sz]) => {
+                    mm(sx).is_some_and(|v| 2 * v.abs() <= x)
+                        && mm(sz).is_some_and(|v| 2 * v.abs() <= z)
+                }
+                _ => false,
+            };
+            s.get("admits").and_then(J::str) == Some("body") && s.get("posture").is_none() && inside
         }),
         _ => false,
     };
-    place || area || standing
+    place || stand || low || standing
 }
 
 /// [`within`]'s rings: the place within `reach` of `target` nearest by the asker's walk, or by the gap alone.
