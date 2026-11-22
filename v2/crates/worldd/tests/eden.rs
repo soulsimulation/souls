@@ -1501,9 +1501,23 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
             let st = Vec3::new(stand.x, place.point.y - place.place.height, stand.z);
             let dry = bodies.town.map.spot(place.floor, st).is_some();
             let near = bodies.town.view().stand_near(place.floor, st, 1, None);
-            let any = bodies.town.view().on_any_ground(place.floor, st);
+            let t = &bodies.town.tree;
+            let any = t
+                .handle(place.thing)
+                .and_then(|h| t.node(h))
+                .and_then(|n| n.parent())
+                .and_then(|h| t.node(h))
+                .map(|n| {
+                    format!(
+                        "{} {} slot at ({}, {})",
+                        n.kind().as_str(),
+                        show(n.id()),
+                        place.point.x,
+                        place.point.z
+                    )
+                });
             println!(
-                "SEAT  floor {} at ({}, {}) dry {dry} near1 {near:?} any {any}",
+                "SEAT  floor {} at ({}, {}) dry {dry} near1 {near:?} parent {any:?}",
                 show(place.floor),
                 st.x,
                 st.z

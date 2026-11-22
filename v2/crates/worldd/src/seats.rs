@@ -71,20 +71,36 @@ pub fn places(
         out.push(place);
     }
     drop(view);
-    // The thing's own solids, in its floor's frame: the boarding step crosses only them and ground.
-    let own: Vec<Vec<Solid>> = boarded
+    // Each boarded seat's solids, in its floor's frame: the thing's own, and every solid on its floor near enough to lie
+    // across a boarding step (the floor's own, read once per floor).
+    let mut on_floor: std::collections::BTreeMap<Id, Vec<Solid>> = Default::default();
+    let solids: Vec<(Vec<Solid>, Vec<Solid>)> = boarded
         .iter()
-        .map(|&(i, _, _)| {
+        .map(|&(i, board, _)| {
             let tree = &town.tree;
-            let (thing, floor) = (out[i].thing, out[i].floor);
-            tree.handle(thing)
-                .zip(tree.handle(floor))
-                .and_then(|(h, f)| sim::ground::scene::solids_under(tree, h, f).ok())
-                .unwrap_or_default()
+            let (thing, floor, at) = (out[i].thing, out[i].floor, out[i].point);
+            let under = |h| {
+                tree.handle(h)
+                    .zip(tree.handle(floor))
+                    .and_then(|(h, f)| sim::ground::scene::solids_under(tree, h, f).ok())
+                    .unwrap_or_default()
+            };
+            let all = on_floor.entry(floor).or_insert_with(|| under(floor));
+            let far = board + BOARD_NEAR;
+            let near = all
+                .iter()
+                .filter(|s| {
+                    s.ring
+                        .iter()
+                        .any(|c| (c[0] - at.x).abs() <= far && (c[1] - at.z).abs() <= far)
+                })
+                .cloned()
+                .collect();
+            (under(thing), near)
         })
         .collect();
     let view = town.view();
-    for (&(i, board, stand), own) in boarded.iter().zip(&own) {
+    for (&(i, board, stand), (own, near)) in boarded.iter().zip(&solids) {
         let place = &mut out[i];
         let floor = place.floor;
         let [w, x, y, z] = place.facing.parts();
@@ -93,7 +109,7 @@ pub fn places(
         };
         let slot = Vec3::new(place.point.x, stand.y, place.point.z);
         let passage = |p: Vec3| sim::walk::town::in_passage(&buildings, &[], ground, floor, p);
-        if let Some(clear) = board_from(&view, floor, slot, stand, board, own, &passage)
+        if let Some(clear) = board_from(&view, floor, slot, stand, board, (own, near), &passage)
             && let Ok(d) = back.rotate(Vec3::new(clear.x - slot.x, 0, clear.z - slot.z))
         {
             place.place.stand = [d.x, d.z];
@@ -148,11 +164,20 @@ fn out_of_passage(
 /// Between the samples of a boarding step's straight line, µm.
 const BOARD_STEP: i64 = 50_000;
 
+/// How far past a seat's boarding reach a solid's corner may be and still be tested against a boarding step, µm: a
+/// solid's half diagonal (a solid larger than this reaching across from afar is not one of a seat's neighbours).
+const BOARD_NEAR: i64 = 10_000_000;
+
+/// A standing body's span above its ground, µm (today's `STEP` and standard height): a solid wholly below the step or
+/// above the head is stepped over or passed under.
+const BODY_SPAN: (i64, i64) = (300_000, 1_750_000);
+
 /// Where a body gets onto a seat whose stand point `stand` no body can stand on or near (a boat's side afloat, #1960):
 /// the nearest clear ground to the seat's slot `slot` (µm, `floor`'s frame, at the stand point's height) within the
 /// slot's boarding reach `board`, on [`sim::spots::within`]'s rings round the slot; out of every doorway and stair
-/// (`passage`); from which the straight step onto the slot crosses only ground (dry, wading or swimming) and the
-/// thing's own solids `own`, grown by a standard body's radius, never another solid. On a ring, the place nearest the
+/// (`passage`); from which the straight step onto the slot crosses no solid of `near` (the floor's solids round it)
+/// that is not the thing's own (`own`), each grown by a standard body's radius, between a step and a body's height
+/// above the stand point's ground, as today's sit slide does (`slotTransitionIssue`). On a ring, the place nearest the
 /// entry's stand point wins, so a boat is boarded from the side its entry names; ties by place. `None` when none is.
 fn board_from(
     view: &sim::walk::town::View<'_>,
@@ -160,7 +185,7 @@ fn board_from(
     slot: Vec3,
     stand: Vec3,
     board: i64,
-    own: &[Solid],
+    (own, near): (&[Solid], &[Solid]),
     passage: &dyn Fn(Vec3) -> bool,
 ) -> Option<Vec3> {
     let pitch = sim::spots::REACH_PITCH;
@@ -173,7 +198,9 @@ fn board_from(
                 p.y,
                 p.z + (slot.z - p.z) * k / n,
             );
-            view.on_any_ground(floor, at) || own.iter().any(|s| within_solid(s, at, grow))
+            let spans = |s: &&Solid| s.y1 > slot.y + BODY_SPAN.0 && s.y0 < slot.y + BODY_SPAN.1;
+            !near.iter().filter(spans).any(|s| within_solid(s, at, grow))
+                || own.iter().any(|s| within_solid(s, at, grow))
         })
     };
     for ring in 1..=board / pitch {
@@ -194,16 +221,6 @@ fn board_from(
                 continue;
             };
             let gap = sim::spots::flat(p, stand);
-            if std::env::var("SEAT_DIAG").is_ok() {
-                eprintln!(
-                    "BOARD ring {ring} p ({}, {}) slot-gap {} passage {} crossed {}",
-                    p.x,
-                    p.z,
-                    sim::spots::flat(p, slot),
-                    passage(p),
-                    crossed(p)
-                );
-            }
             if sim::spots::flat(p, slot) <= board
                 && best.is_none_or(|b| gap < b.0)
                 && !passage(p)
