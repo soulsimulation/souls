@@ -779,8 +779,12 @@ test('#3697: a creator uploads a picture through the check and hold point; an al
 
 test('#4022: in a world that holds uploads for review, souls-god reports a held upload as held, and it is not served', async () => {
   await connected();
-  // A second gateway that holds every upload (`--uploads-hold`), its own uploads folder; the upload asks no world.
-  const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', join(dir, 'no-world.sock'), '--tokens', join(dir, 'tokens.txt'),
+  // A second gateway that holds every upload (`--uploads-hold`), its own uploads folder; the upload asks no world. Its
+  // tokens file is a copy in its own folder, since a gateway's control socket is kept beside its tokens file.
+  const held = join(dir, 'held-gateway');
+  mkdirSync(held, { recursive: true });
+  writeFileSync(join(held, 'tokens.txt'), readFileSync(join(dir, 'tokens.txt')));
+  const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', join(held, 'no-world.sock'), '--tokens', join(held, 'tokens.txt'),
     '--build', `1220${'ab'.repeat(32)}`, '--uploads', join(dir, 'uploads-held'), '--assets-check', ASSETS_CHECK, '--uploads-hold'], /listening (\S+)\n/);
   const port = Number(addr.split(':').pop()), was = relay.target;
   for (const c of relay.posts) c.destroy();
