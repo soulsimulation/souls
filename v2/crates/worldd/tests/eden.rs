@@ -1506,6 +1506,7 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
                 .handle(place.thing)
                 .and_then(|h| t.node(h))
                 .and_then(|n| n.parent())
+                .and_then(|p| t.handle(p))
                 .and_then(|h| t.node(h))
                 .map(|n| {
                     format!(
