@@ -203,7 +203,10 @@ fn a_soul_walks_out_of_mimos_from_each_of_its_floors() {
                 metres(from)
             );
             if walked_in.is_err() || at != on {
-                failed.push(format!("in to {room}: {walked_in:?}, on its floor: {}", at == on));
+                failed.push(format!(
+                    "in to {room}: {walked_in:?}, on its floor: {}",
+                    at == on
+                ));
                 continue;
             }
             let walked_out = soul.walk(to);
