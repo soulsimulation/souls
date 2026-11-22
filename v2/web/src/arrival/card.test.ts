@@ -2,7 +2,7 @@
 // frame dissolves the card and then takes it out of the page with no timer left, and a `?shot` page never shows it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DISSOLVE_MS, STAGES, lightRadius, mountArrival, next, type Arrival } from './card.ts';
+import { DISSOLVE_MS, STAGES, WELCOME_MOST, lightRadius, mountArrival, next, welcomeOf, type Arrival } from './card.ts';
 
 type El = { tag: string; kids: El[]; parent: El | null; dataset: Record<string, string>; vars: Record<string, string>; attrs: Record<string, string>; textContent: string; value: number; clientWidth: number; clientHeight: number;
   append(...k: El[]): void; remove(): void; setAttribute(k: string, v: string): void; style: { setProperty(k: string, v: string): void } };
@@ -80,4 +80,34 @@ test('a ?shot page never shows the card', () => {
   card.fail('x');
   assert.equal(doc.body.kids.length + doc.head.kids.length + timers.pending.size, 0);
   assert.equal(card.state, 'gone');
+});
+
+test('a world\'s welcome (#3702) is read from the list, shown as text, and holds the card until it has been read', () => {
+  const listing = { worlds: [{ name: 'other', welcome: 'no' }, { name: 'eden', welcome: ' Be kind.\nThe café opens at nine. ' }] };
+  assert.equal(welcomeOf(listing, 'eden'), 'Be kind.\nThe café opens at nine.');
+  assert.equal(welcomeOf(listing, 'gone'), '');
+  assert.equal(welcomeOf({ worlds: [{ name: 'eden', welcome: 7 }] }, 'eden'), '');
+  assert.equal(welcomeOf(null, 'eden'), '');
+  assert.equal(welcomeOf({ worlds: [{ name: 'eden', welcome: 'x'.repeat(900) }] }, 'eden').length, WELCOME_MOST);
+
+  const doc = fakeDoc(), timers = fakeTimers();
+  const card = mountArrival(doc as unknown as Document, 'Eden', false, timers.later);
+  const root = doc.body.kids[0], words = root.kids[1].kids[3];
+  card.greet('<i>Be</i> kind');
+  assert.equal(words.textContent, '<i>Be</i> kind', 'set as text, never markup');
+  card.greet('again');
+  assert.equal(words.textContent, '<i>Be</i> kind', 'one welcome');
+  card.reach('drawn');
+  assert.equal(root.dataset.state, 'loading', 'the first frame waits while the welcome is read');
+  timers.run();
+  assert.equal(root.dataset.state, 'dissolving');
+  timers.run();
+  assert.equal(card.state, 'gone');
+  assert.equal(timers.pending.size, 0, 'no timer left behind');
+
+  const quiet = fakeDoc(), t2 = fakeTimers();
+  const plain = mountArrival(quiet as unknown as Document, 'Eden', false, t2.later);
+  plain.greet('');
+  plain.reach('drawn');
+  assert.equal(quiet.body.kids[0].dataset.state, 'dissolving', 'no welcome: no wait');
 });
