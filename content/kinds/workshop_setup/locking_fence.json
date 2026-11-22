@@ -13,13 +13,11 @@
     },
     "offset": {
       "n": 29,
-      "type": "enum",
-      "values": [
-        "offset_100",
-        "offset_200",
-        "offset_300"
-      ],
-      "default": "offset_100",
+      "type": "int",
+      "unit": "mm",
+      "default": 100,
+      "min": 100,
+      "max": 300,
       "audience": {
         "rule": "everyone"
       }
@@ -90,19 +88,9 @@
         }
       ]
     },
-    "set_fence_offset": {
+    "set_fence_offset_100": {
       "who": "anyone",
       "starts": "act",
-      "takes": {
-        "offset": {
-          "type": "value",
-          "of": [
-            "offset_100",
-            "offset_200",
-            "offset_300"
-          ]
-        }
-      },
       "needs": [
         {
           "need": "state",
@@ -113,9 +101,7 @@
         {
           "need": "state",
           "field": "offset",
-          "not": {
-            "arg": "offset"
-          }
+          "not": 100
         },
         {
           "need": "hand",
@@ -141,9 +127,95 @@
         {
           "change": "set",
           "field": "offset",
-          "to": {
-            "arg": "offset"
-          },
+          "to": 100,
+          "event": "set_fence_offset"
+        }
+      ]
+    },
+    "set_fence_offset_200": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lever_locked",
+          "is": false,
+          "says": "unlock_first"
+        },
+        {
+          "need": "state",
+          "field": "offset",
+          "not": 200
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "offset",
+          "to": 200,
+          "event": "set_fence_offset"
+        }
+      ]
+    },
+    "set_fence_offset_300": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lever_locked",
+          "is": false,
+          "says": "unlock_first"
+        },
+        {
+          "need": "state",
+          "field": "offset",
+          "not": 300
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "offset",
+          "to": 300,
           "event": "set_fence_offset"
         }
       ]
@@ -201,11 +273,14 @@
         "field": "offset",
         "do": "slide",
         "axis": "x",
-        "at": {
-          "offset_100": 0,
-          "offset_200": 100,
-          "offset_300": 200
-        },
+        "range": [
+          100,
+          300
+        ],
+        "to": [
+          0,
+          200
+        ],
         "over_us": 350000
       },
       {

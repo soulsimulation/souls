@@ -1,6 +1,6 @@
 {
   "format": "souls-form-cases/1",
-  "about": "Workshop fixture setup: released-only bounded settings, lock/release cycles, invalid and unchanged choices, full hands and reach refusals. Pictures follow state; collision envelopes remain fixed and these fixtures do not restrain other nodes.",
+  "about": "Workshop fixture setup: released-only bounded settings, lock/release cycles and unchanged-setting refusals, full hands and reach refusals. Pictures follow state; collision envelopes remain fixed and these fixtures do not restrain other nodes.",
   "cases": [
     {
       "name": "bench_vice_release_jaws_ready",
@@ -154,13 +154,10 @@
       }
     },
     {
-      "name": "bench_vice_set_jaw_gap_ready",
+      "name": "bench_vice_set_jaw_gap_0_ready",
       "act": {
         "this": "t",
-        "form": "set_jaw_gap",
-        "args": {
-          "gap": "gap_40"
-        }
+        "form": "set_jaw_gap_0"
       },
       "state": {
         "actor": "b",
@@ -168,7 +165,8 @@
           "t": {
             "kind": "eden:bench_vice",
             "fields": {
-              "clamped": false
+              "clamped": false,
+              "jaw_gap": 40
             }
           },
           "b": {
@@ -206,13 +204,10 @@
       }
     },
     {
-      "name": "bench_vice_set_jaw_gap_full_hands",
+      "name": "bench_vice_set_jaw_gap_0_full_hands",
       "act": {
         "this": "t",
-        "form": "set_jaw_gap",
-        "args": {
-          "gap": "gap_40"
-        }
+        "form": "set_jaw_gap_0"
       },
       "state": {
         "actor": "b",
@@ -220,7 +215,8 @@
           "t": {
             "kind": "eden:bench_vice",
             "fields": {
-              "clamped": false
+              "clamped": false,
+              "jaw_gap": 40
             }
           },
           "b": {
@@ -260,13 +256,10 @@
       }
     },
     {
-      "name": "bench_vice_set_jaw_gap_out_of_reach",
+      "name": "bench_vice_set_jaw_gap_0_out_of_reach",
       "act": {
         "this": "t",
-        "form": "set_jaw_gap",
-        "args": {
-          "gap": "gap_40"
-        }
+        "form": "set_jaw_gap_0"
       },
       "state": {
         "actor": "b",
@@ -274,7 +267,8 @@
           "t": {
             "kind": "eden:bench_vice",
             "fields": {
-              "clamped": false
+              "clamped": false,
+              "jaw_gap": 40
             }
           },
           "b": {
@@ -311,6 +305,884 @@
         "verdict": "no",
         "reason": "out_of_reach",
         "need": 3
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_0_locked",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_0"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": true,
+              "jaw_gap": 40
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_0_unchanged",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_0"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": false,
+              "jaw_gap": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_40_ready",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_40"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": false,
+              "jaw_gap": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_40_full_hands",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_40"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": false,
+              "jaw_gap": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": "x",
+              "right": "y"
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_40_out_of_reach",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_40"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": false,
+              "jaw_gap": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              9000,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_40_locked",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_40"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": true,
+              "jaw_gap": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_40_unchanged",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_40"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": false,
+              "jaw_gap": 40
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_80_ready",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_80"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": false,
+              "jaw_gap": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_80_full_hands",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_80"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": false,
+              "jaw_gap": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": "x",
+              "right": "y"
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_80_out_of_reach",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_80"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": false,
+              "jaw_gap": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              9000,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_80_locked",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_80"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": true,
+              "jaw_gap": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_80_unchanged",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_80"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": false,
+              "jaw_gap": 80
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_120_ready",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_120"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": false,
+              "jaw_gap": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_120_full_hands",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_120"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": false,
+              "jaw_gap": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": "x",
+              "right": "y"
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_120_out_of_reach",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_120"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": false,
+              "jaw_gap": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              9000,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_120_locked",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_120"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": true,
+              "jaw_gap": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "bench_vice_set_jaw_gap_120_unchanged",
+      "act": {
+        "this": "t",
+        "form": "set_jaw_gap_120"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:bench_vice",
+            "fields": {
+              "clamped": false,
+              "jaw_gap": 120
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
       }
     },
     {
@@ -465,168 +1337,6 @@
       }
     },
     {
-      "name": "bench_vice_adjust_while_locked",
-      "act": {
-        "this": "t",
-        "form": "set_jaw_gap",
-        "args": {
-          "gap": "gap_40"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:bench_vice",
-            "fields": {
-              "clamped": true
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              0,
-              900,
-              250
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 0
-      }
-    },
-    {
-      "name": "bench_vice_adjust_unchanged",
-      "act": {
-        "this": "t",
-        "form": "set_jaw_gap",
-        "args": {
-          "gap": "gap_40"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:bench_vice",
-            "fields": {
-              "clamped": false,
-              "jaw_gap": "gap_40"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              0,
-              900,
-              250
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 1
-      }
-    },
-    {
-      "name": "bench_vice_invalid_setting",
-      "act": {
-        "this": "t",
-        "form": "set_jaw_gap",
-        "args": {
-          "gap": -1
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:bench_vice",
-            "fields": {
-              "clamped": false
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              0,
-              900,
-              250
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "bad_input"
-      }
-    },
-    {
       "name": "bench_vice_release_already_open",
       "act": {
         "this": "t",
@@ -726,218 +1436,6 @@
         "verdict": "no",
         "reason": "field_differs",
         "need": 0
-      }
-    },
-    {
-      "name": "bench_vice_setting_gap_0",
-      "act": {
-        "this": "t",
-        "form": "set_jaw_gap",
-        "args": {
-          "gap": "gap_0"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:bench_vice",
-            "fields": {
-              "clamped": false,
-              "jaw_gap": "gap_40"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              0,
-              900,
-              250
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "yes"
-      }
-    },
-    {
-      "name": "bench_vice_setting_gap_40",
-      "act": {
-        "this": "t",
-        "form": "set_jaw_gap",
-        "args": {
-          "gap": "gap_40"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:bench_vice",
-            "fields": {
-              "clamped": false,
-              "jaw_gap": "gap_0"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              0,
-              900,
-              250
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "yes"
-      }
-    },
-    {
-      "name": "bench_vice_setting_gap_80",
-      "act": {
-        "this": "t",
-        "form": "set_jaw_gap",
-        "args": {
-          "gap": "gap_80"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:bench_vice",
-            "fields": {
-              "clamped": false,
-              "jaw_gap": "gap_0"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              0,
-              900,
-              250
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "yes"
-      }
-    },
-    {
-      "name": "bench_vice_setting_gap_120",
-      "act": {
-        "this": "t",
-        "form": "set_jaw_gap",
-        "args": {
-          "gap": "gap_120"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:bench_vice",
-            "fields": {
-              "clamped": false,
-              "jaw_gap": "gap_0"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              0,
-              900,
-              250
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "yes"
       }
     },
     {
@@ -1092,13 +1590,10 @@
       }
     },
     {
-      "name": "indexing_head_index_head_ready",
+      "name": "indexing_head_index_head_0_ready",
       "act": {
         "this": "t",
-        "form": "index_head",
-        "args": {
-          "index": "index_45"
-        }
+        "form": "index_head_0"
       },
       "state": {
         "actor": "b",
@@ -1106,7 +1601,8 @@
           "t": {
             "kind": "eden:indexing_head",
             "fields": {
-              "pin_engaged": false
+              "pin_engaged": false,
+              "index": 1
             }
           },
           "b": {
@@ -1144,13 +1640,10 @@
       }
     },
     {
-      "name": "indexing_head_index_head_full_hands",
+      "name": "indexing_head_index_head_0_full_hands",
       "act": {
         "this": "t",
-        "form": "index_head",
-        "args": {
-          "index": "index_45"
-        }
+        "form": "index_head_0"
       },
       "state": {
         "actor": "b",
@@ -1158,7 +1651,8 @@
           "t": {
             "kind": "eden:indexing_head",
             "fields": {
-              "pin_engaged": false
+              "pin_engaged": false,
+              "index": 1
             }
           },
           "b": {
@@ -1198,13 +1692,10 @@
       }
     },
     {
-      "name": "indexing_head_index_head_out_of_reach",
+      "name": "indexing_head_index_head_0_out_of_reach",
       "act": {
         "this": "t",
-        "form": "index_head",
-        "args": {
-          "index": "index_45"
-        }
+        "form": "index_head_0"
       },
       "state": {
         "actor": "b",
@@ -1212,7 +1703,8 @@
           "t": {
             "kind": "eden:indexing_head",
             "fields": {
-              "pin_engaged": false
+              "pin_engaged": false,
+              "index": 1
             }
           },
           "b": {
@@ -1249,6 +1741,626 @@
         "verdict": "no",
         "reason": "out_of_reach",
         "need": 3
+      }
+    },
+    {
+      "name": "indexing_head_index_head_0_locked",
+      "act": {
+        "this": "t",
+        "form": "index_head_0"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:indexing_head",
+            "fields": {
+              "pin_engaged": true,
+              "index": 1
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              880,
+              160
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "indexing_head_index_head_0_unchanged",
+      "act": {
+        "this": "t",
+        "form": "index_head_0"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:indexing_head",
+            "fields": {
+              "pin_engaged": false,
+              "index": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              880,
+              160
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "indexing_head_index_head_45_ready",
+      "act": {
+        "this": "t",
+        "form": "index_head_45"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:indexing_head",
+            "fields": {
+              "pin_engaged": false,
+              "index": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              880,
+              160
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "indexing_head_index_head_45_full_hands",
+      "act": {
+        "this": "t",
+        "form": "index_head_45"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:indexing_head",
+            "fields": {
+              "pin_engaged": false,
+              "index": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": "x",
+              "right": "y"
+            },
+            "effector_mm": [
+              260,
+              880,
+              160
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "indexing_head_index_head_45_out_of_reach",
+      "act": {
+        "this": "t",
+        "form": "index_head_45"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:indexing_head",
+            "fields": {
+              "pin_engaged": false,
+              "index": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              9000,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "indexing_head_index_head_45_locked",
+      "act": {
+        "this": "t",
+        "form": "index_head_45"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:indexing_head",
+            "fields": {
+              "pin_engaged": true,
+              "index": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              880,
+              160
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "indexing_head_index_head_45_unchanged",
+      "act": {
+        "this": "t",
+        "form": "index_head_45"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:indexing_head",
+            "fields": {
+              "pin_engaged": false,
+              "index": 1
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              880,
+              160
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "indexing_head_index_head_90_ready",
+      "act": {
+        "this": "t",
+        "form": "index_head_90"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:indexing_head",
+            "fields": {
+              "pin_engaged": false,
+              "index": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              880,
+              160
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "indexing_head_index_head_90_full_hands",
+      "act": {
+        "this": "t",
+        "form": "index_head_90"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:indexing_head",
+            "fields": {
+              "pin_engaged": false,
+              "index": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": "x",
+              "right": "y"
+            },
+            "effector_mm": [
+              260,
+              880,
+              160
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "indexing_head_index_head_90_out_of_reach",
+      "act": {
+        "this": "t",
+        "form": "index_head_90"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:indexing_head",
+            "fields": {
+              "pin_engaged": false,
+              "index": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              9000,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "indexing_head_index_head_90_locked",
+      "act": {
+        "this": "t",
+        "form": "index_head_90"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:indexing_head",
+            "fields": {
+              "pin_engaged": true,
+              "index": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              880,
+              160
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "indexing_head_index_head_90_unchanged",
+      "act": {
+        "this": "t",
+        "form": "index_head_90"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:indexing_head",
+            "fields": {
+              "pin_engaged": false,
+              "index": 2
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              880,
+              160
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
       }
     },
     {
@@ -1403,168 +2515,6 @@
       }
     },
     {
-      "name": "indexing_head_adjust_while_locked",
-      "act": {
-        "this": "t",
-        "form": "index_head",
-        "args": {
-          "index": "index_45"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:indexing_head",
-            "fields": {
-              "pin_engaged": true
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              260,
-              880,
-              160
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 0
-      }
-    },
-    {
-      "name": "indexing_head_adjust_unchanged",
-      "act": {
-        "this": "t",
-        "form": "index_head",
-        "args": {
-          "index": "index_45"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:indexing_head",
-            "fields": {
-              "pin_engaged": false,
-              "index": "index_45"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              260,
-              880,
-              160
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 1
-      }
-    },
-    {
-      "name": "indexing_head_invalid_setting",
-      "act": {
-        "this": "t",
-        "form": "index_head",
-        "args": {
-          "index": -1
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:indexing_head",
-            "fields": {
-              "pin_engaged": false
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              260,
-              880,
-              160
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "bad_input"
-      }
-    },
-    {
       "name": "indexing_head_release_already_open",
       "act": {
         "this": "t",
@@ -1664,165 +2614,6 @@
         "verdict": "no",
         "reason": "field_differs",
         "need": 0
-      }
-    },
-    {
-      "name": "indexing_head_setting_index_0",
-      "act": {
-        "this": "t",
-        "form": "index_head",
-        "args": {
-          "index": "index_0"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:indexing_head",
-            "fields": {
-              "pin_engaged": false,
-              "index": "index_45"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              260,
-              880,
-              160
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "yes"
-      }
-    },
-    {
-      "name": "indexing_head_setting_index_45",
-      "act": {
-        "this": "t",
-        "form": "index_head",
-        "args": {
-          "index": "index_45"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:indexing_head",
-            "fields": {
-              "pin_engaged": false,
-              "index": "index_0"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              260,
-              880,
-              160
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "yes"
-      }
-    },
-    {
-      "name": "indexing_head_setting_index_90",
-      "act": {
-        "this": "t",
-        "form": "index_head",
-        "args": {
-          "index": "index_90"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:indexing_head",
-            "fields": {
-              "pin_engaged": false,
-              "index": "index_0"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              260,
-              880,
-              160
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "yes"
       }
     },
     {
@@ -1977,13 +2768,10 @@
       }
     },
     {
-      "name": "telescopic_trestle_set_extension_ready",
+      "name": "telescopic_trestle_set_extension_0_ready",
       "act": {
         "this": "t",
-        "form": "set_extension",
-        "args": {
-          "extension": "extension_150"
-        }
+        "form": "set_extension_0"
       },
       "state": {
         "actor": "b",
@@ -1991,7 +2779,8 @@
           "t": {
             "kind": "eden:telescopic_trestle",
             "fields": {
-              "collar_locked": false
+              "collar_locked": false,
+              "extension": 150
             }
           },
           "b": {
@@ -2029,13 +2818,10 @@
       }
     },
     {
-      "name": "telescopic_trestle_set_extension_full_hands",
+      "name": "telescopic_trestle_set_extension_0_full_hands",
       "act": {
         "this": "t",
-        "form": "set_extension",
-        "args": {
-          "extension": "extension_150"
-        }
+        "form": "set_extension_0"
       },
       "state": {
         "actor": "b",
@@ -2043,7 +2829,8 @@
           "t": {
             "kind": "eden:telescopic_trestle",
             "fields": {
-              "collar_locked": false
+              "collar_locked": false,
+              "extension": 150
             }
           },
           "b": {
@@ -2083,13 +2870,10 @@
       }
     },
     {
-      "name": "telescopic_trestle_set_extension_out_of_reach",
+      "name": "telescopic_trestle_set_extension_0_out_of_reach",
       "act": {
         "this": "t",
-        "form": "set_extension",
-        "args": {
-          "extension": "extension_150"
-        }
+        "form": "set_extension_0"
       },
       "state": {
         "actor": "b",
@@ -2097,7 +2881,8 @@
           "t": {
             "kind": "eden:telescopic_trestle",
             "fields": {
-              "collar_locked": false
+              "collar_locked": false,
+              "extension": 150
             }
           },
           "b": {
@@ -2134,6 +2919,626 @@
         "verdict": "no",
         "reason": "out_of_reach",
         "need": 3
+      }
+    },
+    {
+      "name": "telescopic_trestle_set_extension_0_locked",
+      "act": {
+        "this": "t",
+        "form": "set_extension_0"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:telescopic_trestle",
+            "fields": {
+              "collar_locked": true,
+              "extension": 150
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              570,
+              180
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "telescopic_trestle_set_extension_0_unchanged",
+      "act": {
+        "this": "t",
+        "form": "set_extension_0"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:telescopic_trestle",
+            "fields": {
+              "collar_locked": false,
+              "extension": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              570,
+              180
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "telescopic_trestle_set_extension_150_ready",
+      "act": {
+        "this": "t",
+        "form": "set_extension_150"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:telescopic_trestle",
+            "fields": {
+              "collar_locked": false,
+              "extension": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              570,
+              180
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "telescopic_trestle_set_extension_150_full_hands",
+      "act": {
+        "this": "t",
+        "form": "set_extension_150"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:telescopic_trestle",
+            "fields": {
+              "collar_locked": false,
+              "extension": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": "x",
+              "right": "y"
+            },
+            "effector_mm": [
+              0,
+              570,
+              180
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "telescopic_trestle_set_extension_150_out_of_reach",
+      "act": {
+        "this": "t",
+        "form": "set_extension_150"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:telescopic_trestle",
+            "fields": {
+              "collar_locked": false,
+              "extension": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              9000,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "telescopic_trestle_set_extension_150_locked",
+      "act": {
+        "this": "t",
+        "form": "set_extension_150"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:telescopic_trestle",
+            "fields": {
+              "collar_locked": true,
+              "extension": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              570,
+              180
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "telescopic_trestle_set_extension_150_unchanged",
+      "act": {
+        "this": "t",
+        "form": "set_extension_150"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:telescopic_trestle",
+            "fields": {
+              "collar_locked": false,
+              "extension": 150
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              570,
+              180
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "telescopic_trestle_set_extension_300_ready",
+      "act": {
+        "this": "t",
+        "form": "set_extension_300"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:telescopic_trestle",
+            "fields": {
+              "collar_locked": false,
+              "extension": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              570,
+              180
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "telescopic_trestle_set_extension_300_full_hands",
+      "act": {
+        "this": "t",
+        "form": "set_extension_300"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:telescopic_trestle",
+            "fields": {
+              "collar_locked": false,
+              "extension": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": "x",
+              "right": "y"
+            },
+            "effector_mm": [
+              0,
+              570,
+              180
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "telescopic_trestle_set_extension_300_out_of_reach",
+      "act": {
+        "this": "t",
+        "form": "set_extension_300"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:telescopic_trestle",
+            "fields": {
+              "collar_locked": false,
+              "extension": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              9000,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "telescopic_trestle_set_extension_300_locked",
+      "act": {
+        "this": "t",
+        "form": "set_extension_300"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:telescopic_trestle",
+            "fields": {
+              "collar_locked": true,
+              "extension": 0
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              570,
+              180
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "telescopic_trestle_set_extension_300_unchanged",
+      "act": {
+        "this": "t",
+        "form": "set_extension_300"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:telescopic_trestle",
+            "fields": {
+              "collar_locked": false,
+              "extension": 300
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              570,
+              180
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
       }
     },
     {
@@ -2288,168 +3693,6 @@
       }
     },
     {
-      "name": "telescopic_trestle_adjust_while_locked",
-      "act": {
-        "this": "t",
-        "form": "set_extension",
-        "args": {
-          "extension": "extension_150"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:telescopic_trestle",
-            "fields": {
-              "collar_locked": true
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              0,
-              570,
-              180
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 0
-      }
-    },
-    {
-      "name": "telescopic_trestle_adjust_unchanged",
-      "act": {
-        "this": "t",
-        "form": "set_extension",
-        "args": {
-          "extension": "extension_150"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:telescopic_trestle",
-            "fields": {
-              "collar_locked": false,
-              "extension": "extension_150"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              0,
-              570,
-              180
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 1
-      }
-    },
-    {
-      "name": "telescopic_trestle_invalid_setting",
-      "act": {
-        "this": "t",
-        "form": "set_extension",
-        "args": {
-          "extension": -1
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:telescopic_trestle",
-            "fields": {
-              "collar_locked": false
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              0,
-              570,
-              180
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "bad_input"
-      }
-    },
-    {
       "name": "telescopic_trestle_release_already_open",
       "act": {
         "this": "t",
@@ -2549,165 +3792,6 @@
         "verdict": "no",
         "reason": "field_differs",
         "need": 0
-      }
-    },
-    {
-      "name": "telescopic_trestle_setting_extension_0",
-      "act": {
-        "this": "t",
-        "form": "set_extension",
-        "args": {
-          "extension": "extension_0"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:telescopic_trestle",
-            "fields": {
-              "collar_locked": false,
-              "extension": "extension_150"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              0,
-              570,
-              180
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "yes"
-      }
-    },
-    {
-      "name": "telescopic_trestle_setting_extension_150",
-      "act": {
-        "this": "t",
-        "form": "set_extension",
-        "args": {
-          "extension": "extension_150"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:telescopic_trestle",
-            "fields": {
-              "collar_locked": false,
-              "extension": "extension_0"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              0,
-              570,
-              180
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "yes"
-      }
-    },
-    {
-      "name": "telescopic_trestle_setting_extension_300",
-      "act": {
-        "this": "t",
-        "form": "set_extension",
-        "args": {
-          "extension": "extension_300"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:telescopic_trestle",
-            "fields": {
-              "collar_locked": false,
-              "extension": "extension_0"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              0,
-              570,
-              180
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "yes"
       }
     },
     {
@@ -2862,13 +3946,10 @@
       }
     },
     {
-      "name": "locking_fence_set_fence_offset_ready",
+      "name": "locking_fence_set_fence_offset_100_ready",
       "act": {
         "this": "t",
-        "form": "set_fence_offset",
-        "args": {
-          "offset": "offset_200"
-        }
+        "form": "set_fence_offset_100"
       },
       "state": {
         "actor": "b",
@@ -2876,7 +3957,8 @@
           "t": {
             "kind": "eden:locking_fence",
             "fields": {
-              "lever_locked": false
+              "lever_locked": false,
+              "offset": 200
             }
           },
           "b": {
@@ -2914,13 +3996,10 @@
       }
     },
     {
-      "name": "locking_fence_set_fence_offset_full_hands",
+      "name": "locking_fence_set_fence_offset_100_full_hands",
       "act": {
         "this": "t",
-        "form": "set_fence_offset",
-        "args": {
-          "offset": "offset_200"
-        }
+        "form": "set_fence_offset_100"
       },
       "state": {
         "actor": "b",
@@ -2928,7 +4007,8 @@
           "t": {
             "kind": "eden:locking_fence",
             "fields": {
-              "lever_locked": false
+              "lever_locked": false,
+              "offset": 200
             }
           },
           "b": {
@@ -2968,13 +4048,10 @@
       }
     },
     {
-      "name": "locking_fence_set_fence_offset_out_of_reach",
+      "name": "locking_fence_set_fence_offset_100_out_of_reach",
       "act": {
         "this": "t",
-        "form": "set_fence_offset",
-        "args": {
-          "offset": "offset_200"
-        }
+        "form": "set_fence_offset_100"
       },
       "state": {
         "actor": "b",
@@ -2982,7 +4059,8 @@
           "t": {
             "kind": "eden:locking_fence",
             "fields": {
-              "lever_locked": false
+              "lever_locked": false,
+              "offset": 200
             }
           },
           "b": {
@@ -3019,6 +4097,626 @@
         "verdict": "no",
         "reason": "out_of_reach",
         "need": 3
+      }
+    },
+    {
+      "name": "locking_fence_set_fence_offset_100_locked",
+      "act": {
+        "this": "t",
+        "form": "set_fence_offset_100"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:locking_fence",
+            "fields": {
+              "lever_locked": true,
+              "offset": 200
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -400,
+              960,
+              300
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "locking_fence_set_fence_offset_100_unchanged",
+      "act": {
+        "this": "t",
+        "form": "set_fence_offset_100"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:locking_fence",
+            "fields": {
+              "lever_locked": false,
+              "offset": 100
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -400,
+              960,
+              300
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "locking_fence_set_fence_offset_200_ready",
+      "act": {
+        "this": "t",
+        "form": "set_fence_offset_200"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:locking_fence",
+            "fields": {
+              "lever_locked": false,
+              "offset": 100
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -400,
+              960,
+              300
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "locking_fence_set_fence_offset_200_full_hands",
+      "act": {
+        "this": "t",
+        "form": "set_fence_offset_200"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:locking_fence",
+            "fields": {
+              "lever_locked": false,
+              "offset": 100
+            }
+          },
+          "b": {
+            "hands": {
+              "left": "x",
+              "right": "y"
+            },
+            "effector_mm": [
+              -400,
+              960,
+              300
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "locking_fence_set_fence_offset_200_out_of_reach",
+      "act": {
+        "this": "t",
+        "form": "set_fence_offset_200"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:locking_fence",
+            "fields": {
+              "lever_locked": false,
+              "offset": 100
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              9000,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "locking_fence_set_fence_offset_200_locked",
+      "act": {
+        "this": "t",
+        "form": "set_fence_offset_200"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:locking_fence",
+            "fields": {
+              "lever_locked": true,
+              "offset": 100
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -400,
+              960,
+              300
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "locking_fence_set_fence_offset_200_unchanged",
+      "act": {
+        "this": "t",
+        "form": "set_fence_offset_200"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:locking_fence",
+            "fields": {
+              "lever_locked": false,
+              "offset": 200
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -400,
+              960,
+              300
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "locking_fence_set_fence_offset_300_ready",
+      "act": {
+        "this": "t",
+        "form": "set_fence_offset_300"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:locking_fence",
+            "fields": {
+              "lever_locked": false,
+              "offset": 100
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -400,
+              960,
+              300
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "locking_fence_set_fence_offset_300_full_hands",
+      "act": {
+        "this": "t",
+        "form": "set_fence_offset_300"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:locking_fence",
+            "fields": {
+              "lever_locked": false,
+              "offset": 100
+            }
+          },
+          "b": {
+            "hands": {
+              "left": "x",
+              "right": "y"
+            },
+            "effector_mm": [
+              -400,
+              960,
+              300
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "locking_fence_set_fence_offset_300_out_of_reach",
+      "act": {
+        "this": "t",
+        "form": "set_fence_offset_300"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:locking_fence",
+            "fields": {
+              "lever_locked": false,
+              "offset": 100
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              9000,
+              900,
+              250
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "locking_fence_set_fence_offset_300_locked",
+      "act": {
+        "this": "t",
+        "form": "set_fence_offset_300"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:locking_fence",
+            "fields": {
+              "lever_locked": true,
+              "offset": 100
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -400,
+              960,
+              300
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "locking_fence_set_fence_offset_300_unchanged",
+      "act": {
+        "this": "t",
+        "form": "set_fence_offset_300"
+      },
+      "state": {
+        "actor": "b",
+        "nodes": {
+          "t": {
+            "kind": "eden:locking_fence",
+            "fields": {
+              "lever_locked": false,
+              "offset": 300
+            }
+          },
+          "b": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -400,
+              960,
+              300
+            ]
+          },
+          "room": {
+            "loose": [
+              "b",
+              "t"
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "slide": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
       }
     },
     {
@@ -3173,168 +4871,6 @@
       }
     },
     {
-      "name": "locking_fence_adjust_while_locked",
-      "act": {
-        "this": "t",
-        "form": "set_fence_offset",
-        "args": {
-          "offset": "offset_200"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:locking_fence",
-            "fields": {
-              "lever_locked": true
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              -400,
-              960,
-              300
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 0
-      }
-    },
-    {
-      "name": "locking_fence_adjust_unchanged",
-      "act": {
-        "this": "t",
-        "form": "set_fence_offset",
-        "args": {
-          "offset": "offset_200"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:locking_fence",
-            "fields": {
-              "lever_locked": false,
-              "offset": "offset_200"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              -400,
-              960,
-              300
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 1
-      }
-    },
-    {
-      "name": "locking_fence_invalid_setting",
-      "act": {
-        "this": "t",
-        "form": "set_fence_offset",
-        "args": {
-          "offset": -1
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:locking_fence",
-            "fields": {
-              "lever_locked": false
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              -400,
-              960,
-              300
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "bad_input"
-      }
-    },
-    {
       "name": "locking_fence_release_already_open",
       "act": {
         "this": "t",
@@ -3434,165 +4970,6 @@
         "verdict": "no",
         "reason": "field_differs",
         "need": 0
-      }
-    },
-    {
-      "name": "locking_fence_setting_offset_100",
-      "act": {
-        "this": "t",
-        "form": "set_fence_offset",
-        "args": {
-          "offset": "offset_100"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:locking_fence",
-            "fields": {
-              "lever_locked": false,
-              "offset": "offset_200"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              -400,
-              960,
-              300
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "yes"
-      }
-    },
-    {
-      "name": "locking_fence_setting_offset_200",
-      "act": {
-        "this": "t",
-        "form": "set_fence_offset",
-        "args": {
-          "offset": "offset_200"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:locking_fence",
-            "fields": {
-              "lever_locked": false,
-              "offset": "offset_100"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              -400,
-              960,
-              300
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "yes"
-      }
-    },
-    {
-      "name": "locking_fence_setting_offset_300",
-      "act": {
-        "this": "t",
-        "form": "set_fence_offset",
-        "args": {
-          "offset": "offset_300"
-        }
-      },
-      "state": {
-        "actor": "b",
-        "nodes": {
-          "t": {
-            "kind": "eden:locking_fence",
-            "fields": {
-              "lever_locked": false,
-              "offset": "offset_100"
-            }
-          },
-          "b": {
-            "hands": {
-              "left": null,
-              "right": null
-            },
-            "effector_mm": [
-              -400,
-              960,
-              300
-            ]
-          },
-          "room": {
-            "loose": [
-              "b",
-              "t"
-            ]
-          }
-        },
-        "moves": {
-          "turn": {
-            "reach_mm": 600
-          },
-          "slide": {
-            "reach_mm": 600
-          }
-        }
-      },
-      "asker": {
-        "sees": "all"
-      },
-      "expect": {
-        "verdict": "yes"
       }
     }
   ]

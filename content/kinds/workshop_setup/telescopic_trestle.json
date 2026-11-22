@@ -13,13 +13,11 @@
     },
     "extension": {
       "n": 29,
-      "type": "enum",
-      "values": [
-        "extension_0",
-        "extension_150",
-        "extension_300"
-      ],
-      "default": "extension_0",
+      "type": "int",
+      "unit": "mm",
+      "default": 0,
+      "min": 0,
+      "max": 300,
       "audience": {
         "rule": "everyone"
       }
@@ -90,19 +88,9 @@
         }
       ]
     },
-    "set_extension": {
+    "set_extension_0": {
       "who": "anyone",
       "starts": "act",
-      "takes": {
-        "extension": {
-          "type": "value",
-          "of": [
-            "extension_0",
-            "extension_150",
-            "extension_300"
-          ]
-        }
-      },
       "needs": [
         {
           "need": "state",
@@ -113,9 +101,7 @@
         {
           "need": "state",
           "field": "extension",
-          "not": {
-            "arg": "extension"
-          }
+          "not": 0
         },
         {
           "need": "hand",
@@ -141,9 +127,95 @@
         {
           "change": "set",
           "field": "extension",
-          "to": {
-            "arg": "extension"
-          },
+          "to": 0,
+          "event": "set_extension"
+        }
+      ]
+    },
+    "set_extension_150": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "collar_locked",
+          "is": false,
+          "says": "unlock_first"
+        },
+        {
+          "need": "state",
+          "field": "extension",
+          "not": 150
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "extension",
+          "to": 150,
+          "event": "set_extension"
+        }
+      ]
+    },
+    "set_extension_300": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "collar_locked",
+          "is": false,
+          "says": "unlock_first"
+        },
+        {
+          "need": "state",
+          "field": "extension",
+          "not": 300
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "extension",
+          "to": 300,
           "event": "set_extension"
         }
       ]
@@ -201,11 +273,14 @@
         "field": "extension",
         "do": "slide",
         "axis": "y",
-        "at": {
-          "extension_0": 0,
-          "extension_150": 150,
-          "extension_300": 300
-        },
+        "range": [
+          0,
+          300
+        ],
+        "to": [
+          0,
+          300
+        ],
         "over_us": 350000
       },
       {

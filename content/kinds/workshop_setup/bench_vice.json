@@ -13,14 +13,11 @@
     },
     "jaw_gap": {
       "n": 29,
-      "type": "enum",
-      "values": [
-        "gap_0",
-        "gap_40",
-        "gap_80",
-        "gap_120"
-      ],
-      "default": "gap_120",
+      "type": "int",
+      "unit": "mm",
+      "default": 120,
+      "min": 0,
+      "max": 120,
       "audience": {
         "rule": "everyone"
       }
@@ -91,20 +88,9 @@
         }
       ]
     },
-    "set_jaw_gap": {
+    "set_jaw_gap_0": {
       "who": "anyone",
       "starts": "act",
-      "takes": {
-        "gap": {
-          "type": "value",
-          "of": [
-            "gap_0",
-            "gap_40",
-            "gap_80",
-            "gap_120"
-          ]
-        }
-      },
       "needs": [
         {
           "need": "state",
@@ -115,9 +101,7 @@
         {
           "need": "state",
           "field": "jaw_gap",
-          "not": {
-            "arg": "gap"
-          }
+          "not": 0
         },
         {
           "need": "hand",
@@ -143,9 +127,139 @@
         {
           "change": "set",
           "field": "jaw_gap",
-          "to": {
-            "arg": "gap"
-          },
+          "to": 0,
+          "event": "set_jaw_gap"
+        }
+      ]
+    },
+    "set_jaw_gap_40": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "clamped",
+          "is": false,
+          "says": "unlock_first"
+        },
+        {
+          "need": "state",
+          "field": "jaw_gap",
+          "not": 40
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "jaw_gap",
+          "to": 40,
+          "event": "set_jaw_gap"
+        }
+      ]
+    },
+    "set_jaw_gap_80": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "clamped",
+          "is": false,
+          "says": "unlock_first"
+        },
+        {
+          "need": "state",
+          "field": "jaw_gap",
+          "not": 80
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "jaw_gap",
+          "to": 80,
+          "event": "set_jaw_gap"
+        }
+      ]
+    },
+    "set_jaw_gap_120": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "clamped",
+          "is": false,
+          "says": "unlock_first"
+        },
+        {
+          "need": "state",
+          "field": "jaw_gap",
+          "not": 120
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "jaw_gap",
+          "to": 120,
           "event": "set_jaw_gap"
         }
       ]
@@ -203,12 +317,14 @@
         "field": "jaw_gap",
         "do": "slide",
         "axis": "x",
-        "at": {
-          "gap_0": 0,
-          "gap_40": 40,
-          "gap_80": 80,
-          "gap_120": 120
-        },
+        "range": [
+          0,
+          120
+        ],
+        "to": [
+          0,
+          120
+        ],
         "over_us": 350000
       },
       {

@@ -11,7 +11,7 @@
             "kind": "eden:bench_vice",
             "fields": {
               "clamped": true,
-              "jaw_gap": "gap_0"
+              "jaw_gap": 0
             }
           },
           "b": {
@@ -39,10 +39,7 @@
         {
           "act": {
             "this": "t",
-            "form": "set_jaw_gap",
-            "args": {
-              "gap": "gap_120"
-            }
+            "form": "set_jaw_gap_120"
           },
           "receipt": "bench_vice_0",
           "expect": {
@@ -82,10 +79,7 @@
         {
           "act": {
             "this": "t",
-            "form": "set_jaw_gap",
-            "args": {
-              "gap": "gap_120"
-            }
+            "form": "set_jaw_gap_120"
           },
           "receipt": "bench_vice_2",
           "expect": {
@@ -96,7 +90,7 @@
                 "node": "t",
                 "field": "jaw_gap",
                 "n": 29,
-                "to": "gap_120"
+                "to": 120
               }
             ],
             "events": [
@@ -143,9 +137,20 @@
         {
           "act": {
             "this": "t",
-            "form": "release_jaws"
+            "form": "set_jaw_gap_120"
           },
           "receipt": "bench_vice_4",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs"
+          }
+        },
+        {
+          "act": {
+            "this": "t",
+            "form": "release_jaws"
+          },
+          "receipt": "bench_vice_5",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -172,12 +177,9 @@
         {
           "act": {
             "this": "t",
-            "form": "set_jaw_gap",
-            "args": {
-              "gap": "gap_0"
-            }
+            "form": "set_jaw_gap_0"
           },
-          "receipt": "bench_vice_5",
+          "receipt": "bench_vice_6",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -186,7 +188,7 @@
                 "node": "t",
                 "field": "jaw_gap",
                 "n": 29,
-                "to": "gap_0"
+                "to": 0
               }
             ],
             "events": [
@@ -206,7 +208,7 @@
             "this": "t",
             "form": "clamp_jaws"
           },
-          "receipt": "bench_vice_6",
+          "receipt": "bench_vice_7",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -236,7 +238,7 @@
           "kind": "eden:bench_vice",
           "fields": {
             "clamped": 1,
-            "jaw_gap": "gap_0"
+            "jaw_gap": 0
           }
         }
       }
@@ -250,7 +252,7 @@
             "kind": "eden:indexing_head",
             "fields": {
               "pin_engaged": true,
-              "index": "index_0"
+              "index": 0
             }
           },
           "b": {
@@ -278,10 +280,7 @@
         {
           "act": {
             "this": "t",
-            "form": "index_head",
-            "args": {
-              "index": "index_90"
-            }
+            "form": "index_head_90"
           },
           "receipt": "indexing_head_0",
           "expect": {
@@ -321,10 +320,7 @@
         {
           "act": {
             "this": "t",
-            "form": "index_head",
-            "args": {
-              "index": "index_90"
-            }
+            "form": "index_head_90"
           },
           "receipt": "indexing_head_2",
           "expect": {
@@ -335,7 +331,7 @@
                 "node": "t",
                 "field": "index",
                 "n": 29,
-                "to": "index_90"
+                "to": 2
               }
             ],
             "events": [
@@ -382,9 +378,20 @@
         {
           "act": {
             "this": "t",
-            "form": "withdraw_pin"
+            "form": "index_head_90"
           },
           "receipt": "indexing_head_4",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs"
+          }
+        },
+        {
+          "act": {
+            "this": "t",
+            "form": "withdraw_pin"
+          },
+          "receipt": "indexing_head_5",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -411,12 +418,9 @@
         {
           "act": {
             "this": "t",
-            "form": "index_head",
-            "args": {
-              "index": "index_0"
-            }
+            "form": "index_head_0"
           },
-          "receipt": "indexing_head_5",
+          "receipt": "indexing_head_6",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -425,7 +429,7 @@
                 "node": "t",
                 "field": "index",
                 "n": 29,
-                "to": "index_0"
+                "to": 0
               }
             ],
             "events": [
@@ -445,7 +449,7 @@
             "this": "t",
             "form": "engage_pin"
           },
-          "receipt": "indexing_head_6",
+          "receipt": "indexing_head_7",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -475,7 +479,7 @@
           "kind": "eden:indexing_head",
           "fields": {
             "pin_engaged": 1,
-            "index": "index_0"
+            "index": 0
           }
         }
       }
@@ -489,7 +493,7 @@
             "kind": "eden:telescopic_trestle",
             "fields": {
               "collar_locked": true,
-              "extension": "extension_0"
+              "extension": 0
             }
           },
           "b": {
@@ -517,10 +521,7 @@
         {
           "act": {
             "this": "t",
-            "form": "set_extension",
-            "args": {
-              "extension": "extension_300"
-            }
+            "form": "set_extension_300"
           },
           "receipt": "telescopic_trestle_0",
           "expect": {
@@ -560,10 +561,7 @@
         {
           "act": {
             "this": "t",
-            "form": "set_extension",
-            "args": {
-              "extension": "extension_300"
-            }
+            "form": "set_extension_300"
           },
           "receipt": "telescopic_trestle_2",
           "expect": {
@@ -574,7 +572,7 @@
                 "node": "t",
                 "field": "extension",
                 "n": 29,
-                "to": "extension_300"
+                "to": 300
               }
             ],
             "events": [
@@ -621,9 +619,20 @@
         {
           "act": {
             "this": "t",
-            "form": "unlock_collar"
+            "form": "set_extension_300"
           },
           "receipt": "telescopic_trestle_4",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs"
+          }
+        },
+        {
+          "act": {
+            "this": "t",
+            "form": "unlock_collar"
+          },
+          "receipt": "telescopic_trestle_5",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -650,12 +659,9 @@
         {
           "act": {
             "this": "t",
-            "form": "set_extension",
-            "args": {
-              "extension": "extension_0"
-            }
+            "form": "set_extension_0"
           },
-          "receipt": "telescopic_trestle_5",
+          "receipt": "telescopic_trestle_6",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -664,7 +670,7 @@
                 "node": "t",
                 "field": "extension",
                 "n": 29,
-                "to": "extension_0"
+                "to": 0
               }
             ],
             "events": [
@@ -684,7 +690,7 @@
             "this": "t",
             "form": "lock_collar"
           },
-          "receipt": "telescopic_trestle_6",
+          "receipt": "telescopic_trestle_7",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -714,7 +720,7 @@
           "kind": "eden:telescopic_trestle",
           "fields": {
             "collar_locked": 1,
-            "extension": "extension_0"
+            "extension": 0
           }
         }
       }
@@ -728,7 +734,7 @@
             "kind": "eden:locking_fence",
             "fields": {
               "lever_locked": true,
-              "offset": "offset_100"
+              "offset": 100
             }
           },
           "b": {
@@ -756,10 +762,7 @@
         {
           "act": {
             "this": "t",
-            "form": "set_fence_offset",
-            "args": {
-              "offset": "offset_300"
-            }
+            "form": "set_fence_offset_300"
           },
           "receipt": "locking_fence_0",
           "expect": {
@@ -799,10 +802,7 @@
         {
           "act": {
             "this": "t",
-            "form": "set_fence_offset",
-            "args": {
-              "offset": "offset_300"
-            }
+            "form": "set_fence_offset_300"
           },
           "receipt": "locking_fence_2",
           "expect": {
@@ -813,7 +813,7 @@
                 "node": "t",
                 "field": "offset",
                 "n": 29,
-                "to": "offset_300"
+                "to": 300
               }
             ],
             "events": [
@@ -860,9 +860,20 @@
         {
           "act": {
             "this": "t",
-            "form": "release_fence"
+            "form": "set_fence_offset_300"
           },
           "receipt": "locking_fence_4",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs"
+          }
+        },
+        {
+          "act": {
+            "this": "t",
+            "form": "release_fence"
+          },
+          "receipt": "locking_fence_5",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -889,12 +900,9 @@
         {
           "act": {
             "this": "t",
-            "form": "set_fence_offset",
-            "args": {
-              "offset": "offset_100"
-            }
+            "form": "set_fence_offset_100"
           },
-          "receipt": "locking_fence_5",
+          "receipt": "locking_fence_6",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -903,7 +911,7 @@
                 "node": "t",
                 "field": "offset",
                 "n": 29,
-                "to": "offset_100"
+                "to": 100
               }
             ],
             "events": [
@@ -923,7 +931,7 @@
             "this": "t",
             "form": "lock_fence"
           },
-          "receipt": "locking_fence_6",
+          "receipt": "locking_fence_7",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -953,7 +961,7 @@
           "kind": "eden:locking_fence",
           "fields": {
             "lever_locked": 1,
-            "offset": "offset_100"
+            "offset": 100
           }
         }
       }
