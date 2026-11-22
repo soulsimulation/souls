@@ -16,7 +16,7 @@
       "at_mm": [
         0,
         0,
-        450
+        700
       ],
       "yaw_mdeg": 180000
     }
@@ -59,6 +59,10 @@
         }
       ],
       "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
         {
           "step": "move",
           "move": "touch",
