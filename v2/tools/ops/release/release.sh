@@ -155,7 +155,21 @@ stage() {
 }
 
 worlds() { find "$WORLDS_ROOT/worlds" -mindepth 1 -maxdepth 1 -type d 2> /dev/null | sed 's|.*/||' | sort; }
+# The directory's store for deploy's pins: the one worldd@'s launcher reads (#1960 B6). The install's drop-in gives
+# worldd@ the secrets file, so its store settings (only those) come from there; a directory.env still wins after it.
 directory_env() {
+  local k v
+  if [ -r "$ETC/secrets.env" ]; then
+    while IFS='=' read -r k v; do
+      k=${k#export }
+      case $k in
+        DIRECTORY_STORE_* | AWS_ACCESS_KEY_ID | AWS_SECRET_ACCESS_KEY | AWS_DEFAULT_REGION)
+          v=${v%\"} v=${v#\"} v=${v%\'} v=${v#\'}
+          export "$k=$v"
+          ;;
+      esac
+    done < "$ETC/secrets.env"
+  fi
   if [ -f "$ETC/directory.env" ]; then
     set -a
     # shellcheck disable=SC1091

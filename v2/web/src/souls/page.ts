@@ -313,7 +313,7 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     const hit = out.placed.find((p) => e.clientX >= p.x && e.clientX <= p.x + p.w && e.clientY >= p.y && e.clientY <= p.y + p.h);
     if (hit) out.open(hit.id);
   });
-  addEventListener('keydown', (e) => e.key === 'Escape' && (focus ? out.converse(null) : out.open(null)));
+  window.addEventListener('keydown', (e) => e.key === 'Escape' && (focus ? out.converse(null) : out.open(null)));
 
   const out: PageSouls = {
     copy,

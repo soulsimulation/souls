@@ -402,16 +402,12 @@ pub fn judge_effects(copy: &Replica, effects: &[crate::effects::Effect]) -> Resu
                 }
                 Change::Set { node, .. } if Some(*node) != root => points.push(at(*node)),
                 Change::Remove { node } => points.extend(below(*node).into_iter().map(at)),
-                // A link (or its end) is judged at its owning end, which holds its row (#3728); the row's and the
-                // door's own sets are judged above.
-                Change::Link { ends, owner, .. } => points.push(at(
-                    ends[usize::from(*owner == crate::world_model::End::Second)]
-                )),
+                // A link (or its end) is judged at both its ends, since the walkers' map changes at each (#3728,
+                // #3934 review); the row's and the door's own sets are judged above.
+                Change::Link { ends, .. } => points.extend(ends.iter().map(|e| at(*e))),
                 Change::Unlink { link } => {
-                    if let Some((_, ends, owner, _)) = tree.link(*link) {
-                        points.push(at(
-                            ends[usize::from(owner == crate::world_model::End::Second)]
-                        ));
+                    if let Some((_, ends, ..)) = tree.link(*link) {
+                        points.extend(ends.iter().map(|e| at(*e)));
                     }
                 }
                 _ => {}
@@ -664,18 +660,12 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                     add(&mut t, origin(&placed, r));
                 }
             }
-            Op::Link {
-                ends, owner, door, ..
-            } => {
-                // A link writes its row to the owning end and names itself on its door (#3728): judged as an edit
-                // of those nodes.
-                add(
-                    &mut t,
-                    origin(
-                        &placed,
-                        ends[usize::from(*owner == crate::world_model::End::Second)],
-                    ),
-                );
+            Op::Link { ends, door, .. } => {
+                // A link writes its row to the owning end and names itself on its door (#3728), and changes the
+                // walkers' map at both ends, as a doorway does (#3934 review): judged as an edit of all of them.
+                for end in ends {
+                    add(&mut t, origin(&placed, *end));
+                }
                 if let Some(d) = door {
                     add(&mut t, origin(&placed, *d));
                 }

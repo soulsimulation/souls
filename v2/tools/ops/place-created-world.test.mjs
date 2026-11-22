@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, readdir } from 'node:
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { placeRequest, drain, prepareData, publishData, streamPath } from './place-created-world.mjs';
+import { placeRequest, drain, prepareData, publishData, streamPath, directoryStore, storeSettings, bucketNamed } from './place-created-world.mjs';
 
 // Canonical T0 fixture data, independent of the initializer's decoder. Actual native proof uses Rust's real records.
 const cbor = value => {
@@ -133,4 +133,54 @@ test('native nested stream paths retain canonical segments and refuse traversal 
   const native='views/1097fa99efd1cc1cc34ea996f7157200/1097fa99efd1cc1cc34ea996f7157200-0/0/1097fa99efd1cc1cc34ea996f7157200-0/1/everyone/';
   assert.equal(streamPath(native),true);
   for(const path of ['/views/a/','views/../a/','views/./a/','views/a%2fb/','views/a/?x','views/a/#x','views//a/','views/a\\b/'])assert.equal(streamPath(path),false,path);
+});
+
+test('#1960 B7: the store is the bucket the secrets file names, else the folder; settings carry only the store keys',()=>{
+  const text=['# Secrets','SOULS_BACKUP_URL=s3:https://host/backups','export DIRECTORY_STORE_URL="s3:https://host/bucket/dir"',
+    "AWS_ACCESS_KEY_ID='id'",'AWS_SECRET_ACCESS_KEY=s=e=c','AWS_DEFAULT_REGION=auto','SOULS_BACKUP_KEY_FILE=/k','=x','junk'].join('\n');
+  assert.deepEqual(storeSettings(text),{DIRECTORY_STORE_URL:'s3:https://host/bucket/dir',AWS_ACCESS_KEY_ID:'id',AWS_SECRET_ACCESS_KEY:'s=e=c',AWS_DEFAULT_REGION:'auto'});
+  assert.equal(bucketNamed(storeSettings(text)),true);
+  assert.equal(bucketNamed({DIRECTORY_STORE_URL:'  '}),false);assert.equal(bucketNamed({}),false);
+  assert.equal(bucketNamed({DIRECTORY_STORE_ENDPOINT:'http://127.0.0.1:9000'}),true,'directoryd: the endpoint form names a bucket too');
+});
+
+const routed=f=>async(program,args)=>{
+  if(program==='/usr/bin/systemctl'){const marker=join(f.config.routesOut,'slugs',f.row.name);await mkdir(resolve(marker,'..'),{recursive:true});await writeFile(marker,'');return;}
+  f.configured=args;
+};
+
+test('#1960 B7: on a bucket, placement reads intent, name and list there, and the world is not pinned to the folder',async()=>{
+  const f=await fixture();
+  try {
+    const folder=join(f.config.worldsRoot,'directory'),objects=new Map();
+    for(const key of [`world-create/${f.request}`,`world-name/${f.row.name}`,'world-list'])objects.set(key,await readFile(join(folder,key)));
+    await rm(folder,{recursive:true});
+    const settings={DIRECTORY_STORE_URL:'s3:http://127.0.0.1:9/souls',AWS_ACCESS_KEY_ID:'stand-in-key'},reads=[];
+    const store=directoryStore(f.config,settings,{read:async(config,key,given)=>{
+      reads.push(key);assert.equal(given,settings);if(!objects.has(key))throw Object.assign(Error('absent'),{code:'ENOENT'});return objects.get(key);}});
+    assert.equal(store.kind,'bucket');
+    const ready=await placeRequest(f.config,f.request,{run:routed(f),asSouls:async()=>{},store});
+    assert.equal(ready.ready,true);assert.equal(ready.instance,f.instance);
+    assert.deepEqual(reads,[`world-create/${f.request}`,`world-name/${f.row.name}`,'world-list']);
+    assert.ok(!f.configured.includes('--folder-store'),'on a bucket the world reads DIRECTORY_STORE_URL, as the directory does');
+    await assert.rejects(store.get('../world-list'),/placement-store-key-invalid/);
+  } finally {await rm(f.dir,{recursive:true,force:true});}
+});
+
+test('#1960 B7: on a folder store placement names the folder, and place-world.sh pins WORLDD_STORE only then',async()=>{
+  const f=await fixture();
+  try {
+    assert.equal(directoryStore(f.config,{}).kind,'folder');
+    await placeRequest(f.config,f.request,{run:routed(f),asSouls:async()=>{},store:directoryStore(f.config,{})});
+    assert.ok(f.configured.includes('--folder-store'));
+    const script=resolve('v2/tools/ops/place-world.sh');
+    for (const folder of [true,false]) {
+      const root=join(f.dir,`install-${folder}`);await mkdir(root);
+      const args=[script,'--configuration-only','--instance',f.instance,'--creator',`${'2'.repeat(32)}-0`,'--port','7500','--build',f.config.build,
+        '--directory','localhost:7310','--resume',...(folder?['--folder-store']:[])];
+      const result=spawnSync('/bin/bash',args,{env:{...process.env,PLACE_ROOT:root},encoding:'utf8'});assert.equal(result.status,0,result.stderr);
+      const conf=await readFile(join(root,'etc/systemd/system',`worldd@${f.instance}.service.d/place.conf`),'utf8');
+      assert.equal(conf.includes('Environment=WORLDD_STORE=/var/lib/souls/worlds/directory'),folder,conf);
+    }
+  } finally {await rm(f.dir,{recursive:true,force:true});}
 });

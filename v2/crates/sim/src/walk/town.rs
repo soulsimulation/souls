@@ -54,7 +54,9 @@ use crate::ground::{
 };
 use crate::host::Links;
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
-use crate::links::{Building, Doors, F_OPEN, Open, SquareMeet, back, floor_joins, ground_doors};
+use crate::links::{
+    Building, Doors, F_OPEN, Kind, Open, SquareMeet, back, floor_joins, ground_doors,
+};
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
 use crate::spots::{Ask, CLEAR, ClassGround, Ground, Spots, Target, flat, to_segment};
@@ -304,7 +306,11 @@ fn reach(b: &Building) -> Option<[i64; 4]> {
         let m = |c: i32| i64::from(c) * 1000;
         Vec3::new(m(v[0]), m(v[1]), m(v[2]))
     });
-    let steps = b.loose.iter().flat_map(|s| [s.end.a, s.end.b]);
+    let steps = b.loose.iter().flat_map(|s| {
+        [s.end.a, s.end.b]
+            .into_iter()
+            .chain(s.stair.as_ref().map(|t| t.top))
+    });
     let mut out: Option<[i64; 4]> = None;
     for p in corners.chain(steps) {
         let w = b.place.point(p).ok()?;
@@ -1337,7 +1343,7 @@ impl Town {
                 let owner = buildings.iter().find(|b| b.floors.contains_key(&f))?;
                 Some(owner.thing)
             }));
-            buildings[i].links.push(l);
+            buildings[i].join(l);
         }
         let reach = buildings
             .iter()
@@ -1936,6 +1942,9 @@ pub fn in_passage_but(
         b.links
             .iter()
             .filter(|l| door.is_none() || l.door != door)
+            // A step between two surfaces of one floor (a humped deck's quads, a few centimetres apart) is ground a
+            // body walks and stands on, no doorway or stair (#1960).
+            .filter(|l| !(l.kind == Kind::Step && l.nodes[0] == l.nodes[1]))
             .any(|l| {
                 let ends = l.ends.iter().flatten().filter(|e| e.floor == node);
                 let mut on = false;
@@ -1945,17 +1954,20 @@ pub fn in_passage_but(
                         return true;
                     }
                 }
-                on && l.line.windows(2).any(|s| {
-                    let (a, c) = if node == ground {
-                        (
-                            b.place.point(s[0]).unwrap_or(s[0]),
-                            b.place.point(s[1]).unwrap_or(s[1]),
-                        )
-                    } else {
-                        (s[0], s[1])
-                    };
-                    to_segment(p, a, c) < l.width / 2 + CLEAR / 2
-                })
+                // The line is in the building's frame: read on the open ground or on the building's own floors (not
+                // on another thing's floor a step or a flight lands on).
+                on && (node == ground || b.floors.contains_key(&node))
+                    && l.line.windows(2).any(|s| {
+                        let (a, c) = if node == ground {
+                            (
+                                b.place.point(s[0]).unwrap_or(s[0]),
+                                b.place.point(s[1]).unwrap_or(s[1]),
+                            )
+                        } else {
+                            (s[0], s[1])
+                        };
+                        to_segment(p, a, c) < l.width / 2 + CLEAR / 2
+                    })
             })
     })
 }
@@ -2443,6 +2455,25 @@ impl<'a> View<'a> {
         let c = l.points[l.next];
         lines.insert(body.id, l);
         Ok(c)
+    }
+
+    /// The floors the links of thing `thing` land on, its own and other things' (a flight's top on the roof it leads
+    /// to, `crate::links::floor_joins`), the open ground left out: each link that can be crossed, its ends' floors.
+    pub fn floors_reached(&self, thing: Id) -> Vec<Id> {
+        let mut out: Vec<Id> = Vec::new();
+        let ends = self
+            .buildings
+            .iter()
+            .filter(|b| b.thing == thing)
+            .flat_map(|b| &b.links)
+            .filter(|l| l.blocked.is_none())
+            .flat_map(|l| l.ends.iter().flatten());
+        for e in ends {
+            if e.floor != self.ground && !out.contains(&e.floor) {
+                out.push(e.floor);
+            }
+        }
+        out
     }
 
     /// Where a body may stand within `reach` of `at` (µm, `node`'s frame) to act there, for `from` (C15, #3447):
