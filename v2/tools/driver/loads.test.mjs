@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SHAPES, schedule } from '../../../tools/bench/capacity/profiles/shapes.mjs';
-import { LOADS, TARGET, VERBS, scheduleFile } from './loads.mjs';
+import { LADDER, LOADS, TARGET, VERBS, scheduleFile } from './loads.mjs';
 
 test('a3: the target is a copy of the shared event shape, which stays as it was', () => {
   assert.equal(SHAPES.agents.event.presence.value, 0.8);
@@ -30,4 +30,12 @@ test('a5: every kind of every shared shape has a verb; one with none is written 
   for (const [name, shape] of Object.entries(SHAPES.agents)) for (const kind of Object.keys(shape.mix.value)) assert.ok(VERBS[kind], `${name}: ${kind}`);
   const file = scheduleFile('x', { n: 1, seconds: 1, seed: 1, agents: [{ i: 0, acts: [{ at: 0.5, kind: 'juggle' }, { at: 0.25, kind: 'say' }] }], summary: LOADS['target-even'](1, 1, 1).summary });
   assert.deepEqual(file.split('\n').slice(1), ['250 0 say eden:say', '500 0 juggle -', '']);
+});
+
+test('X7 a3: each ladder step has an uneven arm (event as it is) and an even one (uniform) intending about as many acts', () => {
+  for (const n of LADDER) {
+    const u = LOADS[`ladder-${n}-uneven`](1, 60, 1), e = LOADS[`ladder-${n}-even`](1, 60, 1);
+    assert.deepEqual([u.shape, u.n, e.shape, e.n], ['event', n, 'uniform', n]);
+    assert.ok(Math.abs(e.summary.acts - u.summary.acts) <= Math.max(5, 0.1 * u.summary.acts), `${n}: ${e.summary.acts} against ${u.summary.acts}`);
+  }
 });
