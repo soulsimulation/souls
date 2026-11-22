@@ -3433,7 +3433,7 @@ fn again_objects_bound() -> usize {
 
 // ---- #3948: what a closed container holds stays out of the public stream ----------------------------------------
 
-/// The fixture header's crate is closed (to its creator alone); its cup is a thing.
+/// The fixture header's crate kind is closed (to its creator alone).
 fn i3948_closed(h: &Header) -> Closed {
     let entry = replica::rules::json::parse(
         r#"{"closed": {"audience": {"rule": "creator"}, "fields": []}}"#,
@@ -3518,7 +3518,7 @@ fn i3948_holds(p: &PublicPlayer, id: Id) -> bool {
 }
 
 #[test]
-/// #3948 A1, A3: a cup in the closed crate is in no public state, no baseline and no entry while it is in it: hidden
+/// #3948 A1, A3: a thing in the closed crate is in no public state, no baseline and no entry while it is in it: hidden
 /// in the world as built, touched while hidden, taken out (then public), put back (out again), and for a viewer that
 /// joins on the next generation; a restart recovers the same stream.
 fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_out() {
@@ -3527,15 +3527,15 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
     let views = d.join("views");
     let store = directoryd::directory::store::Memory::default();
     let id = |n| Id::new(Scope([0x39; 16]), n).unwrap();
-    let (crate_, hidden, shown_cup) = (id(1), id(2), id(3));
-    // The world as built: the crate, a cup in it and a cup beside it.
+    let (crate_, hidden, beside) = (id(1), id(2), id(3));
+    // The world as built: the crate, a thing in it and a thing beside it.
     let mut actual = Replica::start(h.stored()).unwrap();
     let built = w3e_packet(
         &h,
         vec![
             i3948_create(&h, 0, crate_, h.zone, 5),
             i3948_create(&h, 1, hidden, crate_, 3),
-            i3948_create(&h, 2, shown_cup, h.zone, 3),
+            i3948_create(&h, 2, beside, h.zone, 3),
         ],
     );
     actual.apply_bytes(&built).unwrap();
@@ -3567,10 +3567,10 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
         !i3948_names(&baseline, hidden),
         "hidden at start: not in the baseline"
     );
-    assert!(i3948_names(&baseline, shown_cup) && i3948_names(&baseline, crate_));
+    assert!(i3948_names(&baseline, beside) && i3948_names(&baseline, crate_));
     let header_bytes = fs::read(views.join(stream::header_path(&h))).unwrap();
     let mut viewer = PublicPlayer::start(&header_bytes, &baseline).unwrap();
-    assert!(!i3948_holds(&viewer, hidden) && i3948_holds(&viewer, shown_cup));
+    assert!(!i3948_holds(&viewer, hidden) && i3948_holds(&viewer, beside));
     let gen0 = out.generation_dir();
     // Record `record` pushed and cut; part `number` of the first generation as written, if it was.
     let mut part = |out: &mut PublicWriter<_>, record: u64, number: u64, effects: Vec<Effect>| {
@@ -3580,12 +3580,12 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
         out.flush().unwrap();
         fs::read(gen0.join(number.to_string())).ok()
     };
-    // Touched while hidden: its entry is not published and its row never appears; the other cup's are.
+    // Touched while hidden: its entry is not published and its row never appears; the other thing's are.
     let p0 = part(
         &mut out,
         0,
         0,
-        vec![i3948_set(3, shown_cup, 7), i3948_set(4, hidden, 8)],
+        vec![i3948_set(3, beside, 7), i3948_set(4, hidden, 8)],
     )
     .unwrap();
     viewer.play(&p0).unwrap();
@@ -3593,7 +3593,7 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
         !i3948_names(&p0, hidden),
         "a hidden thing touched: its id in no byte of the part"
     );
-    assert!(i3948_names(&p0, shown_cup));
+    assert!(i3948_names(&p0, beside));
     assert!(!i3948_holds(&viewer, hidden));
     // Taken out: public from then on.
     let x1 = Id::new(Scope([0x3a; 16]), 1).unwrap();
@@ -3601,7 +3601,7 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
     viewer.play(&p1).unwrap();
     assert!(
         i3948_holds(&viewer, hidden),
-        "revealed: the cup is in the public state"
+        "revealed: the thing is in the public state"
     );
     let entries = Part::read(&StreamPart::read(&p1).unwrap().part).unwrap();
     assert_eq!(
@@ -3626,9 +3626,9 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
     // Touched again while hidden: nothing public happened, so no part is written.
     assert_eq!(part(&mut out, 3, 3, vec![i3948_set(9, hidden, 9)]), None);
     assert_eq!(out.player.next(), 3);
-    // The other cup touched: the generation then closes (4 parts). A viewer joining now starts from a baseline
-    // without the hidden cup, and a live viewer crosses over.
-    let p3 = part(&mut out, 4, 3, vec![i3948_set(10, shown_cup, 9)]).unwrap();
+    // The other thing touched: the generation then closes (4 parts). A viewer joining now starts from a baseline
+    // without the hidden thing, and a live viewer crosses over.
+    let p3 = part(&mut out, 4, 3, vec![i3948_set(10, beside, 9)]).unwrap();
     viewer.play(&p3).unwrap();
     assert!(!i3948_names(&p3, hidden));
     assert_ne!(
@@ -3639,17 +3639,17 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
     let late = fs::read(out.generation_dir().join("baseline")).unwrap();
     assert!(
         !i3948_names(&late, hidden),
-        "a late viewer's baseline does not hold the hidden cup"
+        "a late viewer's baseline does not hold the hidden thing"
     );
     let joiner = PublicPlayer::start(&header_bytes, &late).unwrap();
-    assert!(!i3948_holds(&joiner, hidden) && i3948_holds(&joiner, shown_cup));
+    assert!(!i3948_holds(&joiner, hidden) && i3948_holds(&joiner, beside));
     assert_eq!(joiner.hash().unwrap(), viewer.hash().unwrap());
     let pointer = object_map(&fs::read(out.dir.join(POINTER)).unwrap()).unwrap();
     assert!(
         pointer.contains_key(&9) && pointer.contains_key(&10),
         "with a hand-off"
     );
-    // A restart recovers the stream from its store, the cup still out of it.
+    // A restart recovers the stream from its store, the thing still out of it.
     let state = out.player.state().clone();
     drop(out);
     let again = open(initial);
@@ -3689,7 +3689,7 @@ fn i3948_a_stream_begun_before_drops_closed_contents_at_its_next_generation() {
         clock_seed: None,
         history: None,
     };
-    // As a writer before #3948 ran: the cup is in its baseline and its generation keeps it.
+    // As a writer before #3948 ran: the thing is in its baseline and its generation keeps it.
     let mut out = PublicWriter::open(start(actual.frozen()), &store).unwrap();
     out.closed_kinds = i3948_closed(&h);
     out.inside = Inside::new(&out.closed_kinds);
@@ -3711,7 +3711,7 @@ fn i3948_a_stream_begun_before_drops_closed_contents_at_its_next_generation() {
     let late = fs::read(out.generation_dir().join("baseline")).unwrap();
     assert!(
         !i3948_names(&late, hidden),
-        "the new generation leaves the cup out"
+        "the new generation leaves the thing out"
     );
     let pointer = object_map(&fs::read(out.dir.join(POINTER)).unwrap()).unwrap();
     assert!(
