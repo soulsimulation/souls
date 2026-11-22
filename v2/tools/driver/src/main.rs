@@ -145,6 +145,9 @@ struct Sent {
     stall_ms: u64,
     refused_only_ms: u64,
     last_answer_age_ms: u64,
+    /// #4154's accuracy check: the sequences the world took (accepted or receipted) and those it said were done.
+    took: std::collections::HashSet<u64>,
+    done: std::collections::HashSet<u64>,
 }
 
 /// One minute of the run's answers: receipts (a receipt, or a move's acceptance), refusals and errors by name, and
@@ -374,6 +377,70 @@ fn stuck_report(agents: &[Sent]) -> serde_like::Obj {
         )
         .raw("stuckAgents", format!("[{}]", stuck.join(", ")))
         .raw("refusedOnlyAgents", format!("[{}]", refused.join(", ")))
+}
+
+/// #4154, Gene's accuracy measure, by position in the world and not by receipt: each agent's last act that names a
+/// place (walk or sit: its target; a body form: its thing; a look or a point left out), as the copy read 15 s after
+/// the last act holds it. A body within 4 m of the place (frames' positions composed, `targets::world_xz`), or seated
+/// in it, counts as there. Acts the world did not take, and those it took but has not said are done, are counted apart.
+fn accuracy_report(
+    agents: &[Sent],
+    last: &[Option<(u64, String, Id)>],
+    actors: &[Actor],
+    seen: &targets::Seen,
+) -> serde_like::Obj {
+    let mut by: BTreeMap<String, [u64; 5]> = BTreeMap::new();
+    for (k, l) in last.iter().enumerate() {
+        let (Some((seq, verb, place)), Actor::Soul(soul)) = (l, actors[k]) else {
+            continue;
+        };
+        let e = by.entry(verb.clone()).or_default();
+        e[0] += 1;
+        if !agents[k].took.contains(seq) {
+            e[1] += 1;
+            continue;
+        }
+        let body = seen.bodies.get(&soul);
+        let seated = body
+            .and_then(|b| seen.places.get(b))
+            .is_some_and(|(f, _, _)| f == place);
+        let near = match (
+            body.and_then(|b| targets::world_xz(seen, b)),
+            targets::world_xz(seen, place),
+        ) {
+            (Some((x, z)), Some((px, pz))) => (x - px).pow(2) + (z - pz).pow(2) <= 4_000 * 4_000,
+            _ => false,
+        };
+        let done = agents[k].done.contains(seq);
+        e[match (seated || near, done) {
+            (true, _) => 2,
+            (false, true) => 3,
+            (false, false) => 4,
+        }] += 1;
+    }
+    let mut total = [0u64; 5];
+    for v in by.values() {
+        for (t, x) in total.iter_mut().zip(v) {
+            *t += x;
+        }
+    }
+    let row = |v: &[u64; 5]| {
+        format!(
+            "{{\"checked\": {}, \"notTaken\": {}, \"atPlace\": {}, \"doneButElsewhere\": {}, \"underWay\": {}}}",
+            v[0], v[1], v[2], v[3], v[4]
+        )
+    };
+    let verbs: Vec<String> = by
+        .iter()
+        .map(|(k, v)| format!("{k:?}: {}", row(v)))
+        .collect();
+    serde_like::Obj::new()
+        .n("checked", total[0] as f64)
+        .n("atPlaceShare", ratio(total[2], total[0]))
+        .n("doneButElsewhereShare", ratio(total[3], total[0]))
+        .n("underWayShare", ratio(total[4], total[0]))
+        .n("notTakenShare", ratio(total[1], total[0]))
+        .raw("byVerb", format!("{{{}}}", verbs.join(", ")))
 }
 
 /// A tiny JSON writer, so the report needs no dependency.
@@ -770,6 +837,10 @@ async fn agent(
                             if let (Some(id), Some((_, sent_ms, _))) = (iid, pending.get(&s)) {
                                 let verb = verb_of.get(&s).map_or("?".into(), |v| v.as_str().to_owned());
                                 out.taken.push((id, *sent_ms, unix_ms(), verb));
+                            }
+                            out.took.insert(s);
+                            if kind == 1 {
+                                out.done.insert(s);
                             }
                             if kind == 1 && !receipted.insert(s) {
                                 out.duplicates += 1;
@@ -1364,6 +1435,8 @@ async fn main() {
     }
     let think = |agent: u32| a.think_ms * ((u64::from(agent) * 7919) % 1000) / 1000;
     let mut sequence = vec![first; s.agents as usize];
+    // #4154: each agent's last act that names a place: its sequence, verb and the place.
+    let mut last_place: Vec<Option<(u64, String, Id)>> = vec![None; s.agents as usize];
     let mut intended = vec![0u64; s.agents as usize];
     let mut unmapped: BTreeMap<&str, u64> = BTreeMap::new();
     let mut by_verb: BTreeMap<String, u64> = BTreeMap::new();
@@ -1402,6 +1475,15 @@ async fn main() {
         tokio::time::sleep_until(due.into()).await;
         sequence[k] += 1;
         intended[k] += 1;
+        let v = verb.as_str();
+        let place = if v.ends_with(":walk") || v.ends_with(":sit") {
+            target
+        } else {
+            arg.as_ref().map(|x| x.1)
+        };
+        if let (Some(p), false) = (place, v.ends_with(":look_at") || v.ends_with(":point")) {
+            last_place[k] = Some((sequence[k], v.to_owned(), p));
+        }
         *by_verb.entry(verb.as_str().to_owned()).or_default() += 1;
         let _ = chans[k].send(Job::Act(Due {
             at: due,
@@ -1412,6 +1494,18 @@ async fn main() {
             target,
         }));
     }
+    // #4154, Gene's accuracy measure: 15 s after the last act, the first agent reads its copy again, and each agent's
+    // last act that names a place (a walk, a sit, or a body form on a thing) is checked by where its body is.
+    let after = if a.remote.is_some() && aimed.is_some() {
+        tokio::time::sleep(Duration::from_secs(15)).await;
+        let (back, seen) = tokio::sync::oneshot::channel();
+        match chans.first().map(|c| c.send(Job::Read(back))) {
+            Some(Ok(())) => seen.await.ok().and_then(Result::ok),
+            _ => None,
+        }
+    } else {
+        None
+    };
     drop(chans);
     let mut sent = Vec::new();
     for (k, t) in tasks.into_iter().enumerate() {
@@ -1424,6 +1518,9 @@ async fn main() {
     let seen = reader.map(|r| r.join().unwrap_or_default());
     let visible = seen.as_ref().map(|v| visible_report(&sent, v));
     let stuck = stuck_report(&sent);
+    let accuracy = after
+        .as_ref()
+        .map(|seen| accuracy_report(&sent, &last_place, &actors, seen));
     for mut c in children {
         let _ = c.kill();
         let _ = c.wait();
@@ -1504,7 +1601,13 @@ async fn main() {
                 .as_ref()
                 .map_or("null".into(), serde_like::Obj::json),
         )
-        .raw("stuck", stuck.json());
+        .raw("stuck", stuck.json())
+        .raw(
+            "accuracy",
+            accuracy
+                .as_ref()
+                .map_or("null".into(), serde_like::Obj::json),
+        );
     if let Some(v) = &visible {
         println!(
             "Visible on the public stream: {} of {} acts the world took; send to accepted p50 {} ms, p95 {} ms; \

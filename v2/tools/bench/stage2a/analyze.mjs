@@ -39,6 +39,7 @@ export function analyze(D) {
     wait: { taken: v.taken, seen: v.seen, seenShare: v.seenShare, p50Ms: v.p50Ms, p95Ms: v.p95Ms, p99Ms: v.p99Ms, maxMs: v.maxMs, within100: v.within100Ms, within300: v.within300Ms, streamLagP50Ms: v.streamLagP50Ms, streamLagP95Ms: v.streamLagP95Ms, writerLagP50Ms: v.writerLagP50Ms, writerLagP95Ms: v.writerLagP95Ms, visibleBeforeAnswerShare: v.visibleBeforeAnswerShare, visibleAfterAnswerP50Ms: v.visibleAfterAnswerP50Ms, visibleAfterAnswerP95Ms: v.visibleAfterAnswerP95Ms, byVerb: v.byVerb },
     answer: rep.perMinute.map((m) => ({ p50: m.latencyP50Ms, p95: m.latencyP95Ms, p99: m.latencyP99Ms })),
     tick: { p50Us: w2.h.ticks.p50_us, p99Us: w2.h.ticks.p99_us, maxUs: w2.h.ticks.max_us, meanUs: Math.round(meanWin(w1.h.ticks, w2.h.ticks) ?? 0), count: dCount, over: dOver, onTimeShare: dCount ? +(1 - dOver / dCount).toFixed(4) : null },
+    accuracy: rep.accuracy ?? null, sent: rep.all?.sent,
     phases, stuck: rep.stuck, refusals, errors: rep.perMinute.reduce((e, m) => { for (const [k, x] of Object.entries(m.errors)) e[k] = (e[k] ?? 0) + x; return e; }, {}),
     cpu: { world: cores('wcpu'), gateway: cores('gcpu'), origin: cores('ocpu'), worldMb: mb('wrss'), gatewayMb: mb('grss'), originMb: mb('orss') },
     threads: Object.fromEntries(['wthreads', 'gthreads'].map((k) => [k === 'wthreads' ? 'world' : 'gateway', Object.entries(w2[k] ?? {}).map(([n, c]) => [n, +((c - (w1[k]?.[n] ?? 0)) / dt).toFixed(2)]).filter(([, c]) => c >= 0.05).sort((a, b) => b[1] - a[1]).slice(0, 8)])),
@@ -82,6 +83,9 @@ export function tables(rows, label = '') {
   for (const r of rows) t.push(`| ${r.rung} | ${keys.map((k) => (r.phases[k] ? `${r.phases[k].meanUs} (${r.phases[k].p99Us})` : '-')).join(' | ')} |`);
   t.push('', '**Busiest threads** (cores over the load window):', '');
   for (const r of rows) if (r.threads?.world?.length) t.push(`- ${r.rung}: world ${r.threads.world.map(([n, c]) => `${n} ${c}`).join(', ')}; gateway ${r.threads.gateway.map(([n, c]) => `${n} ${c}`).join(', ')}`);
+  t.push('', '**Accuracy by position** (Gene\'s measure: each agent\'s last act naming a place, checked by where its body is 15 s after the last act, not by receipt; shares of those checked):', '');
+  t.push('| Rung | checked | at the place | world said done, body elsewhere | still under way | not taken (refused) | refused acts / sent, all acts |', '|---|---|---|---|---|---|---|');
+  for (const r of rows) { const a = r.accuracy; const refused = Object.values(r.refusals).reduce((x, y) => x + y, 0); t.push(`| ${r.rung} | ${a?.checked ?? '-'} | ${a?.atPlaceShare ?? '-'} | ${a?.doneButElsewhereShare ?? '-'} | ${a?.underWayShare ?? '-'} | ${a?.notTakenShare ?? '-'} | ${r.sent ? (refused / r.sent).toFixed(3) : '-'} |`); }
   t.push('', '**Refusals by name** (verb and reason):', '');
   for (const r of rows) t.push(`- ${r.rung}: ${Object.entries(r.refusals).sort((x, y) => y[1] - x[1]).slice(0, 8).map(([k, n]) => `${k} ${n}`).join('; ') || 'none'}`);
   return t.join('\n');

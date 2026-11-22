@@ -121,7 +121,7 @@ fn has_form(e: &Json, form: &str) -> bool {
 
 /// #4154: a node's place in the world, roughly: its position added to its frames' up the chain (rotations left out, so
 /// a thing inside a turned building may be off by its distance from the building's origin). None without a place.
-fn world_xz(seen: &Seen, id: &Id) -> Option<(i64, i64)> {
+pub fn world_xz(seen: &Seen, id: &Id) -> Option<(i64, i64)> {
     let (mut f, mut x, mut z) = *seen.places.get(id)?;
     for _ in 0..12 {
         let Some((up, fx, fz)) = seen.places.get(&f).copied().filter(|p| p.0 != f) else {
