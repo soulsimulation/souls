@@ -199,8 +199,20 @@ fn board_from(
                 p.z + (slot.z - p.z) * k / n,
             );
             let spans = |s: &&Solid| s.y1 > slot.y + BODY_SPAN.0 && s.y0 < slot.y + BODY_SPAN.1;
-            !near.iter().filter(spans).any(|s| within_solid(s, at, grow))
-                || own.iter().any(|s| within_solid(s, at, grow))
+            let hit = near
+                .iter()
+                .filter(spans)
+                .find(|s| within_solid(s, at, grow));
+            if std::env::var("SEAT_DIAG").is_ok()
+                && slot.x > 99_000_000
+                && slot.x < 100_000_000
+                && hit.is_some()
+                && !own.iter().any(|s| within_solid(s, at, grow))
+            {
+                eprintln!("  blocked at ({}, {}) by {:?}", at.x, at.z, hit);
+                return false;
+            }
+            hit.is_none() || own.iter().any(|s| within_solid(s, at, grow))
         })
     };
     for ring in 1..=board / pitch {
@@ -221,6 +233,19 @@ fn board_from(
                 continue;
             };
             let gap = sim::spots::flat(p, stand);
+            if std::env::var("SEAT_DIAG").is_ok()
+                && slot.x > 99_000_000
+                && slot.x < 100_000_000
+                && k % 7 == 0
+            {
+                eprintln!(
+                    "BOARD ring {ring} k {k} p ({}, {}) passage {} crossed {}",
+                    p.x,
+                    p.z,
+                    passage(p),
+                    crossed(p)
+                );
+            }
             if sim::spots::flat(p, slot) <= board
                 && best.is_none_or(|b| gap < b.0)
                 && !passage(p)
