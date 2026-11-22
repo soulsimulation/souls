@@ -1408,7 +1408,7 @@ fn c22_a2_the_desks_write_ends_done() {
 
 /// #1960 seat approach: a boat afloat is boarded from the bank. Its seat's stand point is on the water, with no ground
 /// within a form's reach of it; the seat's `board_mm` lets the world move it to the nearest clear ground within that of
-/// the seat, from which the straight step onto the seat crosses no other solid (`worldd::seats`). Born on the bank, a
+/// the seat, from which the straight step onto the seat crosses no other solid (`worldd::places`). Born on the bank, a
 /// Soul rides the boat (a walk to that point, then the sit), rises, and is set down on that ground, the bank.
 fn boards_from_the_bank_and_rises_onto_it(at: &str, today: &str, tag: &str, bank: f64) {
     let facts = facts_path();
@@ -1528,8 +1528,8 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
     )
     .expect("the town");
     let mut bodies = worldd::bodies::Bodies::new(town, 50_000).unwrap();
-    // The seats, as `worldd serve` registers them (`worldd::seats::places`).
-    let (seats, ..) = worldd::seats::places(&mut bodies.town, &found);
+    // The seats, as `worldd serve` registers them (`worldd::places::register`).
+    let (seats, ..) = worldd::places::register(&mut bodies.town, &found);
     for place in seats {
         let _ = bodies.add_place(place);
     }

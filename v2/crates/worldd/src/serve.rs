@@ -2164,7 +2164,7 @@ fn serve(args: &[String]) -> R<()> {
         .prepare_classes(catalogue.classes())
         .map_err(|e| format!("body-classes: {e}"))?;
     stamp("body classes");
-    let (places, things, all, left, moved) = worldd::seats::places(&mut town, &kinds);
+    let (places, things, all, left, moved) = worldd::places::register(&mut town, &kinds);
     stamp("places to sit placed");
     let closed_kinds = worldd::closed::Closed::of(&kinds);
     println!(

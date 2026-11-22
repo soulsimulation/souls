@@ -16,7 +16,7 @@ use sim::walk::town::Town;
 /// no such place whose slot has a boarding reach (a boat afloat) is boarded from clear ground ([`board_from`]). Returns the
 /// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
 /// floor above the thing) and the stand points moved.
-pub fn places(
+pub fn register(
     town: &mut Town,
     kinds: &[(String, Json)],
 ) -> (Vec<PlaceAt>, usize, usize, usize, usize) {
