@@ -1492,9 +1492,16 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
     let (seats, ..) = worldd::seats::places(&mut bodies.town, &found);
     for place in seats {
         if std::env::var("SEAT_DIAG").is_ok()
-            && [8866u64, 9098, 9879]
-                .iter()
-                .any(|c| show(place.thing).contains(&format!("cd:{c}")))
+            && bodies
+                .town
+                .tree
+                .handle(place.thing)
+                .and_then(|h| bodies.town.tree.node(h))
+                .is_some_and(|n| {
+                    ["bicycle", "canoe", "rowing_boat"]
+                        .iter()
+                        .any(|k| n.kind().as_str().contains(k))
+                })
         {
             let stand = place.stand().unwrap();
             let gap = sim::spots::flat(stand, place.point);

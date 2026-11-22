@@ -203,12 +203,7 @@ fn board_from(
                 .iter()
                 .filter(spans)
                 .find(|s| within_solid(s, at, grow));
-            if std::env::var("SEAT_DIAG").is_ok()
-                && slot.x > 99_000_000
-                && slot.x < 100_000_000
-                && hit.is_some()
-                && !own.iter().any(|s| within_solid(s, at, grow))
-            {
+            if diag(slot) && hit.is_some() && !own.iter().any(|s| within_solid(s, at, grow)) {
                 eprintln!("  blocked at ({}, {}) by {:?}", at.x, at.z, hit);
                 return false;
             }
@@ -233,11 +228,7 @@ fn board_from(
                 continue;
             };
             let gap = sim::spots::flat(p, stand);
-            if std::env::var("SEAT_DIAG").is_ok()
-                && slot.x > 99_000_000
-                && slot.x < 100_000_000
-                && k % 7 == 0
-            {
+            if diag(slot) && k % 7 == 0 {
                 eprintln!(
                     "BOARD ring {ring} k {k} p ({}, {}) passage {} crossed {}",
                     p.x,
@@ -290,4 +281,12 @@ fn signed_area(s: &Solid) -> i128 {
             i128::from(a[0]) * i128::from(b[1]) - i128::from(b[0]) * i128::from(a[1])
         })
         .sum()
+}
+
+fn diag(slot: Vec3) -> bool {
+    let Ok(v) = std::env::var("SEAT_DIAG_AT") else {
+        return false;
+    };
+    let xz: Vec<i64> = v.split(',').filter_map(|t| t.parse().ok()).collect();
+    (slot.x - xz[0] * 1000).abs() < 300_000 && (slot.z - xz[1] * 1000).abs() < 300_000
 }
