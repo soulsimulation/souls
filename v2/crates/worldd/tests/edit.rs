@@ -1036,7 +1036,13 @@ fn a3962_a_shape_is_judged_by_its_outline_and_line_not_its_origin() {
         .edit(
             w.creator(),
             v,
-            vec![road(1, &room, Ref::Node(w.root), &[[120, 30], [180, 30]], 4)],
+            vec![road(
+                1,
+                &room,
+                Ref::Node(w.root),
+                &[[120, 30], [180, 30]],
+                4,
+            )],
         )
         .expect("the lead's road");
     let built = lead.names[&1];
@@ -1083,7 +1089,13 @@ fn a3962_a_shape_is_judged_by_its_outline_and_line_not_its_origin() {
     w.edit_under(
         as_helper,
         v,
-        vec![road(1, &room, Ref::Node(w.root), &[[110, 25], [190, 25]], 4)],
+        vec![road(
+            1,
+            &room,
+            Ref::Node(w.root),
+            &[[110, 25], [190, 25]],
+            4,
+        )],
         Some("c:house"),
     )
     .expect("the helper's road inside its claim");
@@ -1092,7 +1104,13 @@ fn a3962_a_shape_is_judged_by_its_outline_and_line_not_its_origin() {
         .edit_under(
             as_helper,
             v,
-            vec![road(1, &room, Ref::Node(w.root), &[[150, 30], [250, 30]], 4)],
+            vec![road(
+                1,
+                &room,
+                Ref::Node(w.root),
+                &[[150, 30], [250, 30]],
+                4,
+            )],
             Some("c:house"),
         )
         .expect_err("out of its claim");
