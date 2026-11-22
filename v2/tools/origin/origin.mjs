@@ -31,6 +31,7 @@ import { availableParallelism } from 'node:os';
 import { basename, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { noPage, siteRoutes, wantsPage } from './site.mjs';
+import { upgradeRefusal } from './upgrade-refusal.mjs';
 import { worldRoutes } from './world-routes.mjs';
 
 export const IMMUTABLE = 'public, max-age=31536000, immutable, no-transform';
@@ -100,7 +101,7 @@ export function sharedFiles(cacheBytes, stats = {}) {
  * `cacheBytes` bounds the immutable buffers held after their requests end (sharedFiles).
  */
 export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.ORIGIN_CACHE_MB ?? 64) * 2 ** 20 } = {}) {
-  const root = resolve(dir), pages = siteRoutes(site), worlds = worldRoutes(site.worldRoutes);
+  const root = resolve(dir), pages = siteRoutes(site), worlds = worldRoutes(site.worldRoutes), upgrade = upgradeRefusal(site.client);
   const stats = { pointer: 0, immutable: 0, miss: 0, perPath: new Map(), bytes: {} }; // bytes: served, by first segment (O11)
   const shared = sharedFiles(cacheBytes, stats);
   const server = createServer(async (req, res) => {
@@ -110,6 +111,7 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
       res.writeHead(404, { 'cache-control': MISS, 'content-length': 0 }).end();
     };
     try {
+      if (upgrade.handle(req, res)) return;
       if (worlds.handle(req, res)) return;
       if (pages.handle(req, res)) return;
     } catch {
