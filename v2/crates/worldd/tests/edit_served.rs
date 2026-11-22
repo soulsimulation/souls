@@ -700,6 +700,7 @@ async fn g1f_a2_doorway_commits_owned_metadata_and_removal_guards_the_last_way_o
         "the route crosses this exact new passage"
     );
     let edit = Edit {
+        claim: None,
         intent: Id::new(Scope([0xde; 16]), 1).unwrap(),
         actor,
         planned: open.version(),
@@ -1596,4 +1597,49 @@ async fn g4_undo_and_redo_on_the_wire_and_buildsafe_refuses_an_undo_onto_a_soul(
         got.kind, 1,
         "the undo commits once the Soul is gone: {got:?}"
     );
+}
+
+/// #3958: a creator's move of a thing far off the open ground (100 km east), sent straight to the world with no
+/// client check, is answered (refused by name or done), and the creator's next edit is answered too.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_far_off_the_ground_is_answered_and_so_is_the_next_edit() {
+    let d = scratch("far-move");
+    let w = seed(&d, &testworld::generate(1, 0).unwrap().text, 1, (-40, 30));
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc0);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    s.line("listening ", 60);
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (placed, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 1, 0, wall(&w, -30 * M, 30 * M)),
+    )
+    .await;
+    assert_eq!(placed.kind, 1, "the wall commits: {placed:?}");
+    let far = Op::Move {
+        node: Ref::Node(placed.names[&1]),
+        at: Spot {
+            slot: None,
+            position: Vec3::new(100_000 * 1_000 * 1_000, 0, 0),
+            orientation: Quat::IDENTITY,
+            support: Support::None,
+        },
+    };
+    let (moved, took) = send(&mut ws, edit_intent(&w, creator, 2, placed.version, far)).await;
+    println!("#3958: the far move: {moved:?} in {took:?}");
+    assert_eq!(
+        (moved.kind, moved.reason.as_str()),
+        (2, "edit.off-ground"),
+        "the far move is refused by name, not timed out"
+    );
+    let (next, took) = send(
+        &mut ws,
+        edit_intent(&w, creator, 3, moved.version, wall(&w, -25 * M, 30 * M)),
+    )
+    .await;
+    println!("#3958: the next edit: {next:?} in {took:?}");
+    assert_eq!(next.kind, 1, "the next edit commits: {next:?}");
 }

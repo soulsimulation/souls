@@ -41,6 +41,9 @@ pub const STEP: u64 = 4;
 /// The longest build or step name, in bytes.
 pub const STEP_NAME_MOST: usize = 64;
 
+/// The parameter that names the build claim a batch is sent under (#3701), left out when none.
+pub const CLAIM: u64 = 6;
+
 /// What an edit intent asks for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Asked {
@@ -332,6 +335,36 @@ pub fn parameters_of(asked: &Asked) -> BTreeMap<u64, Value> {
     }
 }
 
+/// The batch and the claim it is sent under: `{1: [operation, ...], 6: claim id}` (3 to 5 are builds and undo).
+pub fn parameters_under(ops: &[Op], claim: Option<&Name>) -> BTreeMap<u64, Value> {
+    with_claim(parameters(ops), claim)
+}
+
+/// `parameters` with the claim they are sent under, when there is one.
+pub fn with_claim(
+    mut parameters: BTreeMap<u64, Value>,
+    claim: Option<&Name>,
+) -> BTreeMap<u64, Value> {
+    if let Some(c) = claim {
+        parameters.insert(CLAIM, Value::Text(c.clone()));
+    }
+    parameters
+}
+
+/// The claim an edit's parameters name, if any; `Err` when parameter 6 is not a name.
+pub fn claim(parameters: &BTreeMap<u64, Value>) -> R<Option<Name>> {
+    match parameters.get(&CLAIM) {
+        None => Ok(None),
+        Some(Value::Text(n))
+            if n.as_str().len() <= 64
+                && crate::effects::not_a_name(&Value::Text(n.clone())).is_none() =>
+        {
+            Ok(Some(n.clone()))
+        }
+        Some(_) => Err("an edit's claim is a name".into()),
+    }
+}
+
 /// Reads an edit intent's parameters: one to [`OPS_MOST`] operations, each in its one byte form. The detail of a
 /// refusal says what was wrong.
 pub fn read(parameters: &BTreeMap<u64, Value>) -> R<Vec<Op>> {
@@ -350,11 +383,13 @@ fn step_name(b: &[u8]) -> Option<String> {
 /// Reads what an edit intent's parameters ask for: `{5: 1}` an undo, `{5: 2}` a redo, else a batch
 /// (`{1: [...]}`, with `{3: build, 4: step}` both or neither).
 pub fn asked(parameters: &BTreeMap<u64, Value>) -> R<Asked> {
+    // Parameter 6, the claim (#3701), may go with any of them.
+    let extra = usize::from(claim(parameters)?.is_some());
     if let Some(u) = parameters.get(&UNDO) {
-        return match (u, parameters.len()) {
+        return match (u, parameters.len() - extra) {
             (Value::Uint(UNDO_ONE), 1) => Ok(Asked::Undo),
             (Value::Uint(REDO_ONE), 1) => Ok(Asked::Redo),
-            _ => Err("an undo is {5: 1} and a redo {5: 2}, alone".into()),
+            _ => Err("an undo is {5: 1} and a redo {5: 2}, alone but for a claim".into()),
         };
     }
     let step = match (parameters.get(&BUILD), parameters.get(&STEP)) {
@@ -370,8 +405,9 @@ pub fn asked(parameters: &BTreeMap<u64, Value>) -> R<Asked> {
         _ => return Err("a build's step is {3: build, 4: step}, both bytes".into()),
     };
     let named = if step.is_some() { 3 } else { 1 };
-    let (Some(Value::Array(a)), true) = (parameters.get(&OPS), parameters.len() == named) else {
-        return Err("an edit's parameters are {1: [operation, ...]}".into());
+    let (Some(Value::Array(a)), true) = (parameters.get(&OPS), parameters.len() == named + extra)
+    else {
+        return Err("an edit's parameters are {1: [operation, ...], 6: claim?}".into());
     };
     if a.is_empty() || a.len() > OPS_MOST {
         return Err(format!("1 to {OPS_MOST} operations, not {}", a.len()));
@@ -406,5 +442,6 @@ pub fn edit_of(intent: &Intent, id: Id) -> Option<Edit> {
         actor: intent.actor,
         planned: *planned,
         ops: read(&intent.parameters).ok()?,
+        claim: claim(&intent.parameters).ok()?,
     })
 }

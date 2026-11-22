@@ -779,8 +779,29 @@ impl Building {
                         at.z - d[0] * half / 1_000_000,
                     ),
                 };
-                let (ends, blocked) = match (lo.flatten(), hi.flatten()) {
-                    (Some(a), Some(b)) => {
+                // A flight whose lower floor has no surface to stand on (a raised building's outside stair, its foot on
+                // the open ground: the Mars campus's kitchen) starts on the open ground beside the building, at the
+                // ground's height there, as a doorway to the open ground ends there.
+                let foot = open.filter(|_| lo.is_none());
+                let (ends, blocked) = match (lo.flatten(), hi.flatten(), foot) {
+                    (None, Some(b), Some(o)) => {
+                        let db = unit(line[k - 2], line[k - 1]);
+                        let e = end(nodes[0], line[0], unit(line[0], line[1]));
+                        if b != line[line.len() - 1] {
+                            line.push(b);
+                        }
+                        let on = End {
+                            floor: o.ground,
+                            a: o.place.point(e.a)?,
+                            b: o.place.point(e.b)?,
+                        };
+                        let y = on.middle().y;
+                        (
+                            [Some(lift(on, o.terrain, y)), Some(end(nodes[1], b, db))],
+                            None,
+                        )
+                    }
+                    (Some(a), Some(b), _) => {
                         let (da, db) = (unit(line[0], line[1]), unit(line[k - 2], line[k - 1]));
                         if a != line[0] {
                             line.insert(0, a);

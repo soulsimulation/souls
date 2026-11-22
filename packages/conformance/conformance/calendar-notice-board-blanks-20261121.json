@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-21 #3970 a new revision of the Engine v2 entry eden:notice_board (content/kinds/calendar/notice_board.json), so it passes the entry check gate. A board now holds a counted stack of blank notices, `blanks` (int, count, 24 at most, starting at 24, seen by everyone): take_notice needs at least one (else `no_blanks`) and spends one in the same batch as it makes the blank eden:calendar_entry, so nothing is made from nothing (rule makes). It says it lasts loose forever, `loose: {ever: true}`, like every fixed thing (rule moves), and its card is shortened to 80 characters (rule card). A notice taken down by its poster is a blank again and is reused by `calendar add`. eden:calendar_entry and core/notice-board@1 are unchanged. No findings: no budgets, samples or gap checks were relaxed.",
+  "findings": []
+}
